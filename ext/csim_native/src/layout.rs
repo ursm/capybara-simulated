@@ -6165,7 +6165,8 @@ fn table_grid(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], declare
     // table's own edges, its declaration and its caption alone (§17.5.3 still floors that empty region at an
     // imposed height: Chrome makes an empty `height: 100px` table 100 tall). A HALF-empty one is not: columns
     // with no rows under them, or a row with no cells to give it a height, are `nlTableSupported`'s to decline.
-    if rows.is_empty() != (c_count == 0) {
+    // (…rows of no cell at all are no half: they are as tall as they declare, and as wide as nothing)
+    if rows.is_empty() != (c_count == 0) && !rows.iter().all(|&r| children[r].is_empty()) {
         return None;
     }
     for (ri, &r) in rows.iter().enumerate() {
@@ -6517,6 +6518,9 @@ fn measure_table(
     };
     let (rows, row_group, captions, c_count) = (&g.rows, &g.row_group, &g.captions, g.c_count);
     let r_count = rows.len();
+    // (…a table of no column spaces nothing: its rows — empty ones, all of them — stack as tall as they declare and no
+    // more, with no spacing between or around them; Chrome makes one 20px row in a `border-spacing: 5px` table 20 tall)
+    let (sx, sy) = if c_count == 0 { (0.0, 0.0) } else { (sx, sy) };
     // `table-layout: fixed` sizes the columns from the first row's declarations alone, so it measures NO cell —
     // the per-column min/max-content pass is only for the content algorithm.
     let fixed = n.table_fixed && !is_auto(n.width);
@@ -6750,8 +6754,9 @@ fn measure_table(
             row_h[ri] = row_h[ri].max(boxes[c].h - have);
         }
     }
-    if row_seen.iter().any(|&s| !s) {
-        return bail(failed); // a row whose cells all span rows — no height to read
+    // (…a row whose cells all span rows has no height to read; an EMPTY one is as tall as it declares, or nothing)
+    if row_seen.iter().zip(rows).any(|(&s, &r)| !s && !children[r].is_empty()) {
+        return bail(failed);
     }
 
     // A declared table height TALLER than the grid is shared out over the rows — a click aimed at the visible

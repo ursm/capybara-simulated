@@ -1566,33 +1566,29 @@ RSpec.describe 'native layout table parity' do
       expect_parity('<div style="width:400px"><div style="display:table-row">x</div><div style="height:4px"></div></div>')
     end
 
-    # …and one of BLOCK-LEVEL element children as the oracle's EQUAL-SHARE flex row (`NL_FLAG_EQUAL_SHARE`): each item
-    # POSITIONED at `floor(available / n)` of the row — a table at its own width where that is wider — and laid out at
-    # its own used width, a declared one kept; measured as the widest child. A cell in such a row is an orphan too, a
-    # plain block. 72 `orphanpart` declines until 2026-09-26, and the 589 shapes of `rv47share` hold the multi-item
-    # arithmetic. SHARED with Chrome, which wraps the row in an anonymous table: a block child after `aa` sits at
-    # x 150 in both engines and under it (0, 22) in Chrome, a second cell at 150 where Chrome shrinks both to 19.2.
-    it 'lays one of block children out natively, each at an equal share' do
+    # …and one of BLOCK-LEVEL element children as the JS model's EQUAL-SHARE flex row (`NL_FLAG_EQUAL_SHARE`), which the
+    # JS walk and the oracle still agree on (`expect_parity`): each item POSITIONED at `floor(available / n)` of the row.
+    # The Rust walk lays the row out as Chrome does, in the anonymous table CSS 2.1 §17.2.1 wraps it in: block children
+    # stacked in one anonymous cell (the second at x 0), cells shrunk to their content (19.2).
+    it 'lays one of block children out natively, in its anonymous table' do
       blocks = '<div style="width:300px;font:16px monospace"><div style="display:table-row"><div>aa</div><div id="m" style="width:50px">w</div></div></div>'
       cells = '<div style="width:300px;font:16px monospace"><div style="display:table-row"><div style="display:table-cell">aa</div><div id="m" style="display:table-cell">bb</div></div></div>'
       [blocks, cells].each {|body| expect_parity(body) }
-      expect_shared_gap(laid_out_rect(blocks)[0], shared: 150, chrome: 0, what: "#{blocks}: #m x")
-      expect_shared_gap(laid_out_rect(cells)[2], shared: 150, chrome: 19.2, what: "#{cells}: #m width")
+      expect(laid_out_rect(blocks)[0]).to be_within(0.05).of(0), "#{blocks}: #m x"
+      expect(laid_out_rect(cells)[2]).to be_within(0.05).of(19.2), "#{cells}: #m width"
       table = '<div style="width:300px;font:16px monospace"><div style="display:table-row"><table style="border-spacing:0"><tr><td>wideunbreakabletablecontent</td></tr></table>' \
               '<div id="m">b</div><div>c</div></div></div>'
       expect_parity(table)
-      expect(laid_out_rect(table)[0]).to be_within(0.02).of(261.2)   # past its 100px share, at the table's own width (both engines)
+      # (…stacked under the table in the one anonymous cell, as wide as the table makes it — Chrome: 0, 261.2)
+      expect(laid_out_rect(table).values_at(0, 2).map {|v| v.round(1) }).to eq([0, 261.2])
       r = run_shadow(blocks, '{noOracle: true}')
       expect(r).to include('ok' => true, 'mismatches' => 0)
       expect(r['oracleReads'].to_h).to be_empty, r.inspect
     end
 
-    # …and on that line in DOCUMENT order, left to right, whatever its `flex-direction` or its children's `order` say:
-    # the oracle lays it out on `PHYSICAL_ROW_PLAN`, and an orphan row's children are no flex items (Chrome keeps them
-    # in document order in its anonymous table). Review rv47: the walk sent the reverse bit and sorted by `order`, so
-    # native ran the line from the right. (In a BLOCK: a `display: table-row` flex item is blockified — no row at all.)
-    # SHARED: Chrome wraps consecutive block children in ONE anonymous cell (CSS 2.1 §17.2.1) and stacks them, where
-    # both engines share the row out between them — the third `#m` at 150 where Chrome has it at 0.
+    # …and in DOCUMENT order whatever its `flex-direction` or its children's `order` say: an orphan row's children are no
+    # flex items (the JS model lays the row out on `PHYSICAL_ROW_PLAN`; Chrome keeps them in document order in its
+    # anonymous table, stacked in one anonymous cell, as the Rust walk does — the `order: -1` child at x 0).
     it 'keeps one of block children in document order' do
       host = '<div style="width:300px;font:16px monospace">%s</div>'
       {
@@ -1605,7 +1601,7 @@ RSpec.describe 'native layout table parity' do
       end
       body = format(host, '<div style="display:table-row"><div style="font-size:24px">big</div><div id="m" style="order:-1">o1</div></div>')
       expect_parity(body)
-      expect_shared_gap(laid_out_rect(body)[0], shared: 150, chrome: 0, what: "#{body}: #m x")
+      expect(laid_out_rect(body)[0]).to be_within(0.05).of(0), "#{body}: #m x"
     end
 
     # …and REFUSES one with an INLINE-level or floated element child, which the oracle's measure puts on a LINE where the
@@ -1736,7 +1732,8 @@ RSpec.describe 'native layout table parity' do
       end
       body = '<div style="width:200px;font:16px monospace"><div id="m" style="display:table-cell;width:50%">aa bb</div></div>'
       expect_parity(body)
-      expect_shared_gap(laid_out_rect(body)[2], shared: 100, chrome: 96.03, what: "#{body}: #m width")
+      expect(laid_out_rect(body)[2]).to be_within(0.05).of(96.03), "#{body}: #m width"
+      # (…the Rust walk's anonymous table resolves the cell's 50% against the room the table is given — Chrome's 96.03)
       # …with no oracle box read — and an orphan ROW native lays out itself (it holds no in-flow item) likewise
       [
         body,
@@ -1755,19 +1752,20 @@ RSpec.describe 'native layout table parity' do
       expect_parity('<div style="width:200px;font:16px monospace"><div style="writing-mode:vertical-lr;height:120px"><div style="display:table-cell;max-width:20px">aa bb cc dd</div></div></div>')
     end
 
-    it 'fills the width and stacks where Chrome wraps it in an anonymous table' do
+    # (…the JS model fills the width and stacks them; the Rust walk wraps them in an anonymous table, as Chrome does)
+    it 'wraps one in an anonymous table' do
       {
-        '<div id="m" style="display:table-cell">aa bb</div>'                                      => [2, 200, 48.02],
-        '<div style="display:table-cell">aa</div><div id="m" style="display:table-cell">bb</div>' => [1, 22, 0],
-        # …a cell's margins, which a table cell does not have (Chrome: y 0; both engines let it collapse to 10)
-        '<div id="m" style="display:table-cell;margin:10px 0">aa bb</div>'                        => [1, 10, 0],
+        '<div id="m" style="display:table-cell">aa bb</div>'                                      => [2, 48.02],
+        '<div style="display:table-cell">aa</div><div id="m" style="display:table-cell">bb</div>' => [1, 0],
+        # …a cell's margins, which a table cell does not have (y 0)
+        '<div id="m" style="display:table-cell;margin:10px 0">aa bb</div>'                        => [1, 0],
         # …and the other parts: a caption as wide as the words it wraps (19.2 by 44), a row group shrink-to-fit
-        '<div id="m" style="display:table-caption">aa bb</div>'                                   => [2, 200, 19.2],
-        '<div id="m" style="display:table-row-group">aa bb</div>'                                 => [2, 200, 48.02]
-      }.each do |cells, (index, shared, chrome)|
+        '<div id="m" style="display:table-caption">aa bb</div>'                                   => [2, 19.2],
+        '<div id="m" style="display:table-row-group">aa bb</div>'                                 => [2, 48.02]
+      }.each do |cells, (index, chrome)|
         body = %(<div style="width:200px;font:16px monospace">#{cells}</div>)
         expect_parity(body)
-        expect_shared_gap(laid_out_rect(body)[index], shared: shared, chrome: chrome, what: "#{body}: #m rect[#{index}]")
+        expect(laid_out_rect(body)[index]).to be_within(0.05).of(chrome), "#{body}: #m rect[#{index}]"
       end
     end
   end

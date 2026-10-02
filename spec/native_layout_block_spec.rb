@@ -342,18 +342,17 @@ RSpec.describe 'native layout L1 block-flow parity' do
     end
   end
 
-  # …but only a caption a TABLE lays out: an ORPHAN one is the oracle's plain block, whose offset resolves against
-  # its parent like any block's — where the walk has to fall back (a flex item's child, a `max()`), it read the
-  # table stamp `layCaption` never wrote and said 0 where the oracle says 20 / 12 / 20. Chrome wraps an orphan in
-  # an anonymous table of auto height and says 0; both engines share the block.
-  it 'resolves an orphan caption\'s fallback offset against its parent, as the block the oracle lays it out as' do
+  # …but only a caption a TABLE lays out: an ORPHAN one is the JS model's plain block, whose offset resolves against
+  # its parent like any block's (the JS walk and the oracle agree on 20 / 12 / 20). The Rust walk wraps it in the
+  # anonymous table CSS 2.1 §17.2.1 makes, of auto height, and says Chrome's 0.
+  it 'resolves an orphan caption\'s fallback offset as its anonymous table does' do
     {
       '<div style="display:flex;width:300px;height:200px"><div style="width:100px"><div id="m" style="display:table-caption;position:relative;top:10%">cap</div></div></div>' => 20,
       '<div style="display:grid;width:300px;grid-auto-rows:120px"><div><div id="m" style="display:table-caption;position:relative;top:10%">cap</div></div></div>'          => 12,
       '<div style="width:300px;height:200px"><div id="m" style="display:table-caption;position:relative;top:max(10%, 4px)">cap</div></div>'                            => 20
     }.each do |body, y|
       expect_parity(body)
-      expect_shared_gap(laid_out_rect(body)[1], shared: y, chrome: 0, what: "#{body}: #m y")
+      expect(laid_out_rect(body)[1]).to be_within(0.05).of(0), "#{body}: #m y"
     end
   end
 

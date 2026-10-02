@@ -65,14 +65,42 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
-  # An orphan `display: table-row` — of block children, and of bare text — as the JS model lays it out: an equal-share
-  # flex row, its text dropped and floored at a line.
-  it 'lays out an orphan table row' do
-    rust, js = both_walks(
-      '<div style="width: 300px; font: 16px monospace"><div style="display: table-row"><div>aa</div><div>bbbb</div></div>' \
-      '<div style="display: table-row">text</div><thead style="display: block"><tr><td>cell</td></tr></thead></div>'
+  # Table boxes a block holds with no table around them are wrapped in an ANONYMOUS table (CSS 2.1 §17.2.1): a block's
+  # consecutive orphan rows are ONE table sharing their columns, and a row's content that is no cell one anonymous cell —
+  # where the JS model laid each row out as an equal-share flex row and dropped its text. Every figure here is Chrome's.
+  it 'wraps orphan table boxes in an anonymous table', :aggregate_failures do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0"><div style="width: 300px">' \
+      '<div id="r1" style="display: table-row"><div>aa</div><div>bbbb</div></div>' \
+      '<div id="r2" style="display: table-row">text<div>box</div></div>' \
+      '<div id="r4" style="display: table-row">a<br>b</div>' \
+      '<div id="r5" style="display: table-row"><div style="display: table-cell">c1</div><div style="display: table-cell">cell2</div></div>' \
+      '<div id="r6" style="display: table-row">xx<div style="display: table-cell">cell</div>yy</div>' \
+      '<div id="r7" style="display: table-row"></div></div>' \
+      '<div style="width: 300px">before <div id="c1" style="display: table-cell">cell</div> after</div>' \
+      '<div style="width: 300px; border-spacing: 3px"><div id="c2" style="display: table-cell; padding: 2px; border: 1px solid">a</div>' \
+      '<div id="c3" style="display: table-cell">bb</div></div>' \
+      '<div style="width: 300px"><div style="display: table-column; width: 50px"></div><div id="c4" style="display: table-cell">x</div></div></body>'
     )
-    expect(rust).to eq(js)
+    rect = ->(id) { s.evaluate_script("(() => { const r = document.getElementById('#{id}').getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map((v) => Math.round(v * 10) / 10); })()") }
+    got = %w[r1 r2 r4 r5 r6 r7 c1 c2 c3 c4].to_h {|id| [id, rect.call(id)] }
+    expect(got).to eq(
+      'r1' => [0, 0, 105.6, 44], 'r2' => [0, 44, 105.6, 44], 'r4' => [0, 88, 105.6, 44], 'r5' => [0, 132, 105.6, 22],
+      'r6' => [0, 154, 105.6, 22], 'r7' => [0, 176, 105.6, 0], 'c1' => [0, 198, 38.4, 22], 'c2' => [3, 245, 15.6, 28],
+      'c3' => [21.6, 245, 19.2, 28], 'c4' => [0, 276, 50, 22]
+    )
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
+  # …and a table of rows holding no cell at all has no columns, and spaces nothing (Chrome: a `border-spacing: 5px` table
+  # bordered 3px around one 20px row is 6 x 26; two empty rows are 0 x 0).
+  it 'lays out a table of empty rows with no spacing' do
+    s = page(
+      '<body style="margin: 0"><table id="b"><tr></tr><tr></tr></table>' \
+      '<table id="c" style="border: 3px solid; border-spacing: 5px"><tr style="height: 20px"></tr></table></body>'
+    )
+    expect(s.evaluate_script("['b', 'c'].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return [r.width, r.height]; })")).to eq([[0, 0], [6, 26]])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # An `<object>` is the default object size where it shows a resource and the box its style makes it where it shows its

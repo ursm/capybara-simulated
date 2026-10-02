@@ -1940,9 +1940,6 @@ css/css-transforms/transform-root-bg-003.html:
 - "== css/css-transforms/transform-root-bg-001-ref.html (both renderings blank)"
 css/css-transforms/transform-root-bg-004.html:
 - "== css/css-transforms/transform-root-bg-004-ref.html (both renderings blank)"
-css/css-transforms/transform-transformable-table-row.html:
-- "== css/css-transforms/transform-transformable-table-row-ref.html (both renderings
-  blank)"
 css/css-transforms/transform-translate-background-001.html:
 - "== css/css-transforms/transform-translate-background-001-ref.html"
 css/css-transforms/transform-translate-background-002.html:

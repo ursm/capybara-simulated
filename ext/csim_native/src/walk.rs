@@ -692,22 +692,6 @@ struct FlexPlan {
     line_left: Side,
 }
 impl FlexPlan {
-    // An ORPHAN `display: table-row`'s plan (layout.js `PHYSICAL_ROW_PLAN`): left to right, top down, no wrap, whatever
-    // its own flex properties or writing mode say — the JS model lays the row out as a flex row (`is_orphan_row`).
-    fn physical_row() -> FlexPlan {
-        FlexPlan {
-            column: false,
-            flex_reverse: false,
-            main_start: Side::Left,
-            cross_start: Side::Top,
-            main_is_x: true,
-            main_reverse: false,
-            cross_far: false,
-            cross_flip: false,
-            wrap: 0,
-            line_left: Side::Top,
-        }
-    }
     fn of(style: &ComputedValues) -> FlexPlan {
         use style::computed_values::flex_direction::T as Dir;
         use style::computed_values::flex_wrap::T as Wrap;
@@ -972,7 +956,11 @@ fn view_box(v: &str) -> Option<(f64, f64)> {
 // A table's structure (`tableGrid`): its rows in render order, its groups, captions, columns and out-of-flow children,
 // and how many columns it has.
 struct TableGrid {
-    table: NodeId,
+    // (…the table's element — None for an ANONYMOUS table around misparented table boxes (CSS 2.1 §17.2.1), which has
+    // none — and the element whose style it inherits and whose alignment its cells take: the table, or the block the
+    // anonymous one is in)
+    table: Option<NodeId>,
+    container: NodeId,
     rows: Vec<GridRow>,
     groups: Vec<GridGroup>,
     captions: Vec<NodeId>,
@@ -1293,6 +1281,10 @@ enum Kid {
     Block,
     Float,
     OutOfFlow,
+    // (…the first of a run of table boxes with no table around them — the `n`th of the block's anonymous tables — and
+    // one of the rest of it)
+    Table(usize),
+    InTable,
 }
 
 // Where the streams stood, for an attempt to be taken back to.
@@ -1674,63 +1666,25 @@ impl<'a> Walk<'a> {
         false
     }
 
-    // Whether a table-internal box is an ORPHAN this walk lays out as a plain block (`nlOrphanTablePart`): no table
-    // lays it out — none above it through nothing but row groups, by box (`nlUnderATable`) — and it is no row, nor a
-    // row's cell.
-    fn orphan_table_part(&self, id: NodeId, display: Display) -> Result<bool, &'static str> {
-        match display.inside() {
-            // (…a row has an arm of its own, `is_orphan_row`)
-            DisplayInside::TableRow => return Ok(false),
-            // (…and a cell in a ROW is that row's: an orphan itself where the row is one, laid out as the plain block an
-            // orphan cell is)
-            DisplayInside::TableCell => {
-                if let Some(p) = self.layout_parent(id).filter(|&p| self.node(p).kind == NodeKind::Element) {
-                    let d = self.laid_display(p, self.style(p)?.get_box());
-                    if matches!(d.inside(), DisplayInside::TableRow) {
-                        return self.is_orphan_row(p, d);
-                    }
-                }
-            }
-            _ => {}
-        }
-        Ok(!self.under_a_table(id)?)
-    }
-
-    // An ORPHAN `display: table-row` — no table above it through row groups (`nlOrphanRow`). A browser wraps one in an
-    // anonymous table; the JS model lays it out as an equal-share flex row, and so does this walk (`orphan_row`).
-    fn is_orphan_row(&self, id: NodeId, display: Display) -> Result<bool, &'static str> {
-        // (…a widget's block-level displays are a flow-root block's, a `table-row` one's included: `widget_block`)
-        Ok(matches!(display.inside(), DisplayInside::TableRow) && !widget_tag(self.node(id).rendering_tag()) && !self.under_a_table(id)?)
-    }
-
     // The display the walk lays the element `id` out by (`WalkDisplay`) — and a fieldset's RENDERED legend blockified
     // whatever inline-level display it declares, as HTML lays it out (Chrome: `display: inline; width: 100px` is 104 wide
     // and an `auto` margin pushes it across): its own width and margins apply, as a block's do.
     // (…not asked by `boxless`, which `rendered_legend` walks the fieldset's children through: whether a box is
     // `contents` no blockification changes)
+    // …and a WIDGET's block-level display other than flex and grid the flow-root block HTML lays it out as (layout.js
+    // `WIDGET_BLOCK_DISPLAYS`): a `<button style="display: table-row">` is no row a block's anonymous table takes in.
     fn laid_display(&self, id: NodeId, b: &style::properties::style_structs::Box) -> Display {
         let node = self.node(id);
         let d = b.walk_display(node.rendering_tag());
         if matches!(d.outside(), DisplayOutside::Inline) && node.is_html_named("legend") && self.rendered_legend(id) {
             return d.equivalent_block_display(false);
         }
-        d
-    }
-
-    // Whether a TABLE lays this box out: one above it through nothing but row groups, climbed by box (`nlUnderATable`).
-    // A row group with no table is no table either — the JS model lays it out as a block, and a row in it is an orphan.
-    fn under_a_table(&self, id: NodeId) -> Result<bool, &'static str> {
-        let mut p = self.layout_parent(id);
-        while let Some(at) = p.filter(|&at| self.node(at).kind == NodeKind::Element) {
-            let d = self.laid_display(at, self.style(at)?.get_box());
-            match d.inside() {
-                DisplayInside::Table => return Ok(true),
-                DisplayInside::TableRowGroup | DisplayInside::TableHeaderGroup | DisplayInside::TableFooterGroup => {}
-                _ => return Ok(false),
-            }
-            p = self.layout_parent(at);
+        if widget_tag(node.rendering_tag())
+            && matches!(d.outside(), DisplayOutside::InternalTable | DisplayOutside::TableCaption)
+        {
+            return Display::Block;
         }
-        Ok(false)
+        d
     }
 
     // One element's record, and its subtree's (`walkRecord`) — an in-flow box's, or an out-of-flow one's that `oof`
@@ -1792,15 +1746,11 @@ impl<'a> Walk<'a> {
             && !matches!(display.inside(), DisplayInside::Flex | DisplayInside::Grid);
         // (…and a REPLACED element — a control, an image, a frame — is a box of its own intrinsic size, whatever it holds)
         let intrinsic = self.intrinsic(id)?;
-        let orphan_row = role != Role::Cell && self.is_orphan_row(id, display)?;
         // (…a cell or a caption only where a table lays it out, as the walk's role for it says)
-        let container = intrinsic.is_some() || widget_block || orphan_row || match (role, display.outside()) {
+        let container = intrinsic.is_some() || widget_block || match (role, display.outside()) {
             (Role::Cell, _) => matches!(display.inside(), DisplayInside::TableCell),
             (Role::Caption, _) => matches!(display.outside(), DisplayOutside::TableCaption),
             (_, DisplayOutside::Block) => matches!(display.inside(), DisplayInside::Flow | DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Grid | DisplayInside::Table),
-            // (…and an ORPHAN table part — a cell, a group, a column or a caption no table lays out — a plain block, as
-            // the JS model lays it out (`nlOrphanTablePart`); an orphan row is a flex row there, `orphan_row`)
-            (_, DisplayOutside::InternalTable | DisplayOutside::TableCaption) => self.orphan_table_part(id, display)?,
             (_, DisplayOutside::Inline) => match display.inside() {
                 DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Grid | DisplayInside::Table => true,
                 DisplayInside::Flow => self.holds_block_level(id)?,
@@ -1896,7 +1846,7 @@ impl<'a> Walk<'a> {
         }
         [rec.width, rec.height, rec.min_w, rec.max_w, rec.min_h, rec.max_h] = slots;
         // (…and a cell's min / max in its BLOCK axis are none: its row sizes it — `cellMinMaxFreeAxis`. Asked of the
-        // display, so an orphan cell ignores them too; a flex or grid item's is blockified and none. The block axis is
+        // display: a flex or grid item's is blockified and none. The block axis is
         // the WIDTH in a vertical writing mode, where a `min-height` does clamp: Chrome, 80.)
         let cell_free_x = matches!(display.inside(), DisplayInside::TableCell) && !style.writing_mode.is_horizontal();
         if matches!(display.inside(), DisplayInside::TableCell) {
@@ -1970,9 +1920,6 @@ impl<'a> Walk<'a> {
         if matches!(display.inside(), DisplayInside::Flex) && !widget_block {
             return self.flex(id, idx, &style);
         }
-        if orphan_row {
-            return self.orphan_row(id, idx, &style);
-        }
         if matches!(display.inside(), DisplayInside::Grid) && !widget_block {
             return self.grid(id, idx, &style, parent);
         }
@@ -1993,6 +1940,10 @@ impl<'a> Walk<'a> {
         let mut blocks: Vec<(NodeId, Kid)> = Vec::new();
         let mut in_flow = false;
         let mut inline = false;
+        // (…and the runs of table boxes it holds with no table around them, each an anonymous table's (CSS 2.1 §17.2.1):
+        // a run is CONSECUTIVE siblings, white space that collapses between them no break in it)
+        let mut tables: Vec<Vec<NodeId>> = Vec::new();
+        let mut open_table = false;
         for &c in kids {
             let cn = self.node(c);
             match cn.kind {
@@ -2000,6 +1951,7 @@ impl<'a> Walk<'a> {
                     let child_mode = self.text_ws_mode(c, ws_mode)?;
                     if has_content(&cn.data) || white_space_only_is_content(&cn.data, child_mode) {
                         inline = true;
+                        open_table = false;
                     } else if !cn.data.is_empty() && preserving(child_mode) && indent_may_bite(style)? {
                         return Err("text-not-measurable");
                     }
@@ -2013,12 +1965,27 @@ impl<'a> Walk<'a> {
                     }
                     if matches!(cb.clone_position(), Position::Absolute | Position::Fixed) {
                         blocks.push((c, Kid::OutOfFlow));
+                        open_table = false;
                         continue;
                     }
                     if cb.clone_float() != Float::None {
                         blocks.push((c, Kid::Float));
+                        open_table = false;
                         continue;
                     }
+                    if matches!(cd.outside(), DisplayOutside::InternalTable | DisplayOutside::TableCaption) {
+                        if open_table {
+                            tables.last_mut().expect("an open run").push(c);
+                            blocks.push((c, Kid::InTable));
+                        } else {
+                            tables.push(vec![c]);
+                            blocks.push((c, Kid::Table(tables.len() - 1)));
+                            open_table = true;
+                        }
+                        in_flow = true;
+                        continue;
+                    }
+                    open_table = false;
                     if matches!(cd.outside(), DisplayOutside::Inline) && !(matches!(cd.inside(), DisplayInside::Flow) && self.holds_block_level(c)?) {
                         inline = true;
                         continue;
@@ -2030,7 +1997,7 @@ impl<'a> Walk<'a> {
             }
         }
         if inline && in_flow {
-            return self.mixed_block(kids, idx, style, ws_mode, &blocks);
+            return self.mixed_block(kids, idx, style, ws_mode, &blocks, &tables);
         }
         if inline {
             return self.text_block(kids, idx, style, ws_mode);
@@ -2051,12 +2018,14 @@ impl<'a> Walk<'a> {
             rec.strut_lh = lh;
         }
         for (c, kid) in blocks {
-            if kid == Kid::OutOfFlow {
-                self.out_of_flow(c, idx)?;
-            } else if kid == Kid::Block {
-                self.block_child(c, idx, style)?;
-            } else {
-                self.record(c, idx)?;
+            match kid {
+                Kid::OutOfFlow => {
+                    self.out_of_flow(c, idx)?;
+                }
+                Kid::Block => self.block_child(c, idx, style)?,
+                Kid::Float => self.record(c, idx)?,
+                Kid::Table(t) => self.anonymous_table(&tables[t], idx, style)?,
+                Kid::InTable => {}
             }
         }
         Ok(())
@@ -2173,7 +2142,8 @@ impl<'a> Walk<'a> {
     // and out-of-flow boxes join the run they are written in, as markers on its lines. A run that makes no line is
     // no box: its records are taken back, and its floats go where the next line would have started — among the
     // block's own children.
-    fn mixed_block(&mut self, kids: &[NodeId], idx: i32, style: &ComputedValues, ws_mode: u8, blocks: &[(NodeId, Kid)]) -> Step {
+    #[allow(clippy::too_many_arguments)]
+    fn mixed_block(&mut self, kids: &[NodeId], idx: i32, style: &ComputedValues, ws_mode: u8, blocks: &[(NodeId, Kid)], tables: &[Vec<NodeId>]) -> Step {
         let font = self.font_info(style, style)?;
         let (indent, bits) = indent(style)?;
         let bites = indent.px != 0.0 || indent.frac != 0.0 || indent.prog.is_some();
@@ -2181,13 +2151,18 @@ impl<'a> Walk<'a> {
         let wrap = wrap_mode(style);
         self.inputs[idx as usize].display = DISPLAY_BLOCK;
         self.inputs[idx as usize].ws_mode = ws_mode;
-        let block_kids: Vec<NodeId> = blocks.iter().filter(|&&(_, kid)| kid == Kid::Block).map(|&(c, _)| c).collect();
+        // (…an anonymous table among them where its run starts, and the rest of its run nowhere: it is in the table)
+        let block_kids: Vec<(NodeId, Kid)> = blocks.iter().filter(|&&(_, kid)| matches!(kid, Kid::Block | Kid::Table(_) | Kid::InTable)).copied().collect();
         let mut unspent = true;
         let mut group: Vec<NodeId> = Vec::new();
         for c in kids.iter().copied().map(Some).chain(std::iter::once(None)) {
             let end = c.is_none();
             let c = c.unwrap_or(NodeId::from_i64(0).expect("a placeholder"));
-            let is_block = !end && block_kids.contains(&c);
+            let kid = if end { None } else { block_kids.iter().find(|&&(b, _)| b == c).map(|&(_, kid)| kid) };
+            if kid == Some(Kid::InTable) {
+                continue;
+            }
+            let is_block = kid.is_some();
             if !end && !is_block {
                 let n = self.node(c);
                 if n.kind == NodeKind::Element && self.laid_display(c, self.style(c)?.get_box()).is_none() {
@@ -2254,9 +2229,16 @@ impl<'a> Walk<'a> {
                     self.commit(anon, g);
                 }
             }
-            if is_block {
-                unspent = false;
-                self.block_child(c, idx, style)?;
+            match kid {
+                Some(Kid::Table(t)) => {
+                    unspent = false;
+                    self.anonymous_table(&tables[t], idx, style)?;
+                }
+                Some(_) => {
+                    unspent = false;
+                    self.block_child(c, idx, style)?;
+                }
+                None => {}
             }
         }
         Ok(())
@@ -2634,72 +2616,6 @@ impl<'a> Walk<'a> {
         self.flex_items(id, idx, style, FlexPlan::of(style), items, oof)
     }
 
-    // An ORPHAN `display: table-row` (`is_orphan_row`), as the JS model lays it out (`nlFlexSupported`'s orphan arm):
-    // a flex record on the physical row plan, its items in DOCUMENT order, each given an EQUAL SHARE of the row, and
-    // MEASURED by stacking — and a row of bare TEXT has no item at all: the layout floors the row at a line and drops
-    // the text, which only the measure reads, off the record's own run stream. Refused where the two phases would give
-    // different answers: an inline-level or floated child, which the measure would put on a line, or text beside a box.
-    fn orphan_row(&mut self, id: NodeId, idx: i32, style: &ComputedValues) -> Step {
-        let kids: Vec<NodeId> = self.children(id).collect();
-        let text = kids.iter().any(|&c| self.node(c).kind == NodeKind::Text && has_content(&self.node(c).data));
-        for &c in &kids {
-            if self.node(c).kind != NodeKind::Element {
-                continue;
-            }
-            let cs = self.style(c)?;
-            let b = cs.get_box();
-            let d = self.laid_display(c, b);
-            if d.is_none() {
-                continue;
-            }
-            // (…a `<br>` or a `<wbr>` is text-run content to `box_items`, which an orphan row's layout drops; the JS model
-            // makes a block-level or out-of-flow `<br>` a box, and which one is a page's `display` before the style engine
-            // touched it)
-            if matches!(self.node(c).rendering_tag(), "br" | "wbr") {
-                return Err("orphan-row-break");
-            }
-            if matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
-                continue;
-            }
-            if text {
-                return Err("orphan-row-text-beside-a-box");
-            }
-            if matches!(d.outside(), DisplayOutside::Inline) || b.clone_float() != Float::None {
-                return Err("orphan-row-inline-item");
-            }
-        }
-        let (items, oof) = self.box_items(id)?;
-        // (…its bare text is no item: the row drops it, and the measure reads it off the run stream below)
-        let items: Vec<(i32, FlexItem)> = items.into_iter().filter(|(_, item)| matches!(item, FlexItem::Element(_))).collect();
-        self.flex_items(id, idx, style, FlexPlan::physical_row(), items, oof)?;
-        if text {
-            let ws_mode = ws_mode_of(style)?;
-            let (indent, indent_bits) = indent(style)?;
-            let bites = indent.px != 0.0 || indent.frac != 0.0 || indent.prog.is_some();
-            let indent_math = self.math(indent.prog.as_deref());
-            let font = self.font_info(style, style)?;
-            let texts: Vec<NodeId> = kids.into_iter().filter(|&c| self.node(c).kind == NodeKind::Text).collect();
-            let mut g = Gather { block: style, idx, bites, runs: Vec::new(), makes_line: false, floats: Vec::new(), rel: None };
-            self.gather(&texts, style, &font, ws_mode, wrap_mode(style), 0.0, &mut g)?;
-            let rec = &mut self.inputs[idx as usize];
-            rec.indent_px = indent.px;
-            rec.indent_frac = indent.frac;
-            rec.indent_math = indent_math;
-            rec.indent_hanging = indent_bits & 256 != 0;
-            rec.indent_each_line = indent_bits & 512 != 0;
-            rec.ws_mode = ws_mode;
-            rec.strut_lh = font.lh;
-            rec.strut_asc = font.asc;
-            // (…the line the layout floors the row at, its text dropped: `anonymousItemHeight`)
-            rec.anon_cross = font.lh;
-            self.commit(idx, g);
-        }
-        let r = &mut self.inputs[idx as usize];
-        r.measured_as_block = true;
-        r.equal_share = true;
-        Ok(())
-    }
-
     // A flex container's record and its items, on `plan`, in the order given.
     fn flex_items(&mut self, id: NodeId, idx: i32, style: &ComputedValues, plan: FlexPlan, items: Vec<(i32, FlexItem)>, oof: Vec<NodeId>) -> Step {
         // (…a LIST BOX item is a container rather than a leaf, which native's flex sizing does not take:
@@ -2799,14 +2715,41 @@ impl<'a> Walk<'a> {
     // column declarations on the grids stream, a record per row group and row, its cells walked under their rows (an
     // anonymous one around each run of stray content), its captions and its out-of-flow children.
     fn table(&mut self, id: NodeId, idx: i32, style: &ComputedValues, role: Role, parent: i32) -> Step {
+        let kids: Vec<NodeId> = self.children(id).collect();
+        self.table_of(Some(id), id, &kids, idx, style, role, parent)
+    }
+    // An ANONYMOUS table (CSS 2.1 §17.2.1) around a run of `kids` — consecutive table boxes a block holds with no table
+    // around them: a row, a row group, a cell, a column or a caption — in the block at record `parent` whose style it
+    // inherits: no element, no box of its own beyond the table's (no border, no padding, an `auto` width and
+    // `table-layout`), its cells and rows as a table's. Chrome makes one table of a block's consecutive orphan rows,
+    // sharing their columns (three rows of 38.4, 48 and 19.2-wide pieces are one 105.6-wide table).
+    fn anonymous_table(&mut self, kids: &[NodeId], parent: i32, style: &ComputedValues) -> Step {
+        let container = NodeId::from_i64(self.inputs[parent as usize].nid as i64).ok_or("anonymous table in no element")?;
+        let at = self.inputs.len() as i32;
+        let mut rec = fresh_record();
+        rec.nid = -1.0;
+        rec.parent = parent;
+        rec.run_start = -1;
+        rec.flex_shrink = 1.0;
+        [rec.width, rec.height, rec.min_w, rec.max_w, rec.min_h, rec.max_h] = [f64::NAN; 6];
+        rec.starts_bfc = true;
+        rec.rtl = (style.get_inherited_box().direction == Direction::Rtl) as u8;
+        rec.block_axis_is_x = !style.writing_mode.is_horizontal();
+        rec.legacy_align = self.legacy_align(container);
+        self.push_record(rec);
+        self.table_of(None, container, kids, at, style, Role::Flow, parent)
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn table_of(&mut self, table: Option<NodeId>, container: NodeId, kids: &[NodeId], idx: i32, style: &ComputedValues, role: Role, parent: i32) -> Step {
         use style::computed_values::border_collapse::T as BorderCollapse;
         let collapses = style.get_inherited_table().border_collapse == BorderCollapse::Collapse;
-        let mut grid = self.table_grid(id)?;
-        let empty = grid.rows.is_empty() && grid.col_count == 0;
+        let mut grid = self.table_grid(table, container, kids)?;
+        // (…rows holding no cell at all are no columns either: an empty orphan row's anonymous table is one of no width)
+        let empty = grid.col_count == 0 && grid.rows.iter().all(|r| r.cells.is_empty());
         if !empty && (grid.rows.is_empty() || grid.col_count == 0) {
             return Err("table-half-empty");
         }
-        if grid.rows.is_empty() && grid.captions.is_empty() && self.children(id).any(|c| self.node(c).kind == NodeKind::Text && has_content(&self.node(c).data)) {
+        if grid.rows.is_empty() && grid.captions.is_empty() && kids.iter().any(|&c| self.node(c).kind == NodeKind::Text && has_content(&self.node(c).data)) {
             return Err("table of bare text");
         }
         for g in &grid.groups {
@@ -2822,7 +2765,7 @@ impl<'a> Walk<'a> {
                 }
                 single |= cell.row_span == 1;
             }
-            if !single {
+            if !single && !row.cells.is_empty() {
                 return Err("table-row-without-single-cell");
             }
         }
@@ -2847,7 +2790,7 @@ impl<'a> Walk<'a> {
             r.display = crate::layout::DISPLAY_TABLE;
             [r.sp_x, r.sp_y] = if collapses { [0.0; 2] } else { [spacing.horizontal().to_f64_px(), spacing.vertical().to_f64_px()] };
             r.self_sizes = role != Role::OutOfFlow && parent_display.is_none_or(|d| d == DISPLAY_BLOCK);
-            r.table_fixed = style.get_table().table_layout == TableLayout::Fixed;
+            r.table_fixed = table.is_some() && style.get_table().table_layout == TableLayout::Fixed;
             r.grid_start = self.grids.len() as i32;
         }
         // The columns: each's declared width, a plain percentage apart, spread over the span it covers.
@@ -2926,7 +2869,8 @@ impl<'a> Walk<'a> {
         let (n, rows) = (grid.col_count, grid.rows.len());
         // The columns run right to left in an rtl table: its physical left rim is the LAST column.
         let rtl = table_style.get_inherited_box().direction == Direction::Rtl;
-        let tb = collapse_sides(table_style);
+        // (…an anonymous table has no border of its own: its rim is its cells')
+        let tb = if grid.table.is_some() { collapse_sides(table_style) } else { [0.0; 4] };
         // Each cell's own four sides, and which cell covers each slot of the grid (a span, every slot it covers).
         let mut raw: Vec<Vec<[f64; 4]>> = Vec::with_capacity(rows);
         let mut occ: Vec<Option<(usize, usize)>> = vec![None; rows * n];
@@ -3146,7 +3090,7 @@ impl<'a> Walk<'a> {
                     (cell_valign(&cs), size_lp(&cs.get_position().width).and_then(plain_percentage).unwrap_or(f64::NAN), self.pct_height_child(*c)?)
                 }
                 CellEl::Anon(run) => {
-                    self.anonymous_cell(grid.table, at, table_style, run, cell.halves, *anon_cells)?;
+                    self.anonymous_cell(grid.table, grid.container, at, table_style, run, cell.halves, *anon_cells)?;
                     *anon_cells += 1;
                     let mut any = false;
                     for &k in run {
@@ -3169,9 +3113,14 @@ impl<'a> Walk<'a> {
     // An ANONYMOUS cell around a run of a row's stray content (`anonTableCell`): no element, the TABLE's inherited
     // style, and the run as its children.
     // (…in a collapsing table it is a collapse cell with no borders of its own, holding the halves the grid gave it)
-    fn anonymous_cell(&mut self, table: NodeId, parent: i32, style: &ComputedValues, run: &[NodeId], halves: Option<[f64; 4]>, ordinal: u32) -> Step {
+    // (…named to the JS side by its table and ordinal, where it has a table element: one in an ANONYMOUS table is a box the
+    // JS side has no object for, and needs none — it paints nothing of its own)
+    #[allow(clippy::too_many_arguments)]
+    fn anonymous_cell(&mut self, table: Option<NodeId>, container: NodeId, parent: i32, style: &ComputedValues, run: &[NodeId], halves: Option<[f64; 4]>, ordinal: u32) -> Step {
         let at = self.inputs.len() as i32;
-        self.anon.push([at as f64, 1.0, table.to_f64(), ordinal as f64]);
+        if let Some(table) = table {
+            self.anon.push([at as f64, 1.0, table.to_f64(), ordinal as f64]);
+        }
         let mut rec = fresh_record();
         rec.nid = -1.0;
         rec.parent = parent;
@@ -3184,7 +3133,7 @@ impl<'a> Walk<'a> {
         rec.starts_bfc = true;
         rec.rtl = (style.get_inherited_box().direction == Direction::Rtl) as u8;
         rec.block_axis_is_x = !style.writing_mode.is_horizontal();
-        rec.legacy_align = self.legacy_align(table);
+        rec.legacy_align = self.legacy_align(container);
         if let Some(halves) = halves {
             [rec.bt, rec.br, rec.bb, rec.bl] = halves;
             rec.decl_edges_x = rec.bl + rec.br;
@@ -3221,9 +3170,9 @@ impl<'a> Walk<'a> {
         self.pct_height_child(c)
     }
     // A table's structure (`tableGrid` / `placeCells`).
-    fn table_grid(&self, table: NodeId) -> Result<TableGrid, &'static str> {
-        let mut grid = TableGrid { table, rows: Vec::new(), groups: Vec::new(), captions: Vec::new(), columns: Vec::new(), column_groups: Vec::new(), oof: Vec::new(), col_count: 0 };
-        self.collect_table(table, None, &mut grid)?;
+    fn table_grid(&self, table: Option<NodeId>, container: NodeId, kids: &[NodeId]) -> Result<TableGrid, &'static str> {
+        let mut grid = TableGrid { table, container, rows: Vec::new(), groups: Vec::new(), captions: Vec::new(), columns: Vec::new(), column_groups: Vec::new(), oof: Vec::new(), col_count: 0 };
+        self.collect_table(kids, None, &mut grid)?;
         // Each row's content as cells: a run of anything but a cell is an anonymous one.
         for row in &mut grid.rows {
             let mut cells = Vec::new();
@@ -3278,9 +3227,9 @@ impl<'a> Walk<'a> {
         }
         Ok(grid)
     }
-    fn collect_table(&self, parent: NodeId, group: Option<usize>, grid: &mut TableGrid) -> Step {
+    fn collect_table(&self, kids: &[NodeId], group: Option<usize>, grid: &mut TableGrid) -> Step {
         let mut anon: Option<usize> = None;
-        for c in self.children(parent).collect::<Vec<_>>() {
+        for &c in kids {
             let n = self.node(c);
             match n.kind {
                 NodeKind::Text => {
@@ -3319,7 +3268,8 @@ impl<'a> Walk<'a> {
                             };
                             grid.groups.push(GridGroup { el: c, index: grid.groups.len(), first: -1, last: -1, rank });
                             let gi = grid.groups.len() - 1;
-                            self.collect_table(c, Some(gi), grid)?;
+                            let rows: Vec<NodeId> = self.children(c).collect();
+                            self.collect_table(&rows, Some(gi), grid)?;
                         }
                         (DisplayOutside::TableCaption, _) => {
                             anon = None;
