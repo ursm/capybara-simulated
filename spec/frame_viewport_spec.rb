@@ -84,7 +84,8 @@ RSpec.describe 'frame viewport' do
   end
 
   # A frame that navigates gets a NEW realm, and the container's box has to be seeded into it as into the first: the
-  # rebuild passed nothing, so after `click_link` inside a frame its window was 0x0 and a block in it 0 wide.
+  # rebuild passed nothing, so after `click_link` inside a frame its window was 0x0 and a block in it 0 wide — and its
+  # `frameElement` null.
   it 'keeps the container box across a navigation inside the frame' do
     pages = {
       '/' => '<!DOCTYPE html><body style="margin:0"><iframe src="/a" style="width:300px;height:150px;border:0"></iframe></body>',
@@ -96,6 +97,7 @@ RSpec.describe 'frame viewport' do
     s.within_frame(0) do
       s.click_link 'next'
       expect(s.evaluate_script("[innerWidth, innerHeight, document.getElementById('d').getBoundingClientRect().width]")).to eq([300, 150, 300])
+      expect(s.evaluate_script('frameElement && frameElement.localName')).to eq('iframe')
     end
   end
 
