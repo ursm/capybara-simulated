@@ -3848,7 +3848,7 @@ impl<'a> Walk<'a> {
                     // through one — `inlineStyleOwner` — a generated box's for its text)
                     // (…asked only of a pass a painter records: no other reads it)
                     let written_in = if self.painting { self.parent_of(c).map_or(-1.0, |p| p.to_f64()) } else { -1.0 };
-                    let vmax = self.split_vmax(owner, font, &td)?;
+                    let vmax = self.split_vmax(owner, font, raw, ws_mode)?;
                     if let Some(Pending::Text { font: lf, text, wrap: lw, ws: lws, shift: ls, vmax: lv, owners }) = g.runs.last_mut() {
                         let joinable = *lw == wrap
                             && *ls == shift
@@ -4097,9 +4097,11 @@ impl<'a> Walk<'a> {
     // The line box a text node needs where its font splits its characters across faces by `unicode-range`: the deepest
     // ascent and descent among the faces they select, each laid out as a face of its own would be (layout.js
     // `runFaceVMax`) — a size-adjusted face that is not the primary still raises the line. None outside a split. Asked
-    // per text NODE, as the oracle asks it (`placeTextRun`): two nodes merge into one run only where it is the same.
-    fn split_vmax(&mut self, owner: &ComputedValues, font: &FontInfo, text: &[u16]) -> Result<Option<(f64, f64)>, &'static str> {
-        if !font.split {
+    // per text NODE, of its data as written, as the oracle asks it (`placeTextRun`): two nodes merge into one run only
+    // where it is the same. A node of white space that collapses is no run there — at most the one space of a gap, which
+    // the oracle places on the owner's own line box — so it raises nothing.
+    fn split_vmax(&mut self, owner: &ComputedValues, font: &FontInfo, text: &[u16], ws_mode: u8) -> Result<Option<(f64, f64)>, &'static str> {
+        if !font.split || !(has_content(text) || white_space_only_is_content(text, ws_mode)) {
             return Ok(None);
         }
         let face = self.face(owner)?;

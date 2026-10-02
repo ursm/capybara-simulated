@@ -182,6 +182,38 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('__csimLayoutShadowRun(null, {rust: true}).mismatches')).to eq(0)
   end
 
+  # …asked of each text node as the oracle asks it: of its data as WRITTEN (a preserved CR, a soft hyphen under `hyphens:
+  # none` — characters the line never lays out — still select their face), and never of white space that collapses to a
+  # gap between two boxes (one space on the owner's own line box). The `ch` of a stack whose own face is a `local()` one
+  # with a metric descriptor is that face's.
+  it 'asks a split for the line box as the oracle does', :aggregate_failures do
+    dir = File.join(__dir__, 'wpt/fonts')
+    files = {'/Ahem.ttf' => File.binread("#{dir}/Ahem.ttf"), '/Lato.ttf' => File.binread("#{dir}/Lato-Medium.ttf")}
+    css = '@font-face { font-family: F; src: url(/Ahem.ttf); unicode-range: U+0041-005A; size-adjust: 150%; } ' \
+          '@font-face { font-family: F; src: url(/Lato.ttf); unicode-range: U+0061-007A; } ' \
+          '@font-face { font-family: C; src: url(/Ahem.ttf); unicode-range: U+000D; size-adjust: 300%; } ' \
+          '@font-face { font-family: C; src: url(/Lato.ttf); unicode-range: U+0000-000C, U+000E-00FF; } ' \
+          '@font-face { font-family: H; src: url(/Lato.ttf); unicode-range: U+00AD; size-adjust: 200%; } ' \
+          '@font-face { font-family: H; src: url(/Ahem.ttf); unicode-range: U+0061-007A; } ' \
+          '@font-face { font-family: L; src: local("Liberation Serif"); unicode-range: U+0000-00FF; size-adjust: 150%; }'
+    body = '<div style="font: 20px F, sans-serif; width: 300px"><span>ab</span> <span>cd</span></div>' \
+           '<pre style="font: 20px C, sans-serif">ab&#13;cd</pre>' \
+           '<div style="font: 20px H, sans-serif; hyphens: none">ab&shy;cd</div>' \
+           '<div style="font: 20px L, sans-serif; width: 10ch">abc</div>'
+    s = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'font/ttf'}, [files[env['PATH_INFO']]]] if files.key?(env['PATH_INFO'])
+
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><style>#{css}</style><body style=\"margin: 0\">#{body}</body>"]]
+    })
+    s.visit '/'
+    s.execute_script("document.body.style.color = 'red'")
+    sizes = s.evaluate_script("[...document.body.children].map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.width * 100) / 100, r.height]; })")
+    expect(sizes.map(&:last)[0, 3]).to eq([24, 60, 48])
+    expect(sizes.last.first).to eq(150)
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('__csimLayoutShadowRun(null, {rust: true}).mismatches')).to eq(0)
+  end
+
   # A face whose descriptors change after the first layout is the new face to the style engine's `ch` / `ex` too: the
   # faces it computed a metric from are asked for again once the faces' generation moves, where it kept the old one's.
   it "follows a face's size-adjust into ch and ex when it changes" do
