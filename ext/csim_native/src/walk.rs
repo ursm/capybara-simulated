@@ -2551,11 +2551,9 @@ impl<'a> Walk<'a> {
     fn grid(&mut self, id: NodeId, idx: i32, style: &ComputedValues, parent: i32) -> Step {
         let pos = style.get_position();
         let (col_gap, row_gap) = (gap(&pos.column_gap)?, gap(&pos.row_gap)?);
-        // (…a comparison gap names its program by its offset in the math table, which the parity instrument compares
-        // on the grid stream as a number)
-        if col_gap.prog.is_some() || row_gap.prog.is_some() {
-            return Err("grid gap program");
-        }
+        // (…a comparison gap rides beside its pair as its PROGRAM's offset in the math table, NaN for none)
+        let program = |walk: &mut Self, prog: Option<&[f64]>| prog.map_or(f64::NAN, |p| walk.math(Some(p)) as f64);
+        let (col_gap_math, row_gap_math) = (program(self, col_gap.prog.as_deref()), program(self, row_gap.prog.as_deref()));
         // (…the pass ROOT's percentage row gap resolves against a height its parent imposed, which the pass has not)
         if parent < 0 && row_gap.frac != 0.0 && self.inputs[idx as usize].height.is_nan() {
             return Err("grid root row gap");
@@ -2575,8 +2573,8 @@ impl<'a> Walk<'a> {
             template.repeat_start,
             template.repeat_len,
             template.repeat_kind,
-            f64::NAN,
-            f64::NAN,
+            col_gap_math,
+            row_gap_math,
             row_floor.unwrap_or(f64::NAN),
         ]);
         for t in &template.tracks {
