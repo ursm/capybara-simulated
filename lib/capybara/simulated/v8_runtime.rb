@@ -932,15 +932,23 @@ module Capybara
             if (__topRaw.__csimRawWindow) __topRaw = __topRaw.__csimRawWindow;
             globalThis.parent = __pf(__NS.contextOf(__parentWin)) || __parentWin;
             globalThis.top    = __pf(__NS.contextOf(__topRaw)) || __topRaw;
-            // `frameElement` is the container from the document's first script on (Chrome): until the parent has set
-            // it, it is the element the parent is building this realm for (`__csimBuildingFrame`).
+            // The container is known from the document's first script on (Chrome): until the parent adopts it
+            // (`__csimAdoptFrameContainer`), it is the element the parent is building this realm for
+            // (`__csimBuildingFrame`). The driver reads it as `__csimFrameContainer`; a page reads `frameElement`,
+            // which is null to a document not of its container's origin — a cross-origin or sandboxed one (HTML
+            // §7.2.3.4) — and which a page cannot write.
             (function (pw) {
               var own;
+              var container = function () { return own !== undefined ? own : (pw.__csimBuildingFrame || null); };
+              Object.defineProperty(globalThis, '__csimFrameContainer', { configurable: true, get: container });
+              Object.defineProperty(globalThis, '__csimAdoptFrameContainer', { configurable: true, value: function (el) { own = el; } });
               Object.defineProperty(globalThis, 'frameElement', {
                 configurable: true,
                 enumerable:   true,
-                get: function () { return own !== undefined ? own : (pw.__csimBuildingFrame || null); },
-                set: function (v) { own = v; }
+                get: function () {
+                  var el = container();
+                  return el && globalThis.origin !== 'null' && globalThis.origin === pw.origin ? el : null;
+                }
               });
             })(__parentWin);
           }

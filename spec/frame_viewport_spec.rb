@@ -118,4 +118,22 @@ RSpec.describe 'frame viewport' do
     s.execute_script("document.getElementById('f').setAttribute('marginwidth', '12')")
     expect(position.call).to eq([12, 7])
   end
+
+  # …but only to a document of its container's origin: a sandboxed one (an opaque origin) sees null, as a cross-origin
+  # one does (HTML §7.2.3.4) — while it loads too — and no page writes it (Chrome: a strict-mode write throws).
+  it 'hides frameElement from a sandboxed document and lets no page write it' do
+    kid = '<!DOCTYPE html><body><script>window.atLoad = String(frameElement)</script></body>'
+    pages = {
+      '/' => '<!DOCTYPE html><body><iframe id="s" sandbox="allow-scripts" src="/kid"></iframe><iframe id="o" src="/kid"></iframe></body>',
+      '/kid' => kid
+    }
+    s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [pages.fetch(env['PATH_INFO'])]] })
+    s.visit '/'
+    s.within_frame('s') { expect(s.evaluate_script('[window.atLoad, String(frameElement)]')).to eq(%w[null null]) }
+    s.within_frame('o') do
+      expect(s.evaluate_script('window.atLoad')).to eq('[object HTMLIFrameElement]')
+      expect(s.evaluate_script("(() => { 'use strict'; try { window.frameElement = 5; return 'wrote'; } catch (e) { return e.name; } })()")).to eq('TypeError')
+      expect(s.evaluate_script('frameElement.id')).to eq('o')
+    end
+  end
 end
