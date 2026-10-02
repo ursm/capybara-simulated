@@ -452,8 +452,8 @@ RSpec.describe 'walk parity' do
   end
 
   it 'declines by name what it has not been taught' do
-    stats = parity('<div style="display: ruby">x</div>')
+    stats = parity('<div><math><mi>x</mi></math></div>')
     expect(stats['compared']).to eq(0)
-    expect(stats['declined']).to include('ruby' => be_positive)
+    expect(stats['declined']).to include('mathml' => be_positive)
   end
 end

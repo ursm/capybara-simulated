@@ -36,11 +36,14 @@ use style::values::specified::box_::{Display, DisplayInside, DisplayOutside};
 // legacy flex box, clamping lines by `-webkit-line-clamp`, and a ruby with its annotation above its base: divergences
 // both engines share, recorded. (The JS model makes a ruby display an AUTHOR gives any other element a block, its
 // fallthrough; inline-level is what the spec and Chrome say, and which origin a display came from is no computed value.)
+// …except on a `<button>`, laid out by HTML's button layout: an inline-level display is an inline-block there and any
+// other a flow-root, and an internal ruby display is no inline-level one — a flow-root block, as Chrome lays it out
+// (`button-layout/display-other`). `tag` is the element's `rendering_tag`.
 trait WalkDisplay {
-    fn walk_display(&self) -> Display;
+    fn walk_display(&self, tag: &str) -> Display;
 }
 impl WalkDisplay for style::properties::style_structs::Box {
-    fn walk_display(&self) -> Display {
+    fn walk_display(&self, tag: &str) -> Display {
         let d = self.clone_display();
         match d.inside() {
             DisplayInside::WebkitBox => Display::Block,
@@ -49,7 +52,8 @@ impl WalkDisplay for style::properties::style_structs::Box {
             | DisplayInside::RubyText
             | DisplayInside::RubyBaseContainer
             | DisplayInside::RubyTextContainer => {
-                if matches!(d.outside(), DisplayOutside::Block) { Display::Block } else { Display::Inline }
+                let internal = !matches!(d.inside(), DisplayInside::Ruby);
+                if matches!(d.outside(), DisplayOutside::Block) || (internal && tag == "button") { Display::Block } else { Display::Inline }
             }
             _ => d,
         }
@@ -1458,19 +1462,6 @@ const WS_PRE_WRAP: u8 = 3;
 const WS_PRE_LINE: u8 = 4;
 const WS_BREAK_SPACES: u8 = 5;
 
-// A ruby display an AUTHOR gave: the JS model lays one out as a BLOCK (its fallthrough; a widget so displayed as a
-// flow-root) on any element, `<ruby>` and `<rt>` included, where `walk_display` makes a ruby display the inline the UA's
-// `<ruby>` and `<rt>` are to it. Every ruby display but the UA sheet's own two — `display: ruby` on a `<ruby>`,
-// `ruby-text` on an `<rt>` — is an author's, and declined, as every ruby display was. (An author declaring exactly the
-// UA's value is no computed difference, and is taken: Chrome lays it out as the inline this walk does.)
-fn authored_ruby(tag: &str, style: &ComputedValues) -> bool {
-    match style.get_box().clone_display().inside() {
-        DisplayInside::Ruby => tag != "ruby",
-        DisplayInside::RubyText => tag != "rt",
-        DisplayInside::RubyBase | DisplayInside::RubyBaseContainer | DisplayInside::RubyTextContainer => true,
-        _ => false,
-    }
-}
 // The elements HTML gives a formatting context of their own whatever their `display` (layout.js `OWN_CONTEXT_TAGS`:
 // the widgets and the replaced elements).
 const OWN_CONTEXT_TAGS: &[&str] = &[
@@ -1619,7 +1610,7 @@ impl<'a> Walk<'a> {
         }
     }
     fn boxless(&self, c: NodeId) -> bool {
-        self.node(c).kind == NodeKind::Element && self.style(c).is_ok_and(|s| s.get_box().walk_display().is_contents())
+        self.node(c).kind == NodeKind::Element && self.style(c).is_ok_and(|s| s.get_box().walk_display(self.node(c).rendering_tag()).is_contents())
     }
     // …and the box that lays an element out: its nearest ancestor that generates one (`layoutParent`).
     fn layout_parent(&self, id: NodeId) -> Option<NodeId> {
@@ -1681,7 +1672,7 @@ impl<'a> Walk<'a> {
             // orphan cell is)
             DisplayInside::TableCell => {
                 if let Some(p) = self.layout_parent(id).filter(|&p| self.node(p).kind == NodeKind::Element) {
-                    let d = self.style(p)?.get_box().walk_display();
+                    let d = self.style(p)?.get_box().walk_display(self.node(p).rendering_tag());
                     if matches!(d.inside(), DisplayInside::TableRow) {
                         return self.is_orphan_row(p, d);
                     }
@@ -1703,7 +1694,7 @@ impl<'a> Walk<'a> {
     fn under_a_table(&self, id: NodeId) -> Result<bool, &'static str> {
         let mut p = self.layout_parent(id);
         while let Some(at) = p.filter(|&at| self.node(at).kind == NodeKind::Element) {
-            let d = self.style(at)?.get_box().walk_display();
+            let d = self.style(at)?.get_box().walk_display(self.node(at).rendering_tag());
             match d.inside() {
                 DisplayInside::Table => return Ok(true),
                 DisplayInside::TableRowGroup | DisplayInside::TableHeaderGroup | DisplayInside::TableFooterGroup => {}
@@ -1765,11 +1756,8 @@ impl<'a> Walk<'a> {
         if node.ns == web_atoms::ns!(mathml) {
             return Err("mathml");
         }
-        if authored_ruby(tag, &style) {
-            return Err("ruby");
-        }
         let b = style.get_box();
-        let display = b.walk_display();
+        let display = b.walk_display(tag);
         // (…a block container: a block-level one, or an `inline-block`, which the gather walks as an ATOMIC)
         // (…a widget's block-level displays other than flex and grid are a flow-root block's, `WIDGET_BLOCK_DISPLAYS`)
         let widget_block = widget_tag(tag)
@@ -1992,7 +1980,7 @@ impl<'a> Walk<'a> {
                 NodeKind::Element => {
                     let cs = self.style(c)?;
                     let cb = cs.get_box();
-                    let cd = cb.walk_display();
+                    let cd = cb.walk_display(self.node(c).rendering_tag());
                     if cd.is_none() {
                         continue;
                     }
@@ -2175,7 +2163,7 @@ impl<'a> Walk<'a> {
             let is_block = !end && block_kids.contains(&c);
             if !end && !is_block {
                 let n = self.node(c);
-                if n.kind == NodeKind::Element && self.style(c)?.get_box().walk_display().is_none() {
+                if n.kind == NodeKind::Element && self.style(c)?.get_box().walk_display(self.node(c).rendering_tag()).is_none() {
                     continue;
                 }
                 if matches!(n.kind, NodeKind::Text | NodeKind::Element) {
@@ -2454,7 +2442,7 @@ impl<'a> Walk<'a> {
     // Does a replaced box lay CSS boxes out inside itself (`replacedLaysOutChildren`): a rendered element child?
     fn lays_out_rows(&self, id: NodeId) -> Result<bool, &'static str> {
         for c in self.children(id) {
-            if self.node(c).kind == NodeKind::Element && !self.style(c)?.get_box().walk_display().is_none() {
+            if self.node(c).kind == NodeKind::Element && !self.style(c)?.get_box().walk_display(self.node(c).rendering_tag()).is_none() {
                 return Ok(true);
             }
         }
@@ -2464,13 +2452,13 @@ impl<'a> Walk<'a> {
     // Is the element's parent a flex or grid container?
     fn parent_is_item_container(&self, id: NodeId) -> Result<bool, &'static str> {
         let Some(p) = self.layout_parent(id).filter(|&p| self.node(p).kind == NodeKind::Element) else { return Ok(false) };
-        Ok(self.style(p)?.get_box().walk_display().is_item_container())
+        Ok(self.style(p)?.get_box().walk_display(self.node(p).rendering_tag()).is_item_container())
     }
 
     // Is the element an item of a flex container — its parent one, and itself in flow?
     fn flex_item(&self, id: NodeId) -> Result<bool, &'static str> {
         let Some(p) = self.layout_parent(id).filter(|&p| self.node(p).kind == NodeKind::Element) else { return Ok(false) };
-        Ok(matches!(self.style(p)?.get_box().walk_display().inside(), DisplayInside::Flex))
+        Ok(matches!(self.style(p)?.get_box().walk_display(self.node(p).rendering_tag()).inside(), DisplayInside::Flex))
     }
 
     // A flex or grid container's items (`boxItems`), in document order with each one's `order`: every in-flow element
@@ -2499,7 +2487,7 @@ impl<'a> Walk<'a> {
                 NodeKind::Element => {
                     let cs = self.style(c)?;
                     let b = cs.get_box();
-                    if b.walk_display().is_none() {
+                    if b.walk_display(self.node(c).rendering_tag()).is_none() {
                         continue;
                     }
                     if matches!(n.rendering_tag(), "br" | "wbr") {
@@ -2633,7 +2621,7 @@ impl<'a> Walk<'a> {
             }
             let cs = self.style(c)?;
             let b = cs.get_box();
-            let d = b.walk_display();
+            let d = b.walk_display(self.node(c).rendering_tag());
             if d.is_none() {
                 continue;
             }
@@ -2958,7 +2946,7 @@ impl<'a> Walk<'a> {
             let cs = self.style(col)?;
             // (…a `<col span=N>` is N column boxes, each with the whole border; a childless `<colgroup span=N>` ONE,
             // whose sides land only at its rim)
-            let group = matches!(cs.get_box().walk_display().inside(), DisplayInside::TableColumnGroup);
+            let group = matches!(cs.get_box().walk_display(self.node(col).rendering_tag()).inside(), DisplayInside::TableColumnGroup);
             let sides = collapse_sides(&cs);
             for i in 0..span {
                 if at + i >= n {
@@ -3193,14 +3181,14 @@ impl<'a> Walk<'a> {
         }
         let cs = self.style(c)?;
         let b = cs.get_box();
-        if b.walk_display().is_none() || matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
+        if b.walk_display(self.node(c).rendering_tag()).is_none() || matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
             return Ok(false);
         }
         let pos = cs.get_position();
         if [size_lp(&pos.height), size_lp(&pos.min_height), max_size_lp(&pos.max_height)].iter().flatten().any(|lp| lp.has_percentage()) {
             return Ok(true);
         }
-        if size_lp(&pos.height).is_some() || matches!(b.walk_display().inside(), DisplayInside::Table) {
+        if size_lp(&pos.height).is_some() || matches!(b.walk_display(self.node(c).rendering_tag()).inside(), DisplayInside::Table) {
             return Ok(false);
         }
         self.pct_height_child(c)
@@ -3214,7 +3202,7 @@ impl<'a> Walk<'a> {
             let mut cells = Vec::new();
             let mut run: Vec<NodeId> = Vec::new();
             for &n in &row.nodes {
-                let is_cell = self.node(n).kind == NodeKind::Element && matches!(self.style(n)?.get_box().walk_display().inside(), DisplayInside::TableCell);
+                let is_cell = self.node(n).kind == NodeKind::Element && matches!(self.style(n)?.get_box().walk_display(self.node(n).rendering_tag()).inside(), DisplayInside::TableCell);
                 if is_cell {
                     if !run.is_empty() {
                         cells.push(CellEl::Anon(std::mem::take(&mut run)));
@@ -3281,7 +3269,7 @@ impl<'a> Walk<'a> {
                 NodeKind::Element => {
                     let cs = self.style(c)?;
                     let b = cs.get_box();
-                    let d = b.walk_display();
+                    let d = b.walk_display(self.node(c).rendering_tag());
                     if d.is_none() {
                         continue;
                     }
@@ -3320,7 +3308,7 @@ impl<'a> Walk<'a> {
                                 .children(c)
                                 .filter(|&k| {
                                     self.node(k).kind == NodeKind::Element
-                                        && self.style(k).is_ok_and(|ks| matches!(ks.get_box().walk_display().inside(), DisplayInside::TableColumn))
+                                        && self.style(k).is_ok_and(|ks| matches!(ks.get_box().walk_display(self.node(k).rendering_tag()).inside(), DisplayInside::TableColumn))
                                 })
                                 .collect();
                             if cols.is_empty() {
@@ -3358,7 +3346,7 @@ impl<'a> Walk<'a> {
                 NodeKind::Element => {
                     let cs = self.style(c)?;
                     let b = cs.get_box();
-                    let d = b.walk_display();
+                    let d = b.walk_display(self.node(c).rendering_tag());
                     if d.is_none() {
                         continue;
                     }
@@ -3563,7 +3551,7 @@ impl<'a> Walk<'a> {
                 break;
             }
             let ps = self.style(p)?;
-            let pd = ps.get_box().walk_display();
+            let pd = ps.get_box().walk_display(self.node(p).rendering_tag());
             let inline_flow = matches!(pd.outside(), DisplayOutside::Inline) && matches!(pd.inside(), DisplayInside::Flow);
             let block = inline_flow && self.holds_block_level(p)?;
             if !pd.is_none() && !pd.is_contents() && ((!fixed && ps.get_box().clone_position() != Position::Static) || contains_out_of_flow(&ps, self.arena, p, node)) {
@@ -3842,7 +3830,7 @@ impl<'a> Walk<'a> {
                 NodeKind::Element => {
                     let cs = self.style(c)?;
                     let b = cs.get_box();
-                    let d = b.walk_display();
+                    let d = b.walk_display(self.node(c).rendering_tag());
                     if d.is_none() {
                         continue;
                     }
@@ -3876,10 +3864,7 @@ impl<'a> Walk<'a> {
         if node.ns == web_atoms::ns!(mathml) {
             return Err("mathml");
         }
-        if authored_ruby(tag, cs) {
-            return Err("ruby");
-        }
-        let d = cs.get_box().walk_display();
+        let d = cs.get_box().walk_display(tag);
         // (…a `<br>` or a `<wbr>` a flex or grid container's run of bare text holds is still a line break, or a place for
         // one, in the anonymous item: the style engine blockifies it as the container's child, where the JS model keeps
         // it the inline it is)
@@ -4146,7 +4131,7 @@ impl<'a> Walk<'a> {
             return Ok(0.0);
         }
         let ps = self.style(p)?;
-        let d = ps.get_box().walk_display();
+        let d = ps.get_box().walk_display(self.node(p).rendering_tag());
         if !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow))
             || replaced_or_control(self.arena, p, self.node(p))
             || self.holds_block_level(p)?
@@ -4256,7 +4241,7 @@ impl<'a> Walk<'a> {
     fn is_block_level_child(&self, id: NodeId) -> Result<bool, &'static str> {
         let style = self.style(id)?;
         let b = style.get_box();
-        let d = b.walk_display();
+        let d = b.walk_display(self.node(id).rendering_tag());
         if d.is_none() || matches!(b.clone_position(), Position::Absolute | Position::Fixed) || b.clone_float() != Float::None {
             return Ok(false);
         }
@@ -4298,7 +4283,7 @@ impl<'a> Walk<'a> {
                 return Ok(false);
             }
             let ps = self.style(p)?;
-            let d = ps.get_box().walk_display();
+            let d = ps.get_box().walk_display(self.node(p).rendering_tag());
             if !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow)) {
                 return Ok(ps.get_inherited_box().direction == Direction::Rtl);
             }
@@ -4323,7 +4308,7 @@ impl<'a> Walk<'a> {
         // laid out as a block but no ordinary one — the JS model's context arm reads its own display)
         let raw = b.clone_display();
         // (…a ruby box by the inline `walk_display` lays it out as; a `-webkit-box` by its own display, a block of its own)
-        let d = if matches!(raw.inside(), DisplayInside::WebkitBox) { raw } else { b.walk_display() };
+        let d = if matches!(raw.inside(), DisplayInside::WebkitBox) { raw } else { b.walk_display(node.rendering_tag()) };
         if !matches!(d.inside(), DisplayInside::Flow) || !matches!(d.outside(), DisplayOutside::Block | DisplayOutside::Inline) {
             return true;
         }
@@ -4335,7 +4320,7 @@ impl<'a> Walk<'a> {
         }
         if let Some(p) = self.layout_parent(id) {
             if let Ok(ps) = self.style(p) {
-                if ps.get_box().walk_display().is_item_container() {
+                if ps.get_box().walk_display(self.node(p).rendering_tag()).is_item_container() {
                     return true;
                 }
             }
@@ -4353,7 +4338,7 @@ impl<'a> Walk<'a> {
     fn clips_content(&self, id: NodeId, style: &ComputedValues) -> bool {
         let node = self.node(id);
         // (…`overflow` applies to no inline box — one laid out as a block for the block it holds among them)
-        let d = style.get_box().walk_display();
+        let d = style.get_box().walk_display(node.rendering_tag());
         if matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) {
             return false;
         }
@@ -4571,7 +4556,7 @@ fn contains_out_of_flow(style: &ComputedValues, arena: &RealmArena, id: NodeId, 
         return true;
     }
     let b = style.get_box();
-    let d = b.walk_display();
+    let d = b.walk_display(node.rendering_tag());
     // (…a block-holding inline among the inline boxes it does not apply to: it is laid out as a block, and is an
     // inline box to everything but the flow — `isSplitInline`)
     let transformable = !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && !replaced_or_control(arena, id, node))

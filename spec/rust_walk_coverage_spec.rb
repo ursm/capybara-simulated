@@ -121,6 +121,23 @@ RSpec.describe 'Rust walk coverage' do
     expect(rust).to eq(js)
   end
 
+  # A ruby display an AUTHOR gives is laid out natively, where the walk declined every one but the UA's own: an inline
+  # box (the spec and Chrome; the JS model made it a block) — a `<fieldset>` so displayed is the inline-block HTML makes
+  # an inline-level widget — but an internal ruby display on a `<button>` is the flow-root block HTML's button layout
+  # makes it (`button-layout/display-other`, `fieldset-display-ruby`).
+  it 'lays out an author ruby display', :aggregate_failures do
+    s = page(
+      '<div style="font: 16px monospace"><div id="r" style="display: ruby">ruby</div>' \
+      '<fieldset id="f" style="display: ruby-base">x</fieldset><fieldset id="fi" style="display: inline-block">x</fieldset>' \
+      '<div style="float: left; width: 100px; height: 100px; margin: 10px"></div><button id="b" style="display: ruby-base"><div style="float: left; width: 100px; height: 100px; margin: 10px"></div></button><span id="a">after</span></div>'
+    )
+    rect = ->(id) { s.evaluate_script("(() => { const r = document.getElementById('#{id}').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()") }
+    expect(rect.call('r')[2]).to be_within(0.01).of(38.4)
+    expect(rect.call('f')[2]).to eq(rect.call('fi')[2])
+    expect(s.evaluate_script('[b.offsetLeft, b.clientWidth >= 120, a.offsetLeft, a.offsetTop >= 120]')).to eq([128, true, 8, true])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # A root element in a vertical writing mode is sized as every vertical block is — its auto width from its content —
   # and placed at its margins, where the walk declined it and the JS layout gave it the initial containing block's width
   # at 0,0 whatever its margins said. Chrome (800px window): `vertical-lr` puts the html at 7,5 and 109 wide, its
