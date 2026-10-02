@@ -161,23 +161,19 @@ RSpec.describe 'letter-spacing and word-spacing reach the flow' do
 
   # …and a percentage INHERITS as the percentage: each element resolves it against its own font size (Chrome: a
   # `letter-spacing: 10%` block puts 3.2px between the letters of a 32px span in it, where handing the parent's 1.6px
-  # down gave 1.6). In the Rust walk, which took no percentage spacing at all and sent the page to the JS one, and in
-  # the JS walk, which handed the px down.
+  # down gave 1.6). The Rust walk took no percentage spacing at all and sent the page to the JS walk, which handed
+  # the px down.
   it 'resolves an inherited letter-spacing percentage against each element\'s own font size' do
     body = '<div style="letter-spacing:10%"><span id=t style="font-size:32px">abcd</span></div>'
     plain = '<div><span id=t style="font-size:32px">abcd</span></div>'
     expect(gain(body, plain)).to be_within(0.01).of(12.8)          # 4 x 10% of 32px
-    rust = page(body)
-    expect(rust.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
-    js = page(body)
-    js.execute_script('globalThis.__csimRustWalk = false')
-    expect(width(js)).to eq(width(rust))
+    expect(page(body).evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and a `min()` / `max()` / `clamp()` of a percentage is no line through the font size: it is resolved at each size,
   # whether the element declares it or inherits it. Chrome, 4 glyphs at 32px: `max(10%, 2px)` 12.8 declared and
   # inherited from a 16px block, `clamp(1px, 10%, 2px)` 8, `min(10%, 2px)` inherited 8.
-  it 'resolves a min() / max() / clamp() of a percentage at each element\'s own font size, in both walks' do
+  it 'resolves a min() / max() / clamp() of a percentage at each element\'s own font size' do
     plain = '<div><span id=t style="font-size:32px">abcd</span></div>'
     {
       '<div><span id=t style="font-size:32px;letter-spacing:max(10%, 2px)">abcd</span></div>'      => 12.8,
@@ -185,11 +181,7 @@ RSpec.describe 'letter-spacing and word-spacing reach the flow' do
       '<div style="letter-spacing:max(10%, 2px)"><span id=t style="font-size:32px">abcd</span></div>' => 12.8,
       '<div style="letter-spacing:min(10%, 2px)"><span id=t style="font-size:32px">abcd</span></div>' => 8
     }.each do |body, expected|
-      rust = page(body)
-      js = page(body)
-      js.execute_script('globalThis.__csimRustWalk = false')
-      base = width(page(plain))
-      expect([width(rust) - base, width(js) - base]).to all(be_within(0.01).of(expected)), body
+      expect(gain(body, plain)).to be_within(0.01).of(expected), body
     end
   end
 

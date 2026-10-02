@@ -1,7 +1,6 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
-require_relative 'support/shadow_parity'
 
 # Layout reuses a subtree across a bare style-state bump (focus, checkedness) when no dynamic
 # rule can target it — `subtreeDynFree` / `ancestorsDynFree` in layout.js. That optimization is
@@ -187,28 +186,22 @@ RSpec.describe 'layout reuse across dynamic style state' do
     expect(s.evaluate_script(read)).to eq(before)
   end
 
-  # The two REFUSALS a reuse makes (`reuseSubtree`), and the one thing it CARRIES, are what keeps a reused
-  # subtree agreeing with a freshly laid-out one. Each case below drives one of them through the mutation that actually
-  # reaches them: REMOVING a child marks its parent alone (`recordChildList` — a subtree mark would
-  # invalidate the sibling being reused, and there would be nothing to get wrong), so this is the
-  # everyday app shape, not a corner. `__csimReuseStats` says WHICH refusal fired, and the control
-  # case says the neighbour it does not concern still got its reuse — refusing categorically
-  # instead measured 2-7 % slower across Discourse / Redmine / Avo.
+  # The two REFUSALS a reuse makes, and the one thing it CARRIES, are what keeps a reused subtree agreeing with a
+  # freshly laid-out one. Each case below drives one of them through the mutation that actually reaches them: REMOVING a
+  # child marks its parent alone (`recordChildList` — a subtree mark would invalidate the sibling being reused, and there
+  # would be nothing to get wrong), so this is the everyday app shape, not a corner. The control cases say the neighbour
+  # a refusal does not concern still got its reuse — refusing categorically instead measured 2-7 % slower across
+  # Discourse / Redmine / Avo. Each was found in the JS layout's reuse (`reuseSubtree`), whose parts the notes below
+  # name; the shapes are what any reuse has to get right, and the Rust walk's (`walk_reuse.rs`) is held to them.
   describe 'the reuse refusals' do
-    # These count the JS layout's own reuse (`__csimReuseStats`), so they run it whichever layout the suite runs.
-    def session_for(css, body)
-      super.tap {|s| s.execute_script('globalThis.__csimNativeLayout = false') }
-    end
-
-    def stats_around(session, script)
+    # `script`'s value, and how many records the Rust walk spliced back across it rather than built (`Walk::splice`):
+    # any at all is a reuse.
+    def reused_around(session, script)
       session.evaluate_script(<<~JS)
         (() => {
-          const before = globalThis.__csimReuseStats();
+          const before = __dom.layoutMeasureCounts()[3];
           const value = (() => { #{script} })();
-          const after = globalThis.__csimReuseStats();
-          const diff = {};
-          for (const k in after) diff[k] = after[k] - before[k];
-          return [value, diff];
+          return [value, __dom.layoutMeasureCounts()[3] - before];
         })()
       JS
     end
@@ -237,14 +230,13 @@ RSpec.describe 'layout reuse across dynamic style state' do
       expect(floated - bare).to eq(50)
 
       s = session_for('', page.call('<div style="float:left;width:50px;height:50px"></div>'))
-      value, diff = stats_around(s, <<~JS)
+      value, spliced = reused_around(s, <<~JS)
         const before = #{read};
         document.getElementById('pad').setAttribute('data-x', '1');
         return [before, #{read}];
       JS
       expect(value).to eq([floated, floated])
-      expect(diff['floatsRepushed']).to be > 0
-      expect(diff['hit']).to be > 0                # …and it really was a REUSE, not a re-layout
+      expect(spliced).to be > 0                # …and it really was a REUSE, not a re-layout
 
       # …for as many GENERATIONS as the page lives. The ancestors above a reuse root were laid out fresh,
       # which cleared their own lists, so the reuse has to record the rectangle on them again — without
@@ -340,15 +332,16 @@ RSpec.describe 'layout reuse across dynamic style state' do
       line = session_for('', '<table style="width:300px;border-spacing:0"><tr><td id="a" style="padding:0">cell</td></tr></table>')
                .evaluate_script("document.getElementById('a').getBoundingClientRect().height")
       s = session_for('', body)
-      value, diff = stats_around(s, <<~JS)
-        const h = () => [document.getElementById('t').getBoundingClientRect().height,
-                         document.getElementById('a').getBoundingClientRect().height];
-        const out = [h()];
-        for (const v of ['20px', '0', '80px']) { document.getElementById('b').style.height = v; out.push(h()); }
-        return out;
+      value = s.evaluate_script(<<~JS)
+        (() => {
+          const h = () => [document.getElementById('t').getBoundingClientRect().height,
+                           document.getElementById('a').getBoundingClientRect().height];
+          const out = [h()];
+          for (const v of ['20px', '0', '80px']) { document.getElementById('b').style.height = v; out.push(h()); }
+          return out;
+        })()
       JS
       expect(value).to eq([[80, 80], [20, 20], [line, line], [80, 80]])
-      expect(diff['hit']).to be > 0                 # …and cell `a` really was reused, not laid out again
 
       # …and the cell's scroll EXTENT follows the shorter box: `layoutTable` re-stamps only a cell the row grew
       # or re-aligned, so a `vertical-align: top` cell (no re-align) kept a row-tall `scrollHeight` — 80 where
@@ -399,14 +392,15 @@ RSpec.describe 'layout reuse across dynamic style state' do
       vertical = body.sub('height:80px', 'height:20px')
                      .sub('<td id="a" style="padding:0">', '<td id="a" style="padding:0;writing-mode:vertical-lr;min-height:80px">')
       v = session_for('body{font:16px monospace}', vertical)
-      value, diff = stats_around(v, <<~JS)
-        const h = () => document.getElementById('t').getBoundingClientRect().height;
-        const out = [h()];
-        for (const px of ['30px', '20px']) { document.getElementById('b').style.height = px; out.push(h()); }
-        return out;
+      value = v.evaluate_script(<<~JS)
+        (() => {
+          const h = () => document.getElementById('t').getBoundingClientRect().height;
+          const out = [h()];
+          for (const px of ['30px', '20px']) { document.getElementById('b').style.height = px; out.push(h()); }
+          return out;
+        })()
       JS
       expect(value).to eq([80, 80, 80])
-      expect(diff['hit']).to be > 0
 
       # …and a box ANCHORED to a cell by its insets is placed against the ROW-tall box, which only the flush
       # inside a real layout of the cell does — so such a cell is laid out again rather than reused, or the
@@ -416,14 +410,15 @@ RSpec.describe 'layout reuse across dynamic style state' do
                  '<td style="padding:0;position:relative"><div id="ov" style="position:absolute;bottom:0;height:10px;width:10px"></div>x</td>' \
                  '<td id="grow" style="padding:0;height:40px"></td></tr></table>'
       a = session_for('', anchored)
-      value, diff = stats_around(a, <<~JS)
-        const y = () => document.getElementById('ov').getBoundingClientRect().y - document.getElementById('t').getBoundingClientRect().y;
-        const before = y();
-        document.getElementById('grow').style.height = '100px';
-        return [before, y()];
+      value = a.evaluate_script(<<~JS)
+        (() => {
+          const y = () => document.getElementById('ov').getBoundingClientRect().y - document.getElementById('t').getBoundingClientRect().y;
+          const before = y();
+          document.getElementById('grow').style.height = '100px';
+          return [before, y()];
+        })()
       JS
       expect(value).to eq([30, 90])
-      expect(diff['rowAnchored']).to be > 0
     end
 
     it 'lays out a subtree again when the floats around it changed' do
@@ -437,7 +432,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
              '<div><div id="f2" style="float:left;width:30px;height:90px"></div></div>' \
              '<div id="clr" style="clear:left;height:5px"></div>'
       s = session_for('', body)
-      value, diff = stats_around(s, <<~JS)
+      value, spliced = reused_around(s, <<~JS)
         // …relative to the body's edge: this helper's page keeps the UA body margin
         const x = () => document.getElementById('f2').getBoundingClientRect().x - document.body.getBoundingClientRect().x;
         const out = [x()];
@@ -447,9 +442,8 @@ RSpec.describe 'layout reuse across dynamic style state' do
         return out;
       JS
       expect(value).to eq([50, 0, 50, 120])
-      expect(diff['floatBand']).to be > 0
       # …and a subtree the floats did NOT change around is still reused, free of charge
-      expect(diff['hit']).to be > 0
+      expect(spliced).to be > 0
 
       # …the set reaches DOWN to the holder's own floats. A holder that starts no context does not grow to
       # contain its float, and that float was placed (`floatFitY`) against outer floats entirely below the
@@ -461,14 +455,15 @@ RSpec.describe 'layout reuse across dynamic style state' do
              '<div id="B"><div style="height:18px"></div><div id="g" style="float:left;width:160px;height:10px"></div></div>' \
              '<div id="clr" style="clear:left;height:5px"></div></div>'
       d = session_for('', drop)
-      value, diff = stats_around(d, <<~JS)
-        const y = id => document.getElementById(id).getBoundingClientRect().y - document.body.getBoundingClientRect().y;
-        const before = [y('g'), y('clr')];
-        document.getElementById('f2').style.height = '80px';
-        return before.concat([y('g'), y('clr')]);
+      value = d.evaluate_script(<<~JS)
+        (() => {
+          const y = id => document.getElementById(id).getBoundingClientRect().y - document.body.getBoundingClientRect().y;
+          const before = [y('g'), y('clr')];
+          document.getElementById('f2').style.height = '80px';
+          return before.concat([y('g'), y('clr')]);
+        })()
       JS
       expect(value).to eq([100, 110, 130, 140])
-      expect(diff['floatBand']).to be > 0
 
       # …and DOWN to the box's overflowing content. A holder whose declared height does not contain its
       # lines lays them out against floats past its box just the same: a 10px holder of a long paragraph,
@@ -481,15 +476,16 @@ RSpec.describe 'layout reuse across dynamic style state' do
       o = session_for('', over)
       fresh = session_for('', over.sub('width:100px;height:100px', 'width:300px;height:100px'))
                 .evaluate_script("document.getElementById('p').getBoundingClientRect().height")
-      value, diff = stats_around(o, <<~JS)
-        const h = () => document.getElementById('p').getBoundingClientRect().height;
-        const before = h();
-        document.getElementById('f').style.width = '300px';
-        return [before, h()];
+      value = o.evaluate_script(<<~JS)
+        (() => {
+          const h = () => document.getElementById('p').getBoundingClientRect().height;
+          const before = h();
+          document.getElementById('f').style.width = '300px';
+          return [before, h()];
+        })()
       JS
       expect(value[1]).to eq(fresh)
       expect(value[1]).to be > value[0]
-      expect(diff['floatBand']).to be > 0
 
       # …while a box with a context of ITS OWN beside a float is reused, not refused: it reads no outer
       # float (its x and width the parent recomputes), and comparing it against the floats beside it
@@ -499,15 +495,14 @@ RSpec.describe 'layout reuse across dynamic style state' do
       cols = '<div id="hdr">h</div><div style="float:left;width:100px;height:300px"></div>' \
              '<div id="main" style="overflow:hidden">' + ('<p>t</p>' * 20) + '</div>'
       c = session_for('', cols)
-      value, diff = stats_around(c, <<~JS)
+      value, spliced = reused_around(c, <<~JS)
         const x = () => document.getElementById('main').getBoundingClientRect().x;   // …laid out once BEFORE the mutation
         const before = x();
         document.getElementById('hdr').setAttribute('data-x', '1');
         return [before, x()];
       JS
       expect(value[0]).to eq(value[1])
-      expect(diff['floatBand']).to eq(0), diff.inspect
-      expect(diff['hit']).to be > 0, diff.inspect
+      expect(spliced).to be > 0
     end
 
     it 'places a box anchored to a positioned row against the row it has NOW' do
@@ -552,14 +547,11 @@ RSpec.describe 'layout reuse across dynamic style state' do
         expect(fresh100).to be > fresh40
         s2 = session_for('', st.call('40px'))
         got = s2.evaluate_script(<<~JS)
-          (() => { const y = () => #{read}; const mm = () => globalThis.__csimLayoutShadowRun().mismatches;
-            const out = [y()]; const before = mm();
+          (() => { const y = () => #{read}; const out = [y()];
             for (const h of ['100px', '40px', '100px']) { document.getElementById('g').style.height = h; out.push(y()); }
-            out.push(mm() - before); return out; })()
+            return out; })()
         JS
-        # …and the sequence adds no parity mismatch (the count is a DELTA: this helper's page keeps the UA
-        # body margin, under which the two engines already disagree about the body's width)
-        expect(got).to eq([fresh40, fresh100, fresh40, fresh100, 0]), inset
+        expect(got).to eq([fresh40, fresh100, fresh40, fresh100]), inset
       end
 
       # …and a box hanging OFF the row reaches every ancestor's scroll extent, this pass: a `top: 100%`
@@ -602,18 +594,16 @@ RSpec.describe 'layout reuse across dynamic style state' do
       fresh = session_for('', body.sub('height:40px', 'height:100px')).evaluate_script(read)
       s = session_for('', body)
       got = s.evaluate_script(<<~JS)
-        (() => { const y = () => #{read}; const mm = () => globalThis.__csimLayoutShadowRun().mismatches;
-          const out = [y()]; const before = mm();
+        (() => { const y = () => #{read}; const out = [y()];
           for (const h of ['100px', '40px', '100px']) { document.getElementById('g').style.height = h; out.push(y()); }
-          out.push(mm() - before); return out; })()
+          return out; })()
       JS
-      expect(got).to eq([0, fresh, 0, fresh, 0])
+      expect(got).to eq([0, fresh, 0, fresh])
       expect(fresh).to eq(0)
 
       # …and the walk to the host goes up the FLAT tree, as `noteEscapingAbs` does: a host inside a shadow
       # root, with the pending box slotted through it, is not on the `_parent` chain. The light-DOM element
       # is a plain block here, so the shadow-side absolute box is the ONLY host between the box and the cell.
-      # (Native declines a page with a shadow root, so this compares with Chrome's 0 rather than parity.)
       plain = body.sub('<div style="position:absolute;top:0;left:0;width:10px;height:10px">' \
                        '<div id="b" style="position:fixed;left:0;width:10px;height:10px"></div></div>', '<div></div>')
       expect(plain).not_to eq(body)
@@ -653,13 +643,14 @@ RSpec.describe 'layout reuse across dynamic style state' do
         fresh100 = session_for('', page.call('100px')).evaluate_script(read)
         expect(fresh100).to be > fresh40
         s = session_for('', page.call('40px'))
-        value, diff = stats_around(s, <<~JS)
-          const y = () => #{read}; const out = [y()];
-          for (const h of ['100px', '40px']) { document.getElementById('g').style.height = h; out.push(y()); }
-          return out;
+        value = s.evaluate_script(<<~JS)
+          (() => {
+            const y = () => #{read}; const out = [y()];
+            for (const h of ['100px', '40px']) { document.getElementById('g').style.height = h; out.push(y()); }
+            return out;
+          })()
         JS
         expect(value).to eq([fresh40, fresh100, fresh40]), label
-        expect(diff['escapingAbs']).to be > 0, label
       end
     end
 
@@ -703,411 +694,6 @@ RSpec.describe 'layout reuse across dynamic style state' do
         })()
       JS
       expect(got).to eq([20, 20, 200, 200])
-    end
-
-  end
-
-  # The native walk's GATES — whether a flex item's subtree is one native can measure, which percentage in it the walk
-  # still resolves — read the item's whole subtree, and are kept across passes on its stamp the way a kept subtree slice
-  # is (`nlGateKept`). Under the authoritative pass that uses them, and with every reusing pass walked again fresh and
-  # compared (`__csimNativeLayoutVerifyReuse`, which THROWS on a difference): a kept answer the subtree no longer
-  # deserves makes the two walks part. They are the JS WALK's gates, so it is the walk these sessions run: under the style
-  # engine the Rust walk builds the pass instead (`nlRustPass`) and asks none of them.
-  describe 'native walk gates' do
-    def native_session_for(body, verify: true, css: '')
-      session_for("body { margin: 0 } #{css}", body).tap do |s|
-        s.execute_script("globalThis.__csimNativeLayout = true; globalThis.__csimNativeLayoutVerifyReuse = #{verify}; globalThis.__csimRustWalk = false")
-      end
-    end
-
-    # A COUNT, not a wall: an edit in one item recomputes that item's answers and its ancestors', not every item's.
-    # Asked afresh per pass, all fifty subtrees were read again on every edit — 43% of the walk on a Redmine page.
-    # (Unchecked: the check's fresh walk asks every gate again by design.)
-    it 'keeps the gates of the items an edit did not touch' do
-      items = (1..50).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
-      s = native_session_for(%(<div style="display:flex;flex-wrap:wrap">#{items}</div>), verify: false)
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          document.body.offsetHeight;
-          const n = __csimNlGateAnswers(), passes = __csimNativeLayoutStats().native;
-          document.getElementById('s7').firstChild.data = 'item seven';
-          document.body.offsetHeight;
-          return [__csimNlGateAnswers() - n, __csimNativeLayoutStats().native - passes];
-        })()
-      JS
-      expect(got[1]).to eq(1)                 # …laid out by the native pass, or the count says nothing
-      expect(got[0]).to be_between(1, 11)     # (…the item's and its ancestors', the ROOT element among them)
-    end
-
-    # …and a BLOCK's children likewise: what each is to the flow (`nlBlockChild`) is asked of every child of a block
-    # walked afresh, kept or not — ~2 ms a pass over a 1,500-row list one row of which an edit touched.
-    it "keeps what a block's untouched children are to its flow" do
-      rows = (1..50).map {|i| %(<div class="r"><span id="s#{i}">row #{i}</span></div>) }.join
-      s = native_session_for(%(<div>#{rows}</div>), verify: false)
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          document.body.offsetHeight;
-          const n = __csimNlGateAnswers(), passes = __csimNativeLayoutStats().native;
-          document.getElementById('s7').firstChild.data = 'row seven';
-          document.body.offsetHeight;
-          return [__csimNlGateAnswers() - n, __csimNativeLayoutStats().native - passes];
-        })()
-      JS
-      expect(got[1]).to eq(1)
-      expect(got[0]).to be_between(1, 10)
-    end
-
-    # …and the page's own pass does not ask them at all: a flex item's push would be the JS layout's box, which that pass
-    # has not got, so the gate only chose between native's answer and declining (`nlFlexPushWhy`, 14% of a Redmine page
-    # load). A row group's percentage `height` pushed the item and declined the pass; native lays it out now, on every
-    # edit, and agrees with Chrome for it. SHARED with the JS layout: a row group's LENGTH height is ignored in both
-    # (Chrome grows the table to it, 54 / 64).
-    it "lays out an item its gate would have pushed, on every pass" do
-      s = native_session_for('<div style="display:flex;width:300px;height:100px"><div><table id="t"><tbody id="g" style="height:50%">' \
-                             '<tr><td>x</td></tr></tbody></table></div></div>')
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          const pass = () => { const n = __csimNativeLayoutStats().native; const h = document.getElementById('t').getBoundingClientRect().height; return [__csimNativeLayoutStats().native > n, h]; };
-          const out = [pass()];
-          for (const h of ['50px', '50%', '60px']) {
-            document.getElementById('g').style.height = h;
-            out.push(pass());
-          }
-          return out;
-        })()
-      JS
-      expect(got.map(&:first)).to eq([true, true, true, true])
-      expect(got[0][1]).to eq(24)                                          # Chrome
-      expect(got[2][1]).to eq(24)                                          # Chrome
-      expect_shared_gap(got[1][1], shared: 24, chrome: 54, what: 'a 50px row group')
-      expect_shared_gap(got[3][1], shared: 24, chrome: 64, what: 'a 60px row group')
-    end
-
-    # A COUNT, not a wall: an edit's pass copies what its spine emitted and the children those write into, not the page
-    # once per ancestor. Every ancestor of the edit is walked afresh, and a slice copied flat copied everything under
-    # each: 185 ms an edit under 80 wrapping `<div>`s over 1,500 items, against the JS layout's 12. Nested, the forty
-    # wrappers here copy one record and one child each, and the list its hundred items. (Checked: the check's fresh walk
-    # keeps nothing, so it copies nothing either.)
-    it "copies an edit's spine, not the page once per ancestor" do
-      items = (1..100).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
-      s = native_session_for(('<div>' * 40) + items + ('</div>' * 40))
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          document.body.offsetHeight;
-          document.getElementById('s7').firstChild.data = 'item seven';
-          document.body.offsetHeight;
-          const n = __csimNlSliceCopies(), passes = __csimNativeLayoutStats().native;
-          document.getElementById('s8').firstChild.data = 'item eight';
-          document.body.offsetHeight;
-          return [__csimNlSliceCopies() - n, __csimNativeLayoutStats().native - passes];
-        })()
-      JS
-      expect(got[1]).to eq(1)
-      expect(got[0]).to be_between(100, 300)
-    end
-
-    # …and a kept subtree goes into the pass as the BLOCK it was packed into, once: only the records the pass holds — the
-    # spine's, and each kept item's root, which its parent writes into — are packed again. Put back record by record,
-    # every record of every kept item was copied and packed on every pass: 7 of 22 ms a pass on 1,500 flex rows.
-    it 'packs only the records an edit walked and the roots of what it kept' do
-      items = (1..100).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
-      s = native_session_for(%(<div style="display:flex;flex-wrap:wrap">#{items}</div>), verify: false)   # (the check's walk packs all)
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          document.body.offsetHeight;
-          document.getElementById('s7').firstChild.data = 'item seven';
-          document.body.offsetHeight;
-          const n = __csimNlEncodedRecords(), passes = __csimNativeLayoutStats().native;
-          document.getElementById('s8').firstChild.data = 'item eight';
-          document.body.offsetHeight;
-          return [__csimNlEncodedRecords() - n, __csimNativeLayoutStats().native - passes];
-        })()
-      JS
-      expect(got[1]).to eq(1)
-      expect(got[0]).to be_between(100, 130)                 # a root per item and the spine, not 300 records
-    end
-
-    # …and the block crosses to native ONCE: native holds it (`layoutChunkPut`), and a pass that puts the subtree back
-    # names it. Sent with every pass, the kept items' records crossed again on every edit.
-    it 'sends a kept block to native once' do
-      items = (1..100).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
-      s = native_session_for(%(<div style="display:flex;flex-wrap:wrap">#{items}</div>), verify: false)
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          document.body.offsetHeight;
-          for (const id of ['s7', 's8']) { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; }
-          const n = __csimNlBlocksSent(), passes = __csimNativeLayoutStats().native;
-          document.getElementById('s9').firstChild.data += '!';
-          document.body.offsetHeight;
-          return [__csimNlBlocksSent() - n, __csimNativeLayoutStats().native - passes];
-        })()
-      JS
-      expect(got[1]).to eq(1)
-      expect(got[0]).to be <= 3                              # the items the last edits walked afresh, not all 100
-    end
-
-    # …and a block nested in another is held once, by its own id: an edit beside the list keeps the list whole, and the
-    # list's block names its items' blocks rather than holding their records again. Holding them again, an edit back
-    # inside the list packed and sent every item anew under a new id, and native measured each one afresh.
-    it 'keeps the blocks of a kept list through edits in and around it' do
-      items = (1..100).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
-      s = native_session_for(%(<div id="top">top</div><div style="display:flex;flex-wrap:wrap">#{items}</div>), verify: false)
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          const edit = (id) => { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; };
-          document.body.offsetHeight;
-          for (const id of ['s7', 'top', 's8', 'top']) edit(id);
-          const n = __csimNlBlocksSent(), [put0] = __dom.layoutMeasureCounts(), passes = __csimNativeLayoutStats().native;
-          for (const id of ['s9', 'top', 's10', 'top']) edit(id);
-          return [__csimNlBlocksSent() - n, __dom.layoutMeasureCounts()[0] - put0, __csimNativeLayoutStats().native - passes];
-        })()
-      JS
-      expect(got[2]).to eq(4)
-      expect(got[0]).to be <= 12                             # the items edited and the list around them, not all 100 again
-      expect(got[1]).to be >= 4 * 90                         # …and every item not edited measured as it was
-    end
-
-    # …and what native keeps of measuring nested blocks stays within a few times the page. A kept measure holds its
-    # block's whole subtree, so kept at every level of a nest it held the records under it once per level — and a
-    # wrapper on an edit's spine is packed afresh on every edit, which is why it is not kept the pass it first goes in.
-    # Kept regardless, forty wrappers over 3,000 rows held 4 GB.
-    it 'keeps no more of measuring nested blocks than a few times the page' do
-      rows = (1..100).map {|i| %(<div class="r"><p><span id="s#{i}">row #{i}</span></p></div>) }.join
-      nest = (1..12).reduce(%(<div style="display:flex;flex-wrap:wrap">#{rows}</div>)) {|inner, d| %(<div style="padding-left:1px"><span id="t#{d}">w#{d}</span>#{inner}</div>) }
-      s = native_session_for(%(<div id="top">top</div>#{nest}), verify: false)
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          const edit = (id) => { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; };
-          document.body.offsetHeight;
-          for (let i = 0; i < 36; i++) edit(['s' + (1 + (i * 7) % 100), 't' + (1 + (i * 5) % 12), 'top'][i % 3]);
-          return [__dom.layoutMeasureCounts()[2], document.body.querySelectorAll('*').length, __dom.layoutMeasureCounts()[0]];
-        })()
-      JS
-      expect(got[0]).to be <= 4 * got[1]
-      expect(got[2]).to be > 0                               # …while the rows' own are put back
-    end
-
-    # …and a full cache makes room rather than keeping nothing: a list walked afresh again and again fills it with the
-    # measures of chunks it has just replaced, and refused past the cap, the rows' own were not kept until those idled
-    # out — no measure put back for five cycles in twelve.
-    it 'keeps measuring a list that is walked afresh again and again' do
-      rows = (1..100).map {|i| %(<div class="r"><p><span id="s#{i}">row #{i}</span> <b>x</b></p></div>) }.join
-      s = native_session_for(%(<div id="l" style="display:flex;flex-wrap:wrap">#{rows}</div>), verify: false)
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          const edit = (id) => { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; };
-          document.body.offsetHeight;
-          const put = [];
-          for (let cycle = 0; cycle < 12; cycle++) {
-            document.getElementById('l').style.paddingLeft = (cycle % 7) + 'px';
-            document.body.offsetHeight;
-            for (let e = 0; e < 5; e++) edit('s' + (1 + (cycle * 5 + e) % 100));
-            const [p0] = __dom.layoutMeasureCounts();
-            edit('s' + (50 + cycle));
-            put.push(__dom.layoutMeasureCounts()[0] - p0);
-          }
-          return put;
-        })()
-      JS
-      expect(got.min).to be >= 90
-    end
-
-    # …and a kept block's subtree is not laid out again either, where it is measured as it was last time: native puts
-    # the measure back (`MeasureCache`). Laid out afresh, every item of the list was measured on every edit. (Checked:
-    # the check lays each put-back subtree out again and compares, so it is left off for the count.)
-    it 'puts back the measure of what an edit did not touch' do
-      items = (1..100).map {|i| %(<div><p><span id="s#{i}">item #{i}</span></p></div>) }.join
-      s = native_session_for(%(<div style="display:flex;flex-wrap:wrap">#{items}</div>), verify: false)
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          document.body.offsetHeight;
-          for (const id of ['s7', 's8']) { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; }
-          const [put0] = __dom.layoutMeasureCounts(), passes = __csimNativeLayoutStats().native;
-          document.getElementById('s9').firstChild.data += '!';
-          document.body.offsetHeight;
-          return [__dom.layoutMeasureCounts()[0] - put0, __csimNativeLayoutStats().native - passes];
-        })()
-      JS
-      expect(got[1]).to eq(1)
-      expect(got[0]).to be >= 90                             # every item but the edited one (and its neighbours)
-    end
-
-    # An inline box native answers with the fragments it answered last time is not written again — but one whose
-    # fragments moved is: an edit elsewhere (nothing moves), an edit before it on its line (it shifts), and one that
-    # wraps it (it breaks in two). The same edits under the JS layout say where every rectangle belongs.
-    it 'writes an inline box again exactly when its fragments moved' do
-      body = '<div style="width:200px;font:16px/20px monospace"><span id="a">aaa</span> <span id="b">bbb bbb</span> ' \
-             '<span id="c">ccc</span></div><p id="p">x</p>'
-      edits = <<~JS
-        (() => {
-          const rects = () => JSON.stringify(['a', 'b', 'c'].map((id) => [...document.getElementById(id).getClientRects()].map((r) => [r.x, r.y, r.width])));
-          const out = [rects()];
-          document.getElementById('p').firstChild.data = 'y';
-          out.push(rects());
-          document.getElementById('a').firstChild.data = 'aaaaaa';
-          out.push(rects());
-          document.getElementById('a').firstChild.data = 'aaaaaaaaaaaaa';
-          out.push(rects());
-          return [out, __csimNativeLayoutStats().native];
-        })()
-      JS
-      native, passes = native_session_for(body, verify: false).evaluate_script(edits)
-      js = session_for('body { margin: 0 }', body).tap {|s| s.execute_script('globalThis.__csimNativeLayout = false') }.evaluate_script(edits).first
-      expect(passes).to be >= 4
-      expect(native).to eq(js)
-      expect(native.uniq.size).to eq(3)                          # the edit elsewhere moved nothing; the others did
-      expect(JSON.parse(native.last)[1].size).to eq(2)           # …the last one breaking `b` in two
-    end
-
-    # A read that merely CONSIDERED a dynamic-state rule leaves what it walked kept: a flip that can move a box dirties
-    # every box the rule can reach (the restyle marks, layout.js `markRestyles`), and that is what the stamps it is kept
-    # under follow.
-    # Refused for one, Redmine's `#main-menu li:hover ul.menu-children` kept the header, and the page wrapper above it,
-    # from ever being kept: every edit walked them afresh, and asked each of their gates again.
-    it 'keeps a subtree a dynamic-state rule reaches' do
-      items = (1..50).map {|i| %(<li><a>item #{i}</a><ul class="sub"><li>sub #{i}</li></ul></li>) }.join
-      s = native_session_for(%(<ul id="m">#{items}</ul><p id="p">x</p>), verify: false,
-                             css: 'ul.sub { display: none } #m li:hover ul.sub { display: block }')
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          document.body.offsetHeight;
-          for (const t of ['y', 'z']) { document.getElementById('p').firstChild.data = t; document.body.offsetHeight; }
-          const n = __csimNlGateAnswers(), passes = __csimNativeLayoutStats().native;
-          document.getElementById('p').firstChild.data = 'w';
-          document.body.offsetHeight;
-          return [__csimNlGateAnswers() - n, __csimNativeLayoutStats().native - passes];
-        })()
-      JS
-      expect(got[1]).to eq(1)
-      expect(got[0]).to be <= 3                              # the edited paragraph and the body, not the fifty items
-    end
-
-    # …and lays it out again when the rule flips: the hovered item's submenu opens and the item after it moves down,
-    # its link turns bold and wider, and all of it closes again — each read where the JS layout reads it.
-    it 'lays a kept subtree out again when a dynamic-state rule flips in it' do
-      css = 'ul.sub { display: none } #m li:hover ul.sub { display: block } #m li:hover > a { font-weight: bold } ' \
-            '#m { font: 16px/20px sans-serif }'
-      body = %(<ul id="m">#{(1..5).map {|i| %(<li id="l#{i}"><a id="a#{i}">item #{i}</a><ul class="sub"><li>sub</li></ul></li>) }.join}</ul>) +
-             '<p id="p">x</p>'
-      edits = <<~JS
-        (() => {
-          const geo = () => JSON.stringify(['a2', 'l3'].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return [r.y, r.width, r.height]; }));
-          const out = [geo()];
-          document.getElementById('p').firstChild.data = 'y'; out.push(geo());
-          document._hoverElement = document.getElementById('a2'); out.push(geo());
-          document.getElementById('p').firstChild.data = 'z'; out.push(geo());
-          document._hoverElement = null; out.push(geo());
-          return [out, __csimNativeLayoutStats().native];
-        })()
-      JS
-      native, passes = native_session_for(body, css: css).evaluate_script(edits)
-      js = session_for("body { margin: 0 } #{css}", body).tap {|s| s.execute_script('globalThis.__csimNativeLayout = false') }.evaluate_script(edits).first
-      expect(passes).to be >= 5
-      expect(native).to eq(js)
-      expect(native.uniq.size).to eq(2)                          # closed, open, closed
-    end
-
-    # …and nor does a rule that can never match, whatever state it names: its selector did not compile
-    # (`unmatchable`), so a read that considered it depends on nothing. Named an unknown state, it counted as one some
-    # writer flips unseen, and Forem's stats page — whose sheets hold such a rule — kept nothing.
-    it 'keeps a subtree whose reads considered a rule that can never match' do
-      items = (1..50).map {|i| %(<li><a>item #{i}</a></li>) }.join
-      s = native_session_for(%(<ul id="m">#{items}</ul><p id="p">x</p>), verify: false, css: 'li:bogus-state { display: none }')
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          document.body.offsetHeight;
-          for (const t of ['y', 'z']) { document.getElementById('p').firstChild.data = t; document.body.offsetHeight; }
-          const n = __csimNlGateAnswers(), passes = __csimNativeLayoutStats().native;
-          document.getElementById('p').firstChild.data = 'w';
-          document.body.offsetHeight;
-          return [__csimNlGateAnswers() - n, __csimNativeLayoutStats().native - passes];
-        })()
-      JS
-      expect(got[1]).to eq(1)
-      expect(got[0]).to be <= 3
-    end
-
-    # …but only where every writer of the state is seen (`STAMP_TRACKED_PSEUDOS`). A clean checkbox's checkedness is its
-    # ATTRIBUTE's, a form's validity its controls', `:dir()` follows `dir=auto` text, `:target` an `id`, and a modal
-    # dialog stops being `:modal` with its `open` attribute: each flips with no state bump and dirties nothing, so a
-    # subtree that read such a rule is not kept. Kept, each read the box from before its flip back.
-    it 'does not keep a subtree a state some writer flips unseen reaches' do
-      shapes = [
-        ['input:checked ~ p { width: 50px }', '<input id="i" type="checkbox"><p id="p"></p>', '',
-         "document.getElementById('i').setAttribute('checked', '')"],
-        ['form:invalid p { width: 50px }', '<form><input id="i" required><p id="p"></p></form>', '',
-         "document.getElementById('i').remove()"],
-        ['div:dir(rtl) + p { width: 50px }', '<div dir="auto"><span id="t">abc</span></div><p id="p"></p>', '',
-         "document.getElementById('t').firstChild.data = 'שלום'"],
-        [':target + p { width: 50px }', '<div id="d"></div><p id="p"></p>', "location.hash = '#sec'",
-         "document.getElementById('d').id = 'sec'"],
-        ['dialog:modal ~ p { width: 50px }', '<dialog id="d">hi</dialog><p id="p"></p>', "document.getElementById('d').showModal()",
-         "document.getElementById('d').removeAttribute('open')"]
-      ]
-      shapes.each do |rule, body, setup, flip|
-        css = "p { width: 100px; height: 10px; margin: 0 } #{rule}"
-        run = lambda do |s|
-          width = "document.getElementById('p').getBoundingClientRect().width"
-          s.execute_script(setup)
-          before = s.evaluate_script(width)
-          s.execute_script("document.getElementById('q').firstChild.data = 'y'; document.body.offsetHeight")
-          s.execute_script(flip)
-          [before, s.evaluate_script(width)]
-        end
-        page = "#{body}<p id=\"q\">x</p>"
-        native = run.call(native_session_for(page, css: css))
-        js = run.call(session_for("body { margin: 0 } #{css}", page).tap {|s| s.execute_script('globalThis.__csimNativeLayout = false') })
-        expect(native).to eq(js), rule
-        expect(native.uniq.size).to eq(2), rule
-      end
-    end
-
-    # …and one that declares a TRANSITION likewise: the declared-value memo asks such a value again on every read, to
-    # compare it with the before-change style, but nothing short of a style change can start one — and a style change
-    # moves the stamps. Refused for it, Forem's stats page (`transition: all` under its charts) was laid out afresh on
-    # every edit: 18 ms a pass where the JS layout takes 4.
-    it 'keeps a subtree whose boxes declare a transition' do
-      items = (1..50).map {|i| %(<li><a>item #{i}</a></li>) }.join
-      s = native_session_for(%(<ul id="m">#{items}</ul><p id="p">x</p>), verify: false, css: 'li, a { transition: all 1s }')
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          document.body.offsetHeight;
-          for (const t of ['y', 'z']) { document.getElementById('p').firstChild.data = t; document.body.offsetHeight; }
-          const n = __csimNlGateAnswers(), passes = __csimNativeLayoutStats().native;
-          document.getElementById('p').firstChild.data = 'w';
-          document.body.offsetHeight;
-          return [__csimNlGateAnswers() - n, __csimNativeLayoutStats().native - passes];
-        })()
-      JS
-      expect(got[1]).to eq(1)
-      expect(got[0]).to be <= 3
-    end
-
-    # …and lays it out again as a transition started in it runs: the box grows read after read and settles, each read
-    # where the JS layout reads it.
-    it 'follows a transition started inside a kept subtree' do
-      css  = 'li { width: 100px; transition: width 1s linear } li.wide { width: 300px }'
-      body = %(<ul id="m">#{(1..5).map {|i| %(<li id="l#{i}">item #{i}</li>) }.join}</ul><p id="p">x</p>)
-      run = lambda do |s|
-        width = "document.getElementById('l3').getBoundingClientRect().width"
-        s.evaluate_script(width)
-        s.execute_script("document.getElementById('p').firstChild.data = 'y'; document.body.offsetHeight")
-        # (…the first read in the task that starts it: the transition runs from then on, as in a browser)
-        reads = [s.evaluate_script("(document.getElementById('l3').classList.add('wide'), #{width})")]
-        while reads.last < 300 && reads.size < 30
-          s.evaluate_script('new Promise((resolve) => setTimeout(resolve, 100))')
-          reads << s.evaluate_script(width)
-        end
-        reads
-      end
-      ns = native_session_for(body, css: css)
-      native = run.call(ns)
-      js = run.call(session_for("body { margin: 0 } #{css}", body).tap {|s| s.execute_script('globalThis.__csimNativeLayout = false') })
-      expect(native).to eq(js)
-      expect(native.first).to eq(100)
-      expect(native.last).to eq(300)
-      expect(native.count {|w| w > 100 && w < 300 }).to be >= 3     # …through the run, not in one jump
-      expect(ns.evaluate_script('__csimNativeLayoutStats().native')).to be >= native.size
     end
   end
 

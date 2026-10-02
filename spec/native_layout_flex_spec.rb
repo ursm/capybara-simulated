@@ -1,5 +1,5 @@
 # frozen_string_literal: true
-# Native layout — flex (§9.7), geometry shadow-parity. The item SIZING is resolved JS-side (each item's used
+# Native layout — flex (§9.7). The item SIZING is resolved JS-side (each item's used
 # main+cross size rides its record, like a float's shrink-to-fit width); native does only the PLACEMENT —
 # main-axis distribution (justify-content + gap + main-axis auto margins), cross-axis alignment
 # (align-items/self + cross-axis auto margins + first/last baseline), and the container's own box. Supported:
@@ -19,15 +19,12 @@
 # measured table below is the statement of it. `wrap-reverse` is a SECOND flag, not the same one: it is what
 # the flow-relative `start` / `end` follow, and a `vertical-rl` row has a reversed cross without it.
 #
-# What still DECLINES to JS is what `nlFlexSupported` (layout.js) refuses.
-# A REPLACED item (svg / img / input …) is now replayed as a leaf box (see native_layout_replaced_spec).
-# Each bail is an A/B: the feature-carrying input declines, a sibling without it stays native.
+# A REPLACED item (svg / img / input …) is laid out as a leaf box (see native_layout_replaced_spec).
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 require_relative 'support/layout_golden'
-require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout flex parity' do
   def page(body)
@@ -39,11 +36,11 @@ RSpec.describe 'native layout flex parity' do
   # and `simulated_session` defers disposal: the align-content one held 576 live V8 isolates and took the
   # file's peak RSS to 9.52 GB (measured), where the gate runs it under flatware beside six sweeps and has
   # been taken down by the OOM killer once already. Same 195 examples at 229 MB.
-  def run_shadow(body, opts = '{}')
+  def run_shadow(body)
     with_simulated_session(page(body)) do |session|
       session.visit '/'
       session.evaluate_script('document.body.offsetHeight')
-      session.evaluate_script("globalThis.__csimLayoutShadowRun(undefined, #{opts})")
+      session.evaluate_script('globalThis.__csimLayoutShadowRun()')
     end
   end
 
@@ -65,8 +62,6 @@ RSpec.describe 'native layout flex parity' do
       body = %(<div style="width:300px"><div style="display:flex"><div>a</div>#{boxless}<div id="g">b</div></div></div>)
       with_simulated_session(page(body)) do |session|
         session.visit '/'
-        session.evaluate_script('document.body.offsetHeight')
-        expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0), body
         x = session.evaluate_script("document.getElementById('g').getBoundingClientRect().x")
         expect(x).to be_within(0.01).of(chrome_x), "#{body}: #{x}, Chrome #{chrome_x}"
       end
@@ -82,23 +77,12 @@ RSpec.describe 'native layout flex parity' do
     end
   end
 
-  # Parity, AND the row's item widths were resolved by the native engine (`flex_row_sizes`), not pushed —
-  # `nativeFlexRows` counts the flex rows that took that path.
   # A wrap COLUMN whose stretching item holds `mid` (the block whose used width is the percentage's basis)
-  # holding `pct`. The second item is a fixed box, which is what makes the container's pushed path
-  # unrecoverable — so where the pre-filter refuses, the whole walk declines and names itself.
+  # holding `pct`, beside a fixed box.
   def wrap_col_pct(mid, pct)
     %(<div style="display:flex;flex-direction:column;width:300px;flex-wrap:wrap"><div><div style="#{mid}">) +
       %(<div style="#{pct}">some rather longer words here to measure</div></div></div>) +
       %(<div style="width:30px;height:20px"></div></div>)
-  end
-
-  def expect_native_flex(body)
-    r = run_shadow(body)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r, body)
-    expect(r['nativeFlexRows']).to be >= 1, "the row's item widths were pushed, not native: #{r.inspect}"
   end
 
   # …and a marked descendant's X, for an example whose figure is a position rather than a size.
@@ -572,7 +556,7 @@ RSpec.describe 'native layout flex parity' do
   # align-content:stretch with lines that MIX stretch-filled and explicit cross sizes: a natively-sized row
   # grows its lines from their NATURAL crosses, so the mix is computed (it declined while item boxes were pushed).
   it 'matches a mixed stretch/explicit wrap under align-content:stretch' do
-    expect_native_flex('<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px"></div><div style="width:100px"></div><div style="width:100px;height:50px"></div></div>')
+    expect_parity('<div style="display:flex;flex-wrap:wrap;width:250px;height:200px"><div style="width:100px"></div><div style="width:100px"></div><div style="width:100px;height:50px"></div></div>')
   end
   # An rtl flex ROW reverses the main axis (first item at the right); once rtl blocks lay out natively (r1) its
   # items no longer decline, so the whole row is native.
@@ -581,7 +565,7 @@ RSpec.describe 'native layout flex parity' do
   end
   # An rtl flex COLUMN packs its items from the RIGHT edge (its cross axis runs right→left). `crossAlignPhysical`
   # flips each item's align onto the physical cross, so native's forward-frame placement lands them correctly —
-  # a non-stretching `stretch` item at the right too. A cross (horizontal) auto MARGIN or a WRAP still declines.
+  # a non-stretching `stretch` item at the right too.
   it 'matches an rtl flex column (items packed from the right)' do
     expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="height:30px"></div><div style="width:60px;height:40px"></div></div>')
     expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;align-items:center;width:200px;height:120px"><div style="width:50px;height:30px"></div><div style="width:70px;height:40px"></div></div>')
@@ -637,33 +621,25 @@ RSpec.describe 'native layout flex parity' do
   end
   it('matches an rtl flex column with a cross auto margin') { expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;width:200px;height:120px"><div style="width:50px;height:30px;margin-left:auto"></div></div>') }
   it('matches an rtl WRAPPING flex column') { expect_parity('<div style="display:flex;flex-direction:column;flex-wrap:wrap;direction:rtl;width:200px;height:60px"><div style="width:40px;height:30px"></div><div style="width:50px;height:40px"></div></div>') }
-  # A PUSHED multi-line container whose lines mix a stretching item and a fixed one: `align-content: stretch` grew
-  # each line from its NATURAL cross, and a stretched box already holds its share, so the lines cannot be rebuilt
-  # from the final boxes — the walk refused the pushed path for it (`flex-item-pushed-cross-unrecoverable`, 1,363
-  # sweep declines). Each pushed item carries its line's natural cross now (rec[128]). (The HALF-EMPTY inline-table in
-  # the item — `WalkRefusals::UNMEASURABLE`'s shape, content the measure refuses — is what keeps the container off
-  # native sizing, onto the pushed path: a plain percentage inside an inline box did until the walk learned to send it,
-  # a two-operand `min()` until native learned to clamp one, a three-operand one until a comparison became a program,
-  # and one inside a `calc()` until a sum of them did, all 2026-09-26.) Chrome's boxes.
-  it 'places a pushed wrap container whose lines mix stretching and fixed items' do
+  # A multi-line container whose lines mix a stretching item and a fixed one: `align-content: stretch` grows each
+  # line from its NATURAL cross, and a stretched box already holds its share, so the lines cannot be rebuilt from the
+  # final boxes. Chrome's boxes.
+  it 'places a wrap container whose lines mix stretching and fixed items' do
     body = '<div style="display:flex;flex-wrap:wrap;width:150px;height:100px;font:16px monospace"><div><div style="height:100%">some rather longer ' \
            'words <b>bold <table style="display:inline-table"><colgroup><col style="width:20px"></colgroup></table> tail</b> more</div></div>' \
            '<div style="width:30px;height:20px"></div></div>'
-    expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+    expect_parity(body)
     chrome = [[0, 0, 150, 88], [0, 88, 30, 20]]
     item_boxes(body).zip(chrome).each do |got, want|
       got.zip(want).each {|g, w| expect(g).to be_within(0.05).of(w) }
     end
   end
-  # …and it carries its line's INDEX too (rec[129]): the pushed boxes are the FINAL sizes, and a column whose
-  # max-height breaks its lines breaks them on the HYPOTHETICAL ones — here a half-empty inline-table in the first item
-  # is what pushes the container (an absolute box's percentage did until native placed those itself, a two-operand
-  # `max()` until native clamped one, and a three-operand one and one inside a `calc()` until native evaluated
-  # programs), and the lines are [a b] [c]. Chrome's boxes.
-  it 'breaks a pushed wrapping column into the lines the oracle broke it into' do
+  # …and a column whose max-height breaks its lines breaks them on the HYPOTHETICAL sizes, not the final ones — here
+  # with a half-empty inline-table in the first item — and the lines are [a b] [c]. Chrome's boxes.
+  it 'breaks a wrapping column into lines on the hypothetical sizes' do
     body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:50px;width:200px"><div style="width:20px;height:20px">' \
            '<table style="display:inline-table"><colgroup><col style="width:20px"></colgroup></table></div><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div></div>'
-    expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
+    expect_parity(body)
     expect(item_boxes(body)).to eq([[0, 0, 20, 20], [0, 20, 20, 20], [100, 0, 20, 20]])
   end
   # A WRAPPING auto-height column with a max-height breaks its lines against that capacity, and each line's main
@@ -671,10 +647,10 @@ RSpec.describe 'native layout flex parity' do
   # here, where one extent for every line made native's box the capacity (40). It declined until 2026-09-24.
   it 'places a wrapping auto-height column whose max-height breaks its lines, the box its tallest line' do
     body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:40px;width:300px"><div style="width:80px;height:30px"></div><div style="width:80px;height:30px"></div></div>'
-    expect_native_flex(body)
+    expect_parity(body)
     expect(item_boxes(body)).to eq([[0, 0, 80, 30], [150, 0, 80, 30]])   # Chrome
     body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:100px;max-height:50px"><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div></div>'
-    expect_native_flex(body)
+    expect_parity(body)
     expect(item_boxes(body)).to eq([[0, 0, 20, 20], [0, 20, 20, 20], [50, 0, 20, 20]])   # Chrome: two lines of 40 and 20, the box 40
   end
   # …and so is one whose auto height reaches it as a PUSHED flex item's (the sibling's percentage-height absolute
@@ -687,7 +663,7 @@ RSpec.describe 'native layout flex parity' do
     body = '<div style="display:flex;align-items:flex-start;width:300px"><div id="c" style="display:flex;flex-direction:column;flex-wrap:wrap;' \
            'max-height:50px;width:200px;justify-content:flex-end"><div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div>' \
            '<div style="width:20px;height:20px"></div></div><div style="width:10px;height:10px"><div style="position:absolute;height:10%;width:2px"></div></div></div>'
-    expect_native_flex(body)
+    expect_parity(body)
     a, b, c = item_boxes(body)
     expect([a, b]).to eq([[0, 0, 20, 20], [0, 20, 20, 20]])   # Chrome
     expect(c.values_at(0, 2, 3)).to eq([100, 20, 20])
@@ -701,7 +677,7 @@ RSpec.describe 'native layout flex parity' do
     item = '<div style="width:30px;height:20px"><div style="width:min(50%,10px);height:2px"></div></div>'
     body = '<div style="display:flex;flex-direction:column;height:120px"><div id="c" style="display:flex;flex-direction:column;flex-wrap:wrap;' \
            "width:70px;max-height:45px;justify-content:center\">#{item * 3}</div></div>"
-    expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0)
+    expect_parity(body)
     a, b, c = item_boxes(body)
     expect([a, b]).to eq([[0, 0, 30, 20], [0, 20, 30, 20]])   # Chrome
     expect_shared_gap(c[1], shared: 0, chrome: 10, what: "#{body}: the third item's y")
@@ -710,11 +686,11 @@ RSpec.describe 'native layout flex parity' do
   it 'lets a min-height above the max-height set the capacity a wrapping column breaks against' do
     body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:30px;min-height:60px;width:200px"><div style="width:20px;height:20px"></div>' \
            '<div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div></div>'
-    expect_native_flex(body)
+    expect_parity(body)
     expect(item_boxes(body)).to eq([[0, 0, 20, 20], [0, 20, 20, 20], [0, 40, 20, 20]])   # Chrome
     body = '<div style="display:flex;flex-direction:column;flex-wrap:wrap;max-height:30px;min-height:60px;width:200px;justify-content:flex-end">' \
            '<div style="width:20px;height:20px"></div><div style="width:20px;height:20px"></div></div>'
-    expect_native_flex(body)
+    expect_parity(body)
     expect(item_boxes(body)).to eq([[0, 20, 20, 20], [0, 40, 20, 20]])   # Chrome
   end
   # A flex container's own % padding resolves against its CONTAINING BLOCK's width on both axes (§ CSS Box),
@@ -899,61 +875,61 @@ RSpec.describe 'native layout flex parity' do
     let(:row) { 'display:flex;width:400px' }
 
     it 'grows in proportion to flex-grow and shrinks declared widths to fit' do
-      expect_native_flex(%(<div style="#{row}"><div style="flex:1">one</div><div style="flex:2">two words</div></div>))
-      expect_native_flex(%(<div style="#{row}"><div style="width:300px">a</div><div style="width:300px">b</div></div>))
-      expect_native_flex(%(<div style="#{row}"><div style="width:100px;flex-shrink:0">fixed</div><div style="width:500px">shrinks a lot of text</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:1">one</div><div style="flex:2">two words</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="width:300px">a</div><div style="width:300px">b</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="width:100px;flex-shrink:0">fixed</div><div style="width:500px">shrinks a lot of text</div></div>))
     end
     it 'bases an item on its content (max-content) and floors it at its min-content unless min-width says otherwise' do
-      expect_native_flex(%(<div style="#{row}"><div>short</div><div>a somewhat longer text item here</div><div style="flex:1">grow</div></div>))
-      expect_native_flex(%(<div style="#{row}"><div style="flex:1">verylongunbreakablewordthatoverflowsthecontainerwidth</div><div style="flex:1">short</div></div>))
-      expect_native_flex(%(<div style="#{row}"><div style="flex:1;min-width:0">verylongunbreakablewordthatoverflows</div><div style="flex:1">short</div></div>))
-      expect_native_flex(%(<div style="#{row}"><div style="flex:1;overflow-x:hidden">verylongunbreakablewordthatoverflowsthecontainerwidth</div><div style="flex:1">short</div></div>))
+      expect_parity(%(<div style="#{row}"><div>short</div><div>a somewhat longer text item here</div><div style="flex:1">grow</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:1">verylongunbreakablewordthatoverflowsthecontainerwidth</div><div style="flex:1">short</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:1;min-width:0">verylongunbreakablewordthatoverflows</div><div style="flex:1">short</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:1;overflow-x:hidden">verylongunbreakablewordthatoverflowsthecontainerwidth</div><div style="flex:1">short</div></div>))
     end
     it 'clamps by min/max-width, freezing the clamped item and re-sharing what it gave up' do
-      expect_native_flex(%(<div style="#{row}"><div style="flex:1;max-width:80px">capped</div><div style="flex:1">rest</div><div style="flex:1;min-width:200px">floor</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:1;max-width:80px">capped</div><div style="flex:1">rest</div><div style="flex:1;min-width:200px">floor</div></div>))
     end
     it 'reads flex-basis as a content-box length (border-box per box-sizing), a percentage, and the intrinsic keywords' do
-      expect_native_flex(%(<div style="#{row}"><div style="flex:0 0 100px;padding:0 10px">basis pad</div><div style="flex:0 0 100px;box-sizing:border-box;padding:0 10px">bb</div><div style="flex:1 1 0%">z</div></div>))
-      expect_native_flex(%(<div style="#{row}"><div style="flex-basis:content;width:300px">content basis</div><div style="flex-basis:max-content">max</div><div style="flex-basis:min-content">min content basis</div><div style="flex-basis:fit-content">fit here</div></div>))
-      expect_native_flex(%(<div style="#{row}"><div style="flex:1;width:50%">pct</div><div style="flex:none;width:25%">quarter</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:0 0 100px;padding:0 10px">basis pad</div><div style="flex:0 0 100px;box-sizing:border-box;padding:0 10px">bb</div><div style="flex:1 1 0%">z</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex-basis:content;width:300px">content basis</div><div style="flex-basis:max-content">max</div><div style="flex-basis:min-content">min content basis</div><div style="flex-basis:fit-content">fit here</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:1;width:50%">pct</div><div style="flex:none;width:25%">quarter</div></div>))
     end
     it 'scales flex factors below one against the initial free space' do
-      expect_native_flex(%(<div style="#{row}"><div style="flex:1 0.25 200px">quarter</div><div style="flex:1 0.25 200px">quarter</div><div style="width:100px">x</div></div>))
-      expect_native_flex(%(<div style="#{row}"><div style="flex:0.5">half grow</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:1 0.25 200px">quarter</div><div style="flex:1 0.25 200px">quarter</div><div style="width:100px">x</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:0.5">half grow</div></div>))
     end
     it 'breaks lines on the hypothetical sizes and stacks them by align-content' do
-      expect_native_flex(%(<div style="#{row};flex-wrap:wrap;gap:10px"><div style="width:150px;height:10px"></div><div style="width:150px;height:20px"></div><div style="width:150px;height:30px"></div></div>))
-      expect_native_flex(%(<div style="#{row};flex-wrap:wrap;gap:10px;align-content:center;height:200px"><div style="width:150px;height:10px"></div><div style="width:150px;height:20px"></div><div style="width:150px;height:30px"></div></div>))
-      expect_native_flex(%(<div style="#{row};flex-wrap:wrap"><div style="flex:1 1 150px;height:10px"></div><div style="flex:1 1 150px;height:20px"></div><div style="flex:1 1 150px;height:30px"></div></div>))
-      expect_native_flex(%(<div style="#{row};flex-wrap:wrap;height:150px;align-content:stretch"><div style="width:300px;height:10px"></div><div style="width:300px">stretchy</div></div>))
+      expect_parity(%(<div style="#{row};flex-wrap:wrap;gap:10px"><div style="width:150px;height:10px"></div><div style="width:150px;height:20px"></div><div style="width:150px;height:30px"></div></div>))
+      expect_parity(%(<div style="#{row};flex-wrap:wrap;gap:10px;align-content:center;height:200px"><div style="width:150px;height:10px"></div><div style="width:150px;height:20px"></div><div style="width:150px;height:30px"></div></div>))
+      expect_parity(%(<div style="#{row};flex-wrap:wrap"><div style="flex:1 1 150px;height:10px"></div><div style="flex:1 1 150px;height:20px"></div><div style="flex:1 1 150px;height:30px"></div></div>))
+      expect_parity(%(<div style="#{row};flex-wrap:wrap;height:150px;align-content:stretch"><div style="width:300px;height:10px"></div><div style="width:300px">stretchy</div></div>))
     end
     it 'stretches an auto-height item to its line as an imposed height, its own min/max-height still clamping' do
-      expect_native_flex(%(<div style="#{row}"><div style="flex:1"><div style="height:10px"></div></div><div style="flex:1"><div style="height:30px"></div></div></div>))
-      expect_native_flex(%(<div style="#{row};align-items:center"><div style="flex:1;height:10px"></div><div style="flex:1;height:30px"></div></div>))
-      expect_native_flex(%(<div style="#{row};height:100px"><div style="flex:1"><div style="height:10px"></div></div><div style="flex:1;max-height:30px"><div style="height:50px"></div></div></div>))
-      expect_native_flex(%(<div style="#{row}"><div style="flex:1;display:flex;align-items:center;min-height:50px"><div style="width:10px;height:10px"></div></div><div style="width:50px;height:80px">y</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:1"><div style="height:10px"></div></div><div style="flex:1"><div style="height:30px"></div></div></div>))
+      expect_parity(%(<div style="#{row};align-items:center"><div style="flex:1;height:10px"></div><div style="flex:1;height:30px"></div></div>))
+      expect_parity(%(<div style="#{row};height:100px"><div style="flex:1"><div style="height:10px"></div></div><div style="flex:1;max-height:30px"><div style="height:50px"></div></div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:1;display:flex;align-items:center;min-height:50px"><div style="width:10px;height:10px"></div></div><div style="width:50px;height:80px">y</div></div>))
     end
     it 'gives an item that measured nothing, or whose content is all out of flow, its zero' do
-      expect_native_flex(%(<div style="#{row}"><div style="flex:1"></div><div style="flex:1"><div></div></div><div style="width:50px">y</div></div>))
-      expect_native_flex(%(<div style="#{row}"><div style="flex:1"><div style="position:absolute;width:30px;height:30px"></div></div><div style="width:50px">y</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:1"></div><div style="flex:1"><div></div></div><div style="width:50px">y</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:1"><div style="position:absolute;width:30px;height:30px"></div></div><div style="width:50px">y</div></div>))
     end
     # A nested flex container's items are BLOCKIFIED for its content measure (CSS Flexbox §4): inline items do
     # not join into one word, inline-blocks are not atomics, and the container's own `white-space` pins nothing
     # (review finding — the oracle's contentIntrinsicWidths now blockifies flex items, as native does).
     it 'measures a nested flex item\'s keyword basis and automatic minimum with its items blockified' do
-      expect_native_flex('<div style="display:flex;width:100px"><div style="flex:1;display:flex"><span>aaaa</span><span>bbbb</span></div><div style="width:90px">y</div></div>')
-      expect_native_flex('<div style="display:flex;width:100px"><div style="flex:1;display:flex;flex-basis:max-content"><span>aaaa</span> <span>bbbb</span></div><div style="width:90px">y</div></div>')
-      expect_native_flex('<div style="display:flex;width:100px"><div style="flex:1;display:flex;flex-basis:content"><span style="display:inline-block">aaaa</span><span style="display:inline-block">bbbb</span></div><div style="width:90px">y</div></div>')
-      expect_native_flex('<div style="display:flex;width:120px"><a style="display:flex;gap:8px"><span>Brand</span><span>tagline</span></a><div style="display:flex;gap:12px"><a>One</a><a>Two</a></div></div>')
-      expect_native_flex('<div style="display:flex;width:100px"><div style="flex:1;display:flex;white-space:nowrap"><div style="white-space:normal">aa bb cc dd</div></div><div style="width:90px">y</div></div>')
+      expect_parity('<div style="display:flex;width:100px"><div style="flex:1;display:flex"><span>aaaa</span><span>bbbb</span></div><div style="width:90px">y</div></div>')
+      expect_parity('<div style="display:flex;width:100px"><div style="flex:1;display:flex;flex-basis:max-content"><span>aaaa</span> <span>bbbb</span></div><div style="width:90px">y</div></div>')
+      expect_parity('<div style="display:flex;width:100px"><div style="flex:1;display:flex;flex-basis:content"><span style="display:inline-block">aaaa</span><span style="display:inline-block">bbbb</span></div><div style="width:90px">y</div></div>')
+      expect_parity('<div style="display:flex;width:120px"><a style="display:flex;gap:8px"><span>Brand</span><span>tagline</span></a><div style="display:flex;gap:12px"><a>One</a><a>Two</a></div></div>')
+      expect_parity('<div style="display:flex;width:100px"><div style="flex:1;display:flex;white-space:nowrap"><div style="white-space:normal">aa bb cc dd</div></div><div style="width:90px">y</div></div>')
     end
     it 'keeps margins, gaps, auto margins, order, reverse and relative offsets on the native path' do
-      expect_native_flex(%(<div style="#{row}"><div style="flex:1;margin:5px 8px">m</div><div style="flex:1;margin-left:auto;width:50px">auto</div></div>))
-      expect_native_flex(%(<div style="#{row};gap:20px"><div style="flex:1">a</div><div style="flex:1">b</div><div style="flex:1">c</div></div>))
-      expect_native_flex(%(<div style="#{row}"><div style="order:2;flex:1">second</div><div style="order:1;width:50px">first</div></div>))
-      expect_native_flex(%(<div style="#{row};flex-direction:row-reverse"><div style="flex:1">a</div><div style="width:50px">b</div></div>))
-      expect_native_flex(%(<div style="#{row}"><div style="flex:1;position:relative;top:3px">rel</div><div style="width:50px">y</div></div>))
-      expect_native_flex(%(<div style="#{row}"><div style="flex:1;display:flex"><div style="flex:1">nested</div><div>x</div></div><div style="width:50px">y</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:1;margin:5px 8px">m</div><div style="flex:1;margin-left:auto;width:50px">auto</div></div>))
+      expect_parity(%(<div style="#{row};gap:20px"><div style="flex:1">a</div><div style="flex:1">b</div><div style="flex:1">c</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="order:2;flex:1">second</div><div style="order:1;width:50px">first</div></div>))
+      expect_parity(%(<div style="#{row};flex-direction:row-reverse"><div style="flex:1">a</div><div style="width:50px">b</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:1;position:relative;top:3px">rel</div><div style="width:50px">y</div></div>))
+      expect_parity(%(<div style="#{row}"><div style="flex:1;display:flex"><div style="flex:1">nested</div><div>x</div></div><div style="width:50px">y</div></div>))
     end
   end
 
@@ -968,48 +944,48 @@ RSpec.describe 'native layout flex parity' do
     let(:col) { 'display:flex;flex-direction:column;width:300px' }
 
     it 'measures content heights for the bases and shares a definite height by flex-grow' do
-      expect_native_flex(%(<div style="#{col}"><div>one line</div><div>two lines of text that wrap around here in the column</div></div>))
-      expect_native_flex(%(<div style="#{col};height:300px"><div style="flex:1">a</div><div style="flex:2">b</div></div>))
-      expect_native_flex(%(<div style="#{col};height:200px;gap:10px"><div style="flex:1">a</div><div style="flex:1">b</div></div>))
+      expect_parity(%(<div style="#{col}"><div>one line</div><div>two lines of text that wrap around here in the column</div></div>))
+      expect_parity(%(<div style="#{col};height:300px"><div style="flex:1">a</div><div style="flex:2">b</div></div>))
+      expect_parity(%(<div style="#{col};height:200px;gap:10px"><div style="flex:1">a</div><div style="flex:1">b</div></div>))
     end
     it 'shrinks a declared-height item (its automatic minimum is its content, capped by the declaration)' do
-      expect_native_flex(%(<div style="#{col};height:100px"><div style="flex:1">a</div><div style="height:200px">tall</div><div style="flex:1">c</div></div>))
-      expect_native_flex(%(<div style="#{col};height:100px"><div style="flex:1"><p style="margin:0">a</p><p style="margin:0">b</p><p style="margin:0">c</p></div><div style="height:80px">tall</div></div>))
-      expect_native_flex(%(<div style="#{col};height:100px"><div style="flex:1;min-height:0"><p style="margin:0">a</p><p style="margin:0">b</p><p style="margin:0">c</p></div><div style="height:80px">tall</div></div>))
-      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1"><div style="height:500px"></div></div><div style="height:30px">footer</div></div>))
-      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1;overflow-y:auto"><div style="height:500px"></div></div><div style="height:30px">footer</div></div>))
+      expect_parity(%(<div style="#{col};height:100px"><div style="flex:1">a</div><div style="height:200px">tall</div><div style="flex:1">c</div></div>))
+      expect_parity(%(<div style="#{col};height:100px"><div style="flex:1"><p style="margin:0">a</p><p style="margin:0">b</p><p style="margin:0">c</p></div><div style="height:80px">tall</div></div>))
+      expect_parity(%(<div style="#{col};height:100px"><div style="flex:1;min-height:0"><p style="margin:0">a</p><p style="margin:0">b</p><p style="margin:0">c</p></div><div style="height:80px">tall</div></div>))
+      expect_parity(%(<div style="#{col};height:200px"><div style="flex:1"><div style="height:500px"></div></div><div style="height:30px">footer</div></div>))
+      expect_parity(%(<div style="#{col};height:200px"><div style="flex:1;overflow-y:auto"><div style="height:500px"></div></div><div style="height:30px">footer</div></div>))
     end
     it 'divides a min-height floor the items underrun and a max-height cap they overrun' do
-      expect_native_flex(%(<div style="#{col};min-height:200px"><div style="flex:1">a</div><div>b</div></div>))
-      expect_native_flex(%(<div style="#{col};min-height:40px"><div style="height:20px"></div><div style="height:20px"></div><div style="height:20px"></div></div>))
-      expect_native_flex(%(<div style="#{col};max-height:100px"><div style="height:200px;flex-shrink:1">shrinks</div></div>))
-      expect_native_flex(%(<div style="#{col};max-height:100px"><div style="height:200px;min-height:150px">cannot</div></div>))
+      expect_parity(%(<div style="#{col};min-height:200px"><div style="flex:1">a</div><div>b</div></div>))
+      expect_parity(%(<div style="#{col};min-height:40px"><div style="height:20px"></div><div style="height:20px"></div><div style="height:20px"></div></div>))
+      expect_parity(%(<div style="#{col};max-height:100px"><div style="height:200px;flex-shrink:1">shrinks</div></div>))
+      expect_parity(%(<div style="#{col};max-height:100px"><div style="height:200px;min-height:150px">cannot</div></div>))
     end
     it 'sizes the cross axis: stretch fills, an aligned item shrinks to fit, declared / min / max widths clamp' do
-      expect_native_flex(%(<div style="#{col};align-items:flex-start"><div>start aligned</div><div style="width:50px">fixed</div></div>))
-      expect_native_flex(%(<div style="#{col};align-items:center"><div>centered text</div><div style="margin:0 auto">auto</div></div>))
-      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1;width:100px">declared width</div><div style="height:30px;width:400px">wide</div></div>))
-      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1;max-width:60px">capped width text</div><div style="height:30px;min-width:350px">min</div></div>))
+      expect_parity(%(<div style="#{col};align-items:flex-start"><div>start aligned</div><div style="width:50px">fixed</div></div>))
+      expect_parity(%(<div style="#{col};align-items:center"><div>centered text</div><div style="margin:0 auto">auto</div></div>))
+      expect_parity(%(<div style="#{col};height:200px"><div style="flex:1;width:100px">declared width</div><div style="height:30px;width:400px">wide</div></div>))
+      expect_parity(%(<div style="#{col};height:200px"><div style="flex:1;max-width:60px">capped width text</div><div style="height:30px;min-width:350px">min</div></div>))
     end
     it 'reads flex-basis as a length (content-box per box-sizing) or a percentage of the definite main size' do
-      expect_native_flex(%(<div style="#{col}"><div style="flex:0 0 120px;padding:10px">basis pad</div><div style="flex:0 0 120px;box-sizing:border-box;padding:10px">bb</div><div style="flex-basis:50%">half</div></div>))
-      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex-basis:50%">half</div><div style="flex:1;max-height:30px"><div style="height:60px"></div></div><div style="flex:1;min-height:80px">min</div></div>))
-      expect_native_flex(%(<div style="#{col}"><div style="flex:1 1 0;min-height:auto">zero basis text</div><div>b</div></div>))
+      expect_parity(%(<div style="#{col}"><div style="flex:0 0 120px;padding:10px">basis pad</div><div style="flex:0 0 120px;box-sizing:border-box;padding:10px">bb</div><div style="flex-basis:50%">half</div></div>))
+      expect_parity(%(<div style="#{col};height:200px"><div style="flex-basis:50%">half</div><div style="flex:1;max-height:30px"><div style="height:60px"></div></div><div style="flex:1;min-height:80px">min</div></div>))
+      expect_parity(%(<div style="#{col}"><div style="flex:1 1 0;min-height:auto">zero basis text</div><div>b</div></div>))
     end
     it 'wraps against a definite height, sizes each line to its widest item, and re-stretches to the grown line' do
-      expect_native_flex(%(<div style="#{col};height:100px;flex-wrap:wrap"><div style="height:60px;width:50px"></div><div style="height:60px;width:70px"></div><div style="height:60px;width:30px"></div></div>))
-      expect_native_flex(%(<div style="#{col};height:100px;flex-wrap:wrap"><div style="height:60px">stretch me</div><div style="height:60px">and me too</div><div style="height:60px">x</div></div>))
-      expect_native_flex(%(<div style="#{col};height:100px;flex-wrap:wrap;align-content:center"><div style="height:60px;width:50px"></div><div style="height:60px;width:70px"></div></div>))
-      expect_native_flex(%(<div style="#{col};height:100px;flex-wrap:wrap;gap:5px 20px"><div style="height:60px;width:50px"></div><div style="height:60px;width:70px"></div><div style="height:60px;width:30px"></div></div>))
+      expect_parity(%(<div style="#{col};height:100px;flex-wrap:wrap"><div style="height:60px;width:50px"></div><div style="height:60px;width:70px"></div><div style="height:60px;width:30px"></div></div>))
+      expect_parity(%(<div style="#{col};height:100px;flex-wrap:wrap"><div style="height:60px">stretch me</div><div style="height:60px">and me too</div><div style="height:60px">x</div></div>))
+      expect_parity(%(<div style="#{col};height:100px;flex-wrap:wrap;align-content:center"><div style="height:60px;width:50px"></div><div style="height:60px;width:70px"></div></div>))
+      expect_parity(%(<div style="#{col};height:100px;flex-wrap:wrap;gap:5px 20px"><div style="height:60px;width:50px"></div><div style="height:60px;width:70px"></div><div style="height:60px;width:30px"></div></div>))
     end
     it 'keeps justify, reverse, auto margins, relative offsets, out-of-flow children and nesting on the native path' do
-      expect_native_flex(%(<div style="#{col};height:200px;flex-direction:column-reverse"><div style="flex:1">a</div><div style="height:30px">b</div></div>))
-      expect_native_flex(%(<div style="#{col};height:200px;justify-content:center"><div style="height:30px">a</div><div style="height:30px">b</div></div>))
-      expect_native_flex(%(<div style="#{col};height:200px"><div style="margin-top:auto;height:30px">pushed down</div></div>))
-      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1;position:relative;left:10px">rel</div><div style="height:30px">b</div></div>))
-      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1">a</div><div style="position:absolute;width:30px;height:30px"></div><div style="height:30px">b</div></div>))
-      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1;display:flex;flex-direction:column"><div style="flex:1">nested col</div><div>x</div></div><div>b</div></div>))
-      expect_native_flex(%(<div style="display:flex;width:400px"><div style="flex:1;display:flex;flex-direction:column"><div style="flex:1">col in row</div><div>x</div></div><div style="width:50px;height:120px"></div></div>))
+      expect_parity(%(<div style="#{col};height:200px;flex-direction:column-reverse"><div style="flex:1">a</div><div style="height:30px">b</div></div>))
+      expect_parity(%(<div style="#{col};height:200px;justify-content:center"><div style="height:30px">a</div><div style="height:30px">b</div></div>))
+      expect_parity(%(<div style="#{col};height:200px"><div style="margin-top:auto;height:30px">pushed down</div></div>))
+      expect_parity(%(<div style="#{col};height:200px"><div style="flex:1;position:relative;left:10px">rel</div><div style="height:30px">b</div></div>))
+      expect_parity(%(<div style="#{col};height:200px"><div style="flex:1">a</div><div style="position:absolute;width:30px;height:30px"></div><div style="height:30px">b</div></div>))
+      expect_parity(%(<div style="#{col};height:200px"><div style="flex:1;display:flex;flex-direction:column"><div style="flex:1">nested col</div><div>x</div></div><div>b</div></div>))
+      expect_parity(%(<div style="display:flex;width:400px"><div style="flex:1;display:flex;flex-direction:column"><div style="flex:1">col in row</div><div>x</div></div><div style="width:50px;height:120px"></div></div>))
     end
     # A descendant declaring a percentage kept the item on the pushed path until 2026-09-19: the records carried
     # those percentages resolved against the item's FINAL size, where native measures it at a provisional one.
@@ -1017,61 +993,54 @@ RSpec.describe 'native layout flex parity' do
     # afresh on every measure), so the item is sized natively — measured over a 2,548-shape sweep on the gate's
     # own axes (declines 516 -> 468, and the `pctsize` sweep's oracle reads 73 -> none).
     it 'sizes an item whose subtree declares a plain percentage natively' do
-      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="height:50%">pct</div></div><div style="flex:1 1 auto">plain</div></div>))
-      expect_native_flex('<div style="display:flex;width:400px"><div><div style="height:150%">pct</div></div><div style="height:40px;width:50px"></div></div>')
-      expect_native_flex(%(<div style="display:flex;width:400px"><div><div style="padding:0 10%">pct</div></div><div style="width:30px"></div></div>))
-      expect_native_flex(%(<div style="#{col};width:400px"><div><div style="width:50%;min-height:20%">pct</div></div></div>))
+      expect_parity(%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="height:50%">pct</div></div><div style="flex:1 1 auto">plain</div></div>))
+      expect_parity('<div style="display:flex;width:400px"><div><div style="height:150%">pct</div></div><div style="height:40px;width:50px"></div></div>')
+      expect_parity(%(<div style="display:flex;width:400px"><div><div style="padding:0 10%">pct</div></div><div style="width:30px"></div></div>))
+      expect_parity(%(<div style="#{col};width:400px"><div><div style="width:50%;min-height:20%">pct</div></div></div>))
       # …and one inside a LINEAR `calc()` since 2026-09-22: the record carries it as the pair `px + frac x basis`
       # (rec[100..105] beside rec[119..124]) and native resolves it at the basis it has, exactly as it does a
       # plain one. It fell back until then — for want of a constant term to send, not for want of a basis.
-      # The ITEM's box is asserted beside the parity, and against CHROME, because parity alone would be green
-      # if native and the oracle agreed on a wrong figure: this increment put new arithmetic on the native
-      # side, and `nativeFlexRows >= 1` only says which path ran.
+      # The ITEM's box is asserted beside the golden, and against CHROME, because a golden only says the layout
+      # did not move: this increment put new arithmetic on the native side.
       calc_row = '<div style="display:flex;width:400px"><div><div id="m" style="height:calc(50% + 2px)">pct</div></div><div style="height:40px;width:50px"></div></div>'
-      expect_native_flex(calc_row)
+      expect_parity(calc_row)
       expect(marked_box(calc_row)).to eq([19.546875, 22])   # Chrome 153
       calc_col = %(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div id="m" style="height:calc(50% + 2px)">pct</div></div><div style="flex:1 1 auto">plain</div></div>)
-      expect_native_flex(calc_col)
+      expect_parity(calc_col)
       expect(marked_box(calc_col)).to eq([300, 52])         # Chrome 153
     end
-    # …and it FALLS BACK for a percentage the walk still resolves, which is what the narrowed test names: one under a
-    # TABLE part a route reaches — a VERTICAL table's cell here, whose inline size the walk resolves against the
-    # oracle's table — where the record's parent is not the box the percentage resolves against, so the figure was
-    # resolved against the item's FINAL size and native measures at a provisional one. (An OUT-OF-FLOW box's is
-    # native's since 2026-09-25: it is placed against its containing block once every size is final. And a math
-    # function is no longer one at all: every `min()` / `max()` / `clamp()` over lines, nested, crossing or inside a
-    # `calc()` sum, travels as a program since 2026-09-26.)
-    # Dropping the test put 15 wrong boxes into a 2,268-case math-function sweep, 28 into a 1,200-case route sweep
-    # and 36 into a 960-case inline sweep, all 0 at the parent commit.
-    # A LINEAR `calc()` left this list on 2026-09-22 and is in the arm above; the figure that used to be cited
-    # here (`height: calc(50% + 2px)` in a wrapping row, 55.5 against Chrome's 58) is now 22, Chrome's own.
-    it 'falls back for a percentage the walk resolves, not for one native does' do
+    # …and one under a TABLE part — a VERTICAL table's cell here — and one in any math function: a `min()` / `max()` /
+    # `clamp()` over lines, nested, crossing or inside a `calc()` sum, travels as a program since 2026-09-26. (An
+    # OUT-OF-FLOW box's is placed against its containing block once every size is final.)
+    # A LINEAR `calc()` is in the arm above; the figure that used to be cited here (`height: calc(50% + 2px)` in a
+    # wrapping row, 55.5 against Chrome's 58) is now 22, Chrome's own.
+    it 'sizes an item over a percentage under a table part or inside a math function' do
       route = %(<div style="#{col};flex-wrap:wrap;height:200px;font:16px monospace"><div style="align-self:flex-start">) +
               '<table style="writing-mode:vertical-rl"><tr><td style="min-width:40%">aa</td><td>bb</td></tr></table></div><div style="width:30px;height:20px"></div></div>'
-      expect(run_shadow(route)).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0)
-      # …and a percentage the cascade cannot resolve at ANY basis (a container-query unit beside it) is no reason to push:
-      # the oracle lays that box out as `auto`, which is what the record says (SHARED with Chrome, which resolves it)
-      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="height:calc(50% + 1cqh)">pct</div></div><div style="flex:1 1 auto">plain</div></div>))
+      expect_parity(route)
+      # …and a percentage the cascade cannot resolve at ANY basis (a container-query unit beside it) lays that box out
+      # as `auto` (SHARED with Chrome, which resolves it)
+      expect_parity(%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="height:calc(50% + 1cqh)">pct</div></div><div style="flex:1 1 auto">plain</div></div>))
       # …where a comparison inside a `calc()` sum — scaled and subtracted too — is native's as the rest are
       [%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="min-height:calc(100% - 2 * min(25%, 40px))">pct</div></div><div style="flex:1 1 auto">plain</div></div>),
        '<div style="display:flex;width:400px"><div><div style="min-height:calc(min(50%, calc(10% + 40px), 80px) / 2 + 5px)">pct</div></div><div style="height:40px;width:50px"></div></div>'].each do |body|
-        expect_native_flex(body)
+        expect_parity(body)
       end
       # …where a comparison function over affine operands is native's: the size travels as its PROGRAM and native
       # evaluates it at whichever basis it measures at — two lines that cross beside a constant included, which fell
       # back until 2026-09-26. Chrome's box for the row; the column is 60 in both engines — the oracle's figure when it
       # was pushed, too — and 60.39 in Chrome, whose flexed item comes out ~1px taller around the same min-height.
       row3 = '<div style="display:flex;width:400px"><div><div id="m" style="min-height:min(50%, calc(10% + 40px), 80px)">pct</div></div><div style="height:40px;width:50px"></div></div>'
-      expect_native_flex(row3)
+      expect_parity(row3)
       expect(marked_box(row3)).to eq([19.546875, 20])   # Chrome
       col3 = %(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div id="m" style="min-height:max(10px, 50%, calc(40% + 20px))">pct</div></div><div style="flex:1 1 auto">plain</div></div>)
-      expect_native_flex(col3)
+      expect_parity(col3)
       expect_shared_gap(marked_box(col3)[1], shared: 60, chrome: 60.390625, what: col3)
       row = '<div style="display:flex;width:400px"><div><div id="m" style="min-height:min(50%,80px)">pct</div></div><div style="height:40px;width:50px"></div></div>'
-      expect_native_flex(row)
+      expect_parity(row)
       expect(marked_box(row)).to eq([19.546875, 20])
       column = %(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div id="m" style="min-height:clamp(10px,50%,80px)">pct</div></div><div style="flex:1 1 auto">plain</div></div>)
-      expect_native_flex(column)
+      expect_parity(column)
       expect(marked_box(column)).to eq([300, 50])
       # …and one with a constant beside two percentage lines, where one line always wins: `max(10%, 5%, 1px)` is `10%`
       # floored at 1 — it took a line and DROPPED the constant once (a gap 0.5 wide where CSS says 1), and was declined
@@ -1079,16 +1048,16 @@ RSpec.describe 'native layout flex parity' do
       # no clamp of one and declined until 2026-09-26, and one inside a `calc()` sum too; a program is all of them.
       # Chrome's figures.
       gap = '<div style="display:flex;column-gap:max(10%, 5%, 1px);width:5px"><div style="width:1px;height:10px"></div><div style="width:1px;height:10px"></div></div>'
-      expect_native_flex(gap)
+      expect_parity(gap)
       expect(item_boxes(gap)[1][0]).to eq(2)   # Chrome
       crossing = gap.sub('max(10%, 5%, 1px)', 'max(10%, calc(5% + 3px), 1px)')
-      expect_native_flex(crossing)
+      expect_parity(crossing)
       expect(item_boxes(crossing)[1][0]).to be_within(0.01).of(4.125)   # Chrome: a 3.25 gap, both items shrunk
       in_calc = gap.sub('max(10%, 5%, 1px)', 'calc(max(10%, calc(5% + 3px), 1px) + 0px)')
-      expect_native_flex(in_calc)
+      expect_parity(in_calc)
       expect(item_boxes(in_calc)[1][0]).to be_within(0.01).of(4.125)   # Chrome
-      expect_native_flex('<div style="position:relative;display:flex;width:400px"><div><div style="position:absolute;height:50%;width:10px"></div>pct</div>' \
-                         '<div style="height:40px;width:50px"></div></div>')
+      expect_parity('<div style="position:relative;display:flex;width:400px"><div><div style="position:absolute;height:50%;width:10px"></div>pct</div>' \
+                    '<div style="height:40px;width:50px"></div></div>')
       # …and neither is a NON-linear one on it, nor any percentage UNDER it: the whole subtree is laid out there.
       # Chrome: the absolute box 30 x 10, and 100 x 18 around its child.
       [
@@ -1097,7 +1066,7 @@ RSpec.describe 'native layout flex parity' do
         '<div style="position:relative;display:flex;width:400px"><div><div style="position:absolute;top:0;width:100px"><div style="height:min(50%, 80px)">x</div></div>pct</div>' \
         '<div style="height:40px;width:50px"></div></div>'
       ].each do |body|
-        expect_native_flex(body)
+        expect_parity(body)
       end
     end
 
@@ -1111,7 +1080,7 @@ RSpec.describe 'native layout flex parity' do
         %(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%">lead<p>para</p><span style="display:contents"><span id="m" style="display:inline-block;width:20px;height:50%">a</span></span></div></div><div>z</div></div>) => [20, 51],
         %(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%"><p>para</p><b>b <span style="display:contents"><img id="m" style="width:12px;height:50%"></span></b></div></div><div>z</div></div>) => [12, 51]
       }.each do |body, size|
-        expect_native_flex(body)
+        expect_parity(body)
         expect(marked_box(body)).to eq(size)
       end
     end
@@ -1124,7 +1093,7 @@ RSpec.describe 'native layout flex parity' do
       wrap = 'display:flex;flex-direction:column;flex-wrap:wrap;height:60px'
       [%(<div style="#{wrap}"><div>bold <i style="padding-left:20%">inl</i> tail words</div><div style="height:40px">z</div><div style="width:170px;height:30px"></div></div>),
        %(<div style="#{wrap}"><div><b>bold <i style="padding-left:20%">inl</i> tail</b> words</div><div style="height:40px">z</div><div style="width:170px;height:30px"></div></div>)].each do |body|
-        expect_native_flex(body)
+        expect_parity(body)
         expect(first_item_box(body)[3]).to eq(36)   # Chrome
       end
     end
@@ -1141,27 +1110,23 @@ RSpec.describe 'native layout flex parity' do
         '<div style="display:flex;width:400px">'              => 20
       }.each do |open, h|
         body = %(#{open}<div><div style="height:100%">words <b>b <span id="m" style="display:inline-block;height:50%;width:20px"></span></b></div></div><div style="height:40px;width:50px"></div></div>)
-        expect_native_flex(body)
+        expect_parity(body)
         expect(laid_out_rect(body)[3]).to eq(h)
-        r = run_shadow(body, '{noOracle: true}')
-        expect(r).to include('ok' => true, 'mismatches' => 0)
-        expect(r['oracleReads'].to_h.keys.grep(/\A(cbH|walkRecord|pushBorderBox) /)).to eq([]), r.inspect
       end
     end
 
     # …and the GRID route is no longer one of them. A grid item's containing block is its GRID AREA — its
     # TRACK across, its ROW down — which native did not have: it resolved a grid item's percentages against the
     # GRID's content box, so the walk resolved them instead, against the size the ORACLE's final layout gave
-    # the item, and a flex item holding such a grid FELL BACK to the pushed path (it never declined — the old
-    # assertion here was `nativeFlexRows => 0`, which is the fallback, not a refusal). Native resolves them per
+    # the item, and a flex item holding such a grid FELL BACK to the pushed path. Native resolves them per
     # track now, so the fraction travels and the item is sized natively.
     # The BASIS itself is the grid spec's business and is asserted there against Chrome
-    # (`native_layout_grid_spec`, "resolves a grid item's percentages against its GRID AREA"); what these say
-    # is only that the flex path stopped falling back.
+    # (`native_layout_grid_spec`, "resolves a grid item's percentages against its GRID AREA"); what these hold
+    # is the flex layout around it.
     it 'sizes an item holding a grid whose own item declares a percentage natively' do
-      expect_native_flex('<div style="display:flex;width:400px"><div><div style="display:grid;height:100%"><div style="height:50%">pct</div></div></div><div style="height:40px;width:50px"></div></div>')
-      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="display:grid;height:100%"><div style="height:50%">pct</div></div></div><div style="flex:1 1 auto">plain</div></div>))
-      expect_native_flex('<div style="display:flex;width:400px"><div><div style="display:grid;grid-template-columns:100px 1fr"><div style="padding-left:50%">a</div><div>b</div></div></div><div style="height:40px;width:50px"></div></div>')
+      expect_parity('<div style="display:flex;width:400px"><div><div style="display:grid;height:100%"><div style="height:50%">pct</div></div></div><div style="height:40px;width:50px"></div></div>')
+      expect_parity(%(<div style="#{col};height:200px"><div style="flex:1 1 auto"><div style="display:grid;height:100%"><div style="height:50%">pct</div></div></div><div style="flex:1 1 auto">plain</div></div>))
+      expect_parity('<div style="display:flex;width:400px"><div><div style="display:grid;grid-template-columns:100px 1fr"><div style="padding-left:50%">a</div><div>b</div></div></div><div style="height:40px;width:50px"></div></div>')
     end
 
     # Review findings: a base-measured item shrunk below its measure keeps its floor; a `wrap` column that never
@@ -1169,24 +1134,24 @@ RSpec.describe 'native layout flex parity' do
     # lines from their NATURAL crosses (a clamped stretch item does not shrink its line); a border-box container
     # is never shorter than its own edges.
     it 'floors a base-measured item at its measure when the line shrinks it' do
-      expect_native_flex(%(<div style="#{col};height:50px"><div>a<br>b<br>c</div><div style="height:40px">b</div></div>))
-      expect_native_flex(%(<div style="#{col};height:50px"><div style="flex-basis:content;height:70px">a<br>b<br>c</div></div>))
-      expect_native_flex(%(<div style="#{col};height:50px"><div style="flex-shrink:1">a<br>b<br>c<br>d</div><div style="flex-shrink:1">a<br>b<br>c<br>d</div></div>))
-      expect_native_flex(%(<div style="#{col};height:50px"><div style="flex:1 1 auto">a<br>b<br>c<br>d<br>e</div></div>))
+      expect_parity(%(<div style="#{col};height:50px"><div>a<br>b<br>c</div><div style="height:40px">b</div></div>))
+      expect_parity(%(<div style="#{col};height:50px"><div style="flex-basis:content;height:70px">a<br>b<br>c</div></div>))
+      expect_parity(%(<div style="#{col};height:50px"><div style="flex-shrink:1">a<br>b<br>c<br>d</div><div style="flex-shrink:1">a<br>b<br>c<br>d</div></div>))
+      expect_parity(%(<div style="#{col};height:50px"><div style="flex:1 1 auto">a<br>b<br>c<br>d<br>e</div></div>))
     end
     it 'treats a wrap column as multi-line even when it never breaks (shrink-to-fit items, align-content placement)' do
-      expect_native_flex(%(<div style="#{col};flex-wrap:wrap;align-content:center"><div>one</div><div>two</div></div>))
-      expect_native_flex(%(<div style="#{col};height:100px;flex-wrap:wrap;align-content:center"><div>one</div></div>))
-      expect_native_flex(%(<div style="#{col};flex-wrap:wrap;align-content:flex-end;min-height:100px"><div>one</div><div>two</div></div>))
+      expect_parity(%(<div style="#{col};flex-wrap:wrap;align-content:center"><div>one</div><div>two</div></div>))
+      expect_parity(%(<div style="#{col};height:100px;flex-wrap:wrap;align-content:center"><div>one</div></div>))
+      expect_parity(%(<div style="#{col};flex-wrap:wrap;align-content:flex-end;min-height:100px"><div>one</div><div>two</div></div>))
     end
     it 'stacks a multi-line column\'s lines from their natural crosses and closes the last stretched line at the edge' do
-      expect_native_flex(%(<div style="#{col};height:100px;flex-wrap:wrap;width:200px"><div style="height:60px;max-width:20px">text here</div><div style="height:60px">b</div><div style="height:60px">c</div></div>))
-      expect_native_flex(%(<div style="#{col};height:100px;flex-wrap:wrap;width:200px"><div style="height:60px;width:20px"></div><div style="height:60px;width:20px"></div><div style="height:60px;width:20px"></div><div style="height:60px;width:20px"></div><div style="height:60px;width:20px"></div></div>))
+      expect_parity(%(<div style="#{col};height:100px;flex-wrap:wrap;width:200px"><div style="height:60px;max-width:20px">text here</div><div style="height:60px">b</div><div style="height:60px">c</div></div>))
+      expect_parity(%(<div style="#{col};height:100px;flex-wrap:wrap;width:200px"><div style="height:60px;width:20px"></div><div style="height:60px;width:20px"></div><div style="height:60px;width:20px"></div><div style="height:60px;width:20px"></div><div style="height:60px;width:20px"></div></div>))
     end
     it 'floors a flex-basis below a declared height at the item\'s content (the floor binds at the base, on any line)' do
-      expect_native_flex(%(<div style="#{col};height:200px"><div style="flex-basis:20px;height:100px">a<br>b<br>c</div><div style="height:30px">b</div></div>))
-      expect_native_flex(%(<div style="#{col}"><div style="flex-basis:20px;height:100px">a<br>b<br>c</div><div style="height:30px">b</div></div>))
-      expect_native_flex(%(<div style="#{col};flex-wrap:wrap;height:70px"><div style="flex-basis:20px;height:100px">a<br>b<br>c</div><div style="height:30px">b</div></div>))
+      expect_parity(%(<div style="#{col};height:200px"><div style="flex-basis:20px;height:100px">a<br>b<br>c</div><div style="height:30px">b</div></div>))
+      expect_parity(%(<div style="#{col}"><div style="flex-basis:20px;height:100px">a<br>b<br>c</div><div style="height:30px">b</div></div>))
+      expect_parity(%(<div style="#{col};flex-wrap:wrap;height:70px"><div style="flex-basis:20px;height:100px">a<br>b<br>c</div><div style="height:30px">b</div></div>))
     end
     # …and a WRAP column's STRETCHING item is measured at its shrink-to-fit width and then RE-STRETCHED, so the
     # BASIS of any percentage in its subtree moves between the measure and the final layout. That used to
@@ -1197,10 +1162,10 @@ RSpec.describe 'native layout flex parity' do
     it 'takes a wrap column\'s stretching item natively even when its subtree declares a percentage' do
       [%(<div style="#{col};flex-wrap:wrap"><div><div style="padding-top:50%">x</div></div></div>),
        %(<div style="#{col};flex-wrap:wrap"><div><div style="width:50%">some text words here to wrap</div></div><div>two</div></div>)].each do |body|
-        expect_native_flex(body)
+        expect_parity(body)
       end
       # …and the same container with the item NOT stretching was native before and stays native
-      expect_native_flex(%(<div style="#{col};flex-wrap:wrap"><div style="align-self:flex-start"><div style="width:50%">some text words here to wrap</div></div><div>two</div></div>))
+      expect_parity(%(<div style="#{col};flex-wrap:wrap"><div style="align-self:flex-start"><div style="width:50%">some text words here to wrap</div></div><div>two</div></div>))
     end
     # …and it no longer matters WHO resolved the percentage, which is what that half of the rule was about.
     # The refusal that used to stand here — a wrap column's stretching item, refused for any percentage in
@@ -1210,8 +1175,7 @@ RSpec.describe 'native layout flex parity' do
     # resolved the same percentage against the width the box actually got, so each was a parity break, and
     # the refusal existed to keep them out of the comparison (a DECLINE, never a right answer).
     # `marginBasis` derives the width `layoutBlock` derives now, so all of it is native. What each arm asserts
-    # is PARITY — `expect_native_flex` says the two engines agree and that the item was sized natively — and
-    # parity is blind to a shared error, so the Chrome column belongs here too. Measured 153, this shape, the
+    # is its recorded GOLDEN, which is blind to an error it was recorded with, so the Chrome column belongs here too. Measured 153, this shape, the
     # mid box's width and the percentage margin it gives:
     #   (plain)  300 / 30      max-width:100px  100 / 10      min-width:600px       600 / 60
     #   fit-content 300 / 30   width:120px      120 / 12      width:50%             150 / 15
@@ -1236,7 +1200,7 @@ RSpec.describe 'native layout flex parity' do
       'a plain block'           => ''
     }.each do |name, mid|
       it "takes a wrap column's stretching item over a box sized by #{name}" do
-        expect_native_flex(wrap_col_pct(mid, 'margin:10% 0'))
+        expect_parity(wrap_col_pct(mid, 'margin:10% 0'))
       end
     end
     # …and a percentage inside an ATOMIC inline (whose children's records hang under it, so native has their basis)
@@ -1244,9 +1208,9 @@ RSpec.describe 'native layout flex parity' do
     # 2026-09-25, "broader than the hazard on purpose", and pushed every flex container above one — ~60 of the 279
     # pushes the census counted, with no shape to show a hazard once they were lifted.
     it 'sizes a wrap column natively over a percentage inside an inline-block or on a caption' do
-      expect_native_flex(%(<div style="display:flex;flex-direction:column;width:300px;height:150px;flex-wrap:wrap"><div style="align-self:flex-start"><div style="display:inline-block"><div style="width:50%">some rather longer words here to measure</div></div></div><div style="width:30px;height:20px"></div></div>))
-      expect_native_flex(%(<div style="display:flex;flex-direction:column;width:300px;height:150px;flex-wrap:wrap"><div style="align-self:flex-start"><div style="display:inline-block"><div style="min-height:50%;padding:0 10%">some rather longer words here to measure</div></div></div><div style="width:30px;height:20px"></div></div>))
-      expect_native_flex('<div style="display:flex;width:300px"><table style="border-spacing:2px"><caption style="height:50%">a caption that wraps over several words here</caption><tr><td>a</td><td>bb cc</td></tr></table><div>y</div></div>')
+      expect_parity(%(<div style="display:flex;flex-direction:column;width:300px;height:150px;flex-wrap:wrap"><div style="align-self:flex-start"><div style="display:inline-block"><div style="width:50%">some rather longer words here to measure</div></div></div><div style="width:30px;height:20px"></div></div>))
+      expect_parity(%(<div style="display:flex;flex-direction:column;width:300px;height:150px;flex-wrap:wrap"><div style="align-self:flex-start"><div style="display:inline-block"><div style="min-height:50%;padding:0 10%">some rather longer words here to measure</div></div></div><div style="width:30px;height:20px"></div></div>))
+      expect_parity('<div style="display:flex;width:300px"><table style="border-spacing:2px"><caption style="height:50%">a caption that wraps over several words here</caption><tr><td>a</td><td>bb cc</td></tr></table><div>y</div></div>')
     end
     # …and a table PART's percentage native resolves itself: a cell's `width` (its column's), `padding` (the table's,
     # `measure_table`), `height` (no basis) and a row's `height` (its minimum) — every table part was the walk's until
@@ -1256,21 +1220,21 @@ RSpec.describe 'native layout flex parity' do
     # hangs under that atomic, whose basis native has — the route pushed its container "as the conservative answer"
     # until 2026-09-25, `display: contents` between them or not.
     it 'sizes natively over a percentage on a block inside an inline box' do
-      expect_native_flex('<div style="display:flex;width:300px;height:100px"><div><div style="height:100%">words <b>b <span style="display:contents"><div style="height:50%">blk</div></span></b></div></div><div style="width:30px;height:40px"></div></div>')
-      expect_native_flex(%(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%">words <b>b <div style="padding-left:20%;width:50%">blk</div></b></div></div><div>z</div></div>))
+      expect_parity('<div style="display:flex;width:300px;height:100px"><div><div style="height:100%">words <b>b <span style="display:contents"><div style="height:50%">blk</div></span></b></div></div><div style="width:30px;height:40px"></div></div>')
+      expect_parity(%(<div style="#{col};height:120px"><div style="flex:1"><div style="height:100%">words <b>b <div style="padding-left:20%;width:50%">blk</div></b></div></div><div>z</div></div>))
     end
     it 'sizes a column natively over a table whose parts declare percentages native resolves' do
       ['width:40%', 'padding:0 10%', 'height:50%', 'min-width:30%', 'max-width:20%', 'width:calc(40% + 10px)'].each do |decl|
-        expect_native_flex(%(<div style="#{col};height:200px;font:16px monospace"><table style="border-spacing:2px"><tr><td style="#{decl}">aa bb</td><td>cc</td></tr></table><div style="width:40px">y</div></div>))
+        expect_parity(%(<div style="#{col};height:200px;font:16px monospace"><table style="border-spacing:2px"><tr><td style="#{decl}">aa bb</td><td>cc</td></tr></table><div style="width:40px">y</div></div>))
       end
-      expect_native_flex(%(<div style="#{col};height:200px;font:16px monospace"><table style="border-spacing:2px"><tr style="height:50%"><td>aa</td></tr><tr><td>bb</td></tr></table><div>y</div></div>))
+      expect_parity(%(<div style="#{col};height:200px;font:16px monospace"><table style="border-spacing:2px"><tr style="height:50%"><td>aa</td></tr><tr><td>bb</td></tr></table><div>y</div></div>))
       # (…a wrap column's stretched and shrink-to-fit items, a 80% table and a clamped padding among them — the review's)
-      expect_native_flex('<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:300px;height:200px;font:16px monospace"><div><table style="width:80%"><tr><td style="padding:0 10%">aa bb cc</td><td>dd</td></tr></table></div><div style="width:30px;height:20px"></div></div>')
-      expect_native_flex('<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:300px;height:200px;font:16px monospace"><div style="align-self:flex-start"><table><tr><td style="padding:0 clamp(2px, 8%, 20px)">aa bb</td><td>cc</td></tr></table></div><div style="width:30px;height:20px"></div></div>')
+      expect_parity('<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:300px;height:200px;font:16px monospace"><div><table style="width:80%"><tr><td style="padding:0 10%">aa bb cc</td><td>dd</td></tr></table></div><div style="width:30px;height:20px"></div></div>')
+      expect_parity('<div style="display:flex;flex-direction:column;flex-wrap:wrap;width:300px;height:200px;font:16px monospace"><div style="align-self:flex-start"><table><tr><td style="padding:0 clamp(2px, 8%, 20px)">aa bb</td><td>cc</td></tr></table></div><div style="width:30px;height:20px"></div></div>')
     end
     it 'floors a border-box flex container at its own border and padding' do
-      expect_native_flex(%(<div style="#{col};box-sizing:border-box;height:5px;padding:10px"><div>x</div></div>))
-      expect_native_flex('<div style="display:flex;width:400px;box-sizing:border-box;height:5px;padding:10px"><div>x</div></div>')
+      expect_parity(%(<div style="#{col};box-sizing:border-box;height:5px;padding:10px"><div>x</div></div>))
+      expect_parity('<div style="display:flex;width:400px;box-sizing:border-box;height:5px;padding:10px"><div>x</div></div>')
     end
   end
 
@@ -1279,95 +1243,85 @@ RSpec.describe 'native layout flex parity' do
   # laid-out lines (`Box::first_baseline`, the oracle's boxBaselineOffset): a text block's line top + ascent,
   # a block / grid / flex container's from its first in-flow child that has one (flex items in flex order,
   # reversed for a *-reverse direction), a scrolling item's clamped into its box, and the bottom margin edge
-  # where no line is there to give one. Items with a shape the line ascent does not reproduce (an atomic
-  # inline, a vertical-align, a replaced element, a table) keep the pushed path.
+  # where no line is there to give one.
   describe 'native baselines' do
     let(:base) { 'display:flex;align-items:baseline;width:400px' }
 
     it 'aligns text items of different sizes on their first line baselines' do
-      expect_native_flex(%(<div style="#{base}"><div>small text</div><div style="font-size:32px">BIG</div><div style="font-size:12px">tiny</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div style="line-height:40px">tall line</div><div style="font-size:32px;line-height:1">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div>text <b style="font-size:28px">bold big</b> more</div><div>x</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div style="white-space:pre">pre\nsecond</div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div>small text</div><div style="font-size:32px">BIG</div><div style="font-size:12px">tiny</div></div>))
+      expect_parity(%(<div style="#{base}"><div style="line-height:40px">tall line</div><div style="font-size:32px;line-height:1">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div>text <b style="font-size:28px">bold big</b> more</div><div>x</div></div>))
+      expect_parity(%(<div style="#{base}"><div style="white-space:pre">pre\nsecond</div><div style="font-size:32px">BIG</div></div>))
     end
     it 'takes a block item\'s baseline from its first in-flow child with a line, skipping empty blocks' do
-      expect_native_flex(%(<div style="#{base}"><div><p style="margin:0">first para</p><p style="margin:0;font-size:24px">second</p></div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div><div style="height:20px"></div><p style="margin:0">after empty block</p></div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div style="position:relative"><p style="margin:0">a</p><div style="position:absolute;font-size:40px">abs</div></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div><p style="margin:0">first para</p><p style="margin:0;font-size:24px">second</p></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div><div style="height:20px"></div><p style="margin:0">after empty block</p></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div style="position:relative"><p style="margin:0">a</p><div style="position:absolute;font-size:40px">abs</div></div><div style="font-size:32px">BIG</div></div>))
     end
     it 'synthesises the bottom margin edge for an item with no line, and counts a <br>\'s empty line' do
-      expect_native_flex(%(<div style="#{base}"><div style="height:40px;width:40px"></div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div></div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div><div></div></div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div><br>after br</div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div style="height:40px;width:40px"></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div><div></div></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div><br>after br</div><div style="font-size:32px">BIG</div></div>))
     end
     it 'adds the item\'s top margin and edges, clamps a scrolling item\'s baseline into its box' do
-      expect_native_flex(%(<div style="#{base}"><div style="padding:10px;border:2px solid;margin-top:7px">padded</div><div style="font-size:32px;margin-bottom:9px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div style="overflow:hidden;height:8px">clipped text</div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div style="padding:10px;border:2px solid;margin-top:7px">padded</div><div style="font-size:32px;margin-bottom:9px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div style="overflow:hidden;height:8px">clipped text</div><div style="font-size:32px">BIG</div></div>))
     end
     it 'aligns last baselines on the last line' do
-      expect_native_flex('<div style="display:flex;align-items:last baseline;width:400px"><div>line one<br>line two<br>line three</div><div style="font-size:32px">BIG</div></div>')
-      expect_native_flex(%(<div style="#{base}"><div>two lines of wrapping text in a narrow item here we go</div><div style="font-size:32px;width:250px">BIG</div></div>))
+      expect_parity('<div style="display:flex;align-items:last baseline;width:400px"><div>line one<br>line two<br>line three</div><div style="font-size:32px">BIG</div></div>')
+      expect_parity(%(<div style="#{base}"><div>two lines of wrapping text in a narrow item here we go</div><div style="font-size:32px;width:250px">BIG</div></div>))
     end
     it 'reads a nested flex / grid container\'s baseline from its items in flex order, reversed for *-reverse' do
-      expect_native_flex(%(<div style="#{base}"><div style="display:flex"><div style="font-size:24px">nested</div><div>row</div></div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div style="display:flex;flex-direction:row-reverse"><div style="font-size:24px">a</div><div>b</div></div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div style="display:flex;flex-direction:column"><div style="font-size:24px">col a</div><div>col b</div></div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div style="display:flex;flex-direction:column-reverse"><div style="font-size:24px">col a</div><div>col b</div></div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base};direction:rtl"><div><div style="font-size:24px">rtl a</div></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div style="display:flex"><div style="font-size:24px">nested</div><div>row</div></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div style="display:flex;flex-direction:row-reverse"><div style="font-size:24px">a</div><div>b</div></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div style="display:flex;flex-direction:column"><div style="font-size:24px">col a</div><div>col b</div></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div style="display:flex;flex-direction:column-reverse"><div style="font-size:24px">col a</div><div>col b</div></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base};direction:rtl"><div><div style="font-size:24px">rtl a</div></div><div style="font-size:32px">BIG</div></div>))
     end
     # A grid ITEM is measurable — both engines answer for it with the grid algorithm — so a grid baseline item
     # takes the NATIVE path, one holding a contiguous run of TEXT included: `gridItems` wraps the run in the
     # anonymous ITEM box CSS Grid §4 asks for, and the run's own BASELINE is what the line then hangs from
     # (`baselineCandidates` reads that list for a grid, not the raw children — measured, an `inline-grid`
     # around bare text put the marker beside it at y 18 where Chrome says 13). It pushed until 2026-09-22.
-    it 'keeps parity for a nested grid baseline item' do
+    it 'matches a nested grid baseline item' do
       [
         '<div>g1</div><div style="font-size:24px">g2</div>',
         'g1<div style="font-size:24px">g2</div>'
       ].each do |items|
-        r = run_shadow(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr 1fr">#{items}</div><div style="font-size:32px">BIG</div></div>))
-        expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 1), "#{items}: #{r.inspect}"
+        expect_parity(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr 1fr">#{items}</div><div style="font-size:32px">BIG</div></div>))
       end
-      # …and an item whose own measure native lacks a rule for still pushes, so the counter is not always 1.
-      # (`white-space: break-spaces` was this shape until 2026-09-23, when its measure went native.)
-      # (Whatever flex containers the fixture holds lay out natively whatever the row around them does — it held two
-      # while it was the percentage-gap shape, and holds none today — so the row's own contribution is what the count
-      # shows BEYOND the fixture's.)
-      own = run_shadow(%(<div style="width:400px">#{WalkRefusals::UNMEASURABLE}</div>))['nativeFlexRows']
-      r = run_shadow(%(<div style="#{base}"><div style="display:grid;grid-template-columns:1fr min-content"><div>g1</div><div>#{WalkRefusals::UNMEASURABLE}</div></div><div style="font-size:32px">BIG</div></div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => own), r.inspect
     end
     # Review findings, oracle side (native and Chrome agreed): a block holding both inline content and block
     # children reads whichever comes first / last DOWN THE FLOW; a `position: relative` child's offset moves the
     # box, not its baseline; a preserved newline's empty line is a line a baseline reads from; and the line's
     # baseline is the ascent the flow grew it to, not a second scan of what sits on it.
     it 'merges a block\'s own lines and its block children in flow order' do
-      expect_native_flex('<div style="display:flex;align-items:last baseline;width:400px"><div>text<p style="margin:0">para</p></div><div style="font-size:32px">BIG</div></div>')
-      expect_native_flex(%(<div style="#{base}"><div><p style="margin:0">para</p>text</div><div style="font-size:32px">BIG</div></div>))
+      expect_parity('<div style="display:flex;align-items:last baseline;width:400px"><div>text<p style="margin:0">para</p></div><div style="font-size:32px">BIG</div></div>')
+      expect_parity(%(<div style="#{base}"><div><p style="margin:0">para</p>text</div><div style="font-size:32px">BIG</div></div>))
     end
     it 'orders by flow, not by y: a negative margin does not make a later block come first' do
-      expect_native_flex(%(<div style="#{base}"><div>text<p style="margin:-30px 0 0">para</p></div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex('<div style="display:flex;align-items:last baseline;width:400px"><div><p style="margin:0 0 -30px">para</p>text</div><div style="font-size:32px">BIG</div></div>')
-      expect_native_flex(%(<div style="#{base}"><div><p style="margin:0">para</p><p style="margin:-40px 0 0">up</p></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div>text<p style="margin:-30px 0 0">para</p></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity('<div style="display:flex;align-items:last baseline;width:400px"><div><p style="margin:0 0 -30px">para</p>text</div><div style="font-size:32px">BIG</div></div>')
+      expect_parity(%(<div style="#{base}"><div><p style="margin:0">para</p><p style="margin:-40px 0 0">up</p></div><div style="font-size:32px">BIG</div></div>))
     end
     it 'ignores a relative child\'s offset for the baseline' do
-      expect_native_flex(%(<div style="#{base}"><div><p style="position:relative;top:10px;margin:0">a</p></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div><p style="position:relative;top:10px;margin:0">a</p></div><div style="font-size:32px">BIG</div></div>))
     end
     it 'reads a baseline from the empty line a preserved newline leaves' do
-      expect_native_flex(%(<div style="display:flex;align-items:last baseline;width:400px"><div style="white-space:pre">a\n\n</div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div style="white-space:pre">\n\na</div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div style="white-space:pre-line">\n\na</div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="display:flex;align-items:last baseline;width:400px"><div style="white-space:pre">a\n\n</div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div style="white-space:pre">\n\na</div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div style="white-space:pre-line">\n\na</div><div style="font-size:32px">BIG</div></div>))
     end
     it 'takes the line\'s baseline from the ascent the flow used (an empty inline, an open edge, a <br> in a larger inline)' do
-      expect_native_flex(%(<div style="#{base}"><div>a<span style="font-size:40px"></span>b</div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div style="width:120px">aaaa aaaa aaaa<span style="font-size:40px;padding-left:5px"> bbbbb</span></div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div><span style="font-size:40px"><br></span>text</div><div style="font-size:32px">BIG</div></div>))
-      expect_native_flex('<div style="display:flex;align-items:last baseline;width:400px"><div>text<span style="font-size:40px"><br></span></div><div style="font-size:32px">BIG</div></div>')
+      expect_parity(%(<div style="#{base}"><div>a<span style="font-size:40px"></span>b</div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div style="width:120px">aaaa aaaa aaaa<span style="font-size:40px;padding-left:5px"> bbbbb</span></div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div><span style="font-size:40px"><br></span>text</div><div style="font-size:32px">BIG</div></div>))
+      expect_parity('<div style="display:flex;align-items:last baseline;width:400px"><div>text<span style="font-size:40px"><br></span></div><div style="font-size:32px">BIG</div></div>')
     end
     it 'keeps wrapped and mixed-alignment rows native' do
-      expect_native_flex(%(<div style="#{base};flex-wrap:wrap"><div style="width:300px">wrapped one</div><div style="font-size:32px;width:300px">BIG</div></div>))
-      expect_native_flex(%(<div style="#{base}"><div style="align-self:flex-start;height:50px">start</div><div>base</div><div style="font-size:32px">BIG</div></div>))
+      expect_parity(%(<div style="#{base};flex-wrap:wrap"><div style="width:300px">wrapped one</div><div style="font-size:32px;width:300px">BIG</div></div>))
+      expect_parity(%(<div style="#{base}"><div style="align-self:flex-start;height:50px">start</div><div>base</div><div style="font-size:32px">BIG</div></div>))
     end
     # …and one holding a `vertical-align` shift or an atomic inline, which fell back to the pushed path — and read
     # the ORACLE's baseline — as a "baseline hazard" until 2026-09-24, when a sweep built on those shapes showed
@@ -1377,43 +1331,9 @@ RSpec.describe 'native layout flex parity' do
         %(<div style="#{base}"><div>text <sup>sup</sup> more</div><div id="m">x</div></div>)                                                    => 4.33,
         %(<div style="#{base}"><div>text <span style="display:inline-block;height:30px;width:10px"></span> more</div><div id="m">x</div></div>) => 16
       }.each do |body, y|
-        expect_native_flex(body)
+        expect_parity(body)
         expect(laid_out_rect(body)[1]).to be_within(0.01).of(y)
-        # …off its OWN lines: rec[42], the oracle's baseline ascent, is written for a pushed item only
-        r = run_shadow(body, '{noOracle: true}')
-        expect(r).to include('ok' => true, 'mismatches' => 0)
-        expect(r['oracleReads'].to_h.keys.grep(/baseline/i)).to eq([]), r.inspect
       end
-    end
-  end
-  # The push census counts each container the PASS pushes, once: a flex container inside a cell that is measured, rolled
-  # back and walked again as a pushed contribution is one container, not two — a rollback takes its count with it, as
-  # it takes every other stream.
-  it 'counts a pushed flex container once when an attempt around it is rolled back' do
-    r = run_shadow('<table style="font:16px monospace"><tr><td><div style="display:flex"><div>x<table style="display:inline-table"><colgroup><col style="width:20px"></colgroup></table></div></div><span style="display:inline-block"><div style="display:table-row">aa bb</div></span></td></tr></table>')
-    expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
-    expect(r['pushedFlexWhy']).to eq('item-not-measurable' => 1)
-  end
-  # Native sizing is a promise about every item at once, and the WALK decides whether it holds: where it declines
-  # one item's subtree the whole set is rolled back and re-emitted with the oracle's boxes pushed. Each shape
-  # here holds content the walk refuses for a reason `nlFlexPushWhy`'s predicate does not model, and under
-  # a predicate-decided gate each took the whole pass down.
-  describe 'a flex container whose item the walk declines to size re-emits with pushed boxes' do
-    WalkRefusals::ATOMIC.each_with_index do |inner, i|
-      it "lays out a row and a column around refused content #{i}" do
-        [
-          %{<div style="display:flex;width:300px"><div>a #{inner}</div><div style="flex:1">x</div></div>},
-          %{<div style="display:flex;flex-direction:column;width:300px;height:200px"><div>a #{inner}</div><div>x</div></div>}
-        ].each do |body|
-          r = run_shadow(body)
-          expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-          expect(r['nativeFlexRows']).to eq(0), "the container should have pushed its item boxes: #{r.inspect}"
-        end
-      end
-    end
-    it 'still resolves the item sizes itself where every item allows it' do
-      r = run_shadow('<div style="display:flex;width:300px"><div>a <span style="display:inline-block">ok</span></div><div style="flex:1">x</div></div>')
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 1), r.inspect
     end
   end
 
@@ -1422,7 +1342,7 @@ RSpec.describe 'native layout flex parity' do
   # to stop refusing it (it was left over from when native's flex axes were physical). It came off the frozen
   # corpus's decline list whole: 60 shapes, a quarter of what was left, all on that one line.
   #
-  # What still declines there is the CROSS axis running backwards, which is the same rule a horizontal mode has
+  # What is left to say there is the CROSS axis running backwards, which is the same rule a horizontal mode has
   # and not a vertical one of its own — and WHICH containers those are depends on the `direction` as much as on
   # the mode, so the table below is the statement of it rather than a sentence here.
   describe 'a vertical writing mode' do
@@ -1460,8 +1380,8 @@ RSpec.describe 'native layout flex parity' do
 
     # …and the table is a GEOMETRY claim, not a description of a gate: `align-items: flex-start` follows the
     # cross AXIS, so it puts a lone item at the far physical edge exactly where the table says `←`. Reading it
-    # off the laid-out page is what keeps the table honest — the parity example above passes whether or not
-    # either engine has the direction right.
+    # off the laid-out page is what keeps the table honest — the golden example above holds whatever direction
+    # it was recorded with, right or not.
     it 'starts the cross axis at the edge the table names' do
       VERTICAL_CROSS.each do |(wm, dir), cells|
         FLEX_DIRECTIONS.each_with_index do |fd, i|
@@ -1574,15 +1494,7 @@ RSpec.describe 'native layout flex parity' do
   # page: without that figure a vertical-mode container with a DECLARED height recomputed its cross from its
   # content (4800 of the vflex sweep's shapes).
   describe 'the auto-height flag' do
-    def no_oracle(body)
-      with_simulated_session(page(body)) do |session|
-        session.visit '/'
-        session.evaluate_script('document.body.offsetHeight')
-        session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
-      end
-    end
-
-    it 'is not read off the oracle box where nothing was pushed' do
+    it 'takes a declared height at its word where nothing was pushed' do
       items = '<div style="width:30px;height:20px"></div><div style="width:40px;height:50px"></div>'
       [
         %(<div style="writing-mode:vertical-rl;display:flex;align-items:flex-end;width:60px;height:60px;align-content:center">#{items}</div>),
@@ -1591,13 +1503,6 @@ RSpec.describe 'native layout flex parity' do
         %(<div style="display:flex;height:40px"><div style="display:flex;align-items:flex-end">#{items}</div></div>)
       ].each do |body|
         expect_parity(body)
-        r = no_oracle(body)
-        expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-        # (a min/max-height container still asks the oracle whether a clamp binds an imposed box — a decline
-        # guard of its own, not this flag)
-        next if body.include?('min-height')
-
-        expect(r['oracleReads'].keys).not_to include('walkRecord _lb.autoHeight'), body
       end
     end
   end
@@ -1680,7 +1585,7 @@ RSpec.describe 'native layout flex parity' do
         '<div style="display:flex;width:300px;font:16px monospace"><div><p style="margin:0">aa bb</p><div id="m" style="height:10%"></div></div><div>z</div></div>',
         '<div style="display:flex;width:300px;font:16px monospace"><div style="margin:max(2vw, 5%) 0">aa bb cc dd<div id="m" style="height:min(10%, 20%, 30px)"></div></div><div>z</div></div>'
       ].each do |body|
-        expect_native_flex(body)
+        expect_parity(body)
         expect(marked_box(body)[1]).to be_within(0.02).of(2.188), body   # Chrome
       end
     end
@@ -1694,7 +1599,7 @@ RSpec.describe 'native layout flex parity' do
         '<div style="display:flex;flex-direction:column"><div style="flex:1 1 content;height:100px;min-height:0"><div id="m" style="height:100%;width:50px"></div></div></div>' => 0,
         '<div style="display:flex;flex-direction:column"><div style="flex:1 1 auto;height:100px;min-height:0"><div id="m" style="height:100%;width:50px"></div></div></div>' => 100
       }.each do |body, h|
-        expect_native_flex(body)
+        expect_parity(body)
         expect(marked_box(body)[1]).to eq(h), body   # Chrome
       end
     end
@@ -1760,14 +1665,6 @@ RSpec.describe 'native layout flex parity' do
       end
     end
 
-    def no_oracle(body)
-      with_simulated_session(page(body)) do |session|
-        session.visit '/'
-        session.evaluate_script('document.body.offsetHeight')
-        session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
-      end
-    end
-
     it 'resolves them against native\'s own sizes' do
       items = '<div style="flex:1;width:40px;height:30px">a</div><div style="flex-basis:30%;width:60px;height:20px"></div><div style="width:50px;height:25px"></div>'
       ['flex-direction:column;flex-wrap:wrap;height:60px;width:200px', 'flex-direction:column;min-height:90px;gap:10%;width:200px',
@@ -1775,10 +1672,6 @@ RSpec.describe 'native layout flex parity' do
        'flex-direction:column;row-gap:20%;width:200px'].each do |container|
         body = %(<div style="display:flex;#{container}">#{items}</div>)
         expect_parity(body)
-        r = no_oracle(body)
-        expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-        # (an item's own EDGES still resolve against the oracle's width, `contentW` — a dependency of their own)
-        expect(r['oracleReads'].keys.grep(/\AcolMain /)).to eq([]), "#{body}: #{r['oracleReads'].keys.inspect}"
       end
     end
     # …where a parent PUSHES the container's final box over its record, that height was not necessarily definite
@@ -1796,7 +1689,7 @@ RSpec.describe 'native layout flex parity' do
     # the oracle's box — and a COMPARISON one as its program (`NL_REC_BASIS_MATH`) since 2026-09-26. Chrome: 70 wide in
     # a 300px row, 50 tall in a 200px column; 90 for `max(30%, 10px)` and for three operands whose lines cross, 30 tall
     # for a `clamp()` in the column.
-    it 'resolves a linear calc() basis natively, with no oracle box read' do
+    it 'resolves a linear calc() basis natively' do
       {
         '<div style="display:flex;width:300px"><div id="m" style="flex-basis:calc(20% + 10px);flex-shrink:0">a</div><div>b</div></div>'                                      => [2, 70],
         '<div style="display:flex;flex-direction:column;width:300px;height:200px"><div id="m" style="flex-basis:calc(20% + 10px);flex-shrink:0">a</div><div>b</div></div>' => [3, 50],
@@ -1804,11 +1697,8 @@ RSpec.describe 'native layout flex parity' do
         '<div style="display:flex;width:300px"><div id="m" style="flex-basis:min(40%, calc(20% + 30px), 100px);flex-shrink:0">a</div><div>b</div></div>'                      => [2, 90],
         '<div style="display:flex;flex-direction:column;width:300px;height:200px"><div id="m" style="flex-basis:clamp(10px, 20%, 30px);flex-shrink:0">a</div><div>b</div></div>' => [3, 30]
       }.each do |body, (index, size)|
-        expect_native_flex(body)
+        expect_parity(body)
         expect(laid_out_rect(body)[index]).to eq(size)
-        r = run_shadow(body, '{noOracle: true}')
-        expect(r).to include('ok' => true, 'mismatches' => 0)
-        expect(r['oracleReads'].to_h).to be_empty, r.inspect
       end
     end
     # …where three bases part from Chrome in BOTH engines alike (the review of 34298827), pinned: a negative linear

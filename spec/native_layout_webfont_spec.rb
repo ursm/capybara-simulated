@@ -1,8 +1,8 @@
 # frozen_string_literal: true
-# Native layout — WEB FONT (@font-face) text, geometry shadow-parity. Native declined text whose font had no
-# fontations handle (system fonts only); now an @font-face family resolves to the SAME decoded SFNT file the
-# oracle measures advances from (the host's font_file_for), so native (skrifa) and the oracle read identical
-# hmtx advances and a web-font text block lays out rather than bailing.
+# Native layout — WEB FONT (@font-face) text, held to recorded goldens. Native declined text whose font had no
+# fontations handle (system fonts only); now an @font-face family resolves to the decoded SFNT file the host
+# hands it (font_file_for), so native (skrifa) reads that face's own hmtx advances and a web-font text block lays
+# out rather than bailing.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -62,11 +62,10 @@ RSpec.describe 'native layout web-font parity' do
     expect_parity('<div style="width:300px;font:16px AhemTest">a <b>bold</b> and <span>more</span> text</div>')
   end
 
-  # A face that ALSO lists a local() source: the oracle prefers a font INSTALLED under that name to the download, so
-  # native registers the same — the installed file where one is (`__csim_localFontFile`, the file the oracle's table
-  # was read from), the url's where none is. It declined outright until 2026-09-26, which was every text block on
+  # A face that ALSO lists a local() source prefers a font INSTALLED under that name to the download, so native
+  # registers the installed file where one is (`__csim_localFontFile`), the url's where none is. It declined outright until 2026-09-26, which was every text block on
   # every Mastodon page (`src: local("Roboto"), url(…)`).
-  it 'measures a face carrying a local() source with the file the oracle measures' do
+  it 'measures a face carrying a local() source with the installed file, or the download' do
     # …no such font here: the download, Ahem's 20px squares
     body = '<div style="width:400px;font:20px MixFont"><span id="m">XXXX</span></div>'
     face = "@font-face{font-family:'MixFont';src:local('No Such Font Anywhere'),url('/f.ttf')}"
@@ -74,22 +73,21 @@ RSpec.describe 'native layout web-font parity' do
     session = simulated_session(page(body, face: face))
     session.visit '/'
     expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().width")).to eq(80)
-    # …and whatever this machine has installed under a common name, the two engines measure the same file
+    # …and whatever this machine has installed under a common name
     expect_parity('<div style="width:120px;font:20px MixFont">aa bb cc dd ee ff gg</div>',
                   face: "@font-face{font-family:'MixFont';src:local('Arial'),local('Noto Sans'),url('/f.ttf')}")
   end
 
   # The native handle memo must invalidate when an @font-face is ADDED at runtime — otherwise native stays on
-  # the stale system fallback while the oracle switches to the web font.
+  # the stale system fallback the text was first measured in. With the face, the text is Ahem's 20px squares, wrapped
+  # into four lines of the 120px block.
   it 'invalidates the native font handle when an @font-face is added at runtime' do
-    session = simulated_session(page('<div style="width:120px;font:20px DynFont">aa bb cc dd ee ff gg</div>',
+    session = simulated_session(page('<div style="width:120px;font:20px DynFont"><span id="m">aa bb cc dd ee ff gg</span></div>',
                                      face: '/* no DynFont face yet */'))
     session.visit '/'
-    session.evaluate_script('document.body.offsetHeight')
-    r1 = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-    expect(r1).to include('ok' => true), "harness bailed pre-add: #{r1.inspect}"
-    expect(r1['mismatches']).to eq(0), "mismatch pre-add: #{r1.inspect}"
-    expect_no_dropped_records(r1)
+    lines = "[...document.getElementById('m').getClientRects()].map((r) => [r.x, r.y, r.width, r.height])"
+    ahem  = [[0, 0, 100, 20], [0, 20, 100, 20], [0, 40, 100, 20], [0, 60, 40, 20]]
+    expect(session.evaluate_script(lines)).not_to eq(ahem)
 
     session.evaluate_script(<<~JS)
       const s = document.createElement('style');
@@ -97,9 +95,7 @@ RSpec.describe 'native layout web-font parity' do
       document.head.appendChild(s);
       document.body.offsetHeight;
     JS
-    r2 = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-    expect(r2).to include('ok' => true), "harness bailed post-add: #{r2.inspect}"
-    expect(r2['mismatches']).to eq(0), "mismatch post-add (stale native font handle?): #{r2.inspect}"
-    expect_no_dropped_records(r2)
+    expect(session.evaluate_script(lines)).to eq(ahem), 'a stale native font handle?'
+    expect(session.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 end

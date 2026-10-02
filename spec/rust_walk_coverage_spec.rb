@@ -2,49 +2,33 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/layout_golden'
 
 # Shapes the Rust walk used to decline, sending the pass to the JS walk (and from there, often, to the oracle): it lays
-# each out itself now — and as the JS walk does, box for box, since that is what the pages and the gate were held to.
+# each out itself now, held to Chrome's figures where a shape names them and to its recorded geometry
+# (`expect_layout_golden`) for the rest of the page.
 RSpec.describe 'Rust walk coverage' do
-  def page(body)
-    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{body}"]] })
-    s.visit '/'
-    s
+  def app(body)
+    ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{body}"]] }
   end
 
-  BOXES_JS = <<~'JS'
-    (() => [...document.querySelectorAll('*')].map((e) => {
-      const r = e.getBoundingClientRect();
-      return [e.localName, r.x, r.y, r.width, r.height].map((v) => typeof v === 'number' ? Math.round(v * 100) / 100 : v);
-    }))()
-  JS
-
-  # Every element's box from the Rust walk, then from the JS walk on a page laid out again.
-  def both_walks(body, script = nil)
-    rust = page(body)
-    rust.execute_script(script) if script
-    boxes = rust.evaluate_script(BOXES_JS)
-    expect(rust.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
-    js = page(body)
-    js.execute_script('globalThis.__csimRustWalk = false')
-    js.execute_script(script) if script
-    js.execute_script("document.body.setAttribute('data-relayout', '')")
-    [boxes, js.evaluate_script(BOXES_JS)]
+  def page(body)
+    s = simulated_session(app(body))
+    s.visit '/'
+    s
   end
 
   # An element of no namespace the walk knows is the box its style makes it (an `inline` one here — Chrome: 28.81 x 22
   # for "abc" in 16px monospace), where the walk refused every element outside HTML and the svg root.
   it 'lays a foreign element out as the box its style makes it' do
-    script = <<~'JS'
+    s = page('<div id="b" style="font: 16px monospace"></div>')
+    s.execute_script(<<~'JS')
       const u = document.createElementNS('urn:x', 'thing');
       u.textContent = 'abc';
       document.getElementById('b').appendChild(u);
     JS
-    rust, js = both_walks('<div id="b" style="font: 16px monospace"></div>', script)
-    expect(rust).to eq(js)
-    u = rust.find {|b| b[0] == 'thing' }
-    expect(u[3]).to be_within(0.02).of(28.81)
-    expect(u[4]).to eq(22)
+    expect(s.evaluate_script("(r => [r.width, r.height])(document.querySelector('#b > *').getBoundingClientRect())")).to match([be_within(0.02).of(28.81), 22])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and so is one NAMED as an HTML element: a `urn:x` `<img>`, `<br>`, `<div>` or `<option>` is an inline holding its
@@ -135,47 +119,42 @@ RSpec.describe 'Rust walk coverage' do
   # An `<object>` is the default object size where it shows a resource and the box its style makes it where it shows its
   # fallback; an `<embed>` with no resource is no box at all (Chrome, `uaNotRendered`).
   it 'lays out an object, its fallback, and no src-less embed' do
-    rust, js = both_walks(
-      '<div style="font: 16px monospace"><object data="x.png"></object><object><span>fallback</span></object>' \
-      '<embed type="text/plain"><object id="nbsp">&nbsp;</object><p>after</p></div>'
-    )
-    expect(rust).to eq(js)
-    expect(rust.find {|b| b[0] == 'embed' }[3..4]).to eq([0, 0])
+    body = '<div style="font: 16px monospace"><object data="x.png"></object><object><span>fallback</span></object>' \
+           '<embed type="text/plain"><object id="nbsp">&nbsp;</object><p>after</p></div>'
+    expect_layout_golden(body, app: app(body))
+    s = page(body)
+    expect(s.evaluate_script("(r => [r.width, r.height])(document.querySelector('embed').getBoundingClientRect())")).to eq([0, 0])
     # (…an NBSP is fallback content, not white space: an inline 9.61 wide in Chrome, where the JS model's `\S` made it
     # the 300 x 150 replaced box)
-    expect(rust.select {|b| b[0] == 'object' }.last[3]).to be_within(0.02).of(9.61)
+    expect(s.evaluate_script('nbsp.getBoundingClientRect().width')).to be_within(0.02).of(9.61)
   end
 
-  # An intrinsic-size keyword on a replaced element is its intrinsic width, as the JS layout has it; `stretch` is an auto
-  # width, a block's filling its containing block.
+  # An intrinsic-size keyword on a replaced element is its intrinsic width; `stretch` is an auto width, a block's filling
+  # its containing block.
   it 'lays out keyword widths on controls and a stretch width' do
-    rust, js = both_walks(
-      '<div style="width: 300px; font: 16px monospace"><input type="date" style="width: min-content">' \
-      '<input type="range" style="display: block; width: max-content"><div style="width: stretch; margin: 0 7px">x</div></div>'
-    )
-    expect(rust).to eq(js)
+    body = '<div style="width: 300px; font: 16px monospace"><input type="date" style="width: min-content">' \
+           '<input type="range" style="display: block; width: max-content"><div style="width: stretch; margin: 0 7px">x</div></div>'
+    expect_layout_golden(body, app: app(body))
   end
 
   # A fixed box inside a TRANSFORMED row or row group has that part for its containing block (Chrome: 11,115 and
   # 53.2,152 for these two), which the walk could not name: a table part's record was in no index.
   it 'lays out a fixed box inside a transformed table part' do
-    rust, js = both_walks(
-      '<body style="margin: 0; font: 16px monospace"><div style="height: 50px"></div><table style="border-spacing: 4px"><thead><tr><td>head</td></tr></thead>' \
-      '<tbody style="transform: translate(0)"><tr><td>row one</td></tr><tr style="transform: translateX(0)"><td>two' \
-      '<div id="f1" style="position: fixed; top: 5px; left: 7px; width: 20px; height: 10px"></div></td></tr></tbody>' \
-      '<tfoot style="transform: translate(0)"><tr><td>foot<div id="f2" style="position: fixed; bottom: 0; right: 0; width: 20px; height: 10px"></div>' \
-      '</td></tr></tfoot></table></body>'
-    )
-    expect(rust).to eq(js)
-    fixed = rust.select {|b| b[0] == 'div' && b[3] == 20 }
-    expect(fixed.map {|b| b[1..2] }).to eq([[11, 115], [53.2, 152]])
+    body = '<body style="margin: 0; font: 16px monospace"><div style="height: 50px"></div><table style="border-spacing: 4px"><thead><tr><td>head</td></tr></thead>' \
+           '<tbody style="transform: translate(0)"><tr><td>row one</td></tr><tr style="transform: translateX(0)"><td>two' \
+           '<div id="f1" style="position: fixed; top: 5px; left: 7px; width: 20px; height: 10px"></div></td></tr></tbody>' \
+           '<tfoot style="transform: translate(0)"><tr><td>foot<div id="f2" style="position: fixed; bottom: 0; right: 0; width: 20px; height: 10px"></div>' \
+           '</td></tr></tfoot></table></body>'
+    expect_layout_golden(body, app: app(body))
+    fixed = page(body).evaluate_script("['f1', 'f2'].map((id) => (r => [Math.round(r.x * 100) / 100, r.y])(document.getElementById(id).getBoundingClientRect()))")
+    expect(fixed).to eq([[11, 115], [53.2, 152]])
   end
 
-  # A `<ruby>` is an inline box, its annotation on the line beside its base, as the JS layout has it (Chrome puts the
-  # annotation above: a divergence both share).
+  # A `<ruby>` is an inline box, its annotation on the line beside its base (Chrome puts the annotation above: a
+  # divergence recorded).
   it 'lays out ruby markup' do
-    rust, js = both_walks('<p style="font: 16px monospace; width: 120px">some text <ruby>漢字<rp>(</rp><rt>かんじ</rt><rp>)</rp></ruby> more text</p>')
-    expect(rust).to eq(js)
+    body = '<p style="font: 16px monospace; width: 120px">some text <ruby>漢字<rp>(</rp><rt>かんじ</rt><rp>)</rp></ruby> more text</p>'
+    expect_layout_golden(body, app: app(body))
   end
 
   # A ruby display an AUTHOR gives is laid out natively, where the walk declined every one but the UA's own: an inline
@@ -319,8 +298,8 @@ RSpec.describe 'Rust walk coverage' do
 
   # …and an anchor function's FALLBACK where it gives one (Chrome: `top: anchor(--a bottom, 30px); left: anchor(--a
   # right, 40px)` at 40,30; a relative box's 15 down; a margin's 25 across), a `fit-content(<length>)` width the `auto`
-  # both engines take it for, and a `nowrap` keeping its breaks two unwrapped lines (44 tall in 50px).
-  it 'answers anchor fallbacks and odd sizes as the engines do', :aggregate_failures do
+  # the walk takes it for, and a `nowrap` keeping its breaks two unwrapped lines (44 tall in 50px).
+  it 'answers anchor fallbacks and odd sizes', :aggregate_failures do
     s = page(
       '<body style="font: 16px monospace; margin: 0"><div style="position: relative; width: 300px; height: 60px">' \
       '<div id="a" style="position: absolute; top: anchor(--a bottom, 30px); left: anchor(--a right, 40px)">x</div></div>' \
@@ -621,8 +600,8 @@ RSpec.describe 'Rust walk coverage' do
 
   # …and a split's faces RAISE the line a run's characters select them on, each laid out as a face of its own would be,
   # where the walks took the line box from the primary face alone: Ahem at 150% for A–Z, under a Lato primary for a–z,
-  # puts "ab ABC cd ef gh ij kl" on two 30px lines (Chrome 55: it raises only the LINE the tall face is on, where the JS
-  # model raises every line of the text node — a divergence all three engines here share). A `ch`
+  # puts "ab ABC cd ef gh ij kl" on two 30px lines (Chrome 55: it raises only the LINE the tall face is on, where this
+  # driver raises every line of the text node — a divergence recorded). A `ch`
   # is the primary face's — Lato at 120%, the face covering `0` — not the system font a character no face covers falls to
   # (Chrome: 139.19 for 10ch, where the system font's `0` gave 120).
   it "raises a split's line box to the faces its characters select", :aggregate_failures do
@@ -643,14 +622,13 @@ RSpec.describe 'Rust walk coverage' do
     sizes = s.evaluate_script("[...document.querySelectorAll('div')].map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.width * 100) / 100, r.height]; })")
     expect(sizes).to eq([[120, 60], [300, 29], [139.2, 0]])
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
-    expect(s.evaluate_script('__csimLayoutShadowRun(null, {rust: true}).mismatches')).to eq(0)
   end
 
-  # …asked of each text node as the oracle asks it: of its data as WRITTEN (a preserved CR, a soft hyphen under `hyphens:
+  # …asked of each text node of its data as WRITTEN (a preserved CR, a soft hyphen under `hyphens:
   # none` — characters the line never lays out — still select their face), and never of white space that collapses to a
   # gap between two boxes (one space on the owner's own line box). The `ch` of a stack whose own face is a `local()` one
   # with a metric descriptor is that face's.
-  it 'asks a split for the line box as the oracle does', :aggregate_failures do
+  it 'asks a split for the line box of each text node as written', :aggregate_failures do
     dir = File.join(__dir__, 'wpt/fonts')
     files = {'/Ahem.ttf' => File.binread("#{dir}/Ahem.ttf"), '/Lato.ttf' => File.binread("#{dir}/Lato-Medium.ttf")}
     css = '@font-face { font-family: F; src: url(/Ahem.ttf); unicode-range: U+0041-005A; size-adjust: 150%; } ' \
@@ -675,7 +653,6 @@ RSpec.describe 'Rust walk coverage' do
     expect(sizes.map(&:last)[0, 3]).to eq([24, 60, 48])
     expect(sizes.last.first).to eq(150)
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
-    expect(s.evaluate_script('__csimLayoutShadowRun(null, {rust: true}).mismatches')).to eq(0)
   end
 
   # A face whose descriptors change after the first layout is the new face to the style engine's `ch` / `ex` too: the

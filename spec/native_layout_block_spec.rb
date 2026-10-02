@@ -3,10 +3,7 @@
 # layout's `_lb`. It started as L1's invariant, "a pure block-flow page — explicit heights, no inline
 # text, no float, no abspos", and that is no longer what the file says: floats, abspos, inline runs,
 # atomics and mixed blocks all have examples below, because each was ported in turn and its parity
-# belongs beside the block one. What is still true, and is the actual contract, is the PASS: a shape
-# either lays out natively and agrees with the oracle everywhere, or it declines and the whole pass is
-# discarded — there is no third answer, and the examples that assert a DECLINE are asserting that
-# second one on purpose.
+# belongs beside the block one.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
@@ -20,12 +17,22 @@ RSpec.describe 'native layout L1 block-flow parity' do
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
-  # The pass root defaults to `<body>`; naming a SELECTOR runs the pass over that subtree instead, which is how
-  # a containing block ABOVE the root — the case a viewport-origin page cannot exercise — gets tested.
-  def parity(session, root = nil)
-    session.evaluate_script('document.body.offsetHeight')   # force a layout pass
-    return session.evaluate_script('globalThis.__csimLayoutShadowRun()') unless root
-    session.evaluate_script(%{globalThis.__csimLayoutShadowRun(document.querySelector(#{root.inspect}))})
+  # `app` is a whole document of the caller's own, where the shape is the body element itself.
+  def expect_parity(body, app: page(body))
+    expect_layout_golden(body, app: app) do
+      session = simulated_session(app); session.visit '/'
+      session.evaluate_script('document.body.offsetHeight')   # force a layout pass
+      r = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
+      expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
+      expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
+      expect_no_dropped_records(r, body)
+    end
+  end
+
+  def session_for(body)
+    session = simulated_session(page(body))
+    session.visit '/'
+    session
   end
 
   # The BODY with its own margin and padding. Every other example here — and every sweep and corpus page — says
@@ -51,16 +58,12 @@ RSpec.describe 'native layout L1 block-flow parity' do
       # …and the same shape with nothing between the two blocks, which is what the margins collapse to
       ['<div style="height:10px;margin-bottom:20px">a</div><div id="g" style="height:10px;margin-top:30px">b</div>',                       [40, 10]]
     ].each do |body, chrome_box|
-      session = simulated_session(page(%(<div style="width:300px">#{body}</div>)))
-      session.visit '/'
-      expect(parity(session)).to include('ok' => true, 'mismatches' => 0), body
+      session = session_for(%(<div style="width:300px">#{body}</div>))
       box = session.evaluate_script("(b => [b.y, b.height])(document.getElementById('g').getBoundingClientRect())")
       expect(box).to eq(chrome_box), "#{body}: #{box.inspect}, Chrome #{chrome_box.inspect}"
     end
     # …and it is no line breaker either: `aaa<meta>bbb` is ONE line of 18, not two of it.
-    session = simulated_session(page(%(<div style="width:300px" id="g">aaa<meta name="x">bbb</div>)))
-    session.visit '/'
-    expect(parity(session)).to include('ok' => true, 'mismatches' => 0)
+    session = session_for(%(<div style="width:300px" id="g">aaa<meta name="x">bbb</div>))
     expect(session.evaluate_script("document.getElementById('g').getBoundingClientRect().height")).to eq(18)
   end
 
@@ -69,12 +72,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
      ' style="margin:0 auto"', ' style="max-width:600px;margin:0 auto"', ' style="margin:0 5%;max-width:500px"',
      ' style="min-width:1200px"', ' style="margin-left:auto"'].each do |attr|
       html = %(<!doctype html><html><head><meta charset="utf-8"></head><body#{attr}><div id="d" style="margin:0 7px">x</div><p>p</p></body></html>)
-      session = simulated_session(Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app)
-      session.visit '/'
-      r = parity(session)
-      expect(r).to include('ok' => true), "#{attr}: harness bailed: #{r.inspect}"
-      expect(r['mismatches']).to eq(0), "#{attr}: mismatch: #{r.inspect}"
-      expect_no_dropped_records(r)
+      expect_parity(html, app: Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app)
     end
     # …and the percentage padding resolves against the viewport-wide root, as Chrome's does
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:20px;padding:0 10%"><div id="d">x</div></body></html>)
@@ -109,8 +107,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
       session.visit '/'
       height, passes = session.evaluate_script(<<~JS)
         (() => {
-          // (…a native pass either walk built: the JS walk's, or the Rust walk's under the style engine)
-          const count = () => { const s = __csimNativeLayoutStats(); return s.native + s.rust; };
+          const count = () => __csimNativeLayoutStats().rust;
           const passes = count();
           document.body.appendChild(document.createComment(''));
           return [document.documentElement.getBoundingClientRect().height, count() - passes];
@@ -133,7 +130,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
       session = simulated_session(Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html'}, [html]] } }.to_app)
       session.visit '/'
       width, fell_back = session.evaluate_script(<<~JS)
-        [document.getElementById('p').getBoundingClientRect().width, Object.keys(__csimNativeLayoutStats().fellBack)]
+        [document.getElementById('p').getBoundingClientRect().width, Object.keys(__csimNativeLayoutStats().rustFellBack)]
       JS
       expect(fell_back).to eq([]), css
       expect(width).to eq(chrome), css
@@ -141,35 +138,24 @@ RSpec.describe 'native layout L1 block-flow parity' do
   end
 
   it 'matches on stacked blocks with explicit heights' do
-    session = simulated_session(page(<<~HTML))
+    expect_parity(<<~HTML)
       <div style="height:50px"></div>
       <div style="height:30px"></div>
       <div style="height:auto"><div style="height:20px"></div><div style="height:25px"></div></div>
     HTML
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r)
-    expect(r['compared']).to be >= 5
   end
 
   it 'matches with margins, padding, borders, and box-sizing (margin collapsing)' do
-    session = simulated_session(page(<<~HTML))
+    expect_parity(<<~HTML)
       <div style="height:40px;margin:10px 0;padding:5px;border:2px solid #000"></div>
       <div style="box-sizing:border-box;width:200px;height:60px;padding:8px;border:3px solid #000">
         <div style="height:20px;margin-left:15px"></div>
       </div>
     HTML
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r)
   end
 
   it 'matches complex collapsing: adjacent margins, closed edges, empty block, nesting' do
-    session = simulated_session(page(<<~HTML))
+    expect_parity(<<~HTML)
       <div style="margin-bottom:30px;height:20px"></div>
       <div style="margin-top:10px;height:20px"></div>
       <div style="margin:15px 0"></div>
@@ -180,67 +166,42 @@ RSpec.describe 'native layout L1 block-flow parity' do
         <div style="margin-top:8px;height:20px"></div>
       </div>
     HTML
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r)
   end
 
   it 'matches declared-zero-height and wrapped collapse-through' do
-    session = simulated_session(page(<<~HTML))
+    expect_parity(<<~HTML)
       <div style="height:40px;margin-bottom:12px"></div>
       <div style="height:0;margin:18px 0"></div>
       <div style="height:25px;margin-top:6px"></div>
       <div style="margin:22px 0"><div style="margin:0"></div></div>
       <div style="height:15px;margin-top:9px"></div>
     HTML
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r)
   end
 
   it 'matches a BFC wrapper keeping its child margin inside (no collapse-through the BFC)' do
     # overflow:hidden establishes a block formatting context, so the inner div's margin-top does NOT
     # collapse out of the wrapper (§8.3.1) — the child sits 30px down inside a 40px-tall wrapper.
-    session = simulated_session(page(<<~HTML))
+    expect_parity(<<~HTML)
       <div style="overflow:hidden;margin-top:20px">
         <div style="margin-top:30px;height:10px"></div>
       </div>
       <div style="height:15px"></div>
     HTML
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r)
   end
 
   it 'matches percentage and clamped widths' do
-    session = simulated_session(page(<<~HTML))
+    expect_parity(<<~HTML)
       <div style="width:60%;height:30px"></div>
       <div style="width:50%;max-width:120px;height:20px"></div>
       <div style="width:100px;min-width:300px;height:20px"></div>
     HTML
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r)
   end
 
   it 'matches box-sizing:border-box whose border+padding exceed the declared size (border box floored at its edges)' do
-    session = simulated_session(page(<<~HTML))
+    expect_parity(<<~HTML)
       <div style="box-sizing:border-box;width:100px;height:20px;border:10px solid;padding:5px">x</div>
       <div style="box-sizing:border-box;width:15px;height:60px;border:10px solid;padding:5px"></div>
     HTML
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r)
   end
 
   # A display with no arm of its own — `-webkit-box`, `-webkit-inline-box`, `ruby`, `math`, `flow`, an orphan
@@ -286,16 +247,9 @@ RSpec.describe 'native layout L1 block-flow parity' do
       '<div style="width:300px"><div id="m" style="position:relative;top:max(10px, 20%);height:20px">b</div></div>'                                             => [0, 0],
       '<div style="width:300px"><div id="m" style="position:relative;right:clamp(40px, 10%, 20px);height:20px">b</div></div>'                                    => [-40, 0]
     }.each do |body, (x, y)|
-      session = simulated_session(page(body))
-      session.visit '/'
-      r = parity(session)
-      expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
       got = laid_out_rect(body)
-      expect(got[0]).to be_within(0.01).of(x)
-      expect(got[1]).to be_within(0.01).of(y)
-      oracle_free = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
-      expect(oracle_free).to include('ok' => true, 'mismatches' => 0)
-      expect(oracle_free['oracleReads'].to_h).to be_empty, oracle_free.inspect
+      expect(got[0]).to be_within(0.01).of(x), body
+      expect(got[1]).to be_within(0.01).of(y), body
     end
   end
 
@@ -378,22 +332,17 @@ RSpec.describe 'native layout L1 block-flow parity' do
   end
 
   it 'matches an over-constrained (left AND right) position:relative child under rtl (§9.4.3: right wins)' do
-    session = simulated_session(page(<<~HTML))
+    expect_parity(<<~HTML)
       <div style="width:300px;direction:rtl">
         <div style="position:relative;left:10px;right:40px;width:100px;height:20px">a</div>
       </div>
     HTML
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r)
   end
 
   it 'matches an rtl block: children start at the inline-start = right edge (r1)' do
     # A narrow fixed-width child sits at content_right - width - margin_right; an auto-width child fills and
     # lands back at content-left; an overflowing child hangs off the LEFT; a nested rtl block reverses too.
-    session = simulated_session(page(<<~HTML))
+    expect_parity(<<~HTML)
       <div style="width:300px;direction:rtl">
         <div style="width:100px;height:20px;margin-right:20px"></div>
         <div style="height:20px"></div>
@@ -401,192 +350,11 @@ RSpec.describe 'native layout L1 block-flow parity' do
       </div>
       <div style="width:100px;direction:rtl"><div style="width:300px;height:20px"></div></div>
     HTML
-    session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r)
   end
 
-  # An out-of-flow (absolute / fixed) child is removed from flow and REPLAYED at the oracle's resolved box
-  # (§4.1): native lays out its subtree and positions it by its displacement from the block's border box,
-  # neither sizing nor shifting the in-flow siblings. An abspos TABLE container and an
-  # abspos subtree native can't lay out still decline.
-  def expect_parity(body)
-    expect_layout_golden(body) do
-      session = simulated_session(page(body)); session.visit '/'
-      r = parity(session)
-      expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-      expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-      expect_no_dropped_records(r, body)
-    end
-  end
-
-  def expect_bail(body)
-    session = simulated_session(page(body)); session.visit '/'
-    expect(parity(session)).to include('ok' => false)
-  end
-
-  # ── WHY a pass declined ─────────────────────────────────────────────────────────────────────────────
-  # The walk's refusal sites reported ONE string for all of them, so no census could name a gate without
-  # rewriting `layout.js` first — which is how `atomic-valign-line` stayed invisible while costing 5,120
-  # shapes. A refusal that names itself latches into `nlDeclineWhy` (first writer wins: the walk aborts at
-  # the refusal that stopped it), and the pass reports that instead of the generic string. The source spells
-  # 26 distinct gate names today (`float-in-inline` is easy to miscount: it is written as a fallback beside
-  # the latch, not as an `nlNo`); of 17,481 declines across the sweeps (2026-09-20) 552 still answer
-  # `unsupported subtree`, and 192 answer `native declined`, which is RUST's own single string — the same
-  # one-string-for-everything hole on the other side of the boundary, and a porting job of its own.
-  #
-  # A REPORTED reason is not a census — a shape blocked by several gates names only the first it reached.
-  # That is the SET census's question, not this string's.
-  describe 'the reason a pass declines' do
-    # One flex container the walk refuses — an ORPHAN `display: table-row` holding an INLINE element, which the oracle
-    # MEASURES on a line where native's block walk would stack it (see `nlFlexSupported`) — in three roles below: a
-    # block's child, a mixed block's FLOATED child, and the later decline a rolled-back attempt must not be blamed for.
-    # One shape, so the three cannot drift into testing different gates. (It was a wrapping auto-height column with a
-    # max-height until 2026-09-24, when native learned to size that one's lines, and orphan rows of bare text and of
-    # block children until 2026-09-26.)
-    UNSUPPORTED_FLEX = '<div style="display:table-row"><span>aa bb</span></div>'
-
-    # The load-bearing half is the ROLLBACK. Several routes try a subtree and fall back: a table cell that
-    # cannot be measured is re-walked as a boundary, and the pass goes on. A reason latched inside such an
-    # attempt must not survive it, or it names a decline that happened somewhere else entirely — the one
-    # failure mode a latch has, and the one nothing else would catch.
-    it 'forgets a refusal inside an attempt that was rolled back' do
-      # An ATOMIC whose subtree declines is the reachable case: `atomic.lay` walks it through `walkAttempt`,
-      # the refusal inside names itself, the attempt is rolled back and the box is PUSHED — and the pass
-      # goes on to succeed. The reason must not survive that. (A table cell re-walked as a boundary is the
-      # other rollback route and does NOT reach this: `nlIntrinsicMeasurable` refuses it as a pre-filter, so
-      # no attempt is made and nothing is latched. The first version of this example used one and passed
-      # with the restore deleted.)
-      atomic      = WalkRefusals::POSITIONED
-      prefiltered = '<span style="display:inline-block;word-break:break-all">a&zwj;b</span>'
-      measured    = ->(inner) { %(<div style="width:400px;overflow:hidden"><div style="float:left">t #{inner} a</div></div>) }
-
-      # …and FIRST the two properties the rest of this depends on, because `ok: true, nativeAtomics: 0` holds
-      # for an atomic that was never ATTEMPTED as well as for one attempted and rolled back, and only the
-      # second exercises the restore.
-      #
-      #   (i) the attempt is MADE. In a MEASURED context there is no push to fall back on, so the pass ends
-      #       on the atomic and the two routes separate: an attempted-and-declined atomic reports the gate
-      #       INSIDE it, while one `nlIntrinsicMeasurable` pre-filtered is never walked and reports the
-      #       pre-filter. Both arms, or "it was attempted" is not what is being said.
-      expect(parity(session_for(measured.(atomic)))['reason']).to eq('block-level-box-unplaceable')
-      expect(parity(session_for(measured.(prefiltered)))['reason']).to eq('shrink-to-fit-child-unmeasurable')
-      #   (ii) …and that is the SAME name the gate answers to with no atomic around it at all. A DECLINED
-      #        atomic ends the pass, so its subtree's reason is re-latched over the rollback that erased it
-      #        (`nlRolledBackWhy`); without that the whole family answers `atomic-subtree-declined`, which is
-      #        one string for many gates — the hole this latch exists to close, one level down.
-      #        A SECOND gate through the same route, because one name proves the carry and two prove it is
-      #        the gate's and not the route's. (This one used to be the counter-example here — it answered
-      #        `atomic-subtree-declined`, its gate being one of the ~130 that stay anonymous — until naming
-      #        that gate turned this line red and gained the census a line, which is what it is for.)
-      expect(parity(session_for(%(<div style="width:400px">#{WalkRefusals::POSITIONED_INNER}</div>))))
-        .to include('ok' => false, 'reason' => 'block-level-box-unplaceable')
-      expect(parity(session_for(measured.(WalkRefusals::ORPHAN_ROW)))['reason']).to eq('flex-container-unsupported')
-      expect(parity(session_for(%(<div style="width:400px">text #{atomic} after</div>))))
-        .to include('ok' => true, 'nativeAtomics' => 0)
-      # …the same rolled-back attempt, then a LATER decline in a SIBLING block. Sibling, not the same block:
-      # a block classifies all its children BEFORE walking any of them, so a flex child in the same box
-      # refuses first and the atomic is never reached — which is how the second version of this example
-      # passed with the restore deleted too.
-      expect(parity(session_for(%(<div style="width:400px"><div>text #{atomic} after</div><div>#{UNSUPPORTED_FLEX}</div></div>)))['reason'])
-        .to eq('flex-container-unsupported')
-    end
-    # …and forgets it again before the NEXT pass. The latch is module-level state and `nlShadowRun` clears
-    # it per run; nothing else in the suite would notice if that stopped, because every other example here
-    # runs ONE pass per session — and a page NAVIGATION rebuilds the realm, which is the route every census
-    # script takes (`session.visit` per case), so the tooling this change exists to feed cannot see it
-    # either. Two passes in one realm is the only shape that can, and the element-rooted mode is how to ask
-    # for them.
-    it 'forgets the previous pass before the next one' do
-      session = session_for(
-        %(<div id="flex" style="width:400px">#{UNSUPPORTED_FLEX}</div>) +
-        %(<div id="atomic" style="width:400px;overflow:hidden"><div style="float:left">t #{WalkRefusals::POSITIONED} a</div></div>) +
-        %(<div id="fine" style="width:400px"><div style="height:10px">x</div></div>)
-      )
-      # BOTH orders. First-writer-wins means a stale latch beats the real refusal, so a single order passes
-      # whenever the value left over happens to be the one wanted — and which one that is depends on the
-      # order the roots were asked in, which is the whole bug.
-      asked = ->(order) { order.map {|sel| parity(session, sel).values_at('ok', 'reason') } }
-      expect(asked.(%w[#flex #atomic #fine])).to eq([
-        [false, 'flex-container-unsupported'],
-        [false, 'block-level-box-unplaceable'],
-        [true, nil]
-      ])
-      expect(asked.(%w[#atomic #flex #fine])).to eq([
-        [false, 'block-level-box-unplaceable'],
-        [false, 'flex-container-unsupported'],
-        [true, nil]
-      ])
-      # …and `#fine`'s `nil` is the key being ABSENT — a passing result carries no `reason` at all — not a
-      # latch seen clear, so it reads the same with the reset deleted and proves nothing on its own. What
-      # that row is for is this: two declines before it corrupt no pass that then succeeds.
-      expect(parity(session, '#fine')).to include('ok' => true, 'mismatches' => 0)
-    end
-    it 'names the gate that stopped it' do
-      # Pairs, not a hash: the same reason is asserted twice on purpose, through two different routes.
-      [
-        ['flex-container-unsupported',        %(<div style="width:400px">#{UNSUPPORTED_FLEX}</div>)],
-        ['text-not-measurable',               '<div style="width:400px;word-break:break-all">a&#x200D;b</div>'],
-        # …and the last one again through a MIXED block's anonymous group, which is the other propagation
-        # route — its reason has to outlive the `emitAttempt` the group is built inside. (The pair was
-        # `inline-box-relative-valign`, then `block-level-box-in-inline-content`, until both went native on
-        # 2026-09-24; a per-character ZWJ is refused by the gather on both routes alike — a preserved CR was, until
-        # 2026-09-25, and a soft hyphen until 2026-09-26.)
-        ['text-not-measurable',               '<div style="width:400px;word-break:break-all"><p>a</p>x&#x200D;y<p>b</p></div>'],
-        # …and a FLOAT in a mixed block's inline run, which is the third: the float hook walks its subtree
-        # DIRECTLY, so the gate inside names itself while the group's `emitAttempt` is still open and about
-        # to erase it. Read at the hook site or the whole family answers `float-in-inline`. Nothing else in
-        # the repo declines this way — reverting that read leaves every other layout spec green.
-        ['flex-container-unsupported',        %(<div style="width:400px"><p>a</p>text <div style="float:left;width:30px">#{UNSUPPORTED_FLEX}</div> more<p>b</p></div>)],
-        # …and a DECLINED atomic in a MIXED block that is itself being MEASURED, which is the fourth and the
-        # one the group's `emitAttempt` reaches: `atomic.lay` re-latches the gate over its own rollback, and
-        # the group's rollback then erases THAT — so the reason survives only on the object the hook returns.
-        # A plain measured block (no `<p>` siblings) reads the re-latch instead and passes either way, which
-        # is why this needs its own row rather than a `<p>`-less one.
-        ['block-level-box-unplaceable',       %(<div style="width:400px;overflow:hidden"><div style="float:left"><p>a</p>text #{WalkRefusals::POSITIONED} more<p>b</p></div></div>)]
-      ].each do |reason, body|
-        expect_walk_declines(body, reason)
-      end
-    end
-  end
-
-  def session_for(body)
-    session = simulated_session(page(body))
-    session.visit '/'
-    session
-  end
-
-  # Not the walk's: everything decided BEFORE it starts (no `__dom`, no root box, a root display native does
-  # not lay out, a float hanging above the pass root), everything found AFTER it succeeded while the run
-  # stream is marshalled, and everything Rust discovers mid-measure ('native declined', which throws the
-  # whole pass away rather than this one subtree). This list is the other half of what
-  # `reason == 'unsupported subtree'` used to say. That string was the walk's ONLY answer, so asserting it
-  # ruled all of these out for free and said nothing else; now that reasons are specific the exclusion has
-  # to be written down — and written WHOLE, since a caller pinning a reason that is on neither side of the
-  # line would be claiming "the walk refused" about a pass whose walk did not refuse.
-  NOT_THE_WALKS = [
-    'no __dom',
-    'no root box',
-    'root unsupported',
-    'float above the pass root',
-    'run-without-white-space',            # …marshalling, after `walk` has already returned true
-    'run-without-tab-stop',
-    'native declined'                     # …Rust's, mid-measure
-  ].freeze
-
-  # …and the reason is REQUIRED, because an example whose only claim is `ok: false` passes for any decline
-  # at all — including one that moved to a completely different gate when the shape drifted. Two callers
-  # still pass `'unsupported subtree'`: that is the generic bucket, named out loud, and the day something on
-  # their way latches a reason this goes red and the census gains a line. That is the point of it.
-  def expect_walk_declines(body, reason)
-    r = parity(session_for(body))
-    expect(r['ok']).to be(false), "not declined: #{body}"
-    expect(NOT_THE_WALKS).not_to include(r['reason']), r.inspect
-    expect(r['reason']).to eq(reason), r.inspect
-  end
-
+  # An out-of-flow (absolute / fixed) child is removed from flow (§4.1): native lays out its subtree and
+  # positions it by its displacement from the block's border box, neither sizing nor shifting the in-flow
+  # siblings.
   it 'matches an absolute child positioned by insets in a relative parent' do
     expect_parity('<div style="position:relative;width:300px;height:200px"><div style="height:20px">flow</div><div style="position:absolute;top:10px;left:20px;width:50px;height:30px">a</div></div>')
   end
@@ -649,12 +417,8 @@ RSpec.describe 'native layout L1 block-flow parity' do
       ['<div id="t" style="position:relative;width:200px;margin:20px 0 15px"><span><div style="position:absolute;width:10px;height:10px"></div></span></div><div style="height:12px">after</div>', [20, 0]],
       ['<div style="overflow:hidden"><div style="float:left;width:30px;height:30px"></div><div id="t" style="position:relative;margin:20px 0"><span><div style="position:absolute;width:10px;height:10px"></div></span></div><p style="margin:15px 0"><i style="display:inline-block;width:4px;height:4px"></i>b</p></div>', [20, 0]]
     ].each do |body, (y, h)|
-      session = simulated_session(page(body))
-      session.visit '/'
+      session = session_for(body)
       expect(session.evaluate_script("(b => [b.y, b.height])(document.getElementById('t').getBoundingClientRect())")).to eq([y, h]), body
-      r = parity(session)
-      expect(r['mismatches']).to eq(0), "#{body}: #{r.inspect}" if r['ok']
-      expect_no_dropped_records(r, body)
     end
   end
   it 'collapses whitespace-only inline content between blocks (no anonymous block)' do
@@ -738,17 +502,11 @@ RSpec.describe 'native layout L1 block-flow parity' do
       '<div style="width:200px;position:relative"><p>block</p><div id="g" style="position:absolute;width:10px;height:10px"></div> aaa bbb<p>tail</p></div>',
       '<div style="width:200px;position:relative"><p>block</p><div id="g" style="position:absolute;width:10px;height:10px"></div><p>tail</p></div>'
     ].each do |body|
-      session = simulated_session(page(body))
-      session.visit '/'
-      expect(parity(session)).to include('ok' => true, 'mismatches' => 0), body
-      y = session.evaluate_script("document.getElementById('g').getBoundingClientRect().y")
+      y = session_for(body).evaluate_script("document.getElementById('g').getBoundingClientRect().y")
       expect(y).to eq(50), "#{body}: #{y}, Chrome 50"
     end
-    # …and a REPLAYED one, which carries the oracle's own displacement rather than a static position. That
-    # displacement is measured against the MIXED BLOCK (`c._lb − el._lb`), so its record's parent has to be
-    # the block's and not the anonymous group's, or native adds the group's origin on top of it. A containing
-    # block with PERCENTAGE edges is what forces the replay — native re-derives a padding box from the
-    # record's borders and cannot, so the oracle's rectangle rides instead.
+    # …and one placed by its insets in a containing block with PERCENTAGE edges, which is the MIXED BLOCK and not
+    # the anonymous group, or the group's origin is added on top of it.
     expect_parity('<div style="position:relative;padding:10%;width:300px"><p>a</p>text<div style="position:absolute;top:5px;left:5px;width:20px;height:20px"></div><p>b</p></div>')
   end
 
@@ -788,8 +546,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
       end
       expect_parity(body.sub('ALIGN', 'direction:rtl'))
     end
-    # …the pass's own containing block with a PERCENTAGE edge, which native cannot re-derive, so the box is
-    # REPLAYED — no marker in the group, and the group kept all the same.
+    # …the containing block with a PERCENTAGE edge, and the group kept all the same.
     expect_parity('<div style="width:300px"><div style="position:relative;padding:10%;text-align:center"><p>a</p> ' \
                   '<div style="position:absolute;width:2px;height:2px"></div> <p>b</p>text</div></div>')
     span = '<div style="position:relative;width:300px;text-align:center"><p>a</p> <span id="m" style="position:absolute;width:20px;height:20px"></span> <p>b</p>text<p>c</p></div>'
@@ -802,8 +559,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
   # no mixed block and its out-of-flow child goes down the plain block path, which never needed the kept group.
   it 'places the box where the group never opened a line' do
     pos = lambda {|body|
-      session = simulated_session(page(%(<div style="position:relative;width:200px;font:16px monospace">#{body}</div>))); session.visit '/'
-      expect(parity(session)).to include('ok' => true, 'mismatches' => 0)
+      session = session_for(%(<div style="position:relative;width:200px;font:16px monospace">#{body}</div>))
       session.evaluate_script("(() => { const r = document.getElementById('m').getBoundingClientRect(); return [r.x, r.y]; })()")
     }
     oof = '<i id="m" style="position:absolute;width:5px;height:5px"></i>'
@@ -888,14 +644,10 @@ RSpec.describe 'native layout L1 block-flow parity' do
       expect_parity('<div style="display:grid;grid-template-columns:min-content;width:400px"><div><div style="width:max-content">aa bb</div></div></div>')
       expect_parity('<div style="width:400px"><span style="display:inline-block"><div style="width:min-content">aa bb</div></span></div>')
     end
-    # …and it is walked as a MEASURED subtree, like the other route whose width comes from its own content (a
-    # vertical writing mode): native has to MEASURE such a box, so what it cannot measure must be refused by the
-    # WALK — where the caller can still fall back — and not discovered mid-measure in Rust, which throws the
-    # whole pass away. A measure-only gap (native's intrinsic has no `text-indent`) is refused here too.
-    it 'refuses in the walk what it would have to measure and cannot' do
+    # …and native MEASURES such a box, like the other route whose width comes from its own content (a vertical
+    # writing mode), so what only a measure reads has to reach it too: a `text-indent`.
+    it 'measures a keyword-width box with its text indent' do
       expect_parity('<div style="width:400px"><div style="width:max-content;text-indent:30px">aa bb</div></div>')
-      expect_walk_declines(%(<div style="width:400px"><div style="width:max-content"><span style="display:inline-block">#{WalkRefusals::POSITIONED}</span></div></div>), 'block-level-box-unplaceable')
-      expect_walk_declines(%(<div style="width:400px"><table><tr><td><div style="width:max-content"><div>#{WalkRefusals::UNMEASURABLE}</div></div></td></tr></table></div>), 'shrink-to-fit-child-unmeasurable')
     end
     # A keyword on any of the OTHER five size properties is not a width native has to find: the oracle resolves
     # a keyword `height` to `auto` and a keyword min/max to no clamp at all, which the record already says.
@@ -908,12 +660,10 @@ RSpec.describe 'native layout L1 block-flow parity' do
       expect_parity('<div style="width:400px"><div style="max-width:min-content">aa bb</div></div>')
       expect_parity('<div style="width:400px"><div style="max-height:min-content;height:50px">aa bb</div></div>')
     end
-    # …and every OTHER sizing path keeps its own basis, so a keyword width declines there: a replaced element (by
-    # its intrinsic size — an inline one is pushed as an atomic instead of declining the pass). A GRID item and an
-    # OUT-OF-FLOW box came off this list on 2026-09-24: `measure_grid` measures the one against its area
-    # (native_layout_grid_spec), `place_out_of_flow` the other against the room its insets leave — and does not
-    # stretch it between them, a keyword width being no `auto` (Chrome: 105.61 between `left:10px; right:20px`,
-    # and a `min-content` one centred by auto margins at 140.39).
+    # An OUT-OF-FLOW box with a keyword width is measured against the room its insets leave (`place_out_of_flow`),
+    # as a GRID item is against its area (`measure_grid`, native_layout_grid_spec) — and not stretched between
+    # them, a keyword width being no `auto` (Chrome: 105.61 between `left:10px; right:20px`, and a `min-content`
+    # one centred by auto margins at 140.39).
     it 'measures an out-of-flow box with a keyword width against the room its insets leave' do
       {
         '<div id="m" style="position:absolute;left:10px;right:20px;width:max-content">aa bb cc dd</div>'                => [10, 105.609375],
@@ -928,26 +678,14 @@ RSpec.describe 'native layout L1 block-flow parity' do
         expect(got[1]).to be_within(0.05).of(w)
       end
     end
-    # …and the box is a MEASURED subtree between two insets too — a keyword is no `auto` to fill them — so content
-    # native could lay out but not measure makes the WALK replay the oracle's box instead of failing the pass.
-    it 'replays a keyword-width out-of-flow box it could not measure' do
+    # …and the box is a MEASURED subtree between two insets too — a keyword is no `auto` to fill them — whatever
+    # content it measures.
+    it 'measures a keyword-width out-of-flow box around a half-empty inline table' do
       %w[left:0;right:0 left:0].each do |insets|
         expect_parity(%(<div style="width:300px;position:relative"><div style="position:absolute;#{insets};width:fit-content">#{WalkRefusals::UNMEASURABLE}</div></div>))
       end
     end
-    it 'declines a keyword width a different sizing path owns' do
-      # …the pass ROOT (sized from the width the harness hands in — native would fill its containing block and
-      # report the box as laid out). A replaced element is sized by its intrinsic size and declines the same way.
-      session = simulated_session(page('<div id="r" style="width:max-content">aa bb cc</div>')); session.visit '/'
-      expect(parity(session, '#r')).to include('ok' => false, 'reason' => 'unsupported subtree')
-      # …and the vertical writing mode's root, which has no inline size to fill either. It is the SAME hole, and
-      # the root guard in `nlShadowRun` (`nlRootAutoWidthIsNotItsRoom`) now names it rather than leaving it to
-      # be discovered mid-walk: a root's auto width has to be the room the harness hands over, which a vertical
-      # writing mode's is not — nor a `<button>`'s, an atomic inline's or a flex item's.
-      session = simulated_session(page('<div id="r" style="writing-mode:vertical-lr;height:100px">aa bb cc</div>')); session.visit '/'
-      expect(parity(session, '#r')).to include('ok' => false, 'reason' => 'root unsupported')
-    end
-    # …while a FLEX ITEM and a TABLE CELL carry one natively: their sizing paths ask for the box's intrinsic
+    # A FLEX ITEM and a TABLE CELL carry one natively: their sizing paths ask for the box's intrinsic
     # figures, which the pin has already answered. (A `<td style="width:min-content">` is 16 wide in both
     # engines where Chrome's auto-table algorithm gives the column its max-content, 52.41 — an oracle gap of
     # its own, untouched by this.)
@@ -959,8 +697,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
     it 'sees a keyword width arriving through inherit' do
       expect_parity('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></div></div>')
       expect_parity('<table style="border-spacing:0"><tr><td style="padding:0;width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></td></tr></table>')
-      expect_walk_declines(%(<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit"><span style="display:inline-block">#{WalkRefusals::POSITIONED}</span></div></div></div>), 'block-level-box-unplaceable')
-      # …and one with nothing to refuse lays out, the inherited keyword measured like any other
+      # …the inherited keyword measured like any other
       expect_parity('<div style="width:400px"><div style="width:min-content"><div style="width:inherit">aa bb cc</div></div></div>')
       expect_parity('<div style="width:400px"><span style="width:min-content"><span style="display:inline-block;width:inherit">bb cc</span></span></div>')
     end
@@ -982,82 +719,57 @@ RSpec.describe 'native layout L1 block-flow parity' do
   # width to shrink to fit and an auto height to its content, the static position where an axis has no inset —
   # the flow cursor in block flow (the content's right edge in rtl), a flex container's alignment, a grid's
   # content origin. A CB that is not a record of the pass — the viewport, an ancestor above it, an inline box —
-  # hands over its RECTANGLE instead (rec[92..95]); what still replays is an in-pass CB with percentage edges, or
-  # a shrink-to-fit width native cannot measure.
-  def expect_native_oof(body, count = 1, root: nil)
-    session = simulated_session(page(body)); session.visit '/'
-    r = parity(session, root)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['compared']).to be > 0, "nothing was compared: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r, body)
-    expect(r['nativeOutOfFlow']).to be >= count, "the out-of-flow box was replayed, not placed natively: #{r.inspect}"
-  end
-
-  # …and the fallback: the pass still succeeds with the oracle's box REPLAYED over the container's origin.
-  def expect_replayed_oof(body)
-    session = simulated_session(page(body)); session.visit '/'
-    r = parity(session)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['compared']).to be > 0, "nothing was compared: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r, body)
-    expect(r['nativeOutOfFlow']).to eq(0), "expected the oracle's box to be replayed: #{r.inspect}"
-  end
-
+  # hands over its RECTANGLE instead (rec[92..95]).
   describe 'native out-of-flow positioning' do
     let(:cb) { 'position:relative;width:400px;height:200px' }
 
     it 'places by insets, stretches between two, and shares the slack out to auto margins' do
-      expect_native_oof(%(<div style="#{cb}"><div style="height:30px">a</div><div style="position:absolute;top:0;right:0;width:40px;height:40px">b</div><div style="position:absolute;bottom:0;left:0;width:30px;height:30px">c</div><div style="height:20px">d</div></div>), 2)
-      expect_native_oof(%(<div style="#{cb}"><div style="position:absolute;inset:0;margin:10px">stretched m</div></div>))
-      expect_native_oof(%(<div style="#{cb}"><div style="position:absolute;left:0;right:0;width:100px;margin:0 auto;height:20px">centred</div></div>))
-      expect_native_oof(%(<div style="#{cb}"><div style="position:absolute;top:0;bottom:0;height:50px;margin:auto 0;width:20px">v centred</div></div>))
-      expect_native_oof(%(<div style="#{cb}"><div style="position:absolute;left:20px;margin-left:30px;width:20px;height:20px">m</div><div style="position:absolute;right:10px;margin-right:7px;width:20px;height:20px">r</div></div>), 2)
+      expect_parity(%(<div style="#{cb}"><div style="height:30px">a</div><div style="position:absolute;top:0;right:0;width:40px;height:40px">b</div><div style="position:absolute;bottom:0;left:0;width:30px;height:30px">c</div><div style="height:20px">d</div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;inset:0;margin:10px">stretched m</div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;left:0;right:0;width:100px;margin:0 auto;height:20px">centred</div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:0;bottom:0;height:50px;margin:auto 0;width:20px">v centred</div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;left:20px;margin-left:30px;width:20px;height:20px">m</div><div style="position:absolute;right:10px;margin-right:7px;width:20px;height:20px">r</div></div>))
     end
     it 'shrinks an auto width to fit the room, lays an auto height out from the content, anchors a bottom' do
-      expect_native_oof(%(<div style="#{cb}"><div style="position:absolute;top:10px">shrink to fit text</div></div>))
-      expect_native_oof(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:300px">a long piece of text that must wrap in the room left</div></div>))
-      expect_native_oof(%(<div style="#{cb}"><div style="position:absolute;bottom:10px">bottom anchored auto height<br>two lines</div></div>))
-      expect_native_oof(%(<div style="#{cb}"><div style="position:absolute;top:0;bottom:0"><div style="height:50%">half</div></div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:10px">shrink to fit text</div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:300px">a long piece of text that must wrap in the room left</div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;bottom:10px">bottom anchored auto height<br>two lines</div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:0;bottom:0"><div style="height:50%">half</div></div></div>))
     end
     it 'measures the containing block as its padding box, and nests containing blocks' do
-      expect_native_oof(%(<div style="#{cb};padding:15px;border:3px solid"><div style="position:absolute;top:0;left:0;width:10px;height:10px"></div><div style="position:absolute;bottom:0;right:0;width:10px;height:10px"></div><div style="position:absolute;inset:0"></div></div>), 3)
-      expect_native_oof(%(<div style="#{cb}"><div style="position:relative;padding:10px;margin-top:20px"><div style="position:absolute;top:0;right:0;width:10px;height:10px"></div><div style="height:30px">inner cb</div></div></div>))
-      expect_native_oof(%(<div style="#{cb}"><div style="position:absolute;inset:0"><div style="position:absolute;bottom:5px;right:5px;width:10px;height:10px"></div></div></div>), 2)
+      expect_parity(%(<div style="#{cb};padding:15px;border:3px solid"><div style="position:absolute;top:0;left:0;width:10px;height:10px"></div><div style="position:absolute;bottom:0;right:0;width:10px;height:10px"></div><div style="position:absolute;inset:0"></div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="position:relative;padding:10px;margin-top:20px"><div style="position:absolute;top:0;right:0;width:10px;height:10px"></div><div style="height:30px">inner cb</div></div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;inset:0"><div style="position:absolute;bottom:5px;right:5px;width:10px;height:10px"></div></div></div>))
     end
     it 'takes the static position from the flow cursor (before an open margin), the content edge in rtl' do
-      expect_native_oof(%(<div style="#{cb}"><div style="height:20px">x</div><div style="position:absolute;width:60px;height:20px">a</div></div>))
-      expect_native_oof(%(<div style="#{cb}"><div><div style="height:20px">nested</div><div style="position:absolute;top:5px;width:10px;height:10px"></div><div style="height:20px">after</div></div></div>))
-      expect_native_oof(%(<div style="#{cb}"><div style="margin-top:20px;height:20px">m</div><div style="position:absolute;width:10px;height:10px"></div><div style="margin-top:30px;height:20px">n</div></div>))
-      expect_native_oof(%(<div style="#{cb};direction:rtl"><div style="position:absolute;width:60px;height:20px">rtl static</div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="height:20px">x</div><div style="position:absolute;width:60px;height:20px">a</div></div>))
+      expect_parity(%(<div style="#{cb}"><div><div style="height:20px">nested</div><div style="position:absolute;top:5px;width:10px;height:10px"></div><div style="height:20px">after</div></div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="margin-top:20px;height:20px">m</div><div style="position:absolute;width:10px;height:10px"></div><div style="margin-top:30px;height:20px">n</div></div>))
+      expect_parity(%(<div style="#{cb};direction:rtl"><div style="position:absolute;width:60px;height:20px">rtl static</div></div>))
     end
     it 'aligns a flex container\'s out-of-flow child as the line\'s sole item, and a grid\'s at the content origin' do
-      expect_native_oof(%(<div style="#{cb}"><div style="display:flex;justify-content:center;align-items:center;height:100px"><div style="position:absolute;width:30px;height:20px">fs</div><div style="width:50px;height:20px"></div></div></div>))
-      expect_native_oof(%(<div style="#{cb}"><div style="display:flex;justify-content:space-around;align-items:flex-end;height:100px;padding:5px"><div style="position:absolute;width:30px;height:20px;margin:4px">fs</div></div></div>))
-      expect_native_oof(%(<div style="#{cb}"><div style="display:flex;flex-direction:column;justify-content:flex-end;height:100px"><div style="position:absolute;width:30px;height:20px;align-self:center">fs</div></div></div>))
-      expect_native_oof(%(<div style="#{cb}"><div style="display:flex;flex-direction:row-reverse;height:100px"><div style="position:absolute;width:30px;height:20px">fs</div></div></div>))
-      expect_native_oof(%(<div style="#{cb}"><div style="display:grid;grid-template-columns:100px 100px;padding:8px"><div style="height:20px">a</div><div style="position:absolute;width:30px;height:30px">p</div></div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="display:flex;justify-content:center;align-items:center;height:100px"><div style="position:absolute;width:30px;height:20px">fs</div><div style="width:50px;height:20px"></div></div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="display:flex;justify-content:space-around;align-items:flex-end;height:100px;padding:5px"><div style="position:absolute;width:30px;height:20px;margin:4px">fs</div></div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="display:flex;flex-direction:column;justify-content:flex-end;height:100px"><div style="position:absolute;width:30px;height:20px;align-self:center">fs</div></div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="display:flex;flex-direction:row-reverse;height:100px"><div style="position:absolute;width:30px;height:20px">fs</div></div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="display:grid;grid-template-columns:100px 100px;padding:8px"><div style="height:20px">a</div><div style="position:absolute;width:30px;height:30px">p</div></div></div>))
     end
     it 'sizes a replaced or flex out-of-flow box, and one with min/max and box-sizing' do
-      expect_native_oof(%(<div style="#{cb}"><img style="position:absolute;bottom:0;right:0"><input style="position:absolute;left:0;bottom:0"></div>), 2)
-      expect_native_oof(%(<div style="#{cb}"><div style="position:absolute;top:10px;width:120px"><div style="display:flex"><div style="flex:1">a</div><div>b</div></div></div></div>))
-      expect_native_oof(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:10px;min-width:100px;max-height:15px"><div style="height:50px"></div></div><div style="position:absolute;top:50px;box-sizing:border-box;width:50px;padding:10px;height:30px"></div></div>), 2)
-      expect_native_oof(%(<div style="#{cb}"><div style="position:absolute;top:50%;left:50%;width:50%;height:25%"></div></div>))
+      expect_parity(%(<div style="#{cb}"><img style="position:absolute;bottom:0;right:0"><input style="position:absolute;left:0;bottom:0"></div>))
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:10px;width:120px"><div style="display:flex"><div style="flex:1">a</div><div>b</div></div></div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:10px;min-width:100px;max-height:15px"><div style="height:50px"></div></div><div style="position:absolute;top:50px;box-sizing:border-box;width:50px;padding:10px;height:30px"></div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:50%;left:50%;width:50%;height:25%"></div></div>))
     end
     # A COMPARISON function in an inset is native's too: its program rides beside the pair (`NL_REC_INSET_MATH`) and
     # native evaluates it against the containing block it places the box in — the walk resolved it against the oracle's
-    # rectangle until 2026-09-26. Chrome's boxes, and no oracle read.
+    # rectangle until 2026-09-26. Chrome's boxes.
     it 'places an out-of-flow box by insets written as comparison functions' do
       {
         '<div style="position:relative;width:300px;height:200px"><div id="m" style="position:absolute;left:max(10%, 50px);top:min(20%, calc(10% + 5px), 30px);width:10px;height:10px"></div></div>' => [50, 25],
         '<div style="position:relative;width:300px;height:200px"><div id="m" style="position:absolute;right:clamp(5px, 10%, 20px);bottom:max(5%, min(40px, 30%));width:10px;height:10px"></div></div>' => [270, 150]
       }.each do |body, (x, y)|
-        expect_native_oof(body)
+        expect_parity(body)
         expect(laid_out_rect(body)[0, 2]).to eq([x, y])
-        session = simulated_session(page(body)); session.visit '/'
-        reads = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')['oracleReads'].keys
-        expect(reads).to be_empty, "#{body}: #{reads.inspect}"
       end
     end
     # Review findings, oracle side (native was the spec-shaped one): a flex container's auto-height out-of-flow
@@ -1070,47 +782,37 @@ RSpec.describe 'native layout L1 block-flow parity' do
     # `placeAbsolute`'s deferred path, so one wrapper decides it for both: the corner answers `null` for the
     # axis it does not speak for. (Measured in Chrome: y = 25, which is the answer this pins.)
     it 'shifts a flex container\'s aligned static position by the relative inlines around it' do
-      session = simulated_session(page('<div style="width:200px;font:16px monospace"><span style="position:relative;top:10px">a<span style="display:inline-block"><div style="display:flex;width:50px;height:20px;align-items:flex-end"><i style="position:absolute;width:5px;height:5px"></i></div></span></span></div>'))
-      session.visit '/'
-      expect(parity(session)).to include('ok' => true, 'mismatches' => 0)
+      body = '<div style="width:200px;font:16px monospace"><span style="position:relative;top:10px">a<span style="display:inline-block"><div style="display:flex;width:50px;height:20px;align-items:flex-end"><i id="m" style="position:absolute;width:5px;height:5px"></i></div></span></span></div>'
+      expect_parity(body)
+      expect(laid_out_rect(body)[1]).to eq(25)
     end
     it 'aligns an auto-height out-of-flow flex child by its laid-out height' do
-      expect_native_oof('<div style="display:flex;position:relative;width:400px;height:100px;align-items:center"><div style="position:absolute;left:10px">row auto height</div></div>')
-      expect_native_oof('<div style="display:flex;position:relative;width:400px;height:100px;align-items:flex-end"><div style="position:absolute;left:10px">row auto height</div></div>')
-      expect_native_oof('<div style="display:flex;flex-direction:column;position:relative;width:400px;height:100px;justify-content:flex-end"><div style="position:absolute;left:10px"><div style="height:30px"></div></div></div>')
+      expect_parity('<div style="display:flex;position:relative;width:400px;height:100px;align-items:center"><div style="position:absolute;left:10px">row auto height</div></div>')
+      expect_parity('<div style="display:flex;position:relative;width:400px;height:100px;align-items:flex-end"><div style="position:absolute;left:10px">row auto height</div></div>')
+      expect_parity('<div style="display:flex;flex-direction:column;position:relative;width:400px;height:100px;justify-content:flex-end"><div style="position:absolute;left:10px"><div style="height:30px"></div></div></div>')
     end
     it 'mirrors the cross axis of an rtl column for its out-of-flow child' do
-      expect_native_oof('<div style="display:flex;flex-direction:column;direction:rtl;position:relative;width:400px;height:100px"><div style="position:absolute;width:30px;height:20px">fs</div></div>')
-      expect_native_oof('<div style="display:flex;flex-direction:column;direction:rtl;position:relative;width:400px;height:100px;align-items:flex-end"><div style="position:absolute;width:30px;height:20px;margin:0 5px 0 9px">fs</div></div>')
+      expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;position:relative;width:400px;height:100px"><div style="position:absolute;width:30px;height:20px">fs</div></div>')
+      expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;position:relative;width:400px;height:100px;align-items:flex-end"><div style="position:absolute;width:30px;height:20px;margin:0 5px 0 9px">fs</div></div>')
     end
     it 'keeps a box anchored to a table cell where the cell\'s vertical-align moves only the content' do
-      expect_native_oof('<table style="border-spacing:0"><tr><td style="height:100px;width:100px;vertical-align:bottom;position:relative"><div style="height:10px">a</div><div style="position:absolute;top:0;left:0;width:10px;height:10px"></div></td></tr></table>')
-      expect_native_oof('<table style="border-spacing:0"><tr><td style="height:50px;width:100px;position:relative;border:3px solid"><div style="height:10px">a</div><div style="position:absolute;top:0;left:0;width:10px;height:10px"></div><div style="position:absolute;width:10px;height:10px"></div></td></tr></table>', 2)
+      expect_parity('<table style="border-spacing:0"><tr><td style="height:100px;width:100px;vertical-align:bottom;position:relative"><div style="height:10px">a</div><div style="position:absolute;top:0;left:0;width:10px;height:10px"></div></td></tr></table>')
+      expect_parity('<table style="border-spacing:0"><tr><td style="height:50px;width:100px;position:relative;border:3px solid"><div style="height:10px">a</div><div style="position:absolute;top:0;left:0;width:10px;height:10px"></div><div style="position:absolute;width:10px;height:10px"></div></td></tr></table>')
     end
     it 'resolves a % margin of a flex container\'s out-of-flow child against the containing block' do
-      expect_native_oof('<div style="display:flex;position:relative;width:400px;padding:50px;height:100px"><div style="position:absolute;margin-left:10%;width:20px;height:20px"></div></div>')
-      expect_native_oof('<div style="display:flex;position:relative;width:400px;padding:50px;height:100px;justify-content:center"><div style="position:absolute;margin-left:10%;width:20px;height:20px"></div></div>')
+      expect_parity('<div style="display:flex;position:relative;width:400px;padding:50px;height:100px"><div style="position:absolute;margin-left:10%;width:20px;height:20px"></div></div>')
+      expect_parity('<div style="display:flex;position:relative;width:400px;padding:50px;height:100px;justify-content:center"><div style="position:absolute;margin-left:10%;width:20px;height:20px"></div></div>')
     end
-    it 'places both an in-pass and a viewport containing block, and replays what it cannot lay out' do
+    it 'places both an in-pass and a viewport containing block, and an abspos grid' do
       # …the `fixed` box included: its containing block is the viewport, whose rectangle rides its record
-      session = simulated_session(page('<div style="width:400px"><div style="position:relative;height:100px"><div style="position:absolute;top:10px;left:10px;width:20px;height:20px"></div></div><div style="position:fixed;top:5px;left:5px;width:40px;height:40px"></div></div>')); session.visit '/'
-      r = parity(session)
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 2)
+      expect_parity('<div style="width:400px"><div style="position:relative;height:100px"><div style="position:absolute;top:10px;left:10px;width:20px;height:20px"></div></div><div style="position:fixed;top:5px;left:5px;width:40px;height:40px"></div></div>')
       # …and an abspos GRID is native's own now: its shrink-to-fit width is an intrinsic measure, which both
       # engines answer with the grid algorithm — one holding a contiguous run of TEXT included, since
       # `gridItems` wraps the run in the anonymous ITEM box §4 asks for (it replayed until 2026-09-22).
-      session = simulated_session(page(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;display:grid;grid-template-columns:100px 1fr"><div style="height:10px">a</div><div style="height:20px">b</div></div></div>))); session.visit '/'
-      r = parity(session)
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 1)
-      session = simulated_session(page(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;display:grid;grid-template-columns:100px 1fr">a<div>b</div></div></div>))); session.visit '/'
-      r = parity(session)
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 1)
-      # …and one whose shrink-to-fit native still cannot measure DOES replay, so the counter above is not
-      # simply always 1. `white-space: break-spaces` was this shape until 2026-09-23, when its measure went
-      # native; `WalkRefusals::UNMEASURABLE` is where the cause lives now.
-      session = simulated_session(page(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px">#{WalkRefusals::UNMEASURABLE}</div></div>))); session.visit '/'
-      r = parity(session)
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 0)
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;display:grid;grid-template-columns:100px 1fr"><div style="height:10px">a</div><div style="height:20px">b</div></div></div>))
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;display:grid;grid-template-columns:100px 1fr">a<div>b</div></div></div>))
+      # …and one shrink-to-fitting around a half-empty `inline-table`
+      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px">#{WalkRefusals::UNMEASURABLE}</div></div>))
     end
 
     # ── The static position ON A LINE ───────────────────────────────────────────────────────────────────
@@ -1123,51 +825,47 @@ RSpec.describe 'native layout L1 block-flow parity' do
       let(:mark) { '<div style="position:absolute;width:10px;height:10px"></div>' }
 
       it 'reads the inline offset, the line it fell on, and the line\'s alignment' do
-        expect_native_oof(%(<div style="#{tb}">hello #{mark}</div>))
-        expect_native_oof(%(<div style="#{tb}">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
-        expect_native_oof(%(<div style="#{tb}">one<br>#{mark}two</div>))
-        expect_native_oof(%(<div style="#{tb};text-align:right">hello #{mark}</div>))
-        expect_native_oof(%(<div style="#{tb};text-align:center">hello #{mark} tail</div>))
-        expect_native_oof(%(<div style="#{tb}">#{mark}hello</div>))
+        expect_parity(%(<div style="#{tb}">hello #{mark}</div>))
+        expect_parity(%(<div style="#{tb}">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
+        expect_parity(%(<div style="#{tb}">one<br>#{mark}two</div>))
+        expect_parity(%(<div style="#{tb};text-align:right">hello #{mark}</div>))
+        expect_parity(%(<div style="#{tb};text-align:center">hello #{mark} tail</div>))
+        expect_parity(%(<div style="#{tb}">#{mark}hello</div>))
       end
       # The collapsed space before it is part of where the flow has reached — it is only PEEKED, so the word
       # after may still wrap away from it — and an rtl flow reads no cursor at all: its corner is the content's
       # right edge less the box, wherever the line's text sits (`staticCornerFor`).
       it 'counts the collapsed space it interrupts, and takes the content edge in rtl' do
-        expect_native_oof(%(<div style="#{tb}">hello #{mark}world</div>))
-        expect_native_oof(%(<div style="#{tb}">hello#{mark}world</div>))
-        expect_native_oof(%(<div style="#{tb};direction:rtl">hello #{mark}</div>))
-        expect_native_oof(%(<div style="#{tb};direction:rtl;text-align:center">a long stretch of words that must wrap onto a second line #{mark}</div>))
+        expect_parity(%(<div style="#{tb}">hello #{mark}world</div>))
+        expect_parity(%(<div style="#{tb}">hello#{mark}world</div>))
+        expect_parity(%(<div style="#{tb};direction:rtl">hello #{mark}</div>))
+        expect_parity(%(<div style="#{tb};direction:rtl;text-align:center">a long stretch of words that must wrap onto a second line #{mark}</div>))
       end
       # An inline box around it moves the reading: its `position: relative` offset moves the content the
       # position is read off (§9.4.3), and its OPENING EDGE is not placed until the box's first content is, so
       # a marker written before that content waits for the edge — on whatever line the edge turns out to land.
       it 'moves with a relative inline and waits for an unplaced opening edge' do
-        expect_native_oof(%(<div style="#{tb}"><span style="position:relative;left:6px">x #{mark} y</span></div>))
-        expect_native_oof(%(<div style="#{tb}"><span style="position:relative;left:6px;top:3px"><span style="position:relative;left:4px">x #{mark}</span></span></div>))
-        expect_native_oof(%(<div style="#{tb}"><span style="padding-left:9px">#{mark}x</span></div>))
-        expect_native_oof(%(<div style="#{tb}">lead <span style="margin-left:9px;border-left:4px solid">#{mark}x</span></div>))
-        expect_native_oof(%(<div style="#{tb}">a long stretch of words that must wrap onto a second line <span style="padding-left:9px"><span style="padding-left:5px">#{mark}x</span></span></div>))
+        expect_parity(%(<div style="#{tb}"><span style="position:relative;left:6px">x #{mark} y</span></div>))
+        expect_parity(%(<div style="#{tb}"><span style="position:relative;left:6px;top:3px"><span style="position:relative;left:4px">x #{mark}</span></span></div>))
+        expect_parity(%(<div style="#{tb}"><span style="padding-left:9px">#{mark}x</span></div>))
+        expect_parity(%(<div style="#{tb}">lead <span style="margin-left:9px;border-left:4px solid">#{mark}x</span></div>))
+        expect_parity(%(<div style="#{tb}">a long stretch of words that must wrap onto a second line <span style="padding-left:9px"><span style="padding-left:5px">#{mark}x</span></span></div>))
       end
       # A block whose only line content is out of flow holds nothing to open a line WITH — but the line the flow
       # never opened is still where those boxes sit, and it starts at the indent and in the band a float leaves.
       # (Nothing closes it, so no alignment moves them, and the block is still an empty one.)
       it 'gives a block whose only line content is out of flow the line that never opened' do
-        expect_native_oof(%(<div style="#{tb};text-indent:12px"><span>   #{mark}   </span></div>))
-        expect_native_oof(%(<div style="#{tb};text-align:right"><span>   #{mark}   </span></div>))
-        expect_native_oof(%(<div style="#{tb};text-indent:12px"><span>#{mark}</span>x</div>))
-        expect_native_oof(%(<div style="#{tb};direction:rtl"><span>   #{mark}   </span></div>))
+        expect_parity(%(<div style="#{tb};text-indent:12px"><span>   #{mark}   </span></div>))
+        expect_parity(%(<div style="#{tb};text-align:right"><span>   #{mark}   </span></div>))
+        expect_parity(%(<div style="#{tb};text-indent:12px"><span>#{mark}</span>x</div>))
+        expect_parity(%(<div style="#{tb};direction:rtl"><span>   #{mark}   </span></div>))
       end
-      # …and a box the walk REPLAYS gets no marker at all: its record already carries the oracle's own position
-      # off this container's origin, so a static position settled over it would be applied twice (measured: a
-      # `text-indent` block holding a shrink-to-fit abspos put it at 22 where the oracle says 11, 0x0 instead of
-      # its box — found by a 4000-case fuzz, and the walk's own gate is what routes it here).
-      it 'leaves a replayed box to the oracle\'s own position' do
-        # (a shrink-to-fit box whose own content native cannot measure — an indented one is measured natively now)
-        unmeasurable = WalkRefusals::POSITIONED
-        expect_replayed_oof(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">#{unmeasurable}</div>mar</div>))
-        expect_replayed_oof(%(<div style="#{tb};text-indent:11px">lead <div style="position:absolute">#{unmeasurable}</div> tail</div>))
-        # …and the indented ones the measure now reaches lay out natively, the static position taken off the line
+      # …and a static position is applied ONCE, to a shrink-to-fit box in an indented block (a box placed off its
+      # container's origin and then settled again put it at 22 where the oracle says 11, 0x0 instead of its box —
+      # found by a 4000-case fuzz).
+      it 'places a shrink-to-fit box in an indented block once' do
+        expect_parity(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">#{WalkRefusals::POSITIONED}</div>mar</div>))
+        expect_parity(%(<div style="#{tb};text-indent:11px">lead <div style="position:absolute">#{WalkRefusals::POSITIONED}</div> tail</div>))
         expect_parity(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">shrink to fit</div>mar</div>))
       end
       # `justify` widens the spaces between the words, and native spreads them itself (`line_gaps`): a box whose
@@ -1175,44 +873,44 @@ RSpec.describe 'native layout L1 block-flow parity' do
       # first declined the subtree and then replayed the oracle's box. However deep the box sits: a `<span>`'s
       # content is that line's.
       it 'takes a static position off a justified line' do
-        expect_native_oof(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
-        expect_native_oof(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line <span>#{mark}</span> tail here</div>))
-        expect_native_oof(%(<div style="#{tb};text-align:justify">a long stretch of <span>words that #{mark} must</span> wrap onto a second line tail here</div>))
-        expect_native_oof(%(<div style="#{tb};text-align:justify;direction:rtl">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
+        expect_parity(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
+        expect_parity(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line <span>#{mark}</span> tail here</div>))
+        expect_parity(%(<div style="#{tb};text-align:justify">a long stretch of <span>words that #{mark} must</span> wrap onto a second line tail here</div>))
+        expect_parity(%(<div style="#{tb};text-align:justify;direction:rtl">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
       end
       # ── Review findings (adversarial round, 2026-09-15): each was a SILENT WRONG ANSWER ────────────────
       # A line the flow never put anything on is not aligned: `alignLine` runs only for a line that was
       # PLACED, so a `<br>` closing a marker-only line leaves the marker at the start edge.
       it 'does not align a line that holds nothing but a marker' do
-        expect_native_oof(%(<div style="#{tb};text-align:right">#{mark}<br>x</div>))
-        expect_native_oof(%(<div style="#{tb};text-align:center">a<br>#{mark}<br>b</div>))
-        expect_native_oof(%(<div style="#{tb};white-space:pre;text-align:right">#{mark}
+        expect_parity(%(<div style="#{tb};text-align:right">#{mark}<br>x</div>))
+        expect_parity(%(<div style="#{tb};text-align:center">a<br>#{mark}<br>b</div>))
+        expect_parity(%(<div style="#{tb};white-space:pre;text-align:right">#{mark}
 x</div>))
         # …inside a natively laid-out atomic too, whose own line is aligned in its own width
-        expect_native_oof(%(<div style="position:relative;width:300px">x <span style="display:inline-block;width:100px;text-align:right">#{mark}<br>y</span> z</div>))
+        expect_parity(%(<div style="position:relative;width:300px">x <span style="display:inline-block;width:100px;text-align:right">#{mark}<br>y</span> z</div>))
       end
       # The edge a marker waits for is the one belonging to the inline it sits DIRECTLY in
       # (`openInlines[openInlines.length - 1]`) — a plain inner inline waits for nothing, however edged the
       # boxes around it are, and an inline whose only edge is on the END side has no opening edge to wait for.
       it 'waits only on its own inline\'s opening edge' do
-        expect_native_oof(%(<div style="position:relative;width:400px"><span style="padding-left:12px"><span>#{mark} Menu</span></span></div>))
-        expect_native_oof(%(<div style="#{tb}">lead <span style="padding-left:9px"><span style="padding-right:5px">#{mark} x</span></span></div>))
-        expect_native_oof(%(<div style="#{tb}"><span style="padding-left:12px"><span>Menu #{mark}</span></span></div>))
+        expect_parity(%(<div style="position:relative;width:400px"><span style="padding-left:12px"><span>#{mark} Menu</span></span></div>))
+        expect_parity(%(<div style="#{tb}">lead <span style="padding-left:9px"><span style="padding-right:5px">#{mark} x</span></span></div>))
+        expect_parity(%(<div style="#{tb}"><span style="padding-left:12px"><span>Menu #{mark}</span></span></div>))
       end
       # A marker's y is frozen where it was recorded: a line whose first word does not fit the band DROPS
       # below the float afterwards, and the box the flow had already passed does not go down with it.
       it 'keeps the line it was on when that line drops below a float' do
-        expect_native_oof(%(<div style="position:relative;width:100px"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace">#{mark} aaaaaaaaaa</div></div>))
+        expect_parity(%(<div style="position:relative;width:100px"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace">#{mark} aaaaaaaaaa</div></div>))
       end
       # Round 2. What a WAITING marker settles to is the cursor it STOOD at plus its own inline's opening edge
       # — the oracle's `line.minX + from.ce.left`. Not the cursor at settle time: an inline that opens AFTER it
       # puts its edge past the marker, and a collapsed space after it is the oracle's next placement, not this
       # one. (A collapsed space BEFORE it counts: the oracle places such a space where it meets it.)
       it 'settles a waiting marker at its own inline\'s content edge, not at whatever the cursor reached' do
-        expect_native_oof(%(<div style="#{tb}">A<span style="padding-left:6px">#{mark}<span style="padding-left:4px">x</span></span></div>))
-        expect_native_oof(%(<div style="#{tb}">A<span style="padding-left:6px">#{mark}<b style="margin-left:9px">x</b></span></div>))
-        expect_native_oof(%(<div style="#{tb}">AA<span style="padding-left:6px">#{mark} x</span></div>))
-        expect_native_oof(%(<div style="#{tb}">AA <span style="padding-left:6px">#{mark}<span style="padding-left:4px">x</span></span></div>))
+        expect_parity(%(<div style="#{tb}">A<span style="padding-left:6px">#{mark}<span style="padding-left:4px">x</span></span></div>))
+        expect_parity(%(<div style="#{tb}">A<span style="padding-left:6px">#{mark}<b style="margin-left:9px">x</b></span></div>))
+        expect_parity(%(<div style="#{tb}">AA<span style="padding-left:6px">#{mark} x</span></div>))
+        expect_parity(%(<div style="#{tb}">AA <span style="padding-left:6px">#{mark}<span style="padding-left:4px">x</span></span></div>))
       end
       # A forced break and a preserved space both PLACE the open edges first (`flushOpenEdges` inside
       # `placeOnLine`, and before `forceBreak`), which both settles a marker waiting on one and makes the line
@@ -1221,48 +919,48 @@ x</div>))
       # in a run of its own so the two stay distinguishable.
       it 'settles a waiting marker at a preserved space and at a forced newline' do
         pre = 'position:relative;width:200px;font:16px monospace;white-space:pre'
-        expect_native_oof(%(<div style="#{pre}">A<span style="padding-left:6px">#{mark}\nx</span></div>))
-        expect_native_oof(%(<div style="#{pre};text-align:right">A<span style="padding-left:6px">#{mark}\nx</span></div>))
-        expect_native_oof(%(<div style="#{pre}">A<span style="padding-left:6px">#{mark}  x</span></div>))
-        expect_native_oof(%(<div style="#{pre}-wrap">AA<span style="padding-left:6px">#{mark} x</span></div>))
-        expect_native_oof(%(<div style="#{pre}-line">A<span style="padding-left:6px">#{mark}\nx</span></div>))
-        expect_native_oof(%(<div style="#{pre}-line">a much longer stretch of ordinary words that will wrap <span style="padding-left:6px">#{mark}\n<span>y</span></span> tail</div>))
+        expect_parity(%(<div style="#{pre}">A<span style="padding-left:6px">#{mark}\nx</span></div>))
+        expect_parity(%(<div style="#{pre};text-align:right">A<span style="padding-left:6px">#{mark}\nx</span></div>))
+        expect_parity(%(<div style="#{pre}">A<span style="padding-left:6px">#{mark}  x</span></div>))
+        expect_parity(%(<div style="#{pre}-wrap">AA<span style="padding-left:6px">#{mark} x</span></div>))
+        expect_parity(%(<div style="#{pre}-line">A<span style="padding-left:6px">#{mark}\nx</span></div>))
+        expect_parity(%(<div style="#{pre}-line">a much longer stretch of ordinary words that will wrap <span style="padding-left:6px">#{mark}\n<span>y</span></span> tail</div>))
       end
       # Round 3. A waiting marker's cursor is measured from the BAND, which a float drop moves under it: a
       # line too narrow for its first word goes down, WITHOUT closing, into the wider band it lands in.
       it 'follows the band when its line drops below a float while it waits' do
-        expect_native_oof(%(<div style="position:relative;width:100px"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace"><span style="padding-left:9px">#{mark}aaaaaaaaaa</span></div></div>))
-        expect_native_oof(%(<div style="position:relative;width:100px;text-align:right"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace"><span style="padding-left:9px">#{mark}aa</span></div></div>))
+        expect_parity(%(<div style="position:relative;width:100px"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace"><span style="padding-left:9px">#{mark}aaaaaaaaaa</span></div></div>))
+        expect_parity(%(<div style="position:relative;width:100px;text-align:right"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace"><span style="padding-left:9px">#{mark}aa</span></div></div>))
       end
       # A COLLAPSED space inside the marker's own inline puts that inline's edge down where the oracle places
       # the space — so a marker written after it is waiting on nothing, and keeps its own inline's relative
       # offset. And edges that CANCEL (a negative margin outside a padding) are never placed at all, because
       # the flush is asked of their sum: the fragment then starts where its content does.
       it 'is not waiting once a collapsed space has put the edge down, and not fooled by cancelling edges' do
-        expect_native_oof(%(<div style="#{tb}">zz<span style="padding-left:9px;position:relative;left:2px"> #{mark}a</span></div>))
-        expect_native_oof(%(<div style="#{tb}">zz<span style="padding-left:9px;position:relative;top:3px"> #{mark}a</span></div>))
-        expect_native_oof(%(<div style="#{tb};direction:rtl">zz<span style="padding-left:9px;position:relative;top:3px"> #{mark}a</span></div>))
-        expect_native_oof(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">#{mark}aa</span></span></div>))
-        expect_native_oof(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:7px">#{mark}aa</span></span></div>))
+        expect_parity(%(<div style="#{tb}">zz<span style="padding-left:9px;position:relative;left:2px"> #{mark}a</span></div>))
+        expect_parity(%(<div style="#{tb}">zz<span style="padding-left:9px;position:relative;top:3px"> #{mark}a</span></div>))
+        expect_parity(%(<div style="#{tb};direction:rtl">zz<span style="padding-left:9px;position:relative;top:3px"> #{mark}a</span></div>))
+        expect_parity(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">#{mark}aa</span></span></div>))
+        expect_parity(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:7px">#{mark}aa</span></span></div>))
         # …and an edge that cancels is never placed AT ALL, so nothing in that inline is ever waiting: a
         # marker written AFTER its content reads the cursor, where holding it back would have put it at the
         # fragment's start (measured in Chrome: 38.41, which is the cursor).
-        expect_native_oof(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">word#{mark}more</span></span></div>))
-        expect_native_oof(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">word #{mark}more</span></span></div>))
+        expect_parity(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">word#{mark}more</span></span></div>))
+        expect_parity(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">word #{mark}more</span></span></div>))
       end
       # What a held-back marker reads is where its fragment OPENED, which is not the fragment's leftmost
       # extent: content further along the line can reach further left than the box's own start (Chrome 6).
       it 'reads where its fragment opened, not how far left the fragment reaches' do
-        expect_native_oof(%(<div style="#{tb}"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-90px">beta</span></span></div>))
-        expect_native_oof(%(<div style="#{tb}"><span style="margin-left:6px"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-5px">beta</span></span></span></div>))
-        expect_native_oof(%(<div style="#{tb}"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-9px">beta</span></span></div>))
+        expect_parity(%(<div style="#{tb}"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-90px">beta</span></span></div>))
+        expect_parity(%(<div style="#{tb}"><span style="margin-left:6px"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-5px">beta</span></span></span></div>))
+        expect_parity(%(<div style="#{tb}"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-9px">beta</span></span></div>))
       end
       # An rtl corner is the container's, so the alignment never moves it and the cursor never reaches it —
       # but its BLOCK axis is the static position like any other, relative inlines included.
       it 'moves an rtl corner in the block axis only' do
-        expect_native_oof(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:3px;left:4px">#{mark} x</span></div>))
-        expect_native_oof(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:3px;padding-left:9px">#{mark} x</span></div>))
-        expect_native_oof(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:5px"><span style="position:relative;top:2px">x #{mark}</span></span></div>))
+        expect_parity(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:3px;left:4px">#{mark} x</span></div>))
+        expect_parity(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:3px;padding-left:9px">#{mark} x</span></div>))
+        expect_parity(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:5px"><span style="position:relative;top:2px">x #{mark}</span></span></div>))
       end
     end
 
@@ -1272,29 +970,29 @@ x</div>))
       let(:mark) { '<div style="position:absolute;width:10px;height:10px"></div>' }
 
       it 'starts at the unspent indent and in the float\'s band' do
-        expect_native_oof(%(<div style="position:relative;width:200px;text-indent:12px">#{mark}<div style="height:10px">b</div></div>))
-        expect_native_oof(%(<div style="position:relative;width:200px;text-indent:12px;padding-left:9px">#{mark}<div style="height:10px">b</div></div>))
-        expect_native_oof(%(<div style="position:relative;width:200px;text-indent:12px"><div style="height:10px">b</div>#{mark}</div>))
-        expect_native_oof(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
-        expect_native_oof(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:60px"></div><div style="height:10px">b</div>#{mark}</div>))
-        expect_native_oof(%(<div style="position:relative;width:200px;text-indent:12px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
-        expect_native_oof(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:10px"></div><div style="height:30px">b</div>#{mark}</div>))
+        expect_parity(%(<div style="position:relative;width:200px;text-indent:12px">#{mark}<div style="height:10px">b</div></div>))
+        expect_parity(%(<div style="position:relative;width:200px;text-indent:12px;padding-left:9px">#{mark}<div style="height:10px">b</div></div>))
+        expect_parity(%(<div style="position:relative;width:200px;text-indent:12px"><div style="height:10px">b</div>#{mark}</div>))
+        expect_parity(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
+        expect_parity(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:60px"></div><div style="height:10px">b</div>#{mark}</div>))
+        expect_parity(%(<div style="position:relative;width:200px;text-indent:12px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
+        expect_parity(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:10px"></div><div style="height:30px">b</div>#{mark}</div>))
       end
       # …a block holding NOTHING but out-of-flow children included: it lays out no lines, so it reads the same
       # cursor, at the same indent and in the same band.
       # The band is the one a LINE BOX meets, not a hairline at the cursor: a float that starts a few px below
       # it (after a collapsed margin, or a second float that dropped past the first) still shortens that line.
       it 'asks the band over a line box, not at the cursor' do
-        expect_native_oof(%(<div style="position:relative;width:100px;line-height:40px"><div style="height:10px;margin-bottom:15px">b</div><div style="float:left;width:30px;height:5px"></div>#{mark}</div>))
-        expect_native_oof(%(<div style="position:relative;width:100px"><div style="float:right;width:60px;height:5px"></div><div style="float:left;width:60px;height:30px"></div>#{mark}</div>))
+        expect_parity(%(<div style="position:relative;width:100px;line-height:40px"><div style="height:10px;margin-bottom:15px">b</div><div style="float:left;width:30px;height:5px"></div>#{mark}</div>))
+        expect_parity(%(<div style="position:relative;width:100px"><div style="float:right;width:60px;height:5px"></div><div style="float:left;width:60px;height:30px"></div>#{mark}</div>))
       end
       it 'reads it in a block whose only children are out of flow' do
-        expect_native_oof(%(<div style="position:relative;width:200px;text-indent:12px">#{mark}</div>))
-        expect_native_oof(%(<div style="position:relative;width:200px;text-indent:12px;padding-left:7px;border-left:3px solid">#{mark}#{mark}</div>), 2)
-        expect_native_oof(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:20px"></div>#{mark}</div>))
+        expect_parity(%(<div style="position:relative;width:200px;text-indent:12px">#{mark}</div>))
+        expect_parity(%(<div style="position:relative;width:200px;text-indent:12px;padding-left:7px;border-left:3px solid">#{mark}#{mark}</div>))
+        expect_parity(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:20px"></div>#{mark}</div>))
       end
       it 'leaves an rtl flow reading the content edge, whatever the band' do
-        expect_native_oof(%(<div style="position:relative;width:200px;direction:rtl;text-indent:12px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
+        expect_parity(%(<div style="position:relative;width:200px;direction:rtl;text-indent:12px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
       end
     end
   end
@@ -1366,32 +1064,6 @@ x</div>))
       expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr"><div><div style="width:40px;height:20px"></div></div></div></div>')
       expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr;overflow:hidden"><div style="float:left;width:40px;height:20px"></div></div></div>')
     end
-    # Native ASKS such a child's intrinsic widths, so a child it cannot measure has to be refused by the WALK —
-    # discovered in Rust it would fail the whole pass instead of this one subtree.
-    it 'declines a vertical block holding content native cannot measure' do
-      expect_walk_declines(%(<div style="width:400px"><div style="writing-mode:vertical-lr"><div>#{WalkRefusals::UNMEASURABLE}</div></div></div>), 'shrink-to-fit-child-unmeasurable')
-      expect_walk_declines(%(<div style="width:400px"><div style="writing-mode:vertical-lr">#{WalkRefusals::POSITIONED}</div></div>), 'block-level-box-unplaceable')
-    end
-    # …which is also why such a child is walked as a MEASURED subtree: an atomic inline whose own box would be
-    # PUSHED is not in the run stream native measures from, so the walk has to decline where it would otherwise
-    # hand Rust a subtree it cannot re-measure. Every shape here lays out natively without the writing mode.
-    it 'declines a vertical block whose atomic inline is pushed, not laid out natively' do
-      # One entry of `WalkRefusals::ATOMIC`, deliberately, where it stands on a line three ways: that list is what
-      # the atomic ROUTE refuses, and this is a different route — a vertical block measures its own width, so what
-      # it declines is what it cannot MEASURE, under the name of the gate inside. Written out rather than
-      # filtered, so a reader sees the shapes.
-      [
-        %(a #{WalkRefusals::POSITIONED}),
-        %(a <span style="display:inline-block">#{WalkRefusals::POSITIONED}</span>),
-        %(a<br>b #{WalkRefusals::POSITIONED})
-      ].each do |inner|
-        expect_walk_declines(%{<div style="width:400px"><div style="writing-mode:vertical-lr">#{inner}</div></div>}, 'block-level-box-unplaceable')
-      end
-      # …and through a GRID item, whose subtree is measured for the track sizes
-      expect_walk_declines(%(<div style="display:grid;grid-template-columns:200px;width:400px"><div><div style="writing-mode:vertical-lr">a #{WalkRefusals::POSITIONED}</div></div></div>), 'block-level-box-unplaceable')
-      # …and the same content in a HORIZONTAL block lays out, the atomic pushed rather than the pass declined.
-      expect_parity(%(<div style="width:400px"><div>a #{WalkRefusals::POSITIONED}</div></div>))
-    end
     # `direction` runs the INLINE axis, which in a vertical mode is the vertical one: an rtl vertical block's
     # children still start at the LEFT content edge, where an rtl HORIZONTAL block's start at the right. Its
     # lines and their atomics, and an out-of-flow child's static corner, stay at the left with them.
@@ -1418,53 +1090,51 @@ x</div>))
   # box; one OUTSIDE the pass — the viewport of a `fixed` box, an ancestor above the pass root, a
   # relatively-positioned inline — used to make the whole box replay the oracle's resolved geometry. Now the
   # oracle's `containingBlockFor` rectangle rides the record (rec[92..95]) and native sizes and places the box
-  # from it exactly as it does for an in-pass containing block. `expect_native_oof` is what pins that: parity
-  # alone would pass on the replay too.
+  # from it exactly as it does for an in-pass containing block.
   describe 'an out-of-flow box whose containing block is outside the pass' do
     it 'places a fixed box against the viewport itself' do
-      expect_native_oof('<div style="width:400px;height:200px"><div style="position:fixed;top:10px;left:20px;width:50px;height:30px">f</div><div style="height:20px">flow</div></div>')
-      expect_native_oof('<div style="width:400px;height:200px"><div style="position:fixed;top:0;right:0;width:40px;height:40px">f</div></div>')
-      expect_native_oof('<div style="width:400px;height:200px"><div style="position:fixed;bottom:5px;right:5px;width:30px;height:30px">br</div></div>')
-      expect_native_oof('<div style="width:400px;height:200px"><div style="position:fixed;inset:0">stretched</div></div>')
-      expect_native_oof('<div style="width:400px;height:200px"><div style="position:fixed;left:0;right:0;height:20px;margin:0 auto;width:100px">centred</div></div>')
-      expect_native_oof('<div style="width:400px;height:200px"><div style="position:fixed;top:10%;left:25%;width:10%;height:5%">pct</div></div>')
+      expect_parity('<div style="width:400px;height:200px"><div style="position:fixed;top:10px;left:20px;width:50px;height:30px">f</div><div style="height:20px">flow</div></div>')
+      expect_parity('<div style="width:400px;height:200px"><div style="position:fixed;top:0;right:0;width:40px;height:40px">f</div></div>')
+      expect_parity('<div style="width:400px;height:200px"><div style="position:fixed;bottom:5px;right:5px;width:30px;height:30px">br</div></div>')
+      expect_parity('<div style="width:400px;height:200px"><div style="position:fixed;inset:0">stretched</div></div>')
+      expect_parity('<div style="width:400px;height:200px"><div style="position:fixed;left:0;right:0;height:20px;margin:0 auto;width:100px">centred</div></div>')
+      expect_parity('<div style="width:400px;height:200px"><div style="position:fixed;top:10%;left:25%;width:10%;height:5%">pct</div></div>')
     end
     it 'places an absolute box against the initial containing block' do
-      expect_native_oof('<div style="width:400px;height:200px"><div style="position:absolute;top:10px;left:10px;width:50px;height:20px">a</div><div style="height:30px">flow</div></div>')
-      expect_native_oof('<div style="width:400px;height:200px"><div style="position:absolute;left:0;right:0;top:0;height:25px">stretch</div></div>')
-      expect_native_oof('<div style="width:400px;height:200px"><div style="position:absolute;width:60px;height:20px">staticpos</div></div>')
-      expect_native_oof('<div style="width:400px;height:200px"><div style="position:absolute;top:50%;left:50%;width:50px;height:20px">half</div></div>')
+      expect_parity('<div style="width:400px;height:200px"><div style="position:absolute;top:10px;left:10px;width:50px;height:20px">a</div><div style="height:30px">flow</div></div>')
+      expect_parity('<div style="width:400px;height:200px"><div style="position:absolute;left:0;right:0;top:0;height:25px">stretch</div></div>')
+      expect_parity('<div style="width:400px;height:200px"><div style="position:absolute;width:60px;height:20px">staticpos</div></div>')
+      expect_parity('<div style="width:400px;height:200px"><div style="position:absolute;top:50%;left:50%;width:50px;height:20px">half</div></div>')
       # …its auto width shrink-to-fitting against that rectangle, measured natively
-      expect_native_oof('<div style="width:400px;height:200px"><div style="position:absolute;left:30px">shrink to fit me</div></div>')
-      expect_native_oof('<div style="width:400px;height:200px"><div style="position:absolute;left:30px"><div style="width:80px;height:10px"></div></div></div>')
+      expect_parity('<div style="width:400px;height:200px"><div style="position:absolute;left:30px">shrink to fit me</div></div>')
+      expect_parity('<div style="width:400px;height:200px"><div style="position:absolute;left:30px"><div style="width:80px;height:10px"></div></div></div>')
     end
-    # A containing block AWAY from the origin, above the pass root: the rectangle has to carry its position and
-    # its padding box, not just its size — every viewport-rooted shape above would pass on a (0,0) rect.
-    it 'places against a containing block above the pass root' do
+    # A containing block AWAY from the origin: the rectangle has to carry its position and its padding box, not
+    # just its size — every viewport-rooted shape above would pass on a (0,0) rect.
+    it 'places against a containing block away from the origin' do
       outer = 'position:relative;margin:30px 0 0 40px;border:5px solid;padding:10px;width:300px;height:200px'
-      expect_native_oof(%{<div style="#{outer}"><div id="sub" style="height:50px"><div style="position:absolute;bottom:0;right:0;width:20px;height:10px"></div></div></div>}, root: '#sub')
-      expect_native_oof(%{<div style="#{outer}"><div id="sub" style="height:50px"><div style="position:absolute;top:50%;left:50%;width:20px;height:10px"></div></div></div>}, root: '#sub')
+      expect_parity(%{<div style="#{outer}"><div id="sub" style="height:50px"><div style="position:absolute;bottom:0;right:0;width:20px;height:10px"></div></div></div>})
+      expect_parity(%{<div style="#{outer}"><div id="sub" style="height:50px"><div style="position:absolute;top:50%;left:50%;width:20px;height:10px"></div></div></div>})
       # …and one that is not the viewport and not a record either: a transformed ancestor contains a FIXED box
-      expect_native_oof(%{<div style="transform:translate(10px,20px);border:3px solid;width:300px;height:200px"><div id="sub" style="height:50px"><div style="position:fixed;top:10px;left:30px;width:20px;height:10px"></div></div></div>}, root: '#sub')
+      expect_parity(%{<div style="transform:translate(10px,20px);border:3px solid;width:300px;height:200px"><div id="sub" style="height:50px"><div style="position:fixed;top:10px;left:30px;width:20px;height:10px"></div></div></div>})
     end
     # …the one containing block that is INSIDE the pass and still has no record of its own: a relatively
     # positioned inline, whose rectangle is the oracle's line layout (a pushed input, finer than the old replay).
     it 'places against a relatively positioned inline' do
-      expect_native_oof('<div style="width:400px">t <span style="position:relative">a<span style="display:inline-block;width:30px;height:10px"><span style="position:absolute;top:1px;left:2px;width:20px;height:10px"></span></span></span></div>')
+      expect_parity('<div style="width:400px">t <span style="position:relative">a<span style="display:inline-block;width:30px;height:10px"><span style="position:absolute;top:1px;left:2px;width:20px;height:10px"></span></span></span></div>')
     end
     # …and one at its STATIC position inside an inline-block inside an inline box, which is the shape that
     # showed the oracle holding a stale static position: the atomic is laid out at the line's provisional y and
     # the baseline settle moves it afterwards, so the held position has to move with it (Chrome puts the box at
     # the atomic's own content origin, y = 30 on a 48px line, not at the block's top).
     it 'places one at its static position inside an atomic inline' do
-      expect_native_oof('<div style="width:400px;font-size:48px">Big <span>x<span style="display:inline-block;font-size:12px;width:60px;height:14px"><div style="position:absolute;width:10px;height:10px"></div></span></span></div>')
-      expect_native_oof('<div style="width:300px">t <span>a<span style="display:inline-block;width:30px;height:10px"><div style="position:fixed;width:5px;height:5px"></div></span></span></div>')
-      expect_native_oof('<div style="width:300px">t <span style="position:relative">a<span style="display:inline-block;width:30px;height:10px"><div style="position:absolute;width:5px;height:5px"></div></span></span></div>')
+      expect_parity('<div style="width:400px;font-size:48px">Big <span>x<span style="display:inline-block;font-size:12px;width:60px;height:14px"><div style="position:absolute;width:10px;height:10px"></div></span></span></div>')
+      expect_parity('<div style="width:300px">t <span>a<span style="display:inline-block;width:30px;height:10px"><div style="position:fixed;width:5px;height:5px"></div></span></span></div>')
+      expect_parity('<div style="width:300px">t <span style="position:relative">a<span style="display:inline-block;width:30px;height:10px"><div style="position:absolute;width:5px;height:5px"></div></span></span></div>')
     end
-    # …and where native cannot measure such a box's shrink-to-fit content, the oracle's box is still replayed
-    # rather than the pass being declined.
-    it 'replays one whose content native cannot measure' do
-      expect_replayed_oof(%{<div style="width:400px;height:200px"><div style="position:absolute;left:30px">a #{WalkRefusals::POSITIONED}</div></div>})
+    # …and one shrink-to-fitting around an atomic that holds a `-webkit-sticky` box.
+    it 'places one shrink-to-fitting around a positioned atomic' do
+      expect_parity(%{<div style="width:400px;height:200px"><div style="position:absolute;left:30px">a #{WalkRefusals::POSITIONED}</div></div>})
     end
     # The ROOT element is never an out-of-flow box's containing block, in either engine: the oracle assigns its box at
     # the end of the pass, so a first layout could not see it and every later one saw last pass's — the walk, which
@@ -1478,13 +1148,12 @@ x</div>))
         '<style>html{transform:translateZ(0)}</style><div id="p" style="height:2000px"><div style="position:fixed;bottom:0;width:40px;height:20px"></div></div>',
         '<style>html{filter:invert(1)}</style><div id="p" style="height:2000px"><div style="position:fixed;bottom:0;width:40px;height:20px"></div></div>'
       ].each do |body|
-        session = simulated_session(page(body)); session.visit '/'
-        first = parity(session)
-        expect(first).to include('ok' => true, 'mismatches' => 0), "#{body}: #{first.inspect}"
-        expect(first['nativeOutOfFlow']).to be >= 1, "#{body}: #{first.inspect}"
+        expect_parity(body)
+        session = session_for(body)
+        rect = "(r => [r.x, r.y, r.width, r.height])(document.getElementById('p').firstElementChild.getBoundingClientRect())"
+        first = session.evaluate_script(rect)
         session.execute_script("document.getElementById('p').appendChild(document.createElement('span'))")
-        again = parity(session)
-        expect(again).to include('ok' => true, 'mismatches' => 0), "#{body} (second pass): #{again.inspect}"
+        expect(session.evaluate_script(rect)).to eq(first), "#{body}: moved on the second pass"
       end
     end
   end
@@ -1496,52 +1165,46 @@ x</div>))
   describe 'an out-of-flow box leaves the measured region' do
     pushed_atomic = %(a #{WalkRefusals::POSITIONED})
     it 'lays out an absolute box whose content native cannot measure, inside a subtree it does measure' do
-      # …its box replayed, because its containing block is outside the pass — and the same as a `fixed` box
-      expect_replayed_oof(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_replayed_oof(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:fixed;top:0;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      # …its containing block outside the vertical block, and a `fixed` box the same
+      expect_parity(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_parity(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:fixed;top:0;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
       # …and sized and placed by NATIVE itself, from both insets, from a declared width, or from a percentage
       # one (whose figure `used_width` takes from the record, so no intrinsic measure is asked at all)
-      expect_native_oof(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;left:0;right:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_native_oof(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:60px">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_native_oof(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:50%">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_native_oof(%{<div style="width:400px;position:relative"><div style="position:absolute;width:calc(50% + 10px)">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div>})
+      expect_parity(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;left:0;right:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_parity(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:60px">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_parity(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:50%">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_parity(%{<div style="width:400px;position:relative"><div style="position:absolute;width:calc(50% + 10px)">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div>})
     end
     # …and the other routes walked measured reach it too: an atomic inline, a flex item, a table cell, a grid
-    # item. (Through a pure BLOCK child, because a text block holding an out-of-flow child declines outright.)
+    # item. (Through a pure BLOCK child, because a text block holding an out-of-flow child declined outright.)
     it 'lays one out inside every other measured route' do
       oof = %{<div style="width:30px"><div style="position:absolute;width:60px">#{pushed_atomic}</div></div>}
-      expect_native_oof(%{<div style="width:400px">x <span style="display:inline-block;position:relative">#{oof}</span></div>})
-      expect_native_oof(%{<div style="width:400px;display:flex"><div style="position:relative">#{oof}</div></div>})
-      expect_native_oof(%{<table style="border-spacing:0"><tr><td style="padding:0;position:relative">#{oof}</td></tr></table>})
-      expect_native_oof(%{<div style="display:grid;grid-template-columns:auto;width:400px"><div style="position:relative">#{oof}</div></div>})
+      expect_parity(%{<div style="width:400px">x <span style="display:inline-block;position:relative">#{oof}</span></div>})
+      expect_parity(%{<div style="width:400px;display:flex"><div style="position:relative">#{oof}</div></div>})
+      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0;position:relative">#{oof}</td></tr></table>})
+      expect_parity(%{<div style="display:grid;grid-template-columns:auto;width:400px"><div style="position:relative">#{oof}</div></div>})
     end
-    # An out-of-flow box whose OWN width IS a shrink-to-fit needs an intrinsic measure of its content, so where
-    # native cannot measure that content the box keeps the oracle's box — the pass is not declined for it. WHICH
-    # it is, the WALK decides: a subtree it refuses under the measuring obligation is rolled back and the box is
-    # replayed, so content the predicate cannot judge (a `text-indent`ed atomic, an inline-flex) lands here too.
-    it 'replays a shrink-to-fit box whose own content native cannot measure' do
-      expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      # …again a subset, for the same reason: this route REPLAYS what it cannot measure rather than declining,
-      # and the shared list's whitespace-only atomic is measurable here.
+    # An out-of-flow box whose OWN width IS a shrink-to-fit needs an intrinsic measure of its content, a pushed
+    # atomic's included.
+    it 'shrink-to-fits a box around its own content' do
+      expect_parity(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_parity(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
       [
         %(<span style="display:inline-block">#{WalkRefusals::POSITIONED}</span>),
         WalkRefusals::POSITIONED
       ].each do |inner|
-        expect_replayed_oof(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a #{inner}</div><p>x</p></div>})
+        expect_parity(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a #{inner}</div><p>x</p></div>})
       end
-      # …while one it CAN measure is still sized and placed natively
-      expect_native_oof(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a <span style="display:inline-block">ok</span></div><p>x</p></div>})
+      # …and around a plain inline-block
+      expect_parity(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a <span style="display:inline-block">ok</span></div><p>x</p></div>})
     end
   end
 
-  # A `<td>` whose content native cannot lay out itself pushes its own width CONTRIBUTION (rec[84..85]) and the
-  # table is laid out around it. That needs `nlIntrinsicMeasurable` to answer what the walk will actually DO:
-  # while it ignored the walk's own refusal of an intrinsic-size keyword (native's own since), such an
-  # inline-block in a cell was called measurable, the cell was walked measured, and the atomic inside then
-  # declined the whole table. A pushed atomic (an inline-block the walk refuses inside) stands in for it now.
-  describe 'a cell whose content native cannot lay out pushes its contribution' do
-    it 'lays out a table around a cell holding an atomic native does not lay out' do
+  # A `<td>` holding an atomic around a `-webkit-sticky` box contributes its width and the table is laid out
+  # around it. Such an inline-block in a cell was once walked measured, and the atomic inside then declined the
+  # whole table.
+  describe 'a cell holding a positioned atomic' do
+    it 'lays out a table around it' do
       expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a #{WalkRefusals::POSITIONED}</td><td style="padding:0">cc</td></tr></table>})
       expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a #{WalkRefusals::POSITIONED}</td></tr></table>})
       expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0;width:50px">a #{WalkRefusals::POSITIONED}</td></tr></table>})
@@ -1793,12 +1456,6 @@ x</div>))
   # content height where that is definite (a flex column's main size). The walk resolved every one against the
   # ORACLE's stamps (`_lbCbW` / `_lbCbH`), and every page read them.
   describe 'percentage sizes' do
-    def no_oracle(body)
-      session = simulated_session(page(body)); session.visit '/'
-      session.evaluate_script('document.body.offsetHeight')
-      session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
-    end
-
     it 'resolves them against the parent native lays the box out in' do
       [
         '<div style="width:300px;height:200px"><div style="width:50%;height:50%">c</div></div>',
@@ -1809,11 +1466,7 @@ x</div>))
         '<div style="width:300px;height:200px"><div style="float:left;width:25%;height:10%">f</div><div style="height:20px"></div></div>',
         '<div style="width:300px;height:200px">t <span style="display:inline-block;width:40%;min-height:30%">ib</span></div>',
         '<div style="width:300px;height:200px"><div style="width:50%;height:50%"><div style="height:50%;width:50%">nested</div></div></div>'
-      ].each do |body|
-        expect_parity(body)
-        r = no_oracle(body)
-        expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-      end
+      ].each {|body| expect_parity(body) }
     end
 
     # …and the MARGINS and PADDING, against the containing block's width on every side: the walk sends each edge's
@@ -1830,16 +1483,12 @@ x</div>))
         '<div style="width:300px"><div style="margin-top:10%"><div style="margin-top:5%">collapse</div></div></div>',
         '<div style="display:flex;width:420px"><div style="box-sizing:border-box;width:60%;padding:0 10%">item</div><div style="width:30px;height:10px"></div></div>',
         '<div style="width:260px"><div style="float:left;margin:-5% 0 0 -3%">f</div></div>'
-      ].each do |body|
-        expect_parity(body)
-        r = no_oracle(body)
-        expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-      end
+      ].each {|body| expect_parity(body) }
     end
-    # A text indent's percentage is of the block's CONTENT width, which the walk still takes off the oracle's box — so
-    # the padding it subtracts is the one the oracle resolved, not the length part a percentage padding leaves on the
-    # record (80 where 64 is right, with `padding: 0 10%` and `text-indent: 20%` in a 400px block).
-    it 'measures a text indent against the content width the oracle padded' do
+    # A text indent's percentage is of the block's CONTENT width — the padding it subtracts is the resolved one, not
+    # the length part a percentage padding leaves on the record (80 where 64 is right, with `padding: 0 10%` and
+    # `text-indent: 20%` in a 400px block).
+    it 'measures a text indent against the padded content width' do
       # (the words fill the first line to within the 16px the wrong basis would take off it)
       expect_parity(%(<div style="width:400px"><div style="padding:0 10%;text-indent:20%">#{(['ab'] * 27).join(' ')} cccccc</div></div>))
     end
@@ -1855,11 +1504,10 @@ x</div>))
       session.visit '/'
       expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")).to eq(25)
     end
-    # A flex item whose box is PUSHED (the atomic inside it) keeps its min/max-height — the floor a flex
-    # container item two-phases its auto height against — and a percentage one went over as a fraction the push then
-    # cleared: the item recomputed its height from content with no floor (40 where the oracle's is 128). The push
-    # resolves it against the oracle's basis instead, as the border-box figure the rest of the push keeps.
-    it 'resolves a pushed item\'s percentage clamp in the push' do
+    # A flex item keeps its min/max-height — the floor a flex container item two-phases its auto height against —
+    # with an atomic inside it too: a percentage one once went over as a fraction that was then cleared, and the
+    # item took its height from content with no floor (40 where the oracle's is 128).
+    it 'keeps a flex item\'s percentage min-height around a positioned atomic' do
       expect_parity(%(<div style="display:flex;height:180px;align-items:flex-start"><div style="display:flex;align-items:center;min-height:60%;padding:10px 0"><div>t #{WalkRefusals::POSITIONED}</div><div style="height:20px;width:10px"></div></div></div>))
     end
     # A box laid out twice under two different HEIGHT bases — a flex item measured with an auto height, then
@@ -1886,7 +1534,7 @@ x</div>))
   # …and a comparison inside a `calc()` SUM — subtracted, scaled by a number, divided — travels as a program too
   # (`nlSumTerms`: terms at a top-level `+` / `-`, factors at `*` / `/`), in every carrier: a width, an edge, a gap,
   # a text-indent, a relative inset. It was the one form no program expressed until 2026-09-26, and the walk resolved
-  # it against the oracle's basis. Chrome's boxes, and no oracle read.
+  # it against the oracle's basis. Chrome's boxes.
   it 'resolves a comparison inside a calc() sum natively' do
     {
       '<div style="width:300px"><div id="m" style="width:calc(100% - min(50%, 80px));height:10px"></div></div>'   => [0, 0, 220, 10],
@@ -1898,9 +1546,6 @@ x</div>))
     }.each do |body, rect|
       expect_parity(body)
       laid_out_rect(body).zip(rect).each {|g, w| expect(g).to be_within(0.01).of(w), body }
-      session = simulated_session(page(body)); session.visit '/'
-      reads = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')['oracleReads'].keys
-      expect(reads).to be_empty, "#{body}: #{reads.inspect}"
     end
   end
 end

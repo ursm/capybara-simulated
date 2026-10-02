@@ -3,15 +3,12 @@
 # content box leaves (left/right, dropping when it doesn't fit), sized from its own content where its width
 # is `auto` (§10.3.5), and CONTAINED by the auto height of the box that establishes the context — which is
 # the nearest ancestor that does, however many plain blocks lie between: native shifts the rectangle up
-# through each of them. Cases the engine can't reproduce yet (position:relative, a relatively SHIFTED
-# ancestor, a float whose content native cannot measure) must DECLINE to JS — an A/B per bail proves the
-# guard is specific.
+# through each of them.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 require_relative 'support/layout_golden'
-require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout float parity' do
   def page(body)
@@ -213,10 +210,10 @@ RSpec.describe 'native layout float parity' do
   # they hold their children's margins in AND own the floats inside them. This engine answered only the first
   # half, which the walk then declined; both halves are native now.
   it 'keeps a contain/multicol formatting context natively' do
-    expect(run_shadow('<div style="contain:layout"><p style="margin-top:30px">hi there</p></div>')).to include('ok' => true, 'mismatches' => 0)
-    expect(run_shadow('<div style="column-count:2"><p style="margin-top:30px">hi there</p></div>')).to include('ok' => true, 'mismatches' => 0)
-    expect(run_shadow('<div><p style="margin-top:30px">hi there</p></div>')).to include('ok' => true, 'mismatches' => 0)
-    expect(run_shadow('<div style="width:300px"><div style="contain:layout"><div style="float:left;width:9px;height:4px"></div></div></div>')).to include('ok' => true, 'mismatches' => 0)
+    expect_parity('<div style="contain:layout"><p style="margin-top:30px">hi there</p></div>')
+    expect_parity('<div style="column-count:2"><p style="margin-top:30px">hi there</p></div>')
+    expect_parity('<div><p style="margin-top:30px">hi there</p></div>')
+    expect_parity('<div style="width:300px"><div style="contain:layout"><div style="float:left;width:9px;height:4px"></div></div></div>')
   end
 
   # A PARTIAL clear — a float left on the side the box does not name still reaches the line it lands on — is a
@@ -369,8 +366,7 @@ RSpec.describe 'native layout float parity' do
 
   # §10.3.5: a float's AUTO width SHRINKS TO FIT where a block's fills — its min-content widened to the room
   # its containing block leaves it, capped at its max-content. Native measures that from the float's own
-  # content like every other content-sized box; the walk marks the float a MEASURED subtree so a shape native
-  # cannot measure declines in the walk rather than mid-pass.
+  # content like every other content-sized box.
   it 'shrinks an auto-width float to fit its own content' do
     expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left">hi there</div></div>')
     # …capped at the room, so a long run wraps inside the float rather than overflowing it
@@ -397,18 +393,6 @@ RSpec.describe 'native layout float parity' do
     expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left"><div style="width:40px;height:10px"></div></div>' \
                   '<div style="clear:left;height:5px"></div></div>')
     expect_parity('<div style="width:300px;overflow:hidden"><div style="float:left">hi</div><div>text beside the float</div></div>')
-  end
-
-  # …and a float whose content native cannot measure declines in the WALK — the same `nlIntrinsicMeasurable`
-  # gate every other content-sized box goes through — rather than leaving Rust to fail the whole pass.
-  it 'declines an auto-width float native cannot measure, keeps one it can' do
-    WalkRefusals::ATOMIC.each do |inner|
-      r = run_shadow(%(<div style="width:300px;overflow:hidden"><div style="float:left">#{inner}</div></div>))
-      expect(r).to include('ok' => false), "#{inner}: #{r.inspect}"
-      # …and the SAME content behind a declared width, which needs no measure: the refusal is width-driven,
-      # not a refusal of the subtree itself.
-      expect_parity(%(<div style="width:300px;overflow:hidden"><div style="float:left;width:200px">#{inner}</div></div>))
-    end
   end
 
   # A RELATIVELY SHIFTED float declined until 2026-09-20 on the argument that it "carries an offset native
@@ -494,12 +478,10 @@ RSpec.describe 'native layout float parity' do
                   '<div><div style="margin-top:20px;height:5px"><div style="margin-top:-20px;height:1px"></div></div></div></div>')
   end
 
-  # A/B — a float ABOVE the pass root is one the pass never places, so nothing inside can be positioned
-  # against it: a box that would CLEAR it took neither its margin nor the clearance (5 tall where the oracle
-  # says 65), one that would AVOID it kept the full width, and the pass ROOT's own used width is the band the
-  # float leaves (an `overflow: hidden` root beside a 100px float is 200 wide, and a pass that cannot see the
-  # float says 300). The walk refuses such a pass rather than answer part of it.
-  it 'refuses a sub-root pass under a float above its root' do
+  # A float ABOVE a block is placed all the same against what that block holds: a box that would CLEAR it takes
+  # its margin and the clearance (65 tall, not 5), one that would AVOID it narrows, and an `overflow: hidden`
+  # block beside a 100px float is the 200 the float leaves, not 300.
+  it 'positions a block\'s content against a float above it' do
     above = '<div style="width:300px;overflow:hidden"><div style="float:left;width:100px;height:100px"></div>' \
             '<div style="height:40px"></div>'
     [
@@ -507,24 +489,12 @@ RSpec.describe 'native layout float parity' do
       '<div id="w"><div style="overflow:hidden;height:25px"></div></div>',
       '<div id="w" style="overflow:hidden"><div style="height:25px"></div></div>',
       '<div id="w"><div style="margin-top:20px;height:5px"></div></div>'
-    ].each do |inner|
-      session = simulated_session(page("#{above}#{inner}</div>"))
-      session.visit '/'
-      session.evaluate_script('document.body.offsetHeight')
-      sub = session.evaluate_script("globalThis.__csimLayoutShadowRun(document.querySelector('#w'))")
-      expect(sub).to include('ok' => false, 'reason' => 'float above the pass root'), "#{inner}: #{sub.inspect}"
-      # …and the whole-document pass, which does place that float, lays the same page out natively
-      expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0)
-    end
+    ].each {|inner| expect_parity("#{above}#{inner}</div>") }
 
-    # …a pass whose root holds the float ITSELF places it, and lays out
-    own = simulated_session(page('<div style="width:300px;overflow:hidden"><div style="height:40px"></div>' \
-                                 '<div id="w"><div style="float:left;width:20px;height:10px"></div>' \
-                                 '<div style="clear:left;height:5px"></div></div></div>'))
-    own.visit '/'
-    own.evaluate_script('document.body.offsetHeight')
-    expect(own.evaluate_script("globalThis.__csimLayoutShadowRun(document.querySelector('#w'))"))
-      .to include('ok' => true, 'mismatches' => 0)
+    # …and a block that holds the float ITSELF
+    expect_parity('<div style="width:300px;overflow:hidden"><div style="height:40px"></div>' \
+                  '<div id="w"><div style="float:left;width:20px;height:10px"></div>' \
+                  '<div style="clear:left;height:5px"></div></div></div>')
   end
 
   # …the shapes that made the structural answer necessary: a cleared box whose float is one its own measure
@@ -566,21 +536,13 @@ RSpec.describe 'native layout float parity' do
     ].each {|body| expect_parity(body) }
   end
 
-  # …and what it still declines, beside the static float it keeps: an auto-width one native cannot measure.
-  # A POSITIONED float was the other entry here and is no longer one — a relative float lays out through the
-  # same hook, which is a second gate from the block arm's and had to be opened with it.
-  it 'declines an inline float native cannot place, keeps the plain one' do
+  # …and a RELATIVE one in inline content lays out through the same hook, which is a second gate from the block
+  # arm's and had to be opened with it.
+  it 'lays out a relative float in inline content' do
     keep = '<div style="width:300px">aaa <span style="float:left;width:50px;height:20px"></span>bbb</div>'
-    expect(run_shadow(keep)['ok']).to be true
+    expect_parity(keep)
     expect_parity(keep.sub('<div style="width:300px">', '<div style="width:300px;overflow:hidden">')
                       .sub('float:left;', 'float:left;position:relative;left:9px;top:6px;'))
-    # …and what the float gates DO still refuse, which after the relative one went is a position neither
-    # engine models (`nlPositionInFlow`). Asserted here because `WalkRefusals::POSITIONED` refuses at the
-    # atomic gate rather than at either of these two, so without it the float gates have no refusing shape
-    # anywhere in the suite.
-    expect(run_shadow(keep.sub('float:left;', 'float:left;position:-webkit-sticky;'))['ok']).to be false
-    expect(run_shadow('<div style="width:300px;overflow:hidden"><div style="float:left;position:-webkit-sticky;width:50px;height:50px"></div>t</div>')['ok']).to be false
-    expect(run_shadow(%(<div style="width:300px">aaa <span style="float:left">#{WalkRefusals::POSITIONED}</span>bbb</div>))['ok']).to be false
   end
 
   # A line too narrow for what is about to go on it DROPS below the float squeezing it (§9.5, "if a shortened
@@ -619,8 +581,8 @@ RSpec.describe 'native layout float parity' do
   # to, and `ddd` no longer fitted beside it — 104 where Chrome says 82, one whole extra line. It had been there
   # for pieces WITH width all along (`aa&shy;bb` beside a 70px float drew `aa-bb`, 48 wide where Chrome's is
   # 38.41 — the same height, so no height saw it).
-  # Native DECLINES every one of these (`text-not-measurable`), so parity cannot see them at all: this is the
-  # oracle's geometry against Chrome's and nothing else, which is why the figures here are Chrome's own.
+  # The parity specs could not see these (the walk declined them as `text-not-measurable`), which is why the
+  # figures here are Chrome's own.
   it 'decides a soft hyphen on the band the piece lands on, not the one it dropped from (Chrome: 82 / 38.41)' do
     {
       '<div style="width:80px;font:16px monospace;text-indent:9px"><div style="float:left;width:90px;height:60px"></div>' \

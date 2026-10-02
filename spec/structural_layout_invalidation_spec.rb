@@ -164,12 +164,12 @@ RSpec.describe 'layout invalidation through structural selectors' do
                             'return [Math.round(e.width * 10) / 10, Math.round(e.height * 10) / 10]; })()')
   end
 
-  def measure(css, body, change, native:)
+  def measure(css, body, change)
     html = "<!DOCTYPE html><style>body { margin: 0; font: 16px monospace } #{css}</style><div style=\"width:300px\">#{body}</div>"
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
     s.visit '/'
-    # …the native pass authoritative, and every reusing pass walked again fresh and compared (it throws on a difference).
-    s.execute_script('globalThis.__csimNativeLayout = true; globalThis.__csimNativeLayoutVerifyReuse = true') if native
+    # …every reusing pass walked again fresh and compared (it throws on a difference).
+    s.execute_script('globalThis.__csimNativeLayoutVerifyReuse = true')
     before = rect(s)
     s.execute_script(change)
     [before, rect(s)]
@@ -177,8 +177,7 @@ RSpec.describe 'layout invalidation through structural selectors' do
 
   shapes.each do |name, css, body, change, before, after|
     it "relays out #{name}" do
-      expect(measure(css, body, change, native: false)).to eq([before, after])
-      expect(measure(css, body, change, native: true)).to eq([before, after])
+      expect(measure(css, body, change)).to eq([before, after])
     end
   end
 

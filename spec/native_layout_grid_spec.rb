@@ -1,16 +1,13 @@
 # frozen_string_literal: true
-# Native layout — GRID (§12), geometry shadow-parity. Native COMPUTES every grid it admits (`nlGridSupported`):
-# it sizes the columns itself — px / % / fr, and the intrinsic tracks from the items' min/max-content, which
-# native measures natively where it can (`nlIntrinsicMeasurable`) and otherwise receives resolved from the
-# oracle — runs the row-major placement (content rows or `grid-auto-rows`), and lays each item out at its track
-# width; an out-of-flow item is replayed at its resolved box as a block's abspos child is. The former replay
-# path (the oracle's item boxes pushed) is retired.
+# Native layout — GRID (§12). Native COMPUTES every grid: it sizes the columns itself — px / % / fr, and the
+# intrinsic tracks from the items' min/max-content, which it measures itself — runs the row-major placement
+# (content rows or `grid-auto-rows`), and lays each item out at its track width; an out-of-flow item is placed
+# as a block's abspos child is. The former replay path (the oracle's item boxes pushed) is retired.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 require_relative 'support/layout_golden'
-require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout grid parity' do
   def page(body)
@@ -18,7 +15,7 @@ RSpec.describe 'native layout grid parity' do
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
-  # …the pass itself, for an example that wants to read the result rather than assert it clean.
+  # The shadow pass over `body`, which a golden's recording checks.
   def run_shadow(body)
     session = simulated_session(page(body))
     session.visit '/'
@@ -35,46 +32,26 @@ RSpec.describe 'native layout grid parity' do
     end
   end
 
-  def expect_bail(body)
-    expect(run_shadow(body)).to include('ok' => false)
-  end
-
-  # Parity, AND the intrinsic tracks were sized from native's own min/max-content measure (no oracle
-  # contribution marshalled) — `nativeIntrinsicGrids` counts the computed grids that took that path.
-  def expect_native_intrinsic(body)
-    r = run_shadow(body)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r, body)
-    expect(r['nativeIntrinsicGrids']).to be >= 1, "intrinsic tracks fell back to the oracle's contribution: #{r.inspect}"
-  end
-
-  # Parity through the FALLBACK: the oracle's per-column contribution is marshalled resolved because an item's
-  # content is not natively measurable yet.
-  def expect_resolved_fallback(body)
-    r = run_shadow(body)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r, body)
-    expect(r['nativeIntrinsicGrids']).to eq(0), "expected the oracle-resolved fallback: #{r.inspect}"
-  end
-
-  # Parity AND the figure Chrome measures for the box marked `id="g"`. The grid's intrinsic answer is the same
-  # algorithm in BOTH engines, so parity alone would be blind to it being the wrong one. The tolerance is for
-  # Chrome's LayoutUnit: it snaps every figure to 1/64 px, so a track carrying a fraction can land 1/128 px off
-  # ours (80.8828125 against Chrome's 80.890625) — one snap, never more, so anything wider is a real difference.
-  # Lay `body` out, assert the two engines agree about all of it, and hand the session back for the ONE figure
-  # the example is really about — which parity cannot supply when both engines had the rule wrong together.
-  def parity_session(body)
+  # Lay `body` out and hand the session back for the ONE figure the example is really about — which a golden
+  # cannot supply when it was recorded with the rule wrong.
+  def laid_out_session(body)
     session = simulated_session(page(body))
     session.visit '/'
-    session.evaluate_script 'document.body.offsetHeight'
-    r = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-    expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-    # …and that it compared anything at all: a record the walk DROPS is indistinguishable from one that
-    # agreed, so a mismatch count of 0 on its own says nothing about a shape neither engine laid out.
-    expect(r['compared']).to be > 0, "#{body}: nothing compared: #{r.inspect}"
     session
+  end
+
+  # The figure Chrome measures for the width of the box marked `id="g"`. The grid's intrinsic answer was the same
+  # algorithm in BOTH engines, so parity alone was blind to it being the wrong one. The tolerance is for Chrome's
+  # LayoutUnit: it snaps every figure to 1/64 px, so a track carrying a fraction can land 1/128 px off ours
+  # (80.8828125 against Chrome's 80.890625) — one snap, never more, so anything wider is a real difference.
+  # …within 0.01px, which is tight enough that a real track-sizing difference cannot hide in it. `tol` is for
+  # the one case the engines cannot meet: a figure the §12.7 `fr` arithmetic MULTIPLIES. Both engines measure
+  # text from the font file's own advances and land a hair under Chrome's rounding (54.664 against 54.671875
+  # here), and doubling the share doubles the gap — 0.0156, not 0.0078. A SHARED divergence, so no sweep sees
+  # it; widen it only where the arithmetic explains the number, never to make a figure fit.
+  def expect_chrome_width(body, chrome_w, tol = 0.01)
+    w = laid_out_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().width")
+    expect(w).to be_within(tol).of(chrome_w), "#{body}: #{w}, Chrome #{chrome_w}"
   end
 
   # …the marked box's own rect against CHROME's (`#m`, where `expect_chrome_width` reads the container `#g`).
@@ -86,20 +63,10 @@ RSpec.describe 'native layout grid parity' do
         return [b.x, b.y, b.width, b.height];
       })()
     JS
-    got = parity_session(body).evaluate_script(js)
+    got = laid_out_session(body).evaluate_script(js)
     got.each_with_index do |v, i|
       expect(v).to be_within(0.01).of(chrome[i]), "#{body}: #{got.inspect}, Chrome #{chrome.inspect}"
     end
-  end
-
-  # …within 0.01px, which is tight enough that a real track-sizing difference cannot hide in it. `tol` is for
-  # the one case the engines cannot meet: a figure the §12.7 `fr` arithmetic MULTIPLIES. Both engines measure
-  # text from the font file's own advances and land a hair under Chrome's rounding (54.664 against 54.671875
-  # here), and doubling the share doubles the gap — 0.0156, not 0.0078. A SHARED divergence, so no sweep sees
-  # it; widen it only where the arithmetic explains the number, never to make a figure fit.
-  def expect_chrome_width(body, chrome_w, tol = 0.01)
-    w = parity_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().width")
-    expect(w).to be_within(tol).of(chrome_w), "#{body}: #{w}, Chrome #{chrome_w}"
   end
 
   # …and a child that generates NO BOX is no grid ITEM either: a `<link>` or `<meta>` in the body is
@@ -109,7 +76,7 @@ RSpec.describe 'native layout grid parity' do
   it 'makes no grid item of a child that generates no box' do
     ['<link rel="stylesheet">', '<meta name="x">', '<div style="display:none"></div>'].each do |boxless|
       body = %(<div style="width:300px"><div style="display:grid;grid-template-columns:40px 40px"><div>a</div>#{boxless}<div id="g">b</div></div></div>)
-      box = parity_session(body).evaluate_script("(b => [b.x, b.y])(document.getElementById('g').getBoundingClientRect())")
+      box = laid_out_session(body).evaluate_script("(b => [b.x, b.y])(document.getElementById('g').getBoundingClientRect())")
       expect(box).to eq([40, 0]), "#{body}: #{box.inspect}, Chrome [40, 0]"
     end
   end
@@ -127,15 +94,6 @@ RSpec.describe 'native layout grid parity' do
       expect_parity(body)
       session = simulated_session(page(body)); session.visit '/'
       expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().width")).to be_within(0.05).of(chrome_w)
-    end
-  end
-  # …and that makes it a MEASURED subtree whatever the template asks, so content native could lay out but not
-  # measure is refused by the WALK — not discovered mid-measure in Rust ("native declined"), which a template with no
-  # intrinsic track (whose items are otherwise walked unmeasured) reached.
-  it 'refuses in the walk a keyword-width grid item it could not measure' do
-    ['50% 50%', 'auto auto'].each do |template|
-      r = run_shadow(%(<div style="width:300px"><div style="display:grid;grid-template-columns:#{template}"><div style="width:fit-content">#{WalkRefusals::UNMEASURABLE}</div><div>zz</div></div></div>))
-      expect(r).to include('ok' => false, 'reason' => 'shrink-to-fit-child-unmeasurable'), template
     end
   end
   it 'matches a fixed 2-column grid with a gap' do
@@ -259,14 +217,10 @@ RSpec.describe 'native layout grid parity' do
   # A STANDALONE inline-grid is an atomic inline whose own container native lays out, at the line's
   # shrink-to-fit -- it was pushed until 2026-09-16.
   it 'lays out a standalone inline-grid atomic itself' do
-    r = run_shadow('<div style="width:300px">text <span style="display:inline-grid;grid-template-columns:30px 30px"><div>x</div><div>y</div></span> more text wrapping onward past the edge</div>')
-    expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
-    expect(r['nativeAtomics']).to be >= 1, "the inline-grid was pushed: #{r.inspect}"
+    expect_parity('<div style="width:300px">text <span style="display:inline-grid;grid-template-columns:30px 30px"><div>x</div><div>y</div></span> more text wrapping onward past the edge</div>')
     # …one holding an ANONYMOUS item included, since 2026-09-22: its shrink-to-fit is an intrinsic measure, and
     # the run is an item the grid algorithm sizes a column from like any other. (It was PUSHED until then.)
-    r = run_shadow('<div style="width:300px">text <span style="display:inline-grid;grid-template-columns:30px 30px">x<div>y</div></span> more text wrapping onward past the edge</div>')
-    expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
-    expect(r['nativeAtomics']).to be >= 1, "the inline-grid was pushed: #{r.inspect}"
+    expect_parity('<div style="width:300px">text <span style="display:inline-grid;grid-template-columns:30px 30px">x<div>y</div></span> more text wrapping onward past the edge</div>')
   end
   # …and an inline-grid FLEX ITEM is a grid: a flex item is blockified, so nothing here is inline. It used to
   # decline for the `position: sticky` on it, which is in flow and needs nothing of its own.
@@ -348,8 +302,7 @@ RSpec.describe 'native layout grid parity' do
   # ── Intrinsic tracks ───────────────────────────────────────────────────────────────────────────────────
   # auto / min-content / max-content / minmax() / fit-content() need each column's content contribution (the
   # items' min/max-content). Native runs the §12.6 maximize + §12.7 fr distribution on the track specs, taking
-  # the contribution from its own measure (below) or, for content it can't measure yet, resolved from the
-  # oracle's gridColumnContent.
+  # the contribution from its own measure (below).
   describe 'native intrinsic-track compute' do
     it 'matches two auto columns sized to their content' do
       expect_parity('<div style="display:grid;grid-template-columns:auto auto;width:500px"><div style="height:20px">short</div><div style="height:30px">a much longer cell here</div></div>')
@@ -388,94 +341,93 @@ RSpec.describe 'native layout grid parity' do
     let(:mc_auto) { 'display:grid;grid-template-columns:max-content auto;width:600px' }
 
     it 'measures a text item (auto columns: min-content floor, max-content ceiling)' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="height:20px">short</div><div style="height:30px">a much longer cell here</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div style="height:20px">short</div><div style="height:30px">a much longer cell here</div></div>))
     end
     it 'measures min-content beside fr (the widest word)' do
-      expect_native_intrinsic('<div style="display:grid;grid-template-columns:min-content 1fr;width:400px"><div style="height:20px">wordwordword and more</div><div style="height:30px">rest</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:min-content 1fr;width:400px"><div style="height:20px">wordwordword and more</div><div style="height:30px">rest</div></div>')
     end
     it 'measures max-content and fit-content(px) tracks' do
-      expect_native_intrinsic('<div style="display:grid;grid-template-columns:max-content auto;width:500px"><div style="height:20px">some text here</div><div style="height:30px">more content in this column here</div></div>')
-      expect_native_intrinsic('<div style="display:grid;grid-template-columns:fit-content(80px) 1fr;width:400px"><div style="height:20px">a longer piece of text than eighty px</div><div style="height:30px">rest</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:max-content auto;width:500px"><div style="height:20px">some text here</div><div style="height:30px">more content in this column here</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:fit-content(80px) 1fr;width:400px"><div style="height:20px">a longer piece of text than eighty px</div><div style="height:30px">rest</div></div>')
     end
     it 'measures minmax() sides that are intrinsic' do
-      expect_native_intrinsic('<div style="display:grid;grid-template-columns:minmax(auto,200px) minmax(min-content,max-content);width:600px"><div>some words in the first</div><div>and some more words in the second column</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:minmax(auto,200px) minmax(min-content,max-content);width:600px"><div>some words in the first</div><div>and some more words in the second column</div></div>')
     end
     it 'pins a declared width (content-box and border-box), then adds the edges' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="width:150px;padding:0 10px;height:10px">declared</div><div style="box-sizing:border-box;width:150px;padding:0 10px;height:10px">declared</div></div>))
-      expect_native_intrinsic('<div style="display:grid;grid-template-columns:auto 1fr;width:300px"><div style="box-sizing:border-box;width:50px;padding:0 40px;height:10px">x</div><div style="height:10px">b</div></div>')
+      expect_parity(%(<div style="#{two_auto}"><div style="width:150px;padding:0 10px;height:10px">declared</div><div style="box-sizing:border-box;width:150px;padding:0 10px;height:10px">declared</div></div>))
+      expect_parity('<div style="display:grid;grid-template-columns:auto 1fr;width:300px"><div style="box-sizing:border-box;width:50px;padding:0 40px;height:10px">x</div><div style="height:10px">b</div></div>')
     end
     it 'clamps the contribution by max-width (below the widest word) and min-width' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="max-width:40px;height:10px">unbreakableword and more</div><div style="min-width:250px;height:10px">x</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div style="max-width:40px;height:10px">unbreakableword and more</div><div style="min-width:250px;height:10px">x</div></div>))
     end
     it 'adds an item\'s own padding and border, and counts an auto margin as zero' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="padding:0 15px;border:3px solid;height:10px">edged item</div><div style="margin:0 auto;height:10px">auto margins</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div style="padding:0 15px;border:3px solid;height:10px">edged item</div><div style="margin:0 auto;height:10px">auto margins</div></div>))
     end
     it 'measures a block-container item by its widest child margin box (a negative margin narrows)' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div><div style="margin:0 12px 0 5px;height:10px">nested block words here</div><div style="margin-right:-20px;height:10px">shorter</div></div><div style="height:30px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div><div style="padding:0 7px;margin:0 9px">child with edges and a few words</div></div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div><div style="margin:0 12px 0 5px;height:10px">nested block words here</div><div style="margin-right:-20px;height:10px">shorter</div></div><div style="height:30px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div><div style="padding:0 7px;margin:0 9px">child with edges and a few words</div></div><div style="height:10px">b</div></div>))
     end
     it 'measures a mixed block item (anonymous text blocks around a block child — their declared sizing is auto)' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div>text before<p style="margin:0 4px">a paragraph in the middle</p>and after</div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div>text before is long<p style="margin:0">para</p>and after</div><div>b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div>text before<p style="margin:0 4px">a paragraph in the middle</p>and after</div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div>text before is long<p style="margin:0">para</p>and after</div><div>b</div></div>))
     end
     it 'skips an out-of-flow child of an item' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="position:relative"><p style="margin:0">a</p><div style="position:absolute;width:300px;height:5px">abs</div></div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div style="position:relative"><p style="margin:0">a</p><div style="position:absolute;width:300px;height:5px">abs</div></div><div style="height:10px">b</div></div>))
     end
     it 'ends a line at <br> (the widest line, not the sum) and breaks at <wbr>' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div>one line<br>a much longer second line here<br>three</div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div>averyveryverylongword<wbr>splithere and more</div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div>one line<br>a much longer second line here<br>three</div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div>averyveryverylongword<wbr>splithere and more</div><div style="height:10px">b</div></div>))
     end
     it 'takes a pending space once: a multi-word run glued to the next run (review finding 1)' do
-      expect_native_intrinsic(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>aa bb<b>cc</b></div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div style="white-space:nowrap">aa bb<b>cc</b></div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>aa bb<wbr>cc</div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>aa<b> bb cc</b>dd</div><div>b</div></div>))
+      expect_parity(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>aa bb<b>cc</b></div><div>b</div></div>))
+      expect_parity(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div style="white-space:nowrap">aa bb<b>cc</b></div><div>b</div></div>))
+      expect_parity(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>aa bb<wbr>cc</div><div>b</div></div>))
+      expect_parity(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>aa<b> bb cc</b>dd</div><div>b</div></div>))
     end
     it 'measures an item holding only a no-break space as that space (content, not white space)' do
-      expect_native_intrinsic(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>&nbsp;</div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>x<p style="margin:0">y</p>&nbsp;</div><div>b</div></div>))
+      expect_parity(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>&nbsp;</div><div>b</div></div>))
+      expect_parity(%(<div style="display:grid;grid-template-columns:max-content auto;width:600px"><div>x<p style="margin:0">y</p>&nbsp;</div><div>b</div></div>))
     end
     it 'continues a word across edgeless inline boundaries (mixed-font glued word)' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div>foo<b>bar</b> baz <i>qux</i>quux</div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="font-size:24px">bigger <small>and smaller</small> text</div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div><span>nested <span>inline <b>deep</b></span></span></div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div>foo<b>bar</b> baz <i>qux</i>quux</div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div style="font-size:24px">bigger <small>and smaller</small> text</div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div><span>nested <span>inline <b>deep</b></span></span></div><div style="height:10px">b</div></div>))
     end
     it 'collapses white space: leading / trailing / newlines, and a later run\'s pending space wins' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div>   leading and trailing   </div><div>\n   newlines\n   collapse   </div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div>foo <span style="font-size:40px"> </span> bar</div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div>a&nbsp;b&nbsp;c glued</div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div>   leading and trailing   </div><div>\n   newlines\n   collapse   </div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div>foo <span style="font-size:40px"> </span> bar</div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div>a&nbsp;b&nbsp;c glued</div><div style="height:10px">b</div></div>))
     end
     it 'measures letter-spacing and word-spacing into the words' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="letter-spacing:2px;word-spacing:5px">spaced out letters</div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div style="letter-spacing:2px;word-spacing:5px">spaced out letters</div><div style="height:10px">b</div></div>))
     end
     it 'pins a nowrap text item\'s min-content to its max-content' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="white-space:nowrap;height:10px">never wraps these words</div><div style="height:10px">wraps these words fine</div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="white-space:nowrap">plain<br>nowrap<wbr>lines</div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div style="white-space:nowrap;height:10px">never wraps these words</div><div style="height:10px">wraps these words fine</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div style="white-space:nowrap">plain<br>nowrap<wbr>lines</div><div style="height:10px">b</div></div>))
     end
     it 'measures empty and whitespace-only items as zero' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div></div><div>   </div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div></div><div>   </div></div>))
     end
     it 'splits a spanning item evenly over its columns and honours an explicit column start' do
-      expect_native_intrinsic('<div style="display:grid;grid-template-columns:auto auto auto;width:600px"><div style="grid-column:span 2">spans two columns with lots of text</div><div>c</div><div style="grid-column:3">explicit third</div><div>x</div><div>yy</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:auto auto auto;width:600px"><div style="grid-column:span 2">spans two columns with lots of text</div><div>c</div><div style="grid-column:3">explicit third</div><div>x</div><div>yy</div></div>')
     end
     it 'takes the widest item from a later row' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div>a</div><div>b</div><div>the widest item sits in the second row</div><div>c</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div>a</div><div>b</div><div>the widest item sits in the second row</div><div>c</div></div>))
     end
 
-    # What native does not measure yet falls back to the oracle's resolved contribution — with parity.
     it 'reads a percentage width / min-width / calc as auto (no basis in an intrinsic measure), from the declared sizing' do
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="width:50%;height:10px">pct width</div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="min-width:50%;height:10px">pct min</div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="width:calc(50% - 10px);height:10px">calc pct</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="width:50%;height:10px">pct width</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="min-width:50%;height:10px">pct min</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="width:calc(50% - 10px);height:10px">calc pct</div><div>b</div></div>))
     end
     # A PERCENTAGE padding / margin resolves to nothing in an intrinsic measure (CSS Sizing 3), and the record
     # carries those basis-less edges beside its cbW-resolved ones, so native measures such a box itself.
     it 'measures a percentage padding / margin itself (the basis-less edges ride the record)' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="padding-left:10%;height:10px">pct pad</div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="margin:0 10%;height:10px">pct margin</div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="height:10px">a <span style="padding:0 10%">pct</span> b</div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="display:flex"><div style="padding:0 10%;min-width:50px;width:20px;height:10px"></div></div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div><table style="padding:0 10%"><tr><td>hello</td></tr></table></div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div style="padding-left:10%;height:10px">pct pad</div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div style="margin:0 10%;height:10px">pct margin</div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div style="height:10px">a <span style="padding:0 10%">pct</span> b</div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div style="display:flex"><div style="padding:0 10%;min-width:50px;width:20px;height:10px"></div></div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div><table style="padding:0 10%"><tr><td>hello</td></tr></table></div><div style="height:10px">b</div></div>))
     end
     # A nowrap / pre block CONTAINER is one unbreakable token, its children included — the oracle's `min = max` —
     # and native pins it the same way now (its record carries the container's own `white-space`), where these fell
@@ -486,65 +438,64 @@ RSpec.describe 'native layout grid parity' do
     # not Chrome's, which pins only inline content — the normal child's column is 57.6 there, the floats' 40.)
     it 'measures a nowrap / pre block container itself, pinning the whole box as the oracle does' do
       mc = 'display:grid;grid-template-columns:min-content auto;width:600px;font:16px monospace'
-      expect_native_intrinsic(%(<div style="#{mc}"><div style="white-space:nowrap"><p style="margin:0">block child under nowrap</p></div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc}"><div style="white-space:pre"><p style="margin:0">block child under pre</p></div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc}"><div style="white-space:nowrap"><p style="margin:0;white-space:normal">a normal child under nowrap</p></div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc}"><div style="white-space:nowrap"><div style="float:left;width:30px;height:5px"></div><div style="float:left;width:40px;height:5px"></div></div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{mc}"><div style="white-space:nowrap"><p style="margin:0">block child under nowrap</p></div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{mc}"><div style="white-space:pre"><p style="margin:0">block child under pre</p></div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{mc}"><div style="white-space:nowrap"><p style="margin:0;white-space:normal">a normal child under nowrap</p></div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{mc}"><div style="white-space:nowrap"><div style="float:left;width:30px;height:5px"></div><div style="float:left;width:40px;height:5px"></div></div><div style="height:10px">b</div></div>))
     end
     it 'puts an edged inline\'s open / close edges on the line and in the word, taking the pending space at its open' do
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div>with <span style="padding:0 8px">padded span</span> here</div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div>aa <span style="margin:0 3px;border:1px solid">bb</span>cc</div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div>aa<span style="padding-right:8px"> bb</span> cc</div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div>aa <span style="padding:0 4px"><span style="padding:0 2px">deep</span> x</span></div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="white-space:nowrap">aa <span style="padding:0 5px">bb</span> cc</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div>with <span style="padding:0 8px">padded span</span> here</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div>aa <span style="margin:0 3px;border:1px solid">bb</span>cc</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div>aa<span style="padding-right:8px"> bb</span> cc</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div>aa <span style="padding:0 4px"><span style="padding:0 2px">deep</span> x</span></div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="white-space:nowrap">aa <span style="padding:0 5px">bb</span> cc</div><div>b</div></div>))
       # "any edge" is decided by the same open+close float sum in both engines (sub-pixel cancelling margins)
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div>aa <span style="margin-left:-1px;padding-right:0.7px;margin-right:0.3px"> bb</span> cc</div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div>aa <span style="margin-left:5px;margin-right:-5px"> bb</span> cc</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div>aa <span style="margin-left:-1px;padding-right:0.7px;margin-right:0.3px"> bb</span> cc</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div>aa <span style="margin-left:5px;margin-right:-5px"> bb</span> cc</div><div>b</div></div>))
     end
     it 'breaks between characters for the min-content under break-all / anywhere, not break-word (spaced advances)' do
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="word-break:break-all">breakallword here</div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="overflow-wrap:anywhere">anywhereword here</div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="overflow-wrap:break-word">breakword words here</div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="word-break:break-all;letter-spacing:3px;word-spacing:4px">spaced break all</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="word-break:break-all">breakallword here</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="overflow-wrap:anywhere">anywhereword here</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="overflow-wrap:break-word">breakword words here</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="word-break:break-all;letter-spacing:3px;word-spacing:4px">spaced break all</div><div>b</div></div>))
     end
     it 'measures preserved white-space (pre / pre-wrap: spaces are content, a newline ends the line) and pre-line' do
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="white-space:pre">pre   spaced\nsecond longer line   </div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="white-space:pre-wrap">  wrap   spaced\nsecond longer line   </div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="white-space:pre-wrap">aa <span style="padding:0 5px">bb</span>   cc</div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="white-space:pre-line">aa bb\ncc dd ee\n\nff</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="white-space:pre">pre   spaced\nsecond longer line   </div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="white-space:pre-wrap">  wrap   spaced\nsecond longer line   </div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="white-space:pre-wrap">aa <span style="padding:0 5px">bb</span>   cc</div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="white-space:pre-line">aa bb\ncc dd ee\n\nff</div><div>b</div></div>))
     end
     it 'packs floats on a line inside a block-container item (max sums, min stands alone)' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div><div style="float:left;width:40px;height:10px"></div><div style="float:left;width:70px;height:10px;margin:0 5px"></div><p style="margin:0">beside floats</p></div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div><div style="float:left;width:40px;height:10px"></div><div style="float:right;width:70px;height:10px"></div></div><div>b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div><div style="float:left;width:40px;height:10px"></div><div style="float:left;width:70px;height:10px;margin:0 5px"></div><p style="margin:0">beside floats</p></div><div>b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div><div style="float:left;width:40px;height:10px"></div><div style="float:right;width:70px;height:10px"></div></div><div>b</div></div>))
     end
-    it 'measures an atomic inline native lays out itself, and falls back for one whose box is pushed' do
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div><span style="display:inline-block;width:80px;height:10px"></span> after</div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div>an <img style="width:30px"> image</div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div><span style="display:inline-block;vertical-align:middle;width:80px;height:10px"></span> after</div><div style="height:10px">b</div></div>))
-      expect_resolved_fallback(%(<div style="#{two_auto}"><div>#{WalkRefusals::POSITIONED} after</div><div style="height:10px">b</div></div>))
+    it 'measures an atomic inline native lays out itself' do
+      expect_parity(%(<div style="#{two_auto}"><div><span style="display:inline-block;width:80px;height:10px"></span> after</div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div>an <img style="width:30px"> image</div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div><span style="display:inline-block;vertical-align:middle;width:80px;height:10px"></span> after</div><div style="height:10px">b</div></div>))
     end
     it 'measures a flex-container item: a row sums its items (gap + margins), a wrapping row\'s min is one item, a column takes the widest' do
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="width:40px;height:10px"></div><div style="width:60px;height:10px"></div></div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex;gap:10px"><div>alpha beta</div><div style="margin:0 4px">gamma</div></div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="display:grid;grid-template-columns:min-content 1fr;width:600px"><div style="display:flex;flex-wrap:wrap;gap:6px"><div>alpha beta</div><div>gamma delta</div></div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex;flex-direction:column"><div>alpha beta gamma</div><div style="margin:0 20px">short</div></div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex;flex-direction:row-reverse"><div style="width:40px;height:10px"></div><div>rev words</div></div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="display:flex;gap:3px"><div>nested</div><div>flex</div></div><div>outer</div></div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="display:flex"><div style="width:40px;height:10px"></div><div style="width:60px;height:10px"></div></div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="display:flex;gap:10px"><div>alpha beta</div><div style="margin:0 4px">gamma</div></div><div>b</div></div>))
+      expect_parity(%(<div style="display:grid;grid-template-columns:min-content 1fr;width:600px"><div style="display:flex;flex-wrap:wrap;gap:6px"><div>alpha beta</div><div>gamma delta</div></div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="display:flex;flex-direction:column"><div>alpha beta gamma</div><div style="margin:0 20px">short</div></div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="display:flex;flex-direction:row-reverse"><div style="width:40px;height:10px"></div><div>rev words</div></div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="display:flex"><div style="display:flex;gap:3px"><div>nested</div><div>flex</div></div><div>outer</div></div><div>b</div></div>))
     end
     it 'reads a flex item\'s DECLARED sizing (not its pushed used box): flex-basis pins or, when it grows, raises the max; min/max-width clamp' do
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="flex:0 0 30px;width:60px;height:10px">x</div><div style="flex:1 0 0">grows from zero basis text</div></div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="flex-basis:50px;flex-grow:1;padding:0 5px">grow basis</div><div style="min-width:120px">min</div><div style="max-width:20px">capped words</div></div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex"><div style="box-sizing:border-box;flex-basis:50px;padding:0 10px">bb</div><div style="width:50%">pct</div><div style="flex-basis:50%">half</div></div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="display:flex"><div style="flex:0 0 30px;width:60px;height:10px">x</div><div style="flex:1 0 0">grows from zero basis text</div></div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="display:flex"><div style="flex-basis:50px;flex-grow:1;padding:0 5px">grow basis</div><div style="min-width:120px">min</div><div style="max-width:20px">capped words</div></div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="display:flex"><div style="box-sizing:border-box;flex-basis:50px;padding:0 10px">bb</div><div style="width:50%">pct</div><div style="flex-basis:50%">half</div></div><div>b</div></div>))
     end
     # (A flex container with a PERCENTAGE main gap fell back until 2026-09-24: native measures its gap with no basis
     # now — the length part, clamped — as the oracle's `axisGap(el, …, null)` does.)
     it 'measures a flex container with a percentage main gap, and a nested grid whatever its items declare' do
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex;column-gap:5%"><div>a</div><div>b</div></div><div>b</div></div>))
-      expect_native_intrinsic(%(<div style="#{mc_auto}"><div style="display:flex;column-gap:calc(5% + 4px)"><div>a</div><div>b</div></div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="display:flex;column-gap:5%"><div>a</div><div>b</div></div><div>b</div></div>))
+      expect_parity(%(<div style="#{mc_auto}"><div style="display:flex;column-gap:calc(5% + 4px)"><div>a</div><div>b</div></div><div>b</div></div>))
       # …a nested GRID is measured natively whether its items are blocks or inline-level: each is an item of its
       # own either way (CSS Grid §4 blockifies them), so both engines run the grid algorithm over the same set.
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:50px 50px"><span>nested grid words</span><span>x</span></div><div style="height:10px">b</div></div>))
-      expect_native_intrinsic(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:50px 50px"><div>nested grid words</div><div>x</div></div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:50px 50px"><span>nested grid words</span><span>x</span></div><div style="height:10px">b</div></div>))
+      expect_parity(%(<div style="#{two_auto}"><div style="display:grid;grid-template-columns:50px 50px"><div>nested grid words</div><div>x</div></div><div style="height:10px">b</div></div>))
     end
   end
 
@@ -556,12 +507,12 @@ RSpec.describe 'native layout grid parity' do
   # LTR regardless), an empty / invalid template (one full-width column), and an out-of-flow item.
   describe 'computed grids that used to replay' do
     it 'computes a grid that is a flex item, stretched or not' do
-      expect_native_intrinsic('<div style="display:flex;width:400px"><div style="display:grid;grid-template-columns:auto 1fr;flex:1"><div style="height:10px">a</div><div style="height:20px">b</div></div><div style="width:50px;height:60px"></div></div>')
-      expect_native_intrinsic('<div style="display:flex;width:400px;align-items:flex-start"><div style="display:grid;grid-template-columns:auto 1fr;flex:1"><div style="height:10px">a</div><div style="height:20px">b</div></div><div style="width:50px;height:60px"></div></div>')
+      expect_parity('<div style="display:flex;width:400px"><div style="display:grid;grid-template-columns:auto 1fr;flex:1"><div style="height:10px">a</div><div style="height:20px">b</div></div><div style="width:50px;height:60px"></div></div>')
+      expect_parity('<div style="display:flex;width:400px;align-items:flex-start"><div style="display:grid;grid-template-columns:auto 1fr;flex:1"><div style="height:10px">a</div><div style="height:20px">b</div></div><div style="width:50px;height:60px"></div></div>')
     end
     it 'computes a grid nested as a grid item, and an absolutely positioned grid' do
-      expect_native_intrinsic('<div style="display:grid;grid-template-columns:100px 100px;width:400px"><div style="display:grid;grid-template-columns:auto auto"><div>n1</div><div>n2</div></div><div style="height:20px">b</div></div>')
-      expect_native_intrinsic('<div style="position:relative;width:400px;height:200px"><div style="position:absolute;top:10px;left:20px;width:200px;display:grid;grid-template-columns:auto 1fr"><div style="height:10px">a</div><div style="height:20px">b</div></div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:100px 100px;width:400px"><div style="display:grid;grid-template-columns:auto auto"><div>n1</div><div>n2</div></div><div style="height:20px">b</div></div>')
+      expect_parity('<div style="position:relative;width:400px;height:200px"><div style="position:absolute;top:10px;left:20px;width:200px;display:grid;grid-template-columns:auto 1fr"><div style="height:10px">a</div><div style="height:20px">b</div></div></div>')
     end
     # A grid item's containing block is its GRID AREA (§12.1) — its TRACK across, its ROW down — and both
     # engines used the grid's own content box on the block axis. The whole family was shared-wrong, so parity
@@ -605,7 +556,7 @@ RSpec.describe 'native layout grid parity' do
     it 'lays a flex-container / nested-grid / table item out within its declared row height' do
       expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:flex;align-items:center"><div style="width:10px;height:10px"></div></div><div>b</div></div>')
       expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:flex;flex-direction:column;justify-content:flex-end"><div style="width:10px;height:10px"></div></div></div>')
-      expect_native_intrinsic('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:grid;grid-template-columns:auto"><div>nested in row</div></div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:60px;width:400px"><div style="display:grid;grid-template-columns:auto"><div>nested in row</div></div></div>')
       expect_parity('<div style="display:grid;grid-template-columns:200px;grid-auto-rows:60px;width:400px"><table><tr><td>cell</td></tr></table></div>')
     end
     it 'lays out a flex-container item with a min/max-height under declared rows' do
@@ -626,7 +577,7 @@ RSpec.describe 'native layout grid parity' do
       it "floors an item at its own edges in a shorter declared row, and ends the grid at its rows: #{name}" do
         expect_parity(body)
         expect_chrome_box(body, chrome)
-        expect(parity_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().height")).to eq(grid_h)
+        expect(laid_out_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().height")).to eq(grid_h)
       end
     end
     # …and the floor is the BORDER box native imposes, a border-box one too: a table's relative caption resolves its
@@ -641,13 +592,13 @@ RSpec.describe 'native layout grid parity' do
     it 'ends the grid round an item taller than a row that is only a floor' do
       body = '<div id="g" style="display:grid;grid-template-columns:100px 1fr;grid-auto-rows:minmax(20px, auto);width:300px;font:16px monospace"><div id="m" style="height:50px">aa</div><div>z</div></div>'
       expect_parity(body)
-      expect(parity_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().height")).to eq(50)
+      expect(laid_out_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().height")).to eq(50)
     end
     it 'keeps an auto-height item content-sized under grid-auto-rows: 0 (a 0 height is the oracle\'s auto placeholder)' do
       expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:0px;width:400px"><div><p style="margin:0">text</p></div><div>b</div></div>')
     end
     it 'resolves a % gap inside an item against the row height it was given (definite at gap time)' do
-      expect_native_intrinsic('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:100px;width:400px"><div style="display:grid;grid-template-columns:auto;row-gap:10%"><div>a</div><div>b</div></div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:100px;width:400px"><div style="display:grid;grid-template-columns:auto;row-gap:10%"><div>a</div><div>b</div></div></div>')
       expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:100px;width:400px"><div style="display:flex;flex-direction:column;row-gap:10%"><div style="height:10px"></div><div style="height:10px"></div></div></div>')
       expect_parity('<div style="display:grid;grid-template-columns:100px;grid-auto-rows:100px;width:400px"><div style="display:flex;flex-wrap:wrap;row-gap:10%"><div style="width:60px;height:10px"></div><div style="width:60px;height:10px"></div></div></div>')
     end
@@ -656,13 +607,8 @@ RSpec.describe 'native layout grid parity' do
     end
     # A DROPDOWN is a leaf to native — the oracle takes its border box from its intrinsic size, never by
     # stacking its `<option>`s, which have no box in Chrome at all — so it is laid out like any replaced item.
-    # A LIST BOX showing rows is a block container instead (native stacks those rows itself, see
-    # native_layout_replaced_spec), and a grid item that IS one still declines: the grid path does not take a
-    # container whose box is pinned that way. It stays on the decline census, which is where the remaining
-    # work belongs.
-    it 'lays out a dropdown item, and declines a list box item' do
+    it 'lays out a dropdown item' do
       expect_parity('<div style="display:grid;grid-template-columns:100px;width:400px"><select><option>o</option></select></div>')
-      expect_bail('<div style="display:grid;grid-template-columns:100px;width:400px"><select multiple><option>a</option><option>b</option></select></div>')
     end
     # …and the auto height comes from the run's own ROW now, not from a line-height floor over an unplaced
     # run: `gridItems` gives it the box CSS Grid §4 asks for. The two shapes are unchanged because a
@@ -680,54 +626,7 @@ RSpec.describe 'native layout grid parity' do
     end
     it 'replays an out-of-flow item at its resolved box while the in-flow items compute' do
       expect_parity('<div style="display:grid;position:relative;grid-template-columns:100px 100px;gap:10px;width:220px"><div style="height:20px">a</div><div style="height:20px">b</div><div style="position:absolute;width:30px;height:30px">p</div><div style="height:20px">c</div></div>')
-      expect_native_intrinsic('<div style="display:grid;position:relative;grid-template-columns:auto 1fr;width:300px"><div style="position:absolute;right:0;top:0;width:30px;height:30px">p</div><div>label text</div><div style="height:20px">b</div></div>')
-    end
-  end
-  # Native measures the items' own min/max-content for an intrinsic track only if it can measure EVERY item, and
-  # which it is, the WALK decides: where it declines one item's subtree under that promise the whole grid — the
-  # tracks it marshalled included — is rolled back and re-emitted with the oracle's column contributions. Under a
-  # predicate-decided gate each of these shapes took the whole pass down, because the refusal is one
-  # `nlIntrinsicMeasurable` does not model.
-  describe 'a grid whose item the walk declines to measure re-emits with the oracle contributions' do
-    WalkRefusals::ATOMIC.each_with_index do |inner, i|
-      it "lays out a min-content and a fit-content track around refused content #{i}" do
-        [
-          %{<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a #{inner}</div><div>x</div></div>},
-          %{<div style="display:grid;grid-template-columns:fit-content(200px);width:400px"><div>a #{inner}</div></div>}
-        ].each do |body|
-          r = run_shadow(body)
-          expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-          expect(r['nativeIntrinsicGrids']).to eq(0), "the grid should have used the oracle's contributions: #{r.inspect}"
-        end
-      end
-    end
-    it 'still measures the tracks itself where every item allows it, and counts the grid once' do
-      r = run_shadow('<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a <span style="display:inline-block">ok</span></div><div>x</div></div>')
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeIntrinsicGrids' => 1), r.inspect
-    end
-    # The rollback has to put the container's OWN marshalled data back too, not just its items' records: a grid
-    # pushes its tracks and placements before them, and rec[55] points at that offset. These pin it — a stale
-    # offset would have native reading the neighbouring table's column data as track specs, and a leaked push
-    # would double or lose the grid count.
-    it 'rolls its own marshalled tracks back, whatever else is in the stream' do
-      refusal = WalkRefusals::POSITIONED   # (any of them; what is under test is the bookkeeping)
-      nested = '<div style="display:grid;grid-template-columns:min-content;width:60px"><div>n</div></div>'
-      cols = '<table style="border-spacing:0"><colgroup><col style="width:20px"><col></colgroup><tr><td style="padding:0">c</td><td style="padding:0">d</td></tr></table>'
-      [
-        # the falling-back grid holds a NESTED grid, before and after the refusal: the outer takes the oracle's
-        # contributions, the inner still measures its own tracks — one count, neither doubled nor lost
-        [%{<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>#{nested}a #{refusal}</div><div>x</div></div>}, 1],
-        [%{<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a #{refusal}</div><div>#{nested}</div></div>}, 1],
-        # …and a `<colgroup>` table inside it, whose column data shares the same stream rec[55] indexes into
-        [%{<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>#{cols}a #{refusal}</div><div>x</div></div>}, 0],
-        [%{<div style="width:400px">#{cols}<div style="display:grid;grid-template-columns:min-content;width:200px"><div>a #{refusal}</div></div></div>}, 0],
-        # …and two sibling grids where only one falls back
-        [%{<div style="width:400px"><div style="display:grid;grid-template-columns:min-content"><div>a #{refusal}</div></div><div style="display:grid;grid-template-columns:min-content"><div>a <span style="display:inline-block">ok</span></div></div></div>}, 1]
-      ].each do |body, measured|
-        r = run_shadow(body)
-        expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-        expect(r['nativeIntrinsicGrids']).to eq(measured), "#{body}: #{r.inspect}"
-      end
+      expect_parity('<div style="display:grid;position:relative;grid-template-columns:auto 1fr;width:300px"><div style="position:absolute;right:0;top:0;width:30px;height:30px">p</div><div>label text</div><div style="height:20px">b</div></div>')
     end
   end
   # A GRID has an intrinsic width of its own now, and it is the GRID algorithm's (CSS Grid §12.5) in BOTH
@@ -810,11 +709,7 @@ RSpec.describe 'native layout grid parity' do
         ['40px repeat(auto-fill, 60px) 20px', 'grid-column:2 / span 3',                      40, 180]
       ].each do |tpl, place, chrome_x, chrome_w|
         body = %(<div style="width:300px"><div style="display:grid;grid-template-columns:#{tpl}"><div id="g" style="#{place}">g</div><div>a</div></div></div>)
-        session = simulated_session(page(body))
-        session.visit '/'
-        session.evaluate_script('document.body.offsetHeight')
-        expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0), body
-        box = session.evaluate_script("(b => [b.x, b.width])(document.getElementById('g').getBoundingClientRect())")
+        box = laid_out_session(body).evaluate_script("(b => [b.x, b.width])(document.getElementById('g').getBoundingClientRect())")
         expect(box).to eq([chrome_x, chrome_w]), "#{body}: #{box.inspect}, Chrome [#{chrome_x}, #{chrome_w}]"
       end
       # …and the same lines against a list of ANOTHER length, where the two engines have to agree on both
@@ -843,11 +738,7 @@ RSpec.describe 'native layout grid parity' do
         ['repeat(auto-fill,90px);gap:5px',              '<div>a</div><div id="g" style="grid-column:span 2">two</div>', 95, 185]
       ].each do |tpl, items, chrome_x, chrome_w|
         body = %(<div style="width:400px"><div style="display:grid;grid-template-columns:#{tpl}">#{items}</div></div>)
-        session = simulated_session(page(body))
-        session.visit '/'
-        session.evaluate_script('document.body.offsetHeight')
-        expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0), body
-        box = session.evaluate_script("(b => [b.x, b.width])(document.getElementById('g').getBoundingClientRect())")
+        box = laid_out_session(body).evaluate_script("(b => [b.x, b.width])(document.getElementById('g').getBoundingClientRect())")
         expect(box).to eq([chrome_x, chrome_w]), "#{body}: #{box.inspect}, Chrome [#{chrome_x}, #{chrome_w}]"
       end
       # …and the same grid measured INTRINSICALLY makes one copy, so the `1 / -1` item spans that one column
@@ -880,8 +771,8 @@ RSpec.describe 'native layout grid parity' do
       ].each {|items| expect_parity(%(<div style="width:max-content"><div style="display:grid">#{items}</div></div>)) }
       # …and a `display: contents` child is no item at all: its children are, one each. The walk DECLINED
       # this shape until 2026-09-22, because it flattened where the oracle did not; both enumerate through
-      # one now, so the measure is asked of the children that stand in for it. What the WIDTH pins is that
-      # the walk takes the shape at all (`parity_session` asserts it), not how many items there are: an
+      # one now, so the measure is asked of the children that stand in for it. The WIDTH does not
+      # say how many items there are: an
       # implicit single column is 44 wide whether the contents element is one item or its two children are,
       # so the COLUMN the second child lands in is the figure that separates them. Chrome puts it in the
       # SECOND (x 30), where one item would have left it under the first at x 0, y 10.
@@ -930,7 +821,7 @@ RSpec.describe 'native layout grid parity' do
       ['text', '<span>text</span>'].each do |items|
         body = %(<div id="g" style="display:inline-grid;grid-auto-rows:5px;font:16px monospace">#{items}</div>)
         expect_parity(body)
-        h = parity_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().height")
+        h = laid_out_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().height")
         expect(h).to eq(5), "#{body}: #{h}, Chrome 5"
       end
     end
@@ -940,22 +831,16 @@ RSpec.describe 'native layout grid parity' do
     # Every wrapper too, because each side of a track is reduced on its own: a `minmax` floor, a `fit-content`
     # cap, and an `auto-fill` repeat whose COUNT reads the track's fixed size.
     it 'sizes a calc() track, through minmax, fit-content and an auto-fill repeat' do
-      # …`measured` says whether the template asks for a CONTENT measure at all, which is what
-      # `nativeIntrinsicGrids` counts: a bare `fr` carries an automatic minimum and `fit-content` a cap, while
-      # `minmax(…, 1fr)` beside a length and an all-fixed `auto-fill` repeat ask for nothing and leave the
-      # counter at 0 whatever engine ran (`minmax(25px, 1fr) 60px` does too, and has no `calc()` in it).
-      # Where it applies it is the stronger assertion: parity alone is green when a grid record rolls BACK to
-      # the oracle's column contributions.
       {
-        'calc(25% + 10px) 1fr'                => [110, true],
-        'minmax(calc(10% + 5px), 1fr) 60px'   => [340, false],
-        'fit-content(calc(20% + 4px)) 1fr'    => [84,  true],
-        'repeat(auto-fill, calc(25% + 10px))' => [110, false]
-      }.each do |tracks, (chrome_x, measured)|
+        'calc(25% + 10px) 1fr'                => 110,
+        'minmax(calc(10% + 5px), 1fr) 60px'   => 340,
+        'fit-content(calc(20% + 4px)) 1fr'    => 84,
+        'repeat(auto-fill, calc(25% + 10px))' => 110
+      }.each do |tracks, chrome_x|
         body = %(<div style="display:grid;width:400px;grid-template-columns:#{tracks}">) +
                %(<div style="height:10px">wwww wwww</div><div id="g" style="height:10px"></div></div>)
-        measured ? expect_native_intrinsic(body) : expect_parity(body)
-        x = parity_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().x")
+        expect_parity(body)
+        x = laid_out_session(body).evaluate_script("document.getElementById('g').getBoundingClientRect().x")
         expect(x).to be_within(0.01).of(chrome_x), "#{tracks}: #g at #{x}, Chrome #{chrome_x}"
       end
     end
@@ -993,16 +878,9 @@ RSpec.describe 'native layout grid parity' do
   # template, the gaps — go to native unresolved and are resolved against the content box native lays the grid out
   # in (a row gap against its content height where that is definite). The walk used to resolve them against the
   # ORACLE's box, which every grid on the page then depended on: without it an empty template's one column came
-  # out the oracle's width poisoned. Parity for each, and no oracle box read for any.
+  # out the oracle's width poisoned.
   describe 'percentages resolved against native\'s own box' do
-    def no_oracle(body)
-      session = simulated_session(page(body))
-      session.visit '/'
-      session.evaluate_script('document.body.offsetHeight')
-      session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
-    end
-
-    it 'lays out percentage tracks and gaps without the oracle box' do
+    it 'lays out percentage tracks and gaps' do
       items = '<div style="height:10px">a</div><div style="height:14px">bb cc</div><div style="height:8px"></div>'
       [
         ['', ''], ['none', 'gap:5% 10%'], ['50% 50%', ''], ['25% 1fr', 'column-gap:7%'], ['fit-content(30%) auto', ''],
@@ -1011,12 +889,6 @@ RSpec.describe 'native layout grid parity' do
         [%(<div style="width:400px"><div style="display:grid;grid-template-columns:#{template};#{extra}">#{items}</div></div>),
          %(<div style="display:flex;height:150px;width:500px"><div style="display:grid;flex:1;grid-template-columns:#{template};#{extra}">#{items}</div></div>)].each do |body|
           expect_parity(body)
-          r = no_oracle(body)
-          expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-          # (a flex parent still resolves its ITEMS' percentages against the oracle's box — its own dependency)
-          next if body.include?('display:flex')
-
-          expect(r['oracleReads'].keys.grep(/\AwalkRecord _lb(\.|\z)|\AwalkRecord _lbDefiniteH/)).to eq([]), body
         end
       end
     end

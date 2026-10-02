@@ -1,14 +1,15 @@
 # frozen_string_literal: true
 
 # An inline box's FRAGMENTS — one rect per line its content reached, which is what `getClientRects` answers and
-# what a relative inline hands an out-of-flow descendant as its containing block. Native lays them out beside the
-# oracle's `settleInlineBoxes` (`fragsCompared` / `fragMismatches` off `__csimLayoutShadowRun`), and a box's own
-# record says nothing about them: an EMPTY `<span>` is a zero-width box either way, and whether it has a height,
-# and where, is a fragment question. So each shape here asserts the fragment parity AND Chrome's rects for `#m`.
+# what a relative inline hands an out-of-flow descendant as its containing block. A box's own rectangle says nothing
+# about them: an EMPTY `<span>` is a zero-width box either way, and whether it has a height, and where, is a fragment
+# question. So each shape here is held to its golden — every element's client rects among it — AND to Chrome's rects
+# for `#m`.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
+require_relative 'support/layout_golden'
 
 RSpec.describe 'native layout inline box fragments' do
   def page(body)
@@ -18,12 +19,23 @@ RSpec.describe 'native layout inline box fragments' do
 
   RECTS = "Array.from(document.getElementById('m').getClientRects()).map(r => [r.x, r.y, r.width, r.height])"
 
-  # The pass's fragment verdict and `#m`'s client rects, off one page.
+  # `body` held to its golden — recorded where native and the oracle agree on every box and every fragment.
+  def expect_parity(body)
+    expect_layout_golden(body) do
+      r = with_simulated_session(page(body)) do |session|
+        session.visit '/'
+        session.evaluate_script('globalThis.__csimLayoutShadowRun()')
+      end
+      expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
+      expect_no_dropped_records(r, body)
+    end
+  end
+
+  # `#m`'s client rects.
   def fragments(body)
     with_simulated_session(page(body)) do |session|
       session.visit '/'
-      session.evaluate_script('document.body.offsetHeight')
-      [session.evaluate_script('globalThis.__csimLayoutShadowRun()'), session.evaluate_script(RECTS)]
+      session.evaluate_script(RECTS)
     end
   end
 
@@ -31,16 +43,14 @@ RSpec.describe 'native layout inline box fragments' do
     got.size == want.size && got.zip(want).all? {|g, w| g.zip(w).all? {|a, b| (a - b).abs <= 0.05 } }
   end
 
-  # `chrome:` where both engines give Chrome's rects; `shared:` + `shared_chrome:` where both give another —
-  # checked Chrome FIRST, so the day one moves onto Chrome's figure the failure says "a fix", not "a regression".
+  # The golden, and `chrome:` where `#m` has Chrome's rects; `shared:` + `shared_chrome:` where both engines gave
+  # another — checked Chrome FIRST, so the day one moves onto Chrome's figure the failure says "a fix", not "a
+  # regression".
   def expect_fragments(body, chrome: nil, shared: nil, shared_chrome: nil)
     raise ArgumentError, 'shared needs shared_chrome' if !shared.nil? && shared_chrome.nil?
 
-    r, rects = fragments(body)
-    expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-    expect(r['fragsCompared']).to be > 0, "#{body}: no fragment was compared: #{r.inspect}"
-    expect(r['fragMismatches']).to eq(0), "#{body}: #{r['fragSample'].inspect}"
-    expect_no_dropped_records(r, body)
+    expect_parity(body)
+    rects = fragments(body)
     expect(rects_near?(rects, chrome)).to be(true), "#{body}: #m #{rects.inspect}, Chrome #{chrome.inspect}" unless chrome.nil?
     return if shared.nil?
 
@@ -70,12 +80,6 @@ RSpec.describe 'native layout inline box fragments' do
     )
     body = '<div style="font:16px monospace;width:200px">aa <span id="m" style="padding:5% 10%;margin-left:-2%">bb cc dd ee ff gg</span> hh</div>'
     expect_fragments(body, chrome: [[24.8125, -10, 154.40625, 42], [0, 12, 39.203125, 42]])
-    r = with_simulated_session(page(body)) do |session|
-      session.visit '/'
-      session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
-    end
-    expect(r).to include('ok' => true, 'mismatches' => 0)
-    expect(r['oracleReads'].to_h).to be_empty
   end
 
   # An EMPTY box takes a fragment only where there is a line box to take it on, and the line is the one it OPENED
@@ -83,7 +87,7 @@ RSpec.describe 'native layout inline box fragments' do
   # line the box CLOSED on (the next one, or none at all) and gave all three of these no height.
   # …and edges written as COMPARISON functions, which the inline table carries as pairs between their bounds since
   # 2026-09-25 — the opening edge's margin and padding clamping apart, a `calc()` padding floored at 0 (3 - 5 here) —
-  # where the walk used to resolve them against the oracle's basis. Chrome's rects, and no oracle read.
+  # where the walk used to resolve them against the oracle's basis. Chrome's rects.
   it 'lays out an inline box whose edges are clamped percentages' do
     {
       '<div style="font:16px monospace;width:300px">aa <span id="m" style="padding:0 clamp(4px, 5%, 20px)">bb</span> cc</div>'                   => [[28.8125, 0, 49.2031, 22]],
@@ -91,12 +95,6 @@ RSpec.describe 'native layout inline box fragments' do
       '<div style="font:16px monospace;width:30px">x <span id="m" style="padding-right:calc(10% - 5px);border-right:2px solid">bb</span> c</div>' => [[0, 22, 21.2031, 22]]
     }.each do |body, chrome|
       expect_fragments(body, chrome: chrome)
-      reads = with_simulated_session(page(body)) do |session|
-        session.visit '/'
-        session.evaluate_script('document.body.offsetHeight')
-        session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')['oracleReads'].keys
-      end
-      expect(reads).to be_empty, "#{body}: #{reads.inspect}"
     end
   end
   # …and a RELATIVE inline box's percentage offsets, which travel as the chain `nlChainRel` sums (a length, a fraction
@@ -105,7 +103,7 @@ RSpec.describe 'native layout inline box fragments' do
   # against the oracle's stamps until 2026-09-25. A `top: 20%` of an indefinite height is `auto`, so `bottom` is used.
   # …and a COMPARISON function's share as a program per axis beside them (`xm` / `ym`, a `right` one negated) since
   # 2026-09-26 — two nested boxes' summed, a `top` one `auto` against an indefinite height as a percentage is. Chrome's
-  # rects, and no oracle read.
+  # rects.
   it 'offsets a relative inline box by percentages of the block it is laid out in' do
     {
       '<div style="width:300px;height:200px;font:16px monospace">aa <span id="m" style="position:relative;left:max(10%, 5px);top:min(10%, 3px)">bb</span></div>' => [[58.8125, 3, 19.2031, 22]],
@@ -117,12 +115,6 @@ RSpec.describe 'native layout inline box fragments' do
       '<div style="font:16px monospace;width:300px;height:120px">aa <span style="position:relative;left:10%;top:10%">bb <span id="m" style="display:inline-block;width:30px;height:12px;position:relative;left:10%"></span></span></div>' => [[117.625, 17, 30, 12]]
     }.each do |body, chrome|
       expect_fragments(body, chrome: chrome)
-      reads = with_simulated_session(page(body)) do |session|
-        session.visit '/'
-        session.evaluate_script('document.body.offsetHeight')
-        session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')['oracleReads'].keys
-      end
-      expect(reads).to be_empty, "#{body}: #{reads.inspect}"
     end
     # …an out-of-flow box in the chain moves by it too (SHARED: its static position is after the space before it in
     # both engines, 57.6 + 30, where Chrome's is before it, 48.02 + 30 — without the chain as well)
@@ -248,10 +240,7 @@ RSpec.describe 'native layout inline box fragments' do
       'padding:10px;border:3px solid;margin:7px' => [[14.203125, 0, 0, 17], 36, "aa\nbb"]
     }.each do |style, (rect, height, text)|
       body = %(<div id="p" style="width:300px;position:relative">aa<br id="m" style="#{style}">bb</div>)
-      r, rects = fragments(body)
-      expect(r).to include('ok' => true, 'mismatches' => 0), "#{style}: #{r.inspect}"
-      expect_no_dropped_records(r, body)
-      expect(rects_near?(rects, [rect])).to be(true), "#{style}: #m #{rects.inspect}, expected #{rect.inspect}"
+      expect_fragments(body, chrome: [rect])
       got = with_simulated_session(page(body)) do |session|
         session.visit '/'
         session.evaluate_script("[document.getElementById('p').offsetHeight, document.getElementById('p').innerText]")
@@ -265,9 +254,7 @@ RSpec.describe 'native layout inline box fragments' do
   # for a break and measured 21.3 while native said 520 — two engines, two answers.
   it 'measures a block-level <br> into an intrinsic width' do
     body = '<div id="p" style="display:inline-block">aaa<br id="m" style="display:block;width:500px;padding:10px">b</div>'
-    r, = fragments(body)
-    expect(r).to include('ok' => true, 'mismatches' => 0)
-    expect_no_dropped_records(r, body)
+    expect_parity(body)
     width = with_simulated_session(page(body)) do |session|
       session.visit '/'
       session.evaluate_script("document.getElementById('p').getBoundingClientRect().width")
@@ -303,9 +290,7 @@ RSpec.describe 'native layout inline box fragments' do
     }.each do |body, chrome|
       expect_fragments(body, chrome: chrome)
     end
-    r, = fragments('<div style="font:16px monospace;width:100px">aaaa <wbr id="m" style="display:inline-block">bbbb</div>')
-    expect(r).to include('ok' => true, 'mismatches' => 0)
-    expect(r['nativeAtomics']).to be > 0, r.inspect
+    expect_parity('<div style="font:16px monospace;width:100px">aaaa <wbr id="m" style="display:inline-block">bbbb</div>')
   end
 
   # The space before a `pre-line` newline is a collapsible one the oracle PLACES on the line the newline ends, and
@@ -335,9 +320,7 @@ RSpec.describe 'native layout inline box fragments' do
     )
     body = '<div style="position:relative;font:16px monospace;width:45px;text-align:justify">aa&nbsp;' \
            '<i id="m" style="position:absolute;width:2px;height:2px"></i>bb q</div>'
-    r, rects = fragments(body)
-    expect(r).to include('ok' => true, 'mismatches' => 0)
-    expect(rects_near?(rects, [[28.8125, 0, 2, 2]])).to be(true), "#m #{rects.inspect}"
+    expect_fragments(body, chrome: [[28.8125, 0, 2, 2]])
   end
 
   # A relatively positioned INLINE is the containing block of an out-of-flow box inside it (CSS 2.1 §10.1): its
@@ -358,15 +341,7 @@ RSpec.describe 'native layout inline box fragments' do
        [28.8125, -4, 78.40625, 4]]
   }.each do |what, (body, chrome)|
     it "places an out-of-flow box against a relative inline's fragments: #{what}" do
-      r, = fragments(body)
-      expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-      expect(r['nativeOutOfFlow']).to be > 0, "#{body}: the box was not placed natively: #{r.inspect}"
-      expect_no_dropped_records(r, body)
-      rect = with_simulated_session(page(body)) do |session|
-        session.visit '/'
-        session.evaluate_script("(r => [r.x, r.y, r.width, r.height])(document.getElementById('m').getBoundingClientRect())")
-      end
-      expect(rects_near?([rect], [chrome])).to be(true), "#{body}: #m #{rect.inspect}, Chrome #{chrome.inspect}"
+      expect_fragments(body, chrome: [chrome])
     end
   end
 

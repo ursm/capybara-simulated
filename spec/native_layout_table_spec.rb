@@ -1,53 +1,42 @@
 # frozen_string_literal: true
-# Native layout — CSS tables (§17), geometry shadow-parity. Increments t1 (base) + t2 (spans) + t3 (collapse) +
+# Native layout — CSS tables (§17), held to recorded goldens. Increments t1 (base) + t2 (spans) + t3 (collapse) +
 # t4 (caption) + t5 (thead/tfoot) + t6 (table-layout:fixed) + t7 (colgroup/<col>) + t8 (imposed height) +
 # t9 (anonymous rows) + r2 (rtl tables):
 # an auto-layout `display:table` in normal flow, border-collapse SEPARATE or COLLAPSE, LTR or RTL (an rtl table
 # MIRRORS its columns — column 0 at the right) — table >
 # (table-header-group | table-row-group | table-footer-group | table-row)* > table-cell*. thead / tbody /
-# tfoot are sorted into RENDER order (header, body, footer) regardless of source order. Each cell's used border
-# box (its spanned column width ×
-# row height, halved borders in collapse) is resolved by the oracle and PUSHED (like a flex item); native
-# reassembles the column/row tracks from the NON-spanning cells, prefix-sums them with border-spacing to
-# position every cell at its (pushed) starting column/row, and derives every row, row-group and the table's
-# OWN box. In collapse the whole shared-border model (§17.6.2.1) is resolved by the oracle — spacing 0, each
-# edge as wide as the WIDEST declaration meeting on it (cells AND tr / row-group / col / colgroup / table
-# borders all participate), border-style:hidden SUPPRESSING the edge entirely, each cell's halved result in its
-# pushed box, and the table's OWN border set to the outer half of its rim's borders with no padding — so native
-# lays a collapse table out exactly like a separate one. A single CAPTION (top or bottom) makes the `<table>` box the WRAPPER:
+# tfoot are sorted into RENDER order (header, body, footer) regardless of source order. Native sizes the columns
+# and rows itself (the two sections below), positions every cell at its starting column/row by prefix sums with
+# border-spacing, and derives every row, row-group and the table's OWN box. In collapse the whole shared-border
+# model (§17.6.2.1) applies — spacing 0, each edge as wide as the WIDEST declaration meeting on it (cells AND tr /
+# row-group / col / colgroup / table borders all participate), border-style:hidden SUPPRESSING the edge
+# entirely, each cell's halved result in its box, and the table's OWN border set to the outer half of its rim's
+# borders with no padding — so a collapse table lays out exactly like a separate one. A CAPTION makes the
+# `<table>` box the WRAPPER:
 # the caption is a NORMAL BLOCK in the table's BORDER box (§17.4 wrapper box), OUTSIDE the table's own border +
 # padding — declared height / width / min-max / box-sizing / auto-margin centering honored, auto width fills the
 # border box; a caption with a definite width WIDER than the grid floors the table's BORDER box (which stretches
 # its columns to fill what is left inside the border, like an explicit table width) — stacked above (the grid
 # offsets down past it) or below the grid, its own block / text subtree laid out normally.
 # colspan/rowspan, ragged grids, border-collapse, thead/tbody/tfoot, table-layout:fixed, colgroup/<col> widths,
-# a caption — its MARGINS included since 2026-09-23: the vertical pair is height the rows do not get, the
+# captions — their MARGINS included since 2026-09-23: the vertical pair is height the rows do not get, the
 # LEADING horizontal one insets it from the wrapper's inline-start edge (the right edge in rtl), an `auto` pair
 # centres it, and the basis-less pair floors the table's width beside the caption's min-content —
 # a position:relative cell (offset ignored), an imposed table height TALLER than the grid (declared /
 # attribute / min, shared out over the rows so the tracks fill the box), ANONYMOUS ROWS (a table-cell with
 # no table-row parent), an OUT-OF-FLOW child of the table / a row group / a row (§9.7 takes it out of the
-# table's structure: the oracle places every one at the grid's top-left corner, so the walk emits them all
-# under the TABLE record), an EMPTY table (no rows and no columns — the clearfix pseudo: its edges, its
-# declaration and its caption are the whole box) and a cell laid out TWICE for its PERCENTAGE-height
-# descendants (§17.5.3: pass 1 sizes it with them treated as auto, pass 2 lays it out again at the final ROW
-# height, which is the only basis they may have) ARE supported. Still DECLINES to JS — more than one caption,
-# a HALF-empty table (columns with no rows), an
-# imposed height the tracks DON'T fill (a min-height's empty space, a too-small height /
-# max-height below the grid) or one alongside a caption / collapsed border,
-# nested tables, an empty row group, and a column/row only
-# spanning cells cover.
-# (A column's visibility:collapse is a conformance gap the oracle itself doesn't model, so native matches it
-# rather than bailing.) Each bail is an A/B: the feature-carrying input
-# declines, a plain table stays native. A `display:table-cell` with no `display:table-row` parent is wrapped in
-# an ANONYMOUS row (t9) and IS supported, and so is stray NON-cell content — the anonymous CELL a browser wraps
-# it in gets the same sentinel: laid out, not compared, its real children compared as usual.
+# table's structure: every one is placed at the grid's top-left corner), an EMPTY table (no rows and no
+# columns — the clearfix pseudo: its edges, its declaration and its caption are the whole box) and a cell laid
+# out TWICE for its PERCENTAGE-height descendants (§17.5.3: pass 1 sizes it with them treated as auto, pass 2
+# lays it out again at the final ROW height, which is the only basis they may have).
+# (A column's visibility:collapse is a conformance gap native does not model.) A `display:table-cell` with no
+# `display:table-row` parent is wrapped in an ANONYMOUS row (t9), and stray NON-cell content in the anonymous
+# CELL a browser wraps it in.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 require_relative 'support/layout_golden'
-require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout table parity' do
   def page(body)
@@ -55,12 +44,11 @@ RSpec.describe 'native layout table parity' do
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
-  # `opts` is the second argument of `__csimLayoutShadowRun`, as JS source (`{noOracle: true}` hides the oracle's stamps).
-  def run_shadow(body, opts = '{}')
+  def run_shadow(body)
     session = simulated_session(page(body))
     session.visit '/'
     session.evaluate_script('document.body.offsetHeight')
-    session.evaluate_script("globalThis.__csimLayoutShadowRun(undefined, #{opts})")
+    session.evaluate_script('globalThis.__csimLayoutShadowRun()')
   end
 
   def expect_parity(body)
@@ -177,9 +165,6 @@ RSpec.describe 'native layout table parity' do
     expect_parity('<div style="display:flex;width:300px"><div style="display:table"></div><div>y</div></div>')
     expect_parity('<div style="width:400px"><div style="display:table;margin:10px;width:50px;height:20px"></div><p>after</p></div>')
   end
-
-  # …and a HALF-empty table still declines: columns with no rows under them reach a grid native does not build.
-  it('declines a table with columns but no rows') { a_bails_b_native('<table style="border-spacing:4px"><colgroup><col style="width:40px"><col style="width:60px"></colgroup></table>') }
 
   it 'matches a 2x2 table with border-spacing (cells placed by prefix sums)' do
     expect_parity('<table style="border-spacing:4px"><tr><td style="width:60px;height:20px">a</td><td style="width:80px;height:30px">bb</td></tr><tr><td>ccc</td><td style="height:40px">d</td></tr></table>')
@@ -414,9 +399,7 @@ RSpec.describe 'native layout table parity' do
     body = %(<div style="font:16px monospace;width:300px"><div style="display:table;height:160px">#{run}<div style="display:table-row"><div style="display:table-cell">b</div></div></div></div>)
     expect_parity(body)
     expect(laid_out_rect(body)[3]).to be_within(0.01).of(53.33)
-    r = run_shadow(%(<div style="font:16px monospace;display:flex;width:300px;height:250px"><div>#{body}</div><div>y</div></div>))
-    expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
-    expect(r['nativeFlexRows']).to eq(1), r.inspect
+    expect_parity(%(<div style="font:16px monospace;display:flex;width:300px;height:250px"><div>#{body}</div><div>y</div></div>))
   end
 
   # A PUSHED table's box is the oracle's, and where the oracle laid it out at its own AUTO height (`pushed_h_indefinite`,
@@ -741,20 +724,13 @@ RSpec.describe 'native layout table parity' do
     expect_parity(oof_table(inner_table: '<div style="position:absolute;top:2px">shrink to fit</div>'))
   end
 
-  # A shrink-to-fit box whose content native cannot measure (`WalkRefusals::UNMEASURABLE`) is REPLAYED
-  # instead: the oracle's border box pushed with its displacement from the table's origin. The only shape here that
-  # takes that arm (`nativeOutOfFlow` stays 0), and it is a whole second code path. (A containing block with
-  # PERCENTAGE edges was the shape until native placed against one itself: its padding box is its border box less
-  # its borders, which no percentage is.)
-  it 'matches a REPLAYED out-of-flow table child (content native cannot measure)' do
-    unmeasured = %(<div style="position:absolute;top:2px">#{WalkRefusals::UNMEASURABLE}</div>)
-    body = %(<div style="position:relative;width:300px">#{oof_table(inner_table: unmeasured)}</div>)
-    expect_parity(body)
-    expect(run_shadow(body)['nativeOutOfFlow']).to eq(0), 'expected the replay arm, not the native placement'
-    # …and against a containing block with percentage edges, native's own now.
-    body = %(<div style="position:relative;padding:5%;width:300px">#{oof_table(inner_table: OOF_BOX)}</div>)
-    expect_parity(body)
-    expect(run_shadow(body)['nativeOutOfFlow']).to eq(1)
+  # A shrink-to-fit box whose content is an inline-table holding only a `<col>` — content native once could not
+  # measure, and replayed the box of — and a containing block with PERCENTAGE edges, whose padding box is its border
+  # box less its borders, which no percentage is.
+  it 'matches an out-of-flow table child of odd content, and against a percentage-edged containing block' do
+    unmeasured = '<div style="position:absolute;top:2px"><div>a<table style="display:inline-table"><colgroup><col style="width:30px"></colgroup></table></div></div>'
+    expect_parity(%(<div style="position:relative;width:300px">#{oof_table(inner_table: unmeasured)}</div>))
+    expect_parity(%(<div style="position:relative;padding:5%;width:300px">#{oof_table(inner_table: OOF_BOX)}</div>))
   end
 
   # A caption is a normal block in the table's BORDER box (§17.4 wrapper box): declared height / width / min-max /
@@ -815,47 +791,9 @@ RSpec.describe 'native layout table parity' do
     ['position:absolute', 'position:absolute;right:0;bottom:0', 'position:fixed;top:0;left:0',
      'float:left', 'float:right', 'float:left;width:150px'].each do |pos|
       tables.each do |t|
-        table = format(t, pos)
-        r = run_shadow(%(<div style="position:relative;width:300px;height:200px;overflow:hidden">#{table}<div>after</div></div>))
-        expect(r).to include('ok' => true), "#{pos}: harness bailed: #{r.inspect}"
-        expect(r['mismatches']).to eq(0), "#{pos}: mismatch: #{r.inspect}"
-        expect_no_dropped_records(r)
+        expect_parity(%(<div style="position:relative;width:300px;height:200px;overflow:hidden">#{format(t, pos)}<div>after</div></div>))
       end
     end
-  end
-
-  # …but never as the pass ROOT. The container gates do not ask a position, because an out-of-flow box is its
-  # PARENT's to size and place — and the root has no parent in the pass, so native laid it out as an in-flow
-  # block filling the width it was handed: an `absolute` table, flex or grid as the root came out 300 wide
-  # where the oracle's shrink-to-fit says 66.4. It declines instead; a floated or static root stays native.
-  it 'declines an out-of-flow container as the pass root' do
-    root_run = lambda do |body, selector|
-      session = simulated_session(page(body))
-      session.visit '/'
-      session.evaluate_script('document.body.offsetHeight')
-      session.evaluate_script(%(globalThis.__csimLayoutShadowRun(document.querySelector(#{selector.inspect}))))
-    end
-    inner = {
-      'table' => '<table id="r" style="%s"><tr><td>a</td><td>bb cc</td></tr></table>',
-      'flex'  => '<div id="r" style="display:flex;%s"><div>a</div><div>bb cc</div></div>',
-      'grid'  => '<div id="r" style="display:grid;grid-template-columns:auto auto;%s"><div>a</div><div>bb cc</div></div>'
-    }
-    inner.each do |kind, t|
-      ['position:absolute;right:10px;bottom:5px', 'position:fixed;top:0;left:0'].each do |pos|
-        r = root_run.call(%(<div style="position:relative;width:300px;height:200px">#{format(t, pos)}</div>), '#r')
-        expect(r).to include('ok' => false, 'reason' => 'root unsupported'), "#{kind} #{pos}: #{r.inspect}"
-      end
-      r = root_run.call(%(<div style="width:300px">#{format(t, 'position:relative')}</div>), '#r')
-      expect(r).to include('ok' => true), "#{kind} relative root: #{r.inspect}"
-      expect(r['mismatches']).to eq(0), "#{kind} relative root: #{r.inspect}"
-      expect_no_dropped_records(r)
-    end
-  end
-
-  # A/B bails — the feature declines; a plain table stays native.
-  def a_bails_b_native(feature, plain = '<table style="border-spacing:4px"><tr><td style="width:40px">a</td><td style="width:40px">b</td></tr></table>')
-    expect(run_shadow(feature)['ok']).to be(false), "expected #{feature.inspect} to bail"
-    expect(run_shadow(plain)['ok']).to be(true), 'expected the plain table to stay native'
   end
 
   # SEVERAL captions stack as `layoutTable`'s `layCaption` stacks them — the top ones above the grid and the bottom
@@ -1042,12 +980,10 @@ RSpec.describe 'native layout table parity' do
   # …and an ANONYMOUS CELL is laid out now, which it was not until 2026-09-22. §17.2.1 wraps a table's stray
   # non-cell content in one, `anonTableCell` builds it, and it is no part of the DOM — so it has no `_nid`, and
   # the record stream had nothing to put in a record's node slot. It gets the sentinel an anonymous ROW and an
-  # anonymous BLOCK GROUP already get: laid out, and skipped in the parity compare (its CHILDREN are real nodes
-  # and are compared). This was the largest single cause behind `table-unsupported`, the campaign's biggest
+  # anonymous BLOCK GROUP already get, and is laid out like them. This was the largest single cause behind `table-unsupported`, the campaign's biggest
   # decline — 1,440 sole blockers over the `pseudo` and `sticky` sweeps, and the reason the reason-string had to
   # be censused before it could be named.
-  # The figures are Chrome 153's, and they are here because parity alone could not tell whether the box the two
-  # engines now agree on is the right one.
+  # The figures are Chrome 153's.
   {
     'a run of text'                => ['stray text', [0, 0, 96.015625, 22]],
     'one atomic inline'            => ['<span style="display:inline-block;width:10px;height:9px"></span>', [0, 0, 10, 22]],
@@ -1057,28 +993,19 @@ RSpec.describe 'native layout table parity' do
       body = %(<div style="width:400px"><div id="m" style="display:table;font:16px monospace">#{content}</div></div>)
       session = simulated_session(page(body))
       session.visit '/'
-      session.evaluate_script 'document.body.offsetHeight'
-      r = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-      expect(r).to include('ok' => true, 'mismatches' => 0), body
-      # …`sample` rather than `compared`, which a wrapper div alone would satisfy: nothing mismatched, and
-      # the table really was walked (a declined one comes back `ok: false`).
-      expect(r['sample']).to be_nil, "#{body}: #{r.inspect}"
       got = session.evaluate_script("(b => [b.x, b.y, b.width, b.height])(document.getElementById('m').getBoundingClientRect())")
       got.each_with_index do |v, i|
         expect(v).to be_within(0.05).of(chrome[i]), "#{body}: #{got.inspect} vs Chrome #{chrome.inspect}"
       end
     end
   end
-  # …and a real node INSIDE the anonymous cell is compared like any other, which is what says the cell is a box
+  # …and a real node INSIDE the anonymous cell is laid out like any other, which is what says the cell is a box
   # in the tree and not a hole in it. Chrome 153: the inline-block sits at 57.609375, 8 on the cell's one line.
-  it 'compares a real box inside the anonymous cell' do
+  it 'places a real box inside the anonymous cell' do
     body = '<div style="width:400px"><div style="display:table;font:16px monospace">stray ' \
            '<span id="m" style="display:inline-block;width:10px;height:9px"></span> text</div></div>'
     session = simulated_session(page(body))
     session.visit '/'
-    session.evaluate_script 'document.body.offsetHeight'
-    r = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-    expect(r).to include('ok' => true, 'mismatches' => 0), body
     got = session.evaluate_script("(b => [b.x, b.y, b.width, b.height])(document.getElementById('m').getBoundingClientRect())")
     [57.609375, 8, 10, 9].each_with_index do |v, i|
       expect(got[i]).to be_within(0.05).of(v), got.inspect
@@ -1094,26 +1021,19 @@ RSpec.describe 'native layout table parity' do
            '<div id="m" style="display:table;font:16px monospace">stray text</div>'
     session = simulated_session(page(body))
     session.visit '/'
-    session.evaluate_script 'document.body.offsetHeight'
-    expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0)
     w = session.evaluate_script("document.getElementById('m').getBoundingClientRect().width")
     expect(w).to be_within(0.05).of(115.21875), "#{w}: a second XX means the anonymous cell generated one"
   end
 
   # …and a PERCENTAGE inside the anonymous cell resolves against the CELL, which is Chrome's own basis: a
   # `float: left; width: 50%` beside stray text in a 200px fixed table whose real cell takes 120 is 40 wide,
-  # not 100. Both engines already agree with Chrome here, which is worth pinning rather than assuming: the
-  # record stream currently pushes the anonymous cell as a `null` node, and the next increment — giving it an
-  # arena node so its box can be COMPARED — is exactly the kind of change that could move a percentage basis
-  # underneath this without anyone asking.
+  # not 100 — the basis a change to how the anonymous cell is built could move without anyone asking.
   it 'resolves a percentage inside the anonymous cell against the cell' do
     body = '<div id="t" style="display:table;table-layout:fixed;width:200px;font:16px monospace">t' \
            '<div id="f" style="float:left;width:50%;height:9px"></div>' \
            '<div style="display:table-cell;width:120px">c</div></div>'
     session = simulated_session(page(body))
     session.visit '/'
-    session.evaluate_script 'document.body.offsetHeight'
-    expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0), body
     w = session.evaluate_script("document.getElementById('f').getBoundingClientRect().width")
     expect(w).to be_within(0.05).of(40), "#{w}: 100 means it resolved against the TABLE, not the anonymous cell"
   end
@@ -1141,8 +1061,6 @@ RSpec.describe 'native layout table parity' do
       body = %(<div id="w" style="width:600px"><span style="display:inline-table;border-spacing:0">#{inner}</span><span id="p">p</span></div>)
       session = simulated_session(page(body))
       session.visit '/'
-      session.evaluate_script 'document.body.offsetHeight'
-      expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0), body
       off = session.evaluate_script(
         "document.getElementById('p').getBoundingClientRect().y - document.getElementById('w').getBoundingClientRect().y"
       )
@@ -1159,12 +1077,9 @@ RSpec.describe 'native layout table parity' do
     body = '<div id="w" style="width:600px"><span style="display:inline-table;border-spacing:0">it</span><span>p</span></div>'
     session = simulated_session(page(body))
     session.visit '/'
-    session.evaluate_script 'document.body.offsetHeight'
-    expect(session.evaluate_script('globalThis.__csimLayoutShadowRun()')).to include('ok' => true, 'mismatches' => 0), body
     h = session.evaluate_script("document.getElementById('w').getBoundingClientRect().height")
     expect(h).to be_within(0.05).of(18), "#{h}: 22 means the table found no baseline and hung from its margin edge"
   end
-  it('declines a same-display group NESTED in another (its rows interleave in render order)') { a_bails_b_native('<div style="display:table;border-spacing:4px"><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;width:40px;height:20px">r1</div></div><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;height:18px">r2</div></div></div><div style="display:table-row"><div style="display:table-cell;height:36px">r3</div></div></div></div>') }
 
   # ── Native COLUMN sizing ──────────────────────────────────────────────────────────────────────────────
   # The columns are native's own now (`table_columns` / `distribute_columns` / `fixed_column_widths`): each one
@@ -1172,14 +1087,6 @@ RSpec.describe 'native layout table parity' do
   # are short of, a declared length or `%` constraining it, a `<col>` naming it — then the distribution ladder
   # (min-content → specified → max-content → the surplus over the unconstrained columns) over the width inside
   # the frame, and the table itself shrink-to-fitting that when its own width is auto.
-  # A grid whose intrinsic tracks native measured itself (no oracle contribution).
-  def expect_native_intrinsic(body)
-    r = run_shadow(body)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r, body)
-    expect(r['nativeIntrinsicGrids']).to be >= 1, "the track took the oracle's contribution: #{r.inspect}"
-  end
 
   describe 'native column sizing' do
     it 'sizes columns from the cells\' content, the widest cell winning' do
@@ -1230,10 +1137,9 @@ RSpec.describe 'native layout table parity' do
       expect_parity('<div style="width:300px"><table style="min-width:280px"><tr><td>a</td></tr></table></div>')
       expect_parity('<div style="width:300px"><table style="max-width:100px"><tr><td>one two three four five</td></tr></table></div>')
     end
-    it 'takes the oracle\'s contribution for a cell it cannot measure, rather than declining the table' do
-      # A control's chrome, a nested grid, a `%` edge an intrinsic measure has no basis for: the cell's resolved
-      # min/max-content ride its record (rec[84..85]) and size its column, exactly as an un-measurable grid
-      # track's contribution does. The table stays native either way.
+    it 'sizes a column from a cell holding a control, a nested grid or a percentage edge' do
+      # A control's chrome, a nested grid, a `%` edge an intrinsic measure has no basis for: each cell's
+      # min/max-content sizes its column all the same.
       expect_parity('<table><tr><td><input type="text"></td><td>b</td></tr></table>')
       expect_parity('<table><tr><td><select><option>x</option></select></td><td>b</td></tr></table>')
       expect_parity('<table><tr><td><div style="display:grid;grid-template-columns:30px 40px"><div>x</div><div>y</div></div></td><td>b</td></tr></table>')
@@ -1242,23 +1148,22 @@ RSpec.describe 'native layout table parity' do
       expect_parity('<table><caption><input></caption><tr><td>a</td></tr></table>')
       expect_parity('<table style="width:100%"><thead><tr><th>Name</th><th>Actions</th></tr></thead><tbody><tr><td>x</td><td><input value="v"></td></tr></tbody></table>')
     end
-    it 'takes the contribution for a cell whose atomic inline is PUSHED, not just one it cannot measure' do
-      # A `justify` block spreads its spaces (positions native does not hold) and a MIXED block's anonymous
-      # groups get no atomic hook, so both push every atomic — whose box is then not in the run stream
-      # `text_intrinsic` reads. The gate says so, and the cell's contribution comes off its record.
+    it 'sizes a column from a cell whose atomic inline sits in a justified or a mixed run' do
+      # A `justify` block spreads its spaces and a MIXED block's anonymous groups hold its atomics, neither of
+      # which is the run stream `text_intrinsic` reads.
       expect_parity('<table><tr><td style="text-align:justify">x <span style="display:inline-block">y</span></td><td>b</td></tr></table>')
       expect_parity('<table><tr><td><div>blk</div>p <span style="display:inline-block">ok</span> q</td><td>b</td></tr></table>')
-      # …and two shapes that USED to be pushed and are measured now, kept as parity checks: an inline with a
-      # `white-space` of its own, and an edged one whose font box exceeds its line-height (which the walk
-      # refused until native's CLOSE learned to grow the line to that box).
+      # …and two shapes that USED to be pushed and are measured now: an inline with a `white-space` of its own,
+      # and an edged one whose font box exceeds its line-height (which the walk refused until native's CLOSE
+      # learned to grow the line to that box).
       expect_parity('<table><tr><td>x <span style="display:inline-block">a <i style="white-space:pre">b  c</i></span></td><td>b</td></tr></table>')
       expect_parity('<table><tr><td>x <span style="display:inline-block"><b style="padding:0 5px;line-height:4px">y</b></span></td><td>b</td></tr></table>')
-      # The fact is ONE per inline formatting context: a nested atomic is pushed too, however deep the inline
-      # chain, so the gate threads it down (a link holding an icon beside a block is ordinary app markup).
+      # …a nested atomic too, however deep the inline chain (a link holding an icon beside a block is ordinary
+      # app markup).
       expect_parity('<table><tr><td style="text-align:justify">x <span>y <span style="display:inline-block">z</span></span></td><td>b</td></tr></table>')
       expect_parity('<table><tr><td style="text-align:justify">x <span>y <img width="10" height="10"></span></td><td>b</td></tr></table>')
       expect_parity('<table><tr><td><div>head</div>x <a href="#">link <img width="10" height="10"></a></td><td>b</td></tr></table>')
-      # …while the same shapes with the hook LIVE still lay their atomic out natively.
+      # …and the same shape on a plain line.
       expect_parity('<table><tr><td>x <a href="#">link <img width="10" height="10"></a></td><td>b</td></tr></table>')
     end
     it 'counts the columns a <col> / <colgroup span> declares past the cells\' own reach' do
@@ -1267,14 +1172,14 @@ RSpec.describe 'native layout table parity' do
       expect_parity('<table style="width:400px;border-spacing:0"><col span="2"><tr><td>a</td></tr></table>')
       expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:0"><col><col><col><tr><td>a</td><td>b</td></tr></table>')
     end
-    # A table in an INTRINSIC grid track is measured by native itself now (`nlIntrinsicMeasurable` admits one),
-    # so the track sizes from the table's own columns rather than an oracle contribution.
+    # A table in an INTRINSIC grid track is measured by native itself, so the track sizes from the table's own
+    # columns.
     it 'measures a table in a grid track itself' do
-      expect_native_intrinsic('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><tr><td>a</td><td>bb</td></tr></table><div>x</div></div>')
-      expect_native_intrinsic('<div style="display:grid;grid-template-columns:min-content auto;width:400px"><table><tr><td>aaa bbb</td><td>bb</td></tr></table><div>x</div></div>')
-      expect_native_intrinsic('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table style="border-spacing:4px"><caption>a wide caption here</caption><tr><td>a</td></tr></table><div>x</div></div>')
-      expect_native_intrinsic('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><tr><td style="width:25%">a</td><td>b</td></tr></table><div>x</div></div>')
-      expect_native_intrinsic('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><col style="width:120px"><tr><td>a</td><td>b</td></tr></table><div>x</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><tr><td>a</td><td>bb</td></tr></table><div>x</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:min-content auto;width:400px"><table><tr><td>aaa bbb</td><td>bb</td></tr></table><div>x</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table style="border-spacing:4px"><caption>a wide caption here</caption><tr><td>a</td></tr></table><div>x</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><tr><td style="width:25%">a</td><td>b</td></tr></table><div>x</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><col style="width:120px"><tr><td>a</td><td>b</td></tr></table><div>x</div></div>')
       expect_parity('<div style="display:grid;grid-template-columns:100px 200px;width:400px"><table><tr><td>a</td><td>bb</td></tr></table><div>x</div></div>')
     end
   end
@@ -1463,106 +1368,43 @@ RSpec.describe 'native layout table parity' do
       expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:auto"><td>a</td></tr><tr style="height:40px"><td>b</td></tr></table>')
     end
   end
-  # A CAPTION is the cell's twin: it floors the table's intrinsic width, and where native cannot measure it the
-  # oracle's contribution rides rec[84..85] (`table_min_max_with_caption` reads that and never descends). So it
-  # is the same measure BOUNDARY a pushed cell is — marked measured instead, a caption holding an atomic native
-  # cannot lay out declined the whole pass.
-  # WHICH of the two a cell is — measured, or a boundary contributing the oracle's figure — is decided by
-  # TRYING: the walk is the only thing that knows what it can build, so a cell it declines under the measuring
-  # obligation is rolled back and re-walked as a boundary. Every shape here holds content the walk refuses for a
-  # reason `nlIntrinsicMeasurable` does not model, so under a predicate-decided gate each took its whole table
-  # down; `table-layout: fixed` is here too, where native measures no cell at all and the obligation was never
-  # real. The one thing that cannot be recovered is a subtree the walk cannot build EITHER way.
-  describe 'a cell the walk declines to measure is re-walked as a boundary' do
+  # An atomic inline holding a box native once refused — a sticky block, an orphan `display: table-row` — in a CELL
+  # whose min/max-content sizes its column, and in a CAPTION, whose min-content floors the table's width on every
+  # layout (`caption_floor`). Each took its whole table down while the cell or caption was obliged to be measured.
+  # (`table-layout: fixed` with a width sizes its columns from the first row and measures no cell at all.)
+  REFUSED_ATOMICS = [
+    '<span style="display:inline-block"><div style="position:-webkit-sticky;width:9px;height:4px"></div>t</span>',
+    '<span style="display:inline-block"><div style="display:table-row"><span>aa bb</span></div></span>'
+  ].freeze
+
+  describe 'a cell or caption holding an atomic native once refused' do
     it 'lays out an auto, a fixed and a measured table around such a cell' do
-      WalkRefusals::ATOMIC.each do |inner|
-        # An AUTO table sizes its columns from the cells, so the contribution is asked for and pushed; a FIXED
-        # one with a width sizes them from the first row and asks for nothing at all, so nothing is pushed.
-        [[%{<div style="width:400px"><table><tr><td>a #{inner}</td></tr></table></div>}, 1],
-         [%{<div style="width:400px"><table style="table-layout:fixed;width:300px"><tr><td>a #{inner}</td></tr></table></div>}, 0],
-         [%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><tr><td>a #{inner}</td></tr></table></div></div>}, 1]].each do |body, pushed|
-          r = run_shadow(body)
-          expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-          expect(r['pushedContributions']).to eq(pushed), "the cell's contribution: #{r.inspect}"
-        end
+      REFUSED_ATOMICS.each do |inner|
+        expect_parity(%{<div style="width:400px"><table><tr><td>a #{inner}</td></tr></table></div>})
+        expect_parity(%{<div style="width:400px"><table style="table-layout:fixed;width:300px"><tr><td>a #{inner}</td></tr></table></div>})
+        expect_parity(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><tr><td>a #{inner}</td></tr></table></div></div>})
       end
     end
-    # The rollback has to put EVERY stream back — records, runs, grids, the node/index maps, the statistics — so
-    # where in the attempted subtree the refusal sits cannot change the outcome. A stream someone forgets to
-    # restore shows up here as a differing node count or a double-counted grid.
-    it 'leaves the same records behind wherever the refusal sits in the subtree' do
-      refusal = WalkRefusals::POSITIONED   # (any of them; what is under test is the bookkeeping)
-      inert = '<div style="width:3px;height:2px"></div>' * 4
-      grid = '<div style="display:grid;grid-template-columns:min-content;width:50px"><div>g</div></div>'
-      early = run_shadow(%{<div style="width:400px"><table><tr><td>#{grid}#{refusal}#{inert}</td></tr></table></div>})
-      late  = run_shadow(%{<div style="width:400px"><table><tr><td>#{grid}#{inert}#{refusal}</td></tr></table></div>})
-      expect(early).to include('ok' => true, 'mismatches' => 0), early.inspect
-      expect(late['nodes']).to eq(early['nodes']), "#{early.inspect} vs #{late.inspect}"
-      expect(late['compared']).to eq(early['compared']), "#{early.inspect} vs #{late.inspect}"
-      %w[nativeIntrinsicGrids nativeFlexRows nativeOutOfFlow nativeAtomics pushedContributions].each do |k|
-        expect(late[k]).to eq(early[k]), "#{k}: #{early.inspect} vs #{late.inspect}"
+
+    it 'lays out a table whose caption holds such an atomic' do
+      REFUSED_ATOMICS.each do |inner|
+        atomic = "a #{inner}"
+        # a vertical-writing-mode block child, a `min-content` track and a normal-flow table all ask for the
+        # caption's contribution
+        expect_parity(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><caption>#{atomic}</caption><tr><td>x</td></tr></table></div></div>})
+        expect_parity(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table></div>})
+        expect_parity(%{<table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table>})
+        expect_parity(%{<div style="width:400px"><table><caption>#{atomic}</caption><tr><td>x</td></tr></table></div>})
       end
-      expect(early['nativeIntrinsicGrids']).to eq(1), "the grid inside the re-walk should be counted once: #{early.inspect}"
-    end
-    it 'still measures a cell it can, and still declines what no walk can build' do
-      r = run_shadow('<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block">ok</span></td></tr></table>')
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'pushedContributions' => 0, 'nativeAtomics' => 1), r.inspect
-      declined = run_shadow(%(<table style="border-spacing:0"><tr><td style="padding:0">#{WalkRefusals::POSITIONED_INNER}</td></tr></table>))
-      expect(declined).to include('ok' => false, 'reason' => 'block-level-box-unplaceable'), declined.inspect
+      expect_parity(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>cap</caption><tr><td style="padding:0">x</td></tr></table></div>})
+      expect_parity(%{<table style="border-spacing:0"><caption>cap</caption><tr><td style="padding:0">x</td></tr></table>})
     end
   end
 
-  describe 'a caption whose content native cannot lay out pushes its contribution' do
-    # The tally counts a contribution native was ASKED for and could not produce — and a caption's always is: its
-    # min-content floors the table's width on every layout (`caption_floor`), not only where the table's own
-    # contribution is asked.
-    def expect_pushed_contribution(body, count = 1)
-      r = run_shadow(body)
-      expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-      expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-      expect_no_dropped_records(r, body)
-      expect(r['pushedContributions']).to eq(count), "expected the oracle's contribution to be pushed: #{r.inspect}"
-    end
-
-    it 'lays out a table whose caption holds an inline-block native cannot measure' do
-      atomic = %(a #{WalkRefusals::POSITIONED})
-      # asked for, and native cannot produce it: a vertical-writing-mode block child and a `min-content` track
-      expect_pushed_contribution(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><caption>#{atomic}</caption><tr><td>x</td></tr></table></div></div>})
-      expect_pushed_contribution(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table></div>})
-      # …asked for and native CAN produce it, so nothing is pushed
-      expect_pushed_contribution(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>cap</caption><tr><td style="padding:0">x</td></tr></table></div>}, 0)
-      # …and a normal-flow table, which asks too
-      expect_pushed_contribution(%{<table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table>})
-      expect_pushed_contribution(%{<table style="border-spacing:0"><caption>cap</caption><tr><td style="padding:0">x</td></tr></table>}, 0)
-    end
-    # Measuring the caption is TRIED (`walkAttempt`), never promised: each of these is a refusal
-    # `nlIntrinsicMeasurable` does not model, and the walk rolls the caption back to a parked subtree whose
-    # contribution the oracle pushes, rather than declining the table over it.
-    it 'parks a caption whose content the walk refuses, rather than declining the table' do
-      WalkRefusals::ATOMIC.each do |inner|
-        expect_pushed_contribution(%{<div style="width:400px"><table><caption>a #{inner}</caption><tr><td>x</td></tr></table></div>})
-      end
-    end
-  end
-
-  # An ORPHAN `display: table-row` — one with no table around it — is not CSS Tables' anonymous table in this
-  # engine. `layoutBox` says so in as many words ("a browser wraps it in an anonymous table and we don't") and
-  # routes it to `layoutFlexRow` with `equalShare` and a PHYSICAL LTR plan. The walk emits it as a flex record
-  # for exactly that reason, and it is 1,296 of the `pseudo` sweep's declines: every one a
+  # An ORPHAN `display: table-row` — one with no table around it — is laid out in the anonymous table CSS 2.1
+  # §17.2.1 wraps it in, as Chrome does. It was 1,296 of the `pseudo` sweep's declines: every one a
   # `::before { display: table-row }`.
-  #
-  # ONLY AN EMPTY ONE, and the boundary is the whole of what these arms are about. For a row with content the
-  # oracle is two things at once — it MEASURES through the block-stacking arm of `contentIntrinsicWidths` (its
-  # display is `table-row`, so the flex arm there never runs) and LAYS OUT through `layoutFlexRow`, which sums
-  # along the row and drops bare text — and one record cannot say both. Taking those made 249 `pseudo` shapes
-  # mismatch. The equal-share arithmetic goes with them: not one shape in the corpus, the sweeps or these
-  # specs is an orphan row with element children, so it would ship unexecuted.
   describe 'an orphan display: table-row' do
-    def expect_declines(body, reason)
-      r = run_shadow(body)
-      expect(r).to include('ok' => false, 'reason' => reason), body
-    end
-
     it 'lays an empty one out natively, whatever flex properties it declares' do
       ['', 'flex-direction:column', 'flex-wrap:wrap', 'direction:rtl', 'writing-mode:vertical-rl'].each do |extra|
         expect_parity(%(<div style="width:400px"><div style="display:table-row;#{extra}"></div><div style="height:4px"></div></div>))
@@ -1576,10 +1418,8 @@ RSpec.describe 'native layout table parity' do
                     '<div style="width:400px"><div class="p"></div><div style="height:4px"></div></div>')
     end
 
-    # …and one of nothing but bare TEXT — the shape every orphan row in the sweeps is, a generated `content` — as the
-    # two things a record can say at once: the layout drops the text (no item; the line-height floor in rec[52]) and
-    # the MEASURE reads it off the record's own run stream (`NL_FLAG_MEASURES_RUNS`, the oracle's block-stacking arm).
-    # 864 `pseudo` declines until 2026-09-26. Chrome's boxes around it (a float, an inline-block, `max-content`).
+    # …and one of nothing but bare TEXT — the shape every orphan row in the sweeps is, a generated `content` —
+    # measured by that text. 864 `pseudo` declines until 2026-09-26. Chrome's boxes around it (a float, an inline-block, `max-content`).
     it 'lays one of bare text out natively, measured by its text' do
       {
         '<style>.p::before{content:"a longer generated string";display:table-row}</style><div style="width:400px;font:16px monospace"><div id="m" class="p" style="float:left"></div></div>' => [240.016, 22],
@@ -1594,10 +1434,8 @@ RSpec.describe 'native layout table parity' do
       expect_parity('<div style="width:400px"><div style="display:table-row">x</div><div style="height:4px"></div></div>')
     end
 
-    # …and one of BLOCK-LEVEL element children as the JS model's EQUAL-SHARE flex row (`NL_FLAG_EQUAL_SHARE`), which the
-    # JS walk and the oracle still agree on (`expect_parity`): each item POSITIONED at `floor(available / n)` of the row.
-    # The Rust walk lays the row out as Chrome does, in the anonymous table CSS 2.1 §17.2.1 wraps it in: block children
-    # stacked in one anonymous cell (the second at x 0), cells shrunk to their content (19.2).
+    # …and one of BLOCK-LEVEL element children: stacked in one anonymous cell (the second at x 0), and cells shrunk to
+    # their content (19.2). Chrome's boxes.
     it 'lays one of block children out natively, in its anonymous table' do
       blocks = '<div style="width:300px;font:16px monospace"><div style="display:table-row"><div>aa</div><div id="m" style="width:50px">w</div></div></div>'
       cells = '<div style="width:300px;font:16px monospace"><div style="display:table-row"><div style="display:table-cell">aa</div><div id="m" style="display:table-cell">bb</div></div></div>'
@@ -1609,14 +1447,11 @@ RSpec.describe 'native layout table parity' do
       expect_parity(table)
       # (…stacked under the table in the one anonymous cell, as wide as the table makes it — Chrome: 0, 261.2)
       expect(laid_out_rect(table).values_at(0, 2).map {|v| v.round(1) }).to eq([0, 261.2])
-      r = run_shadow(blocks, '{noOracle: true}')
-      expect(r).to include('ok' => true, 'mismatches' => 0)
-      expect(r['oracleReads'].to_h).to be_empty, r.inspect
     end
 
     # …and in DOCUMENT order whatever its `flex-direction` or its children's `order` say: an orphan row's children are no
-    # flex items (the JS model lays the row out on `PHYSICAL_ROW_PLAN`; Chrome keeps them in document order in its
-    # anonymous table, stacked in one anonymous cell, as the Rust walk does — the `order: -1` child at x 0).
+    # flex items (Chrome keeps them in document order in its anonymous table, stacked in one anonymous cell — the
+    # `order: -1` child at x 0).
     it 'keeps one of block children in document order' do
       host = '<div style="width:300px;font:16px monospace">%s</div>'
       {
@@ -1631,21 +1466,12 @@ RSpec.describe 'native layout table parity' do
       expect_parity(body)
       expect(laid_out_rect(body)[0]).to be_within(0.05).of(0), "#{body}: #m x"
     end
-
-    # …and REFUSES one with an INLINE-level or floated element child, which the oracle's measure puts on a LINE where the
-    # block walk stacks it. Without these the narrowing is a silent one: the gate could widen back to "any orphan row".
-    it 'refuses one with inline-level children' do
-      expect_declines('<div style="width:400px"><div style="display:table-row"><span>aaaa</span><span>bbbb</span></div></div>',
-                      'flex-container-unsupported')
-      # …a `<br>` is an element and so an item: the row is not empty.
-      expect_declines('<div style="width:400px"><div style="display:table-row"><br></div></div>', 'flex-container-unsupported')
-    end
   end
 
-  # An EMPTY row group (a `<tbody>` with no rows — Discourse's topic list) is laid out natively where the oracle boxes it:
-  # zero height at the grid's bottom edge, its trailing spacing included, the rows' width — the table's content box
-  # where there is no column. It declined until 2026-09-26 (`table-group-empty`). SHARED: Chrome keeps it in DOCUMENT
-  # order (y 0 before a populated `<tbody>`, where both engines say 28) and shares an imposed height out to it too.
+  # An EMPTY row group (a `<tbody>` with no rows — Discourse's topic list) is laid out natively: zero height at the
+  # grid's bottom edge, its trailing spacing included, the rows' width — the table's content box where there is no
+  # column. It declined until 2026-09-26 (`table-group-empty`). SHARED: Chrome keeps it in DOCUMENT order (y 0
+  # before a populated `<tbody>`, where both engines said 28) and shares an imposed height out to it too.
   it 'lays an empty row group out natively' do
     [
       '<table style="width:300px"><thead><tr><th>Topic</th><th>Replies</th></tr></thead><tbody id="m"></tbody></table>',
@@ -1660,28 +1486,17 @@ RSpec.describe 'native layout table parity' do
     expect_shared_gap(laid_out_rect(ordered)[1], shared: 28, chrome: 0, what: "#{ordered}: #m y")
   end
 
-  # …and every OTHER table part with no table to lay it out — a cell, a row group, a caption — which the oracle
-  # lays out as a plain BLOCK (`layoutElementInner`'s fallthrough) and the walk now takes as one: 1,100 declines of
-  # `rv5nw` (`block-level-box-unplaceable`) until 2026-09-24. What still makes one a cell is what the DISPLAY says:
-  # its block-axis min/max do not apply (Chrome agrees, 22 tall either way), where a percentage width is its own —
-  # a table's cell hands that to its column instead — and resolved against the block native lays it out in, with
-  # no oracle box read. Chrome wraps each in an ANONYMOUS table: shrink-to-fit (48 for "aa bb" where both engines
-  # fill the 200; 96.03 for the 50% cell where both say 100) and consecutive cells side by side (the second at
-  # x 19.2, y 0, where both stack it at y 22), with no margins. Shared, so pinned rather than fixed.
-  # A CELL's width that is a `calc()` or a comparison of a percentage constrains no column — Chrome, the oracle and
-  # native alike split the 400 as if nothing were declared — and reaches the cell's box no more than a plain one does:
-  # the box is its column. So the walk sends none of it, with no oracle box read since 2026-09-26, where it resolved it
-  # against the oracle's containing block for a figure nothing read. Chrome's width (377.75, its LayoutUnit of 377.78),
-  # and the narrow column a wider declaration does not widen (10.27 in Chrome, 10.26 in both).
+  # A CELL's width that is a `calc()` or a comparison of a percentage constrains no column — Chrome splits the 400 as
+  # if nothing were declared — and reaches the cell's box no more than a plain one does: the box is its column. The
+  # walk resolved it against the oracle's containing block until 2026-09-26, for a figure nothing read. Chrome's width
+  # (377.75, its LayoutUnit of 377.78), and the narrow column a wider declaration does not widen (10.27 in Chrome,
+  # 10.26 here).
   it 'resolves a calc() or comparison cell width natively, constraining no column' do
     ['calc(40% + 10px)', 'clamp(30px, 50%, 200px)', 'min(90%, 250px)', 'max(60%, 40px)'].each do |w|
       body = %(<table style="width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="width:#{w};padding:0">lorem ipsum dolor</td>) +
              '<td style="padding:0">x</td></tr></table>'
       expect_parity(body)
       expect(laid_out_rect(body)[2]).to be_within(0.05).of(377.75), w
-      r = run_shadow(body, '{noOracle: true}')
-      expect(r).to include('ok' => true, 'mismatches' => 0)
-      expect(r['oracleReads'].to_h).to be_empty, "#{w}: #{r.inspect}"
     end
     ['calc(90% + 10px)', 'max(90%, 10px)'].each do |w|
       body = %(<table style="width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="width:#{w};padding:0">a</td>) +
@@ -1691,9 +1506,8 @@ RSpec.describe 'native layout table parity' do
     end
   end
   # …and a horizontal cell's `min-width` / `max-width` percentage reaches its box no more than its width does — a 60%
-  # minimum and a 10% maximum leave the column alone, in Chrome and in both engines — so the record carries none: the
-  # walk resolved them against the oracle's table until 2026-09-26, and PUSHED every flex container holding such a
-  # table for it (`descendant-walk-percentage: min-width route`). Chrome's widths.
+  # minimum and a 10% maximum leave the column alone, in Chrome and here. The walk resolved them against the oracle's
+  # table until 2026-09-26, and PUSHED every flex container holding such a table for it. Chrome's widths.
   it 'lays out a cell\'s percentage min-width and max-width natively, reaching nothing' do
     {
       '<table style="width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="min-width:60%;padding:0">a</td><td style="padding:0">b</td></tr></table>' => 200,
@@ -1704,17 +1518,13 @@ RSpec.describe 'native layout table parity' do
     }.each do |body, w|
       expect_parity(body)
       expect(laid_out_rect(body)[2]).to be_within(0.05).of(w), body
-      r = run_shadow(body, '{noOracle: true}')
-      expect(r).to include('ok' => true, 'mismatches' => 0)
-      expect(r['oracleReads'].to_h).to be_empty, "#{body}: #{r.inspect}"
     end
   end
   # A FIXED-layout table's first-row cell with a percentage padding: its column is its declared width plus its
-  # horizontal edges resolved against the width being shared out, the oracle's `fixedColumnWidths` — native resolves
-  # the cell's pairs and programs at that width, where the walk declined the table until 2026-09-26
-  # (`table-fixed-pct-padding`, 72 sweep shapes). SHARED: Chrome counts a percentage padding as NOTHING in that
-  # computation (`padding: 0 10%` beside `width: 100px` is a 100px column there, 180 in both engines; `max(5%, 30px)`
-  # counts 30 in all three).
+  # horizontal edges resolved against the width being shared out — native resolves the cell's pairs and programs at
+  # that width, where the walk declined the table until 2026-09-26 (`table-fixed-pct-padding`, 72 sweep shapes).
+  # SHARED: Chrome counts a percentage padding as NOTHING in that computation (`padding: 0 10%` beside `width: 100px`
+  # is a 100px column there, 180 here; `max(5%, 30px)` counts 30 in both).
   it 'lays out a fixed table whose first-row cell has a percentage padding natively' do
     [
       ['<table style="table-layout:fixed;width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="width:100px;padding:0 10%">a</td><td>b</td></tr></table>', 180, 100],
@@ -1726,15 +1536,12 @@ RSpec.describe 'native layout table parity' do
       else
         expect(laid_out_rect(body)[2]).to eq(w)   # Chrome
       end
-      r = run_shadow(body, '{noOracle: true}')
-      expect(r).to include('ok' => true, 'mismatches' => 0)
-      expect(r['oracleReads'].to_h).to be_empty, "#{body}: #{r.inspect}"
     end
   end
   # A table may hold row GROUPS and BARE rows side by side (§17.2.1 wraps neither): the rows stack in render order —
   # header, then bodies and bare rows in document order, then footers — each group's box around its own. The walk
   # emits each group where its first row comes up and a bare row where it stands, where it declined the mix until
-  # 2026-09-26 (`table-grouped-and-bare-rows`, 400 sweep shapes). Chrome's boxes, and no oracle read.
+  # 2026-09-26 (`table-grouped-and-bare-rows`, 400 sweep shapes). Chrome's boxes.
   it 'lays out a table holding row groups and bare rows side by side' do
     {
       '<div style="display:table;font:16px monospace;border-spacing:0"><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell">a</div></div></div>' \
@@ -1746,11 +1553,12 @@ RSpec.describe 'native layout table parity' do
     }.each do |body, rect|
       expect_parity(body)
       laid_out_rect(body).zip(rect).each {|g, w| expect(g).to be_within(0.02).of(w), body }
-      r = run_shadow(body, '{noOracle: true}')
-      expect(r).to include('ok' => true, 'mismatches' => 0)
-      expect(r['oracleReads'].to_h).to be_empty, "#{body}: #{r.inspect}"
     end
   end
+  # …and every OTHER table part with no table to lay it out — a cell, a row group, a caption: 1,100 declines of
+  # `rv5nw` (`block-level-box-unplaceable`) until 2026-09-24. Chrome wraps each in an ANONYMOUS table: a cell's
+  # block-axis min/max do not apply (22 tall either way), each is shrink-to-fit (48 for "aa bb" in 200; 96.03 for
+  # the 50% cell) and consecutive cells sit side by side (the second at x 19.2, y 0), with no margins.
   describe 'an orphan cell, row group or caption' do
     it 'lays one out as a block whose block-axis min/max do not apply' do
       %w[min-height:40px max-height:5px].each do |style|
@@ -1761,16 +1569,9 @@ RSpec.describe 'native layout table parity' do
       body = '<div style="width:200px;font:16px monospace"><div id="m" style="display:table-cell;width:50%">aa bb</div></div>'
       expect_parity(body)
       expect(laid_out_rect(body)[2]).to be_within(0.05).of(96.03), "#{body}: #m width"
-      # (…the Rust walk's anonymous table resolves the cell's 50% against the room the table is given — Chrome's 96.03)
-      # …with no oracle box read — and an orphan ROW native lays out itself (it holds no in-flow item) likewise
-      [
-        body,
-        '<div style="width:200px"><div style="display:table-row;padding:10%;width:50%"></div><p>after</p></div>'
-      ].each do |oracle_free|
-        r = run_shadow(oracle_free, '{noOracle: true}')
-        expect(r).to include('ok' => true, 'mismatches' => 0)
-        expect(r['oracleReads'].to_h).to be_empty, r.inspect
-      end
+      # (…the anonymous table resolves the cell's 50% against the room the table is given — Chrome's 96.03)
+      # …and an orphan ROW with percentage edges and no in-flow item
+      expect_parity('<div style="width:200px"><div style="display:table-row;padding:10%;width:50%"></div><p>after</p></div>')
       %w[table-row-group table-header-group table-caption].each do |display|
         expect_parity(%(<div style="width:200px;font:16px monospace"><div style="display:#{display}">aa bb</div><p>after</p></div>))
       end
@@ -1780,7 +1581,7 @@ RSpec.describe 'native layout table parity' do
       expect_parity('<div style="width:200px;font:16px monospace"><div style="writing-mode:vertical-lr;height:120px"><div style="display:table-cell;max-width:20px">aa bb cc dd</div></div></div>')
     end
 
-    # (…the JS model fills the width and stacks them; the Rust walk wraps them in an anonymous table, as Chrome does)
+    # (…shrink-to-fit and side by side, as Chrome does)
     it 'wraps one in an anonymous table' do
       {
         '<div id="m" style="display:table-cell">aa bb</div>'                                      => [2, 48.02],

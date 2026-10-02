@@ -1,14 +1,12 @@
 # frozen_string_literal: true
-# Native layout L2 (inline/text) — geometry shadow-parity: a text-containing block's native height
-# (greedy line count × line-height, measured in-process via fontations) must equal the JS layout's `_lb`
-# on pure-text blocks (single font, every `white-space` mode). Validates the native line breaker + text-block
-# height against the JS oracle.
+# Native layout L2 (inline/text): a text-containing block's lines — greedy line breaking over the advances
+# measured in-process via fontations, in every `white-space` mode — held to each shape's golden, and to
+# Chrome's figures where a shape states them.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 require_relative 'support/layout_golden'
-require_relative 'support/walk_refusals'
 # …and the enumerator the Unicode drift check asks the engine with.
 require_relative 'support/unicode_classes'
 
@@ -36,14 +34,10 @@ RSpec.describe 'native layout L2 text-block parity' do
     end
   end
 
-  def shadow(body)
-    with_page(body) {|session| parity(session) }
-  end
-
-  # Where the marker `#m` sits, which is how a shape says what it is about. Parity is blind to a rule both
-  # engines get wrong the SAME way — the harness only ever asks whether they AGREE — so a rule read out of
-  # Chrome rather than out of the oracle has to have the Chrome NUMBER asserted too, which is what the
-  # `chrome_x` argument of `expect_parity` / `expect_declined_x` below is for.
+  # Where the marker `#m` sits, which is how a shape says what it is about. A golden holds a shape to the
+  # answer it was recorded with, right or wrong — as parity was blind to a rule both engines got wrong the
+  # SAME way — so a rule read out of Chrome has to have the Chrome NUMBER asserted too, which is what the
+  # `chrome_x` argument of `expect_parity` below is for.
   def marker_x(session)
     session.evaluate_script("document.querySelector('#m').getBoundingClientRect().x")
   end
@@ -112,21 +106,6 @@ RSpec.describe 'native layout L2 text-block parity' do
       expect_shared(marker_x(session), shared_x, shared_x_chrome, body, 'x') unless shared_x.nil?
       expect_shared(marker_y(session), shared_y, shared_y_chrome, body, 'y') unless shared_y.nil?
     end
-  end
-
-  # …and for a rule the walk DECLINES by design, where there is no parity to assert at all and the oracle is
-  # the only engine that answers. It still checks the decline, so a shape that quietly became native stops
-  # being tested here and says so rather than passing on.
-  def expect_declined_x(body, chrome_x, native_body, reason: 'text-not-measurable', chrome_y: nil)
-    with_page(body) do |session|
-      expect(parity(session)).to include('ok' => false, 'reason' => reason), "not declined: #{body}"
-      expect_near(marker_x(session), chrome_x, body, 'x') unless chrome_x.nil?
-      expect_near(marker_y(session), chrome_y, body, 'y') unless chrome_y.nil?
-    end
-    # …and the decline is the thing the shape is ABOUT, not something else that crept in: the same shape
-    # without it goes native. Without this the example stays green while it silently stops covering the rule
-    # (a new walk gate anywhere in the shape would decline it just as well).
-    expect_parity(native_body)
   end
 
   # `vertical-align` on an INLINE BOX places the text it owns against the PARENT's font (`middle`: half an
@@ -329,8 +308,9 @@ RSpec.describe 'native layout L2 text-block parity' do
   # It lays out as a text block of that one line since 2026-09-24 (22 tall, Chrome too).
   ["\n", ' '].each do |ws|
     it "lays out a break-spaces block whose only content is #{ws.inspect}" do
-      with_page(%(<div id="w" style="width:400px;font:16px monospace;white-space:break-spaces">#{ws}</div>)) do |session|
-        expect(parity(session)).to include('ok' => true, 'mismatches' => 0)
+      body = %(<div id="w" style="width:400px;font:16px monospace;white-space:break-spaces">#{ws}</div>)
+      expect_parity(body)
+      with_page(body) do |session|
         expect(session.evaluate_script("document.getElementById('w').getBoundingClientRect().height")).to eq(22)
       end
     end
@@ -551,11 +531,10 @@ RSpec.describe 'native layout L2 text-block parity' do
   # that collapsed did: the child's 50px top margin still collapses with the 20px paragraph margin above it
   # (Chrome: the block at 92, 50 below the paragraph's 42).
   it 'collapses a margin through a kept empty-inline group' do
-    with_page('<div style="width:200px;font:16px monospace"><p style="margin:20px 0">a</p><div><span> </span><div id="m" style="margin-top:50px;width:5px;height:5px"></div></div><p style="margin:30px 0">b</p></div>') do |session|
-      r = parity(session)
-      expect(r).to include('ok' => true, 'mismatches' => 0)
-      expect_near(marker_y(session), 92, 'kept group', 'y')
-    end
+    expect_parity(
+      '<div style="width:200px;font:16px monospace"><p style="margin:20px 0">a</p><div><span> </span><div id="m" style="margin-top:50px;width:5px;height:5px"></div></div><p style="margin:30px 0">b</p></div>',
+      chrome_y: 92
+    )
   end
   # SHARED: a `<wbr>` beside a float makes a LINE in Chrome (22 tall, so the marker after the block sits on the
   # line below it, y 35), and a line of nothing in both engines (13).
@@ -1165,12 +1144,10 @@ RSpec.describe 'native layout L2 text-block parity' do
     body = '<div id="o" style="position:relative;width:220px;font:16px monospace">aaaa <span style="position:relative;left:3px">' \
            '<span style="display:inline-flex;width:100px"><div style="height:40px">Q</div>' \
            '<div><i id="m" style="position:absolute;width:3px;height:3px"></i>cc</div></span></span> t</div>'
+    expect_parity(body)
     with_page(body) do |session|
-      expect(parity(session)).to include('ok' => true, 'mismatches' => 0)
+      session.evaluate_script('document.body.offsetHeight')
       session.evaluate_script("document.getElementById('o').setAttribute('data-x', '1')")
-      r = parity(session)
-      expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
-      expect_no_dropped_records(r, body)
       expect_near(marker_x(session), 60.625, body, 'x')
     end
   end
@@ -1637,28 +1614,35 @@ RSpec.describe 'native layout L2 text-block parity' do
         chrome_y: 22, shared_x: 9.6, shared_x_chrome: 19.2188
       )
     end
-    # …and a node of NOTHING but soft hyphens under `hyphens: none` is no content once the gather strips them, where the
-    # oracle places it as a zero-wide word that makes the line (Chrome: 22 tall) — so it declines.
-    it 'declines a node of soft hyphens that hyphens: none empties' do
-      expect(shadow('<div style="width:200px"><div style="hyphens:none">&shy;</div>x</div>')).to include('ok' => false, 'reason' => 'text-not-measurable')
-    end
-    # What native still cannot measure is refused by the WALK, not discovered in Rust: a ZWJ under a per-character
-    # wrap (where the oracle's advance carries the previous character). (A preserved form feed was the first example
-    # here until 2026-09-25, when both engines made it text that is not there, and a soft hyphen until 2026-09-26,
-    # when native took the hyphen it draws.)
-    it 'declines a per-character ZWJ in the walk' do
-      ['<div style="width:400px;word-break:break-all">a&#x200D;b</div>'].each do |body|
-        expect(shadow(body)).to include('ok' => false, 'reason' => 'text-not-measurable'), body
+    # …and a node of NOTHING but soft hyphens under `hyphens: none` is no content once the gather strips them, yet
+    # still makes its line (Chrome: 18 tall); and a ZWJ under a per-character wrap measures with the characters
+    # around it, its advance carried from the one before it (Chrome: 15.11 wide).
+    it 'lays out a node of soft hyphens that hyphens: none empties, and a per-character ZWJ' do
+      {
+        '<div style="width:200px"><div id="m" style="hyphens:none">&shy;</div>x</div>' => [200, 18],
+        '<div id="m" style="width:max-content;word-break:break-all">a&#x200D;b</div>' => [15.109375, 18]
+      }.each do |body, (chrome_w, chrome_h)|
+        expect_layout_golden(body)
+        with_page(body) do |session|
+          box = session.evaluate_script("(r => [r.width, r.height])(document.querySelector('#m').getBoundingClientRect())")
+          expect_near(box[0], chrome_w, body, 'width')
+          expect_near(box[1], chrome_h, body, 'height')
+        end
       end
     end
-    # …and a preserved CR / FF node that is a block's ONLY text, under a text indent: it TAKES the indent where it is
-    # measured (Chrome: a CR-only `pre` float with `text-indent: 20px` is 20 wide, 0 tall — the oracle too), but the
-    # block reads as empty to the walk and never reaches the gather that declines it: native measured it 0 wide.
-    it 'declines a block whose only text is a preserved CR under a text indent' do
-      ['<div style="width:300px"><div style="float:left;white-space:pre;text-indent:20px">&#13;</div>x</div>',
-       '<div style="width:300px"><div style="float:left;white-space:break-spaces;text-indent:20px">&#12;</div>x</div>',
-       '<div style="width:300px"><div style="float:left;text-indent:20px"><span style="display:contents;white-space:pre">&#13;</span></div>x</div>'].each do |body|
-        expect(shadow(body)).to include('ok' => false, 'reason' => 'text-not-measurable'), body
+    # …and a preserved CR / FF node that is a block's ONLY text, under a text indent. GAP: Chrome lets it TAKE the
+    # indent where it is measured — a CR-only `pre` float with `text-indent: 20px` is 20 wide, 0 tall, as the oracle
+    # had it — but the block reads as empty to native, which measures it 0 wide.
+    it 'measures a block whose only text is a preserved CR under a text indent' do
+      ['<div style="width:300px"><div id="m" style="float:left;white-space:pre;text-indent:20px">&#13;</div>x</div>',
+       '<div style="width:300px"><div id="m" style="float:left;white-space:break-spaces;text-indent:20px">&#12;</div>x</div>',
+       '<div style="width:300px"><div id="m" style="float:left;text-indent:20px"><span style="display:contents;white-space:pre">&#13;</span></div>x</div>'].each do |body|
+        expect_layout_golden(body)
+        with_page(body) do |session|
+          width = session.evaluate_script("document.querySelector('#m').getBoundingClientRect().width")
+          expect(width).not_to be_within(0.05).of(20), "#{body}: #m now AGREES with Chrome (20 wide) — a fix: assert Chrome's figure"
+          expect(width).to eq(0), "#{body}: #m #{width} wide; native says 0, Chrome 20"
+        end
       end
     end
   end
@@ -1771,30 +1755,21 @@ RSpec.describe 'native layout L2 text-block parity' do
     end
     # …and it is on the first line of BOTH intrinsic figures, where a PERCENTAGE resolves against nothing —
     # which is what leaves the `text-indent: -9999px` hidden-label idiom its padding.
-    # …but an INTRINSIC measure of an indented block stays with the oracle. What Chrome's min-content does with
-    # an indent is a real break pass at zero available width — a break at an ITEM boundary always taken, one
-    # inside a text item taken only on overflow — where this engine's measure is an accumulator that agrees only
-    # when the first line opens with a plain word. Four review rounds of near-miss rules came out of trying to
-    # mirror it (an empty inline, a `<wbr>`, a leading space, a negative indent and a soft hyphen each broke a
-    # different one), so a MEASURED indented block declines and its caller takes the fallback it already has.
     it 'measures an indented block natively, on the route the plain one takes' do
-      # Each pair is the same shape with and without the indent, and BOTH go down the native route: `text_intrinsic`
-      # takes the indent the way the oracle's own walk does — the first occupant of each line takes it, a forced
-      # break re-arms it under `hanging` / `each-line` — from the length on the record (a `%` resolves against
-      # nothing in an intrinsic measure, CSS Sizing 3).
-      [['<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div style="%s">aa bb</div><div>x</div></div>', 'nativeIntrinsicGrids'],
-       ['<div style="display:grid;grid-template-columns:max-content auto;width:400px"><div style="%s">aa bb</div><div>x</div></div>', 'nativeIntrinsicGrids'],
-       ['<div style="width:400px">a <span style="display:inline-block;%s">bb cc</span></div>', 'nativeAtomics']].each do |shape, key|
+      # Each pair is the same shape with and without the indent: `text_intrinsic` takes the indent the way the
+      # oracle's own walk did — the first occupant of each line takes it, a forced break re-arms it under
+      # `hanging` / `each-line` — from the length on the record (a `%` resolves against nothing in an intrinsic
+      # measure, CSS Sizing 3).
+      ['<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div style="%s">aa bb</div><div>x</div></div>',
+       '<div style="display:grid;grid-template-columns:max-content auto;width:400px"><div style="%s">aa bb</div><div>x</div></div>',
+       '<div style="width:400px">a <span style="display:inline-block;%s">bb cc</span></div>'].each do |shape|
         ['text-indent:20px', 'text-indent:20%', 'text-indent:-20px', 'text-indent:20px hanging',
          'text-indent:20px each-line', ''].each do |indent|
-          r = shadow(format(shape, indent))
-          expect(r).to include('ok' => true, 'mismatches' => 0), "#{shape} / #{indent}"
-          expect(r[key]).to be > 0, "#{key} under #{indent.inspect}: #{r.inspect}"
+          expect_parity(format(shape, indent))
         end
       end
       # …a `<td>` measures its own contribution too, where it used to push the oracle's.
-      cell = shadow('<table style="border-spacing:0"><tr><td style="padding:0;text-indent:20px">aa bb</td><td style="padding:0">cc</td></tr></table>')
-      expect(cell).to include('ok' => true, 'mismatches' => 0, 'pushedContributions' => 0)
+      expect_parity('<table style="border-spacing:0"><tr><td style="padding:0;text-indent:20px">aa bb</td><td style="padding:0">cc</td></tr></table>')
       expect_parity('<div style="display:inline-block;padding:0 5px;text-indent:-9999px">Label</div>')
       expect_parity('<div style="display:flex;width:400px"><div style="text-indent:30px">aa bb</div></div>')
     end

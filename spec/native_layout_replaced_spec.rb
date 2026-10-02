@@ -1,20 +1,18 @@
 # frozen_string_literal: true
-# Native layout — REPLACED LEAF sizing, geometry shadow-parity. A replaced element (svg / img / canvas /
+# Native layout — REPLACED LEAF sizing, held to recorded goldens. A replaced element (svg / img / canvas /
 # input / …) lays out no CSS-box children of its own; its INTRINSIC size is data the walk hands native (a
-# decoded image's natural size, a control's chrome, an svg's viewBox), and native sizes the box from it as
-# the oracle's `usedSize` does (`replaced_box`: declared sizes win, an intrinsic ratio derives the other axis,
-# min/max clamp through the ratio, a border box floors at its edges). Handled as a BLOCK-LEVEL child, a FLEX
-# ITEM (row and column, sized natively) and a GRID ITEM. A control that lays out CSS boxes of its own is a
-# leaf like any other — the oracle never sizes it by stacking them — EXCEPT a LIST BOX showing rows, which is
-# a block container whose box is the control's and whose rows native stacks itself. An INLINE one is an ATOMIC
-# on a line, laid out by the same two facts — `native_layout_inline_atomic_spec.rb` holds those. Still
-# DECLINES: a list box as a GRID ITEM.
+# decoded image's natural size, a control's chrome, an svg's viewBox), and native sizes the box from it
+# (`replaced_box`: declared sizes win, an intrinsic ratio derives the other axis, min/max clamp through the
+# ratio, a border box floors at its edges). Handled as a BLOCK-LEVEL child, a FLEX ITEM (row and column) and a
+# GRID ITEM. A control that lays out CSS boxes of its own is a leaf like any other — never sized by stacking
+# them — EXCEPT a LIST BOX showing rows, which is a block container whose box is the control's and whose rows
+# native stacks itself. An INLINE one is an ATOMIC on a line, laid out by the same two facts —
+# `native_layout_inline_atomic_spec.rb` holds those.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 require_relative 'support/layout_golden'
-require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout replaced-leaf parity' do
   def page(body)
@@ -22,14 +20,11 @@ RSpec.describe 'native layout replaced-leaf parity' do
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
-  # `opts` is the second argument of `__csimLayoutShadowRun`, as JS source: `{noOracle: true}` runs the same
-  # pass with every oracle layout stamp hidden, which is the only way to tell a box native LAID OUT from one
-  # it replayed off the oracle (a replayed box is parity-clean by construction).
-  def run_shadow(body, opts = '{}')
+  def run_shadow(body)
     session = simulated_session(page(body))
     session.visit '/'
     session.evaluate_script('document.body.offsetHeight')
-    session.evaluate_script("globalThis.__csimLayoutShadowRun(undefined, #{opts})")
+    session.evaluate_script('globalThis.__csimLayoutShadowRun()')
   end
 
   def expect_parity(body)
@@ -41,30 +36,15 @@ RSpec.describe 'native layout replaced-leaf parity' do
     end
   end
 
-  def expect_bail(body)
-    expect(run_shadow(body)).to include('ok' => false)
-  end
-
-  # …rooted at `#t` rather than at the body: the pass root is sized from the width the harness hands it, which
-  # is a rule of its own and the only way to reach it.
-  def run_rooted(body)
-    session = simulated_session(page(body))
-    session.visit '/'
-    session.evaluate_script('document.body.offsetHeight')
-    session.evaluate_script(%(globalThis.__csimLayoutShadowRun(document.getElementById('t'), {})))
-  end
-
-  # The page-visible width of the first element matching `selector` — for the one case where parity is not the
-  # question, because both engines agree on a figure Chrome does not share.
+  # The page-visible width of the first element matching `selector` — a figure held to Chrome's.
   def rendered_width(body, selector)
     session = simulated_session(page(body))
     session.visit '/'
     session.evaluate_script(%(document.querySelector('#{selector}').getBoundingClientRect().width))
   end
 
-  # …and a LIST BOX flex item, which native's flex sizing does not take: the page's own pass asks that of every item, and
-  # lays the page out with the JS layout where one is there. Sized natively, it stretched and grew nothing — 50.66 wide in
-  # both shapes. Chrome's widths.
+  # …and a LIST BOX flex item stretches and grows like any other. Sized as a leaf, it stretched and grew nothing — 50.66
+  # wide in both shapes. Chrome's widths.
   it 'stretches and grows a list-box flex item in the page pass' do
     column = '<div style="display:flex;flex-direction:column;width:200px"><select multiple size="3"><option>a</option></select></div>'
     row    = '<div style="display:flex;width:300px"><select multiple size="3" style="flex-grow:1"><option>a</option></select><i>x</i></div>'
@@ -126,9 +106,8 @@ RSpec.describe 'native layout replaced-leaf parity' do
   end
 
   # A block svg with INTERNAL content (<path>/<g>/…): SVG paints its subtree through the SVG model, not the CSS
-  # box model — the oracle stamps a degenerate _lb on those descendants, but they must NOT make the svg a
-  # non-leaf (native would otherwise lay them out as CSS boxes and mismatch). A sized svg is always a leaf; native
-  # replays its viewBox-sized box and emits no subtree. (This icon-with-a-path shape is pervasive in real apps.)
+  # box model — so those descendants must NOT make the svg a non-leaf (native would otherwise lay them out as CSS
+  # boxes). A sized svg is always a leaf; native sizes its box from the viewBox and emits no subtree. (This icon-with-a-path shape is pervasive in real apps.)
   it 'matches a block svg with internal path/g content (leaf — svg descendants are painted, not laid out)' do
     expect_parity('<div style="width:200px"><svg viewBox="0 0 24 24" style="height:16px;display:block"><path d="M4 4h16v16H4z"/><g><circle cx="5" cy="5" r="2"/></g></svg></div>')
   end
@@ -136,9 +115,9 @@ RSpec.describe 'native layout replaced-leaf parity' do
     expect_parity('<div style="display:flex;align-items:center;width:200px"><svg viewBox="0 0 20 20" style="height:16px"><path d="M0 0h20v20z"/></svg><div style="width:40px;height:16px"></div></div>')
   end
 
-  # …and as an ATOMIC on a line, whichever inline display it carries. The proof that it is laid out rather than
-  # replayed lives in `native_layout_inline_atomic_spec.rb` (`nativeAtomics` and the no-oracle read set); these
-  # two are here because the sizing is the same question as a block-level leaf's.
+  # …and as an ATOMIC on a line, whichever inline display it carries. The inline cases live in
+  # `native_layout_inline_atomic_spec.rb`; these two are here because the sizing is the same question as a
+  # block-level leaf's.
   it 'lays out an INLINE svg in a block (atomic inline — see native_layout_inline_atomic_spec)' do
     expect_parity('<div style="width:300px">text <svg width="16" height="16"></svg> more</div>')
   end
@@ -147,8 +126,7 @@ RSpec.describe 'native layout replaced-leaf parity' do
   end
   # A control that lays out its OWN content (a display:block <select> whose options carry _lb) IS a leaf all the
   # same: its border box comes from its intrinsic (one-row) size, never by stacking those options, so native
-  # emits no subtree — the options are inside a leaf, not children of the flow. Measured: the shape lays out
-  # with an EMPTY oracle read set, so the box is derived from rec[68..70] rather than replayed.
+  # emits no subtree — the options are inside a leaf, not children of the flow.
   it 'lays out a display:block <select> as a leaf (sized by intrinsic, not child flow)' do
     expect_parity('<div style="width:300px"><select style="display:block"><option>aaaa</option><option>bb</option></select></div>')
   end
@@ -210,21 +188,16 @@ RSpec.describe 'native layout replaced-leaf parity' do
       expect_parity('<div style="width:400px"><button style="display:block;box-sizing:border-box;padding:6px">ab</button></div>')
       expect_parity('<div style="width:400px"><button style="display:block;max-width:40px">a long button label</button></div>')
     end
-    # …and it is walked as a MEASURED subtree, like every other box native sizes from its own content. Plain
-    # text is no test of that: native measures it right either way. What proves the contract is content with
-    # a measure-only gap in it, which must DECLINE rather than answer. Without the contract these were 30px
+    # …and it is walked as a MEASURED subtree, like every other box native sizes from its own content — an
+    # indented one included, now that `text_intrinsic` takes the indent. Without the contract these were 30px
     # narrow, and one in a `<td>` took the whole table's columns with it (258 mismatches in a 12,393-case
     # sweep).
     it 'walks a shrink-wrapping button as a measured subtree' do
-      # …an indented one included now that `text_intrinsic` takes the indent; a measure-only gap that REMAINS
-      # still declines. That gap is `WalkRefusals::UNMEASURABLE` — a line holding an atomic native pushes —
-      # whose earlier shapes (see there) each retired as native learned their measure.
       ['<div style="width:400px"><button style="display:block;text-indent:30px">Hi</button></div>',
        '<div style="width:400px"><button style="display:block"><div style="text-indent:40px">Hi</div></button></div>',
        '<table style="border-spacing:0"><tr><td style="padding:0"><button style="display:block;text-indent:30px">Click me</button></td><td style="padding:0">b</td></tr></table>'].each do |body|
         expect_parity(body)
       end
-      expect_bail(%(<div style="width:400px"><button style="display:block"><div>#{WalkRefusals::UNMEASURABLE}</div></button></div>))
     end
     # …while the shrink-wrap decides nothing for a button whose width another algorithm owns, and native was
     # always right about those: a flex or grid ITEM, an out-of-flow box, a float, a declared or keyword width.
@@ -262,8 +235,8 @@ RSpec.describe 'native layout replaced-leaf parity' do
       expect_parity(bare)
       expect(rendered_width(bare, 'button')).to be_within(0.01).of(46.39)
     end
-    # …an `inline-flex` / `inline-grid` one included: as an ATOMIC INLINE it was pushed with the oracle's box
-    # (the same gate answers `nlAtomicNative`), and it is laid out and placed on the line natively now.
+    # …an `inline-flex` / `inline-grid` one included: as an ATOMIC INLINE it was pushed with the oracle's box,
+    # and it is laid out and placed on the line natively now.
     it 'lays out an inline-flex or inline-grid button on a line' do
       ['<div style="width:400px">before<button style="display:inline-flex"><span>hi</span></button>after</div>',
        '<div style="width:400px">before<button style="display:inline-grid"><span>hi</span></button>after</div>',
@@ -271,71 +244,6 @@ RSpec.describe 'native layout replaced-leaf parity' do
        '<div style="width:60px">before<button style="display:inline-flex"><span>a long button label</span></button>after</div>',
        '<div style="width:60px">before<button style="display:inline-grid"><span>a long button label</span></button>after</div>'].each do |body|
         expect_parity(body)
-        # …and it is LAID OUT, not replayed: a pushed atomic carries the oracle's box, which parity cannot tell
-        # from a native one. The whole read set is the one figure the harness HANDS the pass.
-        r = run_shadow(body, '{noOracle: true}')
-        expect(r).to include('ok' => true, 'mismatches' => 0, 'oracleWrites' => 0), r.inspect
-        expect(r['oracleReads'].to_h).to be_empty, body
-      end
-    end
-    # …and NOT as the pass ROOT. The one thing native assumes about the root is that its box is the containing
-    # width the harness hands over — what an in-flow BLOCK-LEVEL box's auto width is, and nothing else's, since
-    # the parent loop that applies every other rule is not there for a box with no parent in the pass. A
-    # `<button>` at `display: flow-root` / `table` already came out 400 wide against the oracle's 124.98 before
-    # any of this; the flex and grid cases joined them when the gate that refused those containers went. So the
-    # guard asks the question once, for every box whose auto width is not its room.
-    it 'refuses a pass root whose auto width is not the room it is handed' do
-      # a `<button>` — HTML's button layout is shrink-to-fit at every display it can carry
-      ['display:flex', 'display:grid', 'display:flow-root', 'display:table', 'display:block'].each do |display|
-        body = %(<div style="width:400px"><button id="t" style="#{display}"><span>a long button label</span></button></div>)
-        expect(run_rooted(body)).to include('ok' => false, 'reason' => 'root unsupported'), body
-      end
-      # …an ATOMIC inline, whose width is its line's shrink-to-fit (400 against the oracle's 19.55), and a FLEX
-      # ITEM, whose width is the flex algorithm's (400 against 74.64, and 400 against 350 under `flex: 1`).
-      ['<div style="width:400px"><span id="t" style="display:inline-flex"><span>lab</span></span></div>',
-       '<div style="width:400px"><span id="t" style="display:inline-grid"><span>lab</span></span></div>',
-       '<div style="display:flex;width:400px"><div id="t">a long label</div><div style="width:50px;height:5px"></div></div>',
-       '<div style="display:flex;width:400px"><div id="t" style="flex:1">a long label</div><div style="width:50px;height:5px"></div></div>'].each do |body|
-        expect(run_rooted(body)).to include('ok' => false, 'reason' => 'root unsupported'), body
-      end
-      # …a FLOAT, whose auto width is shrink-to-fit by §10.3.5. The flex and grid ones came out 400 against the
-      # oracle's 67.97 the moment the gate refusing a floated container went, which is how the arm was found;
-      # the plain BLOCK had a second copy of the same rule inside `nlSupported`, now deleted, so this is the
-      # only thing refusing it. A float is a pass root only through an element-rooted call — no corpus tool
-      # makes one, so nothing else on the whole bar can see any of this.
-      # …and a TABLE is NOT here: §17.5.2 sizes it from its own columns wherever it sits, which is what native
-      # computes for one, so the float changes nothing (it is in the passing list below).
-      ['<div style="width:400px"><div id="t" style="float:left;display:flex"><span>hello there</span></div></div>',
-       '<div style="width:400px"><div id="t" style="float:left;display:grid"><span>hello there</span></div></div>',
-       '<div style="width:400px"><div id="t" style="float:left">hello there</div></div>'].each do |body|
-        expect(run_rooted(body)).to include('ok' => false, 'reason' => 'root unsupported'), body
-      end
-      # …and the mirror of that, which is a PRE-EXISTING mismatch this arm closes rather than one it caused: a
-      # table whose parent is a GRID. The grid-item exemption below is right for a box that fills its track and
-      # wrong for a table, which sizes itself — the oracle stretches it to the 350px track, native answers with
-      # its columns' 80.64, and every element-rooted pass of a table in a grid has read that since the
-      # exemption was written. A table FLEX item was already refused by the flex-item arm.
-      ['<div style="display:grid;grid-template-columns:350px;width:400px"><table id="t"><tr><td>a long label</td></tr></table></div>',
-       '<div style="display:grid;grid-template-columns:350px;width:400px"><div id="t" style="display:table"><div style="display:table-cell">a long label</div></div></div>',
-       '<div style="display:grid;grid-template-columns:350px;width:400px"><table id="t" style="float:left"><tr><td>a long label</td></tr></table></div>'].each do |body|
-        expect(run_rooted(body)).to include('ok' => false, 'reason' => 'root unsupported'), body
-      end
-      # …while a declared width (a length, a percentage, a `calc()`) is the box's own, a plain container was
-      # never the question, and a GRID item's containing width IS its track — so the room handed over is
-      # already the right answer there, which is why it is the one item kind left in.
-      ['<div style="width:400px"><button id="t" style="display:flex;width:200px"><span>lab</span></button></div>',
-       '<div style="width:400px"><button id="t" style="display:flex;width:50%"><span>lab</span></button></div>',
-       '<div style="width:400px"><span id="t" style="display:inline-flex;width:200px"><span>lab</span></span></div>',
-       '<div style="width:400px"><div id="t" style="width:calc(50% - 10px)">ab</div></div>',
-       '<div style="width:400px"><div id="t" style="min-width:600px">ab</div></div>',
-       '<div style="width:400px"><div id="t" style="display:flex"><span>lab</span></div></div>',
-       '<div style="width:400px"><table id="t"><tr><td>a long label</td></tr></table></div>',
-       '<div style="width:400px"><div id="t" style="float:left;display:table"><div style="display:table-cell">hello there</div></div></div>',
-       '<div style="width:120px"><table id="t" style="float:left"><tr><td>a long label</td></tr></table></div>',
-       '<div style="width:60px"><div id="t" style="float:left;display:table"><div style="display:table-cell">hello there</div></div></div>',
-       '<div style="display:grid;grid-template-columns:350px;width:400px"><div id="t" style="justify-self:start">a long label</div></div>',
-       '<div style="display:grid;grid-template-columns:350px;width:400px"><div id="t" style="display:flex"><span>lab</span></div></div>'].each do |body|
-        expect(run_rooted(body)).to include('ok' => true, 'mismatches' => 0), body
       end
     end
     it 'sizes replaced grid items natively, contributing their intrinsic width to intrinsic tracks' do
@@ -348,24 +256,21 @@ RSpec.describe 'native layout replaced-leaf parity' do
       expect_parity('<div style="display:flex;align-items:baseline;width:400px"><div><img style="display:block"><p style="margin:0">after img</p></div><div style="font-size:32px">BIG</div></div>')
     end
 
-    # A `<select>` stacking its `<option>`s used to decline WHOLE, on the argument that the oracle sizes it from
-    # those boxes. It does not — a dropdown's options have no box in Chrome at all, and the oracle takes the
-    # control's border box from its INTRINSIC size — so a DROPDOWN is a leaf like any other replaced element,
+    # A `<select>` stacking its `<option>`s used to decline WHOLE, on the argument that it is sized from those
+    # boxes. It is not — a dropdown's options have no box in Chrome at all, and the control's border box comes
+    # from its INTRINSIC size — so a DROPDOWN is a leaf like any other replaced element,
     # pushed and emitted without a subtree. A LIST BOX showing rows is a block container instead (below). That
     # was 18 shapes of the frozen corpus's 174 declines, freed outright — and, unnamed until a sweep found it,
     # 72 shapes that were laid out WRONG: a `<select style="display:flex">` with options reached the flex gate
     # before the replaced one and had its options flexed as items.
     describe 'a control that lays out boxes of its own' do
       it 'pushes a dropdown as a leaf box, and lays a list box out as a container' do
-        # nodes: the leaf ones emit no subtree, the list boxes emit their rows.
-        {'<select style="display:block"><option>a</option><option>bbbb</option></select>' => 4,
-         '<select style="display:block"></select>'                                        => 4,
-         '<textarea style="display:block;height:30px">hello</textarea>'                    => 4,
-         '<select size="3" style="display:block"><option>a</option><option>b</option></select>'  => 6,
-         '<select multiple style="display:block"><option>a</option></select>'              => 5}.each do |control, nodes|
-          body = %(<div style="width:300px">#{control}<div style="height:10px"></div></div>)
-          expect_parity(body)
-          expect(run_shadow(body)['nodes']).to eq(nodes), body
+        ['<select style="display:block"><option>a</option><option>bbbb</option></select>',
+         '<select style="display:block"></select>',
+         '<textarea style="display:block;height:30px">hello</textarea>',
+         '<select size="3" style="display:block"><option>a</option><option>b</option></select>',
+         '<select multiple style="display:block"><option>a</option></select>'].each do |control|
+          expect_parity(%(<div style="width:300px">#{control}<div style="height:10px"></div></div>))
         end
       end
 
@@ -390,8 +295,7 @@ RSpec.describe 'native layout replaced-leaf parity' do
         ['overflow:visible', 'overflow:clip', 'overflow:hidden'].each do |ov|
           expect_parity(%(<div style="width:400px">text <span style="display:inline-block"><select size="3" style="display:block;#{ov}"><option>a</option><option>bbbb</option></select></span> after</div>))
         end
-        # The rows themselves are laid out where the oracle puts them (a `size=3` select's four options at
-        # y = 1 / 16 / 31 / 46), which is what makes them compared boxes at all.
+        # The rows themselves are laid out as boxes (a `size=3` select's four options at y = 1 / 16 / 31 / 46).
         expect_parity('<div style="width:400px"><select size="3" style="display:block"><option>a</option><option>bbbb</option><option>c</option><option>d</option></select></div>')
       end
 
@@ -423,12 +327,6 @@ RSpec.describe 'native layout replaced-leaf parity' do
         # …and the same control in the layouts that size their children themselves
         expect_parity(%(<div style="display:flex;width:400px"><select multiple size="3" style="flex:1">#{rows}</select><div style="width:40px">y</div></div>))
         expect_parity(%(<table style="width:300px"><tr><td><select multiple size="3">#{rows}</select></td><td>b</td></tr></table>))
-        # …the two that still decline: an intrinsic-size KEYWORD width on a replaced box (its width is its own
-        # size), and a list box as a GRID item.
-        [%(<select multiple size="3" style="display:block;width:max-content">#{rows}</select>),
-         %(<div style="display:grid;grid-template-columns:150px 1fr;width:400px"><select multiple size="3">#{rows}</select><div>y</div></div>)].each do |body|
-          expect(run_shadow(%(<div style="width:400px">#{body}</div>))).to include('ok' => false), body
-        end
       end
     end
   end

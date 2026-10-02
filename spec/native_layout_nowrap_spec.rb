@@ -42,10 +42,6 @@ RSpec.describe 'native layout nowrap parity' do
     expect(x).to be_within(0.05).of(chrome_x), "#{body}: #m at x #{x}, Chrome #{chrome_x}"
   end
 
-  def expect_bail(body)
-    expect(run_shadow(body)).to include('ok' => false)
-  end
-
   it 'matches nowrap text that would have wrapped (stays one line, overflows)' do
     expect_parity('<div style="width:80px;white-space:nowrap">some words that would wrap when normal</div>')
   end

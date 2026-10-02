@@ -1,6 +1,6 @@
 # `display: contents` generates NO BOX: the element is replaced, for layout, by its children (CSS Display 3
 # §3.1). CLAUDE.md listed it for a long time as a *rendering* subsystem this driver deliberately does not
-# model, beside glyph shaping. `layout.js` says it in three places, and only three:
+# model, beside glyph shaping. The layout says it in three places, and only three:
 #
 #   `layoutChildren`     enumerates the children the FLOW lays out, with every box-less one REPLACED by its
 #                        own children in its place — the one list every box-level question asks
@@ -25,7 +25,6 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
-require_relative 'support/shadow_parity'
 
 RSpec.describe 'display: contents' do
   def page(body)
@@ -41,14 +40,18 @@ RSpec.describe 'display: contents' do
     session = simulated_session(page(body))
     session.visit '/'
     r = session.evaluate_script(%(JSON.parse(JSON.stringify(document.querySelector('#{selector}').getBoundingClientRect()))))
-    # …and the native WALK took the same shape, which until 2026-09-22 it did for none of these: it could not
-    # place a box-less child and declined every block holding one. `compared` is asserted beside `mismatches`
-    # because a record the walk DROPS looks exactly like one that agreed — a mismatch count alone would go on
-    # reading 0 for a shape neither engine laid out.
-    shadow = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-    expect(shadow).to include('ok' => true, 'mismatches' => 0), body
-    expect(shadow['compared']).to be > 0, "#{body}: nothing compared: #{shadow.inspect}"
+    expect_rust_walk(session, body)
     r
+  end
+
+  # …and the Rust walk laid the page out, which until 2026-09-22 the native walk did for none of these: it could not
+  # place a box-less child and declined every block holding one. `rust` is asserted beside the empty decline list
+  # because a page no pass laid out declines nothing either.
+  def expect_rust_walk(session, body)
+    session.evaluate_script 'document.body.offsetHeight'
+    stats = session.evaluate_script('__csimNativeLayoutStats()')
+    expect(stats['rustFellBack']).to eq({}), "#{body}: the Rust walk declined: #{stats['rustFellBack'].inspect}"
+    expect(stats['rust']).to be > 0, "#{body}: no pass laid the page out"
   end
 
   # x, y, width, height — Chrome's, for the marked element.
@@ -106,8 +109,7 @@ RSpec.describe 'display: contents' do
        '<div style="width:400px"><div class="p"></div><p id="m">x</p></div>', 18, 16, 400],
     # …unless it is OUT OF FLOW, which this engine gives a box even though Chrome does not (`isBoxlessContents`
     # names the three places that do it). Not blockification — Chrome computes such an element's `display` to
-    # `contents` and measures it 0x0 — but a divergence the two engines SHARE, which during the port is
-    # recorded and not fixed. Pinned here because it is what the looking-through clause is carved around, and
+    # `contents` and measures it 0x0 — but a divergence recorded and not yet fixed. Pinned here because it is what the looking-through clause is carved around, and
     # a FLEX container is the one place in the repo where it is readable at all: in block flow both answers
     # coincide, and here they part in the ITEM'S WIDTH, which is why this table asserts one (below).
     'is a box again when it is positioned' =>
@@ -130,11 +132,8 @@ RSpec.describe 'display: contents' do
     it "is looked through by the flow: #{name}" do
       session = simulated_session(page(body))
       session.visit '/'
-      # …the native WALK agrees about all of it, which is the half that used to decline.
-      session.evaluate_script 'document.body.offsetHeight'
-      shadow = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-      expect(shadow).to include('ok' => true, 'mismatches' => 0), body
-      expect(shadow['compared']).to be > 0, "#{body}: nothing compared: #{shadow.inspect}"   # …as `rect` does
+      # …the native WALK takes all of it, which is the half that used to decline.
+      expect_rust_walk(session, body)
       # …and the figures are CHROME's: both engines were free to be wrong together while one declined and the
       # other read a box that is not there.
       # …the WIDTH as well as the position, and it is not a formality: it is the only figure that separates
@@ -177,10 +176,7 @@ RSpec.describe 'display: contents' do
     it "gives a run spliced through one the spliced element's own style: #{name}" do
       session = simulated_session(page(body))
       session.visit '/'
-      session.evaluate_script 'document.body.offsetHeight'
-      shadow = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-      expect(shadow).to include('ok' => true, 'mismatches' => 0), body
-      expect(shadow['compared']).to be > 0, "#{body}: nothing compared: #{shadow.inspect}"
+      expect_rust_walk(session, body)
       h = session.evaluate_script('document.body.getBoundingClientRect().height')
       expect(h).to be_within(0.05).of(chrome_h), "#{body}: #{h}, Chrome #{chrome_h}"
     end
@@ -200,10 +196,7 @@ RSpec.describe 'display: contents' do
     it "reads vertical-align off the nearest element that HAS a box: #{name}" do
       session = simulated_session(page(body))
       session.visit '/'
-      session.evaluate_script 'document.body.offsetHeight'
-      shadow = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-      expect(shadow).to include('ok' => true, 'mismatches' => 0), body
-      expect(shadow['compared']).to be > 0, "#{body}: nothing compared: #{shadow.inspect}"
+      expect_rust_walk(session, body)
       h = session.evaluate_script('document.body.getBoundingClientRect().height')
       expect(h).to be_within(0.05).of(chrome_h), "#{body}: #{h}, Chrome #{chrome_h}"
     end
@@ -220,10 +213,7 @@ RSpec.describe 'display: contents' do
            '<span style="display:contents;white-space:pre-wrap"> </span><div id="m" style="height:10px"></div></div>'
     session = simulated_session(page(body))
     session.visit '/'
-    session.evaluate_script 'document.body.offsetHeight'
-    shadow = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-    expect(shadow).to include('ok' => true, 'mismatches' => 0), body
-    expect(shadow['compared']).to be > 0, "#{body}: nothing compared: #{shadow.inspect}"
+    expect_rust_walk(session, body)
     expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")).to eq(46)
   end
 
@@ -242,10 +232,7 @@ RSpec.describe 'display: contents' do
       </script>
     HTML
     session.visit '/'
-    session.evaluate_script 'document.body.offsetHeight'
-    shadow = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-    expect(shadow).to include('ok' => true, 'mismatches' => 0)
-    expect(shadow['compared']).to be > 0, "nothing compared: #{shadow.inspect}"
+    expect_rust_walk(session, 'a styled slot')
     # …a whole-pixel answer, so `eq`: nothing here is a glyph advance.
     expect(session.evaluate_script('document.body.getBoundingClientRect().height')).to eq(50)
   end
@@ -261,10 +248,7 @@ RSpec.describe 'display: contents' do
            '<div style="float:left;width:10px;height:5px"></div></div>'
     session = simulated_session(page(body))
     session.visit '/'
-    session.evaluate_script 'document.body.offsetHeight'
-    shadow = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-    expect(shadow).to include('ok' => true, 'mismatches' => 0), body
-    expect(shadow['compared']).to be > 0, "#{body}: nothing compared: #{shadow.inspect}"
+    expect_rust_walk(session, body)
     expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")).to eq(30)
   end
 
@@ -278,10 +262,7 @@ RSpec.describe 'display: contents' do
       '<span style="display:contents"><div style="height:300px;width:220px"></div></span></div>'
     ))
     session.visit '/'
-    session.evaluate_script 'document.body.offsetHeight'
-    shadow = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-    expect(shadow).to include('ok' => true, 'mismatches' => 0)
-    expect(shadow['compared']).to be > 0, "nothing compared: #{shadow.inspect}"
+    expect_rust_walk(session, 'an overflowing subtree')
     got = session.evaluate_script("(s => [s.scrollHeight, s.scrollWidth])(document.getElementById('s'))")
     expect(got).to eq([300, 220]), "#{got.inspect}, Chrome [300, 220]"
   end
@@ -310,9 +291,7 @@ RSpec.describe 'display: contents' do
       expect(session.evaluate_script(%(getComputedStyle(document.getElementById('c'), '::before').width))).to eq('50px')
       # …and the WALK takes the shape too, so "the walk takes all of these" is asserted of all of them and
       # not of the ten that happen to read a rect.
-      shadow = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-      expect(shadow).to include('ok' => true, 'mismatches' => 0), body
-      expect(shadow['compared']).to be > 0, "#{body}: nothing compared: #{shadow.inspect}"
+      expect_rust_walk(session, body)
     end
   end
 

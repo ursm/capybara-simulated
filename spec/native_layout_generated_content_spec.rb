@@ -9,6 +9,7 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
+require_relative 'support/layout_golden'
 
 RSpec.describe 'native layout generated-content parity' do
   def page(body)
@@ -16,22 +17,25 @@ RSpec.describe 'native layout generated-content parity' do
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
-  # Parity AND the pseudo was one of the boxes COMPARED. Asserting `ok` and `mismatches` alone cannot fail:
-  # the same page with its `content` rule removed is `ok: true, mismatches: 0` too, with `compared` merely one
-  # lower. So a shape whose pseudo silently stopped being a box would pass a spec that only asked those two
+  # The golden, and the pseudo a box the page's geometry SEES — which no DOM API answers for the pseudo itself, so
+  # each shape puts it where it moves a box that is read: a sibling, the line after it, the container it sizes.
+  # Recording, parity AND the pseudo was one of the boxes COMPARED. Asserting `ok` and `mismatches` alone cannot
+  # fail: the same page with its `content` rule removed is `ok: true, mismatches: 0` too, with `compared` merely
+  # one lower. So a shape whose pseudo silently stopped being a box would pass a spec that only asked those two
   # while proving nothing — measured, with `content: none` or a `display: none` on the pseudo this file is
   # GREEN without the line below and RED with it. (A `counter()` is not that trap: it renders nothing today
   # but still makes an empty box, so the count holds.) `boxes` is how many boxes native answered for.
   def expect_pseudo_compared(body, boxes)
-    session = simulated_session(page(body))
-    session.visit '/'
-    session.evaluate_script('document.body.offsetHeight')
-    r = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-    expect(r).to include('ok' => true), "harness bailed: #{body}: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{body}: #{r.inspect}"
-    expect_no_dropped_records(r, body)
-    expect(r['compared']).to eq(boxes), "the pseudo was not a compared box: #{body}: #{r.inspect}"
-
+    expect_layout_golden(body) do
+      session = simulated_session(page(body))
+      session.visit '/'
+      session.evaluate_script('document.body.offsetHeight')
+      r = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
+      expect(r).to include('ok' => true), "harness bailed: #{body}: #{r.inspect}"
+      expect(r['mismatches']).to eq(0), "mismatch: #{body}: #{r.inspect}"
+      expect_no_dropped_records(r, body)
+      expect(r['compared']).to eq(boxes), "the pseudo was not a compared box: #{body}: #{r.inspect}"
+    end
   end
 
   # One per GATE that refused a pseudo. The counts are body + the shape's own elements + the pseudo; each was
@@ -48,12 +52,22 @@ RSpec.describe 'native layout generated-content parity' do
       [format(css, 'width:20px;height:10px'), '<div class="p" style="display:flex;width:400px"><div style="width:30px;height:10px"></div></div>'] => 4,
       [format(css, 'width:20px;height:10px'), '<div class="p" style="display:flex;flex-direction:column;width:400px"><div style="width:30px;height:10px"></div></div>'] => 4,
       [format(css, 'width:20px;height:10px'), '<div class="p" style="display:grid;grid-template-columns:100px auto;width:400px"><div>x</div></div>'] => 4,
-      # a FLOAT, and an OUT-OF-FLOW box
-      [format(css, 'float:left;width:20px;height:10px'), '<div style="width:400px"><div class="p"></div></div>'] => 4,
+      # a FLOAT, the text beside it routed round it, and an OUT-OF-FLOW box
+      [format(css, 'float:left;width:20px;height:10px'), '<div style="width:400px"><div class="p">beside</div></div>'] => 4,
       [format(css, 'position:absolute;width:20px;height:10px'), '<div style="width:400px;position:relative"><div class="p"></div></div>'] => 4,
       # a TABLE CELL, on the row
       [format(css, 'display:table-cell;width:20px;height:10px'), '<table style="border-spacing:0"><tr class="p"><td style="padding:0">a</td></tr></table>'] => 6
     }.each {|(style, body), boxes| expect_pseudo_compared(style + body, boxes) }
+  end
+
+  # …an out-of-flow pseudo moves no other box, so it is found by hit-testing: the point it covers answers its
+  # originating element, where without the pseudo it answers the container.
+  it 'hit-tests an out-of-flow generated box' do
+    session = simulated_session(page('<style>.p::before{content:"x";position:absolute;left:30px;top:5px;width:20px;height:10px}</style>' \
+                                     '<div id="c" style="width:400px;height:40px;position:relative"><div id="p" class="p"></div></div>'))
+    session.visit '/'
+    expect(session.evaluate_script('document.elementFromPoint(35, 10).id')).to eq('p')
+    expect(session.evaluate_script('document.elementFromPoint(60, 10).id')).to eq('c')
   end
 
   # …and `::after` is the same box at the other end of the children.
@@ -62,10 +76,9 @@ RSpec.describe 'native layout generated-content parity' do
                            '<div style="width:max-content"><div class="p"><div style="width:30px;height:10px"></div></div></div>', 5)
   end
 
-  # …the box is the ORACLE's box: the arena node is a box holder, not a DOM node. Nothing queries it, and
-  # nothing but the layout reads it — so a page that generates nothing allocates none at all, which is what
-  # keeps `getComputedStyle(el, '::before')` on an ordinary page from filling the arena with boxes that can
-  # never exist.
+  # …the arena node is a box holder, not a DOM node. Nothing queries it, and nothing but the layout reads it — so
+  # a page that generates nothing allocates none at all, which is what keeps `getComputedStyle(el, '::before')` on
+  # an ordinary page from filling the arena with boxes that can never exist.
   it 'allocates no arena node for a pseudo that renders nothing' do
     session = simulated_session(page('<div id="d" style="width:400px">x</div>'))
     session.visit '/'

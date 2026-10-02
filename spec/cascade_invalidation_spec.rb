@@ -911,10 +911,11 @@ RSpec.describe 'cascade invalidation' do
       (() => {
         customElements.define('x-item', class extends HTMLElement {});
         document.body.offsetHeight;
-        const n = __csimElementLayouts();
+        const walked = () => __dom.layoutMeasureCounts()[4];   // …the records the Rust walk built, not spliced back
+        const n = walked();
         document.getElementById('c').innerHTML = '<x-item></x-item>'.repeat(100);
         document.body.offsetHeight;
-        return __csimElementLayouts() - n;
+        return walked() - n;
       })()
     JS
     expect(got).to be < 200                                  # the hundred items and what holds them, not every row
@@ -1652,26 +1653,22 @@ RSpec.describe 'cascade invalidation' do
 
   it 'relays out a table grid when a dynamic display rule flips a row' do
     # A `display` flip on a row changes which rows the table's grid holds, with no child-list
-    # change and no move of the layout epoch — and the JS grid memo (`structFresh`) keys on the
-    # structure stamp, which the restyle marks move (`__csimMarkRestyled`). In the JS layout too:
-    # with the restyle marked as no structural change, its grid kept the hidden row.
+    # change and no move of the layout epoch — so the restyle has to mark it as the structural
+    # change it is (`__csimMarkRestyled`): marked as none, the grid kept the hidden row.
     css = '.toggle:checked ~ table .maybe-row { display: none }'
     body = '<input type="checkbox" class="toggle" id="t">' \
            '<table><tbody><tr class="maybe-row"><td>a</td></tr><tr><td id="keep">b</td></tr></tbody></table>'
-    [true, false].each do |native|
-      s = simulated_session(styled_page(body, css: css))
-      s.visit '/'
-      s.execute_script('globalThis.__csimNativeLayout = false') unless native
-      got = s.evaluate_script(<<~JS)
-        (() => {
-          const keep = document.getElementById('keep');
-          const before = keep.getBoundingClientRect().y;
-          document.getElementById('t').checked = true;
-          return [before > 0, keep.getBoundingClientRect().y < before];
-        })()
-      JS
-      expect(got).to eq([true, true]), "native layout #{native}"
-    end
+    s = simulated_session(styled_page(body, css: css))
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const keep = document.getElementById('keep');
+        const before = keep.getBoundingClientRect().y;
+        document.getElementById('t').checked = true;
+        return [before > 0, keep.getBoundingClientRect().y < before];
+      })()
+    JS
+    expect(got).to eq([true, true])
   end
 
   it 'delivers an IntersectionObserver update for a state-revealed target' do

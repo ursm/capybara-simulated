@@ -109,29 +109,6 @@ RSpec.describe 'style engine invalidation' do
     expect(got).to eq([true, true, true, true, false, true, true, true])
   end
 
-  # The JS cascade's rules, built when this side first reads them, follow the sheets through every edit: a `<style>`
-  # edited, read, edited to something else and back. The JS walk reads them (`withJsCascade`): one box fewer while `.c`
-  # is hidden, as many as the final text's once it is back. (The stale-key half of `ensureJsCascade` — rules built from a
-  # text the owing rebuild did not key — needs a reader that does not freshen the cascade first, and no page script
-  # reaches one any more: the closed-`<details>` check was the last, and this example guarded it through that.)
-  it 'keeps the JS rules in step with the sheets they are built from' do
-    boxes = 'globalThis.__csimLayoutShadowRun().nodes'
-    body = '<div class="c" id="c">c</div><p class="q" id="q">q</p>'
-    s = visit(body, css: '.q { color: red }')
-    got = s.evaluate_script(<<~JS)
-      (() => {
-        const st = document.querySelector('style'), q = document.getElementById('q');
-        st.textContent = '.q { color: blue }';
-        getComputedStyle(q).color;
-        st.textContent = '.c { display: none }';
-        const hidden = #{boxes};
-        st.textContent = '.q { color: blue }';
-        return [hidden, #{boxes}];
-      })()
-    JS
-    expect(got).to eq([2, 3])
-  end
-
   # A page's text, its geometry and its generated content are the engine's to answer, and none of them builds the JS
   # cascade's rules: a `display: none` / `visibility: hidden` / `text-transform` / `white-space` / flex container read for
   # the visible text, the `::before` / `::after` a box lays out, a table's anonymous cell, a `border` shorthand under a
@@ -763,13 +740,11 @@ RSpec.describe 'style engine invalidation' do
     expect(s).to have_css('#out', text: 'done', wait: 2)
   end
 
-  # The JS layout (the oracle, and what lays out where the native walk declines) asks the engine whether an animation
-  # declares a property before it reads one no sheet declares — a hook web-animations.js registers with cascade.js. One
-  # registered as the bundle loaded was wiped once the bundle put cascade.js after it: `min-width` was never read, and
-  # the box took the whole viewport (Chrome: the animated 300px, `min-width` over `max-width`).
-  it 'lays out an animation of a property no sheet declares in the JS layout too' do
+  # An animation of a property no sheet declares is laid out at its animated value — where a layout that asked whether
+  # an animation declares it through a hook registered as the bundle loaded never read `min-width`, and the box took the
+  # whole viewport (Chrome: the animated 300px, `min-width` over `max-width`).
+  it 'lays out an animation of a property no sheet declares' do
     s = visit('<div id="a" style="height: 10px"></div>', css: '')
-    s.execute_script('globalThis.__csimNativeLayout = false')
     width = s.evaluate_script(<<~JS)
       (() => {
         const a = document.getElementById('a');

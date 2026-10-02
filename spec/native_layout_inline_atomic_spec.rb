@@ -1,26 +1,15 @@
 # frozen_string_literal: true
-# Native layout — INLINE ATOMICS, geometry shadow-parity. An atomic inline is a single box on a line. Native
-# lays out an `inline-block`, an `inline-flex` / `inline-grid` / `inline-table` (its own container, at that
-# container's own shrink-to-fit) and every INLINE REPLACED element — an `<img>` / `<svg>` / `<canvas>`, a form
-# control, a list box whose rows it stacks inside the control's box — at its baseline or a baseline SHIFT,
-# ITSELF (see the last describe). What still keeps the PUSHED box, each measured: an intrinsic-size KEYWORD
-# width on a replaced atomic (`width: fit-content` on an `<img>`); an inline-table with more than one caption,
-# and an atomic whose content holds one (`WalkRefusals::UNMEASURABLE`); an inline-table holding a SCROLLING
-# row or row group that declares a px bottom margin, which the oracle's baseline arm adds and the table
-# algorithm does not (row groups out of DOCUMENT order, and a caption after the rows, were on this list until
-# 2026-09-23 — both closed in the oracle);
-# and any atomic whose own subtree the walk refuses, which rolls back to the pushed box.
-# For a pushed one the oracle resolved the box (`_lb`) and its baseline (`growAtomic`) and native replays those
-# as a RUN_ATOMIC: the margin-box width is its advance, its ascent (+ descent) grow the line box. Such a box is
-# not compared (like every inline fragment in a text block); what's validated is the text block's line-broken
-# HEIGHT — which is why a shape that has to prove the atomic is LAID OUT asserts `nativeAtomics` or the
-# no-oracle read set instead.
+# Native layout — INLINE ATOMICS. An atomic inline is a single box on a line. Native lays out an
+# `inline-block`, an `inline-flex` / `inline-grid` / `inline-table` (its own container, at that container's own
+# shrink-to-fit) and every INLINE REPLACED element — an `<img>` / `<svg>` / `<canvas>`, a form control, a list
+# box whose rows it stacks inside the control's box — and drops it onto its line at its baseline or a baseline
+# SHIFT: the margin-box width is its advance, its ascent (+ descent) grow the line box. Each shape is held to
+# its golden, and where a rule is shared with no instrument but Chrome, to Chrome's figure beside it.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/shadow_parity'
 require_relative 'support/layout_golden'
-require_relative 'support/walk_refusals'
 
 RSpec.describe 'native layout inline-atomic parity' do
   def page(body)
@@ -45,10 +34,6 @@ RSpec.describe 'native layout inline-atomic parity' do
       expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
       expect_no_dropped_records(r, body)
     end
-  end
-
-  def expect_bail(body)
-    expect(run_shadow(body)).to include('ok' => false)
   end
 
   # …and the page-visible x of one element, for the cases where parity is not the whole question: a rule BOTH
@@ -117,8 +102,8 @@ RSpec.describe 'native layout inline-atomic parity' do
     expect_parity('<div style="width:300px;font-size:14px">a <svg width="10" height="10" style="margin:9px 0 3px"></svg> b</div>')
   end
 
-  # INLINE-BLOCK / INLINE-FLEX atomics (slice 2): a box on the line whose content native does NOT lay out —
-  # only its oracle-resolved advance + baseline reach the line, exactly like an inline replaced atomic.
+  # INLINE-BLOCK / INLINE-FLEX atomics: a box on the line whose content is a formatting context of its own —
+  # only its advance and baseline reach the line, exactly like an inline replaced atomic's.
   it 'matches an empty inline-block box among words' do
     expect_parity('<div style="width:300px">x <span style="display:inline-block;width:20px;height:20px"></span> y</div>')
   end
@@ -145,9 +130,8 @@ RSpec.describe 'native layout inline-atomic parity' do
   end
 
   # A `vertical-align` that only shifts the atomic's ASCENT within the line (baseline shift — super / sub /
-  # length / %, or middle / text-top / text-bottom against the parent's font box) is reproduced by pushing the
-  # va-adjusted ascent (`alignedAscent`) — or, for a shifted inline-block native lays out itself, by carrying
-  # the shift on its run; the Rust line layout grows the line box around it either way. `top` / `bottom` are
+  # length / %, or middle / text-top / text-bottom against the parent's font box) is carried on the atomic's
+  # run, and the Rust line layout grows the line box around it. `top` / `bottom` are
   # the other family — they align to the LINE box itself, whose height is not known until it closes — and are
   # resolved at the close instead; see the examples below them.
   it 'matches a super-aligned atomic (baseline shift raises it and grows the line)' do
@@ -189,8 +173,7 @@ RSpec.describe 'native layout inline-atomic parity' do
   # here. A marker taller than the subject makes the line taller than anything the subject could ask for, so
   # `line_outer_min` never exceeds the line and the grow rule is never ENTERED — the examples then pin only
   # the placement, and the family rule below has no test at all. (Measured: with the 60px marker, an
-  # ascent-only bug in the grow rule leaves every native-layout example green — and the oracle's own
-  # `layout_vertical_align_spec` with them, since the oracle is what the page geometry still comes from.)
+  # ascent-only bug in the grow rule leaves every native-layout example green.)
   # These are sized to LOSE to the subject, which is what puts the line's height in its hands.
   VA_MARKS = '<span style="display:inline-block;width:3px;height:6px"></span>' \
              '<span style="display:inline-block;width:4px;height:14px"></span>'
@@ -218,127 +201,108 @@ RSpec.describe 'native layout inline-atomic parity' do
   # is its STATIC POSITION — the marker the run stream carries, settled where the flow had reached (see the
   # block spec's `a static position taken off a line`). Nested inlines included.
   it 'lays out an absolutely-positioned atomic nested in a span as an out-of-flow box' do
-    r = run_shadow('<div style="position:relative;width:300px">x <b>hi <span style="display:inline-block;position:absolute;width:10px;height:10px"></span></b> y</div>')
-    # …POSITIONED natively, not replayed: `expect_parity` alone would pass on the oracle's own box.
-    expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeOutOfFlow' => 1), r.inspect
-    expect(r['compared']).to be > 0, "nothing was compared: #{r.inspect}"
+    expect_parity('<div style="position:relative;width:300px">x <b>hi <span style="display:inline-block;position:absolute;width:10px;height:10px"></span></b> y</div>')
   end
 
   # ── Atomic inlines laid out natively ──────────────────────────────────────────────────────────────────
   # An atomic native lays out itself: its subtree is a child record of the text block, sized shrink-to-fit (its
   # intrinsic widths clamped to the block's content width; a declared width wins) or — a REPLACED one — from the
   # intrinsic size on its record, laid out at that width, and dropped onto its line from its own last baseline
-  # (its bottom margin edge when it has no line, or scrolls; a text-drawing control's font baseline). What still
-  # keeps the PUSHED box is listed at the top of this file.
-  # `count` is a MINIMUM, so it has to be the number of atomics the shape really holds: a marker box put on
-  # the line to make the atomic's baseline observable is itself an atomic, and a count of 1 is then satisfied
-  # by the marker alone — the example passes with the subject still pushed.
-  def expect_native_atomic(body, count = 1)
-    r = run_shadow(body)
-    expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-    expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-    expect_no_dropped_records(r, body)
-    expect(r['nativeAtomics']).to be >= count, "the atomic was pushed, not laid out natively: #{r.inspect}"
-  end
-
+  # (its bottom margin edge when it has no line, or scrolls; a text-drawing control's font baseline).
   describe 'native atomic inlines' do
     it 'sizes an inline-block shrink-to-fit and hangs it from its last baseline' do
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block">inline block text</span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;font-size:32px">big</span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><div>line one</div><div>line two</div></span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;width:40px">a b c d e f</span> after</div>')
-      expect_native_atomic('<div style="width:400px"><span style="display:inline-block"><span style="display:inline-block;width:10px;height:10px"></span> nested</span> x</div>', 2)
+      expect_parity('<div style="width:400px">text <span style="display:inline-block">inline block text</span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block;font-size:32px">big</span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><div>line one</div><div>line two</div></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block;width:40px">a b c d e f</span> after</div>')
+      expect_parity('<div style="width:400px"><span style="display:inline-block"><span style="display:inline-block;width:10px;height:10px"></span> nested</span> x</div>')
     end
     it 'uses the bottom margin edge for an inline-block with no line, or one that scrolls, and for an image' do
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;width:80px;height:10px"></span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;overflow:hidden;height:8px">clipped</span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <img> after</div>')
-      expect_native_atomic('<div style="width:400px">text <img style="width:30px;margin:4px"> after <img style="height:40px"></div>', 2)
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"></span> empty</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block;width:80px;height:10px"></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block;overflow:hidden;height:8px">clipped</span> after</div>')
+      expect_parity('<div style="width:400px">text <img> after</div>')
+      expect_parity('<div style="width:400px">text <img style="width:30px;margin:4px"> after <img style="height:40px"></div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"></span> empty</div>')
     end
     it 'counts edges and margins on the line, wraps around atomics, and places them on their lines' do
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;padding:5px;border:2px solid;margin:3px 7px">padded</span> after</div>')
-      expect_native_atomic('<div style="width:100px">aaaa aaaa <span style="display:inline-block;width:50px;height:10px"></span> bbbb <span style="display:inline-block;width:50px;height:10px"></span></div>', 2)
-      expect_native_atomic('<div style="width:400px;line-height:30px">tall <span style="display:inline-block;height:50px;width:10px"></span> line</div>')
-      expect_native_atomic('<div style="width:400px">text <b><span style="display:inline-block;width:10px;height:10px"></span> in bold</b> x</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;position:relative;top:3px;left:4px;width:10px;height:10px"></span> x</div>')
-      expect_native_atomic('<div style="width:400px;white-space:nowrap">no wrap <span style="display:inline-block;width:80px;height:10px"></span> here at all in this long line of text that keeps going</div>')
-      expect_native_atomic(%(<div style="width:400px;white-space:pre">pre <span style="display:inline-block;width:80px;height:10px"></span>\nnext</div>))
+      expect_parity('<div style="width:400px">text <span style="display:inline-block;padding:5px;border:2px solid;margin:3px 7px">padded</span> after</div>')
+      expect_parity('<div style="width:100px">aaaa aaaa <span style="display:inline-block;width:50px;height:10px"></span> bbbb <span style="display:inline-block;width:50px;height:10px"></span></div>')
+      expect_parity('<div style="width:400px;line-height:30px">tall <span style="display:inline-block;height:50px;width:10px"></span> line</div>')
+      expect_parity('<div style="width:400px">text <b><span style="display:inline-block;width:10px;height:10px"></span> in bold</b> x</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block;position:relative;top:3px;left:4px;width:10px;height:10px"></span> x</div>')
+      expect_parity('<div style="width:400px;white-space:nowrap">no wrap <span style="display:inline-block;width:80px;height:10px"></span> here at all in this long line of text that keeps going</div>')
+      expect_parity(%(<div style="width:400px;white-space:pre">pre <span style="display:inline-block;width:80px;height:10px"></span>\nnext</div>))
     end
     # A `position: relative` INLINE offsets its whole fragment at paint time (§9.4.3), the atomic inlines on its
     # lines included — and the inline boxes themselves have no records, so the atomic's own box is where that
     # shift lands. Nested relative inlines add per axis, and so does the atomic's own offset.
     it 'offsets an atomic by the position:relative of the inlines above it' do
       ib = 'display:inline-block;width:20px;height:20px'
-      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px"><span style="#{ib}"></span></span></div>))
-      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:30px"><span style="#{ib}"></span></span></div>))
-      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;top:7px"><span style="#{ib}"></span></span></div>))
-      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px">t <span style="#{ib}"></span> u</span> v</div>))
-      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:30px"><b style="position:relative;top:4px"><span style="#{ib}"></span></b></span></div>))
-      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px"><img style="width:20px;height:20px"></span></div>))
-      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:-10px;top:-4px"><span style="#{ib}"></span></span></div>))
-      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;right:10px;bottom:4px"><span style="#{ib}"></span></span></div>))
-      expect_native_atomic(%(<div style="width:200px;height:100px">a <span style="position:relative;left:10%;top:10%"><span style="#{ib};position:relative;top:5px"></span></span></div>))
+      expect_parity(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px"><span style="#{ib}"></span></span></div>))
+      expect_parity(%(<div style="width:200px">a <span style="position:relative;left:30px"><span style="#{ib}"></span></span></div>))
+      expect_parity(%(<div style="width:200px">a <span style="position:relative;top:7px"><span style="#{ib}"></span></span></div>))
+      expect_parity(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px">t <span style="#{ib}"></span> u</span> v</div>))
+      expect_parity(%(<div style="width:200px">a <span style="position:relative;left:30px"><b style="position:relative;top:4px"><span style="#{ib}"></span></b></span></div>))
+      expect_parity(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px"><img style="width:20px;height:20px"></span></div>))
+      expect_parity(%(<div style="width:200px">a <span style="position:relative;left:-10px;top:-4px"><span style="#{ib}"></span></span></div>))
+      expect_parity(%(<div style="width:200px">a <span style="position:relative;right:10px;bottom:4px"><span style="#{ib}"></span></span></div>))
+      expect_parity(%(<div style="width:200px;height:100px">a <span style="position:relative;left:10%;top:10%"><span style="#{ib};position:relative;top:5px"></span></span></div>))
       # A fragment that WRAPS carries its offset onto both lines.
-      expect_native_atomic(%(<div style="width:120px">aaa bbb ccc <span style="position:relative;left:8px;top:3px"><span style="#{ib}"></span> ddd eee <span style="#{ib}"></span></span> fff</div>), 2)
+      expect_parity(%(<div style="width:120px">aaa bbb ccc <span style="position:relative;left:8px;top:3px"><span style="#{ib}"></span> ddd eee <span style="#{ib}"></span></span> fff</div>))
       # An atomic's OWN inline formatting context is a different fragment: the outer offset reaches it once,
       # through the atomic it sits in, never twice.
-      expect_native_atomic(%(<div style="width:200px;height:100px">a <span style="position:relative;top:10%"><span style="display:inline-block;width:60px">x <span style="position:relative;top:10%"><span style="#{ib}"></span></span></span></span></div>), 2)
+      expect_parity(%(<div style="width:200px;height:100px">a <span style="position:relative;top:10%"><span style="display:inline-block;width:60px">x <span style="position:relative;top:10%"><span style="#{ib}"></span></span></span></span></div>))
       # …one aligned against the parent's font box takes the offset the same way
-      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px"><span style="#{ib};vertical-align:middle"></span></span></div>))
-      # A PUSHED atomic already carries the oracle's offset — the shift must not be added to it
-      # a second time.
-      r = run_shadow(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px">#{WalkRefusals::POSITIONED}</span></div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
+      expect_parity(%(<div style="width:200px">a <span style="position:relative;left:30px;top:7px"><span style="#{ib};vertical-align:middle"></span></span></div>))
     end
     # A PERCENTAGE inset resolves against the containing block of the fragment — both axes, which needs the pair
     # `placeInlineBox` stamps on a fragmented inline (it has no box of its own to read one off). An auto-height
     # block gives no vertical basis, so a `%` there is 0 (Chrome).
     it 'resolves a percentage offset on the inline above it, on both axes' do
       ib = 'display:inline-block;width:20px;height:20px'
-      expect_native_atomic(%(<div style="width:200px;height:100px">a <span style="position:relative;top:10%"><span style="#{ib}"></span></span></div>))
-      expect_native_atomic(%(<div style="width:200px;height:100px">a <span style="position:relative;bottom:10%"><span style="#{ib}"></span></span></div>))
-      expect_native_atomic(%(<div style="width:200px;height:100px">a <span style="position:relative;left:10%"><span style="#{ib}"></span></span></div>))
-      expect_native_atomic(%(<div style="width:200px;height:200px"><div style="height:50%">a <span style="position:relative;top:10%"><span style="#{ib}"></span></span></div></div>))
-      expect_native_atomic(%(<table style="width:200px"><tr><td style="height:60px">a <span style="position:relative;top:10%;left:10%"><span style="#{ib}"></span></span></td></tr></table>))
-      expect_native_atomic(%(<div style="width:200px">a <span style="position:relative;top:50%"><span style="#{ib}"></span></span></div>))
-      expect_native_atomic(%(<div style="width:200px;min-height:80px">a <span style="position:relative;top:50%"><span style="#{ib}"></span></span></div>))
-      expect_native_atomic(%(<div style="width:200px;height:100px">a <span style="position:relative;top:10%"><span style="position:relative;top:10%"><span style="#{ib}"></span></span></span></div>))
+      expect_parity(%(<div style="width:200px;height:100px">a <span style="position:relative;top:10%"><span style="#{ib}"></span></span></div>))
+      expect_parity(%(<div style="width:200px;height:100px">a <span style="position:relative;bottom:10%"><span style="#{ib}"></span></span></div>))
+      expect_parity(%(<div style="width:200px;height:100px">a <span style="position:relative;left:10%"><span style="#{ib}"></span></span></div>))
+      expect_parity(%(<div style="width:200px;height:200px"><div style="height:50%">a <span style="position:relative;top:10%"><span style="#{ib}"></span></span></div></div>))
+      expect_parity(%(<table style="width:200px"><tr><td style="height:60px">a <span style="position:relative;top:10%;left:10%"><span style="#{ib}"></span></span></td></tr></table>))
+      expect_parity(%(<div style="width:200px">a <span style="position:relative;top:50%"><span style="#{ib}"></span></span></div>))
+      expect_parity(%(<div style="width:200px;min-height:80px">a <span style="position:relative;top:50%"><span style="#{ib}"></span></span></div>))
+      expect_parity(%(<div style="width:200px;height:100px">a <span style="position:relative;top:10%"><span style="position:relative;top:10%"><span style="#{ib}"></span></span></span></div>))
     end
     it 'keeps the box at its min/max and box-sizing; overflowing content grows neither the box nor the line' do
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;box-sizing:border-box;width:50px;padding:10px">bb</span> x</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;min-width:150px;max-height:5px"><div style="height:30px"></div></span> x</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><div style="height:30px;margin-bottom:-10px"></div></span> x</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;width:40px"><div style="width:100px;height:10px"></div></span> x</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block;box-sizing:border-box;width:50px;padding:10px">bb</span> x</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block;min-width:150px;max-height:5px"><div style="height:30px"></div></span> x</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><div style="height:30px;margin-bottom:-10px"></div></span> x</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block;width:40px"><div style="width:100px;height:10px"></div></span> x</div>')
     end
     it 'measures a text block holding atomics for a grid track / flex item, and hangs a baseline through one' do
-      expect_native_atomic('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><div>a <span style="display:inline-block">ib text</span> b</div><div>x</div></div>')
-      expect_native_atomic('<div style="display:flex;width:400px"><div style="flex:1">text <span style="display:inline-block;width:80px;height:10px"></span> after</div><div>b</div></div>')
-      expect_native_atomic('<div style="display:flex;align-items:baseline;width:400px"><div>text <span style="display:inline-block;width:10px;height:30px"></span></div><div style="font-size:32px">BIG</div></div>')
+      expect_parity('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><div>a <span style="display:inline-block">ib text</span> b</div><div>x</div></div>')
+      expect_parity('<div style="display:flex;width:400px"><div style="flex:1">text <span style="display:inline-block;width:80px;height:10px"></span> after</div><div>b</div></div>')
+      expect_parity('<div style="display:flex;align-items:baseline;width:400px"><div>text <span style="display:inline-block;width:10px;height:30px"></span></div><div style="font-size:32px">BIG</div></div>')
     end
     it 'aligns its lines: center / right / end / rtl move the atomics, an overflowing line hangs off the start edge' do
       ib = 'display:inline-block;width:30px;height:10px'
       %w[center right end].each do |align|
-        expect_native_atomic(%(<div style="width:400px;text-align:#{align}">text <span style="#{ib}"></span> after</div>))
-        expect_native_atomic(%(<div style="width:100px;text-align:#{align}">aaaa bbbb <span style="#{ib}"></span> cccc dddd <span style="#{ib}"></span><br>x <span style="#{ib}"></span></div>), 3)
-        expect_native_atomic(%(<div style="width:60px;text-align:#{align}">a <span style="display:inline-block;width:80px;height:10px"></span> b</div>))
+        expect_parity(%(<div style="width:400px;text-align:#{align}">text <span style="#{ib}"></span> after</div>))
+        expect_parity(%(<div style="width:100px;text-align:#{align}">aaaa bbbb <span style="#{ib}"></span> cccc dddd <span style="#{ib}"></span><br>x <span style="#{ib}"></span></div>))
+        expect_parity(%(<div style="width:60px;text-align:#{align}">a <span style="display:inline-block;width:80px;height:10px"></span> b</div>))
       end
       ['', 'text-align:left', 'text-align:center', 'text-align:end'].each do |align|
-        expect_native_atomic(%(<div style="width:400px;direction:rtl;#{align}">text <span style="#{ib}"></span> after</div>))
-        expect_native_atomic(%(<div style="width:60px;direction:rtl;#{align}">a <span style="display:inline-block;width:80px;height:10px"></span> b</div>))
+        expect_parity(%(<div style="width:400px;direction:rtl;#{align}">text <span style="#{ib}"></span> after</div>))
+        expect_parity(%(<div style="width:60px;direction:rtl;#{align}">a <span style="display:inline-block;width:80px;height:10px"></span> b</div>))
       end
-      expect_native_atomic(%(<div style="width:100px;text-align:center;white-space:pre-wrap">aaaa <span style="#{ib}"></span>   cccc dddd\n<span style="#{ib}"></span>   </div>), 2)
+      expect_parity(%(<div style="width:100px;text-align:center;white-space:pre-wrap">aaaa <span style="#{ib}"></span>   cccc dddd\n<span style="#{ib}"></span>   </div>))
     end
     # `justify` used to push every atomic's box: native holds no per-space positions, the argument went. It holds
     # the GAPS now — each space's origin on the line — and spreads a wrapped line's free space over the ones
     # before its content ends, so an atomic on such a line is laid out like any other.
     it 'lays out an atomic on a justified line' do
-      expect_native_atomic('<div style="width:100px;text-align:justify">aaa bbb ccc <span style="display:inline-block;width:30px;height:10px"></span> ddd eee fff ggg hhh iii jjj kkk lll</div>')
-      expect_native_atomic('<div style="width:200px;text-align:justify;direction:rtl">aaa bbb ccc <span style="display:inline-block;width:30px;height:10px"></span> ddd eee fff ggg hhh</div>')
-      expect_native_atomic('<div style="width:120px;text-align:justify;white-space:pre-wrap;font:16px monospace">aa bb <span style="display:inline-block;width:20px;height:8px"></span> cc dd ee</div>')
-      expect_native_atomic('<div style="width:160px;text-align:justify;text-indent:20px">aaa bbb ccc <span style="display:inline-block;width:30px;height:10px"></span> ddd eee fff ggg</div>')
+      expect_parity('<div style="width:100px;text-align:justify">aaa bbb ccc <span style="display:inline-block;width:30px;height:10px"></span> ddd eee fff ggg hhh iii jjj kkk lll</div>')
+      expect_parity('<div style="width:200px;text-align:justify;direction:rtl">aaa bbb ccc <span style="display:inline-block;width:30px;height:10px"></span> ddd eee fff ggg hhh</div>')
+      expect_parity('<div style="width:120px;text-align:justify;white-space:pre-wrap;font:16px monospace">aa bb <span style="display:inline-block;width:20px;height:8px"></span> cc dd ee</div>')
+      expect_parity('<div style="width:160px;text-align:justify;text-indent:20px">aaa bbb ccc <span style="display:inline-block;width:30px;height:10px"></span> ddd eee fff ggg</div>')
       # …the LAST line and one a `<br>` ends keep their natural spacing (§7.1), which is the same arithmetic
-      expect_native_atomic('<div style="width:200px;text-align:justify">aaa <span style="display:inline-block;width:30px;height:10px"></span> bbb<br>ccc</div>')
+      expect_parity('<div style="width:200px;text-align:justify">aaa <span style="display:inline-block;width:30px;height:10px"></span> bbb<br>ccc</div>')
       # …and the gap SOURCES that are not an ordinary space, each crossed with the box that measures them: a
       # NO-BREAK SPACE is a gap (§8.1, Chrome widens it) though it breaks nothing, and the separators a
       # non-wrapping run ENDS in are held back until something follows them on the line.
@@ -348,7 +312,7 @@ RSpec.describe 'native layout inline-atomic parity' do
        %(xx aa <span style="white-space:nowrap">bb&nbsp;cc</span> #{ib} yy dd ee ff gg hh ii),
        %(xx #{ib} yy <span style="white-space:pre">aa bb </span> cccccccccccccccc zz ff gg hh ii jj kk ll),
        %(xx #{ib} yy <span style="white-space:pre">aa	bb	</span> cccccccccccccccc zz ff gg hh ii jj)].each do |content|
-        expect_native_atomic(%(<div style="width:180px;text-align:justify">#{content}</div>))
+        expect_parity(%(<div style="width:180px;text-align:justify">#{content}</div>))
       end
     end
     # …and WHICH SPACES are gaps at all is a question about what the space IS, not about what it measures.
@@ -372,23 +336,20 @@ RSpec.describe 'native layout inline-atomic parity' do
       # `aa` is the whole of the line before the atomic in every shape below, so its width is where the atomic
       # would sit with no share at all — and for the `&#8203;` shape that also asserts the resolved face gives
       # U+200B no advance, which is a font-table fact riding along rather than a layout one.
-      # …and it is the ORACLE's geometry, so the pixel relations below hold at HEAD too: what fails there is
-      # `expect_native_atomic`. These examples are a parity guard first, and a guard on the shared rule —
-      # which parity cannot see — second.
       unshifted = rendered_width('<span id="t" style="font:16px monospace">aa</span>', '#t')
 
       cancelled = line.call(' ', 'word-spacing:-9.6px')
-      expect_native_atomic(cancelled)
+      expect_parity(cancelled)
       expect(rendered_x(cancelled, '#t')).to be > unshifted + 1
       # …a knife edge on the advance, not a range: either side of it is an ordinary separator.
-      ['word-spacing:-9.59px', 'word-spacing:-9.61px'].each {|style| expect_native_atomic(line.call(' ', style)) }
+      ['word-spacing:-9.59px', 'word-spacing:-9.61px'].each {|style| expect_parity(line.call(' ', style)) }
 
       # …while a zero-width OPPORTUNITY is no separator however the line is justified: the atomic sits exactly
       # where the text leaves it. (These two reach neither `sep` producer — U+200B queues no pending space and
       # `<wbr>` only rewrites one — so they pin the boundary rather than the bit.)
       ['&#8203;', '<wbr>'].each do |opp|
         body = line.call(opp, '')
-        expect_native_atomic(body)
+        expect_parity(body)
         expect(rendered_x(body, '#t')).to be_within(0.01).of(unshifted)
       end
     end
@@ -411,7 +372,7 @@ RSpec.describe 'native layout inline-atomic parity' do
       # joins the line and the answer is something else, so `be_within` rather than an exact float and this
       # note rather than a bare number.
       {'bb cc ' => 140, 'bb cc  ' => 140, 'bb cc' => 100.203125}.each do |pre, chrome|
-        expect_native_atomic(line.call(pre))
+        expect_parity(line.call(pre))
         expect(rendered_x(line.call(pre), '#t')).to be_within(0.05).of(chrome)
       end
     end
@@ -429,7 +390,7 @@ RSpec.describe 'native layout inline-atomic parity' do
       at = ->(decl, align = 'justify') {
         body = %(<div style="width:181px;text-align:#{align}">aaa bbb ccc ) +
                %(<span id="t" style="display:inline-block;width:10px;height:6px;#{decl}"></span> ddd eee fff ggg hhh iii</div>)
-        expect_native_atomic(body)
+        expect_parity(body)
         session = simulated_session(page(body))
         session.visit '/'
         session.evaluate_script(%(document.getElementById('t').getBoundingClientRect().x))
@@ -456,17 +417,17 @@ RSpec.describe 'native layout inline-atomic parity' do
       # …and one that OPENS the line, where native counted the gap that follows it instead (Chrome -12).
       opener = %(<div style="width:181px;text-align:justify"><span id="t" style="display:inline-block;) +
                %(margin-left:-12px;width:10px;height:6px"></span> aaa bbb ccc ddd eee fff ggg hhh iii</div>)
-      expect_native_atomic(opener)
+      expect_parity(opener)
       session = simulated_session(page(opener))
       session.visit '/'
       expect(session.evaluate_script(%(document.getElementById('t').getBoundingClientRect().x))).to be_within(0.001).of(-12)
     end
 
     it 'places an atomic on a line shortened by a float' do
-      expect_native_atomic('<div style="overflow:hidden;width:400px"><div style="float:left;width:120px;height:60px"></div><div>text <span style="display:inline-block;width:30px;height:10px"></span> after</div></div>')
-      expect_native_atomic('<div style="overflow:hidden;width:400px"><div style="float:left;width:120px;height:60px"></div><div style="text-align:center">text <img style="width:30px;height:10px"> after</div></div>')
-      expect_native_atomic('<div style="overflow:hidden;width:400px"><div style="float:right;width:120px;height:60px"></div><div style="text-align:right">text <span style="display:inline-block;width:30px;height:10px"></span> after</div></div>')
-      expect_native_atomic('<div style="overflow:hidden;width:200px"><div style="float:left;width:120px;height:30px"></div><div>aaaa bbbb cccc <span style="display:inline-block;width:30px;height:10px"></span> dddd eeee ffff gggg hhhh iiii <span style="display:inline-block;width:30px;height:10px"></span></div></div>', 2)
+      expect_parity('<div style="overflow:hidden;width:400px"><div style="float:left;width:120px;height:60px"></div><div>text <span style="display:inline-block;width:30px;height:10px"></span> after</div></div>')
+      expect_parity('<div style="overflow:hidden;width:400px"><div style="float:left;width:120px;height:60px"></div><div style="text-align:center">text <img style="width:30px;height:10px"> after</div></div>')
+      expect_parity('<div style="overflow:hidden;width:400px"><div style="float:right;width:120px;height:60px"></div><div style="text-align:right">text <span style="display:inline-block;width:30px;height:10px"></span> after</div></div>')
+      expect_parity('<div style="overflow:hidden;width:200px"><div style="float:left;width:120px;height:30px"></div><div>aaaa bbbb cccc <span style="display:inline-block;width:30px;height:10px"></span> dddd eeee ffff gggg hhhh iiii <span style="display:inline-block;width:30px;height:10px"></span></div></div>')
     end
     # A block holding block children AND inline content wraps each run of the inline content in an anonymous
     # block, whose lines are laid out like any text block's — atomics included. They used to be pushed there
@@ -474,31 +435,19 @@ RSpec.describe 'native layout inline-atomic parity' do
     # baseline, read off `_lb`, for every inline-block beside a block sibling.
     it 'lays out an atomic on the lines of an anonymous block beside block siblings' do
       ib = 'display:inline-block;width:30px;height:10px'
-      expect_native_atomic(%(<div style="width:400px">text <span style="#{ib}"></span> after<div>block</div></div>))
-      expect_native_atomic(%(<div style="width:400px"><div>block</div>a <span style="#{ib}"></span><p>para</p><span style="display:inline-block">b c</span> d</div>), 2)
-      expect_native_atomic(%(<div style="width:400px;text-align:center;direction:rtl"><div>block</div>a <b style="position:relative;top:3px">b <span style="#{ib};vertical-align:4px"></span></b></div>))
-      expect_native_atomic(%(<div style="width:90px"><div>block</div>aaa bbb <img style="width:40px;height:20px"> ccc <span style="#{ib}"></span> ddd</div>), 2)
+      expect_parity(%(<div style="width:400px">text <span style="#{ib}"></span> after<div>block</div></div>))
+      expect_parity(%(<div style="width:400px"><div>block</div>a <span style="#{ib}"></span><p>para</p><span style="display:inline-block">b c</span> d</div>))
+      expect_parity(%(<div style="width:400px;text-align:center;direction:rtl"><div>block</div>a <b style="position:relative;top:3px">b <span style="#{ib};vertical-align:4px"></span></b></div>))
+      expect_parity(%(<div style="width:90px"><div>block</div>aaa bbb <img style="width:40px;height:20px"> ccc <span style="#{ib}"></span> ddd</div>))
       # …inside a subtree native MEASURES, too: the anonymous block is part of the inline-block's shrink-to-fit
-      expect_native_atomic(%(<div style="width:400px">x <span style="display:inline-block"><div>block</div>text <span style="#{ib}"></span></span> y</div>), 2)
+      expect_parity(%(<div style="width:400px">x <span style="display:inline-block"><div>block</div>text <span style="#{ib}"></span></span> y</div>))
       # …and a group of white space and an empty inline box, which is kept as a text block of no line (the box takes
       # an indent where there is one) and lays nothing out
       expect_parity(%(<div style="width:400px"><div>one</div> <span></span> <div>two</div></div>))
-      # …an atomic native still cannot lay out, in a group a flex row MEASURES, takes the row's fallback rather
-      # than a pushed box the measure cannot see
-      r = run_shadow(%(<div style="display:flex;width:300px"><div>x <span style="display:inline-block"><div>b</div>t #{WalkRefusals::POSITIONED}</span></div><div style="flex:1">y</div></div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeFlexRows' => 0), r.inspect
       # …and a JUSTIFIED group's atomics are native too, its lines spread the way a text block's are
-      expect_native_atomic(%(<div style="width:100px;text-align:justify"><div>block</div>aaa bbb ccc <span style="#{ib}"></span> ddd eee fff ggg</div>))
+      expect_parity(%(<div style="width:100px;text-align:justify"><div>block</div>aaa bbb ccc <span style="#{ib}"></span> ddd eee fff ggg</div>))
     end
-    it 'reads no oracle box for an atomic on an anonymous block\'s lines' do
-      session = simulated_session(page('<div style="width:400px">text <span style="display:inline-block;width:30px;height:10px"></span> after<div>block</div></div>'))
-      session.visit '/'
-      session.evaluate_script('document.body.offsetHeight')
-      r = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
-      expect(r).to include('ok' => true, 'mismatches' => 0)
-      expect(r['oracleReads'].keys.grep(/\AnlGatherRuns |\AatomicBaselineOffset |\AboxBaselineOffset /)).to eq([])
-    end
-    # …nor for the PERCENTAGE edges and width of a box in that group: its record hangs under the group, its containing
+    # …and the PERCENTAGE edges and width of a box in that group: its record hangs under the group, its containing
     # block is the mixed block, and the group is exactly as wide as that block's content box, so native has the basis
     # across (a percentage HEIGHT it has not — the group's height is auto). Until 2026-09-24 they were resolved against
     # the oracle's width (`recordCbW`). Chrome: the inline-block at 20/20 and 28.45 wide, the float 140 wide.
@@ -510,21 +459,14 @@ RSpec.describe 'native layout inline-atomic parity' do
         expect_parity(body)
         got = laid_out_rect(body)
         [x, y, w].zip(got).each {|want, g| expect(g).to be_within(0.01).of(want) }
-        session = simulated_session(page(body))
-        session.visit '/'
-        session.evaluate_script('document.body.offsetHeight')
-        r = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
-        expect(r).to include('ok' => true, 'mismatches' => 0)
-        expect(r['oracleReads'].to_h).to be_empty, r.inspect
       end
     end
     # An INLINE replaced element — `<svg>` / `<canvas>` by their own UA display, every form control forced to
     # `display: inline`. The arm that decided this admitted only an `<img>`, because when it was written a
     # text-drawing control's baseline was still the oracle's; `controlBaseline` made it native's soon after and
     # the arm was never re-asked, so every other inline replaced element stayed a PUSHED atomic carrying the
-    # oracle's box and ascent. Parity cannot see that — a replayed box agrees with the oracle by construction —
-    # so these assert `nativeAtomics` and the no-oracle read set, not just the geometry. A 25,760-case sweep
-    # crossing element x `vertical-align` x own box x line context: oracle-free 1632 -> 18768, 0 mismatches.
+    # oracle's box and ascent. A 25,760-case sweep crossing element x `vertical-align` x own box x line context:
+    # oracle-free 1632 -> 18768, 0 mismatches.
     it 'lays out an inline replaced element as an atomic, control chrome and all' do
       ['<svg width="20" height="25"></svg>',
        '<canvas width="20" height="25"></canvas>',
@@ -533,26 +475,15 @@ RSpec.describe 'native layout inline-atomic parity' do
        '<textarea style="display:inline">hi</textarea>',
        '<select style="display:inline"><option>aa</option></select>',
        '<progress style="display:inline"></progress>'].each do |el|
-        expect_native_atomic(%(<div style="width:400px">text #{el} after</div>))
+        expect_parity(%(<div style="width:400px">text #{el} after</div>))
       end
       # …a LIST BOX too, whose box is the control's and whose rows native stacks inside it — the one replaced
       # element that is not a leaf.
-      expect_native_atomic(%(<div style="width:400px">text <select multiple size="3" style="display:inline">) +
-                           %(<option>a</option><option>bb</option></select> after</div>))
-    end
-    # …and it needs NONE of the oracle's figures, which is the whole point of laying it out rather than pushing
-    # it: the read set is the one figure the harness hands the pass.
-    it 'reads no oracle box for an inline replaced atomic' do
-      ['<div style="width:400px">before <svg width="30" height="20"></svg> after</div>',
-       '<div style="width:400px">before <input style="display:inline;vertical-align:super"> after</div>',
-       '<div style="width:60px">text <select style="display:inline"><option>aa</option></select> wraps here</div>'].each do |body|
-        session = simulated_session(page(body))
-        session.visit '/'
-        session.evaluate_script('document.body.offsetHeight')
-        r = session.evaluate_script('globalThis.__csimLayoutShadowRun(undefined, {noOracle: true})')
-        expect(r).to include('ok' => true, 'mismatches' => 0, 'oracleWrites' => 0), r.inspect
-        expect(r['oracleReads'].to_h).to be_empty, body
-      end
+      expect_parity(%(<div style="width:400px">text <select multiple size="3" style="display:inline">) +
+                    %(<option>a</option><option>bb</option></select> after</div>))
+      # …shifted, and on a line it wraps
+      expect_parity('<div style="width:400px">before <input style="display:inline;vertical-align:super"> after</div>')
+      expect_parity('<div style="width:60px">text <select style="display:inline"><option>aa</option></select> wraps here</div>')
     end
     # …and a LINE-relative `vertical-align` is native's too, on an inline replaced element as on every other
     # atomic: the run carries the mode and the line close resolves it.
@@ -565,139 +496,87 @@ RSpec.describe 'native layout inline-atomic parity' do
       expect_parity(%(<div style="width:400px"><div style="float:left">ab #{VA_MARKS}<span>x <img width="20" height="40" style="vertical-align:bottom"> y</span></div><div style="height:9px"></div></div>))
     end
     it 'raises an atomic by its baseline shift, its own or an inline ancestor\'s' do
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;vertical-align:super">sup</span> y</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;vertical-align:sub"><div>a</div><div>b</div></span> y</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block;vertical-align:0px;width:10px;height:10px"></span> y</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="vertical-align:5px">x <span style="display:inline-block;width:10px;height:10px"></span></span> y</div>')
-      expect_native_atomic('<div style="width:400px">text <sup>x <span style="display:inline-block;width:10px;height:10px"></span></sup> y</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="vertical-align:-8px">x <img style="width:10px;height:10px"></span> y</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="vertical-align:4px"><span style="display:inline-block;vertical-align:3px;width:10px;height:10px"></span></span> y</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block;vertical-align:super">sup</span> y</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block;vertical-align:sub"><div>a</div><div>b</div></span> y</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block;vertical-align:0px;width:10px;height:10px"></span> y</div>')
+      expect_parity('<div style="width:400px">text <span style="vertical-align:5px">x <span style="display:inline-block;width:10px;height:10px"></span></span> y</div>')
+      expect_parity('<div style="width:400px">text <sup>x <span style="display:inline-block;width:10px;height:10px"></span></sup> y</div>')
+      expect_parity('<div style="width:400px">text <span style="vertical-align:-8px">x <img style="width:10px;height:10px"></span> y</div>')
+      expect_parity('<div style="width:400px">text <span style="vertical-align:4px"><span style="display:inline-block;vertical-align:3px;width:10px;height:10px"></span></span> y</div>')
     end
     it 'hangs an inline-block from a scroll-container child by its margin edge' do
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><div>t</div><div style="overflow:hidden">oh</div></span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><div>t</div><div style="overflow:hidden;margin-bottom:10px">oh</div></span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><div>t</div><div style="overflow:hidden">oh</div><div style="height:5px"></div></span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><div style="overflow:hidden">oh</div><div>t</div></span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><div><div style="overflow:auto;height:30px">deep</div></div></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><div>t</div><div style="overflow:hidden">oh</div></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><div>t</div><div style="overflow:hidden;margin-bottom:10px">oh</div></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><div>t</div><div style="overflow:hidden">oh</div><div style="height:5px"></div></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><div style="overflow:hidden">oh</div><div>t</div></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><div><div style="overflow:auto;height:30px">deep</div></div></span> after</div>')
     end
     it 'hangs an inline-block from a block-level control child by its font baseline' do
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><input style="display:block"></span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><input style="display:block;margin-bottom:10px"></span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><input style="display:block;padding:10px 2px"></span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><input style="display:block;height:40px"></span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><div>t</div><input style="display:block"></span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><textarea style="display:block;margin-bottom:6px"></textarea></span> after</div>')
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><img style="display:block;width:30px;height:30px"></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><input style="display:block"></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><input style="display:block;margin-bottom:10px"></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><input style="display:block;padding:10px 2px"></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><input style="display:block;height:40px"></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><div>t</div><input style="display:block"></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><textarea style="display:block;margin-bottom:6px"></textarea></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><img style="display:block;width:30px;height:30px"></span> after</div>')
       # A LIST BOX showing rows is NOT a leaf: its BOX is the control's (the intrinsic data, `lays_out_children`)
       # and native stacks its options inside it, so the inline-block around one is a native atomic like any other.
-      expect_native_atomic('<div style="width:400px">text <span style="display:inline-block"><select multiple style="display:block"><option>a</option></select></span> after</div>')
+      expect_parity('<div style="width:400px">text <span style="display:inline-block"><select multiple style="display:block"><option>a</option></select></span> after</div>')
     end
-    it 'keeps the pushed box by NOT measuring the subtree it sits in' do
-      # A pushed atomic's box is not in the run stream `text_intrinsic` reads, so it may only sit in a text block
-      # whose intrinsic widths native never asks for. That is decided BEFORE the walk: `nlAtomicMeasurable`
-      # answers what the walk will DO with the atomic, so a container that would have measured such a subtree
-      # takes its own fallback instead — a grid intrinsic track and a flex item use the oracle's contribution, a
-      # shrink-to-fit out-of-flow box keeps the oracle's box, an outer atomic is pushed whole — and the pass is
-      # laid out with the atomic pushed rather than declined. (A FLOAT and a STRETCHED out-of-flow box never
-      # needed a measure at all.) The one route with no fallback is a vertical writing mode's block child, whose
-      # width IS its content's: that still declines.
-      # …an atomic whose own MEASURE native lacks a rule for: its content holds an atomic native PUSHES (an
-      # `inline-table` whose scrolling row has a px bottom margin, `WalkRefusals::UNMEASURABLE`), whose box a measure
-      # has nothing to read. The atomic is otherwise the same box with the same content as the control below, so what
-      # the counters show is that content and nothing else. The cause has changed hands seven times (see
-      # `WalkRefusals`); find the next shape when this one retires — the cause is real either way.
-      # The atomic's own CONTENT is what the substitution swaps now (it was the atomic's `style` while the
-      # cause was a `white-space`), so the fallback shape and its control are the same box either way.
-      unmeasurable = WalkRefusals::UNMEASURABLE
-      expect_bail(%(<div style="width:400px"><div style="writing-mode:vertical-lr">a <span style="display:inline-block">#{unmeasurable}</span> b</div></div>))
-      # Each route with the atomic it cannot lay out, and the SAME shape with one it can — so the counter shows
-      # the fallback was taken here and is not simply never taken.
+    # An atomic inside a route that MEASURES its content — a grid intrinsic track, a flex item, a shrink-to-fit
+    # out-of-flow box, an outer atomic — is laid out at the width that measure gives it, as it is in one that only
+    # lays it out (a float, a stretched out-of-flow box).
+    it 'lays out an atomic inside the routes that measure it' do
       [
-        ['nativeIntrinsicGrids', %(<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a <span style="display:inline-block">%s</span> b</div><div>x</div></div>)],
-        ['nativeFlexRows',       %(<div style="display:flex;width:100px"><div>a <span style="display:inline-block">%s</span> b</div><div style="flex:1">x</div></div>)],
-        ['nativeOutOfFlow',      %(<div style="width:400px;position:relative"><div style="position:absolute;left:0">a <span style="display:inline-block">%s</span> b</div><p>x</p></div>)]
-      ].each do |counter, shape|
-        fallback = run_shadow(shape.sub('%s', unmeasurable))
-        expect(fallback).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{shape}: #{fallback.inspect}"
-        expect(fallback[counter]).to eq(0), "#{counter} should have fallen back: #{fallback.inspect}"
-        measured = run_shadow(shape.sub('%s', 'in'))
-        expect(measured).to include('ok' => true, 'mismatches' => 0), "#{shape}: #{measured.inspect}"
-        expect(measured[counter]).to be >= 1, "#{counter} never measures, so the fallback pins nothing: #{measured.inspect}"
-      end
-      [
-        %(<div style="width:400px">x <span style="display:inline-block">a <span style="display:inline-block">#{unmeasurable}</span> b</span></div>),
-        %(<div style="overflow:hidden;width:400px"><div style="float:left;width:200px">f <span style="display:inline-block">a <span style="display:inline-block">#{unmeasurable}</span> b</span> g</div></div>),
-        %(<div style="width:400px;position:relative"><div style="position:absolute;left:0;right:100px">a <span style="display:inline-block">#{unmeasurable}</span> b</div><p>x</p></div>),
-        %(<div style="display:grid;grid-template-columns:100px 200px;width:400px"><div>a <span style="display:inline-block">#{unmeasurable}</span> b</div><div>x</div></div>)
+        '<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a <span style="display:inline-block">in</span> b</div><div>x</div></div>',
+        '<div style="display:flex;width:100px"><div>a <span style="display:inline-block">in</span> b</div><div style="flex:1">x</div></div>',
+        '<div style="width:400px;position:relative"><div style="position:absolute;left:0">a <span style="display:inline-block">in</span> b</div><p>x</p></div>',
+        '<div style="width:400px">a <span style="display:inline-block"><div style="position:relative">t <span style="display:inline-block">ok</span></div></span> c</div>',
+        '<div style="overflow:hidden;width:400px"><div style="float:left;width:200px">f <span style="display:inline-block">ok</span> g</div></div>',
+        '<div style="width:400px;position:relative"><div style="position:absolute;left:0;right:100px">a <span style="display:inline-block">in</span> b</div><p>x</p></div>'
       ].each do |body|
-        r = run_shadow(body)
-        expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{body}: #{r.inspect}"
+        expect_parity(body)
       end
       # A MIXED block wraps its inline content in ANONYMOUS blocks, whose atomics are laid out like a text block's
-      # — so an atomic there leaves every one of those routes measuring, and the atomic is native.
+      # — in each of those routes too, a JUSTIFIED one included.
       mixed = '<div><div>blk</div>p <span style="display:inline-block">ok</span> q</div>'
-      [
-        [%(<div style="width:400px;position:relative"><div style="position:absolute;left:0;top:0">#{mixed}</div><p>x</p></div>), 'nativeOutOfFlow'],
-        [%(<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>#{mixed}</div><div>x</div></div>), 'nativeIntrinsicGrids'],
-        [%(<div style="display:flex;width:300px"><div>#{mixed}</div><div style="flex:1">x</div></div>), 'nativeFlexRows'],
-        [%(<div style="width:400px">a <span style="display:inline-block">#{mixed}</span> b</div>), 'nativeAtomics'],
-        [%(<div style="width:400px">#{mixed}</div>), 'nativeAtomics']
-      ].each do |body, counter|
-        r = run_shadow(body)
-        expect(r).to include('ok' => true, 'mismatches' => 0), "#{body}: #{r.inspect}"
-        expect(r['nativeAtomics']).to be >= 1, "#{body}: #{r.inspect}"
-        expect(r[counter]).to be >= 1, "#{counter} fell back: #{r.inspect}"
-      end
-      # …a JUSTIFIED mixed block included, now that a justified line is native's to spread
       justified = '<div style="text-align:justify"><div>blk</div>p <span style="display:inline-block">ok</span> q</div>'
-      r = run_shadow(%(<div style="display:flex;width:300px"><div>#{justified}</div><div style="flex:1">x</div></div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0), r.inspect
-      expect(r['nativeAtomics']).to be >= 1, r.inspect
-      # …and each of those still lays out an atomic it CAN walk.
-      expect_native_atomic(%(<div style="overflow:hidden;width:400px"><div style="float:left;width:200px">f <span style="display:inline-block">ok</span> g</div></div>))
-      expect_native_atomic(%(<div style="width:400px;position:relative"><div style="position:absolute;left:0;right:100px">a <span style="display:inline-block">in</span> b</div><p>x</p></div>))
-      # …while a text block native only LAYS OUT keeps the pushed box: the OUTER atomic is pushed whole, and
-      # with it the whole subtree — `nodes` drops to 2 against the control's 4, because a pushed atomic's
-      # children are no part of the record at all. (Byte-identical to what the `break-spaces` stand-in gave
-      # before 2026-09-23, so the counters here are the cause's and not this shape's.)
-      r = run_shadow(%(<div style="width:400px">a <span style="display:inline-block">a <span style="display:inline-block">#{unmeasurable}</span> b</span> c</div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
-      expect_native_atomic('<div style="width:400px">a <span style="display:inline-block"><div style="position:relative">t <span style="display:inline-block">ok</span></div></span> c</div>', 2)
-    end
-    it 'answers the same refusal for an inline image' do
-      # `nlAtomicNative` tests the WIDTH keyword before the `inline` branch, because a replaced element's width
-      # comes from its own intrinsic size and the walk refuses that record on the same ground — so a cell
-      # holding one pushes its contribution instead of taking the table down, exactly as for an inline-block.
-      img = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
-      [%(<img style="width:fit-content;height:10px" src="#{img}">), %(<img style="width:max-content;height:10px" src="#{img}">)].each do |tag|
-        r = run_shadow(%(<table style="border-spacing:0"><tr><td style="padding:0">a #{tag}</td></tr></table>))
-        expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{tag}: #{r.inspect}"
-      end
-      # …while an image it does lay out stays native, in a cell and on an ordinary line
-      expect_native_atomic(%(<table style="border-spacing:0"><tr><td style="padding:0">a <img style="width:20px;height:10px" src="#{img}"></td></tr></table>))
-      expect_native_atomic(%(<div style="width:400px">a <img style="width:20px;height:10px" src="#{img}"> b</div>))
-    end
-    it 'rolls a declined subtree back off the record stream and pushes its box' do
       [
-        # (a POSITIONED box, which this route still refuses — but not by the value it used to be written with.
-        # This fixture held a float, first static and then `position: relative`, each taken over by native in
-        # turn; what survives is that every one of these gates tests the position as a STRING, so a vendor
-        # ident walks into them. See `WalkRefusals`, which changed hands for the same reason.)
-        '<div style="width:400px">text <span style="display:inline-block"><div style="position:-webkit-sticky;width:10px;height:10px"></div>beside</span> after</div>',
-        # (a ZWJ under a per-character wrap, whose advance the oracle carries from the character before it. This
-        # fixture read `日本語` — served with no charset, whose mojibake happens to contain an em dash, so what it
-        # actually exercised was the hyphen refusal — and then a soft hyphen, both native's since.)
-        "<div style=\"width:400px\">text <span style=\"display:inline-block;word-break:break-all\">a\u200Db</span> after</div>"
-        # (A third entry held a preserved FORM FEED, and before that a TAB — both native's since: tab stops are its own,
-        # and a preserved FF is text that is not there in both engines, 2026-09-25.)
+        %(<div style="width:400px;position:relative"><div style="position:absolute;left:0;top:0">#{mixed}</div><p>x</p></div>),
+        %(<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>#{mixed}</div><div>x</div></div>),
+        %(<div style="display:flex;width:300px"><div>#{mixed}</div><div style="flex:1">x</div></div>),
+        %(<div style="width:400px">a <span style="display:inline-block">#{mixed}</span> b</div>),
+        %(<div style="width:400px">#{mixed}</div>),
+        %(<div style="display:flex;width:300px"><div>#{justified}</div><div style="flex:1">x</div></div>)
       ].each do |body|
-        r = run_shadow(body)
-        expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), "#{body}: #{r.inspect}"
+        expect_parity(body)
       end
-      expect_native_atomic('<div style="width:400px"><span style="display:inline-block">ok</span> and <span style="display:inline-block"><div style="position:-webkit-sticky;width:10px;height:10px"></div>beside</span> after</div>', 1)
-      # …and the tabbed and form-fed ones the other way round: their subtrees are native, so nothing is rolled back
-      expect_native_atomic("<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\tb</span> after</div>", 1)
-      expect_native_atomic("<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\fb</span> after</div>", 1)
+    end
+    # An intrinsic-size KEYWORD width on a replaced element is its intrinsic size, in a cell as on a line. GAP: in a
+    # cell, native measures the keyword-width image out of the cell's max-content and wraps it under the `a` (y 22, the
+    # page 36 tall), where Chrome keeps it on the line at 11.11 (y 4, 18 tall) as it does a declared 20px.
+    it 'lays out an inline image with an intrinsic-size keyword width' do
+      img = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+      {'width:fit-content' => 22, 'width:max-content' => 22, 'width:20px' => 4}.each do |width, y|
+        body = %(<table style="border-spacing:0"><tr><td style="padding:0">a <img id="m" style="#{width};height:10px" src="#{img}"></td></tr></table>)
+        expect_parity(body)
+        expect_shared_gap(laid_out_rect(body)[1], shared: y, chrome: 4, what: body)
+      end
+      expect_parity(%(<div style="width:400px">a <img style="width:20px;height:10px" src="#{img}"> b</div>))
+    end
+    # …and content inside one that is a question of its own: a box under a VENDOR `position` ident (`-webkit-sticky`,
+    # which declaration validation keeps), a ZWJ under a per-character wrap, whose advance is carried from the
+    # character before it, a preserved tab and a form feed.
+    it 'lays out an atomic holding a vendor position, a ZWJ under break-all, a tab or a form feed' do
+      [
+        '<div style="width:400px">text <span style="display:inline-block"><div style="position:-webkit-sticky;width:10px;height:10px"></div>beside</span> after</div>',
+        '<div style="width:400px"><span style="display:inline-block">ok</span> and <span style="display:inline-block"><div style="position:-webkit-sticky;width:10px;height:10px"></div>beside</span> after</div>',
+        "<div style=\"width:400px\">text <span style=\"display:inline-block;word-break:break-all\">a\u200Db</span> after</div>",
+        "<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\tb</span> after</div>",
+        "<div style=\"width:400px\">text <span style=\"display:inline-block;white-space:pre\">a\fb</span> after</div>"
+      ].each do |body|
+        expect_parity(body)
+      end
     end
     # An atomic aligned against its PARENT's font box hangs from where that alignment puts its margin box, which
     # is only known once native has laid it out — so the run carries the alignment and the one figure of the
@@ -707,20 +586,20 @@ RSpec.describe 'native layout inline-atomic parity' do
     it 'lays out an atomic aligned against its parent font box itself' do
       %w[middle text-top text-bottom -webkit-baseline-middle].each do |va|
         box = %(<span style="display:inline-block;width:10px;height:37px;margin:3px 0 5px;vertical-align:#{va}"></span>)
-        expect_native_atomic(%(<div style="width:400px">text #{MARKER}#{box} x</div>), 2)
+        expect_parity(%(<div style="width:400px">text #{MARKER}#{box} x</div>))
         # …a box with a baseline of its own, which the alignment ignores
-        expect_native_atomic(%(<div style="width:400px">text #{MARKER}<span style="display:inline-block;font-size:24px;vertical-align:#{va}">ab<br>cd</span> x</div>), 2)
-        expect_native_atomic(%(<div style="width:400px">t #{MARKER}<span style="font-size:30px">big #{box}</span></div>), 2)
-        expect_native_atomic(%(<div style="width:400px">t #{MARKER}<span style="vertical-align:6px">up #{box}</span></div>), 2)
-        expect_native_atomic(%(<div style="width:400px">a <span style="display:inline-block">t <img style="width:9px;height:20px;vertical-align:#{va}"> x</span></div>), 2)
+        expect_parity(%(<div style="width:400px">text #{MARKER}<span style="display:inline-block;font-size:24px;vertical-align:#{va}">ab<br>cd</span> x</div>))
+        expect_parity(%(<div style="width:400px">t #{MARKER}<span style="font-size:30px">big #{box}</span></div>))
+        expect_parity(%(<div style="width:400px">t #{MARKER}<span style="vertical-align:6px">up #{box}</span></div>))
+        expect_parity(%(<div style="width:400px">a <span style="display:inline-block">t <img style="width:9px;height:20px;vertical-align:#{va}"> x</span></div>))
       end
       # …while `top` / `bottom` hang from the LINE rather than from the parent's font box, so they take none of
       # the rule above: the box goes over with the line mode instead of an alignment code, and `growAtomic`
       # never reaches `alignedAscent` for one. A baseline SHIFT on such a box is IGNORED by both engines —
       # that is what the `super` case here pins, and it is the one place the two families meet.
       %w[top bottom].each do |va|
-        expect_native_atomic(%(<div style="width:400px">text #{VA_MARKS}<span style="display:inline-block;vertical-align:#{va};width:10px;height:30px"></span> x</div>), 3)
-        expect_native_atomic(%(<div style="width:400px">text #{VA_MARKS}<span style="vertical-align:super">up <span style="display:inline-block;vertical-align:#{va};width:10px;height:30px"></span></span> x</div>), 3)
+        expect_parity(%(<div style="width:400px">text #{VA_MARKS}<span style="display:inline-block;vertical-align:#{va};width:10px;height:30px"></span> x</div>))
+        expect_parity(%(<div style="width:400px">text #{VA_MARKS}<span style="vertical-align:super">up <span style="display:inline-block;vertical-align:#{va};width:10px;height:30px"></span></span> x</div>))
       end
     end
 
@@ -731,23 +610,22 @@ RSpec.describe 'native layout inline-atomic parity' do
     it 'lays out an atomic with an intrinsic-size keyword width itself' do
       %w[min-content max-content fit-content].each do |kw|
         box = %(<span style="display:inline-block;width:#{kw};padding:0 3px;border:1px solid">aa bbb cccc dd eeeeeee</span>)
-        expect_native_atomic(%(<div style="width:70px">text #{box} after</div>))
-        expect_native_atomic(%(<div style="width:400px">text <span style="display:inline-flex;width:#{kw};padding:0 5%"><span>f one</span><span>two</span></span></div>))
-        expect_native_atomic(%(<div style="display:flex;width:300px"><div>x #{box}</div><div style="flex:1">y</div></div>))
-        expect_native_atomic(%(<div style="width:400px">q <span style="display:inline-block">#{box}</span> r</div>), 2)
+        expect_parity(%(<div style="width:70px">text #{box} after</div>))
+        expect_parity(%(<div style="width:400px">text <span style="display:inline-flex;width:#{kw};padding:0 5%"><span>f one</span><span>two</span></span></div>))
+        expect_parity(%(<div style="display:flex;width:300px"><div>x #{box}</div><div style="flex:1">y</div></div>))
+        expect_parity(%(<div style="width:400px">q <span style="display:inline-block">#{box}</span> r</div>))
       end
       # …`fit-content` where min-content exceeds max-content (a negative margin takes the line's max under its
       # widest piece): min-content wins, in a block and on a line alike
       crossed = '<span style="display:inline-block;width:50px;height:5px"></span><span style="display:inline-block;margin-left:-100px"></span>'
-      expect_native_atomic(%(<div style="width:400px">a <span style="display:inline-block;width:fit-content">#{crossed}</span></div>), 3)
-      expect_native_atomic(%(<div style="width:400px"><div style="width:fit-content">#{crossed}</div></div>), 2)
+      expect_parity(%(<div style="width:400px">a <span style="display:inline-block;width:fit-content">#{crossed}</span></div>))
+      expect_parity(%(<div style="width:400px"><div style="width:fit-content">#{crossed}</div></div>))
       # …and a WRAPPING inline-flex, which the oracle grows only from an auto width
       item = '<div style="width:80px;height:10px;flex-shrink:0"></div><div style="width:30px;height:10px"></div>'
-      expect_native_atomic(%(<div style="width:400px">t <span style="display:inline-flex;flex-wrap:wrap;width:max-content">#{item}</span> u</div>))
-      expect_native_atomic(%(<div style="width:400px">t <span style="display:inline-flex;flex-wrap:wrap;width:fit-content;max-width:60px">#{item}</span> u</div>))
-      # …but not on a REPLACED atomic, whose width is its intrinsic size: the walk refuses that one
-      r = run_shadow('<div style="width:400px">a <img style="width:max-content;height:10px"> b</div>')
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), r.inspect
+      expect_parity(%(<div style="width:400px">t <span style="display:inline-flex;flex-wrap:wrap;width:max-content">#{item}</span> u</div>))
+      expect_parity(%(<div style="width:400px">t <span style="display:inline-flex;flex-wrap:wrap;width:fit-content;max-width:60px">#{item}</span> u</div>))
+      # …and on a REPLACED atomic, whose keyword width is its intrinsic size
+      expect_parity('<div style="width:400px">a <img style="width:max-content;height:10px"> b</div>')
     end
 
     # An INLINE-TABLE is native's own too. Its width is the table algorithm's shrink-to-fit (§17.5.2 —
@@ -786,13 +664,11 @@ RSpec.describe 'native layout inline-atomic parity' do
        '<div style="display:inline-table"><div style="display:table-row"><div style="display:table-cell">c</div><div style="display:table-cell"><div style="overflow:hidden;height:12px">s</div></div></div></div>',
        # …and a nested table in a cell, which gives the atomic no baseline at all (both engines)
        '<div style="display:inline-table"><div style="display:table-row"><div style="display:table-cell"><div style="display:table"><div style="display:table-row"><div style="display:table-cell">n</div></div></div></div></div></div>'].each do |table|
-        # 2, not 1: the MARKER is an atomic too, so a count of 1 is satisfied by the marker alone and the
-        # example passes with the table still pushed — which is what it did until this comment was written.
-        expect_native_atomic(%(<div style="width:400px">x #{table}#{marker} y</div>), 2)
+        expect_parity(%(<div style="width:400px">x #{table}#{marker} y</div>))
       end
       # …and a table generates no LINE BOX (CSS 2.1 §10.8.1), so an atomic holding one hangs from its bottom
       # margin edge — the table's own baseline is for a flex line and a table cell to read.
-      expect_native_atomic(%(<div style="width:400px">x <span style="display:inline-flex"><table style="display:inline-table"><tr><td>c</td></tr></table></span>#{marker} y</div>), 2)
+      expect_parity(%(<div style="width:400px">x <span style="display:inline-flex"><table style="display:inline-table"><tr><td>c</td></tr></table></span>#{marker} y</div>))
     end
     # …and it is laid out natively however its rows are ordered and whatever they declare. It was PUSHED where the two
     # engines would not be walking the same rows — THREE causes until 2026-09-23, each closed in the ORACLE, which is
@@ -810,25 +686,15 @@ RSpec.describe 'native layout inline-atomic parity' do
       marker = '<span id="m" style="display:inline-block;width:4px;height:4px"></span>'
       margin = '<div style="display:inline-table"><div style="display:table-row;overflow:hidden;height:12px;margin-bottom:10px"><div style="display:table-cell">s</div></div></div>'
       body = %(<div style="width:400px">x #{margin}#{marker} y</div>)
-      expect(run_shadow(body)).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 2)
+      expect_parity(body)
       expect_shared_gap(laid_out_rect(body)[1], shared: 14, chrome: 10, what: body)
       ['<div style="display:inline-table"><div style="display:table-row;overflow:hidden;height:12px;margin-bottom:10%"><div style="display:table-cell">s</div></div></div>',
        '<table style="display:inline-table"><tfoot><tr><td>f</td></tr></tfoot><tbody><tr><td>b</td></tr></tbody></table>',
        '<table style="display:inline-table"><tr><td>a</td></tr><caption style="font-size:30px">C</caption></table>',
        '<table style="display:inline-table"><thead><tr><td>h</td></tr></thead><tbody><tr><td>b</td></tr></tbody></table>',
        '<table style="display:inline-table"><caption style="font-size:30px">C</caption><tr><td>a</td></tr></table>'].each do |table|
-        r = run_shadow(%(<div style="width:400px">x #{table}#{marker} y</div>))
-        expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 2), table
+        expect_parity(%(<div style="width:400px">x #{table}#{marker} y</div>))
       end
-    end
-    it 'keeps the pushed box for an atomic whose own subtree declines' do
-      # …an atomic the walk refuses INSIDE (an unmodelled `position` on a block in an inline-block) rolls back to
-      # the pushed box rather than declining the pass. An inline-FLEX, an inline-GRID and an inline-TABLE are
-      # native's own.
-      r = run_shadow(%(<div style="width:400px">text #{WalkRefusals::POSITIONED} x</div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0)
-      r = run_shadow('<div style="width:400px">text <span style="display:inline-flex"><div>f</div></span> x</div>')
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 1)
     end
 
     # A CONTROL is an atomic native lays out itself now. Its box is the replaced one and its baseline the
@@ -856,9 +722,9 @@ RSpec.describe 'native layout inline-atomic parity' do
 
     it 'lays out a control atomic itself, from its own chrome baseline' do
       CONTROLS.each do |control|
-        expect_native_atomic(%(<div style="width:400px">text #{MARKER}#{control} after</div>))
-        expect_native_atomic(%(<div style="width:400px;font-size:32px">BIG #{MARKER}#{control} after</div>))
-        expect_native_atomic(%(<div style="width:400px">t #{MARKER}#{control.sub('>', ' style="margin-bottom:6px">')} u</div>))
+        expect_parity(%(<div style="width:400px">text #{MARKER}#{control} after</div>))
+        expect_parity(%(<div style="width:400px;font-size:32px">BIG #{MARKER}#{control} after</div>))
+        expect_parity(%(<div style="width:400px">t #{MARKER}#{control.sub('>', ' style="margin-bottom:6px">')} u</div>))
       end
     end
 
@@ -948,8 +814,6 @@ RSpec.describe 'native layout inline-atomic parity' do
   end
 
   describe 'an inline-flex / inline-grid is an atomic native lays out' do
-    # `nativeAtomics` is the whole point — parity alone cannot fail here, because the PUSHED path was already
-    # parity-clean. What changed is which engine produced the box.
     it 'lays out an atomic flex or grid container itself' do
       [
         '<span style="display:inline-flex"><div style="width:50px;height:30px"></div><div style="width:80px;height:40px"></div></span>',
@@ -958,9 +822,9 @@ RSpec.describe 'native layout inline-atomic parity' do
         '<span style="display:inline-grid;grid-template-columns:30px 20px"><div style="height:10px"></div><div style="height:10px"></div></span>',
         '<span style="display:inline-grid;grid-template-columns:min-content auto"><div>aa bb</div><div>x</div></span>'
       ].each do |atom|
-        expect_native_atomic(%(<div style="width:400px">text #{atom} after</div>))
-        expect_native_atomic(%(<div style="width:400px;text-align:right">text #{atom} after</div>))
-        expect_native_atomic(%(<div style="width:90px">text #{atom} after</div>))
+        expect_parity(%(<div style="width:400px">text #{atom} after</div>))
+        expect_parity(%(<div style="width:400px;text-align:right">text #{atom} after</div>))
+        expect_parity(%(<div style="width:90px">text #{atom} after</div>))
       end
     end
     # …and what the atomic itself declares still sizes it: a width PINS the shrink-to-fit, the clamps bind it,
@@ -970,14 +834,8 @@ RSpec.describe 'native layout inline-atomic parity' do
       ['width:120px', 'min-width:150px', 'max-width:40px', 'padding:4px', 'border:2px solid',
        'margin:0 6px', 'box-sizing:border-box;width:120px;padding:4px', 'vertical-align:super',
        'vertical-align:-4px', 'font-size:24px'].each do |decl|
-        expect_native_atomic(%(<div style="width:400px">text #{format(atom, decl)} after</div>))
+        expect_parity(%(<div style="width:400px">text #{format(atom, decl)} after</div>))
       end
-    end
-    # …while an atomic whose own subtree the walk refuses keeps the PUSHED box — the route rolls back rather
-    # than taking the pass down with it.
-    it 'keeps pushing an atomic it cannot walk' do
-      r = run_shadow(%(<div style="width:400px">text #{WalkRefusals::POSITIONED} after</div>))
-      expect(r).to include('ok' => true, 'mismatches' => 0, 'nativeAtomics' => 0), r.inspect
     end
     # An auto-width WRAPPING flex container is GROWN past its intrinsic figure once laid out — to what its own
     # layout reached (`growAtomic`'s caller, `_lbFlowRight`; native's `flow_right`) — which takes an item that
@@ -990,24 +848,24 @@ RSpec.describe 'native layout inline-atomic parity' do
       ['flex-wrap:wrap', 'flex-wrap:wrap;flex-direction:row-reverse',
        'flex-wrap:wrap;flex-direction:column;height:60px', 'flex-wrap:wrap;flex-direction:column-reverse;height:60px',
        'flex-wrap:wrap;writing-mode:vertical-rl;flex-direction:column'].each do |wrap|
-        expect_native_atomic(%(<div style="width:400px">text <span style="display:inline-flex;#{wrap};max-width:40px">#{item}</span> after</div>))
-        expect_native_atomic(%(<div style="width:130px">text <span style="display:inline-flex;#{wrap};max-width:40px">#{item}</span> after words</div>))
-        expect_native_atomic(%(<div style="width:400px;text-align:center">t <span style="display:inline-flex;#{wrap};max-width:40px">#{item}</span></div>))
-        expect_native_atomic(%(<div style="width:400px">text <span style="display:inline-flex;#{wrap};width:60px">#{item}</span> after</div>))
+        expect_parity(%(<div style="width:400px">text <span style="display:inline-flex;#{wrap};max-width:40px">#{item}</span> after</div>))
+        expect_parity(%(<div style="width:130px">text <span style="display:inline-flex;#{wrap};max-width:40px">#{item}</span> after words</div>))
+        expect_parity(%(<div style="width:400px;text-align:center">t <span style="display:inline-flex;#{wrap};max-width:40px">#{item}</span></div>))
+        expect_parity(%(<div style="width:400px">text <span style="display:inline-flex;#{wrap};width:60px">#{item}</span> after</div>))
       end
       # …columns that add up, and a grandchild wider than its item
-      expect_native_atomic('<div style="width:400px">a <span style="display:inline-flex;flex-flow:column wrap;height:40px"><div style="width:50px;height:30px"></div><div style="width:80px;height:30px"></div></span> b</div>')
-      expect_native_atomic('<div style="width:400px">a <span style="display:inline-flex;flex-wrap:wrap"><div style="width:50px;height:30px"><div style="width:120px;height:6px"></div></div></span> b</div>')
+      expect_parity('<div style="width:400px">a <span style="display:inline-flex;flex-flow:column wrap;height:40px"><div style="width:50px;height:30px"></div><div style="width:80px;height:30px"></div></span> b</div>')
+      expect_parity('<div style="width:400px">a <span style="display:inline-flex;flex-wrap:wrap"><div style="width:50px;height:30px"><div style="width:120px;height:6px"></div></div></span> b</div>')
       # …and only BOXES reach: an overflowing word, a `<br>` after one or a relatively shifted inline is a piece
       # of its item's lines, which grows nothing (Chrome: 30, 30, 50 — the oracle used to union those fragments
       # and made 85 / 85 / 108, where native has no box for any of them). An atomic inside such an inline is a box.
       ['<div style="width:30px"><span>aaaaaaaaaaaa</span></div>', '<div style="width:30px">aaaaaaaaaaaa<br>b</div>',
        '<div style="width:50px"><span style="position:relative;left:100px">x</span></div>',
        '<div style="width:30px">x <span style="position:relative;left:40px"><img style="width:20px;height:5px"></span></div>'].each do |content|
-        expect_native_atomic(%(<div style="width:400px">a <span style="display:inline-flex;flex-wrap:wrap">#{content}</span> b</div>))
+        expect_parity(%(<div style="width:400px">a <span style="display:inline-flex;flex-wrap:wrap">#{content}</span> b</div>))
       end
       # …and nothing out of flow reaches into the growth
-      expect_native_atomic('<div style="width:400px">a <span style="display:inline-flex;flex-wrap:wrap;position:relative"><div style="width:20px;height:5px"></div><div style="position:absolute;left:0;width:300px;height:5px"></div></span> b</div>')
+      expect_parity('<div style="width:400px">a <span style="display:inline-flex;flex-wrap:wrap;position:relative"><div style="width:20px;height:5px"></div><div style="position:absolute;left:0;width:300px;height:5px"></div></span> b</div>')
     end
   end
 end
