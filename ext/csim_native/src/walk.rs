@@ -2781,11 +2781,6 @@ impl<'a> Walk<'a> {
         if grid.rows.is_empty() && grid.captions.is_empty() && kids.iter().any(|&c| self.node(c).kind == NodeKind::Text && has_content(&self.node(c).data)) {
             return Err("table of bare text");
         }
-        for g in &grid.groups {
-            if g.first >= 0 && (g.first..=g.last).any(|i| grid.rows[i as usize].group != Some(g.index)) {
-                return Err("table-group-interleaved");
-            }
-        }
         // A COLLAPSING table (§17.6.2) spaces nothing, and where it has a grid its border is the outer half of its rim
         // cells' collapsed borders and it keeps no padding: the cells hold the inner halves (`edgeInsets`).
         if collapses && !grid.rows.is_empty() && grid.col_count > 0 {
@@ -3286,7 +3281,12 @@ impl<'a> Walk<'a> {
                             let nodes = self.row_content(c, grid)?;
                             grid.rows.push(GridRow { el: Some(c), group, nodes, pending: Vec::new(), cells: Vec::new() });
                         }
-                        (DisplayOutside::InternalTable, inside @ (DisplayInside::TableRowGroup | DisplayInside::TableHeaderGroup | DisplayInside::TableFooterGroup)) => {
+                        // (…a row GROUP, a caption or a column belongs to a table: inside a row group it is content
+                        // like any other, which an anonymous row and cell take — and the cell an anonymous table
+                        // around it, CSS 2.1 §17.2.1 (Chrome: a group nested in a group is a table in a cell))
+                        (DisplayOutside::InternalTable, inside @ (DisplayInside::TableRowGroup | DisplayInside::TableHeaderGroup | DisplayInside::TableFooterGroup))
+                            if group.is_none() =>
+                        {
                             anon = None;
                             let rank = match inside {
                                 DisplayInside::TableHeaderGroup => 0,
@@ -3298,15 +3298,15 @@ impl<'a> Walk<'a> {
                             let rows: Vec<NodeId> = self.children(c).collect();
                             self.collect_table(&rows, Some(gi), grid)?;
                         }
-                        (DisplayOutside::TableCaption, _) => {
+                        (DisplayOutside::TableCaption, _) if group.is_none() => {
                             anon = None;
                             grid.captions.push(c);
                         }
-                        (DisplayOutside::InternalTable, DisplayInside::TableColumn) => {
+                        (DisplayOutside::InternalTable, DisplayInside::TableColumn) if group.is_none() => {
                             anon = None;
                             grid.columns.push(c);
                         }
-                        (DisplayOutside::InternalTable, DisplayInside::TableColumnGroup) => {
+                        (DisplayOutside::InternalTable, DisplayInside::TableColumnGroup) if group.is_none() => {
                             anon = None;
                             let cols: Vec<NodeId> = self
                                 .children(c)

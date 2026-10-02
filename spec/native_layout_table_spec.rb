@@ -1580,19 +1580,16 @@ RSpec.describe 'native layout table' do
       '<div style="width:400px"><div style="display:table-row"><br></div></div>'
     ].each {|body| expect_layout(body) }
   end
-  # …but a row group NESTED in another, its rows interleaved with the outer group's, the Rust walk declines
-  # (`table-group-interleaved`), and the page is left its root alone: every box 0 by 0, where Chrome wraps the inner
-  # group in an anonymous table in an anonymous cell and the table is 98 tall.
-  it 'declines a row group nested in another (Chrome: a 98px table)', rust_declines: true do
+  # A row group NESTED in another is content of the outer group like any other: an anonymous row and cell take it, and an
+  # anonymous table around it (CSS 2.1 §17.2.1) — Chrome's table is 98 tall. The walk took the inner group's rows for the
+  # outer's, interleaved, and declined the page, which was then its root alone.
+  it 'lays a row group nested in another out as a table in an anonymous cell (Chrome: 98 tall)' do
     body = '<div id="m" style="display:table;border-spacing:4px"><div style="display:table-row-group">' \
            '<div style="display:table-row"><div style="display:table-cell;width:40px;height:20px">r1</div></div>' \
            '<div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;height:18px">r2</div></div></div>' \
            '<div style="display:table-row"><div style="display:table-cell;height:36px">r3</div></div></div></div>'
-    session = simulated_session(page(body))
-    session.visit '/'
-    height = session.evaluate_script("document.getElementById('m').getBoundingClientRect().height")
-    expect(rust_declines(session)).to eq('{"rust: table-group-interleaved":1}')
-    expect_shared_gap(height, shared: 0, chrome: 98, what: "#{body}: #m height")
+    expect(laid_out_rect(body)[3]).to eq(98)
+    expect_layout(body)
   end
   # A `<col>` and a `<colgroup>` have no box: every one is 0 by 0 at the origin, where Chrome gives a column the rect
   # of the cells it spans (40 by 20 here). And an inline-table holding nothing but a column is as wide as that column
