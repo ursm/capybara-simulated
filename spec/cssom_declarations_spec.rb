@@ -82,8 +82,7 @@ RSpec.describe 'CSSOM declaration blocks' do
   end
 
   # Editing one rule rebuilds the sheet the engine cascades from, and every OTHER rule goes back as it was written — not
-  # as CSSOM serializes it, which rounds its numbers (and, in the engine, folds two different `border-block` sides into
-  # one).
+  # as CSSOM serializes it, which rounds its numbers.
   it 'leaves the rules an edit did not touch as they were written' do
     head = '<style>#a { width: 123.4567891px; border-block-start: 3px solid red; border-block-end: 7px dashed blue } #c { color: red }</style>'
     got = page(head).evaluate_script(<<~JS)
@@ -111,5 +110,27 @@ RSpec.describe 'CSSOM declaration blocks' do
       })()
     JS
     expect(got).to eq('opacity: 0; animation-timing-function: linear;')
+  end
+
+  # `border-block` sets one value for both sides, so two different sides serialize as their longhands — not as the
+  # start side alone (Chrome: `border-block-start: 1px solid red; border-block-end: 2px dashed blue;`, and `border-block:
+  # 3px solid red;` for two equal ones).
+  it 'serializes border-block only where both sides agree' do
+    got = page.evaluate_script(<<~JS)
+      (() => {
+        const d = document.createElement('div');
+        d.style.cssText = 'border-block-start: 1px solid red; border-block-end: 2px dashed blue';
+        const e = document.createElement('div');
+        e.style.cssText = 'border-block-start: 3px solid red; border-block-end: 3px solid red';
+        return [d.style.cssText, d.style.borderBlock, e.style.cssText];
+      })()
+    JS
+    expect(got).to eq(['border-block-start: 1px solid red; border-block-end: 2px dashed blue;', '', 'border-block: 3px solid red;'])
+  end
+
+  # `subgrid` is a track list the engine parses, so `@supports` says so (Discourse refuses to boot without it).
+  it 'parses subgrid' do
+    got = page.evaluate_script("[CSS.supports('(grid-template-rows: subgrid)'), CSS.supports('grid-template-columns', 'subgrid [a] [b]')]")
+    expect(got).to eq([true, true])
   end
 end
