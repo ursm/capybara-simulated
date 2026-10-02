@@ -4087,7 +4087,10 @@ impl<'a> Walk<'a> {
             AlignmentBaseline::TextTop => Some(VaMode::TextTop),
             AlignmentBaseline::TextBottom => Some(VaMode::TextBottom),
             AlignmentBaseline::MozMiddleWithBaseline => Some(VaMode::BaselineMiddle),
-            _ => return Err("vertical-align"),
+            // (…`central` the middle of the box, its nearest the model has; the other baselines — alphabetic,
+            // ideographic, mathematical — are the one baseline a face's metrics give here)
+            AlignmentBaseline::Central => Some(VaMode::Middle),
+            _ => None,
         };
         let shift = match &b.baseline_shift {
             BaselineShift::Length(lp) if lp.to_length().is_some_and(|l| l.px() == 0.0) || lp.to_percentage().is_some_and(|p| p.0 == 0.0) => None,
@@ -4103,10 +4106,14 @@ impl<'a> Walk<'a> {
             }
             BaselineShift::Keyword(BaselineShiftKeyword::Top) => Some(Va { mode: VaMode::Top, px: 0.0 }),
             BaselineShift::Keyword(BaselineShiftKeyword::Bottom) => Some(Va { mode: VaMode::Bottom, px: 0.0 }),
-            _ => return Err("vertical-align"),
+            // (…`center` the middle of the line box, its nearest the model has)
+            BaselineShift::Keyword(BaselineShiftKeyword::Center) => Some(Va { mode: VaMode::Middle, px: 0.0 }),
         };
         Ok(match (aligned, shift) {
-            (Some(_), Some(_)) => return Err("vertical-align"),
+            // (…an alignment AND a shift: the box aligned, then shifted from there — CSS Inline 3 applies
+            // `baseline-shift` after `alignment-baseline` — and a line-relative shift wins outright)
+            (Some(mode), Some(Va { mode: VaMode::Shift, px })) if px.is_finite() => Some(Va { mode, px: px + inherited }),
+            (Some(_), Some(Va { mode, .. })) => Some(Va { mode, px: inherited }),
             (Some(mode), None) => Some(Va { mode, px: inherited }),
             (None, Some(Va { mode: VaMode::Shift, px })) if px.is_finite() => Some(Va { mode: VaMode::Shift, px: px + inherited }),
             (None, Some(Va { mode, .. })) if mode != VaMode::Shift => Some(Va { mode, px: inherited }),

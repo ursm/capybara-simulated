@@ -308,6 +308,18 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # …and every `vertical-align` the style engine computes is a box the walk places: `central` / `center` the middle, the
+  # other baselines the one a face's metrics give, an alignment with a shift aligned and then shifted (CSS Inline 3;
+  # Chrome knows none of them on an HTML box and computes `baseline`).
+  it 'places every vertical-align' do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0"><div>a<span style="alignment-baseline: central">b</span>' \
+      '<span style="alignment-baseline: alphabetic">d</span><span style="vertical-align: center">e</span>' \
+      '<span style="alignment-baseline: middle; baseline-shift: 3px">f</span></div></body>'
+    )
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # A root element in a vertical writing mode is sized as every vertical block is — its auto width from its content —
   # and placed at its margins, where the walk declined it and the JS layout gave it the initial containing block's width
   # at 0,0 whatever its margins said. Chrome (800px window): `vertical-lr` puts the html at 7,5 and 109 wide, its
