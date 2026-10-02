@@ -6729,7 +6729,6 @@ fn measure_table(
     let mut row_declared = vec![false; r_count];
     let mut row_baseline = vec![0.0f64; r_count];
     let mut spans: Vec<(usize, usize)> = Vec::new(); // (cell, its first row) — sized when it ENDS
-    let mut row_seen = vec![false; r_count];
     let mut pct_used = 0.0f64;
     for (ri, &r) in rows.iter().enumerate() {
         let rn = inputs[r].get();
@@ -6756,7 +6755,6 @@ fn measure_table(
                 spans.push((c, ri));
                 continue;
             }
-            row_seen[ri] = true;
             if base.is_some() {
                 baseline_cells.push(c);
             } else {
@@ -6781,10 +6779,9 @@ fn measure_table(
             row_h[ri] = row_h[ri].max(boxes[c].h - have);
         }
     }
-    // (…a row whose cells all span rows has no height to read; an EMPTY one is as tall as it declares, or nothing)
-    if row_seen.iter().zip(rows).any(|(&s, &r)| !s && !children[r].is_empty()) {
-        return bail(failed);
-    }
+    // (…a row whose cells all span rows, or that holds none, is as tall as it declares, or nothing: what a spanning cell
+    // needs past the rows it covers goes to the last of them, above — Chrome: two `rowspan=2` cells over an empty row
+    // leave the first row 0 tall and the second 24)
 
     // A declared table height TALLER than the grid is shared out over the rows — a click aimed at the visible
     // bottom of a cell has to land inside it. The surplus goes to the BODY group's AUTO rows in proportion to

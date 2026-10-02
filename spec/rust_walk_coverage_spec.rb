@@ -112,6 +112,15 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # A row whose cells all span rows is as tall as it declares, or nothing, and what the spanning cells need past it goes
+  # to the last row they cover (Chrome: two `rowspan=2` cells over an empty row leave the first row 0 tall, the second 24)
+  # — where the walk declined the table.
+  it 'lays out a row of nothing but spanning cells' do
+    s = page('<body style="font: 16px monospace; margin: 0"><table style="border-spacing: 0"><tr id="a"><td rowspan="2">a</td><td rowspan="2">b</td></tr><tr id="b"></tr></table></body>')
+    expect(s.evaluate_script('[a.getBoundingClientRect().height, b.getBoundingClientRect().height]')).to eq([0, 24])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # …and a table of rows holding no cell at all has no columns, and spaces nothing (Chrome: a `border-spacing: 5px` table
   # bordered 3px around one 20px row is 6 x 26; two empty rows are 0 x 0).
   it 'lays out a table of empty rows with no spacing' do

@@ -2771,15 +2771,10 @@ impl<'a> Walk<'a> {
             }
         }
         for row in &grid.rows {
-            let mut single = false;
             for cell in &row.cells {
                 if cell.col + cell.col_span > grid.col_count {
                     return Err("table-span-past-columns");
                 }
-                single |= cell.row_span == 1;
-            }
-            if !single && !row.cells.is_empty() {
-                return Err("table-row-without-single-cell");
             }
         }
         // A COLLAPSING table (§17.6.2) spaces nothing, and where it has a grid its border is the outer half of its rim
