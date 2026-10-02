@@ -13,7 +13,6 @@ mod css;
 mod css_animations;
 mod css_transitions;
 // The native author cascade: a realm's static rules, and one element's winning declarations in one pass.
-mod cascade;
 mod document_encoding;
 mod dom;
 mod element_state;

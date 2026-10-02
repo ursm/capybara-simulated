@@ -18,8 +18,7 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 
-RSpec.describe 'native arena reclamation (generational)',
-  unless: ENV['CSIM_NO_NATIVE_CASCADE'] do
+RSpec.describe 'native arena reclamation (generational)' do
   let(:app) {
     html = <<~HTML
       <!doctype html>

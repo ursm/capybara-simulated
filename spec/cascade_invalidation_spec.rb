@@ -171,91 +171,6 @@ RSpec.describe 'cascade invalidation' do
     expect([before, s.evaluate_script(read)]).to eq(['rgb(128, 0, 0)', 'rgb(0, 0, 0)'])
   end
 
-  it 'classifies selectors correctly for the taint bracket' do
-    # Asserted on the CLASSIFIER, not through a colour. The vendor-prefixed case cannot be toggled
-    # from a spec, so the colour-based version of this passed against the very regression it was
-    # written for — two identical reads of a rule that never matches say nothing about whether it
-    # was treated as static.
-    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
-    s = simulated_session(app)
-    s.visit '/'
-    got = s.evaluate_script(<<~JS)
-      (() => {
-        const d = globalThis.__csimSelectorIsDynamic;
-        return {
-          plain:        d('#t'),
-          structural:   d('li:first-child'),
-          attribute:    d('input:disabled'),
-          active:       d('#t:active'),             // matcher-constant: isActive is () => false
-          hover:        d('#t:hover'),
-          chained:      d('a:link:hover'),          // the pseudo AFTER a matched one
-          chainedInner: d(':is(:first-child:hover)'),
-          vendor:       d('input:-webkit-autofill'),
-          dirAuto:      d('#t:dir(rtl)'),           // reads the control's VALUE for dir="auto"
-          pseudoEl:     d('p::before'),             // a pseudo-ELEMENT is not a state
-          legacyPseudoEl: d('.clearfix:before'),   // ...in its legacy single-colon spelling too
-          escapedColon: d('.hover' + String.fromCharCode(92) + ':bg-red-500')  // Tailwind variant: an identifier
-        };
-      })()
-    JS
-    expect(got).to eq(
-      'plain'        => false,
-      'structural'   => false,
-      'attribute'    => false,
-      'active'       => false,
-      'hover'        => true,
-      'chained'      => true,
-      'chainedInner' => true,
-      'vendor'       => true,
-      'dirAuto'      => true,
-      'pseudoEl'       => false,
-      'legacyPseudoEl' => false,
-      'escapedColon' => false
-    )
-  end
-
-  # …and which of them a LAYOUT STAMP follows (`STAMP_TRACKED_PSEUDOS`), so a memo kept under one need not refuse a read
-  # that considered the rule: hover and focus are found by a diff every flip goes through, and a popover, a definition
-  # and a custom state bump the style state where they change. A checkedness, a value, a validity, `:dir()`, `:target`
-  # and `:modal` (whose dialog's `open` attribute is its own) can each flip with no bump — and so can a state this does
-  # not know.
-  it 'tells a state the layout stamps follow from one they do not' do
-    app = lambda {|_env| [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html><body></body></html>']] }
-    s = simulated_session(app)
-    s.visit '/'
-    got = s.evaluate_script(<<~JS)
-      (() => {
-        const d = globalThis.__csimSelectorIsUntracked;
-        return {
-          hover:       d('#t:hover'),
-          focusWithin: d('.f:focus-within'),
-          popover:     d('[popover]:popover-open'),
-          modal:       d('dialog:modal'),
-          nested:      d(':is(.a:hover) .b'),
-          checked:     d('input:checked'),
-          mixed:       d('input:hover:checked'),
-          hasChecked:  d('.c:has(:checked)'),
-          dir:         d('p:dir(rtl)'),
-          target:      d(':target'),
-          vendor:      d('input:-webkit-autofill')
-        };
-      })()
-    JS
-    expect(got).to eq(
-      'hover'       => false,
-      'focusWithin' => false,
-      'popover'     => false,
-      'modal'       => true,
-      'nested'      => false,
-      'checked'     => true,
-      'mixed'       => true,
-      'hasChecked'  => true,
-      'dir'         => true,
-      'target'      => true,
-      'vendor'      => true
-    )
-  end
-
   it 'does not cache a flow-side mapping that a dynamic selector decided' do
     # `flowSides` (the writing-mode / direction resolution behind every `*-inline-*` property)
     # carries its own generation-keyed memo, and it predates the taint counter — so a `direction`
@@ -448,29 +363,6 @@ RSpec.describe 'cascade invalidation' do
   # reaches is marked by the restyle instead. The specs further down pin both sides: the epoch must
   # NOT move, and the rule MUST take effect the moment it can match — including when the widget
   # arrives only after the first layout.
-
-  # A value whose only taint is a rule naming a TRACKED state (hover, focus, …) is kept, though, under the style-state
-  # generation every flip of that state moves: declining it recomputed every `color` of every link on a page with an
-  # `a:hover` rule on every read. A COUNT, since the colour alone cannot tell a kept value from one recomputed equal.
-  it 'keeps a value a tracked-state rule was considered for until that state moves' do
-    app = ->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><style>a:hover { color: rgb(0, 128, 0) }</style><a id="t">x</a>']] }
-    s = simulated_session(app)
-    s.visit '/'
-    got = s.evaluate_script(<<~JS)
-      (() => {
-        const t = document.getElementById('t'), color = () => getComputedStyle(t).color;
-        const computes = () => __csimDeclaredComputes();
-        color();
-        let n = computes(); const a = color(); const kept = computes() - n;
-        document._hoverElement = t;
-        const b = color();
-        n = computes(); color(); const keptHovered = computes() - n;
-        document._hoverElement = null;
-        return [a, kept, b, keptHovered, color()];
-      })()
-    JS
-    expect(got).to eq(['rgb(0, 0, 0)', 0, 'rgb(0, 128, 0)', 0, 'rgb(0, 0, 0)'])
-  end
 
   # Methods, not constants, for the same reason as `cases` above: a constant assigned inside a
   # `describe` block lands at top level and collides across spec files. The default sheet is a
@@ -986,32 +878,6 @@ RSpec.describe 'cascade invalidation' do
       })()
     JS
     expect(got).to eq(['rgb(255, 0, 0)', 'rgb(0, 128, 0)'])
-  end
-
-  it 'keeps dynamic state out of the declared-value memo key, and lets a rule-set change in' do
-    # The taint bracket is what keeps a CACHED value independent of focus / typing / checkedness;
-    # moving the memo's key on every state write on top of it only cold-started every element's
-    # memo per keystroke (a third of all memo entries on a Discourse subset).
-    body = '<input id="i"><input id="c" type="checkbox"><p id="after">after</p>'
-    s = simulated_session(styled_page(body))
-    s.visit '/'
-    got = s.evaluate_script(<<~JS)
-      (() => {
-        const after = document.getElementById('after');
-        getComputedStyle(after).color;                                   // prime the memo
-        const before = globalThis.__csimStyleEpoch();
-        document.getElementById('i').focus();
-        document.getElementById('i').value = 'typed';
-        document.getElementById('c').checked = true;
-        const afterState = globalThis.__csimStyleEpoch();
-        const style = document.createElement('style');
-        style.textContent = 'p { color: rgb(0, 128, 0) }';
-        document.head.appendChild(style);
-        const color = getComputedStyle(after).color;                     // a rule-set change reaches the memo
-        return [afterState === before, globalThis.__csimStyleEpoch() !== before, color];
-      })()
-    JS
-    expect(got).to eq([true, true, 'rgb(0, 128, 0)'])
   end
 
   it 'keeps the layout epoch still on a focus flip the dynamic rule cannot match' do

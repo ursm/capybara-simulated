@@ -62,7 +62,7 @@ RSpec.describe 'style engine invalidation' do
   # own `visibility`, and the UA's rules with them — a popover not showing is `display: none` (HTML §15.3.1), unless an
   # author rule displays it, and so is an SVG `clipPath` (SVG 2 Appendix A's `!important` rule). Chrome and Firefox:
   # false / false / true / false / true, then true / true — and both report the `clipPath` `inline` and visible, which
-  # the appendix does not. (The JS cascade has no popover rule: recorded.)
+  # the appendix does not.
   it 'answers what is shown off the engine' do
     s = visit('<div style="display:none"><p id="a">a</p></div><p id="b" style="visibility:hidden">b</p><p id="c">c</p>' \
               '<div id="pop" popover>p</div><div id="shown" popover style="display:block">s</div><svg><clipPath id="cp"/></svg>',
@@ -109,12 +109,11 @@ RSpec.describe 'style engine invalidation' do
     expect(got).to eq([true, true, true, true, false, true, true, true])
   end
 
-  # A page's text, its geometry and its generated content are the engine's to answer, and none of them builds the JS
-  # cascade's rules: a `display: none` / `visibility: hidden` / `text-transform` / `white-space` / flex container read for
-  # the visible text, the `::before` / `::after` a box lays out, a table's anonymous cell, a `border` shorthand under a
+  # A page's text, its geometry and its generated content are the engine's to answer: a `display: none` / `visibility:
+  # hidden` / `text-transform` / `white-space` / flex container read for the visible text, the `::before` / `::after` a box lays out, a table's anonymous cell, a `border` shorthand under a
   # border width, and a `<br>` a flex container holds, which still breaks its line. Chrome: the text below (as Capybara
   # normalises its `innerText`), 30.23 × 18, `"B"`, 3px, 36 and 31.
-  it 'answers text, geometry and generated content without the JS cascade' do
+  it 'answers text, geometry and generated content' do
     s = visit(<<~HTML, css: <<~CSS)
       <div class="flex"><span>one</span><span>two</span></div>
       <p class="up">up <span class="hide">gone</span><span class="vis">vis</span></p>
@@ -140,35 +139,30 @@ RSpec.describe 'style engine invalidation' do
     (width, height), *rest = got
     expect(width).to be_within(0.02).of(30.23)
     expect([height, *rest]).to eq([18, '"B"', '3px', 36, 31])
-    expect(s.evaluate_script('__csimJsCascadeDemands().builds')).to eq(0)
   end
 
   # …and a box that skips its contents renders no text of them, nor the breaks around it — `hidden=until-found` and an
-  # author `content-visibility: hidden` alike — and a shadow host asks the JS rules nothing either. Chrome: "A||", "C||".
-  it 'reads no text from skipped contents, and no JS rules for a shadow host' do
-    s = visit('<div id="a">A|<div hidden="until-found">uf <b>bb</b></div>|</div><div id="c">C|<div style="content-visibility:hidden">cv</div>|</div>' \
-              '<div id="h"></div>', css: '')
-    s.execute_script("const h = document.getElementById('h'); h.attachShadow({mode: 'open'}).innerHTML = '<pre><slot></slot></pre>'; h.append('x')")
+  # author `content-visibility: hidden` alike. Chrome: "A||", "C||".
+  it 'reads no text from skipped contents' do
+    s = visit('<div id="a">A|<div hidden="until-found">uf <b>bb</b></div>|</div><div id="c">C|<div style="content-visibility:hidden">cv</div>|</div>',
+              css: '')
     expect(s.evaluate_script("['a', 'c'].map((id) => document.getElementById(id).innerText)")).to eq(['A||', 'C||'])
-    expect(s.evaluate_script('__csimJsCascadeDemands().builds')).to eq(0)
   end
 
-  # …nor for the flow a box's sides follow: a `dir` attribute turns `margin-inline-start` to the right edge, and a scroll
-  # extent asks which way its content overflows (Mastodon's `scrollHeight` reads built the rule set for it). Chrome:
-  # 0px / 10px, and 100.
-  it 'answers the flow sides without the JS cascade' do
+  # …and the flow a box's sides follow: a `dir` attribute turns `margin-inline-start` to the right edge, and a scroll
+  # extent asks which way its content overflows. Chrome: 0px / 10px, and 100.
+  it 'answers the flow sides' do
     s = visit('<div dir="rtl" id="d" style="width:100px;height:50px;overflow:auto"><p id="p" style="margin:0;margin-inline-start:10px;height:100px">x</p></div>',
               css: '')
     got = s.evaluate_script(<<~JS)
       (() => { const p = getComputedStyle(document.getElementById('p')); return [p.marginLeft, p.marginRight, document.getElementById('d').scrollHeight]; })()
     JS
     expect(got).to eq(['0px', '10px', 100])
-    expect(s.evaluate_script('__csimJsCascadeDemands().builds')).to eq(0)
   end
 
-  # …nor for an element not in the document, which the engine never styles: its client box, its styles, and an
-  # IntersectionObserver still watching it once it left (Avo's pages built the rule set for these). Chrome: 0 and "".
-  it 'answers an element out of the document without the JS cascade' do
+  # …and an element not in the document, which the engine never styles: its client box, its styles, and an
+  # IntersectionObserver still watching it once it left. Chrome: 0 and "".
+  it 'answers an element out of the document' do
     s = visit('<div id="a">a</div>', css: 'div { color: red; margin-left: 5px }')
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -181,7 +175,29 @@ RSpec.describe 'style engine invalidation' do
     JS
     expect(got).to eq([0, '', '', ''])
     s.evaluate_script('new Promise((resolve) => requestAnimationFrame(() => resolve(true)))')
-    expect(s.evaluate_script('__csimJsCascadeDemands().builds')).to eq(0)
+  end
+
+  # …and an element ADOPTED into a frame's document is the frame's engine's to style, its shadow tree with it: the
+  # frame's realm counts the host it never saw attached, and feeds the tree's own sheet. Read once before the move, the
+  # element was answered from then on by the proxy of the realm that read it first — whose engine no longer styles it.
+  it 'styles an element adopted into a frame, and its shadow tree, from the frame' do
+    s = visit('<div id="h">h</div><iframe id="f"></iframe>', css: '#h { color: rgb(1, 2, 3) }')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const h = document.getElementById('h'), doc = document.getElementById('f').contentDocument;
+        const style = doc.createElement('style');
+        style.textContent = 'div { color: rgb(4, 5, 6) }';
+        doc.head.append(style);
+        const root = h.attachShadow({mode: 'open'});
+        root.innerHTML = '<style>p { color: rgb(7, 8, 9) }</style><p id="p">p</p>';
+        const p = root.getElementById('p');
+        const before = [getComputedStyle(h).color, getComputedStyle(p).color];
+        doc.adoptNode(h);
+        doc.body.append(h);
+        return [before, [getComputedStyle(h).color, getComputedStyle(p).color]];
+      })()
+    JS
+    expect(got).to eq([['rgb(1, 2, 3)', 'rgb(7, 8, 9)'], ['rgb(4, 5, 6)', 'rgb(7, 8, 9)']])
   end
 
   # A paint recording lays the page out in a pass of its own, after the one a read wrote — and a box's edges from THAT
@@ -231,14 +247,13 @@ RSpec.describe 'style engine invalidation' do
     s.driver.save_screenshot(path)
     stats = s.evaluate_script('__csimNativeLayoutStats()')
     expect(stats['rustFellBack']).to eq({})
-    expect(s.evaluate_script('__csimJsCascadeDemands().builds')).to eq(0)
   ensure
     File.delete(path) if path && File.exist?(path)
   end
 
   # An element under a `display: none` — styled by no traversal — is resolved on its own, its unstyled ancestors with it
   # (Gecko's `ResolveStyleLazily`): its colour, its em-relative lengths and its percentages as Chrome reports them
-  # (rgb(1, 2, 3), 0px, 30px, auto, 10px, block; then 50% and none), where it was answered by the JS cascade.
+  # (rgb(1, 2, 3), 0px, 30px, auto, 10px, block; then 50% and none).
   it 'resolves the style of an element no traversal styled' do
     s = visit('<div class="d" style="display:none"><p id="p">x</p></div><div id="x" style="display:none;width:50%"></div>',
               css: '.d { color: rgb(1, 2, 3); padding: 2em; font-size: 10px } .d p { margin-left: 3em }')

@@ -674,36 +674,6 @@ fn with_parsed<R>(text: &str, namespaces: Option<&Namespaces>, f: impl FnOnce(Op
     })
 }
 
-// Compiled-selector store for the AUTHORITATIVE cascade path. The shadow / query APIs re-send the
-// selector STRING every call (marshalled across V8→Rust, then hashed in CACHE); the cascade matches
-// millions of times, so instead it compiles each rule's selector ONCE to a stable integer handle and
-// then matches by handle — no per-call string conversion, hash, or key allocation. COMPILED holds the
-// parsed lists; COMPILED_IDX dedups by text so distinct rules that share a selector share one entry,
-// keeping COMPILED bounded by distinct selectors (like CACHE).
-thread_local! {
-    static COMPILED: std::cell::RefCell<Vec<SelectorList<CsimImpl>>> = std::cell::RefCell::new(Vec::new());
-    static COMPILED_IDX: std::cell::RefCell<std::collections::HashMap<String, i32>> =
-        std::cell::RefCell::new(std::collections::HashMap::new());
-}
-
-// Compile a selector to a stable handle: `>= 0` indexes COMPILED (a natively-matchable selector);
-// `-1` means invalid — the caller should cache this handle so it never re-asks. Idempotent per text.
-pub fn compile_selector(text: &str) -> i32 {
-    if let Some(h) = COMPILED_IDX.with(|m| m.borrow().get(text).copied()) {
-        return h;
-    }
-    let h = match parse(text, None) {
-        Some(list) => COMPILED.with(|c| {
-            let mut v = c.borrow_mut();
-            v.push(list);
-            (v.len() - 1) as i32
-        }),
-        None => -1, // invalid
-    };
-    COMPILED_IDX.with(|m| m.borrow_mut().insert(text.to_owned(), h));
-    h
-}
-
 // The document's mode as the matcher takes it: in a quirks-mode document a class or id selector matches ASCII
 // case-insensitively (Selectors 4 §6.6 / §6.7) — the crate hands `has_class` / `has_id` the sensitivity from this.
 pub fn quirks_mode(quirks: bool) -> QuirksMode {
@@ -712,36 +682,6 @@ pub fn quirks_mode(quirks: bool) -> QuirksMode {
     } else {
         QuirksMode::NoQuirks
     }
-}
-
-// The compiled selectors, by handle, for a caller that matches many against one element with one
-// MatchingContext of its own (the native cascade's per-element pass, crate::cascade).
-pub fn with_compiled<R>(f: impl FnOnce(&[SelectorList<CsimImpl>]) -> R) -> R {
-    COMPILED.with(|c| f(&c.borrow()))
-}
-
-// Match ONE element against a previously compiled selector handle. `None` when the handle is out of
-// range or the node id is stale (the caller asks selectors.js instead); `Some(bool)` is authoritative.
-// Like `query`, the crate's ancestor walk (for combinators) relies on the arena being acyclic — a
-// property the sync layer maintains (it mirrors the acyclic JS DOM); there is no per-call cycle cap here.
-pub fn matches_compiled(arena: &RealmArena, id: NodeId, handle: i32, quirks: bool, html_doc: bool) -> Option<bool> {
-    if handle < 0 || arena.get(id).is_none() {
-        return None;
-    }
-    COMPILED.with(|c| {
-        let v = c.borrow();
-        let list = v.get(handle as usize)?;
-        let mut caches = SelectorCaches::default();
-        let mut ctx = MatchingContext::new(
-            MatchingMode::Normal,
-            None,
-            &mut caches,
-            quirks_mode(quirks),
-            NeedsSelectorFlags::No,
-            MatchingForInvalidation::No,
-        );
-        Some(matches_selector_list(list, &NodeRef { arena, id, html_doc }, &mut ctx))
-    })
 }
 
 // Collect descendants of `root` (preorder / document order) matching `list`, with `:scope` bound to

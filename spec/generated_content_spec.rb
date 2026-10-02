@@ -194,29 +194,6 @@ RSpec.describe 'generated content' do
     expect(width.call).to be_within(0.01).of(w.call('ddddTabcdef'))
   end
 
-  # A mutation anywhere starts a new cascade generation, and each re-resolves the pseudo — which must be a memo
-  # read, not a re-match of every `content` rule: a text edit on a Redmine page re-matched every icon's `::before`
-  # on the edited row, a twentieth of the relayout.
-  it 'resolves an unchanged content from the memo after a text edit' do
-    rows = (1..10).map { |i| "<li class=ic>item #{i}</li>" }.join
-    s = page("<ul id=l>#{rows}</ul>", '.ic::before { content: "x" }')
-    computes = s.evaluate_script(<<~JS)
-      (() => {
-        const text = document.getElementById('l').children[3].firstChild;
-        const out = [];
-        for (let i = 0; i < 4; i++) {
-          document.body.offsetHeight;
-          const c0 = __csimDeclaredComputes();
-          text.data += 'x';
-          document.body.offsetHeight;
-          out.push(__csimDeclaredComputes() - c0);
-        }
-        return out;
-      })()
-    JS
-    expect(computes.drop(1)).to eq([0, 0, 0])
-  end
-
   it 'follows a state flip — a checked box shows the label\'s ::before' do
     _, w, s = measure('<div class=w><input type=checkbox id=c><label id=h for=c><span id=t>L</span></label></div>', '#c:checked + label::before { content: "ck" }')
     x0 = s.evaluate_script("document.getElementById('t').getBoundingClientRect().x")

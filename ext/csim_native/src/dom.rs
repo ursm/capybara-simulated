@@ -900,8 +900,6 @@ pub(crate) struct Dom {
     // `hasOwnProperty`, `Object.keys`, `delete` all work against the arena in C++ — faster than a
     // JS Proxy and a faithful stand-in for the native-backed endgame.
     attrs_view_template: Option<v8::Global<v8::ObjectTemplate>>,
-    // Each realm's static author rules (`cascadeLoad`), which `cascadeWinners` answers from.
-    pub(crate) cascades: std::collections::HashMap<i32, crate::cascade::CascadeStore>,
     // Each realm's style engine (made by `styleSheets`).
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
     // Each realm's Rust walk's last pass and the measures kept of it (`walk_reuse`).
@@ -1036,7 +1034,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // THIS realm's arena.
     let ns = v8::Object::new(scope);
     // Bulk import + id-level query: build the arena from an already-parsed page (importNode /
-    // syncChildren) and match over it natively (queryIds / matchesId / matchesCompiled).
+    // syncChildren) and match over it natively (queryIds / matchesId).
     register(scope, ns, "importNode", import_node, context_id);
     // Every other node kind, character-data changes, and the parser's per-node tree steps.
     register(scope, ns, "createNode", create_node, context_id);
@@ -1061,19 +1059,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "queryIds", query_ids, context_id);
     register(scope, ns, "matchesId", matches_id, context_id);
     register(scope, ns, "closestId", closest_id, context_id);
-    register(scope, ns, "matchesRule", matches_rule, context_id);
     register(scope, ns, "selectorValid", selector_valid, context_id);
     register(scope, ns, "xpathPrefixes", xpath_prefixes, context_id);
     register(scope, ns, "xpathEvaluate", xpath_evaluate, context_id);
-    // Authoritative cascade matching: compile a rule's selector once to an integer handle, then match
-    // by handle with no per-call string marshalling (compileSelector / matchesCompiled).
-    register(scope, ns, "compileSelector", compile_selector, context_id);
-    register(scope, ns, "matchesCompiled", matches_compiled, context_id);
     register(scope, ns, "resetArena", reset_arena, context_id);
-    // The native author cascade: load a rule set's STATIC rules once (cascadeLoad), then answer one element's
-    // winning declaration per property in one pass (cascadeWinners).
-    register(scope, ns, "cascadeLoad", cascade_load, context_id);
-    register(scope, ns, "cascadeWinners", cascade_winners, context_id);
     // The style engine (stylo): a document's sheets and the sheets their `@import`s ask for, and an element's computed
     // value.
     register(scope, ns, "styleSheets", style_sheets, context_id);
@@ -1837,39 +1826,6 @@ fn closest_id(
     }
 }
 
-// __dom.matchesRule(nid, selector, quirks, xml, defaultNs, prefixes) -> bool, or `null` for a selector that does not
-// parse (under the sheet's `@namespace` declarations: an undeclared prefix). A style sheet rule's match, in the mode of
-// the element's document — no `:scope` bound to the element, as Element.matches binds it. `prefixes` a flat
-// [prefix, url, …]; `defaultNs` null for none.
-fn matches_rule(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let selector = args.get(1).to_rust_string_lossy(scope);
-    let quirks = args.get(2).is_true();
-    let html_doc = !args.get(3).is_true();
-    let default = (!args.get(4).is_null_or_undefined()).then(|| args.get(4).to_rust_string_lossy(scope));
-    let mut prefixes = Vec::new();
-    if let Ok(flat) = v8::Local::<v8::Array>::try_from(args.get(5)) {
-        let mut i = 0;
-        while i + 1 < flat.length() {
-            let (Some(p), Some(u)) = (flat.get_index(scope, i), flat.get_index(scope, i + 1)) else { break };
-            prefixes.push((p.to_rust_string_lossy(scope), u.to_rust_string_lossy(scope)));
-            i += 2;
-        }
-    }
-    // (…a sheet with no `@namespace` parses its selectors as a query does, and shares their parse)
-    let namespaces = (default.is_some() || !prefixes.is_empty()).then_some(crate::selector::Namespaces { default, prefixes });
-    let cid = realm_id(scope, &args);
-    match crate::selector::matches_text(realm(scope, cid), id, &selector, namespaces.as_ref(), quirks, html_doc, false, false) {
-        Some(hit) => rv.set_bool(hit.is_some()),
-        None => rv.set_null(),
-    }
-}
 
 // __dom.selectorValid(text) -> bool: a selector this engine parses — `CSS.supports('selector(…)')`.
 fn selector_valid(
@@ -1994,105 +1950,9 @@ fn xpath_evaluate(
     }
 }
 
-// __dom.compileSelector(text) -> handle. The authoritative cascade path calls this ONCE per rule and
-// caches the integer, then matches by handle (matchesCompiled) with no per-call string marshalling.
-// `>= 0` = a natively-matchable compiled selector; `-1` = invalid or needs JS fallback → `matchesRule`.
-fn compile_selector(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let text = args.get(0).to_rust_string_lossy(scope);
-    rv.set_int32(crate::selector::compile_selector(&text));
-}
 
-// __dom.matchesCompiled(nid, handle, quirks, xml) -> bool, or undefined when the handle/node is out of range so the
-// caller falls back to `matchesRule`. The per-match hot path of authoritative cascade matching: a nid + an integer
-// handle, no string — in the document's mode (`xml`: not an HTML document, where no name folds case).
-fn matches_compiled(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let handle = match args.get(1).integer_value(scope) {
-        Some(h) => h as i32,
-        _ => return,
-    };
-    let cid = realm_id(scope, &args);
-    let quirks = args.get(2).is_true();
-    let html_doc = !args.get(3).is_true();
-    if let Some(hit) = crate::selector::matches_compiled(realm(scope, cid), id, handle, quirks, html_doc) {
-        rv.set_bool(hit);
-    }
-}
 
-// __dom.cascadeLoad(records: Float64Array, keys: string[], propCount, quirks, xml) -> the number of rules loaded.
-// Replaces the calling realm's rule set, for a document in the given mode and of the given kind (`xml`: not an HTML
-// document); the record layout is `CascadeStore::load`'s.
-fn cascade_load(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let prop_count = args.get(2).integer_value(scope).unwrap_or(0).max(0) as usize;
-    let quirks = args.get(3).is_true();
-    let xml = args.get(4).is_true();
-    let mut keys = Vec::new();
-    if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
-        for i in 0..arr.length() {
-            let key = match arr.get_index(scope, i) {
-                Some(v) => v.to_rust_string_lossy(scope),
-                None => String::new(),
-            };
-            keys.push(key);
-        }
-    }
-    let cid = realm_id(scope, &args);
-    let store = crate::cascade::CascadeStore::load(&f64_arg(args.get(0)), &keys, prop_count, quirks, xml);
-    let n = store.rule_count();
-    dom(scope).cascades.insert(cid, store);
-    rv.set_int32(n as i32);
-}
 
-// __dom.cascadeWinners(nid, out: Int32Array) -> the number of ints `CascadeStore::answer` wrote to `out`; -1 when the
-// node is not in the arena or the answer does not fit — the caller then runs its own cascade for this element — and
-// -2 when the realm holds no rule set at all (its arena was reset under the caller's store), which is the caller's
-// cue to load it again.
-fn cascade_winners(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    rv.set_int32(-1);
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let Ok(out) = v8::Local::<v8::Int32Array>::try_from(args.get(1)) else {
-        return;
-    };
-    let n = out.length();
-    let ptr = out.data() as *mut i32;
-    if n == 0 || ptr.is_null() || (ptr as usize) % std::mem::align_of::<i32>() != 0 {
-        return;
-    }
-    // SAFETY: the view's own `n` i32s; nothing below runs JS or allocates on V8's heap, so nothing can move them.
-    let out = unsafe { std::slice::from_raw_parts_mut(ptr, n) };
-    let cid = realm_id(scope, &args);
-    let d = dom(scope);
-    let Some(store) = d.cascades.get_mut(&cid) else {
-        rv.set_int32(-2);
-        return;
-    };
-    let Some(arena) = d.realms.get(&cid) else {
-        return;
-    };
-    if let Some(count) = store.answer(arena, id, out) {
-        rv.set_int32(count as i32);
-    }
-}
 
 // A JS array of `urls`.
 fn url_array<'s>(scope: &mut v8::PinScope<'s, '_>, urls: &[String]) -> v8::Local<'s, v8::Value> {
@@ -2551,7 +2411,6 @@ fn reset_arena(
     realm(scope, cid).reset();
     crate::text_codec::drop_realm(scope, cid);   // (…a page's stream decoders die with it)
     dom(scope).walk_reuse.remove(&cid);
-    dom(scope).cascades.remove(&cid);
     // …and the style engine forgets the nodes it held (its sheets stay until the new page sets its own).
     if let Some(engine) = dom(scope).styles.get_mut(&cid) {
         engine.reset();
@@ -2592,7 +2451,6 @@ fn drop_realm(
         d.dropped.insert(id);
         d.graveyard.reset();
         d.realms.remove(&id);
-        d.cascades.remove(&id);        // (…and its rules)
         d.styles.remove(&id);          // (…and its style engine)
         d.walk_reuse.remove(&id);      // (…and its Rust walk's last pass)
         crate::text_codec::drop_realm(scope, id);   // (…and the stream decoders it left open)

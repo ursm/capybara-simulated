@@ -800,12 +800,8 @@ module Capybara
         attach_run_script_with_cache(c)
         attach_native_module_loader(c)
         attach_frame_realm_loader(c)
-        # The JS cascade's compiled matching: each rule's selector compiled once to a native handle (cascade.js
-        # `safeMatches`). ON BY DEFAULT, seeded on the main context only — a frame realm and a worker match through
-        # selectors.js, natively all the same. CSIM_NO_NATIVE_CASCADE turns the handles off.
-        c.eval_void('globalThis.__csimNativeCascadeAuthoritative = true;') unless ENV['CSIM_NO_NATIVE_CASCADE']
         seed_layout(c)
-        # …and the check on the arena itself: the whole JS tree held against it at every layout and cascade entry.
+        # The check on the arena: the whole JS tree held against it at every layout and cascade entry.
         c.eval_void('globalThis.__csimArenaVerify = true;') if ENV['CSIM_ARENA_VERIFY'] == '1'
       end
 
@@ -1545,12 +1541,6 @@ module Capybara
       def reseed_realm_js(c)
         c.eval_void("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
         c.eval_void('__csim_installWorker();')
-        # Native cascade matching in FRAME realms too. The arena is now partitioned per realm (each
-        # realm's `__dom` functions carry their context_id and route to their OWN arena — see dom.rs
-        # RealmArena / register), so a frame builds and matches over its own arena, independent of the
-        # main realm. Same kill switch as the main context. Before the partition this was main-realm
-        # only (one shared isolate arena); it is safe per realm now.
-        c.eval_void('globalThis.__csimNativeCascadeAuthoritative = true;') unless ENV['CSIM_NO_NATIVE_CASCADE']
         seed_layout(c)
       end
 
