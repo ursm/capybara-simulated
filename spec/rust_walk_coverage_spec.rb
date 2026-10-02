@@ -716,7 +716,8 @@ RSpec.describe 'Rust walk coverage' do
   # 150px))` in 400px is three of 120), where the whole template was dropped; a function nested deeper than the
   # evaluator's stack is a value; and a positioned root stretches between both insets, centres in them on `auto`
   # margins, and sits at its right / bottom ones (Chrome: `inset: 0` is the viewport; `left: 0; right: 0; width: 200px;
-  # margin: 0 auto` puts it at 412; `right: 30px; bottom: 20px` at the viewport's corner less its size).
+  # margin: 0 auto` puts it at 412; `right: 30px; bottom: 20px` at the viewport's corner less its size); and a
+  # `fit-content()` track capped by such a function is a track too.
   it 'lays out what the declined shapes reached, as Chrome does', :aggregate_failures do
     deep = "#{'min(' * 20}50%#{', 400px)' * 20}"
     s = page(
@@ -740,6 +741,12 @@ RSpec.describe 'Rust walk coverage' do
     expect(root['position: absolute; left: 0; right: 0; width: 200px; margin: 0 auto'].evaluate_script(read)).to eq([412, 0, 200, 38])
     expect(root['position: absolute; right: 30px; bottom: 20px'].evaluate_script(read)).to eq([872.4, 710, 121.6, 38])
     expect(root['float: right'].evaluate_script(read)).to eq([902.4, 0, 121.6, 38])
+    # (…clamped by its max-width between both insets, and centred there on `auto` margins: Chrome's 500 at 262)
+    expect(root['position: absolute; top: 0; left: 0; right: 0; max-width: 500px; margin: auto'].evaluate_script(read)).to eq([262, 0, 500, 38])
+    # (…and a `fit-content()` track capped by a function over a percentage: Chrome's 160 | 240)
+    fit = page('<body style="margin: 0"><div style="width: 400px; display: grid; grid-template-columns: fit-content(min(40%, 300px)) 1fr">' \
+               '<div>aaaa bbbb cccc dddd eeee ffff</div><div id="k">b</div></div></body>')
+    expect(fit.evaluate_script('(r => [r.x, r.width])(k.getBoundingClientRect())')).to eq([160, 240])
     # (…and a face the walk cannot measure falls back to the next family of the stack: `emoji, monospace` sets the
     # letters in monospace, seven of them 67.2 wide — Chrome's 77.6 keeps the emoji face's own space)
     emoji = page('<body><span id="e" style="font-family: emoji, monospace">abc def</span></body>')

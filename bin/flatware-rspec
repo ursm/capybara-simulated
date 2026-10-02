@@ -4,6 +4,10 @@
 # runs (e.g. two worktrees' suites side by side) would steal each
 # other's jobs — workers spawn before the sink binds — and a crashed run's
 # stale socket file blocks every later run until removed by hand. A
-# per-PID socket under /tmp avoids both (and stays under the 108-byte
-# sun_path limit the scratch dirs would blow).
-exec bundle exec flatware rspec --sink-endpoint "drbunix:${TMPDIR:-/tmp}/flatware-sink-$$" "$@"
+# socket under /tmp named by `mktemp` avoids both (and stays under the
+# 108-byte sun_path limit the scratch dirs would blow). Not by `$$`: a
+# sandboxed shell has a PID namespace of its own over the same /tmp, so two
+# runs can share a PID — and then a sink, each one's workers running the
+# other's files (13,503 examples where 411 were asked for).
+sink=$(mktemp -u "${TMPDIR:-/tmp}/flatware-sink-XXXXXXXX")
+exec bundle exec flatware rspec --sink-endpoint "drbunix:$sink" "$@"

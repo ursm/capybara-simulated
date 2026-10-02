@@ -1129,7 +1129,7 @@ impl GridTrack {
                 t.floor = Some(Box::new(GridTrack::breadth(min)?));
                 Some(t)
             }
-            Size::FitContent(cap) => Some(GridTrack { fit: Some(Box::new(GridTrack::breadth(cap).filter(|c| c.prog.is_none())?)), ..Default::default() }),
+            Size::FitContent(cap) => Some(GridTrack { fit: Some(Box::new(GridTrack::breadth(cap)?)), ..Default::default() }),
         }
     }
     fn breadth(b: &style::values::computed::TrackBreadth) -> Option<GridTrack> {
@@ -1154,7 +1154,7 @@ impl GridTrack {
     // One side of the track as native resolves it, `[kind, value, px]`: 0 a length, 1 the column's min-content, 2 its
     // max-content, 3 `fit-content` capped at a length, 4 a fraction of the grid's content width beside a length, 5
     // `fit-content` capped at such a fraction, 6 a program of the pass's math table (its offset, `math` enters it) at
-    // the content width. `min` asks the base's question, else the limit's.
+    // the content width, 7 `fit-content` capped at such a program. `min` asks the base's question, else the limit's.
     fn side(&self, min: bool, math: &mut impl FnMut(&[f64]) -> u32) -> [f64; 3] {
         const SIDE_MIN: [f64; 3] = [1.0, 0.0, 0.0];
         const SIDE_MAX: [f64; 3] = [2.0, 0.0, 0.0];
@@ -1170,6 +1170,9 @@ impl GridTrack {
         if let Some(cap) = &self.fit {
             if min {
                 return SIDE_MIN;
+            }
+            if let Some(prog) = &cap.prog {
+                return [7.0, math(prog) as f64, 0.0];
             }
             return match (cap.frac, cap.px) {
                 (Some(frac), px) => [5.0, frac, px.unwrap_or(0.0)],

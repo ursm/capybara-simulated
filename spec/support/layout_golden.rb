@@ -171,7 +171,9 @@ module LayoutGolden
             '--headless=new',
             '--disable-gpu',
             '--hide-scrollbars',
-            '--window-size=1024,768',
+            # (…a WINDOW that size under `--headless=new` has a 1024 x 681 viewport — its browser UI is drawn — where the
+            # driver lays out against 1024 x 768: 855 tall is the window whose viewport is 768, measured)
+            '--window-size=1024,855',
             '--virtual-time-budget=5000',
             "--user-data-dir=#{profile}",
             '--dump-dom',

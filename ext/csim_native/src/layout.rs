@@ -1445,7 +1445,10 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
         let margins = Input::m(root.ml) + Input::m(root.mr);
         let (left, right) = (root.inset_left, root.inset_right);
         if left.is_finite() && right.is_finite() {
-            (root_cb_w - left - right - margins).max(0.0)
+            // (…clamped by its own min / max, as a stretched box is: Chrome's `max-width: 500px` root is 500 wide)
+            let extra = if root.border_box { 0.0 } else { root.edges_x() };
+            let to_border = |v: f64| if is_auto(v) { v } else { v + extra };
+            clamp_min_max((root_cb_w - left - right - margins).max(0.0), to_border(root.min_w), to_border(root.max_w))
         } else {
             let room = root_cb_w - [left, right].iter().filter(|v| v.is_finite()).sum::<f64>() - margins;
             let Some(w) = shrink_to_fit_width(0, room, inputs, runs, run_texts, grids, &children) else {
@@ -6938,7 +6941,8 @@ impl GridTrack {
     }
 }
 // One side of a track in px, given the column's (min, max) content contribution and the grid's content width, which a
-// PERCENTAGE side is a fraction of (kind 4; kind 5 is `fit-content` capped at such a fraction; kind 6 a program at it).
+// PERCENTAGE side is a fraction of (kind 4; kind 5 is `fit-content` capped at such a fraction; kind 6 a program at it,
+// kind 7 `fit-content` capped at one).
 // `px` is the CONSTANT TERM beside a fraction (kinds 4 and 5): a `calc(25% + 10px)` track is
 // `frac * content_w + px`, and a plain percentage sends 0. It is no part of the other kinds — an intrinsic
 // reference has no constant and a px track carries its figure in `val`.
@@ -6949,6 +6953,7 @@ fn resolve_track_side(kind: u8, val: f64, col: (f64, f64), content_w: f64, px: f
         4 => val * content_w + px,
         5 => col.0.max((val * content_w + px).min(col.1)),
         6 => bounded(f64::NAN, val as u32, content_w),
+        7 => col.0.max(bounded(f64::NAN, val as u32, content_w).min(col.1)),
         3 => col.0.max(val.min(col.1)),
         _ => val,
     }
@@ -7320,12 +7325,12 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
             let gaps = grids[gs + 1].max(0.0) * (col_count as f64 - 1.0).max(0.0);
             let mut min = gaps;
             let mut max = gaps;
-            // A PERCENTAGE track (kind 4, `fit-content` of one, kind 5, or a program over one, kind 6) has nothing to be
-            // a percentage OF here, and behaves as `auto` — the column's own content (Chrome: a
-            // `grid-template-columns: 50%` grid measures its column's min and max).
+            // A PERCENTAGE track (kind 4, `fit-content` of one, kind 5, a program over one, kind 6, or `fit-content` of
+            // that, 7) has nothing to be a percentage OF here, and behaves as `auto` — the column's own content
+            // (Chrome: a `grid-template-columns: 50%` grid measures its column's min and max).
             let side = |kind: u8, val: f64, col: (f64, f64), want_max: bool| -> f64 {
                 match kind {
-                    4..=6 => if want_max { col.1 } else { col.0 },
+                    4..=7 => if want_max { col.1 } else { col.0 },
                     _ => resolve_track_side(kind, val, col, 0.0, 0.0),
                 }
             };

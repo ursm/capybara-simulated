@@ -708,6 +708,20 @@ RSpec.describe 'layout reuse across dynamic style state' do
       end
     end
 
+    # A kept block is kept only in the formatting context it was walked in: its record holds what the floats placed
+    # before it made of it — whether its `clear` gives it clearance, which stops its top margin collapsing through its
+    # parent. A sibling turned into a float leaves the block's own subtree untouched, and splicing its old record kept it
+    # collapsing: 50 where a page laid out afresh — and Chrome — puts the text below the float at 30.
+    it 'walks a kept block again when the floats before it change its formatting context' do
+      body = '<div style="width: 200px"><div id="f" style="width: 50px; height: 30px"></div>' \
+             '<div style="clear: left; margin-top: 20px"><div id="t">t</div></div></div>'
+      s = walk_session_for(body, verify: false)
+      read = "document.getElementById('t').getBoundingClientRect().y"
+      expect(s.evaluate_script(read)).to eq(50)
+      s.execute_script("document.getElementById('f').style.float = 'left'")
+      expect(s.evaluate_script(read)).to eq(30)
+    end
+
     # A dynamic-state rule's flip that is seen dirties every box the rule can reach, and that is what a kept subtree's
     # stamp follows: the hovered item's submenu opens and the item after it moves down, its link turns bold and wider,
     # and all of it closes again — each read where a page laid out afresh in that state reads it.
