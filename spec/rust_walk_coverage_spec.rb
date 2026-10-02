@@ -134,4 +134,22 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script("document.getElementById('t').getBoundingClientRect().width")).to eq(180)
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
+
+  # A face whose descriptors change after the first layout is the new face to the style engine's `ch` / `ex` too: the
+  # faces it computed a metric from are asked for again once the faces' generation moves, where it kept the old one's.
+  it "follows a face's size-adjust into ch and ex when it changes" do
+    ahem = File.binread(File.join(__dir__, 'wpt/fonts/Ahem.ttf'))
+    html = '<style id="ff">@font-face { font-family: F; src: url(/Ahem.ttf); size-adjust: 150%; }</style>' \
+           '<div style="font: 20px F, monospace"><div id="x" style="width: 10ch; height: 3ex"></div><span>abc</span></div>'
+    s = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'font/ttf'}, [ahem]] if env['PATH_INFO'] == '/Ahem.ttf'
+
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><body style=\"margin: 0\">#{html}</body>"]]
+    })
+    s.visit '/'
+    read = "(() => { const cs = getComputedStyle(document.getElementById('x')); return [cs.width, cs.height]; })()"
+    expect(s.evaluate_script(read)).to eq(%w[300px 72px])
+    s.execute_script("document.getElementById('ff').textContent = '@font-face { font-family: F; src: url(/Ahem.ttf); size-adjust: 50%; }'")
+    expect(s.evaluate_script(read)).to eq(%w[100px 24px])
+  end
 end

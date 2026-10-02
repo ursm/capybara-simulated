@@ -87,6 +87,9 @@ pub(crate) struct Faces {
     known: HashMap<FaceKey, Option<Face>>,
     pub(crate) missing: Vec<FaceKey>,
     metrics_missing: Vec<FaceKey>,
+    // …and the faces it DID compute a metric from: what has to be asked for again, and its styles computed again, once
+    // what they resolve by moves (`at_generation`).
+    metrics_used: Vec<FaceKey>,
     // The generation the faces were resolved at (`natFontGen`: the rules and the FontFaceSet a family resolves by).
     generation: String,
 }
@@ -128,7 +131,12 @@ impl Faces {
     // not been asked for yet, for the next walk to name.
     pub(crate) fn for_metrics(&mut self, key: FaceKey) -> Option<Face> {
         match self.known.get(&key) {
-            Some(face) => *face,
+            Some(face) => {
+                if !self.metrics_used.contains(&key) {
+                    self.metrics_used.push(key);
+                }
+                *face
+            }
             None => {
                 if !self.metrics_missing.contains(&key) {
                     self.metrics_missing.push(key);
@@ -141,10 +149,17 @@ impl Faces {
     pub(crate) fn metrics_missing(&self) -> &[FaceKey] {
         &self.metrics_missing
     }
-    // Forget every face once what they resolve by has moved.
+    // Forget every face once what they resolve by has moved — and ask again for each one the style engine computed a
+    // metric from: a face whose `size-adjust` or source changed would otherwise go on giving the `ch` / `ex` of the old
+    // one, since nothing computed from it is computed again until it is told (`learn`, then a restyle).
     pub(crate) fn at_generation(&mut self, generation: &str) {
         if self.generation != generation {
             self.known.clear();
+            for key in std::mem::take(&mut self.metrics_used) {
+                if !self.metrics_missing.contains(&key) {
+                    self.metrics_missing.push(key);
+                }
+            }
             self.generation = generation.to_owned();
         }
     }
