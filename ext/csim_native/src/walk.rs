@@ -1641,7 +1641,6 @@ impl<'a> Walk<'a> {
         let n = self.node(c);
         n.rendering_tag() == "embed" && n.get_attr("src").is_none()
     }
-    // Is `c` an element that generates no box of its own, but whose children stand in for it (`display: contents`)?
     // The `white-space` a text node collapses by: the box-less element's it is spliced out of where it is (the one
     // inherited property it takes from there that decides whether its white space is content), else `ws_mode`, its box's.
     fn text_ws_mode(&self, c: NodeId, ws_mode: u8) -> Result<u8, &'static str> {
@@ -1650,6 +1649,7 @@ impl<'a> Walk<'a> {
             None => Ok(ws_mode),
         }
     }
+    // Is `c` an element that generates no box of its own, but whose children stand in for it (`display: contents`)?
     fn boxless(&self, c: NodeId) -> bool {
         self.node(c).kind == NodeKind::Element && self.style(c).is_ok_and(|s| s.get_box().walk_display(self.node(c).rendering_tag()).is_contents())
     }

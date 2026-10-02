@@ -1488,9 +1488,12 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
             let (top, right, bottom, left) = (n.inset_top, n.inset_right, n.inset_bottom, n.inset_left);
             let (lm, rm, tm, bm) = (Input::m(n.ml), Input::m(n.mr), Input::m(n.mt), Input::m(n.mb));
             let or0 = |v: f64| if v.is_finite() { v } else { 0.0 };
-            // (…both vertical insets and an auto height: as tall as the room between them)
+            // (…both vertical insets and an auto height: as tall as the room between them, clamped by its min / max-height,
+            // §10.6.4 — Chrome's `inset: 0; max-height: 200px` root is 200 tall)
             if top.is_finite() && bottom.is_finite() && n.height.is_nan() {
-                boxes[0].h = (cb_h - top - bottom - tm - bm).max(0.0);
+                let extra = if n.border_box { 0.0 } else { n.edges_y() };
+                let to_border = |v: f64| if is_auto(v) { v } else { v + extra };
+                boxes[0].h = clamp_min_max((cb_h - top - bottom - tm - bm).max(0.0), to_border(n.min_h), to_border(n.max_h));
             }
             let h = boxes[0].h;
             let x = if n.fits_content == ROOT_FLOAT_RIGHT {
@@ -1505,7 +1508,16 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
             } else {
                 cb_w - right - rm - w
             };
-            let y = if top.is_finite() || !bottom.is_finite() { or0(top) + tm } else { cb_h - bottom - bm - h };
+            let y = if top.is_finite() && bottom.is_finite() && n.auto_margins & 12 != 0 {
+                // (…and `auto` margins between both share what the height leaves them, §10.6.4: centred at 240.5 of 681)
+                let fixed = if n.auto_margins & 4 != 0 { 0.0 } else { tm } + if n.auto_margins & 8 != 0 { 0.0 } else { bm };
+                let slack = (cb_h - top - bottom - h - fixed).max(0.0);
+                top + if n.auto_margins & 4 == 0 { tm } else if n.auto_margins & 8 != 0 { slack / 2.0 } else { slack }
+            } else if top.is_finite() || !bottom.is_finite() {
+                or0(top) + tm
+            } else {
+                cb_h - bottom - bm - h
+            };
             (x, y)
         } else {
             (if root_from_right { root_cb_w - w - lead } else { lead }, root_margins.top_only.value())
