@@ -45,20 +45,18 @@ use style::rule_tree::{CascadeLevel, CascadeOrigin};
 use style::stylesheets::layer_rule::LayerOrder;
 use style::selector_parser::SnapshotMap;
 use style::servo::attr::{AttrIdentifier, AttrValue as SnapshotValue};
-use style::stylesheets::import_rule::{ImportLayer, ImportSheet, ImportSupportsCondition};
 use style::stylesheets::keyframes_rule::KeyframesStepValue;
 use style::values::specified::animation::{AnimationComposition, AnimationDirection, AnimationFillMode, AnimationPlayState};
 use style::values::specified::TransitionBehavior;
-use style::stylesheets::{ImportRule, OriginSet, StylesheetLoader};
-use style::values::CssUrl;
-use cssparser::{Parser, ParserInput, SourceLocation};
+use style::stylesheets::OriginSet;
+use cssparser::{Parser, ParserInput};
 use style_traits::ParsingMode;
 use style::queries::values::PrefersColorScheme;
 use style::selector_parser::{AttrValue, Lang, NonTSPseudoClass, PseudoElement, RestyleDamage, SelectorImpl};
 use style::servo_arc::{Arc, ArcBorrow};
 use style::shared_lock::{Locked, SharedRwLock, StylesheetGuards};
 use style::stylesheets::scope_rule::ImplicitScopeRoot;
-use style::stylesheets::{AllowImportRules, CssRuleType, DocumentStyleSheet, Origin, Stylesheet, UrlExtraData};
+use style::stylesheets::{AllowImportRules, CssRuleType, DocumentStyleSheet, Origin, UrlExtraData};
 use style::animation::DocumentAnimationSet;
 use style::author_styles::AuthorStyles;
 use style::stylist::{RuleInclusion, Stylist};
@@ -185,12 +183,8 @@ pub(crate) struct StyleEngine {
     html_document: bool,
     viewport: (f32, f32),
     doc: Option<NodeId>,
-    // The page's sheets as last set, each under what it was made from — so a set that keeps one keeps its parse.
+    // The page's sheets as last set (the realm's `SheetStore` holds them; a set that keeps one keeps its parse).
     author: Vec<AuthorSheet>,
-    pending: RefCell<Vec<PendingImport>>,
-    // The URLs of the `@import`ed sheets whose text could paint an image (`css_image`), as each last arrived. A sheet
-    // another document keeps keeps its imports too, and they never arrive again.
-    image_imports: std::collections::HashSet<String>,
     // The arena's `mutations` when it was last styled; None while it has to be styled again whatever they are.
     styled: Option<u64>,
     // Each element changed since then, as it was before the first change: its attributes (and its state, which a
@@ -230,50 +224,16 @@ pub(crate) struct StyleEngine {
     poisoned: bool,
 }
 
-// A sheet as the page hands it over: its text, the base URL its `url()`s resolve against, the media list it applies
-// under, and whether it is a constructed sheet (`new CSSStyleSheet()`), whose `@import`s are ignored.
-pub(crate) struct SheetSource {
-    pub(crate) css: String,
-    pub(crate) base: String,
-    pub(crate) media: String,
-    pub(crate) constructed: bool,
-}
-
-// A sheet of the page's, as `set_sheets` keeps it: what it was made from, its parse, and whether its own text could
-// paint an image (`css_image`), read once as it is parsed.
+// A sheet of the page's, as `set_sheets` keeps it: its parse, and whether its own text could paint an image
+// (`css_image`, read once as it was parsed).
 struct AuthorSheet {
-    key: SheetKey,
     sheet: DocumentStyleSheet,
     css_image: bool,
 }
 
-// What a parsed sheet was made from, so a set of sheets that keeps one keeps its parse.
-#[derive(PartialEq)]
-struct SheetKey {
-    css_hash: u64,
-    css_len: usize,
-    base: String,
-    media: String,
-    constructed: bool,
-}
-
-impl SheetKey {
-    fn of(source: &SheetSource) -> SheetKey {
-        let mut hasher = std::hash::DefaultHasher::new();
-        source.css.hash(&mut hasher);
-        SheetKey {
-            css_hash: hasher.finish(),
-            css_len: source.css.len(),
-            base: source.base.clone(),
-            media: source.media.clone(),
-            constructed: source.constructed,
-        }
-    }
-}
-
 // One shadow root's sheets, as the page last gave them, and the cascade data stylo built of them.
 struct ShadowStyles {
-    sheets: Vec<(SheetKey, DocumentStyleSheet)>,
+    sheets: Vec<DocumentStyleSheet>,
     styles: AuthorStyles<DocumentStyleSheet>,
     dirty: bool,
     // Whether a sheet reads the host's light DESCENDANTS through `:host(:has(…))` (`host_reads_descendants`), which the
@@ -288,70 +248,8 @@ impl Default for ShadowStyles {
     }
 }
 
-// Whether `css` holds a `:has()` inside a `:host()` ARGUMENT — read off the text: between a `:host(` and the
-// parenthesis that closes it (ASCII case-insensitively).
-fn host_reads_descendants(css: &str) -> bool {
-    let lower = css.to_ascii_lowercase();
-    lower.match_indices(":host(").any(|(at, _)| {
-        let arg = &lower[at + ":host".len()..];
-        let mut depth = 0;
-        let end = arg
-            .bytes()
-            .position(|b| {
-                depth += match b {
-                    b'(' => 1,
-                    b')' => -1,
-                    _ => 0,
-                };
-                depth == 0
-            })
-            .unwrap_or(arg.len());
-        arg[..end].contains(":has(")
-    })
-}
-
 // The `@custom-media` a shadow root's sheets can see: none, as no browser ships them (`enable_properties`).
 static NO_CUSTOM_MEDIA: std::sync::LazyLock<style::stylesheets::CustomMediaMap> = std::sync::LazyLock::new(Default::default);
-
-// An `@import` whose sheet has not arrived: the rule, the absolute URL it asked for, and the media list its sheet
-// will be made with.
-struct PendingImport {
-    url: String,
-    rule: Arc<Locked<ImportRule>>,
-    media: Arc<Locked<MediaList>>,
-    // The URLs of the sheets that import it, outermost first: one already among them is a cycle.
-    chain: Vec<String>,
-}
-
-// What a sheet's `@import`s ask of the engine while it is parsed: each is answered with a PENDING rule and noted,
-// and the page supplies the sheet by its URL (`import`) — or REFUSED, when the sheet being parsed is among the ones
-// importing it (an import cycle, which loads nothing).
-struct Loader<'a> {
-    pending: &'a RefCell<Vec<PendingImport>>,
-    chain: Vec<String>,
-}
-
-impl StylesheetLoader for Loader<'_> {
-    fn request_stylesheet(
-        &self,
-        url: CssUrl,
-        location: SourceLocation,
-        lock: &SharedRwLock,
-        media: Arc<Locked<MediaList>>,
-        supports: Option<ImportSupportsCondition>,
-        layer: ImportLayer,
-    ) -> Arc<Locked<ImportRule>> {
-        let href = url.url().map(|u| u.as_str().to_owned());
-        let cycle = href.as_ref().is_some_and(|h| self.chain.contains(h));
-        let refused = cycle || supports.as_ref().is_some_and(|s| !s.enabled);
-        let sheet = if refused || href.is_none() { ImportSheet::new_refused() } else { ImportSheet::new_pending() };
-        let rule = Arc::new(lock.wrap(ImportRule { url, stylesheet: sheet, supports, layer, source_location: location }));
-        if let (false, Some(url)) = (refused, href) {
-            self.pending.borrow_mut().push(PendingImport { url, rule: rule.clone(), media, chain: self.chain.clone() });
-        }
-        rule
-    }
-}
 
 // Every property stylo can parse, whichever of Servo's layout switches it waits behind — this engine's layout is
 // its own, so a switch Servo keeps off for its own layout's sake says nothing about ours — and every feature the
@@ -416,8 +314,6 @@ impl StyleEngine {
             viewport,
             doc: None,
             author: Vec::new(),
-            pending: RefCell::new(Vec::new()),
-            image_imports: std::collections::HashSet::new(),
             styled: None,
             snapshots: SnapshotMap::new(),
             restyle_all: true,
@@ -435,7 +331,7 @@ impl StyleEngine {
             web_animations: waapi::Animations::default(),
             animation_tasks: RefCell::new(Vec::new()),
         };
-        let ua = engine.parse(UA_SHEET, engine.url.clone(), "", Origin::UserAgent, AllowImportRules::No, Vec::new());
+        let ua = engine.parse_ua(UA_SHEET);
         engine.stylist.append_stylesheet(ua, &engine.lock.read());
         engine.set_quirks(quirks);
         engine
@@ -495,8 +391,7 @@ impl StyleEngine {
             (true, Some(sheet)) => self.quirks_sheet = Some(sheet),
             (true, None) => {
                 drop(guard);
-                let sheet =
-                    self.parse(UA_QUIRKS_SHEET, self.url.clone(), "", Origin::UserAgent, AllowImportRules::No, Vec::new());
+                let sheet = self.parse_ua(UA_QUIRKS_SHEET);
                 self.stylist.append_stylesheet(sheet.clone(), &self.lock.read());
                 self.quirks_sheet = Some(sheet);
             }
@@ -511,7 +406,6 @@ impl StyleEngine {
         self.web_animations = waapi::Animations::default();
         self.animation_tasks.borrow_mut().clear();
         self.snapshots.clear();
-        self.pending.borrow_mut().clear();
         self.shadow_styles.clear();
         self.hint_blocks.borrow_mut().clear();
         self.styled = None;
@@ -520,37 +414,13 @@ impl StyleEngine {
         self.scanned_epoch = u64::MAX;
     }
 
-    fn parse(
-        &self,
-        css: &str,
-        url: UrlExtraData,
-        media: &str,
-        origin: Origin,
-        imports: AllowImportRules,
-        chain: Vec<String>,
-    ) -> DocumentStyleSheet {
-        let media = Arc::new(self.lock.wrap(self.media_list(media, &url)));
-        let sheet = Stylesheet::from_str(
-            css,
-            url,
-            origin,
-            media,
-            self.lock.clone(),
-            Some(&Loader { pending: &self.pending, chain }),
-            None,
-            self.quirks,
-            imports,
+    // A user-agent sheet: `css` at the document's URL.
+    fn parse_ua(&self, css: &str) -> DocumentStyleSheet {
+        let media = Arc::new(self.lock.wrap(MediaList::empty()));
+        let sheet = crate::sheets::parse_sheet(
+            &self.lock, css, self.url.clone(), Origin::UserAgent, media, AllowImportRules::No, None, self.quirks,
         );
         DocumentStyleSheet(Arc::new(sheet))
-    }
-
-    // `source` parsed as an author sheet.
-    fn parse_source(&self, source: &SheetSource) -> DocumentStyleSheet {
-        let url = url::Url::parse(&source.base).map(UrlExtraData::from).unwrap_or_else(|_| self.url.clone());
-        let imports = if source.constructed { AllowImportRules::No } else { AllowImportRules::Yes };
-        // A sheet reached by URL is the first link of its imports' chain; an inline one names none.
-        let chain = if source.constructed { Vec::new() } else { vec![source.base.clone()] };
-        self.parse(&source.css, url, &source.media, Origin::Author, imports, chain)
     }
 
     // The block of `hints` for the hint level, or None when none of them is a declaration of its property. Each is
@@ -634,45 +504,45 @@ impl StyleEngine {
         MediaList::parse(&mut context, &mut Parser::new(&mut input))
     }
 
-    // The document `doc`'s sheets become `sheets` — (text, base URL, media) each, in document order — and the URLs
-    // their `@import`s wait for are returned (`import` supplies each).
-    pub(crate) fn set_sheets(&mut self, doc: NodeId, sheets: &[SheetSource]) -> Vec<String> {
+    // The document `doc`'s sheets become `sheets` — the realm's (`SheetStore`), in document order.
+    pub(crate) fn set_sheets(&mut self, doc: NodeId, sheets: &[&crate::sheets::StoredSheet]) {
         if self.doc != Some(doc) {
             self.doc = Some(doc);
             self.styled = None;
             self.restyle_all = true;
         }
         // The same sheets again (a rebuild the rule set did not need) change nothing.
-        if sheets.len() == self.author.len() && sheets.iter().zip(&self.author).all(|(s, a)| SheetKey::of(s) == a.key) {
-            return Vec::new();
+        if sheets.len() == self.author.len() && sheets.iter().zip(&self.author).all(|(s, a)| Arc::ptr_eq(&s.sheet.0, &a.sheet.0)) {
+            return;
         }
-        let mut kept = std::mem::take(&mut self.author);
         let guard = self.lock.read();
-        for a in &kept {
-            self.stylist.remove_stylesheet(a.sheet.clone(), &guard);
+        for a in std::mem::take(&mut self.author) {
+            self.stylist.remove_stylesheet(a.sheet, &guard);
+        }
+        for s in sheets {
+            self.stylist.append_stylesheet(s.sheet.clone(), &guard);
+            self.author.push(AuthorSheet { sheet: s.sheet.clone(), css_image: s.css_image });
         }
         drop(guard);
-        let before = self.pending.borrow().len();
-        for source in sheets {
-            let key = SheetKey::of(source);
-            let a = match kept.iter().position(|a| a.key == key) {
-                Some(i) => kept.swap_remove(i),
-                None => AuthorSheet { sheet: self.parse_source(source), css_image: css_image(&source.css), key },
-            };
-            self.stylist.append_stylesheet(a.sheet.clone(), &self.lock.read());
-            self.author.push(a);
+        self.sheets_changed();
+    }
+
+    // A sheet's rules moved under the engine — an `@import`ed one arrived — so everything is styled again.
+    pub(crate) fn sheets_changed(&mut self) {
+        self.stylist.force_stylesheet_origins_dirty(OriginSet::all());
+        for shadow in self.shadow_styles.values_mut() {
+            shadow.dirty = true;
         }
         self.styled = None;
         self.restyle_all = true;
         self.rules_changed = true;
-        self.pending.borrow()[before..].iter().map(|p| p.url.clone()).collect()
     }
 
     // What the document's sheets declare that the page side asks of them without styling anything: whether one could
     // paint an image (`css_image`), and its `@font-face` rules — each the index of the sheet it is in (an `@import`ed
     // one's, its importer's) and the declarations it holds, its sources' URLs resolved — the ones that apply, inside an
     // `@media` / `@supports` that holds and an `@import` that does, in the order a CSSOM walk finds them.
-    pub(crate) fn sheet_facts(&self) -> (bool, Vec<(usize, String)>) {
+    pub(crate) fn sheet_facts(&self, store: &crate::sheets::SheetStore) -> (bool, Vec<(usize, String)>) {
         use style::font_face::DescriptorId;
         use style::stylesheets::{CssRule, StylesheetInDocument};
         const DESCRIPTORS: [DescriptorId; 13] = [
@@ -693,7 +563,7 @@ impl StyleEngine {
             for rule in a.sheet.contents(&guard).effective_rules(device, &*NO_CUSTOM_MEDIA, &guard) {
                 if let CssRule::Import(import) = rule {
                     let import = import.read_with(&guard);
-                    image |= import.url.url().is_some_and(|u| self.image_imports.contains(u.as_str()));
+                    image |= import.url.url().is_some_and(|u| store.image_import(u.as_str()));
                     continue;
                 }
                 let CssRule::FontFace(face) = rule else { continue };
@@ -715,32 +585,20 @@ impl StyleEngine {
         (image, faces)
     }
 
-    // The shadow root `root`'s sheets become `sheets` (as `set_sheets` takes them), in its tree order; its host and
-    // everything under it is styled again.
-    pub(crate) fn set_shadow_sheets(&mut self, arena: &RealmArena, root: NodeId, sheets: &[SheetSource]) -> Vec<String> {
+    // The shadow root `root`'s sheets become `sheets` (the realm's, as `set_sheets` takes them), in its tree order; its
+    // host and everything under it is styled again.
+    pub(crate) fn set_shadow_sheets(&mut self, arena: &RealmArena, root: NodeId, sheets: &[&crate::sheets::StoredSheet]) {
         let mut shadow = self.shadow_styles.remove(&root).unwrap_or_default();
-        let mut kept = std::mem::take(&mut shadow.sheets);
         let guard = self.lock.read();
-        for (_, sheet) in &kept {
-            shadow.styles.stylesheets.remove_stylesheet(Some(self.stylist.device()), &NO_CUSTOM_MEDIA, sheet.clone(), &guard);
+        for sheet in std::mem::take(&mut shadow.sheets) {
+            shadow.styles.stylesheets.remove_stylesheet(Some(self.stylist.device()), &NO_CUSTOM_MEDIA, sheet, &guard);
+        }
+        shadow.host_has = sheets.iter().any(|s| s.host_has);
+        for s in sheets {
+            shadow.styles.stylesheets.append_stylesheet(Some(self.stylist.device()), &NO_CUSTOM_MEDIA, s.sheet.clone(), &guard);
+            shadow.sheets.push(s.sheet.clone());
         }
         drop(guard);
-        let before = self.pending.borrow().len();
-        shadow.host_has = sheets.iter().any(|source| host_reads_descendants(&source.css));
-        for source in sheets {
-            let key = SheetKey::of(source);
-            let sheet = match kept.iter().position(|(k, _)| *k == key) {
-                Some(i) => kept.swap_remove(i).1,
-                None => self.parse_source(source),
-            };
-            shadow.styles.stylesheets.append_stylesheet(
-                Some(self.stylist.device()),
-                &NO_CUSTOM_MEDIA,
-                sheet.clone(),
-                &self.lock.read(),
-            );
-            shadow.sheets.push((key, sheet));
-        }
         shadow.dirty = true;
         self.shadow_styles.insert(root, shadow);
         self.styled = None;
@@ -748,51 +606,6 @@ impl StyleEngine {
         if let Some(host) = arena.get(root).and_then(|r| r.host) {
             in_arena(arena, self, || hint_element(StyleNode::new(arena, host), RestyleHint::restyle_subtree()));
         }
-        self.pending.borrow()[before..].iter().map(|p| p.url.clone()).collect()
-    }
-
-    // The sheet at `url` arrived as `css` (None: it could not be fetched): every `@import` waiting for it takes it,
-    // and the URLs its own `@import`s wait for are returned.
-    pub(crate) fn import(&mut self, url: &str, css: Option<&str>) -> Vec<String> {
-        let waiting: Vec<PendingImport> = {
-            let mut pending = self.pending.borrow_mut();
-            let (hit, rest) = std::mem::take(&mut *pending).into_iter().partition(|p| p.url == url);
-            *pending = rest;
-            hit
-        };
-        let before = self.pending.borrow().len();
-        if css.is_some_and(css_image) {
-            self.image_imports.insert(url.to_owned());
-        } else {
-            self.image_imports.remove(url);
-        }
-        for p in waiting {
-            let sheet = match (css, url::Url::parse(url)) {
-                (Some(css), Ok(base)) => {
-                    let media = p.media.clone();
-                    let sheet = Stylesheet::from_str(
-                        css,
-                        UrlExtraData::from(base),
-                        Origin::Author,
-                        media,
-                        self.lock.clone(),
-                        Some(&Loader { pending: &self.pending, chain: [&p.chain[..], &[url.to_owned()]].concat() }),
-                        None,
-                        self.quirks,
-                        AllowImportRules::Yes,
-                    );
-                    ImportSheet::new(Arc::new(sheet))
-                }
-                _ => ImportSheet::new_refused(),
-            };
-            let mut guard = self.lock.write();
-            p.rule.write_with(&mut guard).stylesheet = sheet;
-        }
-        self.stylist.force_stylesheet_origins_dirty(OriginSet::all());
-        self.styled = None;
-        self.restyle_all = true;
-        self.rules_changed = true;
-        self.pending.borrow()[before..].iter().map(|p| p.url.clone()).collect()
     }
 
     // Style the document as it stands in `arena`, when anything moved since it last was: what the changes since
@@ -3225,7 +3038,9 @@ const UA_QUIRKS_SHEET: &str = include_str!("ua-quirks.css");
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cssparser::SourceLocation;
     use style::error_reporting::{ContextualParseError, ParseErrorReporter};
+    use style::stylesheets::Stylesheet;
 
     struct Errors(RefCell<Vec<String>>);
     impl ParseErrorReporter for Errors {
@@ -3241,17 +3056,6 @@ mod tests {
         for sheet in [UA_SHEET, UA_QUIRKS_SHEET] {
             assert_parses_whole(sheet);
         }
-    }
-
-    // A `:has()` inside a `:host()` is found, and one beside it (or a `:host` with no argument) is not.
-    #[test]
-    fn a_host_condition_reading_descendants_is_found_in_the_text() {
-        assert!(host_reads_descendants(":host(:has(.f)) p { margin: 1px }"));
-        assert!(host_reads_descendants("p {} :HOST(.x:HAS(> b)) { color: red }"));
-        assert!(!host_reads_descendants(":host(.x) p { color: red } .a:has(.b) { color: red }"));
-        assert!(!host_reads_descendants(":host p:has(b) { color: red }"));
-        assert!(!host_reads_descendants(":host(.x) p:has(b) { color: red }"));
-        assert!(host_reads_descendants(":host(:is(.a, .b):has(i)) p { color: red }"));
     }
 
     fn assert_parses_whole(sheet: &str) {
@@ -3354,22 +3158,4 @@ fn font_face_src(src: &style::font_face::SourceList) -> String {
     }).collect::<Vec<_>>().join(", ")
 }
 
-// Whether a sheet's text could paint an image: a `background` / `cursor` / `list-style` declaration with a `url(` in its
-// value (a declaration is what lies between `;`, `{` and `}`, and the property a keyword with a `:` after it).
-fn css_image(css: &str) -> bool {
-    let lower = css.to_ascii_lowercase();
-    let bytes = lower.as_bytes();
-    let mut from = 0;
-    while let Some(at) = lower[from..].find("url(").map(|i| i + from) {
-        let start = bytes[..at].iter().rposition(|&b| matches!(b, b';' | b'{' | b'}')).map_or(0, |i| i + 1);
-        let decl = &lower[start..at];
-        // (…a keyword with a `:` after it, the regex's `keyword[^:;{}]*:`)
-        let keyword_then_colon = |k: &str| decl.match_indices(k).any(|(i, _)| decl[i + k.len()..].contains(':'));
-        if ["background", "cursor", "list-style"].into_iter().any(keyword_then_colon) {
-            return true;
-        }
-        from = at + 4;
-    }
-    false
-}
 

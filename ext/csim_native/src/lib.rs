@@ -27,6 +27,7 @@ mod html_parse;
 // Layout: the records the walk builds (mod walk) laid out, driven by the `layoutBuild` op (mod walk_ops).
 mod layout;
 mod selector;
+mod sheets;
 // The style engine: stylo over the arena.
 mod style;
 mod style_fonts;

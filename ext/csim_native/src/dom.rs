@@ -429,6 +429,8 @@ pub(crate) struct RealmArena {
     // The lock the style engine's rules and every element's parsed declarations are read under — ONE for the realm's
     // life, as a block parsed under one lock can never be read under another.
     pub(crate) style_lock: crate::style::StyleLock,
+    // The realm's style sheets, parsed under that lock (sheets.rs): what its engine cascades and CSSOM reads.
+    pub(crate) sheets: crate::sheets::SheetStore,
     // Per tree root, the facts element_state.rs asks of every control in turn, as of `mutations` (`form_facts`).
     pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
     // The `marginwidth` / `marginheight` of the frame this realm's document sits in, which its body takes its margins
@@ -587,6 +589,7 @@ impl RealmArena {
         self.form_facts.get_mut().clear();
         self.directionality.get_mut().1.clear();
         self.direction_sources = false;
+        self.sheets.reset();
         // (…in place: the style engine holds the same table, and outlives the page)
         self.faces.with(|faces| *faces = Default::default());
         self.mutations += 1;
@@ -1086,6 +1089,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleImport", style_import, context_id);
     register(scope, ns, "styleSheetFacts", style_sheet_facts, context_id);
     register(scope, ns, "styleShadowSheets", style_shadow_sheets, context_id);
+    // …the realm's sheets they are made of (sheets.rs).
+    register(scope, ns, "sheetMake", sheet_make, context_id);
+    register(scope, ns, "sheetReplace", sheet_replace, context_id);
+    register(scope, ns, "sheetDrop", sheet_drop, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
     register(scope, ns, "styleProperties", style_properties, context_id);
     // CSSOM's declaration blocks, over the engine's (cssom_decl.rs): each takes the block's TEXT, its kind and the
@@ -2081,23 +2088,24 @@ pub(crate) fn style_op(scope: &mut v8::PinScope<'_, '_>, cid: i32, op: impl FnOn
 }
 
 // Sheets off a JS array of [css, baseUrl, media, constructed, css, …] (`StyleEngine::set_sheets` takes them).
-fn sheet_sources(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>) -> Vec<crate::style::SheetSource> {
+// The realm's sheets a `[id, …]` array names, in its order (an id the store no longer has, none).
+fn sheet_ids(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>) -> Vec<u32> {
     let Ok(arr) = v8::Local::<v8::Array>::try_from(val) else { return Vec::new() };
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i + 3 < arr.length() {
-        let text = |k: u32| arr.get_index(scope, i + k).filter(|v| v.is_string()).map_or(String::new(), |v| v.to_rust_string_lossy(scope));
-        let (css, base, media) = (text(0), text(1), text(2));
-        let constructed = arr.get_index(scope, i + 3).is_some_and(|v| v.is_true());
-        out.push(crate::style::SheetSource { css, base, media, constructed });
-        i += 4;
-    }
-    out
+    (0..arr.length()).filter_map(|i| arr.get_index(scope, i)?.uint32_value(scope)).collect()
+}
+// …and a sheet as the page hands one over: `(css, baseUrl, media, constructed)` from argument `at` on.
+fn sheet_source(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, at: i32) -> crate::sheets::SheetSource {
+    let text = |scope: &mut v8::PinScope<'_, '_>, k: i32| {
+        let v = args.get(at + k);
+        if v.is_string() { v.to_rust_string_lossy(scope) } else { String::new() }
+    };
+    let (css, base, media) = (text(scope, 0), text(scope, 1), text(scope, 2));
+    crate::sheets::SheetSource { css, base, media, constructed: args.get(at + 3).is_true() }
 }
 
-// __dom.styleSheets(docNid, baseUrl, quirks, xml, width, height, [css, baseUrl, media, constructed, …]) -> the
-// URLs the sheets' `@import`s wait for. The realm document's sheets, in document order, for its style engine — made
-// again only when the document's base URL, mode, kind (`xml`: not an HTML document) or viewport moved.
+// __dom.styleSheets(docNid, baseUrl, quirks, xml, width, height, [sheetId, …]): the realm document's sheets (the
+// realm's, sheetMake), in document order, for its style engine — which is made again only when the document's base
+// URL, mode, kind (`xml`: not an HTML document) or viewport moved.
 fn style_sheets(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2109,7 +2117,7 @@ fn style_sheets(
 fn style_sheets_unguarded(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let base = args.get(1).to_rust_string_lossy(scope);
@@ -2119,7 +2127,7 @@ fn style_sheets_unguarded(
         args.get(4).number_value(scope).unwrap_or(0.0) as f32,
         args.get(5).number_value(scope).unwrap_or(0.0) as f32,
     );
-    let sheets = sheet_sources(scope, args.get(6));
+    let ids = sheet_ids(scope, args.get(6));
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     if d.dropped.contains(&cid) {
@@ -2127,14 +2135,12 @@ fn style_sheets_unguarded(
     }
     let arena = d.realms.entry(cid).or_default();
     let mut engine = crate::style::StyleEngine::for_document(d.styles.remove(&cid), arena, &base, quirks, html_document, viewport);
-    let pending = engine.set_sheets(doc, &sheets);
+    let sheets: Vec<_> = ids.iter().filter_map(|&id| arena.sheets.get(id)).collect();
+    engine.set_sheets(doc, &sheets);
     d.styles.insert(cid, engine);
-    let urls = url_array(scope, &pending);
-    rv.set(urls);
 }
 
-// __dom.styleShadowSheets(rootNid, [css, baseUrl, media, constructed, …]) -> the URLs the sheets' `@import`s wait for: a shadow
-// root's own sheets, in its tree order.
+// __dom.styleShadowSheets(rootNid, [sheetId, …]): a shadow root's own sheets (the realm's), in its tree order.
 fn style_shadow_sheets(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2146,16 +2152,15 @@ fn style_shadow_sheets(
 fn style_shadow_sheets_unguarded(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
-    let sheets = sheet_sources(scope, args.get(1));
+    let ids = sheet_ids(scope, args.get(1));
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
     let Some(engine) = engine else { return };
-    let pending = engine.set_shadow_sheets(arena, root, &sheets);
-    let urls = url_array(scope, &pending);
-    rv.set(urls);
+    let sheets: Vec<_> = ids.iter().filter_map(|&id| arena.sheets.get(id)).collect();
+    engine.set_shadow_sheets(arena, root, &sheets);
 }
 
 // __dom.styleSheetFacts() -> [cssImage, sheetIndex, faceText, …]: what the document's sheets declare that the page side
@@ -2175,8 +2180,9 @@ fn style_sheet_facts_unguarded(
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let cid = realm_id(scope, &args);
-    let Some(engine) = dom(scope).styles.get(&cid) else { return };
-    let (css_image, faces) = engine.sheet_facts();
+    let d = dom(scope);
+    let (Some(engine), Some(arena)) = (d.styles.get(&cid), d.realms.get(&cid)) else { return };
+    let (css_image, faces) = engine.sheet_facts(&arena.sheets);
     let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Boolean::new(scope, css_image).into()];
     for (sheet, text) in faces {
         items.push(v8::Number::new(scope, sheet as f64).into());
@@ -2189,8 +2195,8 @@ fn style_sheet_facts_unguarded(
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.styleImport(url, css) -> the URLs the imported sheet's own `@import`s wait for. The sheet at `url` arrived
-// (`css` null: it could not be fetched).
+// __dom.styleImport(url, css, quirks) -> the URLs the imported sheet's own `@import`s wait for. The sheet at `url`
+// arrived (`css` null: it could not be fetched), for every realm sheet whose `@import` waits for it.
 fn style_import(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2206,11 +2212,52 @@ fn style_import_unguarded(
 ) {
     let url = args.get(0).to_rust_string_lossy(scope);
     let css = args.get(1).is_string().then(|| args.get(1).to_rust_string_lossy(scope));
+    let quirks = args.get(2).is_true();
     let cid = realm_id(scope, &args);
-    let Some(engine) = dom(scope).styles.get_mut(&cid) else { return };
-    let pending = engine.import(&url, css.as_deref());
+    let d = dom(scope);
+    let arena = d.realms.entry(cid).or_default();
+    let lock = arena.style_lock.0.clone();
+    let pending = arena.sheets.import(&lock, &url, css.as_deref(), quirks);
+    if let Some(engine) = d.styles.get_mut(&cid) {
+        engine.sheets_changed();
+    }
     let urls = url_array(scope, &pending);
     rv.set(urls);
+}
+
+// __dom.sheetMake(css, baseUrl, media, constructed, quirks) -> [sheetId, …the URLs its `@import`s wait for]: a new sheet
+// of the realm's (sheets.rs), for a `<style>` / `<link>` or a constructed sheet, in a document of `quirks` mode.
+fn sheet_make(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let source = sheet_source(scope, &args, 0);
+    let quirks = args.get(4).is_true();
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let lock = arena.style_lock.0.clone();
+    let (id, pending) = arena.sheets.make(&lock, &source, quirks);
+    let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, id).into()];
+    items.extend(pending.iter().filter_map(|u| v8::String::new(scope, u)).map(Into::<v8::Local<v8::Value>>::into));
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.sheetReplace(sheetId, css, baseUrl, media, constructed, quirks) -> the URLs its `@import`s wait for: the sheet
+// made of other text (or under another base or media). The engine takes it as the new sheet it is at its next set.
+fn sheet_replace(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = args.get(0).uint32_value(scope) else { return };
+    let source = sheet_source(scope, &args, 1);
+    let quirks = args.get(5).is_true();
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let lock = arena.style_lock.0.clone();
+    let pending = arena.sheets.replace(&lock, id, &source, quirks);
+    let urls = url_array(scope, &pending);
+    rv.set(urls);
+}
+// __dom.sheetDrop(sheetId): the page let go of the sheet.
+fn sheet_drop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = args.get(0).uint32_value(scope) else { return };
+    let cid = realm_id(scope, &args);
+    if let Some(arena) = dom(scope).realms.get_mut(&cid) {
+        arena.sheets.drop_sheet(id);
+    }
 }
 
 // __dom.styleValue(nid, property, pseudo, now) — `now` the page's animation clock (ms) — the element's (or, with `pseudo` — `before`, `placeholder`, … — its
