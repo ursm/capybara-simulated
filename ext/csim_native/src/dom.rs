@@ -420,6 +420,9 @@ pub(crate) struct RealmArena {
     pub(crate) style_lock: crate::style::StyleLock,
     // Per tree root, the facts element_state.rs asks of every control in turn, as of `mutations` (`form_facts`).
     pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
+    // The `marginwidth` / `marginheight` of the frame this realm's document sits in, which its body takes its margins
+    // from where it declares none (HTML §15.3.2) — pushed in by the parent realm (`setContainerMargins`).
+    pub(crate) container_margins: [Option<String>; 2],
     // The faces its families resolve to, which its walks and its style engine's font metrics read (`SharedFaces`).
     pub(crate) faces: crate::walk::SharedFaces,
     // Each element's resolved directionality asked so far, true for rtl, as of `mutations` (`is_rtl`)…
@@ -959,8 +962,6 @@ fn arena_and_engine<'s>(
     (d.realms.entry(cid).or_default(), d.styles.get_mut(&cid))
 }
 
-// An attribute write to `id` of the attributes `names`, about to land: the style engine hears of it first, and a name
-// a state can read moves the state epoch (a class, a style and data / ARIA attributes are read by none).
 // Whether a node can decide a directionality of its own (`is_rtl`): a `dir` on it, or its being a `<bdi>` or a telephone
 // `<input>` — a telephone one only: almost every app page has an input, and each one latched the whole realm into the
 // per-element walk (a 1500-row append 290 → 530 ms).
@@ -969,6 +970,8 @@ fn notes_direction(n: &NodeData) -> bool {
         && (n.plain_attr("dir").is_some() || n.is_html_named("bdi") || (n.is_html_named("input") && n.input_type() == "tel"))
 }
 
+// An attribute write to `id` of the attributes `names`, about to land: the style engine hears of it first, and a name
+// a state can read moves the state epoch (a class, a style and data / ARIA attributes are read by none).
 fn before_attribute_write(arena: &mut RealmArena, engine: Option<&mut crate::style::StyleEngine>, id: NodeId, names: &[&str]) {
     // (…and a `type` written may make an input a telephone one: latched on the write, as the value lands after this)
     arena.direction_sources |= names.contains(&"dir") || (names.contains(&"type") && arena.get(id).is_some_and(|n| n.is_html_named("input")));
@@ -1052,6 +1055,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "linkPseudoBox", link_pseudo_box, context_id);
     register(scope, ns, "firstStrongDirection", first_strong_direction, context_id);
     register(scope, ns, "lineBreakGlues", line_break_glues, context_id);
+    register(scope, ns, "setContainerMargins", set_container_margins, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
     register(scope, ns, "setAssignedNodes", set_assigned_nodes, context_id);
     register(scope, ns, "setValue", set_value, context_id);
@@ -1359,6 +1363,35 @@ fn first_strong_direction(
             rv.set(s.into());
         }
         None => rv.set_null(),
+    }
+}
+
+// __dom.setContainerMargins(bodyNid, marginwidth, marginheight): the frame's two attributes as they stand (`null` for
+// one it lacks), and the body to restyle where they changed (-1 before the document has one).
+fn set_container_margins(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let mut margins = [None, None];
+    for (i, m) in margins.iter_mut().enumerate() {
+        let v = args.get(i as i32 + 1);
+        if !v.is_null_or_undefined() {
+            *m = Some(v.to_rust_string_lossy(scope));
+        }
+    }
+    let body = nid_arg(scope, &args, 0);
+    let cid = realm_id(scope, &args);
+    let (arena, engine) = arena_and_engine(scope, cid);
+    if arena.container_margins == margins {
+        return;
+    }
+    if let Some(id) = body {
+        before_attribute_write(arena, engine, id, &["marginwidth", "marginheight"]);
+    }
+    arena.container_margins = margins;
+    if let Some(node) = body.and_then(|id| arena.get_mut(id)) {
+        node.attr_changed(Some("marginwidth"));
     }
 }
 

@@ -14,8 +14,10 @@ use crate::dom::{NodeData, NodeId, RealmArena};
 // that is no value of its property — or text that would be more than one declaration — is dropped whole.
 pub(crate) type Hint = (&'static str, String);
 
-// The hints an element's own attributes give it, appended to `out`. An SVG element's are its presentation attributes.
-pub(crate) fn own_hints(node: &NodeData, out: &mut Vec<Hint>) {
+// The hints an element's own attributes give it, appended to `out` — and a body's, those of the frame it sits in, where
+// it declares none (`container`: the frame's `marginwidth` / `marginheight`). An SVG element's are its presentation
+// attributes.
+pub(crate) fn own_hints(node: &NodeData, container: &[Option<String>; 2], out: &mut Vec<Hint>) {
     if node.ns == ns!(svg) {
         return svg_presentation_attributes(node, out);
     }
@@ -29,11 +31,11 @@ pub(crate) fn own_hints(node: &NodeData, out: &mut Vec<Hint>) {
 
     // §15.3.2 The page: `<body>`'s margins, colours and background.
     if tag == "body" {
-        for (props, attrs) in [
-            (["margin-top", "margin-bottom"], ["marginheight", "topmargin"]),
-            (["margin-left", "margin-right"], ["marginwidth", "leftmargin"]),
+        for (props, attrs, framed) in [
+            (["margin-top", "margin-bottom"], ["marginheight", "topmargin"], &container[1]),
+            (["margin-left", "margin-right"], ["marginwidth", "leftmargin"], &container[0]),
         ] {
-            if let Some(px) = attrs.iter().find_map(|a| attr(a)).and_then(pixel_length) {
+            if let Some(px) = attrs.iter().find_map(|a| attr(a)).or(framed.as_deref()).and_then(pixel_length) {
                 for p in props {
                     decl(p, &px);
                 }

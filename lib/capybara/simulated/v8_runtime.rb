@@ -477,16 +477,19 @@ module Capybara
       # new realm's context id. A new context (not an in-place document reset) is
       # the right model — it drops the prior frame document's timers / listeners
       # / module state, exactly like the main page's per-visit rebuild. `parent_id`
-      # keeps the new realm's `parent`/`top` wired to the owning realm. The
-      # Browser then re-points the iframe element at the new id (`__csimRebindFrameRealm`).
-      def reload_frame_realm(old_id, parent_id, url, body, content_type, client_id = nil)
+      # keeps the new realm's `parent`/`top` wired to the owning realm, and `seed`
+      # is what the container gives the document, seeded as on the first build
+      # (`__csimFrameSeed`: its viewport and margins). The Browser then re-points
+      # the iframe element at the new id (`__csimRebindFrameRealm`).
+      def reload_frame_realm(old_id, parent_id, url, body, content_type, client_id = nil, seed = nil)
         # A re-navigated document discards its child browsing contexts, so dispose the old realm's
         # DESCENDANT frame realms too — not just old_id. The JS src-reassignment path gets this for
         # free (the old document's iframe elements go away → DOM-unregister disposes their realms);
         # the Ruby reload path (navigate_realm_self_get/_post) rebuilds without that DOM teardown, so
         # a descendant frame's realm would otherwise linger and its contentWindow stay live.
         dispose_frame_realm_tree(old_id)
-        create_frame_realm(ctx, url, body, content_type, parent_id, nil, nil, nil, nil, nil, nil, client_id)
+        seed ||= {}
+        create_frame_realm(ctx, url, body, content_type, parent_id, nil, nil, nil, nil, nil, seed['viewport'], client_id, seed['margins'])
       end
 
       # Dispose a frame realm and every descendant frame realm (transitively), deepest first so a
@@ -834,8 +837,8 @@ module Capybara
       # id (or nil on failure — then the bridge keeps its same-realm fallback).
       # The bridge maps `iframe.contentWindow` to `RustyRacer.contextGlobal(id)`.
       def attach_frame_realm_loader(c)
-        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil) {
-          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, frame_name, frame_doc_origin, frame_location_origin, js_url_source, frame_about_base, frame_viewport, client_id) }
+        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil, frame_margins = nil) {
+          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, frame_name, frame_doc_origin, frame_location_origin, js_url_source, frame_about_base, frame_viewport, client_id, frame_margins) }
         })
         # Re-navigating an iframe (src/srcdoc reassigned) builds a fresh realm;
         # the bridge calls this to tear down the superseded one so it doesn't
@@ -887,7 +890,7 @@ module Capybara
         realm
       end
 
-      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil)
+      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, frame_name = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil, frame_margins = nil)
         depth = (frame_realm_depths[parent_id] || 0) + 1
         if depth > MAX_FRAME_DEPTH
           @browser.log_console('warn', "iframe nesting depth #{depth} exceeds #{MAX_FRAME_DEPTH}; not building #{url}")
@@ -954,6 +957,8 @@ module Capybara
         # frame's own size rather than the top window's. `nil` = an unrendered container, which is a
         # 0x0 window — pass it through rather than skipping, or the frame keeps the top-level size.
         realm.call('__csimFrameViewportChanged', frame_viewport)
+        # …and the container's `marginwidth` / `marginheight`, which the framed body's first style already reads.
+        realm.call('__csimFrameMarginsChanged', *frame_margins) if frame_margins
         # Seed the frame's document origin (opaque/inherited) BEFORE the document
         # loads, so its load-time scripts read the right self.origin. nil → a
         # real-URL frame whose origin is its own location origin.

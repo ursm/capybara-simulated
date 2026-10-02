@@ -82,4 +82,36 @@ RSpec.describe 'frame viewport' do
       expect(s).to have_css('#narrow', text: 'N')
     end
   end
+
+  # A frame that navigates gets a NEW realm, and the container's box has to be seeded into it as into the first: the
+  # rebuild passed nothing, so after `click_link` inside a frame its window was 0x0 and a block in it 0 wide.
+  it 'keeps the container box across a navigation inside the frame' do
+    pages = {
+      '/' => '<!DOCTYPE html><body style="margin:0"><iframe src="/a" style="width:300px;height:150px;border:0"></iframe></body>',
+      '/a' => '<!DOCTYPE html><body style="margin:0"><a href="/b">next</a></body>',
+      '/b' => '<!DOCTYPE html><body style="margin:0"><div id="d">b</div></body>'
+    }
+    s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [pages.fetch(env['PATH_INFO'])]] })
+    s.visit '/'
+    s.within_frame(0) do
+      s.click_link 'next'
+      expect(s.evaluate_script("[innerWidth, innerHeight, document.getElementById('d').getBoundingClientRect().width]")).to eq([300, 150, 300])
+    end
+  end
+
+  # The body of a framed document takes its margins from the frame's `marginwidth` / `marginheight` where it declares
+  # none (HTML §15.3.2) — and as they change. Chrome: `<iframe marginheight=7 marginwidth=3>` puts the body's first
+  # child at (3, 7).
+  it "gives the framed body its container's marginwidth and marginheight" do
+    pages = {
+      '/' => '<!DOCTYPE html><body style="margin:0"><iframe id="f" src="/a" marginheight="7" marginwidth="3"></iframe></body>',
+      '/a' => '<!DOCTYPE html><body><div id="d">a</div></body>'
+    }
+    s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [pages.fetch(env['PATH_INFO'])]] })
+    s.visit '/'
+    position = -> { s.within_frame(0) { s.evaluate_script("(r => [r.x, r.y])(document.getElementById('d').getBoundingClientRect())") } }
+    expect(position.call).to eq([3, 7])
+    s.execute_script("document.getElementById('f').setAttribute('marginwidth', '12')")
+    expect(position.call).to eq([12, 7])
+  end
 end

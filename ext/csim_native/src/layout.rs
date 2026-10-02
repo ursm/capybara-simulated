@@ -3053,9 +3053,16 @@ fn line_layout(
                                     let mut cw = measure_word(run, &text[u..u + ulen])?;
                                     // (…and where break-all's rules glue a unit wider than the band, a declared
                                     // `overflow-wrap` still breaks it, between grapheme clusters: `.......` in 30px is
-                                    // three lines under `break-all` + `anywhere`, one overflowing under break-all alone.)
+                                    // three lines under `break-all` + `anywhere`, one overflowing under break-all alone.
+                                    // An emergency break is taken only where the line has no other, so the unit first
+                                    // takes the ordinary one before it, to a fresh line — `ab.......` in 30px is "a" /
+                                    // "b.." / "..." / ".." in Chrome, the `b` glued to the dots.)
                                     if per_char && wrap_mode >= 4 && u >= emergency_end && cw > avail + LINE_FIT_EPS {
                                         emergency_end = u + ulen;
+                                        if line_has_content && (!first || preceded) {
+                                            take_break!();
+                                            space_pending = false;
+                                        }
                                         ulen = break_unit_len(text, u, cut_end.max(u + 1), true, true);
                                         cw = measure_word(run, &text[u..u + ulen])?;
                                     }
@@ -3081,7 +3088,13 @@ fn line_layout(
                                             let n_wide = has_wide && text[pend..npend].iter().any(|&c| is_wide_unit(c));
                                             let npw = measure_word(run, &text[pend..npend])?;
                                             let n_per = wrap_mode != 0 && !n_wide && (fills || npw > avail + LINE_FIT_EPS);
-                                            measure_word(run, &text[pend..pend + break_unit_len(text, pend, npend, n_per, !break_all)])?
+                                            let mut nlen = break_unit_len(text, pend, npend, n_per, !break_all);
+                                            let mut nw = measure_word(run, &text[pend..pend + nlen])?;
+                                            if n_per && wrap_mode >= 4 && nw > avail + LINE_FIT_EPS {
+                                                nlen = break_unit_len(text, pend, npend, true, true);
+                                                nw = measure_word(run, &text[pend..pend + nlen])?;
+                                            }
+                                            nw
                                         } else {
                                             0.0
                                         };

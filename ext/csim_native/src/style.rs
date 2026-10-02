@@ -3162,7 +3162,7 @@ impl<'a> TElement for StyleNode<'a> {
         // SAFETY: as `style_attribute`'s.
         let own = unsafe { &*self.slot().hints.get() }.get_or_init(|| {
             let mut list = Vec::new();
-            crate::hints::own_hints(self.node(), &mut list);
+            crate::hints::own_hints(self.node(), &self.arena().container_margins, &mut list);
             engine.hint_block(&list, svg)
         });
         if let Some(block) = own {
@@ -3305,7 +3305,7 @@ mod tests {
             node.ns = ns!(html);
             node.attributes = attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
             let mut hints = Vec::new();
-            crate::hints::own_hints(&node, &mut hints);
+            crate::hints::own_hints(&node, &Default::default(), &mut hints);
             assert!(!hints.is_empty(), "<{tag}> gave no hint");
             let block = engine.hint_block(&hints, false).expect("a hint block");
             let guard = engine.lock.read();
