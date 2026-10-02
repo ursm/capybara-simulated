@@ -115,9 +115,22 @@ nobr wbr { white-space: normal; }
 /* …and MathML Core's own sheet maps a MathML element's `dir` (no HTML directionality: `:dir()` does not see it) */
 mathml|*[dir=ltr i] { direction: ltr; }
 mathml|*[dir=rtl i] { direction: rtl; }
-/* …and its `display=block` math is a block of its own (MathML Core: `block math`; `math` is no display the style engine
- * has, so a MathML element is otherwise the inline its initial value makes it — its row laid out along the line) */
+/* MathML Core's user-agent sheet, as far as the style engine has its values: `math` resets what text styling would
+ * otherwise reach its glyphs through, `display=block` math is a block of its own (MathML Core: `block math` — `math` is no
+ * display the style engine has, so a MathML element is otherwise the inline its initial value makes it, its row laid out
+ * along the line), a table is a table, a phantom keeps its room unseen, and only the FIRST child of a `semantics` or an
+ * `maction` renders: the annotations a TeX converter writes beside its markup (KaTeX, MathJax) are none. */
+mathml|math {
+  direction: ltr; text-indent: 0; letter-spacing: normal; line-height: normal; word-spacing: normal;
+  font-style: normal; font-weight: normal;
+}
 mathml|math[display=block i] { display: block; }
+mathml|mtable { display: inline-table; }
+mathml|mtr { display: table-row; }
+mathml|mtd { display: table-cell; text-align: center; padding: 0.5ex 0.4em; }
+mathml|mphantom { visibility: hidden; }
+mathml|semantics > *|*:not(:first-child), mathml|maction > *|*:not(:first-child) { display: none; }
+mathml|merror { border: 1px solid red; background-color: lightyellow; }
 address, blockquote, center, div, figure, figcaption, footer, form, header, hr,
 legend, listing, main, p, plaintext, pre, summary, xmp, article, aside, h1, h2,
 h3, h4, h5, h6, hgroup, nav, section, search, table, caption, colgroup, col,

@@ -92,6 +92,28 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # …and what makes no table box stays out of it: a replaced element or a control with a table display is an inline-level
+  # box on the line (CSS Tables 3 §2.1; Firefox — Chrome blocks an `<img>`), a row inside an orphan row is the anonymous
+  # cell's own anonymous table, columns over no row are as wide as they declare, and a row group of no row is as tall
+  # (Chrome: 19.2 for the nested cell, 50 for the column — whose own box reads 0, as a real table's `<col>` does here —
+  # and 0 x 30 for the group, its block 52 tall).
+  it 'keeps replaced elements out of an anonymous table and lays out its edge cases', :aggregate_failures do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0">' \
+      '<div id="w6" style="width: 300px"><img id="i1" style="display: table-cell; width: 20px; height: 20px"><canvas id="i2" style="display: table-cell" width="30" height="10"></canvas></div>' \
+      '<div style="width: 300px"><div style="display: table-row"><div style="display: table-row"><div id="x3" style="display: table-cell">xx</div></div></div></div>' \
+      '<div id="w1" style="width: 300px"><div style="display: table-column; width: 50px"></div>after</div>' \
+      '<div id="w4" style="width: 300px"><div id="g1" style="display: table-row-group; height: 30px"></div>after</div></body>'
+    )
+    rect = ->(id) { s.evaluate_script("(() => { const r = document.getElementById('#{id}').getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map((v) => Math.round(v * 10) / 10); })()") }
+    expect(rect.call('i1')[0, 1] + rect.call('i2')[0, 1]).to eq([0, 20])       # (…side by side: img at 0, canvas at 20)
+    expect(rect.call('x3')[2]).to eq(19.2)
+    expect(rect.call('w1')[3]).to eq(22)
+    expect(rect.call('g1')[2, 2]).to eq([0, 30])
+    expect(rect.call('w4')[3]).to eq(52)
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # …and a table of rows holding no cell at all has no columns, and spaces nothing (Chrome: a `border-spacing: 5px` table
   # bordered 3px around one 20px row is 6 x 26; two empty rows are 0 x 0).
   it 'lays out a table of empty rows with no spacing' do
@@ -255,6 +277,19 @@ RSpec.describe 'Rust walk coverage' do
     expect(m1[0]).to eq(19.1)
     expect(m1[1]).to be_within(1).of(33.4)
     expect(m2).to eq([8, 1008])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
+  # …and MathML Core's user-agent sheet as far as the style engine has its values: only the first child of a `semantics`
+  # or an `maction` renders (the TeX a converter annotates its markup with is no text: Chrome's innerText has no `x^2`),
+  # a phantom is hidden, a table a table.
+  it "renders MathML by MathML Core's user-agent sheet", :aggregate_failures do
+    s = page(
+      '<p id="p">a <math><semantics><mrow><mi>x</mi><mphantom id="ph"><mi>p</mi></mphantom></mrow><annotation id="an">x^2</annotation></semantics>' \
+      '<maction><mi>A</mi><mi id="mb">B</mi></maction><mtable id="t"><mtr><mtd><mi>t</mi></mtd></mtr></mtable></math> b</p>'
+    )
+    expect(s.evaluate_script('[getComputedStyle(an).display, getComputedStyle(mb).display, getComputedStyle(ph).visibility, getComputedStyle(t).display]')).to eq(%w[none none hidden inline-table])
+    expect(s.evaluate_script('p.innerText')).not_to include('x^2', 'B')
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 

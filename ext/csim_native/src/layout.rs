@@ -6165,8 +6165,9 @@ fn table_grid(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], declare
     // table's own edges, its declaration and its caption alone (§17.5.3 still floors that empty region at an
     // imposed height: Chrome makes an empty `height: 100px` table 100 tall). A HALF-empty one is not: columns
     // with no rows under them, or a row with no cells to give it a height, are `nlTableSupported`'s to decline.
-    // (…rows of no cell at all are no half: they are as tall as they declare, and as wide as nothing)
-    if rows.is_empty() != (c_count == 0) && !rows.iter().all(|&r| children[r].is_empty()) {
+    // (…rows of no cell at all are no half: they are as tall as they declare, and as wide as nothing; nor are columns over
+    // no row, which are as wide as they declare and of no height)
+    if c_count == 0 && !rows.iter().all(|&r| children[r].is_empty()) {
         return None;
     }
     for (ri, &r) in rows.iter().enumerate() {

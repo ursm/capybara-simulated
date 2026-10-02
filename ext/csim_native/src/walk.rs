@@ -974,6 +974,8 @@ struct TableGrid {
 // A row — an element's, or an anonymous one around stray content — its group, its content, and its cells placed.
 struct GridRow {
     el: Option<NodeId>,
+    // (…and, for the row standing in for an EMPTY row group, the height that group declares: NaN for any other)
+    height: f64,
     group: Option<usize>,
     nodes: Vec<NodeId>,
     pending: Vec<CellEl>,
@@ -1671,18 +1673,27 @@ impl<'a> Walk<'a> {
     // and an `auto` margin pushes it across): its own width and margins apply, as a block's do.
     // (…not asked by `boxless`, which `rendered_legend` walks the fieldset's children through: whether a box is
     // `contents` no blockification changes)
-    // …and a WIDGET's block-level display other than flex and grid the flow-root block HTML lays it out as (layout.js
-    // `WIDGET_BLOCK_DISPLAYS`): a `<button style="display: table-row">` is no row a block's anonymous table takes in.
+    // …and no table box what can be none: a REPLACED element or a control with a table display is an inline-level box
+    // (CSS Tables 3 §2.1, "a breaking change from CSS 2.1 but matches implementations" — Chrome and Firefox put an
+    // `<img style="display: table-cell">` on the line, 20 x 20), and a `<button>` or a `<fieldset>` the flow-root
+    // block HTML lays one out as whatever display is not inline-level (layout.js `WIDGET_BLOCK_DISPLAYS`).
     fn laid_display(&self, id: NodeId, b: &style::properties::style_structs::Box) -> Display {
         let node = self.node(id);
         let d = b.walk_display(node.rendering_tag());
-        if matches!(d.outside(), DisplayOutside::Inline) && node.is_html_named("legend") && self.rendered_legend(id) {
+        // (…a table display included: no anonymous table takes a rendered legend in)
+        if matches!(d.outside(), DisplayOutside::Inline | DisplayOutside::InternalTable | DisplayOutside::TableCaption)
+            && node.is_html_named("legend")
+            && self.rendered_legend(id)
+        {
             return d.equivalent_block_display(false);
         }
-        if widget_tag(node.rendering_tag())
-            && matches!(d.outside(), DisplayOutside::InternalTable | DisplayOutside::TableCaption)
-        {
-            return Display::Block;
+        if matches!(d.outside(), DisplayOutside::InternalTable | DisplayOutside::TableCaption) {
+            if replaced_or_control(self.arena, id, node) {
+                return Display::InlineBlock;
+            }
+            if widget_tag(node.rendering_tag()) {
+                return Display::Block;
+            }
         }
         d
     }
@@ -2724,7 +2735,8 @@ impl<'a> Walk<'a> {
     // `table-layout`), its cells and rows as a table's. Chrome makes one table of a block's consecutive orphan rows,
     // sharing their columns (three rows of 38.4, 48 and 19.2-wide pieces are one 105.6-wide table).
     fn anonymous_table(&mut self, kids: &[NodeId], parent: i32, style: &ComputedValues) -> Step {
-        let container = NodeId::from_i64(self.inputs[parent as usize].nid as i64).ok_or("anonymous table in no element")?;
+        // (…the element it is in by the flat tree, which the record it hangs from may not be: an anonymous cell's has none)
+        let container = self.layout_parent(kids[0]).ok_or("anonymous table in no element")?;
         let at = self.inputs.len() as i32;
         let mut rec = fresh_record();
         rec.nid = -1.0;
@@ -2746,7 +2758,9 @@ impl<'a> Walk<'a> {
         let mut grid = self.table_grid(table, container, kids)?;
         // (…rows holding no cell at all are no columns either: an empty orphan row's anonymous table is one of no width)
         let empty = grid.col_count == 0 && grid.rows.iter().all(|r| r.cells.is_empty());
-        if !empty && (grid.rows.is_empty() || grid.col_count == 0) {
+        // (…and columns over no row are a table as wide as they declare and of no height: Chrome's 50 for one orphan
+        // `display: table-column; width: 50px`)
+        if !empty && grid.col_count == 0 {
             return Err("table-half-empty");
         }
         if grid.rows.is_empty() && grid.captions.is_empty() && kids.iter().any(|&c| self.node(c).kind == NodeKind::Text && has_content(&self.node(c).data)) {
@@ -3067,6 +3081,8 @@ impl<'a> Walk<'a> {
                 r.parent = parent;
                 r.display = crate::layout::DISPLAY_TABLE_ROW;
                 r.run_start = -1;
+                r.row_height = row.height;
+                r.row_pct = f64::NAN;
                 self.push_record(r);
                 at
             }
@@ -3237,7 +3253,7 @@ impl<'a> Walk<'a> {
                         continue;
                     }
                     let at = *anon.get_or_insert_with(|| {
-                        grid.rows.push(GridRow { el: None, group, nodes: Vec::new(), pending: Vec::new(), cells: Vec::new() });
+                        grid.rows.push(GridRow { el: None, height: f64::NAN, group, nodes: Vec::new(), pending: Vec::new(), cells: Vec::new() });
                         grid.rows.len() - 1
                     });
                     grid.rows[at].nodes.push(c);
@@ -3257,7 +3273,7 @@ impl<'a> Walk<'a> {
                         (DisplayOutside::InternalTable, DisplayInside::TableRow) => {
                             anon = None;
                             let nodes = self.row_content(c, grid)?;
-                            grid.rows.push(GridRow { el: Some(c), group, nodes, pending: Vec::new(), cells: Vec::new() });
+                            grid.rows.push(GridRow { el: Some(c), height: f64::NAN, group, nodes, pending: Vec::new(), cells: Vec::new() });
                         }
                         (DisplayOutside::InternalTable, inside @ (DisplayInside::TableRowGroup | DisplayInside::TableHeaderGroup | DisplayInside::TableFooterGroup)) => {
                             anon = None;
@@ -3269,7 +3285,14 @@ impl<'a> Walk<'a> {
                             grid.groups.push(GridGroup { el: c, index: grid.groups.len(), first: -1, last: -1, rank });
                             let gi = grid.groups.len() - 1;
                             let rows: Vec<NodeId> = self.children(c).collect();
+                            let before = grid.rows.len();
                             self.collect_table(&rows, Some(gi), grid)?;
+                            // (…a group of NO row is still as tall as it declares — Chrome: an empty `height: 30px`
+                            // group is 0 x 30, its table 30 tall — which an anonymous empty row of that height carries)
+                            let height = size_lp(&cs.get_position().height).filter(|lp| !lp.has_percentage()).map_or(Ok(f64::NAN), length)?;
+                            if grid.rows.len() == before && !height.is_nan() {
+                                grid.rows.push(GridRow { el: None, height, group: Some(gi), nodes: Vec::new(), pending: Vec::new(), cells: Vec::new() });
+                            }
                         }
                         (DisplayOutside::TableCaption, _) => {
                             anon = None;
@@ -3297,7 +3320,7 @@ impl<'a> Walk<'a> {
                         }
                         _ => {
                             let at = *anon.get_or_insert_with(|| {
-                                grid.rows.push(GridRow { el: None, group, nodes: Vec::new(), pending: Vec::new(), cells: Vec::new() });
+                                grid.rows.push(GridRow { el: None, height: f64::NAN, group, nodes: Vec::new(), pending: Vec::new(), cells: Vec::new() });
                                 grid.rows.len() - 1
                             });
                             grid.rows[at].nodes.push(c);
