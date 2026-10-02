@@ -73,13 +73,14 @@ pub(crate) fn is_extended_pictographic(cp: u32) -> bool {
 // its rules): none BEFORE a closing mark, `!` / `?`, an infix separator or a `/` (LB13), none AFTER an opening one
 // (LB14), none on either side of a quotation mark (LB19) or a word joiner (LB11), none before a combining mark or a
 // joiner (LB9, which binds one across an element boundary too), and none around a no-break space (LB12, LB12a — whose
-// break before one survives only after a space, a hyphen or a break-after character).
+// break before one survives only after a space, a hyphen or a break-after character), and none after a currency sign
+// or before a `%` / `°` (LB23a / LB25, with letters read as ideographs: `ab$cd` is "ab" / "$cd").
 // Chrome: `abc.` in 30px under break-all is "ab" / "c.", not "abc" / ".".
 pub(crate) fn line_break_glues(prev: u32, next: u32) -> bool {
     use icu_properties::props::LineBreak as Lb;
     let classes = icu_properties::CodePointMapData::<Lb>::new();
     let (p, n) = (classes.get32(prev), classes.get32(next));
-    matches!(p, Lb::OpenPunctuation | Lb::Quotation | Lb::Glue | Lb::WordJoiner)
+    matches!(p, Lb::OpenPunctuation | Lb::Quotation | Lb::Glue | Lb::WordJoiner | Lb::PrefixNumeric)
         || matches!(
             n,
             Lb::ClosePunctuation
@@ -91,6 +92,7 @@ pub(crate) fn line_break_glues(prev: u32, next: u32) -> bool {
                 | Lb::WordJoiner
                 | Lb::CombiningMark
                 | Lb::ZWJ
+                | Lb::PostfixNumeric
         )
         || (n == Lb::Glue && !matches!(p, Lb::Space | Lb::BreakAfter | Lb::Hyphen))
 }

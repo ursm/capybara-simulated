@@ -491,6 +491,34 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # What break-all glues it glues by the character a mark ATTACHES to (LB9: `"&#x301;` is a quotation mark), and a
+  # currency sign to what follows and a `%` to what precedes (LB23a / LB25); a run ENDING in a zero width space leaves an
+  # opportunity like any space. And a declared `overflow-wrap` still breaks a glued unit wider than the band: `.......`
+  # under break-all + anywhere is three lines in Chrome (one, overflowing, under break-all alone), and its min-content
+  # counts those emergency breaks (`ab.` is 9.6). Chrome: 66 for `ab"&#x301;cd` in 30px, "ab" / "$cd", "ab" / "c%d", 66
+  # for `xx ab&#x200B;<b>cdcd</b>` in 40px.
+  it 'glues by the base character, and lets overflow-wrap break what break-all glues', :aggregate_failures do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0"><div style="word-break: break-all">' \
+      '<div style="width: 30px" id="a">ab"&#x301;cd</div>' \
+      '<div style="width: 30px"><b id="b">ab$cd</b></div><div style="width: 30px"><b id="c">abc%d</b></div>' \
+      '<div style="width: 30px; overflow-wrap: anywhere"><b id="d">.......</b></div>' \
+      '<div style="width: min-content; overflow-wrap: anywhere" id="e">ab.</div></div>' \
+      '<div style="width: 40px" id="f">xx ab&#x200B;<b>cdcd</b></div></body>'
+    )
+    expect(s.evaluate_script(<<~JS)).to eq([66, [19.2, 28.8], [19.2, 28.8], [28.8, 28.8, 9.6], 9.6, 66])
+      [
+        a.getBoundingClientRect().height,
+        [...b.getClientRects()].map((r) => +r.width.toFixed(2)),
+        [...c.getClientRects()].map((r) => +r.width.toFixed(2)),
+        [...d.getClientRects()].map((r) => +r.width.toFixed(2)),
+        +e.getBoundingClientRect().width.toFixed(2),
+        f.getBoundingClientRect().height
+      ]
+    JS
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # A node of nothing but soft hyphens under `hyphens: none` is a zero-wide word that still makes its line (Chrome: 22
   # tall), and a preserved node of nothing but a CR under a text indent is laid out as nothing (Chrome measures the indent
   # into a shrink-to-fit width — 20 — which goes unmeasured here) — where the walk declined both.

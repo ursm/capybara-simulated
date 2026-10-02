@@ -589,26 +589,23 @@ RSpec.describe 'native layout float parity' do
   # checked-in sweeps for as long as `fzws` had existed (and waved through as "native is the right engine"
   # every time, which it was — the ORACLE had to move).
   #
-  # WITHOUT the indent the same shape is 22 in BOTH engines and 82 in Chrome, for TWO reasons, not one.
-  # `floatBand` clamps a band at zero, so a zero-width run fits even the narrowest one and neither engine yet
-  # counts the run AFTER it as what has to fit (a ZWJ, or `letter-spacing` driving a glyph to zero, show that
-  # half alone). And U+200B is not a break opportunity in EITHER engine at all — `BREAK_AFTER_RE` is built on
-  # JS `\s`, which does not match it — so `a&#8203;ddd` in a 30px block with no float anywhere is one 22px line
-  # here and two (44) in Chrome. Shared, so recorded rather than fixed; pinned so it cannot drift apart.
-  # …and the pin's tripwire is `expect_shared_gap`, which checks CHROME first: written inline it came second,
-  # behind an assertion that would have failed first on exactly the fix it was there to announce.
+  # WITHOUT the indent the same shape was 22 in both engines and 82 in Chrome: neither took the break after the
+  # span that ENDS in the ZWSP (`BREAK_AFTER_RE` was JS `\s`, which does not match U+200B), so `ddd` stayed glued to
+  # it. It takes it now. Still shared: a U+200B INSIDE a word is no opportunity in either engine (`a&#8203;ddd` in a
+  # 30px block is one 22px line here and two in Chrome), and `floatBand` clamps a band at zero, so a zero-width run fits
+  # even the narrowest one and neither engine counts the run AFTER it as what has to fit.
   it 'drops a line whose zero-width first run leaves no room for the indent (Chrome: 82)' do
     float = '<div style="float:right;width:90px;height:60px"></div>'
     {
-      'text-indent:9px;' => [82, 82],
-      '' => [22, 82]
-    }.each do |indent, (shared, chrome)|
+      'text-indent:9px;' => 82,
+      '' => 82
+    }.each do |indent, chrome|
       body = %(<div style="width:80px;font:16px monospace;#{indent}">#{float}<div id="t" style="width:40px"><span>&#8203;</span>ddd</div></div>)
       expect_parity(body)
       session = simulated_session(page(body))
       session.visit '/'
       h = session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")
-      expect_shared_gap(h, shared: shared, chrome: chrome, what: "#{body}: #t height")
+      expect(h).to be_within(0.05).of(chrome), "#{body}: #t height"
     end
   end
 

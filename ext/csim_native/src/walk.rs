@@ -4989,7 +4989,8 @@ fn align_code(align: TextAlign, starts_at_right: bool) -> u8 {
         _ => if starts_at_right { 1 } else { 0 },
     }
 }
-// The in-word break mode (`nlWrapMode`): 0 none, 1 break-all, 2 break-word, 3 anywhere.
+// The in-word break mode (`nlWrapMode`): 0 none, 1 break-all, 2 break-word, 3 anywhere, 4 break-all + break-word,
+// 5 break-all + anywhere.
 fn wrap_mode(style: &ComputedValues) -> u8 {
     let t = style.get_inherited_text();
     let break_all = t.word_break == WordBreak::BreakAll;
@@ -4997,10 +4998,13 @@ fn wrap_mode(style: &ComputedValues) -> u8 {
     if !(break_all || wrap != OverflowWrap::Normal) {
         return 0;
     }
-    if break_all {
-        return 1;
+    match (break_all, wrap) {
+        (true, OverflowWrap::Normal) => 1,
+        (true, OverflowWrap::Anywhere) => 5,
+        (true, _) => 4,
+        (false, OverflowWrap::Anywhere) => 3,
+        _ => 2,
     }
-    if wrap == OverflowWrap::Anywhere { 3 } else { 2 }
 }
 // JavaScript's `Math.round`: halves go UP, toward +∞.
 pub(crate) fn js_round(x: f64) -> f64 {

@@ -1561,9 +1561,11 @@ RSpec.describe 'native layout L2 text-block parity' do
       expect_parity('<div style="width:24px;word-break:break-all">q<span style="font-size:40px"> </span>aaaa</div>')
       expect_parity('<div style="width:300px">q<span style="font-size:40px"> </span>well-known</div>')  # …and where it does stay
     end
-    # A run ending in a JS `\s` that is NOT css white space — an NBSP, a thin space, a BOM — leaves an
-    # opportunity too (`BREAK_AFTER_RE`), and none of them reaches native as a space run of its own.
-    it 'breaks after a non-collapsing space a run ends with' do
+    # A run ending in a space character that is NOT css white space — a thin space, an ideographic space — leaves an
+    # opportunity too (`BREAK_AFTER_RE`), and none of them reaches native as a space run of its own; one ending in a
+    # NO-BREAK space (U+00A0, U+2007, U+202F, U+FEFF) or a U+000B leaves none (Chrome: the guard in
+    # rust_walk_coverage_spec).
+    it 'breaks after the space characters a run ends with, and after no no-break space' do
       %w[000B 00A0 2007 2009 200A 2028 2029 202F 205F 1680 2000 2003 FEFF].each do |cp|
         expect_parity(%(<div style="width:80px">xx ab&\#x#{cp};<b>kgkgkgkg</b></div>))
       end
