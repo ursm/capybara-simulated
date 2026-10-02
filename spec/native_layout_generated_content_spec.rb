@@ -34,6 +34,7 @@ RSpec.describe 'native layout generated content' do
       [format(css, 'width:20px;height:10px'), '<div class="p" style="display:grid;grid-template-columns:100px auto;width:400px"><div>x</div></div>'],
       # a FLOAT, the text beside it routed round it, and an OUT-OF-FLOW box (which moves nothing: see below)
       [format(css, 'float:left;width:20px;height:10px'), '<div style="width:400px"><div class="p">beside</div></div>'],
+      [format(css, 'float:left;width:20px;height:10px'), '<div style="width:400px"><div class="p"></div></div>'],
       [format(css, 'position:absolute;width:20px;height:10px'), '<div style="width:400px;position:relative"><div class="p"></div></div>'],
       # a TABLE CELL, on the row
       [format(css, 'display:table-cell;width:20px;height:10px'), '<table style="border-spacing:0"><tr class="p"><td style="padding:0">a</td></tr></table>']

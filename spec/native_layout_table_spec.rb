@@ -1551,4 +1551,60 @@ RSpec.describe 'native layout table' do
     end
   end
 
+  # Tables a walk once refused: columns and no rows, a table, flex or grid container out of flow or relatively
+  # positioned, a cell holding a `-webkit-sticky` box (in an inline-block, beside a grid
+  # and a run of blocks), and an orphan `display: table-row` of inline content.
+  it 'lays out the tables a walk once refused' do
+    sticky = '<span style="display:inline-block"><div style="position:-webkit-sticky;width:9px;height:4px"></div>t</span>'
+    grid   = '<div style="display:grid;grid-template-columns:min-content;width:50px"><div>g</div></div>'
+    blocks = '<div style="width:3px;height:2px"></div>' * 4
+    [
+      '<table style="border-spacing:4px"><colgroup><col style="width:40px"><col style="width:60px"></colgroup></table>',
+      '<table style="border-spacing:4px"><tr><td style="width:40px">a</td><td style="width:40px">b</td></tr></table>',
+      *[
+        ['table', '<tr><td>a</td><td>bb cc</td></tr>'],
+        ['div', '<div>a</div><div>bb cc</div>', 'display:flex;'],
+        ['div', '<div>a</div><div>bb cc</div>', 'display:grid;grid-template-columns:auto auto;']
+      ].flat_map {|tag, content, display = ''|
+        [
+          %(<div style="position:relative;width:300px;height:200px"><#{tag} id="r" style="#{display}position:absolute;right:10px;bottom:5px">#{content}</#{tag}></div>),
+          %(<div style="position:relative;width:300px;height:200px"><#{tag} id="r" style="#{display}position:fixed;top:0;left:0">#{content}</#{tag}></div>),
+          %(<div style="width:300px"><#{tag} id="r" style="#{display}position:relative">#{content}</#{tag}></div>)
+        ]
+      },
+      %(<div style="width:400px"><table><tr><td>#{grid}#{sticky}#{blocks}</td></tr></table></div>),
+      %(<div style="width:400px"><table><tr><td>#{grid}#{blocks}#{sticky}</td></tr></table></div>),
+      '<table style="border-spacing:0"><tr><td style="padding:0">a <span style="display:inline-block">ok</span></td></tr></table>',
+      '<table style="border-spacing:0"><tr><td style="padding:0"><div style="position:-webkit-sticky;width:9px;height:4px"></div>t</td></tr></table>',
+      '<div style="width:400px"><div style="display:table-row"><span>aaaa</span><span>bbbb</span></div></div>',
+      '<div style="width:400px"><div style="display:table-row"><br></div></div>'
+    ].each {|body| expect_layout(body) }
+  end
+  # …but a row group NESTED in another, its rows interleaved with the outer group's, the Rust walk declines
+  # (`table-group-interleaved`), and the page is left its root alone: every box 0 by 0, where Chrome wraps the inner
+  # group in an anonymous table in an anonymous cell and the table is 98 tall.
+  it 'declines a row group nested in another (Chrome: a 98px table)', rust_declines: true do
+    body = '<div id="m" style="display:table;border-spacing:4px"><div style="display:table-row-group">' \
+           '<div style="display:table-row"><div style="display:table-cell;width:40px;height:20px">r1</div></div>' \
+           '<div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;height:18px">r2</div></div></div>' \
+           '<div style="display:table-row"><div style="display:table-cell;height:36px">r3</div></div></div></div>'
+    session = simulated_session(page(body))
+    session.visit '/'
+    height = session.evaluate_script("document.getElementById('m').getBoundingClientRect().height")
+    expect(rust_declines(session)).to eq('{"rust: table-group-interleaved":1}')
+    expect_shared_gap(height, shared: 0, chrome: 98, what: "#{body}: #m height")
+  end
+  # A `<col>` and a `<colgroup>` have no box: every one is 0 by 0 at the origin, where Chrome gives a column the rect
+  # of the cells it spans (40 by 20 here). And an inline-table holding nothing but a column is as wide as that column
+  # (34) under a min-content width, where Chrome makes it 7.11, the width of the `a` beside it; with room to spare
+  # both say 34.
+  it 'gives a column no box (Chrome: its cells\' rect), and a column-only inline-table its column under min-content' do
+    [
+      [2, 0, 40, '<table style="border-spacing:0"><colgroup><col id="m" style="width:40px"></colgroup><tr><td>a</td></tr></table>'],
+      [2, 34, 7.11, '<div style="width:min-content">a<table id="m" style="display:inline-table"><colgroup><col style="width:30px"></colgroup></table></div>']
+    ].each do |index, shared, chrome, body|
+      expect_layout(body)
+      expect_shared_gap(laid_out_rect(body)[index], shared: shared, chrome: chrome, what: "#{body}: #m rect[#{index}]")
+    end
+  end
 end

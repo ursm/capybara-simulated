@@ -920,7 +920,8 @@ x</div>))
         expect_layout(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:7px">#{mark}aa</span></span></div>))
         # …and an edge that cancels is never placed AT ALL, so nothing in that inline is ever waiting: a
         # marker written AFTER its content reads the cursor, where holding it back would have put it at the
-        # fragment's start (measured in Chrome: 38.41, which is the cursor).
+        # fragment's start. (Chrome's 38.41 is the cursor for an INLINE-level marker; this block-level one Chrome and
+        # Firefox put at the next line's start, 0 / 22 — the family pinned at 'puts a block-level abspos …'.)
         expect_layout(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">word#{mark}more</span></span></div>))
         expect_layout(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">word #{mark}more</span></span></div>))
       end
@@ -1511,5 +1512,67 @@ x</div>))
       expect_layout(body)
       laid_out_rect(body).zip(rect).each {|g, w| expect(g).to be_within(0.01).of(w), body }
     end
+  end
+
+  # Shapes a walk once refused, which the layout places like any other: a `-webkit-sticky` box in a block, an atomic, a
+  # float and a max-content box; an orphan `display: table-row` beside them; `break-all` over a ZERO WIDTH JOINER; and
+  # a column-only `inline-table` in a cell's max-content box.
+  it 'places the shapes a walk once refused' do
+    orphan_row = '<div style="display:table-row"><span>aa bb</span></div>'
+    [
+      %(<div style="width:400px"><div style="position:-webkit-sticky;width:9px;height:4px"></div>t</div>),
+      %(<div style="width:400px">text #{STICKY_ATOMIC} after</div>),
+      %(<div style="width:400px"><div>a #{STICKY_ATOMIC}</div></div>),
+      %(<div style="width:400px;overflow:hidden"><div style="float:left">t #{STICKY_ATOMIC} a</div></div>),
+      %(<div style="width:400px;overflow:hidden"><div style="float:left"><p>a</p>text #{STICKY_ATOMIC} more<p>b</p></div></div>),
+      %(<div style="width:400px"><div style="width:max-content"><span style="display:inline-block">#{STICKY_ATOMIC}</span></div></div>),
+      %(<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit"><span style="display:inline-block">#{STICKY_ATOMIC}</span></div></div></div>),
+      %(<div style="width:400px">#{orphan_row}</div>),
+      %(<div style="width:400px;overflow:hidden"><div style="float:left">t <span style="display:inline-block">#{orphan_row}</span> a</div></div>),
+      %(<div style="width:400px"><div>text #{STICKY_ATOMIC} after</div><div>#{orphan_row}</div></div>),
+      %(<div style="width:400px"><p>a</p>text <div style="float:left;width:30px">#{orphan_row}</div> more<p>b</p></div>),
+      %(<div id="flex" style="width:400px">#{orphan_row}</div><div id="atomic" style="width:400px;overflow:hidden"><div style="float:left">t #{STICKY_ATOMIC} a</div></div>) +
+        '<div id="fine" style="width:400px"><div style="height:10px">x</div></div>',
+      '<div style="width:400px;overflow:hidden"><div style="float:left">t <span style="display:inline-block;word-break:break-all">a&zwj;b</span> a</div></div>',
+      '<div style="width:400px;word-break:break-all">a&#x200D;b</div>',
+      '<div style="width:400px;word-break:break-all"><p>a</p>x&#x200D;y<p>b</p></div>',
+      %(<div style="width:400px"><table><tr><td><div style="width:max-content"><div>#{COLUMN_ONLY_INLINE_TABLE}</div></div></td></tr></table></div>),
+      '<div style="width:200px;font:16px monospace"><span style="position:relative;top:10px">a<span style="display:inline-block">' \
+        '<div style="display:flex;width:50px;height:20px;align-items:flex-end"><i style="position:absolute;width:5px;height:5px"></i></div></span></span></div>',
+      '<div id="r" style="width:max-content">aa bb cc</div>'
+    ].each {|body| expect_layout(body) }
+  end
+  # A BLOCK-level abspos box written in inline content takes its static position at the inline cursor, beside `hello`
+  # (57.6, 0), where Chrome and Firefox put it at the start of the next line (0, 22) — as if it closed the line, which
+  # a block-level box in inline content does. Every static-position golden of a block-level marker on a line holds
+  # the cursor.
+  it 'puts a block-level abspos in inline content at the inline cursor (Chrome, Firefox: the next line)' do
+    body = '<div style="position:relative;width:200px;font:16px monospace">hello <div id="m" style="position:absolute;width:10px;height:10px"></div>world</div>'
+    expect_layout(body)
+    x, y = laid_out_rect(body)
+    expect_shared_gap(x, shared: 57.6, chrome: 0, what: "#{body}: #m x")
+    expect_shared_gap(y, shared: 0, chrome: 22, what: "#{body}: #m y")
+  end
+  # A multi-column container lays its content out in ONE column as wide as itself: `column-count: 2` in 400px is a
+  # 400px column, where the spec's (and Chrome's) is 192 — the room less one 1em gap, halved.
+  it 'lays a multi-column container out as one column (Chrome: 192 of 400)' do
+    body = '<div style="width:400px"><div style="column-count:2"><div id="m" style="height:10px"></div><div style="height:10px"></div></div></div>'
+    expect_layout(body)
+    expect_shared_gap(laid_out_rect(body)[2], shared: 400, chrome: 192, what: "#{body}: #m width")
+  end
+  # …and in a VERTICAL-LR block, which lays its text out horizontally: a 100px-tall block of `aa bb cc` is 52.4 wide
+  # where Chrome stacks the words in columns 18 wide.
+  it 'lays the text of a vertical-lr block out horizontally (Chrome: in columns)' do
+    vertical = '<div id="m" style="writing-mode:vertical-lr;height:100px">aa bb cc</div>'
+    expect_layout(vertical)
+    expect_shared_gap(laid_out_rect(vertical)[2], shared: 52.4, chrome: 18, what: "#{vertical}: #m width")
+    [
+      %(<div style="width:400px"><div style="writing-mode:vertical-lr"><div>#{COLUMN_ONLY_INLINE_TABLE}</div></div></div>),
+      %(<div style="width:400px"><div style="writing-mode:vertical-lr">#{STICKY_ATOMIC}</div></div>),
+      %(<div style="width:400px"><div style="writing-mode:vertical-lr">a #{STICKY_ATOMIC}</div></div>),
+      %(<div style="width:400px"><div style="writing-mode:vertical-lr">a <span style="display:inline-block">#{STICKY_ATOMIC}</span></div></div>),
+      %(<div style="width:400px"><div style="writing-mode:vertical-lr">a<br>b #{STICKY_ATOMIC}</div></div>),
+      %(<div style="display:grid;grid-template-columns:200px;width:400px"><div><div style="writing-mode:vertical-lr">a #{STICKY_ATOMIC}</div></div></div>)
+    ].each {|body| expect_layout(body) }
   end
 end

@@ -1676,4 +1676,28 @@ RSpec.describe 'native layout flex' do
     expect_layout(body)
     expect(marked_box(body)[1]).to be_within(0.05).of(3.59)   # Chrome
   end
+
+  # Flex items whose content a walk once refused to size: an inline-block holding a `-webkit-sticky` box or an orphan
+  # `display: table-row`, in a row and in a column, and a column-only `inline-table` under a baseline-aligned grid item
+  # and in a table cell.
+  it 'sizes a flex item whose content a walk once refused' do
+    columns = '<div>a<table style="display:inline-table"><colgroup><col style="width:30px"></colgroup></table></div>'
+    [
+      '<span style="display:inline-block"><div style="position:-webkit-sticky;width:9px;height:4px"></div>t</span>',
+      '<span style="display:inline-block"><div style="display:table-row"><span>aa bb</span></div></span>',
+      '<span style="display:inline-block">ok</span>'
+    ].each do |atomic|
+      expect_layout(%(<div style="display:flex;width:300px"><div>a #{atomic}</div><div style="flex:1">x</div></div>))
+      expect_layout(%(<div style="display:flex;flex-direction:column;width:300px;height:200px"><div>a #{atomic}</div><div>x</div></div>))
+    end
+    expect_layout(%(<div style="width:400px">#{columns}</div>))
+    expect_layout(
+      %(<div style="display:flex;align-items:baseline;width:400px"><div style="display:grid;grid-template-columns:1fr min-content"><div>g1</div><div>#{columns}</div></div>) +
+        '<div style="font-size:32px">BIG</div></div>'
+    )
+    expect_layout(
+      '<table style="font:16px monospace"><tr><td><div style="display:flex"><div>x<table style="display:inline-table"><colgroup><col style="width:20px"></colgroup></table></div></div>' \
+      '<span style="display:inline-block"><div style="display:table-row">aa bb</div></span></td></tr></table>'
+    )
+  end
 end

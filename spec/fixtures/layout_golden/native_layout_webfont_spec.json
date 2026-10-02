@@ -1,6 +1,7 @@
 {
   "00e60c35353c5660": {"body":"<div style=\"width:300px;font:16px AhemTest\">a <b>bold</b> and <span>more</span> text</div>","boxes":[["body",[0,0,1024,32]],["div",[0,0,300,32]],["#text",[]],["b",[32,0,64,16]],["#text",[]],["#text",[]],["span",[176,0,64,16]],["#text",[]],["#text",[]]]},
-  "58c4763e229cee9a": {"body":"<div style=\"width:120px;font:20px MixFont\">aa bb cc dd ee ff gg</div>","variant":"face=ae2c5e60818a","boxes":[["body",[0,0,1024,46]],["div",[0,0,120,46]],["#text",[]]]},
+  "58c4763e229cee9a": {"body":"<div style=\"width:120px;font:20px MixFont\">aa bb cc dd ee ff gg</div>","variant":"face=ae2c5e60818a","boxes":[["body",[0,0,1024,46]],["div",[0,0,120,46]],["#text",[]]],"chrome":{"0":["body",[0,0,1024,80]],"1":["div",[0,0,120,80]]}},
+  "5fc4e3f443882e12": {"body":"<div id=\"m\" style=\"width:120px;font:20px MixFont\">aa bb cc dd ee ff gg</div>","variant":"face=ae2c5e60818a","boxes":[["body",[0,0,1024,46]],["div",[0,0,120,46]],["#text",[]]],"chrome":{"0":["body",[0,0,1024,80]],"1":["div",[0,0,120,80]]}},
   "857c71058cce2591": {"body":"<div style=\"width:120px;font:20px AhemTest\">XX xx word wrap onto more lines here now ok</div>","variant":"ct=b9d9f8a1a168,ext=9aee6ac80dbc,font=9024b1618962","boxes":[["body",[0,0,1024,160]],["div",[0,0,120,160]],["#text",[]]]},
   "eb6f5beee906f134": {"body":"<div style=\"width:400px;font:20px MixFont\"><span id=\"m\">XXXX</span></div>","variant":"face=c7601d2e7274","boxes":[["body",[0,0,1024,20]],["div",[0,0,400,20]],["span",[0,0,80,20]],["#text",[]]]},
   "eff6c1f47662a26b": {"body":"<div style=\"width:120px;font:20px AhemTest\">XX xx word wrap onto more lines here now ok</div>","boxes":[["body",[0,0,1024,160]],["div",[0,0,120,160]],["#text",[]]]},

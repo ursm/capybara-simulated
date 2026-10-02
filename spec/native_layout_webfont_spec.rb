@@ -6,6 +6,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/chrome_figures'
 require_relative 'support/layout_golden'
 
 RSpec.describe 'native layout web-font' do
@@ -84,5 +85,19 @@ RSpec.describe 'native layout web-font' do
     JS
     expect(session.evaluate_script(lines)).to eq(ahem), 'a stale native font handle?'
     expect(session.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
+  # A `local()` source names a face by its FULL name or its PostScript name (CSS Fonts 4 §4.3.1), and the layout
+  # asks fontconfig for it as a FAMILY, which answers `Arial` with its metric alias, Liberation Sans: two lines, 46
+  # tall. No face on this machine is named "Arial" or "Noto Sans" in full, so Chrome falls through to the download —
+  # Ahem's four 20px lines, 80 tall.
+  it 'matches a local() source by family name (Chrome: by full name, so the download)' do
+    face = "@font-face{font-family:'MixFont';src:local('Arial'),local('Noto Sans'),url('/f.ttf')}"
+    body = '<div id="m" style="width:120px;font:20px MixFont">aa bb cc dd ee ff gg</div>'
+    expect_layout(body, face: face)
+    session = simulated_session(page(body, face: face))
+    session.visit '/'
+    height = session.evaluate_script("document.getElementById('m').getBoundingClientRect().height")
+    expect_shared_gap(height, shared: 46, chrome: 80, what: "#{body}: #m height")
   end
 end

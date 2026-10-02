@@ -594,4 +594,20 @@ RSpec.describe 'native layout float' do
       end
     end
   end
+
+  # A float that is itself, or holds, a box of a VENDOR `position` (`-webkit-sticky`), or holds an orphan
+  # `display: table-row` in an inline-block — shapes a walk once refused.
+  it 'places a float holding a -webkit-sticky box or an orphan table row' do
+    sticky = '<span style="display:inline-block"><div style="position:-webkit-sticky;width:9px;height:4px"></div>t</span>'
+    row    = '<span style="display:inline-block"><div style="display:table-row"><span>aa bb</span></div></span>'
+    [
+      %(<div style="width:300px;overflow:hidden"><div style="float:left">#{sticky}</div></div>),
+      %(<div style="width:300px;overflow:hidden"><div style="float:left;width:200px">#{sticky}</div></div>),
+      %(<div style="width:300px;overflow:hidden"><div style="float:left">#{row}</div></div>),
+      %(<div style="width:300px;overflow:hidden"><div style="float:left;width:200px">#{row}</div></div>),
+      '<div style="width:300px">aaa <span style="float:left;position:-webkit-sticky;width:50px;height:20px"></span>bbb</div>',
+      '<div style="width:300px;overflow:hidden"><div style="float:left;position:-webkit-sticky;width:50px;height:50px"></div>t</div>',
+      %(<div style="width:300px">aaa <span style="float:left">#{sticky}</span>bbb</div>)
+    ].each {|body| expect_layout(body) }
+  end
 end

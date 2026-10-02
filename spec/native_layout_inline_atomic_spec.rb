@@ -834,4 +834,49 @@ RSpec.describe 'native layout inline-atomic' do
       expect_layout('<div style="width:400px">a <span style="display:inline-flex;flex-wrap:wrap;position:relative"><div style="width:20px;height:5px"></div><div style="position:absolute;left:0;width:300px;height:5px"></div></span> b</div>')
     end
   end
+
+  # Atomics a walk once refused or pushed whole: one holding a `-webkit-sticky` box (relatively shifted, a flex item's
+  # content, on a plain line), an inline-flex, an inline `<svg>`, and an inline-block holding a column-only
+  # `inline-table` in every context that sizes it — a flex item, a grid item, an abspos box, a float, another atomic.
+  it 'places the atomics a walk once refused' do
+    sticky = '<span style="display:inline-block"><div style="position:-webkit-sticky;width:9px;height:4px"></div>t</span>'
+    columns = '<span style="display:inline-block"><div>a<table style="display:inline-table"><colgroup><col style="width:30px"></colgroup></table></div></span>'
+    [
+      %(<div style="width:200px">a <span style="position:relative;left:30px;top:7px">#{sticky}</span></div>),
+      %(<div style="display:flex;width:300px"><div>x <span style="display:inline-block"><div>b</div>t #{sticky}</span></div><div style="flex:1">y</div></div>),
+      %(<div style="width:400px">text #{sticky} x</div>),
+      '<div style="width:400px">text <span style="display:inline-flex"><div>f</div></span> x</div>',
+      '<div style="width:400px">before <svg width="30" height="20"></svg> after</div>',
+      %(<div style="width:400px"><div style="writing-mode:vertical-lr">a #{columns} b</div></div>),
+      %(<div style="display:flex;width:100px"><div>a #{columns} b</div><div style="flex:1">x</div></div>),
+      %(<div style="width:400px;position:relative"><div style="position:absolute;left:0">a #{columns} b</div><p>x</p></div>),
+      %(<div style="width:400px;position:relative"><div style="position:absolute;left:0;right:100px">a #{columns} b</div><p>x</p></div>),
+      %(<div style="width:400px">x <span style="display:inline-block">a #{columns} b</span></div>),
+      %(<div style="width:400px">a <span style="display:inline-block">a #{columns} b</span> c</div>),
+      %(<div style="overflow:hidden;width:400px"><div style="float:left;width:200px">f <span style="display:inline-block">a #{columns} b</span> g</div></div>),
+      %(<div style="display:grid;grid-template-columns:100px 200px;width:400px"><div>a #{columns} b</div><div>x</div></div>),
+      %(<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a #{columns} b</div><div>x</div></div>)
+    ].each {|body| expect_layout(body) }
+  end
+
+  # Where an atomic's own box or its place on the line differs from Chrome's, one shape a family, Chrome's figure
+  # beside the layout's:
+  #   * an inline-flex line is 44 tall where Chrome's is 40 — the flex container's baseline sits lower;
+  #   * the marker after an inline-table with a `<thead>` sits at 35, on the second row's baseline, where Chrome's sits
+  #     at 17, on the header's;
+  #   * an `<img>` with no `src` is a 16x16 box, Chrome's is 0 by 0;
+  #   * a wrapping inline-flex capped at `max-width: 40px` is as wide as its 80px item, Chrome's is 40;
+  #   * an inline list box is 35.83 wide, Chrome's 20.83 (its options' rows 15 tall where Chrome's are 17).
+  it 'places an atomic where Chrome does not, one family at a time' do
+    [
+      [3, 44, 40, '<div id="m" style="width:400px">text <span style="display:inline-flex"><div style="width:50px;height:30px"></div><div style="width:80px;height:40px"></div></span> after</div>'],
+      [1, 35, 17, '<div style="width:400px">x <table style="display:inline-table"><thead><tr><td>h</td></tr></thead><tbody><tr><td>b</td></tr></tbody></table><span id="m" style="display:inline-block;width:4px;height:4px"></span> y</div>'],
+      [2, 16, 0, '<div style="width:400px">text <img id="m"> after</div>'],
+      [2, 80, 40, '<div style="width:400px">text <span id="m" style="display:inline-flex;flex-wrap:wrap;max-width:40px"><div style="width:80px;height:10px;flex-shrink:0"></div></span> after</div>'],
+      [2, 35.83, 20.83, '<div style="width:400px">text <select id="m" multiple size="3" style="display:inline"><option>a</option><option>bb</option></select> after</div>']
+    ].each do |index, shared, chrome, body|
+      expect_layout(body)
+      expect_shared_gap(laid_out_rect(body)[index], shared: shared, chrome: chrome, what: "#{body}: #m rect[#{index}]")
+    end
+  end
 end

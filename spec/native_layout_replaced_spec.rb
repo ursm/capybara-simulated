@@ -328,4 +328,44 @@ RSpec.describe 'native layout replaced-leaf' do
     s.visit '/'
     expect(s.evaluate_script('[document.documentElement, document.getElementById("inner")].map((e) => getComputedStyle(e).overflow).join(" ")')).to eq('visible hidden')
   end
+
+  # Boxes whose auto width is not the room they are given — a `<button>` at every display it carries, an atomic inline,
+  # a flex item, a float, a table, a grid item — beside ones whose width the room does decide. Each was once refused as
+  # a box to start a layout at.
+  it 'sizes a box whose auto width is not its room' do
+    [
+      *%w[flex grid flow-root table block].map {|display|
+        %(<div style="width:400px"><button id="t" style="display:#{display}"><span>a long button label</span></button></div>)
+      },
+      '<div style="width:400px"><button style="display:block"><div><div>a<table style="display:inline-table"><colgroup><col style="width:30px"></colgroup></table></div></div></button></div>',
+      '<div style="width:400px"><button id="t" style="display:flex;width:200px"><span>lab</span></button></div>',
+      '<div style="width:400px"><button id="t" style="display:flex;width:50%"><span>lab</span></button></div>',
+      '<div style="width:400px"><span id="t" style="display:inline-flex"><span>lab</span></span></div>',
+      '<div style="width:400px"><span id="t" style="display:inline-grid"><span>lab</span></span></div>',
+      '<div style="width:400px"><span id="t" style="display:inline-flex;width:200px"><span>lab</span></span></div>',
+      '<div style="display:flex;width:400px"><div id="t">a long label</div><div style="width:50px;height:5px"></div></div>',
+      '<div style="display:flex;width:400px"><div id="t" style="flex:1">a long label</div><div style="width:50px;height:5px"></div></div>',
+      '<div style="width:400px"><div id="t" style="float:left">hello there</div></div>',
+      '<div style="width:400px"><div id="t" style="float:left;display:flex"><span>hello there</span></div></div>',
+      '<div style="width:400px"><div id="t" style="float:left;display:grid"><span>hello there</span></div></div>',
+      '<div style="width:400px"><div id="t" style="float:left;display:table"><div style="display:table-cell">hello there</div></div></div>',
+      '<div style="width:60px"><div id="t" style="float:left;display:table"><div style="display:table-cell">hello there</div></div></div>',
+      '<div style="width:400px"><table id="t"><tr><td>a long label</td></tr></table></div>',
+      '<div style="width:120px"><table id="t" style="float:left"><tr><td>a long label</td></tr></table></div>',
+      '<div style="display:grid;grid-template-columns:350px;width:400px"><table id="t"><tr><td>a long label</td></tr></table></div>',
+      '<div style="display:grid;grid-template-columns:350px;width:400px"><table id="t" style="float:left"><tr><td>a long label</td></tr></table></div>',
+      '<div style="display:grid;grid-template-columns:350px;width:400px"><div id="t" style="display:table"><div style="display:table-cell">a long label</div></div></div>',
+      '<div style="display:grid;grid-template-columns:350px;width:400px"><div id="t" style="display:flex"><span>lab</span></div></div>',
+      '<div style="display:grid;grid-template-columns:350px;width:400px"><div id="t" style="justify-self:start">a long label</div></div>',
+      # …and the room deciding it
+      '<div style="width:400px"><div id="t" style="display:flex"><span>lab</span></div></div>',
+      '<div style="width:400px"><div id="t" style="width:calc(50% - 10px)">ab</div></div>',
+      '<div style="width:400px"><div id="t" style="min-width:600px">ab</div></div>'
+    ].each {|body| expect_layout(body) }
+  end
+  # …a list box as a max-content block and as a grid item
+  it 'sizes a list box under a keyword width and in a grid track' do
+    expect_layout('<div style="width:400px"><select multiple size="3" style="display:block;width:max-content"><option>a</option><option>bbbb</option></select></div>')
+    expect_layout('<div style="width:400px"><div style="display:grid;grid-template-columns:150px 1fr;width:400px"><select multiple size="3"><option>a</option><option>bbbb</option></select><div>y</div></div></div>')
+  end
 end
