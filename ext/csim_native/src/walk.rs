@@ -1823,8 +1823,9 @@ impl<'a> Walk<'a> {
             // in normal flow — filling its containing block — and not for a flex item or an out-of-flow box, which the two
             // engines share)
             Size::Stretch | Size::WebkitFillAvailable => 0,
-            // (…and `fit-content(<length>)` the fit-content it clamps, its argument aside)
-            Size::FitContentFunction(_) => 3,
+            // (…and `fit-content(<length>)` the `auto` Chrome and Firefox give it, which take the declaration for invalid:
+            // CSS Sizing 3's min(max-content, max(min-content, <length>)) wants its argument on the record, which has none)
+            Size::FitContentFunction(_) => 0,
         };
         rec.height_kw = matches!(pos.height, Size::MinContent | Size::MaxContent | Size::FitContent);
         rec.is_button = tag == "button";
@@ -4409,8 +4410,14 @@ fn edge_lps(style: &ComputedValues) -> Result<([Option<&LengthPercentage>; 8], u
         match margin {
             Margin::Auto => auto |= [4, 2, 8, 1][k],
             Margin::LengthPercentage(lp) => edges[k] = Some(lp),
-            // (…an `anchor-size()` margin with no anchor to size it is invalid at computed-value time: the initial 0)
-            _ => {}
+            // (…an `anchor-size()` margin with no anchor to size it — none is modelled — is its FALLBACK, and with none
+            // invalid at computed-value time: the initial 0. Chrome: `anchor-size(--a width, 25px)` is 25.)
+            Margin::AnchorSizeFunction(f) => match &f.fallback {
+                style::values::generics::Optional::Some(Margin::LengthPercentage(lp)) => edges[k] = Some(lp),
+                style::values::generics::Optional::Some(Margin::Auto) => auto |= [4, 2, 8, 1][k],
+                _ => {}
+            },
+            Margin::AnchorContainingCalcFunction(_) => {}
         }
     }
     for (k, padding) in [&p.padding_top, &p.padding_right, &p.padding_bottom, &p.padding_left].into_iter().enumerate() {
@@ -4538,11 +4545,22 @@ fn inline_rel_spec(style: &ComputedValues, rtl: bool) -> Result<Option<Rel>, &'s
 // An inset's length-percentage, None for `auto`.
 fn inset_lp(v: &style::values::computed::position::Inset) -> Result<Option<&LengthPercentage>, &'static str> {
     use style::values::generics::position::GenericInset as Inset;
+    use style::values::generics::Optional;
     match v {
         Inset::LengthPercentage(lp) => Ok(Some(lp)),
-        // (…an `anchor()` inset with no anchor to place it is invalid at computed-value time: the initial `auto` — no
-        // anchor is modelled, as none is positioned by one in the JS layout either)
-        _ => Ok(None),
+        Inset::Auto => Ok(None),
+        // (…an `anchor()` / `anchor-size()` inset with no anchor to place it — none is modelled — is its FALLBACK, and
+        // with none invalid at computed-value time: the initial `auto`. Chrome: `top: anchor(--a bottom, 30px)` with no
+        // `--a` is 30.)
+        Inset::AnchorFunction(f) => match &f.fallback {
+            Optional::Some(fallback) => inset_lp(fallback),
+            Optional::None => Ok(None),
+        },
+        Inset::AnchorSizeFunction(f) => match &f.fallback {
+            Optional::Some(fallback) => inset_lp(fallback),
+            Optional::None => Ok(None),
+        },
+        Inset::AnchorContainingCalcFunction(_) => Ok(None),
     }
 }
 // Does the box contain its out-of-flow descendants, fixed ones included (`containsOutOfFlow`): a filter, a transform
@@ -4908,9 +4926,10 @@ fn ws_mode_of(style: &ComputedValues) -> Result<u8, &'static str> {
         (WhiteSpaceCollapse::Preserve, true) => WS_PRE_WRAP,
         (WhiteSpaceCollapse::PreserveBreaks, true) => WS_PRE_LINE,
         (WhiteSpaceCollapse::BreakSpaces, true) => WS_BREAK_SPACES,
-        // (…and the combinations no `white-space` value spells, by what they preserve: a `nowrap` that keeps its
-        // breaks wraps nothing but them — `pre-line`'s breaks, kept — and a `nowrap` keeping its spaces is `pre`)
-        (WhiteSpaceCollapse::PreserveBreaks, false) => WS_PRE_LINE,
+        // (…and the combinations no `white-space` value spells, by the lines they make: a `nowrap` that keeps its breaks
+        // breaks there and nowhere else — `pre`'s lines, its spaces kept where Chrome collapses them (two unwrapped lines,
+        // 44 tall) — and any other keeping its spaces `pre` or `pre-wrap`)
+        (WhiteSpaceCollapse::PreserveBreaks, false) => WS_PRE,
         (_, wrap) => if wrap { WS_PRE_WRAP } else { WS_PRE },
     })
 }

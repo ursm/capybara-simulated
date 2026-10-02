@@ -308,6 +308,25 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # …and an anchor function's FALLBACK where it gives one (Chrome: `top: anchor(--a bottom, 30px); left: anchor(--a
+  # right, 40px)` at 40,30; a relative box's 15 down; a margin's 25 across), a `fit-content(<length>)` width the `auto`
+  # both engines take it for, and a `nowrap` keeping its breaks two unwrapped lines (44 tall in 50px).
+  it 'answers anchor fallbacks and odd sizes as the engines do', :aggregate_failures do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0"><div style="position: relative; width: 300px; height: 60px">' \
+      '<div id="a" style="position: absolute; top: anchor(--a bottom, 30px); left: anchor(--a right, 40px)">x</div></div>' \
+      '<div id="b" style="position: relative; top: anchor(--a bottom, 15px); width: 50px">y</div>' \
+      '<div id="c" style="margin-left: anchor-size(--a width, 25px); width: 50px">z</div>' \
+      '<div style="width: 300px"><div id="d" style="width: fit-content(500px)">short</div></div>' \
+      "<div id=\"e\" style=\"white-space-collapse: preserve-breaks; text-wrap-mode: nowrap; width: 50px\">aaaa bbbb cccc\ndd</div></body>"
+    )
+    rect = ->(id) { s.evaluate_script("(() => { const r = document.getElementById('#{id}').getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map((v) => Math.round(v * 10) / 10); })()") }
+    expect(%w[a b c].map {|id| rect.call(id)[0, 2] }).to eq([[40, 30], [0, 75], [25, 82]])
+    expect(rect.call('d')[2]).to eq(300)
+    expect(rect.call('e')[3]).to eq(44)
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # …and every `vertical-align` the style engine computes is a box the walk places: `central` / `center` the middle, the
   # other baselines the one a face's metrics give, an alignment with a shift aligned and then shifted (CSS Inline 3;
   # Chrome knows none of them on an HTML box and computes `baseline`).

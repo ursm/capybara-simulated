@@ -6248,10 +6248,15 @@ fn table_columns(
                 // A cell's declared width is no narrower than its content's min-content: the column's minimum is the
                 // larger of the two (CSS 2.1 §17.5.2.2, CSS Tables 3) — Chrome makes `<td style="width: 1px;
                 // white-space: nowrap">` as wide as its line, the idiom a table's shrink-to-content column is written in.
+                // (…the floor clamped by the cell's own min / max-width, as its contribution is: Chrome makes a `width: 10px;
+                // max-width: 5px` cell around a long word 7 wide)
                 if is_auto(k.decl_w) {
                     (imin, imax)
                 } else {
-                    let floor = content_intrinsic(c, inputs, runs, run_texts, grids, children)?.0 + k.decl_edges_x;
+                    let extra = k.decl_edges_x;
+                    let to_border = |v: f64| if is_auto(v) || k.decl_border_box { v } else { v + extra };
+                    let content = content_intrinsic(c, inputs, runs, run_texts, grids, children)?.0;
+                    let floor = clamp_min_max(content + extra, to_border(k.decl_min_w), to_border(k.decl_max_w));
                     (imin.max(floor), imax.max(floor))
                 }
             } else {
@@ -7421,7 +7426,11 @@ fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts
         let w = if n.decl_border_box { (n.decl_w - extra).max(0.0) } else { n.decl_w };
         (w, w)
     } else if n.replaced && !n.ratio_only {
-        (n.intrinsic_w, n.intrinsic_w) // a replaced box wants its intrinsic width (a ratio-only one, its container's)
+        // A replaced box wants its intrinsic width (a ratio-only one, its container's) — and a COMPRESSIBLE one, sized by
+        // a percentage width or max-width, can be squeezed to nothing: its min-content contribution is 0 (CSS Sizing 3
+        // §5.2.2; Chrome and Firefox: a `width: 100%` input in a `width: 50px` cell leaves the cell 52 wide).
+        let compressible = [0, 3].iter().any(|&k| !n.pct_sizes[k].is_nan() || n.pct_math[k] != NO_MATH);
+        (if compressible { 0.0 } else { n.intrinsic_w }, n.intrinsic_w)
     } else if n.display == DISPLAY_FLEX && !n.measured_as_block {
         flex_intrinsic_widths(i, inputs, runs, run_texts, grids, children)?
     } else if n.display == DISPLAY_TABLE {

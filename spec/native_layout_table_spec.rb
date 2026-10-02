@@ -86,7 +86,13 @@ RSpec.describe 'native layout table parity' do
       '<table><tr><td id="m" style="width:1px;white-space:nowrap">no wrap here</td><td>rest</td></tr></table>'           => 117.2,
       '<table style="width:300px"><tr><td id="m" style="width:1px;white-space:nowrap">keep</td><td>rest</td></tr></table>' => 40.4,
       '<table><tr><td id="m" style="width:10px;padding:5px"><img style="width:100px;height:5px"></td></tr></table>'      => 110,
-      '<table style="width:400px"><tr><td id="m" style="width:50px">aa bb cc</td><td>x</td></tr></table>'                => 52
+      '<table style="width:400px"><tr><td id="m" style="width:50px">aa bb cc</td><td>x</td></tr></table>'                => 52,
+      # …floored at what the content can be squeezed to: a control or an image sized by a percentage contributes nothing
+      # to it (CSS Sizing 3 §5.2.2), and the cell's own max-width caps it
+      '<table><tr><td id="m" style="width:50px"><input style="width:100%"></td><td>x</td></tr></table>'                  => 52,
+      '<table><tr><td id="m" style="width:10px"><img style="width:50%;height:10px"></td></tr></table>'                    => 12,
+      '<table style="width:400px"><tr><td id="m" style="width:60px"><textarea style="width:100%"></textarea></td><td>x</td></tr></table>' => 62,
+      '<table><tr><td id="m" style="width:10px;max-width:5px">Supercalifragilistic</td></tr></table>'                     => 7
     }.each do |table, w|
       body = %(<div style="font:16px monospace">#{table}</div>)
       expect_parity(body)
