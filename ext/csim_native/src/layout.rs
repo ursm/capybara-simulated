@@ -4182,8 +4182,11 @@ fn measure_uncached(
     // declares. The box is handed on as the width and the IMPOSED height, so the record keeps its declarations:
     // writing the resolved figures back turned the box into its own input, and a second measure of the same node
     // (a flex stretch, a float's two passes) then read a percentage width as a border box with no clamps left.
+    // (…its WIDTH the one it is handed — the replaced width every caller resolved it to (`used_width`), or the one a flex
+    // container's sizing gave it, a stretch included: re-deriving it here undid that, 27.7 where Chrome stretches a list
+    // box across a 300px column)
     let (w, imposed_h) = if inputs[i].get().lays_out_children {
-        replaced_box(&inputs[i].get().with_imposed_height(imposed_h), w)
+        (w, replaced_box(&inputs[i].get().with_imposed_height(imposed_h), w).1)
     } else {
         (w, imposed_h)
     };

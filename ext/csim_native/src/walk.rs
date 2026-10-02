@@ -2634,15 +2634,6 @@ impl<'a> Walk<'a> {
 
     // A flex container's record and its items, on `plan`, in the order given.
     fn flex_items(&mut self, id: NodeId, idx: i32, style: &ComputedValues, plan: FlexPlan, items: Vec<(i32, FlexItem)>, oof: Vec<NodeId>) -> Step {
-        // (…a LIST BOX item is a container rather than a leaf, which native's flex sizing does not take:
-        // `nlFlexItemsUnsizable`)
-        for (_, item) in &items {
-            if let FlexItem::Element(c) = item {
-                if self.node(*c).is_html_named("select") && self.arena.is_list_box(*c) && self.lays_out_rows(*c)? {
-                    return Err("list-box-item");
-                }
-            }
-        }
         let pos = style.get_position();
         let items_align = align_kw(pos.align_items.0);
         let cross_gap = gap(if plan.column { &pos.column_gap } else { &pos.row_gap })?;

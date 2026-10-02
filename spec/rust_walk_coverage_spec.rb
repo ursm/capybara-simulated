@@ -397,6 +397,17 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # A LIST BOX is a flex item like any control — its own box from the control's data, its rows inside it, the width the
+  # flex container gives it (Chrome: 43.3 in a row; stretched to 300 across a column) — where the walk declined it.
+  it 'lays out a list box as a flex item' do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0"><div style="display: flex; width: 300px"><select id="a" size="3"><option>aaa</option><option>b</option></select><div>x</div></div>' \
+      '<div style="display: flex; flex-direction: column; width: 300px"><select id="b" size="2"><option>one</option><option>two</option></select></div></body>'
+    )
+    expect(s.evaluate_script('[Math.round(a.getBoundingClientRect().width * 10) / 10, b.getBoundingClientRect().width]')).to eq([43.2, 300])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # A node of nothing but soft hyphens under `hyphens: none` is a zero-wide word that still makes its line (Chrome: 22
   # tall), and a preserved node of nothing but a CR under a text indent is laid out as nothing (Chrome measures the indent
   # into a shrink-to-fit width — 20 — which goes unmeasured here) — where the walk declined both.
