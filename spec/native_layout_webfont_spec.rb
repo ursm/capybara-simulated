@@ -6,10 +6,9 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
-require_relative 'support/shadow_parity'
 require_relative 'support/layout_golden'
 
-RSpec.describe 'native layout web-font parity' do
+RSpec.describe 'native layout web-font' do
   FONT_TTF   = File.binread(File.expand_path('wpt/fonts/Ahem.ttf', __dir__))
   FONT_WOFF2 = File.binread(File.expand_path('fixtures/fonts/Ahem.woff2', __dir__))
 
@@ -30,36 +29,24 @@ RSpec.describe 'native layout web-font parity' do
     end.to_app
   end
 
-  def run_shadow(body, **opts)
-    session = simulated_session(page(body, **opts))
-    session.visit '/'
-    session.evaluate_script('document.body.offsetHeight')
-    session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-  end
-
-  def expect_parity(body, **opts)
+  def expect_layout(body, **opts)
     # (…the font options named by key and a digest of each value: `Hash#inspect` changed in Ruby 3.4, and a value holds
     # a whole font file.)
     variant = opts.empty? ? nil : opts.sort.map {|k, v| "#{k}=#{Digest::SHA256.hexdigest(v.to_s)[0, 12]}" }.join(',')
-    expect_layout_golden(body, app: page(body, **opts), variant:) do
-      r = run_shadow(body, **opts)
-      expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-      expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-      expect_no_dropped_records(r, body)
-    end
+    expect_layout_golden(body, app: page(body, **opts), variant:)
   end
 
   it 'matches a single-line text block in a TTF web font' do
-    expect_parity('<div style="width:400px;font:20px AhemTest">XXXX xxxx</div>')
+    expect_layout('<div style="width:400px;font:20px AhemTest">XXXX xxxx</div>')
   end
   it 'matches a WRAPPING text block in a TTF web font (advances drive the wrap)' do
-    expect_parity('<div style="width:120px;font:20px AhemTest">XX xx word wrap onto more lines here now ok</div>')
+    expect_layout('<div style="width:120px;font:20px AhemTest">XX xx word wrap onto more lines here now ok</div>')
   end
   it 'matches a text block in a WOFF2 web font (host Brotli-decodes it to the same SFNT)' do
-    expect_parity('<div style="width:120px;font:20px AhemTest">XX xx word wrap onto more lines here now ok</div>', font: FONT_WOFF2, ct: 'font/woff2', ext: 'woff2')
+    expect_layout('<div style="width:120px;font:20px AhemTest">XX xx word wrap onto more lines here now ok</div>', font: FONT_WOFF2, ct: 'font/woff2', ext: 'woff2')
   end
   it 'matches a web font alongside inline spans in the same family' do
-    expect_parity('<div style="width:300px;font:16px AhemTest">a <b>bold</b> and <span>more</span> text</div>')
+    expect_layout('<div style="width:300px;font:16px AhemTest">a <b>bold</b> and <span>more</span> text</div>')
   end
 
   # A face that ALSO lists a local() source prefers a font INSTALLED under that name to the download, so native
@@ -69,12 +56,12 @@ RSpec.describe 'native layout web-font parity' do
     # …no such font here: the download, Ahem's 20px squares
     body = '<div style="width:400px;font:20px MixFont"><span id="m">XXXX</span></div>'
     face = "@font-face{font-family:'MixFont';src:local('No Such Font Anywhere'),url('/f.ttf')}"
-    expect_parity(body, face: face)
+    expect_layout(body, face: face)
     session = simulated_session(page(body, face: face))
     session.visit '/'
     expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().width")).to eq(80)
     # …and whatever this machine has installed under a common name
-    expect_parity('<div style="width:120px;font:20px MixFont">aa bb cc dd ee ff gg</div>',
+    expect_layout('<div style="width:120px;font:20px MixFont">aa bb cc dd ee ff gg</div>',
                   face: "@font-face{font-family:'MixFont';src:local('Arial'),local('Noto Sans'),url('/f.ttf')}")
   end
 

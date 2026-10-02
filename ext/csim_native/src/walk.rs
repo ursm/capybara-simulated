@@ -1304,14 +1304,12 @@ struct Mark {
     saw_float: (bool, bool),
 }
 
-// A text block's inline content as its gather builds it (`nlGatherRuns`'s `ctx`): the block's style (its tab stops,
-// what an inline's font is taken against), whether its indent can bite, the runs so far, and whether any of them
-// makes a line.
+// A text block's inline content as its gather builds it: the block's style (its tab stops, what an inline's font is
+// taken against), the runs so far, and whether any of them makes a line.
 struct Gather<'s> {
     block: &'s ComputedValues,
     // (…the text block's record, which an out-of-flow box among the lines hangs under)
     idx: i32,
-    bites: bool,
     runs: Vec<Pending>,
     makes_line: bool,
     // (…the floats among them, which an anonymous run that makes no line hands back to its block)
@@ -2203,7 +2201,7 @@ impl<'a> Walk<'a> {
                 rec.parent = idx;
                 rec.display = DISPLAY_TEXT_BLOCK;
                 self.push_record(rec);
-                let mut g = Gather { block: style, idx: anon, bites, runs: Vec::new(), makes_line: false, floats: Vec::new(), rel: None };
+                let mut g = Gather { block: style, idx: anon, runs: Vec::new(), makes_line: false, floats: Vec::new(), rel: None };
                 self.attempts += 1;
                 let gathered = self.gather(&kids, style, &font, ws_mode, wrap, 0.0, &mut g);
                 self.attempts -= 1;
@@ -3601,7 +3599,7 @@ impl<'a> Walk<'a> {
         let indent_math = self.math(indent.prog.as_deref());
         let font = self.font_info(style, style)?;
         let align = align_code(style.get_inherited_text().text_align, starts_at_right(style));
-        let mut g = Gather { block: style, idx, bites, runs: Vec::new(), makes_line: false, floats: Vec::new(), rel: None };
+        let mut g = Gather { block: style, idx, runs: Vec::new(), makes_line: false, floats: Vec::new(), rel: None };
         self.gather(kids, style, &font, ws_mode, wrap_mode(style), 0.0, &mut g)?;
         // (…the indent and the alignment written before the gather, as the JS walk writes them: a block whose content
         // makes no line keeps them too.)
@@ -4973,11 +4971,6 @@ fn indent(style: &ComputedValues) -> Result<(Spec, u32), &'static str> {
     let ti = &style.get_inherited_text().text_indent;
     Ok((spec(&ti.length)?, (if ti.hanging { 256 } else { 0 }) | (if ti.each_line { 512 } else { 0 })))
 }
-// …and whether it can come to anything at some basis (`nlIndentMayBite`).
-fn indent_may_bite(style: &ComputedValues) -> Result<bool, &'static str> {
-    let (s, _) = indent(style)?;
-    Ok(s.px != 0.0 || s.frac != 0.0 || s.prog.is_some())
-}
 // The line alignment code (`nlAlignCode(textAlignOf(…))`): 0 left, 1 right, 2 center, 3 justify.
 fn align_code(align: TextAlign, starts_at_right: bool) -> u8 {
     match align {
@@ -5011,108 +5004,7 @@ pub(crate) fn js_round(x: f64) -> f64 {
     (x + 0.5).floor()
 }
 
-// Where two walks built a record differently, field by field: each differing field's name, whether it differs only as
-// much as f32 precision does (stylo keeps lengths as f32), and the two values.
-pub(crate) struct FieldDiff {
-    pub(crate) field: &'static str,
-    pub(crate) close: bool,
-    pub(crate) js: String,
-    pub(crate) rust: String,
-}
-pub(crate) fn input_diff(js: &Input, js_maths: &[f64], rust: &Input, rust_maths: &[f64]) -> Vec<FieldDiff> {
-    let mut out = Vec::new();
-    // (…a program by what it IS: the two walks write the same value in different shapes and at different offsets.)
-    macro_rules! cmp_math {
-        ($($f:ident),* $(,)?) => {$(
-            let (a, b) = (math_refs(&js.$f), math_refs(&rust.$f));
-            if let Some(close) = a.iter().zip(b).map(|(&a, &b)| program_diff(js_maths, a, rust_maths, b)).fold(None, worse) {
-                out.push(FieldDiff { field: stringify!($f), close, js: format!("{:?}", a.iter().map(|&m| program_text(js_maths, m)).collect::<Vec<_>>()), rust: format!("{:?}", b.iter().map(|&m| program_text(rust_maths, m)).collect::<Vec<_>>()) });
-            }
-        )*};
-    }
-    cmp_math!(flex_main_gap_math, flex_cross_gap_math, chain_math, rel_math, flex_basis_math, pct_math, edge_math, inset_math, indent_math);
-    macro_rules! cmp {
-        ($($f:ident),* $(,)?) => {$(
-            if let Some(close) = Same::diff(&js.$f, &rust.$f) {
-                out.push(FieldDiff { field: stringify!($f), close, js: format!("{:?}", js.$f), rust: format!("{:?}", rust.$f) });
-            }
-        )*};
-    }
-    cmp!(
-        nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl,
-        bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc,
-        float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x,
-        flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far,
-        has_replayed_oof, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, measured_as_block, equal_share, chain_rel,
-        chain_px, chain_shift, flex_item_auto, flex_baseline_asc, flex_line_nat, flex_line, out_of_flow, sp_x, sp_y,
-        cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height,
-        pushed_h_indefinite, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box,
-        flex_shrink, flex_basis_cb, flex_basis_frac, pct_sizes, pct_px, edge_frac, edge_px, basis_w, inset_frac,
-        flex_main_gap_frac, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes,
-        block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, cell_min_content,
-        cell_max_content, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl,
-        row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse,
-        replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, control_baseline, control_font_box,
-        control_font_asc, intrinsic_w, intrinsic_h, cb_index, cb_rect, inset_top, inset_right, inset_bottom,
-        inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line,
-        indent_spent, width_kw, height_kw,
-    );
-    out
-}
-// …an inline box's entry.
-pub(crate) fn inline_diff(js: &InlineBox, js_maths: &[f64], rust: &InlineBox, rust_maths: &[f64]) -> Vec<FieldDiff> {
-    let mut out = Vec::new();
-    macro_rules! cmp {
-        ($($f:ident),* $(,)?) => {$(
-            if let Some(close) = Same::diff(&js.$f, &rust.$f) {
-                out.push(FieldDiff { field: stringify!($f), close, js: format!("{:?}", js.$f), rust: format!("{:?}", rust.$f) });
-            }
-        )*};
-    }
-    cmp!(ml, right, mr, top, bottom, own_h, own_asc, rel_x, rel_y, bt, br, bb, bl, f_ml, f_left, f_right, f_mr, f_top, f_bottom, left, rel_xf, rel_yf, rel_yi);
-    for (field, a, b) in [("math", &js.math[..], &rust.math[..]), ("rel_math", &js.rel_math[..], &rust.rel_math[..])] {
-        if let Some(close) = a.iter().zip(b).map(|(&a, &b)| program_diff(js_maths, a, rust_maths, b)).fold(None, worse) {
-            let text = |maths, refs: &[u32]| format!("{:?}", refs.iter().map(|&m| program_text(maths, m)).collect::<Vec<_>>());
-            out.push(FieldDiff { field, close, js: text(js_maths, a), rust: text(rust_maths, b) });
-        }
-    }
-    out
-}
-// …a number on the grid stream.
-pub(crate) fn grid_diff(js: f64, rust: f64) -> Vec<FieldDiff> {
-    Same::diff(&js, &rust).map(|close| FieldDiff { field: "grids", close, js: format!("{js:?}"), rust: format!("{rust:?}") }).into_iter().collect()
-}
-// …and a run.
-pub(crate) fn run_diff(js: &Run, rust: &Run) -> Vec<FieldDiff> {
-    let mut out = Vec::new();
-    macro_rules! cmp {
-        ($($f:ident),* $(,)?) => {$(
-            if let Some(close) = Same::diff(&js.$f, &rust.$f) {
-                out.push(FieldDiff { field: stringify!($f), close, js: format!("{:?}", js.$f), rust: format!("{:?}", rust.$f) });
-            }
-        )*};
-    }
-    cmp!(kind, font, size, ls, ws, line_height, asc, metric, ws_mode, tab_px, tab_min, line_mode, lands, plain);
-    out
-}
 
-// A math field as its offsets, one or several.
-trait MathRefs {
-    fn refs(&self) -> &[u32];
-}
-impl MathRefs for u32 {
-    fn refs(&self) -> &[u32] {
-        std::slice::from_ref(self)
-    }
-}
-impl<const N: usize> MathRefs for [u32; N] {
-    fn refs(&self) -> &[u32] {
-        self
-    }
-}
-fn math_refs<T: MathRefs + ?Sized>(v: &T) -> &[u32] {
-    v.refs()
-}
 // The program at `at` in a math table (`[length, op, a, b, …]`), or None for NO_MATH or an offset past the table.
 fn program_at(maths: &[f64], at: u32) -> Option<&[f64]> {
     if at == crate::layout::NO_MATH {
@@ -5121,68 +5013,6 @@ fn program_at(maths: &[f64], at: u32) -> Option<&[f64]> {
     let at = at as usize;
     let n = *maths.get(at)? as usize;
     maths.get(at + 1..at + 1 + n * 3)
-}
-// Whether two programs differ in what they come to, at bases a page's width spans and past them.
-fn program_diff(a_maths: &[f64], a: u32, b_maths: &[f64], b: u32) -> Option<bool> {
-    match (program_at(a_maths, a), program_at(b_maths, b)) {
-        (None, None) => None,
-        (Some(_), Some(_)) => [0.0, 50.0, 217.0, 400.0, 1531.0, 4099.0, 30011.0, EDGE_PROBE]
-            .iter()
-            .map(|&basis| crate::layout::math_at(a_maths, a as usize, basis).diff(&crate::layout::math_at(b_maths, b as usize, basis)))
-            .fold(None, worse),
-        _ => Some(false),
-    }
-}
-fn program_text(maths: &[f64], at: u32) -> String {
-    match program_at(maths, at) {
-        Some(p) => format!("{p:?}"),
-        None => "-".into(),
-    }
-}
-fn worse(a: Option<bool>, b: Option<bool>) -> Option<bool> {
-    match (a, b) {
-        (Some(false), _) | (_, Some(false)) => Some(false),
-        (Some(true), _) | (_, Some(true)) => Some(true),
-        _ => None,
-    }
-}
-
-// Whether two field values differ: None where they are the same (two NaNs are), Some(true) where they differ only as
-// much as an f32 does from the f64 it rounds (stylo keeps lengths as f32), Some(false) where they really differ.
-trait Same {
-    fn diff(&self, other: &Self) -> Option<bool>;
-}
-impl Same for f64 {
-    fn diff(&self, other: &f64) -> Option<bool> {
-        if self == other || (self.is_nan() && other.is_nan()) {
-            None
-        } else {
-            Some((self - other).abs() <= 1e-5 * self.abs().max(other.abs()).max(1.0))
-        }
-    }
-}
-macro_rules! same_eq {
-    ($($t:ty),*) => {$(
-        impl Same for $t {
-            fn diff(&self, other: &$t) -> Option<bool> {
-                if self == other { None } else { Some(false) }
-            }
-        }
-    )*};
-}
-same_eq!(bool, u8, i32, u32, usize);
-impl<T: Same, const N: usize> Same for [T; N] {
-    fn diff(&self, other: &[T; N]) -> Option<bool> {
-        let mut worst = None;
-        for (a, b) in self.iter().zip(other) {
-            match a.diff(b) {
-                Some(false) => return Some(false),
-                Some(true) => worst = Some(true),
-                None => {}
-            }
-        }
-        worst
-    }
 }
 
 #[cfg(test)]

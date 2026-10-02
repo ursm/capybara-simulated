@@ -52,11 +52,8 @@ module PerfGate
 
   # The workloads, each a key in the baseline. `grid_table` is the app-shaped page the gate has always
   # run; `shadow_host` is the SAME page with one shadow host beside the table — see `workload_html`.
-  # `layout_walk` is the NATIVE-LAYOUT WALK, which nothing else here measures: `__csimLayoutShadowRun` is
-  # reached from no dom_op, so a change that makes the walk quadratic costs a green run nothing. One did —
-  # a gate predicate that rescanned a box's siblings per child, asked before the cheap test that would have
-  # short-circuited it: 117 ms → 1,882 ms on a page with no percentage in it, past `perf 5/0` and into
-  # review. The walk becomes the hot path the day native stops being a shadow, so it is measured now.
+  # `layout_walk` is the same page with wide flex and inline levels added — see `WALK_SECTION` — the shapes whose
+  # per-element questions went quadratic in the walk once (117 ms → 1,882 ms on a page with no percentage in it).
   # `flex_shell` is an app shell whose flexed cards hold `height: 100%` content — see `FLEX_SHELL_HTML` — and
   # `flex_row_shell` its ROW twin, cards STRETCHED across rows of a resizing page — see `FLEX_ROW_SHELL_HTML`.
   WORKLOADS = %w[grid_table shadow_host layout_walk flex_shell flex_row_shell].freeze
@@ -156,11 +153,10 @@ module PerfGate
   end
 
   # …and what `layout_walk` adds: FLEX CONTAINERS with many children each. The walk's per-element
-  # predicates are what this gate is here to hold, and the ones that have gone quadratic are the ones that
-  # answer a question about a box by looking at its SIBLINGS — `nlComputeMixedBlock` was the first, reached by
-  # `nlSubtreeDeclaresWalkPct` per element it recursed over (gone on 2026-09-25 with the percentage route it
-  # answered; `nlContinuedInline` is the one there is now). A wide level INSIDE an item is what made that N²;
-  # the table above holds the rest of the walk (rows, cells, text blocks, inline content).
+  # predicates are what this workload is here to hold, and the ones that have gone quadratic are the ones that
+  # answer a question about a box by looking at its SIBLINGS — the first was a mixed-block scan asked per element
+  # a percentage route recursed over. A wide level INSIDE an item is what made that N²; the table above holds the
+  # rest of the walk (rows, cells, text blocks, inline content).
   # Deliberately NO percentage anywhere in it: the regression that prompted this was paid by pages that
   # declare none, which is the case a gate is most likely to stop measuring.
   # The SHAPE is the whole point, and two wrong ones went in first — each of which measured the walk
@@ -175,9 +171,9 @@ module PerfGate
   # never asked at all — a sibling rescan behind it would be invisible here. It has to be asked MANY times under
   # ONE parent for a memo to be what is measured: 300 declaring siblings read the mixed-block scan once memoised
   # and 300 times without it, while that scan existed; the declaring item keeps the route test on the clock.
-  # …and one INLINE holding many atomics, whose every record asks which box around it is not an inline box
-  # (`nlInlineContainer`) — which scans that inline's children unless the answer is memoised per walk: 300 atomics
-  # read `sibScans` 1 memoised and 300 without it (a 2,000-atomic span took the shadow run from 28 ms to 1.5 s).
+  # …and one INLINE holding many atomics, whose every record asks which box around it is not an inline box — which
+  # scans that inline's children unless the answer is memoised per walk (a 2,000-atomic span took a walk from 28 ms
+  # to 1.5 s).
   WALK_SECTION = ((1..8).map {|c|
     kids = (1..300).map {|k| %(<span class="fi">i#{k}</span>) }.join
     pct  = c == 1 ? ' pctitem' : ''
@@ -219,28 +215,6 @@ module PerfGate
       readAll();                                                  // partial relayout; untouched rows reuse
       for (let k = 0; k < 20; k++) document.querySelectorAll('#grid .link').length; // structural queries
       return h;
-    })()
-  JS
-
-  # `layout_walk`'s interaction: the native-layout WALK itself, which is what this workload exists to
-  # measure. Run after one geometry read so the oracle's boxes are there for it to compare against, and
-  # repeated on the SAME page — a shadow run restores every stamp it touches, so nothing needs re-parsing
-  # between reps and the page's first layout stays out of the wall. Its own return value is the op-count
-  # vector — `nodes` / `compared` / the four native-coverage counters / `pushedContributions` are pure
-  # functions of what the walk DID, so they ratchet exactly as the layout counters do, and a gate that
-  # starts refusing shapes shows up as coverage falling rather than as nothing at all. What they CANNOT see
-  # is a gate answering the same thing more slowly, which emits the same records — `sibScans` is there for
-  # that, and it is the only key here that a pure slowdown moves.
-  # …on a page the JS layout lays out: a shadow run is held against the JS layout's boxes, and on a natively laid-out
-  # page it lays that reference out itself first (`ensureOracleLayout`) — two thirds of the wall, which would bury a
-  # walk regression under it.
-  WALK_JS = <<~JS.freeze
-    (() => {
-      globalThis.__csimNativeLayout = false;
-      document.body.offsetHeight;
-      let r = null;
-      for (let i = 0; i < 3; i++) r = globalThis.__csimLayoutShadowRun();
-      return r;
     })()
   JS
 
@@ -300,7 +274,7 @@ module PerfGate
     })()
   JS
 
-  # The interaction a workload's page is measured under (the walk's is `WALK_JS`, run in its own branch).
+  # The interaction a workload's page is measured under.
   def self.interaction_js(workload)
     case workload
     when 'flex_shell' then FLEX_SHELL_JS
@@ -320,30 +294,18 @@ module PerfGate
   # invalidation changes that are NOT perf regressions, so holding them exactly
   # would red the gate on unrelated PRs and train everyone to reflexively regen —
   # eroding the ratchet. These move only when the driver does more (or less)
-  # layout work. Read as one object so a single round-trip captures the vector.
-  # The JS layout's own (`element_layouts`, `reuse_*`) read 0 where native layout — the default — laid the page out, and
-  # rise where it declined to the JS layout, which is the regression they now catch; the native layout's work is the
-  # `nl_*` group: its passes and declines, the records its walk copied afresh, the kept blocks it sent, the gates it
-  # answered again and the measures native put back. Under the style engine — the default — the Rust walk builds the
-  # pass and those read 0 where it did: its own are the `rust_*` group, its passes and declines (each a pass the JS walk
-  # took instead), and the records it walked afresh and spliced back from the last pass.
+  # layout work. Read as one object so a single round-trip captures the vector:
+  # the layout passes, the Rust walk's passes and declines (a declined page is laid
+  # out as its root alone), the measures it put back, and the records it walked
+  # afresh and spliced back from the last pass.
   COUNTS_JS = <<~JS.freeze
     ({
-      passes:               globalThis.__csimLayoutPasses(),
-      nl_passes:            globalThis.__csimNativeLayoutStats().native,
-      nl_declines:          Object.values(globalThis.__csimNativeLayoutStats().fellBack).reduce((a, b) => a + b, 0),
-      nl_records_copied:    globalThis.__csimNlSliceCopies(),
-      nl_blocks_sent:       globalThis.__csimNlBlocksSent(),
-      nl_gate_answers:      globalThis.__csimNlGateAnswers(),
-      nl_measures_put_back: globalThis.__dom && globalThis.__dom.layoutMeasureCounts ? globalThis.__dom.layoutMeasureCounts()[0] : 0,
-      rust_passes:          globalThis.__csimNativeLayoutStats().rust,
-      rust_declines:        Object.values(globalThis.__csimNativeLayoutStats().rustFellBack).reduce((a, b) => a + b, 0),
-      rust_records_walked:  globalThis.__dom && globalThis.__dom.layoutMeasureCounts ? globalThis.__dom.layoutMeasureCounts()[4] : 0,
-      rust_records_spliced: globalThis.__dom && globalThis.__dom.layoutMeasureCounts ? globalThis.__dom.layoutMeasureCounts()[3] : 0,
-      element_layouts:      globalThis.__csimElementLayouts(),
-      reuse_hit:            globalThis.__csimReuseStats().hit,
-      reuse_remeasured:     globalThis.__csimReuseStats().remeasured,
-      reuse_escapingAbs:    globalThis.__csimReuseStats().escapingAbs
+      passes:                 globalThis.__csimLayoutPasses(),
+      rust_passes:            globalThis.__csimNativeLayoutStats().rust,
+      rust_declines:          Object.values(globalThis.__csimNativeLayoutStats().rustFellBack).reduce((a, b) => a + b, 0),
+      rust_measures_put_back: globalThis.__dom.layoutMeasureCounts()[0],
+      rust_records_walked:    globalThis.__dom.layoutMeasureCounts()[4],
+      rust_records_spliced:   globalThis.__dom.layoutMeasureCounts()[3]
     })
   JS
 
@@ -358,48 +320,14 @@ module PerfGate
   def self.capture_counts(workload)
     with_session(workload) do |session|
       session.visit('/')
-      if workload == 'layout_walk'
-        # …the WALK's own vector, not the layout counters: what it laid out natively, and what it had to
-        # ask the oracle for. `ok` rides along as a bit, because a walk that starts DECLINING the page
-        # would otherwise show up as every other counter dropping to zero and read like a win.
-        r = session.evaluate_script(WALK_JS)
-        # `fetch(k, 0)`, not `fetch(k)`: a DECLINING walk returns `{ok: false, reason: …}` and nothing else,
-        # and a KeyError here is raised in the outer `before(:context)` — it takes all three workloads down
-        # with a message that never mentions the walk. The `ok` bit is what is supposed to say it, so let it.
-        @walk_note = r['ok'] ? nil : "the walk DECLINED the page: #{r['reason']}" # …surfaced in the failure
-        return WALK_COUNT_KEYS.to_h {|k| [k, k == 'ok' ? (r['ok'] ? 1 : 0) : r.fetch(k, 0).to_i] }
-      end
       session.evaluate_script(interaction_js(workload))
       session.evaluate_script(COUNTS_JS).transform_keys(&:to_s).transform_values(&:to_i)
     end
   end
-  # …and `sibScans`, the predicate-work counter, which is the one key here that a slower walk MOVES: the
-  # coverage counters are pure functions of what the walk produced, so a gate answering the same thing more
-  # slowly leaves every one of them alone. `mismatches` is the odd one out in the other direction — it is a
-  # geometry comparison, held at 0 as a correctness tripwire rather than as a perf figure.
-  WALK_COUNT_KEYS = %w[
-    ok
-    nodes
-    compared
-    mismatches
-    sibScans
-    nativeAtomics
-    nativeFlexRows
-    nativeIntrinsicGrids
-    nativeOutOfFlow
-    pushedContributions
-  ].freeze
-
   def self.capture_wall(workload)
     with_session(workload) do |session|
       session.visit('/')   # warm the realm + JIT before timing
-      # The walk restores every stamp it touches, so it can be re-run on the SAME page — where
-      # `INTERACTION_JS` mutates the DOM and needs a fresh one per rep. Re-visiting for it anyway put the
-      # page parse and the ORACLE's first layout into the wall: 58% of it, which is the same work
-      # `grid_table` already holds and which diluted this axis to needing a 60% walk regression before it
-      # would speak (review-measured).
-      walk     = workload == 'layout_walk'
-      elapsed  = median_ms { session.visit('/') unless walk; session.evaluate_script(walk ? WALK_JS : interaction_js(workload)) }
+      elapsed  = median_ms { session.visit('/'); session.evaluate_script(interaction_js(workload)) }
       calib    = median_ms { session.evaluate_script(CALIB_JS) }
       {
         'workload_ms' => elapsed.round(3),
@@ -408,9 +336,6 @@ module PerfGate
       }
     end
   end
-
-  # What the last `layout_walk` capture saw, where it is worth a word in a failure (the walk declining).
-  def self.walk_note = @walk_note ? " #{@walk_note}." : ''
 
   def self.baseline
     YAML.safe_load_file(BASELINE_PATH)
@@ -440,15 +365,8 @@ module PerfGate
             next if expected[k] == actual[k]
             "  - #{k}: baseline #{expected[k].inspect} → now #{actual[k].inspect}"
           }
-          # …and the walk's vector is a different set of things, so it says so rather than talking about
-          # passes and reuse: `sibScans` is predicate work, `mismatches` is a native-vs-oracle geometry
-          # divergence (`sample` names the first box), `ok: 1 → 0` is the walk refusing the page outright.
-          why = workload == 'layout_walk' ?
-            "perf counts changed for the native-layout WALK. `sibScans` is per-element predicate work (a " \
-            'sibling rescan asked per child), the coverage counters are what it laid out natively, ' \
-            "`mismatches` is a geometry divergence and `ok` is the walk declining the page.#{PerfGate.walk_note}" :
-            "perf op-counts changed for #{workload}. This is a REGRESSION (added passes / " \
-            'dropped subtree reuse / O(n²) creep) or an IMPROVEMENT to lock in.'
+          why = "perf op-counts changed for #{workload}. This is a REGRESSION (added passes / " \
+                'dropped subtree reuse / O(n²) creep) or an IMPROVEMENT to lock in.'
           expect(mismatches).to be_empty,
             "#{why} If the shift is intended, regenerate the baseline:\n" \
             "  bundle exec ruby script/regen_perf_baseline.rb\n\n" +

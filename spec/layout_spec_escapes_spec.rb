@@ -6,9 +6,9 @@
 # to (measured — the soft-hyphen example for the tabbed-run break passed with the fix reverted, and an
 # inline-atomic example asserted a forced break it did not contain).
 #
-# Nothing else catches it. The harness compares the two engines on whatever markup it is handed, so both
-# agree on the wrong shape; the parity is real, the coverage is not. It is mechanical to check, so it is
-# checked here rather than remembered.
+# Nothing else catches it. A golden is recorded from whatever markup it is handed, so it holds the wrong
+# shape; the check is real, the coverage is not. It is mechanical to check, so it is checked here rather
+# than remembered.
 RSpec.describe 'layout spec markup' do
   # Every escape Ruby interprets in a double-quoted string and not in a single-quoted one. `\u` is the
   # likeliest remaining trap after `\t` — an NBSP written `'\u00a0'` in a line-breaking spec is a literal
@@ -21,7 +21,7 @@ RSpec.describe 'layout spec markup' do
   # live in a hash or array literal and reach the helper through a block parameter, which is how
   # `display_contents_spec` and every table-driven example write them — by being MARKUP itself. Keying only
   # on the helper name made every such table invisible to this guard.
-  HELPER = /\b(?:expect_parity|expect_bail|expect_walk_declines|expect_declined_x|expect_native_\w+|run_shadow|shadow|session_for)\(/
+  HELPER = /\b(?:expect_layout\w*|expect_fragments|expect_chrome_\w+|laid_out_\w+|rendered_\w+|session_for)\(/
   MARKUP = /'[^']*<[a-z]+[ >][^']*'/
   # …and a heredoc is not the subject at all: quoting does not apply inside one, so `\\n` there is the
   # author writing a backslash-n for a JS string on purpose, not a Ruby escape that failed to interpret.

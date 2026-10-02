@@ -900,14 +900,10 @@ pub(crate) struct Dom {
     // `hasOwnProperty`, `Object.keys`, `delete` all work against the arena in C++ — faster than a
     // JS Proxy and a faithful stand-in for the native-backed endgame.
     attrs_view_template: Option<v8::Global<v8::ObjectTemplate>>,
-    // Each realm's kept layout chunks (`ChunkStore`).
-    pub(crate) layout_chunks: std::collections::HashMap<i32, ChunkStore>,
     // Each realm's static author rules (`cascadeLoad`), which `cascadeWinners` answers from.
     pub(crate) cascades: std::collections::HashMap<i32, crate::cascade::CascadeStore>,
     // Each realm's style engine (`styleLoad`).
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
-    // Each realm's walk-parity instrument (`walk_ops`), where a pass has asked for it.
-    pub(crate) walk_parity: std::collections::HashMap<i32, crate::walk_ops::Parity>,
     // Each realm's Rust walk's last pass and the measures kept of it (`walk_reuse`).
     pub(crate) walk_reuse: std::collections::HashMap<i32, crate::walk_reuse::WalkReuse>,
     // The realms `dropRealm` freed: an op a script of one still runs lands in `graveyard` rather than bringing its
@@ -1054,7 +1050,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setNaturalSize", set_natural_size, context_id);
     register(scope, ns, "linkPseudoBox", link_pseudo_box, context_id);
     register(scope, ns, "firstStrongDirection", first_strong_direction, context_id);
-    register(scope, ns, "lineBreakGlues", line_break_glues, context_id);
     register(scope, ns, "setContainerMargins", set_container_margins, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
     register(scope, ns, "setAssignedNodes", set_assigned_nodes, context_id);
@@ -1123,10 +1118,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // Native layout (reader-flip endgame, stage L1 = block flow): lay a subtree out from a flat buffer
     // of per-node used values in ONE crossing, writing a border-box per node into the arena; boxOf reads
     // one back for the JS geometry getters.
-    register(scope, ns, "layoutPass", layout_pass, context_id);
-    register(scope, ns, "layoutChunkPut", layout_chunk_put, context_id);
     register(scope, ns, "layoutMeasureCounts", layout_measure_counts, context_id);
-    register(scope, ns, "boxOf", box_of, context_id);
     // Native text metrics (fontations) for native inline layout (L2): register a font (fontconfig path
     // or in-memory SFNT bytes) to a handle JS puts in the layout inputs; native measures runs in-process.
     register(scope, ns, "registerFontPath", register_font_path, context_id);
@@ -1395,17 +1387,6 @@ fn set_container_margins(
     }
 }
 
-// __dom.lineBreakGlues(prev, next) -> bool: whether UAX #14 forbids a line break between two code points even under
-// `word-break: break-all` (`unicode::line_break_glues`) — the Line_Break classes, which JS has no regex property for.
-fn line_break_glues(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let prev = args.get(0).uint32_value(scope).unwrap_or(0);
-    let next = args.get(1).uint32_value(scope).unwrap_or(0);
-    rv.set_bool(crate::unicode::line_break_glues(prev, next));
-}
 
 // __dom.linkPseudoBox(nid, which, boxNid): the box an element's `::before` (0) or `::after` (1) generates.
 fn link_pseudo_box(
@@ -2611,7 +2592,6 @@ fn reset_arena(
     let cid = realm_id(scope, &args);
     realm(scope, cid).reset();
     crate::text_codec::drop_realm(scope, cid);   // (…a page's stream decoders die with it)
-    dom(scope).layout_chunks.remove(&cid);
     dom(scope).walk_reuse.remove(&cid);
     dom(scope).cascades.remove(&cid);
     // …and the style engine forgets the nodes it held (its sheets stay until the new page sets its own).
@@ -2654,10 +2634,8 @@ fn drop_realm(
         d.dropped.insert(id);
         d.graveyard.reset();
         d.realms.remove(&id);
-        d.layout_chunks.remove(&id);   // (…and its kept layout chunks, see `reset_arena`)
         d.cascades.remove(&id);        // (…and its rules)
         d.styles.remove(&id);          // (…and its style engine)
-        d.walk_parity.remove(&id);     // (…and its walk-parity instrument)
         d.walk_reuse.remove(&id);      // (…and its Rust walk's last pass)
         crate::text_codec::drop_realm(scope, id);   // (…and the stream decoders it left open)
     }
@@ -2741,9 +2719,6 @@ pub(crate) const MATH_SLOTS: [usize; 27] = [
     125, 126, 127, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 156, 157, 158, 159, 160, 161,
     162,
 ];
-const RUN_STRIDE: usize = 12;
-// …and per inline box in the inline table (layout.js `NL_INLINE_STRIDE` / `nlInlineEntry`, layout::InlineBox).
-pub(crate) const INLINE_STRIDE: usize = 31;
 
 // A Float64Array argument's values, read IN PLACE: a pass's records run to megabytes on a large page (1,320 bytes a
 // record), and copying them out — twice, through a byte vector — was a fifth of a pass. Copied only where the view is
@@ -2945,210 +2920,10 @@ pub(crate) fn decode_input(r: &[f64]) -> crate::layout::Input {
         control_font_asc: r[79],
     }
 }
-// …one run.
-fn decode_run(r: &[f64]) -> crate::layout::Run {
-    // A slot may mean one thing per kind — slot 11 an ATOMIC's line mode or a CLOSE edge's `lands`, slot 3
-    // a TEXT run's letter-spacing or an edge's `plain` width (an OUT-OF-FLOW run's `rel.y`, read as `ls`).
-    // The fields added per kind take their slot only on their own kind; `ls` is decoded for every kind, as
-    // it always was, and is read only where it means letter-spacing or the offset.
-    let kind = r[0] as u8;
-    crate::layout::Run {
-        kind,
-        font: r[1] as i32,
-        size: r[2],
-        ls: r[3],
-        ws: r[4],
-        line_height: r[5],
-        asc: r[7],
-        metric: r[6],
-        ws_mode: r[8] as u8,
-        tab_px: r[9],
-        tab_min: r[10],
-        line_mode: if kind == crate::layout::RUN_ATOMIC { r[11] as u8 } else { 0 },
-        lands: kind == crate::layout::RUN_CLOSE && r[11] != 0.0,
-        plain: if kind == crate::layout::RUN_OPEN || kind == crate::layout::RUN_CLOSE { r[3] } else { 0.0 },
-    }
-}
-// …one inline entry.
-pub(crate) fn decode_inline(r: &[f64]) -> crate::layout::InlineBox {
-    crate::layout::InlineBox {
-        ml: r[0],
-        right: r[1],
-        mr: r[2],
-        top: r[3],
-        bottom: r[4],
-        own_h: r[5],
-        own_asc: r[6],
-        rel_x: r[7],
-        rel_y: r[8],
-        bt: r[9],
-        br: r[10],
-        bb: r[11],
-        bl: r[12],
-        f_ml: r[13],
-        f_left: r[14],
-        f_right: r[15],
-        f_mr: r[16],
-        f_top: r[17],
-        f_bottom: r[18],
-        left: r[19],
-        math: std::array::from_fn(|k| crate::layout::math_ref(r[20 + k])),
-        rel_xf: r[26],
-        rel_yf: r[27],
-        rel_yi: r[28],
-        rel_math: [crate::layout::math_ref(r[29]), crate::layout::math_ref(r[30])],
-    }
-}
-// A run-text channel: each entry's text (a string), read as UTF-16 to iterate exactly as JS does, else None. Read
-// BEFORE any Float64Array argument is borrowed (`f64_arg`): flattening a string can allocate on V8's heap, and a small
-// typed array lives there.
-fn read_run_texts(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>) -> Vec<crate::layout::RunText> {
-    let mut out = Vec::new();
-    if let Ok(tarr) = v8::Local::<v8::Array>::try_from(val) {
-        out.reserve(tarr.length() as usize);
-        for i in 0..tarr.length() {
-            match tarr.get_index(scope, i) {
-                Some(val) if val.is_string() => {
-                    let s = val.to_string(scope).unwrap();
-                    let mut u = vec![0u16; s.length()];
-                    s.write_v2(scope, 0, &mut u, v8::WriteFlags::empty());
-                    out.push(Some(u.into()));
-                }
-                _ => out.push(None),
-            }
-        }
-    }
-    out
-}
 
-// A KEPT subtree's inputs, held from pass to pass: what the JS walk packed once for a slice it keeps (`nlPackBlock`).
-// A chunk holds what the subtree emitted ITSELF — its records but the root (which the pass holds, its parent writing
-// into it), its runs and their texts, grid values and inline entries, every index LOCAL to the chunk, and which records
-// own a run range or a grid — and names the chunks of the subtrees kept inside it, where the walk met them (`steps`).
-// So a record is held once however deep the kept subtrees nest: a chunk holding a copy of everything under it held a
-// list's rows twice, and an edit inside the list packed every row again under a new id, for native to hold and to
-// measure afresh. A pass that puts the subtree back names the chunk and where each of its streams now starts
-// (`layoutPass`'s placements), and the chunk goes in there relocated, never crossing from JS or being decoded again.
-// The unit the measure cache keys on.
-pub(crate) struct Chunk {
-    inputs: Vec<crate::layout::Input>,
-    flags: Vec<u8>,
-    runs: Vec<crate::layout::Run>,
-    run_texts: Vec<crate::layout::RunText>,
-    grids: Vec<f64>,
-    inlines: Vec<crate::layout::InlineBox>,
-    steps: Vec<ChunkStep>,
-    // …how long the subtree is in each stream, its root's record included,
-    size: Mark,
-    // …and whether the ROOT owns a run range or a grid (`CHUNK_RUNS` / `CHUNK_GRID`), whose start the pass relocates.
-    root_flags: u8,
-    used: u64,
-    // …and whether a pass has placed it yet.
-    placed: bool,
-}
-// A chunk's contents in the order the walk emitted them: `Own` takes the chunk's next records — `recs` of them, at
-// record `at` — and then its next runs, grid values and inline entries, each appended where its stream stands; `Child`
-// is a kept subtree inside it, whose root is the record placed just before it. A record placed BELOW where the records
-// stand is one the subtree wrote over a child's (a pushed table's captions), and replaces it.
-#[derive(Clone, Copy)]
-enum ChunkStep {
-    Own { at: usize, recs: usize, runs: usize, grids: usize, inls: usize },
-    Child(u32),
-}
-const CHUNK_STEP_OWN: f64 = 0.0;
-// Where a subtree stands in each stream, or how long it is.
-#[derive(Clone, Copy)]
-struct Mark {
-    rec: usize,
-    run: usize,
-    grid: usize,
-    inl: usize,
-}
-// A realm's chunks, by the id the walk gave each. One not placed for `CHUNK_IDLE_PASSES` passes is dropped; a pass that
-// names a chunk the store no longer holds is answered with the ids it needs (`layoutPass`), which the walk still has.
-#[derive(Default)]
-pub(crate) struct ChunkStore {
-    chunks: std::collections::HashMap<u32, Chunk>,
-    pass: u64,
-    // …and what the layout kept of measuring them (`layout::MeasureCache`), dropped with them.
-    measure: crate::layout::MeasureCache,
-}
-impl ChunkStore {
-    // The chunks placing `id` needs that the store does not hold — it, or one it names.
-    fn missing(&self, id: u32, out: &mut Vec<f64>) {
-        match self.chunks.get(&id) {
-            None => out.push(id as f64),
-            Some(c) => {
-                for step in &c.steps {
-                    if let ChunkStep::Child(child) = *step {
-                        self.missing(child, out);
-                    }
-                }
-            }
-        }
-    }
-}
-const CHUNK_IDLE_PASSES: u64 = 16;
-const CHUNK_RUNS: u8 = 1;
-const CHUNK_GRID: u8 = 2;
-
-// __dom.layoutChunkPut(id, records, flags, runs, runTexts, grids, inlines, steps, size, rootFlags): hold one kept
-// subtree's inputs (see `Chunk`) — `steps` as [kind, record or child id, records, runs, grid values, inline entries]
-// rows, `size` as [records, runs, grid values, inline entries].
-fn layout_chunk_put(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let id = args.get(0).uint32_value(scope).unwrap_or(0);
-    let run_texts = read_run_texts(scope, args.get(4));
-    let root_flags = args.get(9).uint32_value(scope).unwrap_or(0) as u8;
-    let recs = f64_arg(args.get(1));
-    let flags = f64_arg(args.get(2));
-    let run_floats = f64_arg(args.get(3));
-    let grids = f64_arg(args.get(5));
-    let inline_floats = f64_arg(args.get(6));
-    let step_floats = f64_arg(args.get(7));
-    let size = f64_arg(args.get(8));
-    if recs.len() % LAYOUT_STRIDE != 0 || run_floats.len() % RUN_STRIDE != 0 || inline_floats.len() % INLINE_STRIDE != 0
-        || run_texts.len() != run_floats.len() / RUN_STRIDE || step_floats.len() % 6 != 0 || size.len() != 4 {
-        rv.set_bool(false);
-        return;
-    }
-    let steps = step_floats
-        .chunks_exact(6)
-        .map(|s| {
-            if s[0] == CHUNK_STEP_OWN {
-                ChunkStep::Own { at: s[1] as usize, recs: s[2] as usize, runs: s[3] as usize, grids: s[4] as usize, inls: s[5] as usize }
-            } else {
-                ChunkStep::Child(s[1] as u32)
-            }
-        })
-        .collect();
-    let cid = realm_id(scope, &args);
-    let store = dom(scope).layout_chunks.entry(cid).or_default();
-    let chunk = Chunk {
-        inputs: recs.chunks_exact(LAYOUT_STRIDE).map(decode_input).collect(),
-        flags: flags.iter().map(|&f| f as u8).collect(),
-        runs: run_floats.chunks_exact(RUN_STRIDE).map(decode_run).collect(),
-        run_texts,
-        grids: grids.to_vec(),
-        inlines: inline_floats.chunks_exact(INLINE_STRIDE).map(decode_inline).collect(),
-        steps,
-        size: Mark { rec: size[0] as usize, run: size[1] as usize, grid: size[2] as usize, inl: size[3] as usize },
-        root_flags,
-        used: store.pass,
-        placed: false,
-    };
-    // (…an id put again is another subtree's, whatever was measured of the last one it named.)
-    store.measure.forget(id);
-    store.chunks.insert(id, chunk);
-    rv.set_bool(true);
-}
-
-// __dom.layoutMeasureCounts() -> [put back, kept, records held, records spliced]: the realm's kept measures
-// (`layout::MeasureCache`) — the JS walk's chunks' and the Rust walk's (`walk_reuse`) together — and the records the Rust
-// walk spliced back rather than built (`Walk::splice`), for a spec.
+// __dom.layoutMeasureCounts() -> [put back, kept, records held, records spliced, records walked]: the Rust walk's kept
+// measures (`layout::MeasureCache` in `walk_reuse`), and the records it spliced back from its last pass rather than built
+// (`Walk::splice`) and those it built, for a spec and the perf gate.
 fn layout_measure_counts(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -3156,12 +2931,11 @@ fn layout_measure_counts(
 ) {
     let cid = realm_id(scope, &args);
     let d = dom(scope);
-    let caches = [d.layout_chunks.get(&cid).map(|s| &s.measure), d.walk_reuse.get(&cid).map(|r| &r.measure)];
     let mut counts = [0.0; 5];
-    for m in caches.into_iter().flatten() {
-        counts[0] += m.put_back as f64;
-        counts[1] += m.kept as f64;
-        counts[2] += m.records() as f64;
+    if let Some(m) = d.walk_reuse.get(&cid).map(|r| &r.measure) {
+        counts[0] = m.put_back as f64;
+        counts[1] = m.kept as f64;
+        counts[2] = m.records() as f64;
     }
     counts[3] = d.walk_reuse.get(&cid).map_or(0.0, |r| r.spliced_records as f64);
     counts[4] = d.walk_reuse.get(&cid).map_or(0.0, |r| r.walked_records as f64);
@@ -3173,124 +2947,6 @@ fn layout_measure_counts(
     rv.set(out.into());
 }
 
-// __dom.layoutPass(inputsFlat, runsFlat, runTexts, rootX, rootY, rootCbW, grids, inlines, maths, rootRtl, placements,
-//                  patches, check, texts) -> [Float64Array, Float64Array, Float64Array(, Float64Array)] | Float64Array
-//                  | string | false.
-// Decode the flat per-node record buffer (root at record 0), the per-run buffer, the parallel `runTexts` string
-// array (a run's text, else non-string), the grid channel and the inline table, run native layout, and write each
-// node's border-box into its arena slot. Answers the inline boxes' FRAGMENTS as rows of [inline index, x, y, w, h],
-// and beside them EVERY record's box, in record order, as the rows `boxOf` answers one node at a time
-// (`BOX_ROW` numbers each: [x, y, w, h, autoHeight, cbW, mt, mr, mb, ml, relX, relY], then its edges — see `box_row`)
-// — which is also the only answer for a record with NO node to write into (an anonymous grid item, table cell or row),
-// then the records whose box is not the one their node held
-// before the pass (all of them without a node) — what the writer has to write — and, where `texts` asks, the TEXT
-// PIECES the lines placed, as rows of `TextRow`; or false when the subtree uses
-// a feature the native engine doesn't model (Outcome::Unsupported), and the caller then lays it out in JS. One
-// crossing per pass, where reading the boxes back one `boxOf` at a time was a crossing per box.
-// A kept subtree is a HOLE in every buffer, filled from its chunk (`ChunkStore`): `placements` names each, in record
-// order, as [chunk id, record, run, grid and inline position] — the record being the subtree's root, which the buffer
-// holds — and `patches` sets what the walk resolves per pass in a record the chunk holds, as [record, slot, value]
-// (slot 71 the containing block's record, 92-95 its rectangle or an inline's entry). Where a chunk is not held (never
-// sent, or dropped for idling), the answer is the ids it needs, as a Float64Array, and nothing is laid out. Under
-// `check`, a kept measure that differs from laying its subtree out again is answered as the string that says where.
-fn layout_pass(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let run_texts_fresh = read_run_texts(scope, args.get(2));
-    let root_x = args.get(3).number_value(scope).unwrap_or(0.0);
-    let root_y = args.get(4).number_value(scope).unwrap_or(0.0);
-    let root_cb_w = args.get(5).number_value(scope).unwrap_or(0.0);
-    // …and the root element's direction, for a pass root native places itself (a NaN origin): the BODY's lead margin.
-    let root_rtl = args.get(9).is_true();
-    // …and whether to CHECK every measure a kept chunk puts back against laying it out again (`CSIM_NL_REUSE_VERIFY`).
-    let check = args.get(12).is_true();
-    // …and whether to answer the TEXT PIECES the lines placed as well (`TextRow`), which only a paint asks for.
-    let texts = args.get(13).is_true();
-    let cid = realm_id(scope, &args);
-    let node_floats = f64_arg(args.get(0));
-    // The record STRIDE is a contract between two files, and a buffer that does not divide by it is not a
-    // layout the pass should guess at: `chunks_exact` would silently drop the remainder and read every field at
-    // the wrong offset — garbage boxes, not a decline. That is precisely what a stale `.so` (the
-    // `rm -rf target/release` trap) or a half-applied stride bump produces, so check it once per pass.
-    if node_floats.is_empty() || node_floats.len() % LAYOUT_STRIDE != 0 {
-        rv.set_bool(false);
-        return;
-    }
-    let run_floats = f64_arg(args.get(1));
-    // Parallel grid channel: a computed grid container's `grid_start` indexes this buffer (parsed column
-    // template + gaps + per-item placement). Empty when the pass has no computed grid.
-    let grid_floats = f64_arg(args.get(6));
-    // The inline table: one entry per inline box the run stream opens, named by its runs. A buffer that does not
-    // divide by the stride is refused like the record buffer above.
-    let inline_floats = f64_arg(args.get(7));
-    // …and the math table: every comparison function's program, named by offset from a record, an inline entry or a grid.
-    let maths = f64_arg(args.get(8));
-    let placements = f64_arg(args.get(10));
-    let patches = f64_arg(args.get(11));
-    // …and TEXT pieces only from a pass that placed nothing kept: a kept chunk's measure is put back without the pieces
-    // it placed, so the answer would be missing its text. The JS recorder turns reuse off (`NL_REUSE_OFF`); this is
-    // the contract, refused rather than answered short.
-    if texts && !placements.is_empty() {
-        rv.set_bool(false);
-        return;
-    }
-    if inline_floats.len() % INLINE_STRIDE != 0 || run_floats.len() % RUN_STRIDE != 0 || placements.len() % 5 != 0 || patches.len() % 3 != 0 {
-        rv.set_bool(false);
-        return;
-    }
-    let assembled = {
-        let store = dom(scope).layout_chunks.entry(cid).or_default();
-        store.pass += 1;
-        let mut missing = Vec::new();
-        for p in placements.chunks_exact(5) {
-            store.missing(p[0] as u32, &mut missing);
-        }
-        if missing.is_empty() {
-            Ok(store_pass(store, &node_floats, &run_floats, run_texts_fresh, &grid_floats, &inline_floats, &placements, &patches))
-        } else {
-            Err(missing)
-        }
-    };
-    let (mut inputs, runs, run_texts, grids, inlines, roots) = match assembled {
-        Ok(Some(a)) => a,
-        // (…a chunk that does not fill the hole the walk left for it: packed against another walk.)
-        Ok(None) => {
-            rv.set_bool(false);
-            return;
-        }
-        Err(missing) => {
-            let answer: v8::Local<v8::Value> = f64_array(scope, &missing).into();
-            rv.set(answer);
-            return;
-        }
-    };
-    // …kept for the walk-parity instrument (`CSIM_WALK_PARITY`) as the JS walk sent them, before the pass writes into them.
-    if args.get(14).is_true() {
-        // (…and the pass root's containing block, which the ROOT's own percentages resolve against: its height is not
-        // one the pass takes, so the JS side hands it beside the flag.)
-        let basis = crate::walk::Basis { w: root_cb_w, h: args.get(15).number_value(scope).unwrap_or(f64::NAN) };
-        dom(scope).walk_parity.entry(cid).or_default().keep(&inputs, &runs, &run_texts, &inlines, &grids, &maths, basis);
-    }
-    // The measures kept of the placed chunks, lent to the pass and taken back.
-    let mut measure = std::mem::take(&mut dom(scope).layout_chunks.entry(cid).or_default().measure);
-    let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths, root_x, root_y, root_cb_w, root_rtl, Some((&mut measure, roots, check)), texts);
-    let mismatch = measure.mismatch.take();
-    dom(scope).layout_chunks.entry(cid).or_default().measure = measure;
-    if let Some(why) = mismatch {
-        let s: v8::Local<v8::Value> = v8::String::new(scope, &why).unwrap().into();
-        rv.set(s);
-        return;
-    }
-    match out {
-        crate::layout::Outcome::Unsupported => rv.set_bool(false),
-        crate::layout::Outcome::LaidOut(laid) => {
-            let answer = laid_answer(scope, cid, laid, texts);
-            rv.set(answer.into());
-        }
-    }
-}
 
 // A laid-out pass as the JS side takes it: `[fragRows, boxRows, changed, textRows?]` — each box stored on its node as
 // well (`layout_box`, what `boxOf` reads), and `changed` naming the records whose box moved from the one stored.
@@ -3326,193 +2982,6 @@ pub(crate) fn laid_answer<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, laid: 
     answer
 }
 
-// The pass's inputs assembled, then the chunks it placed marked used and the idle ones dropped. None where a chunk
-// does not fill the hole the walk left for it.
-#[allow(clippy::too_many_arguments)]
-fn store_pass(
-    store: &mut ChunkStore,
-    node_floats: &[f64],
-    run_floats: &[f64],
-    run_texts: Vec<crate::layout::RunText>,
-    grid_floats: &[f64],
-    inline_floats: &[f64],
-    placements: &[f64],
-    patches: &[f64],
-) -> Option<PassInputs> {
-    let assembled = assemble_pass(store, node_floats, run_floats, run_texts, grid_floats, inline_floats, placements, patches);
-    let pass = store.pass;
-    if let Some((.., roots)) = &assembled {
-        for root in roots.values() {
-            if let Some(c) = store.chunks.get_mut(&root.id) {
-                c.used = pass;
-                c.placed = true;
-            }
-        }
-    }
-    if pass % CHUNK_IDLE_PASSES == 0 {
-        store.chunks.retain(|_, c| pass - c.used < CHUNK_IDLE_PASSES);
-        let chunks = &store.chunks;
-        store.measure.retain_chunks(|id| chunks.contains_key(&id));
-    }
-    assembled
-}
-type PassInputs = (
-    Vec<crate::layout::Input>,
-    Vec<crate::layout::Run>,
-    Vec<crate::layout::RunText>,
-    Vec<f64>,
-    Vec<crate::layout::InlineBox>,
-    // …and where each chunk placed, nested ones included, has its root (`layout::ChunkRoot`), for the measure cache.
-    std::collections::HashMap<usize, crate::layout::ChunkRoot>,
-);
-// The streams a pass is assembled into.
-struct Assembly {
-    inputs: Vec<crate::layout::Input>,
-    runs: Vec<crate::layout::Run>,
-    run_texts: Vec<crate::layout::RunText>,
-    grids: Vec<f64>,
-    inlines: Vec<crate::layout::InlineBox>,
-    roots: std::collections::HashMap<usize, crate::layout::ChunkRoot>,
-}
-// The pass's inputs: what the buffers hold, decoded, and each placed chunk in its holes — every local position made the
-// pass's (a record's parent, run start and grid start; a run's record or inline entry) — then the patches. Placements
-// come in the order the walk made them, which is every stream's order, so each stream is caught up to where a chunk
-// starts in it before the chunk goes in, and skips the hole it leaves after.
-#[allow(clippy::too_many_arguments)]
-fn assemble_pass(
-    store: &ChunkStore,
-    node_floats: &[f64],
-    run_floats: &[f64],
-    mut run_texts: Vec<crate::layout::RunText>,
-    grid_floats: &[f64],
-    inline_floats: &[f64],
-    placements: &[f64],
-    patches: &[f64],
-) -> Option<PassInputs> {
-    let n_rec = node_floats.len() / LAYOUT_STRIDE;
-    let n_runs = run_floats.len() / RUN_STRIDE;
-    let n_inl = inline_floats.len() / INLINE_STRIDE;
-    run_texts.resize(n_runs, None);
-    let mut out = Assembly {
-        inputs: Vec::with_capacity(n_rec),
-        runs: Vec::with_capacity(n_runs),
-        run_texts: Vec::with_capacity(n_runs),
-        grids: Vec::with_capacity(grid_floats.len()),
-        inlines: Vec::with_capacity(n_inl),
-        roots: std::collections::HashMap::new(),
-    };
-    // Where the buffers are read up to, in each stream.
-    let mut at = Mark { rec: 0, run: 0, grid: 0, inl: 0 };
-    let catch_up = |out: &mut Assembly, at: &mut Mark, to: Mark, run_texts: &mut Vec<crate::layout::RunText>| {
-        for i in at.rec..to.rec {
-            out.inputs.push(decode_input(&node_floats[i * LAYOUT_STRIDE..(i + 1) * LAYOUT_STRIDE]));
-        }
-        for i in at.run..to.run {
-            out.runs.push(decode_run(&run_floats[i * RUN_STRIDE..(i + 1) * RUN_STRIDE]));
-            out.run_texts.push(run_texts[i].take());
-        }
-        out.grids.extend_from_slice(&grid_floats[at.grid..to.grid]);
-        for i in at.inl..to.inl {
-            out.inlines.push(decode_inline(&inline_floats[i * INLINE_STRIDE..(i + 1) * INLINE_STRIDE]));
-        }
-        *at = to;
-    };
-    for p in placements.chunks_exact(5) {
-        let id = p[0] as u32;
-        let start = Mark { rec: p[1] as usize + 1, run: p[2] as usize, grid: p[3] as usize, inl: p[4] as usize };
-        let size = store.chunks.get(&id)?.size;
-        // (…the root's record, the buffer's, included: the chunk goes in after it.)
-        let end = Mark { rec: start.rec - 1 + size.rec, run: start.run + size.run, grid: start.grid + size.grid, inl: start.inl + size.inl };
-        if start.rec <= at.rec || start.run < at.run || start.grid < at.grid || start.inl < at.inl
-            || end.rec > n_rec || end.run > n_runs || end.grid > grid_floats.len() || end.inl > n_inl {
-            return None;
-        }
-        catch_up(&mut out, &mut at, start, &mut run_texts);
-        if !emit_chunk(store, id, &mut out) {
-            return None;
-        }
-        at = end;
-    }
-    let end = Mark { rec: n_rec, run: n_runs, grid: grid_floats.len(), inl: n_inl };
-    catch_up(&mut out, &mut at, end, &mut run_texts);
-    for p in patches.chunks_exact(3) {
-        let x = out.inputs.get_mut(p[0] as usize)?;
-        match p[1] as usize {
-            71 => x.cb_index = p[2] as i32,
-            s @ 92..=95 => x.cb_rect[s - 92] = p[2],
-            _ => {}
-        }
-    }
-    Some((out.inputs, out.runs, out.run_texts, out.grids, out.inlines, out.roots))
-}
-// One chunk put in where the streams stand, its root the record last placed: its own contents relocated to there, the
-// chunks nested in it where the walk met them. False where it does not come out exactly as long as it was packed.
-fn emit_chunk(store: &ChunkStore, id: u32, out: &mut Assembly) -> bool {
-    use crate::layout::{RUN_ATOMIC, RUN_BR, RUN_CLOSE, RUN_FLOAT, RUN_OOF, RUN_OPEN, RUN_WBR};
-    let Some(c) = store.chunks.get(&id) else { return false };
-    let Some(root) = out.inputs.len().checked_sub(1) else { return false };
-    let base = Mark { rec: root, run: out.runs.len(), grid: out.grids.len(), inl: out.inlines.len() };
-    out.roots.insert(root, crate::layout::ChunkRoot {
-        id,
-        n: c.size.rec,
-        runs_at: base.run,
-        grids_at: base.grid,
-        inl_at: base.inl,
-        root_runs: c.root_flags & CHUNK_RUNS != 0,
-        root_grid: c.root_flags & CHUNK_GRID != 0,
-        fresh: !c.placed,
-    });
-    let (mut r, mut u, mut g, mut l) = (0, 0, 0, 0);
-    for step in &c.steps {
-        match *step {
-            ChunkStep::Own { at, recs, runs, grids, inls } => {
-                if r + recs > c.inputs.len() || u + runs > c.runs.len() || g + grids > c.grids.len() || l + inls > c.inlines.len() {
-                    return false;
-                }
-                for k in 0..recs {
-                    let mut x = c.inputs[r + k];
-                    x.parent += base.rec as i32;
-                    if c.flags[r + k] & CHUNK_RUNS != 0 {
-                        x.run_start += base.run as i32;
-                    }
-                    if c.flags[r + k] & CHUNK_GRID != 0 {
-                        x.grid_start += base.grid as i32;
-                    }
-                    let pos = base.rec + at + k;
-                    match pos.cmp(&out.inputs.len()) {
-                        std::cmp::Ordering::Equal => out.inputs.push(x),
-                        std::cmp::Ordering::Less if pos > base.rec => out.inputs[pos] = x,
-                        _ => return false,
-                    }
-                }
-                r += recs;
-                for k in 0..runs {
-                    let mut run = c.runs[u + k];
-                    match run.kind {
-                        RUN_OOF | RUN_FLOAT | RUN_ATOMIC if run.font >= 0 => run.font += base.rec as i32,
-                        RUN_OPEN | RUN_CLOSE | RUN_WBR => run.font += base.inl as i32,
-                        RUN_BR if run.font >= 0 => run.font += base.inl as i32,
-                        _ => {}
-                    }
-                    out.runs.push(run);
-                    out.run_texts.push(c.run_texts[u + k].clone());
-                }
-                u += runs;
-                out.grids.extend_from_slice(&c.grids[g..g + grids]);
-                g += grids;
-                out.inlines.extend_from_slice(&c.inlines[l..l + inls]);
-                l += inls;
-            }
-            ChunkStep::Child(child) => {
-                if !emit_chunk(store, child, out) {
-                    return false;
-                }
-            }
-        }
-    }
-    out.inputs.len() == base.rec + c.size.rec && out.runs.len() == base.run + c.size.run
-        && out.grids.len() == base.grid + c.size.grid && out.inlines.len() == base.inl + c.size.inl
-}
 
 // A Float64Array holding `vals` — how a pass hands a flat table back to JS in one crossing.
 pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v8::Local<'s, v8::Float64Array> {
@@ -3550,32 +3019,6 @@ fn box_row(b: &crate::layout::Box) -> [f64; BOX_ROW] {
     row
 }
 
-// __dom.boxOf(nid) -> [x, y, w, h, autoHeight, cbW, marginTop, marginRight, marginBottom, marginLeft, relX, relY, …edges]
-// (document coords, border-box) or undefined when the node has no native box (never laid out this pass / stale nid).
-// The JS geometry getters read this. `cbW` is the basis the box's percentages resolved against and the margins are the
-// ones its placement USED — each NaN where the pass had none to report (`layout::Box::cb_w` / `used_margins`) — and
-// `relX` / `relY` its relative shift, already in `x` / `y` (`layout::Box::rel`).
-fn box_of(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let cid = realm_id(scope, &args);
-    let b = match realm(scope, cid).get(id).and_then(|node| node.layout_box) {
-        Some(b) => b,
-        None => return,
-    };
-    let vals = box_row(&b);
-    let arr = v8::Array::new(scope, vals.len() as i32);
-    for (i, v) in vals.iter().enumerate() {
-        let num: v8::Local<v8::Value> = v8::Number::new(scope, *v).into();
-        arr.set_index(scope, i as u32, num);
-    }
-    rv.set(arr.into());
-}
 
 // __dom.nowNanos() -> a process-monotonic wall time in nanoseconds (as a Number). csim's own clock (Date.now /
 // performance.now) is the VIRTUAL event-loop clock, which no amount of work inside one synchronous JS turn moves as a

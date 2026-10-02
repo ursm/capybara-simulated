@@ -7,14 +7,12 @@ require 'json'
 # every element's border box, its client rects and its used margins and padding, and every text node's line boxes —
 # recorded in a golden file and compared on every run, with the Rust walk asserted to have laid the page out.
 #
-# A golden is RECORDED (`CSIM_LAYOUT_GOLDEN=record`, or `rerecord` to drop what this run did not reach — run the whole
-# file) only where the shape's own parity check passes: the caller's block runs it first, and the Rust walk is held to
-# the oracle too, so a recorded answer is one the Rust walk, the JS walk and the oracle all agreed on — or one listed
-# for a measurement against Chrome where the Rust walk alone differs (`tmp/layout_golden_divergent*.json`). That is what
-# the parity specs held these shapes to, and the golden keeps holding them to it after the reference is deleted. Where
-# an answer is KNOWN to differ from Chrome the spec says so beside it with Chrome's figure (`expect_shared_gap`); a
-# golden is a regression guard, not a claim of conformance. What it cannot see is a pseudo-element's box, which no DOM
-# API answers.
+# A golden is RECORDED with `CSIM_LAYOUT_GOLDEN=record` (or `rerecord`, which drops what the run did not reach — run
+# the whole file). The goldens first recorded were the answers the Rust walk, a JS walk and a JS layout all agreed on,
+# held to them while both still existed (2026-10-02); a shape recorded since is the Rust walk's answer, and is worth
+# holding against Chrome before it is recorded. Where an answer is KNOWN to differ from Chrome the spec says so beside
+# it with Chrome's figure (`expect_shared_gap`); a golden is a regression guard, not a claim of conformance. What it
+# cannot see is a pseudo-element's box, which no DOM API answers.
 #
 # One file per spec file (`spec/fixtures/layout_golden/<spec>.json`), keyed by the body's digest, the body kept beside
 # its boxes so a diff reads as a page. The figures are this machine's fonts' (fontconfig's monospace), as every
@@ -23,7 +21,6 @@ module LayoutGolden
   MODE = ENV['CSIM_LAYOUT_GOLDEN']
   RECORD = %w[record rerecord].include?(MODE)
   DIR = File.expand_path('../fixtures/layout_golden', __dir__)
-  TMP = File.expand_path('../../tmp', __dir__)
   # `body` and everything under it in tree order: an element as its tag and border box, then — where it has any — its
   # client rects (an inline box's fragments; a block's one rect is its box, and is left out) and its used margins and
   # padding (the resolved values `getComputedStyle` reports); a text node as `#text` and its line boxes.
@@ -57,10 +54,7 @@ module LayoutGolden
 
   @files = {}
   @dirty = {}
-  @divergent = []
   class << self
-    attr_reader :divergent
-
     def file(spec_path)
       path = File.join(DIR, "#{File.basename(spec_path, '.rb')}.json")
       @files[path] ||= MODE != 'rerecord' && File.exist?(path) ? JSON.parse(File.read(path)) : {}
@@ -80,12 +74,6 @@ module LayoutGolden
         File.write(path, "{\n#{lines.join(",\n")}\n}\n")
       end
       @dirty.clear
-      return unless RECORD
-
-      # (…written on every recording run, an empty list too, so no earlier run's list survives it; one per flatware
-      # worker, which records its own files.)
-      FileUtils.mkdir_p(TMP)
-      File.write(File.join(TMP, "layout_golden_divergent#{ENV.fetch('TEST_ENV_NUMBER', '')}.json"), JSON.pretty_generate(@divergent))
     end
 
     def near?(got, want)
@@ -98,9 +86,9 @@ module LayoutGolden
   end
 
   # `body` laid out on the example group's own `page` (or `app`, a variant of it `variant` names in the key — a stable
-  # string, as the key must be the same on every Ruby), held to its golden — or, recording, checked by the block (the
-  # shape's parity) and then recorded. The session goes as soon as the shape is read: a loop of shapes in one example
-  # otherwise keeps every page's realm alive to its end (1.3 GB where one at a time is 200 MB).
+  # string, as the key must be the same on every Ruby), held to its golden — or, recording, recorded. The session goes
+  # as soon as the shape is read: a loop of shapes in one example otherwise keeps every page's realm alive to its end
+  # (1.3 GB where one at a time is 200 MB).
   def expect_layout_golden(body, app: page(body), variant: nil)
     path, store = LayoutGolden.file(RSpec.current_example.metadata[:file_path])
     key = Digest::SHA256.hexdigest([body, variant].compact.join("\0"))[0, 16]
@@ -110,13 +98,6 @@ module LayoutGolden
       # The answer is the RUST walk's, the one production lays out with — so it took the page.
       expect(session.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}'), "#{body}: the Rust walk declined"
       if RECORD
-        yield if block_given?
-        # …and where it does NOT agree with the oracle, its answer is still the one recorded — it is the one production
-        # gives — and the shape is listed for a measurement against Chrome.
-        rust = session.evaluate_script('globalThis.__csimLayoutShadowRun(null, {rust: true})')
-        unless rust['ok'] && rust['mismatches'].to_i.zero? && rust['fragMismatches'].to_i.zero?
-          LayoutGolden.divergent << {'spec' => path, 'body' => body, 'sample' => rust.slice('sample', 'fragSample')}
-        end
         LayoutGolden.record(path, key, {'body' => body, 'variant' => variant, 'boxes' => got}.compact)
       else
         want = store[key]

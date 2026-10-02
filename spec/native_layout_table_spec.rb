@@ -35,37 +35,23 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
-require_relative 'support/shadow_parity'
+require_relative 'support/chrome_figures'
 require_relative 'support/layout_golden'
 
-RSpec.describe 'native layout table parity' do
+RSpec.describe 'native layout table' do
   def page(body)
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
-  def run_shadow(body)
-    session = simulated_session(page(body))
-    session.visit '/'
-    session.evaluate_script('document.body.offsetHeight')
-    session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-  end
-
-  def expect_parity(body)
-    expect_layout_golden(body) do
-      r = run_shadow(body)
-      expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-      expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-      expect_no_dropped_records(r, body)
-    end
-  end
+  def expect_layout(body) = expect_layout_golden(body)
 
   # An EMPTY table — `display: table` with nothing in it, which a `::before { content: ""; display: table }`
   # produces all over real stylesheets (the clearfix). It has no grid at all: its border box is its own edges
   # plus whatever it declares, a caption stacks on top of that, and an imposed height still makes the empty
   # grid REGION that tall (§17.5.3 — a table height is a minimum, with or without rows to share it out).
   # `border-spacing` says nothing without tracks to space. The figures are headless Chrome's, measured
-  # 2026-09-22, because parity alone cannot tell a shared rule from a shared mistake.
+  # 2026-09-22, because a golden alone cannot tell a right answer from a recorded mistake.
   # A cell's declared width is no narrower than its content's min-content: the column's minimum is the larger of the two
   # (CSS 2.1 §17.5.2.2, CSS Tables 3). All three engines let the declaration shrink the column below its content — the
   # `<td style="width: 1px; white-space: nowrap">` idiom an app's shrink-to-content column is written in came out 3 wide.
@@ -86,7 +72,7 @@ RSpec.describe 'native layout table parity' do
       '<table><tr><td id="m" style="width:10px;max-width:5px">Supercalifragilistic</td></tr></table>'                     => 7
     }.each do |table, w|
       body = %(<div style="font:16px monospace">#{table}</div>)
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[2]).to be_within(0.05).of(w), body
     end
   end
@@ -100,7 +86,7 @@ RSpec.describe 'native layout table parity' do
       'display:table;min-height:40px'         => [0, 40]
     }.each do |style, (w, h)|
       body = %(<div id="t" style="#{style}"></div>)
-      expect_parity(body)
+      expect_layout(body)
       session = simulated_session(page(body))
       session.visit '/'
       box = session.evaluate_script("(() => { const r = document.getElementById('t').getBoundingClientRect(); return [r.width, r.height]; })()")
@@ -109,30 +95,30 @@ RSpec.describe 'native layout table parity' do
   end
 
   it 'matches an empty table with a caption (the caption is the whole box)' do
-    expect_parity('<div style="display:table"><div style="display:table-caption">cap</div></div>')
-    expect_parity('<div style="display:table;height:100px"><div style="display:table-caption">cap</div></div>')
-    expect_parity('<div style="display:table;table-layout:fixed;width:150px"></div>')
+    expect_layout('<div style="display:table"><div style="display:table-caption">cap</div></div>')
+    expect_layout('<div style="display:table;height:100px"><div style="display:table-caption">cap</div></div>')
+    expect_layout('<div style="display:table;table-layout:fixed;width:150px"></div>')
   end
 
   # …and an empty table on a LINE, which is the one shape where a table's BASELINE has nothing behind the
   # caption to answer first. A caption gives its table no baseline at all (§17.4 puts it outside the table box;
   # §10.8.1 reads an inline-table's from its first ROW), so an empty one hangs from its bottom margin edge and
   # the line is 22 — Chrome's figure, measured 2026-09-23, and the reason the ORACLE was the engine that moved:
-  # it took the caption's baseline and made the line 18. Pinned to Chrome because both engines now agree.
+  # it took the caption's baseline and made the line 18. Pinned to Chrome.
   it 'gives an empty table with a caption NO baseline (Chrome: the line is 22, not 18)' do
     body = '<div id="l" style="width:300px">x <span style="display:inline-table"><span style="display:table-caption">cap</span></span> y</div>'
-    expect_parity(body)
+    expect_layout(body)
     session = simulated_session(page(body))
     session.visit '/'
     expect(session.evaluate_script("document.getElementById('l').getBoundingClientRect().height")).to eq(22)
     # …and the same through a baseline-aligned CELL, which reaches the walk by a different route.
-    expect_parity('<table style="border-spacing:0"><tr><td style="vertical-align:baseline"><div style="display:table"><div style="display:table-caption;height:16px">cap</div></div></td><td style="vertical-align:baseline;font-size:30px">Y</td></tr></table>')
+    expect_layout('<table style="border-spacing:0"><tr><td style="vertical-align:baseline"><div style="display:table"><div style="display:table-caption;height:16px">cap</div></div></td><td style="vertical-align:baseline;font-size:30px">Y</td></tr></table>')
     # …while a table WITH rows still answers from them (Chrome: 36 and 46).
-    expect_parity('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-caption">cap</span><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>')
+    expect_layout('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-caption">cap</span><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>')
   end
 
   # A caption is the one block-level box in the engine that does NOT go through `block_child_width`: the oracle
-  # sizes it with `usedSize`, which honours an intrinsic-size KEYWORD and nothing else that makes a block size
+  # sized it with `usedSize`, which honours an intrinsic-size KEYWORD and nothing else that makes a block size
   # from its own content. Native ran it through `used_width` alone, which knows no keyword, and filled the
   # wrapper — 300 where the oracle and Chrome say 37.33. The `auto` margins then had nothing left to centre.
   it 'matches a caption sized by an intrinsic-size keyword (Chrome: min-content is 37.33 in a 300px table)' do
@@ -143,7 +129,7 @@ RSpec.describe 'native layout table parity' do
       'width:min-content;min-width:200px', 'width:fit-content;max-width:30px'
     ].each do |cap|
       ['width:300px;border-spacing:0', 'border-spacing:4px', 'width:60px;border-spacing:0'].each do |tbl|
-        expect_parity(%(<table style="#{tbl}"><caption id="c" style="#{cap}">hello world</caption><tr><td style="width:40px;height:20px">a</td></tr></table>))
+        expect_layout(%(<table style="#{tbl}"><caption id="c" style="#{cap}">hello world</caption><tr><td style="width:40px;height:20px">a</td></tr></table>))
       end
     end
     body = '<table style="width:300px;border-spacing:0"><caption id="c" style="width:min-content;height:16px">hello world</caption><tr><td style="width:40px;height:20px">a</td></tr></table>'
@@ -154,102 +140,102 @@ RSpec.describe 'native layout table parity' do
   end
 
   # …but a VERTICAL writing mode's auto width is not one of them: `block_child_width` would shrink it and
-  # `usedSize` does not, so a vertical-rl caption fills the wrapper in both engines. A divergence from Chrome
-  # they SHARE, recorded rather than fixed while the port runs — and the reason the caption is not simply
+  # `usedSize` did not, so a vertical-rl caption fills the wrapper. A divergence from Chrome carried over from
+  # the oracle, recorded rather than fixed while the port runs — and the reason the caption is not simply
   # routed through `block_child_width`.
-  it 'keeps a vertical writing-mode caption filling the wrapper (shared with the oracle, not with Chrome)' do
-    expect_parity('<table style="width:300px;border-spacing:0"><caption style="writing-mode:vertical-rl">hello world</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+  it 'keeps a vertical writing-mode caption filling the wrapper (Chrome: it does not)' do
+    expect_layout('<table style="width:300px;border-spacing:0"><caption style="writing-mode:vertical-rl">hello world</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
   end
 
   it 'matches an empty table as a flex item and in block flow (its margins still stack)' do
-    expect_parity('<div style="display:flex;width:300px"><div style="display:table"></div><div>y</div></div>')
-    expect_parity('<div style="width:400px"><div style="display:table;margin:10px;width:50px;height:20px"></div><p>after</p></div>')
+    expect_layout('<div style="display:flex;width:300px"><div style="display:table"></div><div>y</div></div>')
+    expect_layout('<div style="width:400px"><div style="display:table;margin:10px;width:50px;height:20px"></div><p>after</p></div>')
   end
 
   it 'matches a 2x2 table with border-spacing (cells placed by prefix sums)' do
-    expect_parity('<table style="border-spacing:4px"><tr><td style="width:60px;height:20px">a</td><td style="width:80px;height:30px">bb</td></tr><tr><td>ccc</td><td style="height:40px">d</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><tr><td style="width:60px;height:20px">a</td><td style="width:80px;height:30px">bb</td></tr><tr><td>ccc</td><td style="height:40px">d</td></tr></table>')
   end
 
   it 'matches a plain 2x2 table (UA border-spacing)' do
-    expect_parity('<table><tr><td>a</td><td>bb</td></tr><tr><td>ccc</td><td>d</td></tr></table>')
+    expect_layout('<table><tr><td>a</td><td>bb</td></tr><tr><td>ccc</td><td>d</td></tr></table>')
   end
 
   it 'matches a single row of three cells with asymmetric border-spacing' do
-    expect_parity('<table style="border-spacing:2px 6px"><tr><td style="width:30px">x</td><td style="width:40px">y</td><td style="width:50px">z</td></tr></table>')
+    expect_layout('<table style="border-spacing:2px 6px"><tr><td style="width:30px">x</td><td style="width:40px">y</td><td style="width:50px">z</td></tr></table>')
   end
 
   it "matches a table carrying its own padding and border" do
-    expect_parity('<table style="border-spacing:4px;padding:10px;border:2px solid"><tr><td style="width:50px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px;padding:10px;border:2px solid"><tr><td style="width:50px">a</td></tr></table>')
   end
 
   it 'matches a display:table div with bare table-row children (no row group)' do
-    expect_parity('<div style="display:table;border-spacing:3px"><div style="display:table-row"><div style="display:table-cell;width:40px">a</div><div style="display:table-cell;width:60px">b</div></div></div>')
+    expect_layout('<div style="display:table;border-spacing:3px"><div style="display:table-row"><div style="display:table-cell;width:40px">a</div><div style="display:table-cell;width:60px">b</div></div></div>')
   end
 
   it 'matches a table nested inside a block' do
-    expect_parity('<div style="padding:8px"><table style="border-spacing:5px"><tr><td style="width:40px">a</td><td style="width:40px">b</td></tr></table></div>')
+    expect_layout('<div style="padding:8px"><table style="border-spacing:5px"><tr><td style="width:40px">a</td><td style="width:40px">b</td></tr></table></div>')
   end
 
   it 'matches a header row of th cells plus a data row' do
-    expect_parity('<table style="border-spacing:3px"><tr><th style="width:50px">H1</th><th style="width:70px">H2</th></tr><tr><td>data one</td><td>two</td></tr></table>')
+    expect_layout('<table style="border-spacing:3px"><tr><th style="width:50px">H1</th><th style="width:70px">H2</th></tr><tr><td>data one</td><td>two</td></tr></table>')
   end
 
   it 'matches a cell holding its own block subtree (descendant boxes)' do
-    expect_parity('<table style="border-spacing:4px"><tr><td style="width:100px"><div style="height:10px;margin:5px"></div><div style="height:20px"></div></td><td style="width:60px;height:50px">x</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><tr><td style="width:100px"><div style="height:10px;margin:5px"></div><div style="height:20px"></div></td><td style="width:60px;height:50px">x</td></tr></table>')
   end
 
   # vertical-align (§17.5.3): a short cell beside a taller one has its content pushed down — the UA default is
-  # middle, and top/bottom are honored. Native lays cell content top-aligned then applies the oracle's pushed
-  # offset, so the descendant boxes match.
+  # middle, and top/bottom are honored. Native lays cell content top-aligned then applies the alignment
+  # offset to it.
   it 'matches vertical-aligned cell content in a taller row (middle default, and explicit top/bottom)' do
-    expect_parity('<table style="border-spacing:4px"><tr><td style="width:20px;vertical-align:top"><div style="width:20px;height:40px"></div></td><td style="width:20px"><div style="width:20px;height:10px"></div></td><td style="width:20px;vertical-align:bottom"><div style="width:20px;height:12px"></div></td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><tr><td style="width:20px;vertical-align:top"><div style="width:20px;height:40px"></div></td><td style="width:20px"><div style="width:20px;height:10px"></div></td><td style="width:20px;vertical-align:bottom"><div style="width:20px;height:12px"></div></td></tr></table>')
   end
 
-  it 'matches a table with a declared width (distributed into the columns by the oracle)' do
-    expect_parity('<table style="width:300px;border-spacing:4px"><tr><td>a</td><td>b</td></tr></table>')
+  it 'matches a table with a declared width (distributed into the columns)' do
+    expect_layout('<table style="width:300px;border-spacing:4px"><tr><td>a</td><td>b</td></tr></table>')
   end
 
   it 'matches cells carrying their own padding and border' do
-    expect_parity('<table style="border-spacing:4px"><tr><td style="padding:6px;border:2px solid;width:40px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><tr><td style="padding:6px;border:2px solid;width:40px">a</td></tr></table>')
   end
 
   it 'matches a position:relative cell (the offset is ignored, grid-positioned)' do
-    expect_parity('<table style="border-spacing:4px"><tr><td style="position:relative;left:10px;top:5px;width:50px;height:30px">a</td><td style="width:60px">b</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><tr><td style="position:relative;left:10px;top:5px;width:50px;height:30px">a</td><td style="width:60px">b</td></tr></table>')
   end
 
   # t2 — spans.
   it 'matches a colspan=2 cell over a three-column table' do
-    expect_parity('<table style="border-spacing:4px"><tr><td colspan="2" style="height:20px">A</td><td style="width:50px">B</td></tr><tr><td style="width:30px">c</td><td style="width:40px">d</td><td>e</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><tr><td colspan="2" style="height:20px">A</td><td style="width:50px">B</td></tr><tr><td style="width:30px">c</td><td style="width:40px">d</td><td>e</td></tr></table>')
   end
 
   it 'matches a rowspan=2 cell' do
-    expect_parity('<table style="border-spacing:4px"><tr><td rowspan="2" style="width:30px">A</td><td style="width:50px;height:20px">b</td></tr><tr><td style="height:35px">c</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><tr><td rowspan="2" style="width:30px">A</td><td style="width:50px;height:20px">b</td></tr><tr><td style="height:35px">c</td></tr></table>')
   end
 
   it 'matches a combined colspan=2 rowspan=2 corner cell' do
-    expect_parity('<table style="border-spacing:4px"><tr><td colspan="2" rowspan="2" style="width:60px;height:40px">A</td><td style="width:30px">b</td></tr><tr><td style="height:25px">c</td></tr><tr><td style="width:20px">d</td><td>e</td><td>f</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><tr><td colspan="2" rowspan="2" style="width:60px;height:40px">A</td><td style="width:30px">b</td></tr><tr><td style="height:25px">c</td></tr><tr><td style="width:20px">d</td><td>e</td><td>f</td></tr></table>')
   end
 
   it 'matches a ragged grid (a row missing a trailing cell)' do
-    expect_parity('<table style="border-spacing:4px"><tr><td style="width:40px">a</td><td style="width:50px">b</td></tr><tr><td>c</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><tr><td style="width:40px">a</td><td style="width:50px">b</td></tr><tr><td>c</td></tr></table>')
   end
 
   # t5 — thead / tbody / tfoot. tableGrid sorts the rows into RENDER order (header, body, footer) regardless of
   # source order, and the walk emits the groups in that order; native stacks them like any row groups.
   it 'matches thead / tbody / tfoot in normal source order' do
-    expect_parity('<table style="border-spacing:4px"><thead><tr><td style="width:60px;height:10px">h</td></tr></thead><tbody><tr><td style="height:30px">b</td></tr></tbody><tfoot><tr><td style="height:20px">f</td></tr></tfoot></table>')
+    expect_layout('<table style="border-spacing:4px"><thead><tr><td style="width:60px;height:10px">h</td></tr></thead><tbody><tr><td style="height:30px">b</td></tr></tbody><tfoot><tr><td style="height:20px">f</td></tr></tfoot></table>')
   end
 
   it 'matches a tfoot / tbody / thead written OUT of order (rendered header, body, footer)' do
-    expect_parity('<table style="border-spacing:4px"><tfoot><tr><td style="width:60px;height:20px">foot</td></tr></tfoot><tbody><tr><td style="height:30px">body</td></tr></tbody><thead><tr><td style="height:10px">head</td></tr></thead></table>')
+    expect_layout('<table style="border-spacing:4px"><tfoot><tr><td style="width:60px;height:20px">foot</td></tr></tfoot><tbody><tr><td style="height:30px">body</td></tr></tbody><thead><tr><td style="height:10px">head</td></tr></thead></table>')
   end
 
   it 'matches a thead over two tbody groups' do
-    expect_parity('<table style="border-spacing:4px"><thead><tr><td style="width:50px;height:10px">h</td></tr></thead><tbody><tr><td style="height:20px">b1</td></tr></tbody><tbody><tr><td style="height:25px">b2</td></tr></tbody></table>')
+    expect_layout('<table style="border-spacing:4px"><thead><tr><td style="width:50px;height:10px">h</td></tr></thead><tbody><tr><td style="height:20px">b1</td></tr></tbody><tbody><tr><td style="height:25px">b2</td></tr></tbody></table>')
   end
 
   it 'matches thead / tfoot carrying colspans' do
-    expect_parity('<table style="border-spacing:4px"><thead><tr><td colspan="2" style="height:10px">H</td></tr></thead><tbody><tr><td style="width:30px">a</td><td style="width:40px">b</td></tr></tbody><tfoot><tr><td colspan="2" style="height:15px">F</td></tr></tfoot></table>')
+    expect_layout('<table style="border-spacing:4px"><thead><tr><td colspan="2" style="height:10px">H</td></tr></thead><tbody><tr><td style="width:30px">a</td><td style="width:40px">b</td></tr></tbody><tfoot><tr><td colspan="2" style="height:15px">F</td></tr></tfoot></table>')
   end
 
   # t6 — table-layout:fixed. Columns are sized from the FIRST row (+ the table width), ignoring later rows'
@@ -257,58 +243,58 @@ RSpec.describe 'native layout table parity' do
   # (auto columns split the remainder; with none, it is spread proportionally over the fixed widths). Native
   # reassembles those pushed widths and self-sizes to the same box, as for an auto table.
   it 'matches a fixed-layout table with all-auto columns (equal split of the declared width)' do
-    expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:4px"><tr><td style="height:20px">a</td><td>b</td></tr></table>')
+    expect_layout('<table style="table-layout:fixed;width:300px;border-spacing:4px"><tr><td style="height:20px">a</td><td>b</td></tr></table>')
   end
 
   it 'matches a fixed-layout table whose fixed columns fill the remainder proportionally (no auto column)' do
-    expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:4px"><tr><td style="width:50px;height:20px">a</td><td style="width:100px">b</td></tr></table>')
+    expect_layout('<table style="table-layout:fixed;width:300px;border-spacing:4px"><tr><td style="width:50px;height:20px">a</td><td style="width:100px">b</td></tr></table>')
   end
 
   it 'matches a fixed-layout table with a fixed column and an auto column (auto absorbs the remainder)' do
-    expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:4px"><tr><td style="width:50px;height:20px">a</td><td>b</td></tr></table>')
+    expect_layout('<table style="table-layout:fixed;width:300px;border-spacing:4px"><tr><td style="width:50px;height:20px">a</td><td>b</td></tr></table>')
   end
 
   it 'matches a fixed-layout table with percentage column widths (resolved against the assignable width)' do
-    expect_parity('<table style="table-layout:fixed;width:304px;border-spacing:0"><tr><td style="width:25%;padding:0;height:20px">a</td><td style="width:75%;padding:0">b</td></tr></table>')
+    expect_layout('<table style="table-layout:fixed;width:304px;border-spacing:0"><tr><td style="width:25%;padding:0;height:20px">a</td><td style="width:75%;padding:0">b</td></tr></table>')
   end
 
   it 'matches a fixed-layout table whose first row sets the columns (a wider cell in row 2 is ignored)' do
-    expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:4px"><tr><td style="width:80px;height:20px">a</td><td style="width:120px">b</td></tr><tr><td style="width:500px">x</td><td>y</td></tr></table>')
+    expect_layout('<table style="table-layout:fixed;width:300px;border-spacing:4px"><tr><td style="width:80px;height:20px">a</td><td style="width:120px">b</td></tr><tr><td style="width:500px">x</td><td>y</td></tr></table>')
   end
 
   it 'matches a fixed-layout table narrower than its columns (it grows to fit them)' do
-    expect_parity('<table style="table-layout:fixed;width:50px;border-spacing:4px"><tr><td style="width:100px;height:20px">a</td><td style="width:100px">b</td></tr></table>')
+    expect_layout('<table style="table-layout:fixed;width:50px;border-spacing:4px"><tr><td style="width:100px;height:20px">a</td><td style="width:100px">b</td></tr></table>')
   end
 
   it 'matches a fixed-layout table with a colspan in the first row setting two columns' do
-    expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:0"><tr><td colspan="2" style="width:200px;padding:0;height:20px">A</td><td style="width:40px;padding:0">b</td></tr><tr><td>x</td><td>y</td><td>z</td></tr></table>')
+    expect_layout('<table style="table-layout:fixed;width:300px;border-spacing:0"><tr><td colspan="2" style="width:200px;padding:0;height:20px">A</td><td style="width:40px;padding:0">b</td></tr><tr><td>x</td><td>y</td><td>z</td></tr></table>')
   end
 
   it 'matches a fixed-layout table whose columns all declare width:0 (the width splits equally, Chrome fills)' do
-    expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:0"><tr><td style="width:0;padding:0;height:20px">a</td><td style="width:0;padding:0">b</td></tr></table>')
+    expect_layout('<table style="table-layout:fixed;width:300px;border-spacing:0"><tr><td style="width:0;padding:0;height:20px">a</td><td style="width:0;padding:0">b</td></tr></table>')
   end
 
-  # t7 — colgroup / <col>. A column's declared width / span constrains its track: the oracle folds it into the
+  # t7 — colgroup / <col>. A column's declared width / span constrains its track: it folds into the
   # table's intrinsic width AND the column distribution, so the auto table grows to hold a wide <col> and the
-  # cells fill their columns — native reassembles those pushed widths as usual.
+  # cells fill their columns.
   it 'matches an auto-layout table with a <col> width (the table grows to it)' do
-    expect_parity('<table style="border-spacing:4px"><colgroup><col style="width:120px"><col></colgroup><tr><td style="height:20px">a</td><td>bbbb</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><colgroup><col style="width:120px"><col></colgroup><tr><td style="height:20px">a</td><td>bbbb</td></tr></table>')
   end
 
   it 'matches a <colgroup span="2"> width applied to both columns' do
-    expect_parity('<table style="border-spacing:4px"><colgroup span="2" style="width:90px"></colgroup><tr><td style="height:20px">a</td><td>b</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><colgroup span="2" style="width:90px"></colgroup><tr><td style="height:20px">a</td><td>b</td></tr></table>')
   end
 
   it 'matches a <col span="2"> width applied to both columns' do
-    expect_parity('<table style="border-spacing:4px"><col span="2" style="width:70px"><tr><td style="height:20px">a</td><td>b</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><col span="2" style="width:70px"><tr><td style="height:20px">a</td><td>b</td></tr></table>')
   end
 
   it 'matches a <col> width overridden by a wider cell width (the larger wins)' do
-    expect_parity('<table style="border-spacing:4px"><col style="width:50px"><col><tr><td style="width:150px;height:20px">a</td><td>b</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><col style="width:50px"><col><tr><td style="width:150px;height:20px">a</td><td>b</td></tr></table>')
   end
 
   it 'matches <col> widths in a fixed-layout table' do
-    expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:4px"><colgroup><col style="width:80px"><col></colgroup><tr><td style="height:20px">a</td><td>b</td></tr></table>')
+    expect_layout('<table style="table-layout:fixed;width:300px;border-spacing:4px"><colgroup><col style="width:80px"><col></colgroup><tr><td style="height:20px">a</td><td>b</td></tr></table>')
   end
 
   # t8 — imposed table height. A declared or MIN height TALLER than the grid is shared out over the rows so the
@@ -316,66 +302,66 @@ RSpec.describe 'native layout table parity' do
   # rows and self-sizes to the same box (a too-small height / min-height just floors it — the box grows to the
   # tracks). A `max-height` below the grid, and a caption or collapsed border alongside an imposed height, bail.
   it 'matches a table height taller than the grid (shared out over the rows)' do
-    expect_parity('<table style="border-spacing:4px;height:200px"><tr><td style="width:60px;height:20px">a</td></tr><tr><td style="height:20px">b</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px;height:200px"><tr><td style="width:60px;height:20px">a</td></tr><tr><td style="height:20px">b</td></tr></table>')
   end
 
   it 'matches a MIN-height taller than the grid (shared out over the rows too)' do
-    expect_parity('<table style="min-height:200px"><tr><td style="height:50px">a</td></tr></table>')
+    expect_layout('<table style="min-height:200px"><tr><td style="height:50px">a</td></tr></table>')
   end
 
   it 'matches a table whose declared height is BELOW its natural grid (the box grows to the tracks)' do
-    expect_parity('<table style="height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>')
+    expect_layout('<table style="height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>')
   end
 
   it 'matches a table whose MAX-height is below its natural grid (max-height never clips a table)' do
-    expect_parity('<table style="max-height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>')
+    expect_layout('<table style="max-height:10px;border-spacing:4px"><tr><td style="height:50px">a</td></tr></table>')
   end
 
   it 'matches a table height from the height attribute' do
-    expect_parity('<table height="200" style="border-spacing:4px"><tr><td style="width:60px;height:20px">a</td></tr><tr><td style="height:20px">b</td></tr></table>')
+    expect_layout('<table height="200" style="border-spacing:4px"><tr><td style="width:60px;height:20px">a</td></tr><tr><td style="height:20px">b</td></tr></table>')
   end
 
   it 'matches a taller declared height distributed over a colspan grid' do
-    expect_parity('<table style="border-spacing:4px;height:300px"><tr><td colspan="2" style="height:20px">A</td></tr><tr><td style="width:30px">a</td><td style="width:40px">b</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px;height:300px"><tr><td colspan="2" style="height:20px">A</td></tr><tr><td style="width:30px">a</td><td style="width:40px">b</td></tr></table>')
   end
 
   it 'matches a max-height that exceeds the grid (no effect, rows still fill)' do
-    expect_parity('<table style="border-spacing:4px;max-height:300px"><tr><td style="width:60px;height:20px">a</td></tr><tr><td style="height:20px">b</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px;max-height:300px"><tr><td style="width:60px;height:20px">a</td></tr><tr><td style="height:20px">b</td></tr></table>')
   end
 
   # t9 — anonymous rows. A `display:table-cell` with no `display:table-row` parent is wrapped in an ANONYMOUS
   # row (consecutive such cells share one row; a real row resets the run). The row has no element/box — the walk
-  # emits it with a sentinel nid and the parity compare skips it — but its cells are real and matched.
+  # emits it with a sentinel nid — but its cells are real boxes.
   it 'matches two table-cells with no row (one anonymous row wraps both)' do
-    expect_parity('<div style="display:table;border-spacing:4px"><div style="display:table-cell;width:60px;height:20px">a</div><div style="display:table-cell;width:80px;height:30px">b</div></div>')
+    expect_layout('<div style="display:table;border-spacing:4px"><div style="display:table-cell;width:60px;height:20px">a</div><div style="display:table-cell;width:80px;height:30px">b</div></div>')
   end
 
   it 'matches a single table-cell with no row' do
-    expect_parity('<div style="display:table;border-spacing:4px"><div style="display:table-cell;width:60px;height:20px">a</div></div>')
+    expect_layout('<div style="display:table;border-spacing:4px"><div style="display:table-cell;width:60px;height:20px">a</div></div>')
   end
 
   it 'matches a real row followed by a stray cell (its own anonymous row)' do
-    expect_parity('<div style="display:table;border-spacing:4px"><div style="display:table-row"><div style="display:table-cell;width:60px;height:20px">a</div></div><div style="display:table-cell;width:80px;height:25px">b</div></div>')
+    expect_layout('<div style="display:table;border-spacing:4px"><div style="display:table-row"><div style="display:table-cell;width:60px;height:20px">a</div></div><div style="display:table-cell;width:80px;height:25px">b</div></div>')
   end
 
   it 'matches a table-cell with no row inside a row-group' do
-    expect_parity('<div style="display:table;border-spacing:4px"><div style="display:table-row-group"><div style="display:table-cell;width:60px;height:20px">a</div></div></div>')
+    expect_layout('<div style="display:table;border-spacing:4px"><div style="display:table-row-group"><div style="display:table-cell;width:60px;height:20px">a</div></div></div>')
   end
 
   it 'matches anonymous-row cells in a border-collapse table' do
-    expect_parity('<div style="display:table;border-collapse:collapse"><div style="display:table-cell;width:60px;height:20px;border:4px solid">a</div><div style="display:table-cell;width:80px;height:20px;border:4px solid">b</div></div>')
+    expect_layout('<div style="display:table;border-collapse:collapse"><div style="display:table-cell;width:60px;height:20px;border:4px solid">a</div><div style="display:table-cell;width:80px;height:20px;border:4px solid">b</div></div>')
   end
 
   it 'matches cells split into two anonymous rows by a caption / column between them (a proper table child breaks the run)' do
-    expect_parity('<div style="display:table;border-spacing:0"><div style="display:table-cell;width:30px;height:40px">a</div><div style="display:table-caption">cap</div><div style="display:table-cell;width:30px;height:40px">b</div></div>')
-    expect_parity('<div style="display:table;border-spacing:0"><div style="display:table-cell;width:30px;height:40px">a</div><div style="display:table-column"></div><div style="display:table-cell;width:30px;height:40px">b</div></div>')
+    expect_layout('<div style="display:table;border-spacing:0"><div style="display:table-cell;width:30px;height:40px">a</div><div style="display:table-caption">cap</div><div style="display:table-cell;width:30px;height:40px">b</div></div>')
+    expect_layout('<div style="display:table;border-spacing:0"><div style="display:table-cell;width:30px;height:40px">a</div><div style="display:table-column"></div><div style="display:table-cell;width:30px;height:40px">b</div></div>')
   end
 
   # …and an anonymous row TAKES ITS SHARE of a declared table height's surplus, in proportion to its height like any
   # auto row: a `display: flex` `<tr>` is no row, so the table wraps it in an anonymous row and cell, and the rows
   # split 154 as 77 / 77 (content 24 / 24) or 104.05 / 49.95 (50 / 24). Native gave the anonymous row its content
   # height and the last row everything (130, 104) until 2026-09-25: the record left the row's PERCENTAGE slot at 0,
-  # a declared `0%`, which is a fixed track. Chrome's boxes, and the oracle's.
+  # a declared `0%`, which is a fixed track. Chrome's boxes.
   it 'shares a declared table height out over an anonymous row' do
     {
       '<tr style="display:flex"><td>c</td></tr><tr id="m"><td>b</td></tr>'                          => [81, 77],
@@ -383,7 +369,7 @@ RSpec.describe 'native layout table parity' do
       '<tr style="height:50px;display:flex"><td>c</td></tr><tr id="m"><td>b</td></tr>'                => [108.05, 49.95]
     }.each do |rows, (y, h)|
       body = %(<div style="font:16px monospace;width:300px"><table style="height:160px">#{rows}</table></div>)
-      expect_parity(body)
+      expect_layout(body)
       got = laid_out_rect(body)
       expect(got[1]).to be_within(0.01).of(y), body
       expect(got[3]).to be_within(0.01).of(h), body
@@ -397,9 +383,9 @@ RSpec.describe 'native layout table parity' do
   it 'gives an atomic in an anonymous cell\'s mixed run the cell as its basis' do
     run = '<div style="display:table-row"><div style="display:table-cell">c</div>tx <span id="m" style="display:inline-block;height:50%">ib</span><div>blk</div></div>'
     body = %(<div style="font:16px monospace;width:300px"><div style="display:table;height:160px">#{run}<div style="display:table-row"><div style="display:table-cell">b</div></div></div></div>)
-    expect_parity(body)
+    expect_layout(body)
     expect(laid_out_rect(body)[3]).to be_within(0.01).of(53.33)
-    expect_parity(%(<div style="font:16px monospace;display:flex;width:300px;height:250px"><div>#{body}</div><div>y</div></div>))
+    expect_layout(%(<div style="font:16px monospace;display:flex;width:300px;height:250px"><div>#{body}</div><div>y</div></div>))
   end
 
   # A PUSHED table's box is the oracle's, and where the oracle laid it out at its own AUTO height (`pushed_h_indefinite`,
@@ -412,221 +398,220 @@ RSpec.describe 'native layout table parity' do
       %(<div style="font:16px monospace"><div style="display:flex;width:300px">#{table}</div></div>),
       %(<div style="font:16px monospace"><div style="display:flex;flex-direction:column;width:300px">#{table}</div></div>)
     ].each do |body|
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[3]).to eq(70), body
     end
-    expect_parity('<div style="font:16px monospace"><div style="display:flex;width:300px"><table style="border-spacing:2px;min-height:120px"><tr style="height:50%"><td>t</td></tr><tr><td>t2<br>t3</td></tr></table></div></div>')
+    expect_layout('<div style="font:16px monospace"><div style="display:flex;width:300px"><table style="border-spacing:2px;min-height:120px"><tr style="height:50%"><td>t</td></tr><tr><td>t2<br>t3</td></tr></table></div></div>')
   end
 
-  # r2 — rtl tables (column reversal). The columns run RIGHT-to-LEFT: column 0 is at the right edge. The oracle
-  # mirrors each cell within the table content box, and native reflects it within its row (row_w - ltr_rel -
+  # r2 — rtl tables (column reversal). The columns run RIGHT-to-LEFT: column 0 is at the right edge. Native
+  # reflects each cell within its row (row_w - ltr_rel -
   # cell_width); the row / group / table boxes span the whole grid and are direction-agnostic. A FULL-WIDTH
   # caption sits at the same left edge in either direction, and native mirrors a NARROWER rtl caption to the
   # inline-start = right (`wrapper_width - caption_width`), one LEADING margin — the right one — further in.
   it 'matches a 2-column rtl table (column 0 at the right)' do
-    expect_parity('<table dir="rtl" style="border-spacing:4px"><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-spacing:4px"><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
   end
 
   it 'matches an rtl table with a FULL-WIDTH caption (a caption is left-flush both ways)' do
-    expect_parity('<table dir="rtl" style="border-spacing:4px"><caption style="height:16px">c</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-spacing:4px"><caption style="height:16px">c</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
   end
 
   it 'matches an rtl table with a NARROWER caption (at the inline-start = right edge)' do
-    expect_parity('<table dir="rtl" style="border-spacing:4px"><caption style="width:40px;height:16px">c</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-spacing:4px"><caption style="width:40px;height:16px">c</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
   end
 
   it 'matches an rtl table with a NARROWER bottom caption (inline-start = right, below the grid)' do
-    expect_parity('<table dir="rtl" style="border-spacing:4px;caption-side:bottom"><caption style="width:40px;height:16px">c</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-spacing:4px;caption-side:bottom"><caption style="width:40px;height:16px">c</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
   end
 
   it 'matches a 3-column rtl table' do
-    expect_parity('<table dir="rtl" style="border-spacing:4px"><tr><td style="width:30px;height:20px">a</td><td style="width:40px">b</td><td style="width:50px">c</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-spacing:4px"><tr><td style="width:30px;height:20px">a</td><td style="width:40px">b</td><td style="width:50px">c</td></tr></table>')
   end
 
   it 'matches an rtl table with a colspan (reflected by its spanned width)' do
-    expect_parity('<table dir="rtl" style="border-spacing:4px"><tr><td colspan="2" style="height:20px">A</td><td style="width:50px">c</td></tr><tr><td style="width:30px">d</td><td style="width:40px">e</td><td style="width:50px">f</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-spacing:4px"><tr><td colspan="2" style="height:20px">A</td><td style="width:50px">c</td></tr><tr><td style="width:30px">d</td><td style="width:40px">e</td><td style="width:50px">f</td></tr></table>')
   end
 
   it 'matches an rtl table with a rowspan' do
-    expect_parity('<table dir="rtl" style="border-spacing:4px"><tr><td rowspan="2" style="width:30px">A</td><td style="width:50px;height:20px">b</td></tr><tr><td style="height:25px">c</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-spacing:4px"><tr><td rowspan="2" style="width:30px">A</td><td style="width:50px;height:20px">b</td></tr><tr><td style="height:25px">c</td></tr></table>')
   end
 
   it 'matches a rowspan cell joining its first row baseline group (its baseline is the deepest)' do
-    expect_parity('<table style="border-collapse:collapse"><tr><td rowspan="2" style="vertical-align:baseline;font:40px monospace;padding:0">Ay</td><td style="vertical-align:baseline;font:16px monospace;padding:0">Ay</td></tr><tr><td style="padding:0">x</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse"><tr><td rowspan="2" style="vertical-align:baseline;font:40px monospace;padding:0">Ay</td><td style="vertical-align:baseline;font:16px monospace;padding:0">Ay</td></tr><tr><td style="padding:0">x</td></tr></table>')
   end
 
   it 'matches an rtl fixed-layout table (columns mirrored)' do
-    expect_parity('<table dir="rtl" style="table-layout:fixed;width:300px;border-spacing:4px"><tr><td style="height:20px">a</td><td>b</td></tr></table>')
+    expect_layout('<table dir="rtl" style="table-layout:fixed;width:300px;border-spacing:4px"><tr><td style="height:20px">a</td><td>b</td></tr></table>')
   end
 
   # An rtl border-COLLAPSE table resolves its frame with the columns mirrored: the physical `border-left`
   # collapses with the HIGHEST-index column and `border-right` with column 0, so an asymmetric left/right frame
-  # (or asymmetric cell borders) lands the wide half on the opposite cell from LTR (§17.6.2). The oracle now
-  # resolves that (matched to Chrome), and native reproduces the pushed edges.
+  # (or asymmetric cell borders) lands the wide half on the opposite cell from LTR (§17.6.2). Native
+  # resolves that, matched to Chrome.
   it 'matches an rtl border-collapse table with an asymmetric frame' do
-    expect_parity('<table dir="rtl" style="border-collapse:collapse;border-left:10px solid;border-right:2px solid"><tr><td style="width:40px;height:20px">a</td><td style="width:60px">b</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-collapse:collapse;border-left:10px solid;border-right:2px solid"><tr><td style="width:40px;height:20px">a</td><td style="width:60px">b</td></tr></table>')
   end
 
   it 'matches an rtl border-collapse table with asymmetric cell borders' do
-    expect_parity('<table dir="rtl" style="border-collapse:collapse"><tr><td style="border-left:8px solid;border-right:1px solid;width:40px;height:20px">a</td><td style="border-left:1px solid;border-right:6px solid;width:60px">b</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-collapse:collapse"><tr><td style="border-left:8px solid;border-right:1px solid;width:40px;height:20px">a</td><td style="border-left:1px solid;border-right:6px solid;width:60px">b</td></tr></table>')
   end
 
   it 'matches an rtl border-collapse table with a rowspan and an asymmetric frame' do
-    expect_parity('<table dir="rtl" style="border-collapse:collapse;border-left:12px solid;border-right:2px solid"><tr><td rowspan="2" style="width:30px;height:20px">A</td><td style="width:50px">b</td></tr><tr><td style="height:20px">c</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-collapse:collapse;border-left:12px solid;border-right:2px solid"><tr><td rowspan="2" style="width:30px;height:20px">A</td><td style="width:50px">b</td></tr><tr><td style="height:20px">c</td></tr></table>')
   end
 
   it 'matches an rtl border-collapse table with a colspan and an asymmetric frame' do
-    expect_parity('<table dir="rtl" style="border-collapse:collapse;border-left:10px solid;border-right:2px solid"><tr><td colspan="2" style="height:20px">A</td></tr><tr><td style="width:30px">d</td><td style="width:40px">e</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-collapse:collapse;border-left:10px solid;border-right:2px solid"><tr><td colspan="2" style="height:20px">A</td></tr><tr><td style="width:30px">d</td><td style="width:40px">e</td></tr></table>')
   end
 
   # A `<col>` / `<colgroup>` border participates in the collapse on its PHYSICAL grid line, which the rtl mirror
   # also flips: a `<col>`'s physical border-left / -right and a childless `<colgroup span=N>`'s outer rims land
   # on the opposite columns from LTR.
   it 'matches an rtl border-collapse table with a bordered <col>' do
-    expect_parity('<table dir="rtl" style="border-collapse:collapse"><colgroup><col style="border-left:8px solid;border-right:2px solid"><col style="border-left:1px solid;border-right:6px solid"></colgroup><tr><td style="width:40px;height:20px">a</td><td style="width:50px">b</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-collapse:collapse"><colgroup><col style="border-left:8px solid;border-right:2px solid"><col style="border-left:1px solid;border-right:6px solid"></colgroup><tr><td style="width:40px;height:20px">a</td><td style="width:50px">b</td></tr></table>')
   end
 
   it 'matches an rtl border-collapse table with a childless <colgroup span=2> frame' do
-    expect_parity('<table dir="rtl" style="border-collapse:collapse"><colgroup span="2" style="border-left:10px solid;border-right:2px solid"></colgroup><tr><td style="width:40px;height:20px">a</td><td style="width:50px">b</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-collapse:collapse"><colgroup span="2" style="border-left:10px solid;border-right:2px solid"></colgroup><tr><td style="width:40px;height:20px">a</td><td style="width:50px">b</td></tr></table>')
   end
 
   it 'matches a bordered <colgroup> that defines its columns through <col> children' do
-    expect_parity('<table style="border-collapse:collapse"><colgroup style="border-left:8px solid;border-right:4px solid"><col><col></colgroup><tr><td style="width:40px;height:20px">a</td><td style="width:50px">b</td></tr></table>')
-    expect_parity('<table dir="rtl" style="border-collapse:collapse"><colgroup style="border-left:8px solid;border-right:4px solid"><col><col></colgroup><tr><td style="width:40px;height:20px">a</td><td style="width:50px">b</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse"><colgroup style="border-left:8px solid;border-right:4px solid"><col><col></colgroup><tr><td style="width:40px;height:20px">a</td><td style="width:50px">b</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-collapse:collapse"><colgroup style="border-left:8px solid;border-right:4px solid"><col><col></colgroup><tr><td style="width:40px;height:20px">a</td><td style="width:50px">b</td></tr></table>')
   end
 
   # t3 — border-collapse:collapse (half-borders, spacing 0, the outer half-border frame).
   it 'matches a border-collapse 2x2 with bordered cells' do
-    expect_parity('<table style="border-collapse:collapse"><tr><td style="border:4px solid;width:40px;height:20px">a</td><td style="border:4px solid;width:50px">b</td></tr><tr><td style="border:4px solid">c</td><td style="border:4px solid;height:30px">d</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse"><tr><td style="border:4px solid;width:40px;height:20px">a</td><td style="border:4px solid;width:50px">b</td></tr><tr><td style="border:4px solid">c</td><td style="border:4px solid;height:30px">d</td></tr></table>')
   end
 
   it 'matches a collapsed table with its own border (outer frame inside the table border)' do
-    expect_parity('<table style="border-collapse:collapse;border:10px solid"><tr><td style="border:2px solid;width:40px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse;border:10px solid"><tr><td style="border:2px solid;width:40px;height:20px">a</td></tr></table>')
   end
 
   it 'matches a collapsed table with padding' do
-    expect_parity('<table style="border-collapse:collapse;padding:10px"><tr><td style="border:4px solid;width:40px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse;padding:10px"><tr><td style="border:4px solid;width:40px;height:20px">a</td></tr></table>')
   end
 
   it 'matches collapsed cells with unequal borders (shared border = the widest)' do
-    expect_parity('<table style="border-collapse:collapse"><tr><td style="border:2px solid;width:40px;height:20px">a</td><td style="border:8px solid;width:50px">b</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse"><tr><td style="border:2px solid;width:40px;height:20px">a</td><td style="border:8px solid;width:50px">b</td></tr></table>')
   end
 
   # Borders that differ per SIDE — the collapsed edge is grid-aware (widest of the two facing
-  # borders across a shared edge, the table's own border at the rim), which the oracle resolves and
-  # native reassembles from the pushed halved cell edges + the pushed outer-half table border.
+  # borders across a shared edge, the table's own border at the rim), which native resolves.
   it 'matches collapsed cells whose borders differ per side' do
-    expect_parity('<table style="border-collapse:collapse"><tr><td style="border-left:2px solid;border-right:10px solid;width:60px;height:20px;padding:0">a</td><td style="border-left:6px solid;border-right:4px solid;width:80px;padding:0">b</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse"><tr><td style="border-left:2px solid;border-right:10px solid;width:60px;height:20px;padding:0">a</td><td style="border-left:6px solid;border-right:4px solid;width:80px;padding:0">b</td></tr></table>')
   end
 
   it 'matches per-side collapsed borders down a column (top/bottom)' do
-    expect_parity('<table style="border-collapse:collapse"><tr><td style="border-top:2px solid;border-bottom:10px solid;width:40px;height:20px;padding:0">a</td></tr><tr><td style="border-top:6px solid;border-bottom:4px solid;width:40px;height:30px;padding:0">b</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse"><tr><td style="border-top:2px solid;border-bottom:10px solid;width:40px;height:20px;padding:0">a</td></tr><tr><td style="border-top:6px solid;border-bottom:4px solid;width:40px;height:30px;padding:0">b</td></tr></table>')
   end
 
   it 'matches a collapsed rowspan cell facing two different neighbours (widest wins)' do
-    expect_parity('<table style="border-collapse:collapse"><tr><td rowspan="2" style="border-left:2px solid;border-right:4px solid;width:30px;padding:0">a</td><td style="border-left:20px solid;border-right:6px solid;width:40px;padding:0">b</td></tr><tr><td style="border-left:8px solid;border-right:6px solid;width:40px;padding:0">c</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse"><tr><td rowspan="2" style="border-left:2px solid;border-right:4px solid;width:30px;padding:0">a</td><td style="border-left:20px solid;border-right:6px solid;width:40px;padding:0">b</td></tr><tr><td style="border-left:8px solid;border-right:6px solid;width:40px;padding:0">c</td></tr></table>')
   end
 
   it 'matches a collapse table that ignores its own padding and collapses its own border' do
-    expect_parity('<table style="border-collapse:collapse;padding:10px;border:4px solid"><tr><td style="border:2px solid;width:40px;padding:0">a</td><td style="border:2px solid;width:40px;padding:0">b</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse;padding:10px;border:4px solid"><tr><td style="border:2px solid;width:40px;padding:0">a</td><td style="border:2px solid;width:40px;padding:0">b</td></tr></table>')
   end
 
   # border-style:hidden SUPPRESSES a collapsed edge (§17.6.2.1) — a cell hidden edge, and the table's own.
   it 'matches a collapse table with a border-style:hidden cell edge' do
-    expect_parity('<table style="border-collapse:collapse"><tr><td style="border:2px solid;border-right:10px hidden;width:60px;padding:0">a</td><td style="border:2px solid;border-left:10px solid;width:60px;padding:0">b</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse"><tr><td style="border:2px solid;border-right:10px hidden;width:60px;padding:0">a</td><td style="border:2px solid;border-left:10px solid;width:60px;padding:0">b</td></tr></table>')
   end
 
   it 'matches a collapse table whose own border is border-style:hidden' do
-    expect_parity('<table style="border-collapse:collapse;border-left:20px hidden"><tr><td style="border:4px solid;width:40px;padding:0">a</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse;border-left:20px hidden"><tr><td style="border:4px solid;width:40px;padding:0">a</td></tr></table>')
   end
 
   it 'matches a rim cell whose hidden edge suppresses the table border' do
-    expect_parity('<table style="border-collapse:collapse;border:20px solid"><tr><td style="border:4px solid;border-left:4px hidden;width:50px;height:20px;padding:0">a</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse;border:20px solid"><tr><td style="border:4px solid;border-left:4px hidden;width:50px;height:20px;padding:0">a</td></tr></table>')
   end
 
   it 'matches a spanning cell with one hidden facing segment' do
-    expect_parity('<table style="border-collapse:collapse"><tr><td colspan="2" style="border:4px solid;width:80px;padding:0">A</td></tr><tr><td style="border-top:20px hidden;width:40px;padding:0">b</td><td style="border-top:10px solid;width:40px;padding:0">c</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse"><tr><td colspan="2" style="border:4px solid;width:80px;padding:0">A</td></tr><tr><td style="border-top:20px hidden;width:40px;padding:0">b</td><td style="border-top:10px solid;width:40px;padding:0">c</td></tr></table>')
   end
 
   # Structural (tr / row-group / col / colgroup) borders participate in the collapsed width (§17.6.2.1); native
-  # reassembles from the oracle-resolved cell boxes + the outer-half frame, both of which fold them in.
+  # folds them into the cell boxes and the outer-half frame alike.
   it 'matches a table with a row border on the inter-row edge' do
-    expect_parity('<table style="border-collapse:collapse"><tr style="border-bottom:20px solid"><td style="border:2px solid;width:40px;height:20px;padding:0">a</td></tr><tr><td style="border:2px solid;width:40px;height:20px;padding:0">b</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse"><tr style="border-bottom:20px solid"><td style="border:2px solid;width:40px;height:20px;padding:0">a</td></tr><tr><td style="border:2px solid;width:40px;height:20px;padding:0">b</td></tr></table>')
   end
 
   it 'matches a table with a <col> border on the inter-column edge' do
-    expect_parity('<table style="border-collapse:collapse"><colgroup><col style="border-right:20px solid"><col></colgroup><tr><td style="border:2px solid;width:40px;padding:0">a</td><td style="border:2px solid;width:40px;padding:0">b</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse"><colgroup><col style="border-right:20px solid"><col></colgroup><tr><td style="border:2px solid;width:40px;padding:0">a</td><td style="border:2px solid;width:40px;padding:0">b</td></tr></table>')
   end
 
   it 'matches a table with a row-group border and a row border on the outer rim' do
-    expect_parity('<table style="border-collapse:collapse"><tbody style="border-top:16px solid"><tr style="border-left:12px solid"><td style="border:2px solid;width:40px;height:20px;padding:0">a</td><td style="border:2px solid;width:40px;padding:0">b</td></tr></tbody></table>')
+    expect_layout('<table style="border-collapse:collapse"><tbody style="border-top:16px solid"><tr style="border-left:12px solid"><td style="border:2px solid;width:40px;height:20px;padding:0">a</td><td style="border:2px solid;width:40px;padding:0">b</td></tr></tbody></table>')
   end
 
   it 'matches border-collapse with a colspan' do
-    expect_parity('<table style="border-collapse:collapse"><tr><td colspan="2" style="border:3px solid">A</td></tr><tr><td style="border:3px solid;width:30px">b</td><td style="border:3px solid;width:40px">c</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse"><tr><td colspan="2" style="border:3px solid">A</td></tr><tr><td style="border:3px solid;width:30px">b</td><td style="border:3px solid;width:40px">c</td></tr></table>')
   end
 
   it 'matches border-collapse with a rowspan' do
-    expect_parity('<table style="border-collapse:collapse"><tr><td rowspan="2" style="border:3px solid;width:30px">A</td><td style="border:3px solid;height:20px">b</td></tr><tr><td style="border:3px solid;height:25px">c</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse"><tr><td rowspan="2" style="border:3px solid;width:30px">A</td><td style="border:3px solid;height:20px">b</td></tr><tr><td style="border:3px solid;height:25px">c</td></tr></table>')
   end
 
   # t4 — the caption (a single block box, top or bottom). The `<table>` el._lb is the WRAPPER (caption + grid):
   # a top caption offsets the grid down by its own height, a bottom one sits below it, and a wider caption
   # widens the wrapper. The caption's own block / text subtree lays out normally.
   it 'matches a caption above the grid (default caption-side)' do
-    expect_parity('<table style="border-spacing:4px"><caption style="height:16px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="height:16px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
   end
 
   it 'matches a caption below the grid (caption-side:bottom)' do
-    expect_parity('<table style="border-spacing:4px;caption-side:bottom"><caption style="height:16px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px;caption-side:bottom"><caption style="height:16px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
   end
 
   it 'matches a caption wider than the grid (the wrapper widens to the caption)' do
-    expect_parity('<table style="border-spacing:4px"><caption style="height:16px;width:300px">Wide</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="height:16px;width:300px">Wide</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
   end
 
   it 'matches a caption on a table carrying its own border' do
-    expect_parity('<table style="border-spacing:4px;border:6px solid"><caption style="height:16px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px;border:6px solid"><caption style="height:16px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
 
   it 'matches a caption on a border-collapse table' do
-    expect_parity('<table style="border-collapse:collapse"><caption style="height:16px">c</caption><tr><td style="border:4px solid;width:40px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-collapse:collapse"><caption style="height:16px">c</caption><tr><td style="border:4px solid;width:40px;height:20px">a</td></tr></table>')
   end
 
   # A caption spans the table's BORDER box, OUTSIDE the table's own border+padding (§17.4 wrapper box) — so a
   # definite caption WIDER than the grid floors the BORDER box to the caption (the columns then fill what is
   # left inside the border+padding), not the content box to the caption plus the border on top.
   it 'matches a wide caption flooring a bordered table border box' do
-    expect_parity('<table style="border-spacing:0;border:10px solid"><caption style="height:16px;width:300px">Wide</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:0;border:10px solid"><caption style="height:16px;width:300px">Wide</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
   end
 
   # A PERCENTAGE caption is a fraction of that border box, and floors nothing (it is indefinite while the table's
   # width is being decided): one over 100% overflows the table without growing it — by a sub-pixel amount too,
   # where a union with the caption's box would round the wrapper up to it.
   it 'matches a caption overflowing the table (a %-width wider than the border box — the table does not grow)' do
-    expect_parity('<table style="border-spacing:4px"><caption style="width:120%">c</caption><tr><td style="width:40px">a</td></tr></table>')
-    expect_parity('<table style="width:200px;border-spacing:0"><caption style="height:16px;width:100.2%">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
-    expect_parity('<table dir="rtl" style="border-spacing:4px"><caption style="width:150%">c</caption><tr><td style="width:40px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="width:120%">c</caption><tr><td style="width:40px">a</td></tr></table>')
+    expect_layout('<table style="width:200px;border-spacing:0"><caption style="height:16px;width:100.2%">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-spacing:4px"><caption style="width:150%">c</caption><tr><td style="width:40px">a</td></tr></table>')
   end
 
   it 'matches a caption on a table carrying its own padding (spans the border box)' do
-    expect_parity('<table style="border-spacing:0;padding:12px"><caption style="height:16px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:0;padding:12px"><caption style="height:16px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
 
   it 'matches a bottom caption clearing a bordered table bottom border' do
-    expect_parity('<table style="border-spacing:0;border:8px solid;caption-side:bottom"><caption style="height:16px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:0;border:8px solid;caption-side:bottom"><caption style="height:16px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
 
   it 'matches a caption with a wrapping text / block subtree of its own' do
-    expect_parity('<table style="border-spacing:4px"><caption><div style="height:10px;margin:3px"></div><div style="height:8px"></div></caption><tr><td style="width:50px;height:20px">x</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption><div style="height:10px;margin:3px"></div><div style="height:8px"></div></caption><tr><td style="width:50px;height:20px">x</td></tr></table>')
   end
 
   it 'matches a position:relative caption (its paint-time offset shifts the box, Chrome: top:5/left:7 -> {7,5})' do
-    expect_parity('<table style="border-spacing:4px"><caption style="height:16px;position:relative;top:5px;left:7px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="height:16px;position:relative;top:5px;left:7px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
 
   it 'matches a position:relative caption below the grid' do
-    expect_parity('<table style="border-spacing:4px;caption-side:bottom"><caption style="height:16px;position:relative;left:11px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px;caption-side:bottom"><caption style="height:16px;position:relative;left:11px">c</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
 
   # A caption's PERCENTAGE heights resolve against nothing — the table's height is not its containing block's —
@@ -639,7 +624,7 @@ RSpec.describe 'native layout table parity' do
       '<table style="height:0;border-spacing:2px"><caption id="c" style="height:50%;min-height:50%">cap</caption><tr><td>a</td></tr></table>',
       '<div style="height:300px"><table style="height:100%;border-spacing:2px"><caption id="c" style="min-height:40%">cap</caption><tr><td>a</td></tr></table></div>'
     ].each do |body|
-      expect_parity(body)
+      expect_layout(body)
       session = simulated_session(page(body))
       session.visit '/'
       expect(session.evaluate_script("document.getElementById('c').getBoundingClientRect().height")).to eq(18), body
@@ -657,23 +642,23 @@ RSpec.describe 'native layout table parity' do
   # …and the basis-less pair floors the table beside the caption's min-content (`caption_floor`): the table can
   # be no narrower than the caption's MARGIN box, so margins on a caption already at the floor WIDEN the table.
   it 'matches a caption with a length margin (its margin box stacks, the lead insets it)' do
-    expect_parity('<table style="border-spacing:4px"><caption style="height:16px;margin:5px 9px 7px 13px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
-    expect_parity('<table style="border-spacing:4px;caption-side:bottom"><caption style="height:16px;margin:5px 9px 7px 13px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="height:16px;margin:5px 9px 7px 13px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px;caption-side:bottom"><caption style="height:16px;margin:5px 9px 7px 13px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
   end
 
   it 'matches a caption whose margin box WIDENS the table (the floor is the margin box)' do
-    expect_parity('<table style="border-spacing:0"><caption style="height:16px;width:120px;margin:0 20px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:0"><caption style="height:16px;width:120px;margin:0 20px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
   end
 
   it 'matches an auto-margin caption (centred, and pushed by a single auto)' do
-    expect_parity('<table style="border-spacing:4px"><caption style="width:40px;height:16px;margin:0 auto">c</caption><tr><td style="width:200px;height:20px">a</td></tr></table>')
-    expect_parity('<table style="border-spacing:4px"><caption style="width:40px;height:16px;margin-left:auto">c</caption><tr><td style="width:200px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="width:40px;height:16px;margin:0 auto">c</caption><tr><td style="width:200px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="width:40px;height:16px;margin-left:auto">c</caption><tr><td style="width:200px;height:20px">a</td></tr></table>')
   end
 
   it 'matches an rtl caption offset by a margin (the lead is the RIGHT margin)' do
-    expect_parity('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-left:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
-    expect_parity('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-right:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
-    expect_parity('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin:0 auto">c</caption><tr><td style="width:200px;height:20px">a</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-left:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin-right:8px">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_layout('<table dir="rtl" style="border-spacing:4px"><caption style="width:20px;height:16px;margin:0 auto">c</caption><tr><td style="width:200px;height:20px">a</td></tr></table>')
   end
 
   # A PERCENTAGE margin resolves against the table's border box — the block the caption spans — which is the
@@ -681,12 +666,12 @@ RSpec.describe 'native layout table parity' do
   # AFFINE, and off the oracle's basis (`recordCbW`) where a comparison function makes them piecewise. The floor
   # reads them basis-less (0 and 12 here), since the width they would resolve against is the one being decided.
   it 'matches a caption with a percentage / piecewise margin' do
-    expect_parity('<table style="width:200px;border-spacing:0"><caption style="height:16px;margin:0 5%">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
-    expect_parity('<table style="width:200px;border-spacing:0"><caption style="height:16px;margin:0 min(10%, 12px)">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="width:200px;border-spacing:0"><caption style="height:16px;margin:0 5%">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="width:200px;border-spacing:0"><caption style="height:16px;margin:0 min(10%, 12px)">c</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
   end
 
   # An OUT-OF-FLOW child of a table (§9.7): it is no cell, no row and no caption — it leaves the table's
-  # structure entirely — and the oracle places EVERY one at the same corner, the grid's top-left, whether it was
+  # structure entirely — and native places EVERY one at the same corner, the grid's top-left, whether it was
   # written in the table, in a row group or in a row. So the walk emits them all under the TABLE record and
   # `measure_table` records that one static corner; `place_out_of_flow` does the rest, as for any other box.
   # (Three parents, because `tableGrid` gathers them at three different sites and only the table's own used to
@@ -703,25 +688,25 @@ RSpec.describe 'native layout table parity' do
   OOF_BOX = '<div style="position:absolute;top:2px;left:3px;width:8px;height:6px"></div>'
 
   it 'matches an out-of-flow child of a table, of a row and of a row group' do
-    expect_parity(oof_table(inner_table: OOF_BOX))
-    expect_parity(oof_table(inner_group: OOF_BOX))
-    expect_parity(oof_table(inner_row: OOF_BOX))
+    expect_layout(oof_table(inner_table: OOF_BOX))
+    expect_layout(oof_table(inner_group: OOF_BOX))
+    expect_layout(oof_table(inner_row: OOF_BOX))
   end
 
   # …and its STATIC position is the grid's top-left corner — inside the table's own border + padding and PAST a
   # top caption — which only a box with no insets to override it can see. An RTL table leaves that corner at the
   # content's LEFT edge: `layoutTable` is the one flow that places its out-of-flow children with no aligned
-  # static corner, where block flow and grid both hand `placeAbsolute` one. Chrome puts it at the right; both
-  # engines agree on the left, so this is a recorded oracle divergence, not a parity break.
+  # static corner, where block flow and grid both hand `placeAbsolute` one. Chrome puts it at the right; native
+  # puts it on the left, a divergence from Chrome recorded here.
   it 'matches an out-of-flow table child at its static position (past the caption, inside the padding)' do
     static_box = '<div style="position:absolute;width:8px;height:6px"></div>'
-    expect_parity(oof_table(table: 'border:5px solid;padding:3px',
+    expect_layout(oof_table(table: 'border:5px solid;padding:3px',
                             inner_table: %(<div style="display:table-caption;height:16px">c</div>#{static_box})))
-    expect_parity(oof_table(table: 'border:5px solid;padding:3px', inner_table: static_box, dir: 'rtl'))
+    expect_layout(oof_table(table: 'border:5px solid;padding:3px', inner_table: static_box, dir: 'rtl'))
   end
 
   it 'matches a shrink-to-fit out-of-flow table child (auto width, one inset)' do
-    expect_parity(oof_table(inner_table: '<div style="position:absolute;top:2px">shrink to fit</div>'))
+    expect_layout(oof_table(inner_table: '<div style="position:absolute;top:2px">shrink to fit</div>'))
   end
 
   # A shrink-to-fit box whose content is an inline-table holding only a `<col>` — content native once could not
@@ -729,52 +714,52 @@ RSpec.describe 'native layout table parity' do
   # box less its borders, which no percentage is.
   it 'matches an out-of-flow table child of odd content, and against a percentage-edged containing block' do
     unmeasured = '<div style="position:absolute;top:2px"><div>a<table style="display:inline-table"><colgroup><col style="width:30px"></colgroup></table></div></div>'
-    expect_parity(%(<div style="position:relative;width:300px">#{oof_table(inner_table: unmeasured)}</div>))
-    expect_parity(%(<div style="position:relative;padding:5%;width:300px">#{oof_table(inner_table: OOF_BOX)}</div>))
+    expect_layout(%(<div style="position:relative;width:300px">#{oof_table(inner_table: unmeasured)}</div>))
+    expect_layout(%(<div style="position:relative;padding:5%;width:300px">#{oof_table(inner_table: OOF_BOX)}</div>))
   end
 
   # A caption is a normal block in the table's BORDER box (§17.4 wrapper box): declared height / width / min-max /
   # box-sizing / auto-margin centering honored, auto width fills the border box, and a caption with a definite
   # width wider than the grid floors the table (stretching its columns to fill what is left inside the border).
   it 'matches a caption honoring a declared height (content overflows the box)' do
-    expect_parity('<table style="border-spacing:4px"><caption style="height:40px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="height:40px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
 
   it 'matches a caption floored by min-height and capped by max-height' do
-    expect_parity('<table style="border-spacing:4px"><caption style="min-height:50px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
-    expect_parity('<table style="border-spacing:4px"><caption style="max-height:8px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="min-height:50px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="max-height:8px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
 
   it 'matches a caption narrower than the grid (declared width honored, table unchanged)' do
-    expect_parity('<table style="border-spacing:4px"><caption style="width:20px">Cap</caption><tr><td style="width:200px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="width:20px">Cap</caption><tr><td style="width:200px;height:20px">a</td></tr></table>')
   end
 
   it 'matches a caption wider than the grid (the table grows and its columns stretch to fill it)' do
     # A definite (length / min-width) caption width floors the table via tableIntrinsicWidths, so the columns
     # STRETCH to fill it (Chrome: a 300px caption over a 156px grid stretches the two columns to 124/164).
-    expect_parity('<table style="border-spacing:4px"><caption style="width:300px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
-    expect_parity('<table style="border-spacing:4px"><caption style="min-width:300px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="width:300px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="min-width:300px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
   end
 
   it 'matches a caption whose max-width caps both the caption and the table it floors' do
-    expect_parity('<table style="border-spacing:4px"><caption style="width:300px;max-width:200px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="width:300px;max-width:200px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
   end
 
   it 'matches a caption where min-width beats a smaller max-width (§10.4: min wins the contradiction)' do
-    expect_parity('<table style="border-spacing:4px"><caption style="min-width:300px;max-width:200px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="min-width:300px;max-width:200px">Cap</caption><tr><td style="width:60px;height:20px">a</td><td style="width:80px">b</td></tr></table>')
   end
 
   it 'matches a caption wider than an explicitly-narrow table (the table grows past its declared width, §17.5.2)' do
-    expect_parity('<table style="width:100px;border-spacing:4px"><caption style="width:300px">Cap</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="width:100px;border-spacing:4px"><caption style="width:300px">Cap</caption><tr><td style="width:40px;height:20px">a</td></tr></table>')
   end
 
   it 'matches a caption with a percentage width narrower than the table (resolved against the table width)' do
-    expect_parity('<table style="border-spacing:4px"><caption style="width:50%">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="width:50%">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
 
   it 'matches a caption with box-sizing and its own padding' do
-    expect_parity('<table style="border-spacing:4px"><caption style="box-sizing:border-box;width:100px;padding:10px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
-    expect_parity('<table style="border-spacing:4px"><caption style="width:100px;padding:10px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="box-sizing:border-box;width:100px;padding:10px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
+    expect_layout('<table style="border-spacing:4px"><caption style="width:100px;padding:10px">Cap</caption><tr><td style="width:60px;height:20px">a</td></tr></table>')
   end
 
   # A POSITIONED or FLOATED table lays out natively. Neither enters the table's own layout — a positioned
@@ -791,7 +776,7 @@ RSpec.describe 'native layout table parity' do
     ['position:absolute', 'position:absolute;right:0;bottom:0', 'position:fixed;top:0;left:0',
      'float:left', 'float:right', 'float:left;width:150px'].each do |pos|
       tables.each do |t|
-        expect_parity(%(<div style="position:relative;width:300px;height:200px;overflow:hidden">#{format(t, pos)}<div>after</div></div>))
+        expect_layout(%(<div style="position:relative;width:300px;height:200px;overflow:hidden">#{format(t, pos)}<div>after</div></div>))
       end
     end
   end
@@ -803,7 +788,7 @@ RSpec.describe 'native layout table parity' do
   it 'stacks several captions on either side of the grid' do
     body = '<table style="border-spacing:4px;border:3px solid;padding:2px"><caption id="m" style="margin:4px">one</caption><caption>two two two two</caption>' \
            '<caption style="caption-side:bottom;margin-top:5px">b1</caption><caption id="b2" style="caption-side:bottom">b2</caption><tr><td style="width:40px">a</td></tr></table>'
-    expect_parity(body)
+    expect_layout(body)
     expect(laid_out_rect(body)).to eq([4, 4, 52, 18])
     expect(laid_out_rect(body, 'b2')).to eq([0, 123, 60, 18])
   end
@@ -821,12 +806,12 @@ RSpec.describe 'native layout table parity' do
     }.each do |caps, (declared, chrome)|
       body = %(<div style="display:flex;width:300px;height:180px;font:16px monospace"><table id="m" style="height:#{declared}px;border-spacing:2px">) +
              %(#{caps}<tr><td>a</td></tr><tr><td>c</td></tr></table></div>)
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[3]).to eq(chrome), caps
     end
     column = '<div style="display:flex;flex-direction:column;width:300px;font:16px monospace"><table id="m" style="height:76px;border-spacing:2px">' \
              '<caption>t1</caption><tr><td>a</td></tr><tr><td>c</td></tr></table></div>'
-    expect_parity(column)
+    expect_layout(column)
     expect(laid_out_rect(column)[3]).to eq(98)   # Chrome
   end
   # NATIVE: a captioned table in a definite flex COLUMN whose cells hold a percentage height is measured, and that
@@ -836,22 +821,21 @@ RSpec.describe 'native layout table parity' do
   it 'keeps a captioned table its measure in a definite column whose cells read a percentage height' do
     body = '<div style="display:flex;flex-direction:column;height:200px;width:300px;font:16px monospace"><table id="m" style="border-spacing:2px">' \
            '<caption>cap</caption><tr><td><div style="height:50%">p</div></td></tr></table><div>z</div></div>'
-    expect_parity(body)
+    expect_layout(body)
     expect(laid_out_rect(body)[3]).to eq(50)   # Chrome
   end
-  # An inline-table is an ATOMIC inline in its parent's line — native replays its oracle box (its rows/cells are
-  # covered via the parent), so a block holding one lays out rather than declining.
+  # An inline-table is an ATOMIC inline in its parent's line, so a block holding one lays out rather than declining.
   # A table as a FLEX ITEM: the walk declined every flex container holding one. Native sizes it like any item
   # (its automatic minimum is the table's own min-content, a border-box figure), and a table that ends up TALLER
   # than the main size it was given — its height is a minimum (§17.5.3), and a caption stacks on top of it —
   # pushes the items after it down (Chrome: the table 138, the item after it at 138, the column 156).
   it 'matches a table as a flex item' do
-    expect_parity('<div style="display:flex;width:300px"><table style="border-spacing:2px"><tr><td>a</td><td>bb cc</td></tr></table><div>y</div></div>')
-    expect_parity('<div style="display:flex;width:300px"><table style="flex:1;border-spacing:2px"><tr><td>a</td><td>bb cc</td></tr></table><div style="width:40px">y</div></div>')
-    expect_parity('<div style="display:flex;width:300px;flex-direction:column"><table style="flex:0 0 10px;border-spacing:2px"><tr><td>a</td></tr><tr><td>b</td></tr></table><div style="height:20px">y</div></div>')
-    expect_parity('<div style="display:flex;width:300px;align-items:flex-end;height:90px"><table style="table-layout:fixed;width:150px"><tr><td>aaaa</td><td>b</td></tr></table><div style="width:40px">y</div></div>')
+    expect_layout('<div style="display:flex;width:300px"><table style="border-spacing:2px"><tr><td>a</td><td>bb cc</td></tr></table><div>y</div></div>')
+    expect_layout('<div style="display:flex;width:300px"><table style="flex:1;border-spacing:2px"><tr><td>a</td><td>bb cc</td></tr></table><div style="width:40px">y</div></div>')
+    expect_layout('<div style="display:flex;width:300px;flex-direction:column"><table style="flex:0 0 10px;border-spacing:2px"><tr><td>a</td></tr><tr><td>b</td></tr></table><div style="height:20px">y</div></div>')
+    expect_layout('<div style="display:flex;width:300px;align-items:flex-end;height:90px"><table style="table-layout:fixed;width:150px"><tr><td>aaaa</td><td>b</td></tr></table><div style="width:40px">y</div></div>')
     body = '<div id="f" style="display:flex;width:300px;flex-direction:column"><table id="t" style="flex:0 0 120px;border-spacing:2px"><caption>cap</caption><tr><td>a</td></tr></table><div id="s" style="width:40px">y</div></div>'
-    expect_parity(body)
+    expect_layout(body)
     session = simulated_session(page(body))
     session.visit '/'
     expect(session.evaluate_script("['f', 't', 's'].map(id => { const b = document.getElementById(id).getBoundingClientRect(); return [b.y, b.height]; })"))
@@ -878,7 +862,7 @@ RSpec.describe 'native layout table parity' do
       ['<div style="display:flex;width:300px;height:100px"><table id="t" style="border-spacing:2px;min-height:150px"><caption>cap</caption><tr><td style="height:30px">a</td></tr></table><div style="width:40px">y</div></div>', 168],
       ['<div style="display:flex;width:300px;height:100px"><table id="t" style="border-spacing:2px;max-height:40px"><caption>cap</caption><tr><td style="height:30px">a</td></tr></table><div style="width:40px">y</div></div>', 58]
     ].each do |body, height|
-      expect_parity(body)
+      expect_layout(body)
       session = simulated_session(page(body))
       session.visit '/'
       expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")).to eq(height), body
@@ -891,7 +875,7 @@ RSpec.describe 'native layout table parity' do
   # caption sits at 118, where the pre-growth box put it at 100).
   it 'anchors a box to a relative table grown by its caption' do
     body = '<table style="position:relative;border-spacing:2px;width:200px;height:120px"><caption>cap</caption><tr><td style="height:30px"><div id="t" style="position:absolute;bottom:0;left:0;width:20px;height:20px"></div>a</td></tr></table>'
-    expect_parity(body)
+    expect_layout(body)
     session = simulated_session(page(body))
     session.visit '/'
     expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().y")).to eq(118)
@@ -903,14 +887,14 @@ RSpec.describe 'native layout table parity' do
   # re-asking. Native has stamped a table's first and last baselines in `measure_table` since 2026-09-19, and a
   # CAPTION stopped being one of the oracle's baseline candidates the same day the refusal came out.
   #
-  # The two engines agree on every shape below, and the page's geometry is byte-identical to what it was with
+  # The two engines agreed on every shape below, and the page's geometry is byte-identical to what it was with
   # the refusal in place — the ORACLE was answering either way, so lifting it moved no box, only the decline
   # (`caption` sweep: 2,250 → 0).
   #
-  # Chrome's figures are pinned too, because the gap is REAL and shared: a table hands a flex line a baseline
+  # Chrome's figures are pinned too, because the gap is REAL: a table hands a flex line a baseline
   # ~9px higher here than in Chrome. The plain-block CONTROL agrees exactly (13 in all three), which is what
-  # says this is a table rule and not a font or a harness difference. Recorded, not fixed — moving it means
-  # moving both engines, and that is its own increment.
+  # says this is a table rule and not a font or a harness difference. Recorded, not fixed — moving it is its own
+  # increment.
   it 'matches a table flex item aligned on the baseline (Chrome: the marker is 9px lower)' do
     marker = '<b id="m" style="display:inline-block;width:4px;height:4px"></b>'
     row    = '<table style="border-spacing:2px"><tr><td style="height:30px">a</td></tr></table>'
@@ -924,7 +908,7 @@ RSpec.describe 'native layout table parity' do
       ['align-items:baseline', '<table style="border-spacing:2px"></table>']                      => [0, 0]
     }.each do |(align, table), (shared_y, chrome_y)|
       body = %(<div style="display:flex;width:300px;font:16px monospace;#{align}">#{table}#{marker}</div>)
-      expect_parity(body)
+      expect_layout(body)
       session = simulated_session(page(body))
       session.visit '/'
       y = session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")
@@ -950,7 +934,7 @@ RSpec.describe 'native layout table parity' do
               else '<table style="border-spacing:2px"><tbody><tr><td style="height:10px">b1</td></tr></tbody><thead><tr><td style="height:30px">h</td></tr></thead><tbody><tr><td style="height:20px">b2</td></tr></tbody></table>'
               end
       body = %(<div style="display:flex;width:300px;font:16px monospace;#{align}">#{table}#{marker}</div>)
-      expect_parity(body)
+      expect_layout(body)
       session = simulated_session(page(body))
       session.visit '/'
       y = session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")
@@ -962,7 +946,7 @@ RSpec.describe 'native layout table parity' do
     divs = '<div style="display:table;border-spacing:2px"><div style="display:table-footer-group"><div style="display:table-row"><div style="display:table-cell;height:30px">f</div></div></div><div style="display:table-row-group"><div style="display:table-row"><div style="display:table-cell;height:10px">b</div></div></div></div>'
     {'align-items:baseline' => 15, 'align-items:last baseline' => 39}.each do |align, chrome_y|
       body = %(<div style="display:flex;width:300px;font:16px monospace;#{align}">#{divs}#{marker}</div>)
-      expect_parity(body)
+      expect_layout(body)
       session = simulated_session(page(body))
       session.visit '/'
       expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")).to be_within(0.05).of(chrome_y), body
@@ -970,13 +954,13 @@ RSpec.describe 'native layout table parity' do
     # …and the CONTROL, where the item is a plain block: all three engines agree, so the gap above is the
     # table's baseline and nothing else.
     control = %(<div style="display:flex;width:300px;font:16px monospace;align-items:baseline"><div style="height:30px">a</div>#{marker}</div>)
-    expect_parity(control)
+    expect_layout(control)
     session = simulated_session(page(control))
     session.visit '/'
     expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().y")).to be_within(0.05).of(13)
   end
 
-  it('matches an inline-table as an atomic inline') { expect_parity('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>') }
+  it('matches an inline-table as an atomic inline') { expect_layout('<div style="width:300px">x <span style="display:inline-table"><span style="display:table-row"><span style="display:table-cell">a</span></span></span> y</div>') }
   # …and an ANONYMOUS CELL is laid out now, which it was not until 2026-09-22. §17.2.1 wraps a table's stray
   # non-cell content in one, `anonTableCell` builds it, and it is no part of the DOM — so it has no `_nid`, and
   # the record stream had nothing to put in a record's node slot. It gets the sentinel an anonymous ROW and an
@@ -1038,12 +1022,12 @@ RSpec.describe 'native layout table parity' do
     expect(w).to be_within(0.05).of(40), "#{w}: 100 means it resolved against the TABLE, not the anonymous cell"
   end
 
-  # KNOWN DIVERGENCE, both engines and older than this: an `inline-table` hangs from its FIRST row's baseline
+  # KNOWN DIVERGENCE, older than this: an `inline-table` hangs from its FIRST row's baseline
   # (CSS 2.1 §10.8.1) and this engine hangs it from its LAST, because `atomicBaselineOffset` asks every atomic
   # inline for its last baseline and a table is not told apart. Chrome 153 puts the word beside a two-row
-  # inline-table at 0 when the tall row is second and 23 when it is first; both engines say 41 and 47.
+  # inline-table at 0 when the tall row is second and 23 when it is first; native says 41 and 47.
   # Pinned here because the anonymous-cell path was made to agree with the real-row path rather than
-  # half-corrected — a shared divergence moved in one engine only is a parity break, which costs more.
+  # half-corrected — a shared divergence moved in one engine only was a parity break, which cost more.
   # Two of the four reach the anonymous-cell FALLBACK and two do not, which is the point: the shapes with
   # element children (`display:table-row`) never empty the candidate list, so they go the way they always did.
   # Written the other way round first — `<div>A</div><div>B</div>` for the anonymous pair — the fallback could
@@ -1090,97 +1074,97 @@ RSpec.describe 'native layout table parity' do
 
   describe 'native column sizing' do
     it 'sizes columns from the cells\' content, the widest cell winning' do
-      expect_parity('<table style="border-spacing:0"><tr><td>a</td><td>wider text</td></tr><tr><td>longer word</td><td>b</td></tr></table>')
-      expect_parity('<table style="border-spacing:4px"><tr><td>aa</td><td>bbb</td></tr><tr><td>c</td><td>d</td></tr></table>')
-      expect_parity('<table><tr><td>one two three four five six seven eight nine ten</td></tr></table>')
-      expect_parity('<table style="width:600px"><tr><td>one two three</td><td>four five six seven eight</td></tr></table>')
-      expect_parity('<table style="width:60px"><tr><td>one two three</td><td>four five six</td></tr></table>')
+      expect_layout('<table style="border-spacing:0"><tr><td>a</td><td>wider text</td></tr><tr><td>longer word</td><td>b</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr><td>aa</td><td>bbb</td></tr><tr><td>c</td><td>d</td></tr></table>')
+      expect_layout('<table><tr><td>one two three four five six seven eight nine ten</td></tr></table>')
+      expect_layout('<table style="width:600px"><tr><td>one two three</td><td>four five six seven eight</td></tr></table>')
+      expect_layout('<table style="width:60px"><tr><td>one two three</td><td>four five six</td></tr></table>')
     end
     it 'lets a spanning cell top up only what the columns it covers are short of' do
-      expect_parity('<table style="border-spacing:4px"><tr><td colspan="2">A very wide spanning cell</td><td>b</td></tr><tr><td>c</td><td>d</td><td>e</td></tr></table>')
-      expect_parity('<table style="border-spacing:4px"><tr><td colspan="2">A</td><td style="width:20px">b</td></tr><tr><td style="width:30px">c</td><td colspan="2">DE</td></tr></table>')
-      expect_parity('<table><tr><td colspan="3">one wide spanning row</td></tr><tr><td>a</td><td>b</td><td>c</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr><td colspan="2">A very wide spanning cell</td><td>b</td></tr><tr><td>c</td><td>d</td><td>e</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr><td colspan="2">A</td><td style="width:20px">b</td></tr><tr><td style="width:30px">c</td><td colspan="2">DE</td></tr></table>')
+      expect_layout('<table><tr><td colspan="3">one wide spanning row</td></tr><tr><td>a</td><td>b</td><td>c</td></tr></table>')
     end
     it 'honours a declared cell width, a percentage, and min/max-width' do
-      expect_parity('<table style="width:400px"><tr><td style="width:100px">a</td><td>b</td></tr></table>')
-      expect_parity('<table style="width:400px"><tr><td style="width:25%">a</td><td>b</td></tr></table>')
-      expect_parity('<table><tr><td style="width:25%">a</td><td>b</td></tr></table>')
-      expect_parity('<table style="width:400px"><tr><td style="width:25%">a</td><td style="width:50%">b</td></tr></table>')
-      expect_parity('<table style="width:400px"><tr><td style="min-width:200px">a</td><td>b</td></tr></table>')
-      expect_parity('<table style="width:400px"><tr><td style="max-width:40px">a longer text</td><td>b</td></tr></table>')
-      expect_parity('<table style="width:400px"><tr><td style="width:100px;padding:10px;border:2px solid">a</td><td>b</td></tr></table>')
-      expect_parity('<table style="width:400px"><tr><td style="width:100px;box-sizing:border-box;padding:10px">a</td><td>b</td></tr></table>')
+      expect_layout('<table style="width:400px"><tr><td style="width:100px">a</td><td>b</td></tr></table>')
+      expect_layout('<table style="width:400px"><tr><td style="width:25%">a</td><td>b</td></tr></table>')
+      expect_layout('<table><tr><td style="width:25%">a</td><td>b</td></tr></table>')
+      expect_layout('<table style="width:400px"><tr><td style="width:25%">a</td><td style="width:50%">b</td></tr></table>')
+      expect_layout('<table style="width:400px"><tr><td style="min-width:200px">a</td><td>b</td></tr></table>')
+      expect_layout('<table style="width:400px"><tr><td style="max-width:40px">a longer text</td><td>b</td></tr></table>')
+      expect_layout('<table style="width:400px"><tr><td style="width:100px;padding:10px;border:2px solid">a</td><td>b</td></tr></table>')
+      expect_layout('<table style="width:400px"><tr><td style="width:100px;box-sizing:border-box;padding:10px">a</td><td>b</td></tr></table>')
     end
     it 'reads a <col> / <colgroup> width and span' do
-      expect_parity('<table><col style="width:120px"><col><tr><td>a</td><td>b</td></tr></table>')
-      expect_parity('<table style="width:400px"><col style="width:25%"><col><tr><td>a</td><td>b</td></tr></table>')
-      expect_parity('<table style="width:400px"><colgroup><col span="2" style="width:80px"><col></colgroup><tr><td>a</td><td>b</td><td>c</td></tr></table>')
-      expect_parity('<table><col style="width:120px"><tr><td>a</td><td>b</td></tr></table>')
+      expect_layout('<table><col style="width:120px"><col><tr><td>a</td><td>b</td></tr></table>')
+      expect_layout('<table style="width:400px"><col style="width:25%"><col><tr><td>a</td><td>b</td></tr></table>')
+      expect_layout('<table style="width:400px"><colgroup><col span="2" style="width:80px"><col></colgroup><tr><td>a</td><td>b</td><td>c</td></tr></table>')
+      expect_layout('<table><col style="width:120px"><tr><td>a</td><td>b</td></tr></table>')
     end
     it 'sizes a fixed-layout table from its first row alone' do
-      expect_parity('<table style="table-layout:fixed;width:300px"><tr><td>a</td><td>b</td></tr></table>')
-      expect_parity('<table style="table-layout:fixed;width:300px"><tr><td style="width:50px">a</td><td>b</td></tr></table>')
-      expect_parity('<table style="table-layout:fixed;width:300px"><tr><td style="width:50px">a</td><td style="width:100px">b</td></tr></table>')
-      expect_parity('<table style="table-layout:fixed;width:300px"><tr><td style="width:25%">a</td><td>b</td></tr></table>')
+      expect_layout('<table style="table-layout:fixed;width:300px"><tr><td>a</td><td>b</td></tr></table>')
+      expect_layout('<table style="table-layout:fixed;width:300px"><tr><td style="width:50px">a</td><td>b</td></tr></table>')
+      expect_layout('<table style="table-layout:fixed;width:300px"><tr><td style="width:50px">a</td><td style="width:100px">b</td></tr></table>')
+      expect_layout('<table style="table-layout:fixed;width:300px"><tr><td style="width:25%">a</td><td>b</td></tr></table>')
       # Chrome's own asymmetry: a `width: 0%` CELL really takes 0 of the width, a `<col style="width:0%">` is
       # ignored and the columns split it evenly.
-      expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:0"><tr><td style="width:0%">a</td><td>b</td></tr></table>')
-      expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:0"><col style="width:0%"><col><tr><td>a</td><td>b</td></tr></table>')
-      expect_parity('<table style="table-layout:fixed;width:300px"><col style="width:40px"><tr><td>a</td><td style="width:100px">b</td></tr></table>')
-      expect_parity('<table style="table-layout:fixed;width:300px"><tr><td colspan="2" style="width:200px">a</td><td>b</td></tr><tr><td>x</td><td>y</td><td>z</td></tr></table>')
-      expect_parity('<table style="table-layout:fixed"><tr><td style="width:50px">a</td><td>wide content here</td></tr></table>')
+      expect_layout('<table style="table-layout:fixed;width:300px;border-spacing:0"><tr><td style="width:0%">a</td><td>b</td></tr></table>')
+      expect_layout('<table style="table-layout:fixed;width:300px;border-spacing:0"><col style="width:0%"><col><tr><td>a</td><td>b</td></tr></table>')
+      expect_layout('<table style="table-layout:fixed;width:300px"><col style="width:40px"><tr><td>a</td><td style="width:100px">b</td></tr></table>')
+      expect_layout('<table style="table-layout:fixed;width:300px"><tr><td colspan="2" style="width:200px">a</td><td>b</td></tr><tr><td>x</td><td>y</td><td>z</td></tr></table>')
+      expect_layout('<table style="table-layout:fixed"><tr><td style="width:50px">a</td><td>wide content here</td></tr></table>')
     end
     it 'shrink-to-fits an auto-width table, and grows past a width its columns overflow' do
-      expect_parity('<div style="width:300px"><table><tr><td>one two three four five six seven</td></tr></table></div>')
-      expect_parity('<div style="width:80px"><table><tr><td>one two three four</td><td>five six</td></tr></table></div>')
-      expect_parity('<table style="width:20px"><tr><td>unbreakableword</td><td>another</td></tr></table>')
-      expect_parity('<div style="width:300px"><table style="min-width:280px"><tr><td>a</td></tr></table></div>')
-      expect_parity('<div style="width:300px"><table style="max-width:100px"><tr><td>one two three four five</td></tr></table></div>')
+      expect_layout('<div style="width:300px"><table><tr><td>one two three four five six seven</td></tr></table></div>')
+      expect_layout('<div style="width:80px"><table><tr><td>one two three four</td><td>five six</td></tr></table></div>')
+      expect_layout('<table style="width:20px"><tr><td>unbreakableword</td><td>another</td></tr></table>')
+      expect_layout('<div style="width:300px"><table style="min-width:280px"><tr><td>a</td></tr></table></div>')
+      expect_layout('<div style="width:300px"><table style="max-width:100px"><tr><td>one two three four five</td></tr></table></div>')
     end
     it 'sizes a column from a cell holding a control, a nested grid or a percentage edge' do
       # A control's chrome, a nested grid, a `%` edge an intrinsic measure has no basis for: each cell's
       # min/max-content sizes its column all the same.
-      expect_parity('<table><tr><td><input type="text"></td><td>b</td></tr></table>')
-      expect_parity('<table><tr><td><select><option>x</option></select></td><td>b</td></tr></table>')
-      expect_parity('<table><tr><td><div style="display:grid;grid-template-columns:30px 40px"><div>x</div><div>y</div></div></td><td>b</td></tr></table>')
-      expect_parity('<table style="width:400px;border-spacing:0"><tr><td style="padding-left:10%">a</td><td>b</td></tr></table>')
-      expect_parity('<table style="width:400px;border-spacing:0"><tr><td><div style="padding-left:10%">a</div></td><td>b</td></tr></table>')
-      expect_parity('<table><caption><input></caption><tr><td>a</td></tr></table>')
-      expect_parity('<table style="width:100%"><thead><tr><th>Name</th><th>Actions</th></tr></thead><tbody><tr><td>x</td><td><input value="v"></td></tr></tbody></table>')
+      expect_layout('<table><tr><td><input type="text"></td><td>b</td></tr></table>')
+      expect_layout('<table><tr><td><select><option>x</option></select></td><td>b</td></tr></table>')
+      expect_layout('<table><tr><td><div style="display:grid;grid-template-columns:30px 40px"><div>x</div><div>y</div></div></td><td>b</td></tr></table>')
+      expect_layout('<table style="width:400px;border-spacing:0"><tr><td style="padding-left:10%">a</td><td>b</td></tr></table>')
+      expect_layout('<table style="width:400px;border-spacing:0"><tr><td><div style="padding-left:10%">a</div></td><td>b</td></tr></table>')
+      expect_layout('<table><caption><input></caption><tr><td>a</td></tr></table>')
+      expect_layout('<table style="width:100%"><thead><tr><th>Name</th><th>Actions</th></tr></thead><tbody><tr><td>x</td><td><input value="v"></td></tr></tbody></table>')
     end
     it 'sizes a column from a cell whose atomic inline sits in a justified or a mixed run' do
       # A `justify` block spreads its spaces and a MIXED block's anonymous groups hold its atomics, neither of
       # which is the run stream `text_intrinsic` reads.
-      expect_parity('<table><tr><td style="text-align:justify">x <span style="display:inline-block">y</span></td><td>b</td></tr></table>')
-      expect_parity('<table><tr><td><div>blk</div>p <span style="display:inline-block">ok</span> q</td><td>b</td></tr></table>')
+      expect_layout('<table><tr><td style="text-align:justify">x <span style="display:inline-block">y</span></td><td>b</td></tr></table>')
+      expect_layout('<table><tr><td><div>blk</div>p <span style="display:inline-block">ok</span> q</td><td>b</td></tr></table>')
       # …and two shapes that USED to be pushed and are measured now: an inline with a `white-space` of its own,
       # and an edged one whose font box exceeds its line-height (which the walk refused until native's CLOSE
       # learned to grow the line to that box).
-      expect_parity('<table><tr><td>x <span style="display:inline-block">a <i style="white-space:pre">b  c</i></span></td><td>b</td></tr></table>')
-      expect_parity('<table><tr><td>x <span style="display:inline-block"><b style="padding:0 5px;line-height:4px">y</b></span></td><td>b</td></tr></table>')
+      expect_layout('<table><tr><td>x <span style="display:inline-block">a <i style="white-space:pre">b  c</i></span></td><td>b</td></tr></table>')
+      expect_layout('<table><tr><td>x <span style="display:inline-block"><b style="padding:0 5px;line-height:4px">y</b></span></td><td>b</td></tr></table>')
       # …a nested atomic too, however deep the inline chain (a link holding an icon beside a block is ordinary
       # app markup).
-      expect_parity('<table><tr><td style="text-align:justify">x <span>y <span style="display:inline-block">z</span></span></td><td>b</td></tr></table>')
-      expect_parity('<table><tr><td style="text-align:justify">x <span>y <img width="10" height="10"></span></td><td>b</td></tr></table>')
-      expect_parity('<table><tr><td><div>head</div>x <a href="#">link <img width="10" height="10"></a></td><td>b</td></tr></table>')
+      expect_layout('<table><tr><td style="text-align:justify">x <span>y <span style="display:inline-block">z</span></span></td><td>b</td></tr></table>')
+      expect_layout('<table><tr><td style="text-align:justify">x <span>y <img width="10" height="10"></span></td><td>b</td></tr></table>')
+      expect_layout('<table><tr><td><div>head</div>x <a href="#">link <img width="10" height="10"></a></td><td>b</td></tr></table>')
       # …and the same shape on a plain line.
-      expect_parity('<table><tr><td>x <a href="#">link <img width="10" height="10"></a></td><td>b</td></tr></table>')
+      expect_layout('<table><tr><td>x <a href="#">link <img width="10" height="10"></a></td><td>b</td></tr></table>')
     end
     it 'counts the columns a <col> / <colgroup span> declares past the cells\' own reach' do
-      expect_parity('<table style="width:400px;border-spacing:0"><col><col><col><tr><td>a</td><td>b</td></tr></table>')
-      expect_parity('<table style="width:400px;border-spacing:0"><colgroup span="3"></colgroup><tr><td>a</td><td>b</td></tr></table>')
-      expect_parity('<table style="width:400px;border-spacing:0"><col span="2"><tr><td>a</td></tr></table>')
-      expect_parity('<table style="table-layout:fixed;width:300px;border-spacing:0"><col><col><col><tr><td>a</td><td>b</td></tr></table>')
+      expect_layout('<table style="width:400px;border-spacing:0"><col><col><col><tr><td>a</td><td>b</td></tr></table>')
+      expect_layout('<table style="width:400px;border-spacing:0"><colgroup span="3"></colgroup><tr><td>a</td><td>b</td></tr></table>')
+      expect_layout('<table style="width:400px;border-spacing:0"><col span="2"><tr><td>a</td></tr></table>')
+      expect_layout('<table style="table-layout:fixed;width:300px;border-spacing:0"><col><col><col><tr><td>a</td><td>b</td></tr></table>')
     end
     # A table in an INTRINSIC grid track is measured by native itself, so the track sizes from the table's own
     # columns.
     it 'measures a table in a grid track itself' do
-      expect_parity('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><tr><td>a</td><td>bb</td></tr></table><div>x</div></div>')
-      expect_parity('<div style="display:grid;grid-template-columns:min-content auto;width:400px"><table><tr><td>aaa bbb</td><td>bb</td></tr></table><div>x</div></div>')
-      expect_parity('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table style="border-spacing:4px"><caption>a wide caption here</caption><tr><td>a</td></tr></table><div>x</div></div>')
-      expect_parity('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><tr><td style="width:25%">a</td><td>b</td></tr></table><div>x</div></div>')
-      expect_parity('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><col style="width:120px"><tr><td>a</td><td>b</td></tr></table><div>x</div></div>')
-      expect_parity('<div style="display:grid;grid-template-columns:100px 200px;width:400px"><table><tr><td>a</td><td>bb</td></tr></table><div>x</div></div>')
+      expect_layout('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><tr><td>a</td><td>bb</td></tr></table><div>x</div></div>')
+      expect_layout('<div style="display:grid;grid-template-columns:min-content auto;width:400px"><table><tr><td>aaa bbb</td><td>bb</td></tr></table><div>x</div></div>')
+      expect_layout('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table style="border-spacing:4px"><caption>a wide caption here</caption><tr><td>a</td></tr></table><div>x</div></div>')
+      expect_layout('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><tr><td style="width:25%">a</td><td>b</td></tr></table><div>x</div></div>')
+      expect_layout('<div style="display:grid;grid-template-columns:max-content auto;width:400px"><table><col style="width:120px"><tr><td>a</td><td>b</td></tr></table><div>x</div></div>')
+      expect_layout('<div style="display:grid;grid-template-columns:100px 200px;width:400px"><table><tr><td>a</td><td>bb</td></tr></table><div>x</div></div>')
     end
   end
 
@@ -1192,61 +1176,61 @@ RSpec.describe 'native layout table parity' do
   # that box per `vertical-align`.
   describe 'native row sizing' do
     it 'sizes a row from its tallest non-spanning cell, a declared cell height being a floor' do
-      expect_parity('<table style="border-spacing:4px"><tr><td>one line</td><td>two<br>lines</td></tr></table>')
-      expect_parity('<table style="border-spacing:4px"><tr><td style="height:50px">short</td><td>x</td></tr></table>')
-      expect_parity('<table style="border-spacing:4px"><tr><td style="height:5px">taller content than five pixels</td><td>x</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr><td>one line</td><td>two<br>lines</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr><td style="height:50px">short</td><td>x</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr><td style="height:5px">taller content than five pixels</td><td>x</td></tr></table>')
       # min/max-height do not apply to a cell (measured: Chrome leaves both tables 28 tall).
-      expect_parity('<table style="border-spacing:4px"><tr><td style="min-height:40px">x</td><td>y</td></tr></table>')
-      expect_parity('<table style="border-spacing:4px"><tr><td style="max-height:5px">x</td><td>y</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr><td style="min-height:40px">x</td><td>y</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr><td style="max-height:5px">x</td><td>y</td></tr></table>')
       # …in its BLOCK axis, which in a vertical writing mode is its width: there its min-height clamps it (Chrome 80,
       # where native skipped every cell's min/max-height by the physical axis and said 18)
       body = '<table style="border-spacing:0"><tr><td id="m" style="padding:0;writing-mode:vertical-lr;min-height:80px">aa bb</td><td>x</td></tr></table>'
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[3]).to eq(80)
       # …and its max-height with it, where Chrome ignores one under a declared height — the table's block-axis max,
-      # which an ORTHOGONAL cell is the one to tell apart from its own (both engines 90, Chrome 200; the orthogonal
-      # cell is a backlog item of its own: Chrome also applies its min/max-width, which both engines skip)
+      # which an ORTHOGONAL cell is the one to tell apart from its own (native 90, Chrome 200; the orthogonal
+      # cell is a backlog item of its own: Chrome also applies its min/max-width, which native skips)
       capped = body.sub('min-height:80px', 'height:200px;max-height:90px')
-      expect_parity(capped)
+      expect_layout(capped)
       expect_shared_gap(laid_out_rect(capped)[3], shared: 90, chrome: 200, what: "#{capped}: #m height")
-      expect_parity('<table style="border-spacing:4px"><tr><td style="height:30px;box-sizing:border-box;padding:6px">x</td><td>y</td></tr></table>')
-      expect_parity('<table style="border-spacing:4px"><tr><td><div style="height:10px;margin:5px"></div><div style="height:20px"></div></td><td style="height:50px">x</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr><td style="height:30px;box-sizing:border-box;padding:6px">x</td><td>y</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr><td><div style="height:10px;margin:5px"></div><div style="height:20px"></div></td><td style="height:50px">x</td></tr></table>')
     end
     it 'honours a declared row height, and shares a percentage one' do
-      expect_parity('<table style="border-spacing:4px"><tr style="height:60px"><td>a</td></tr><tr><td>b</td></tr></table>')
-      expect_parity('<table style="border-spacing:4px"><tr style="height:5px"><td>content taller than the row</td></tr></table>')
-      expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:60%"><td>a</td></tr><tr style="height:60%"><td>b</td></tr></table>')
-      expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:30%"><td>a</td></tr><tr><td>b</td></tr></table>')
-      expect_parity('<table style="border-spacing:0"><tr style="height:30%"><td>a</td></tr><tr><td>b</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr style="height:60px"><td>a</td></tr><tr><td>b</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr style="height:5px"><td>content taller than the row</td></tr></table>')
+      expect_layout('<table style="border-spacing:0;height:100px"><tr style="height:60%"><td>a</td></tr><tr style="height:60%"><td>b</td></tr></table>')
+      expect_layout('<table style="border-spacing:0;height:100px"><tr style="height:30%"><td>a</td></tr><tr><td>b</td></tr></table>')
+      expect_layout('<table style="border-spacing:0"><tr style="height:30%"><td>a</td></tr><tr><td>b</td></tr></table>')
     end
     it 'hands a declared table height\'s surplus to the body group\'s auto rows' do
-      expect_parity('<table style="border-spacing:0;height:100px"><tr><td style="height:10px">a</td></tr><tr><td style="height:30px">b</td></tr></table>')
-      expect_parity('<table style="border-spacing:4px;height:200px"><thead><tr><td style="height:20px">h</td></tr></thead><tbody><tr><td style="height:10px">b1</td></tr><tr><td style="height:30px">b2</td></tr></tbody><tfoot><tr><td style="height:20px">f</td></tr></tfoot></table>')
-      expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:20px"><td>fixed</td></tr><tr><td>auto</td></tr></table>')
-      expect_parity('<table style="border-spacing:0;min-height:100px"><tr><td style="height:10px">a</td></tr><tr><td style="height:30px">b</td></tr></table>')
-      expect_parity('<table style="border-spacing:0;height:200px;max-height:100px"><tr><td style="height:10px">a</td></tr></table>')
-      expect_parity('<table style="border-spacing:0;height:20px"><tr><td style="height:40px">taller than the table</td></tr></table>')
-      expect_parity('<table style="border-spacing:4px;height:200px"><caption style="height:16px">c</caption><tr><td style="height:20px">a</td></tr></table>')
-      expect_parity('<table style="border-collapse:collapse;height:200px"><tr><td style="border:2px solid;height:20px">a</td></tr></table>')
-      expect_parity('<table style="border-spacing:0;height:100px;box-sizing:border-box;padding:10px"><tr><td>a</td></tr></table>')
+      expect_layout('<table style="border-spacing:0;height:100px"><tr><td style="height:10px">a</td></tr><tr><td style="height:30px">b</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px;height:200px"><thead><tr><td style="height:20px">h</td></tr></thead><tbody><tr><td style="height:10px">b1</td></tr><tr><td style="height:30px">b2</td></tr></tbody><tfoot><tr><td style="height:20px">f</td></tr></tfoot></table>')
+      expect_layout('<table style="border-spacing:0;height:100px"><tr style="height:20px"><td>fixed</td></tr><tr><td>auto</td></tr></table>')
+      expect_layout('<table style="border-spacing:0;min-height:100px"><tr><td style="height:10px">a</td></tr><tr><td style="height:30px">b</td></tr></table>')
+      expect_layout('<table style="border-spacing:0;height:200px;max-height:100px"><tr><td style="height:10px">a</td></tr></table>')
+      expect_layout('<table style="border-spacing:0;height:20px"><tr><td style="height:40px">taller than the table</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px;height:200px"><caption style="height:16px">c</caption><tr><td style="height:20px">a</td></tr></table>')
+      expect_layout('<table style="border-collapse:collapse;height:200px"><tr><td style="border:2px solid;height:20px">a</td></tr></table>')
+      expect_layout('<table style="border-spacing:0;height:100px;box-sizing:border-box;padding:10px"><tr><td>a</td></tr></table>')
     end
-    # NOTE (both engines vs Chrome, pre-existing): Chrome SPREADS a spanning cell's deficit over the rows it
-    # covers (39/39 for a rowspan=2 80px cell over two auto rows); both engines give it all to the last row
+    # NOTE (native vs Chrome, pre-existing): Chrome SPREADS a spanning cell's deficit over the rows it
+    # covers (39/39 for a rowspan=2 80px cell over two auto rows); native gives it all to the last row
     # (20/58). These expectations pin the driver's own model, not Chrome's — see the campaign's table backlog.
     it 'grows the last row a spanning cell touches by what the rows it covers are short of' do
-      expect_parity('<table style="border-spacing:4px"><tr><td rowspan="2" style="height:80px">tall</td><td>a</td></tr><tr><td>b</td></tr></table>')
-      expect_parity('<table style="border-spacing:4px"><tr><td rowspan="3" style="height:100px">tall</td><td>a</td></tr><tr><td style="height:20px">b</td></tr><tr><td>c</td></tr></table>')
-      expect_parity('<table style="border-spacing:4px"><tr><td rowspan="2">short</td><td style="height:40px">a</td></tr><tr><td style="height:40px">b</td></tr></table>')
-      expect_parity('<table style="border-spacing:4px;height:200px"><tr><td rowspan="2" style="height:60px">tall</td><td>a</td></tr><tr><td>b</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr><td rowspan="2" style="height:80px">tall</td><td>a</td></tr><tr><td>b</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr><td rowspan="3" style="height:100px">tall</td><td>a</td></tr><tr><td style="height:20px">b</td></tr><tr><td>c</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px"><tr><td rowspan="2">short</td><td style="height:40px">a</td></tr><tr><td style="height:40px">b</td></tr></table>')
+      expect_layout('<table style="border-spacing:4px;height:200px"><tr><td rowspan="2" style="height:60px">tall</td><td>a</td></tr><tr><td>b</td></tr></table>')
     end
     it 'places each cell\'s content in the row-tall box per vertical-align' do
       %w[top middle bottom baseline].each do |va|
-        expect_parity(%(<table style="border-spacing:0"><tr><td style="vertical-align:#{va}"><div style="width:20px;height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table>))
+        expect_layout(%(<table style="border-spacing:0"><tr><td style="vertical-align:#{va}"><div style="width:20px;height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table>))
       end
-      expect_parity('<table style="border-spacing:0"><tr><td><div style="height:10px"></div></td><td style="height:61px"><div style="height:61px"></div></td></tr></table>')
-      expect_parity('<table style="border-spacing:0"><tr><td style="vertical-align:middle;height:80px"><div style="height:10px"></div></td><td><div style="height:20px"></div></td></tr></table>')
-      expect_parity('<table style="border-collapse:collapse"><tr><td style="vertical-align:baseline;font:40px monospace;padding:0"><div>Ay</div></td><td style="vertical-align:baseline;font:16px monospace;padding:0"><div>Ay</div></td></tr></table>')
-      expect_parity('<table style="border-spacing:0"><tr><td rowspan="2" style="vertical-align:bottom"><div style="height:10px"></div></td><td style="height:30px"><div style="height:30px"></div></td></tr><tr><td style="height:40px"><div style="height:40px"></div></td></tr></table>')
+      expect_layout('<table style="border-spacing:0"><tr><td><div style="height:10px"></div></td><td style="height:61px"><div style="height:61px"></div></td></tr></table>')
+      expect_layout('<table style="border-spacing:0"><tr><td style="vertical-align:middle;height:80px"><div style="height:10px"></div></td><td><div style="height:20px"></div></td></tr></table>')
+      expect_layout('<table style="border-collapse:collapse"><tr><td style="vertical-align:baseline;font:40px monospace;padding:0"><div>Ay</div></td><td style="vertical-align:baseline;font:16px monospace;padding:0"><div>Ay</div></td></tr></table>')
+      expect_layout('<table style="border-spacing:0"><tr><td rowspan="2" style="vertical-align:bottom"><div style="height:10px"></div></td><td style="height:30px"><div style="height:30px"></div></td></tr><tr><td style="height:40px"><div style="height:40px"></div></td></tr></table>')
     end
     # A cell holding a PERCENTAGE-height descendant is laid out TWICE (§17.5.3): its used height is the ROW's,
     # known only once every row is placed, so pass 1 sizes it with those descendants treated as AUTO — they must
@@ -1255,49 +1239,49 @@ RSpec.describe 'native layout table parity' do
     #
     # The bug was in pass ONE. Native handed the cell's own DECLARED height to its children as a basis, and the
     # cell's declared height is a MINIMUM, not a containing block: a `height: 150%` child of a `height: 80px`
-    # cell came out 120 and took the row to 122 where the oracle says 82. Nothing else in the engine withholds a
+    # cell came out 120 and took the row to 122 where the oracle said 82. Nothing else in the engine withholds a
     # basis it has, which is why the test is the IMPOSED height — only `measure_table`'s second pass sends one.
     it 'lays a cell with a percentage-height descendant out twice, at the final row height' do
       # Definite from the TABLE's height, from the cell's OWN height, and from neither.
-      expect_parity('<table style="height:200px"><tr><td><div style="height:50%">a</div></td></tr></table>')
-      expect_parity('<table><tr><td style="height:100px"><div style="min-height:50%">a</div></td></tr></table>')
-      expect_parity('<table><tr><td><div style="height:50%">a</div></td></tr></table>')
-      expect_parity('<table><tr><td><div style="height:100%">a</div></td><td>b</td></tr></table>')
+      expect_layout('<table style="height:200px"><tr><td><div style="height:50%">a</div></td></tr></table>')
+      expect_layout('<table><tr><td style="height:100px"><div style="min-height:50%">a</div></td></tr></table>')
+      expect_layout('<table><tr><td><div style="height:50%">a</div></td></tr></table>')
+      expect_layout('<table><tr><td><div style="height:100%">a</div></td><td>b</td></tr></table>')
       # …a child that OVERFLOWS the cell: the box stays the row's, it does not grow to fit (the shape that
       # caught the pass-1 basis — Chrome, the oracle and native all make this table 114 tall).
       body = '<table id="t" style="border-spacing:0"><tr><td style="height:80px"><div style="height:150%;width:20px">x</div></td></tr><tr><td style="height:30px">r2</td></tr></table>'
-      expect_parity(body)
+      expect_layout(body)
       session = simulated_session(page(body))
       session.visit '/'
       expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")).to eq(114)
       # …a row that is merely TALLER because a sibling cell is does NOT make the cell definite.
-      expect_parity('<table style="border-spacing:0"><tr><td><div style="height:50%;width:20px">x</div></td><td style="height:90px">tall</td></tr></table>')
+      expect_layout('<table style="border-spacing:0"><tr><td><div style="height:50%;width:20px">x</div></td><td style="height:90px">tall</td></tr></table>')
       # …the cell's content then sits in the row-tall box per `vertical-align`, off its SECOND-pass height.
       %w[top middle bottom baseline].each do |va|
-        expect_parity(%(<table style="border-spacing:0;height:150px"><tr><td style="vertical-align:#{va}"><div style="height:50%;width:20px">x</div></td><td style="height:70px">s</td></tr></table>))
+        expect_layout(%(<table style="border-spacing:0;height:150px"><tr><td style="vertical-align:#{va}"><div style="height:50%;width:20px">x</div></td><td style="height:70px">s</td></tr></table>))
       end
       # …a cell that SPANS rows resolves against the rows it covers.
-      expect_parity('<table style="border-spacing:0;height:150px"><tr><td rowspan="2"><div style="height:50%;width:20px">x</div></td><td style="height:40px">a</td></tr><tr><td style="height:50px">b</td></tr></table>')
+      expect_layout('<table style="border-spacing:0;height:150px"><tr><td rowspan="2"><div style="height:50%;width:20px">x</div></td><td style="height:40px">a</td></tr><tr><td style="height:50px">b</td></tr></table>')
       # …and the three subtrees that are their OWN percentages' containing block, so the cell never asks:
       # a definite-height child, a nested table, an out-of-flow box.
-      expect_parity('<table style="height:150px"><tr><td><div style="height:40px"><div style="height:50%;width:20px">x</div></div></td></tr></table>')
-      expect_parity('<table style="height:150px"><tr><td><table style="border-spacing:0"><tr><td style="height:50%">n</td></tr></table></td></tr></table>')
-      expect_parity('<table style="height:150px"><tr><td style="position:relative"><div style="position:absolute;height:50%;width:10px"></div>own</td></tr></table>')
+      expect_layout('<table style="height:150px"><tr><td><div style="height:40px"><div style="height:50%;width:20px">x</div></div></td></tr></table>')
+      expect_layout('<table style="height:150px"><tr><td><table style="border-spacing:0"><tr><td style="height:50%">n</td></tr></table></td></tr></table>')
+      expect_layout('<table style="height:150px"><tr><td style="position:relative"><div style="position:absolute;height:50%;width:10px"></div>own</td></tr></table>')
     end
 
     # A cell's own `min-height` / `max-height` do NOT apply in the block axis (§17.5.3 leaves their effect
     # undefined; Chrome and Firefox read both as `auto`), and native's BOX already knew that — but the content
     # height it hands the descendants as their pass-2 basis was clamped by them anyway. A `height: 50%` child of
     # a `max-height: 20px` cell in a 200px table came out 10, and of a `min-height: 500px` cell, 250. Chrome says
-    # 97 for all three of these, the same as the cell with no clamp at all — which is what pins it: parity alone
-    # cannot tell a shared rule from a shared mistake, and this is a figure only Chrome can settle.
+    # 97 for all three of these, the same as the cell with no clamp at all — which is what pins it: a golden alone
+    # cannot tell a right answer from a recorded mistake, and this is a figure only Chrome can settle.
     it 'ignores a cell min/max-height when resolving its percentage-height descendants (Chrome: 97 either way)' do
       [
         '<table style="height:200px"><tr><td style="max-height:20px"><div id="k" style="height:50%;width:10px">x</div></td></tr></table>',
         '<table style="height:200px"><tr><td style="min-height:500px"><div id="k" style="height:50%;width:10px">x</div></td></tr></table>',
         '<table style="height:200px"><tr><td><div id="k" style="height:50%;width:10px">x</div></td></tr></table>'
       ].each do |body|
-        expect_parity(body)
+        expect_layout(body)
         session = simulated_session(page(body))
         session.visit '/'
         expect(session.evaluate_script("document.getElementById('k').getBoundingClientRect().height")).to eq(97), body
@@ -1312,9 +1296,9 @@ RSpec.describe 'native layout table parity' do
     # PREVIOUS layout pass. Native then measured the cell against a figure derived from its own last answer.
     # (`layoutParent` is the fix, and it is the general rule — this is just the shape that reached it.)
     it 'resolves a percentage-height box under a box-less wrapper against the CELL' do
-      expect_parity('<table style="height:150px;border-spacing:0"><tr><td><div style="display:contents"><div style="height:50%;width:20px">x</div></div></td></tr><tr><td style="height:30px">r2</td></tr></table>')
-      expect_parity('<table style="height:150px;border-spacing:0"><tr><td><div style="display:contents"><div style="display:contents"><div style="min-height:50%;width:20px">x</div></div></div></td></tr><tr><td style="height:30px">r2</td></tr></table>')
-      expect_parity('<table style="height:150px;border-spacing:0"><tr><td style="height:60px"><div style="display:contents"><div style="height:50%;width:20px">x</div></div></td><td style="vertical-align:baseline">s</td></tr></table>')
+      expect_layout('<table style="height:150px;border-spacing:0"><tr><td><div style="display:contents"><div style="height:50%;width:20px">x</div></div></td></tr><tr><td style="height:30px">r2</td></tr></table>')
+      expect_layout('<table style="height:150px;border-spacing:0"><tr><td><div style="display:contents"><div style="display:contents"><div style="min-height:50%;width:20px">x</div></div></div></td></tr><tr><td style="height:30px">r2</td></tr></table>')
+      expect_layout('<table style="height:150px;border-spacing:0"><tr><td style="height:60px"><div style="display:contents"><div style="height:50%;width:20px">x</div></div></td><td style="vertical-align:baseline">s</td></tr></table>')
     end
 
     # A `vertical-align: baseline` cell aligns its FIRST baseline to the row's — and a percentage-height box in
@@ -1322,7 +1306,7 @@ RSpec.describe 'native layout table parity' do
     # under a comment claiming it is stable across the re-layout; it is not, and Chrome agrees with the pass-2
     # reading. Measured: an empty `height: 50%` div followed by text sits at y 1 (no shift — the cell's first
     # line is now below the row's baseline), while the same div WITH its own text in it sits at 30, and so does
-    # a plain `height: 20px` one. The oracle is the engine that moved.
+    # a plain `height: 20px` one. The oracle was the engine that moved.
     it 'aligns a baseline cell on its SECOND-pass baseline (Chrome: y 1 with the line pushed down, 30 without)' do
       deep = '<td style="vertical-align:baseline;font:40px monospace">Ay</td>'
       {
@@ -1331,7 +1315,7 @@ RSpec.describe 'native layout table parity' do
         %(<div id="k" style="height:20px;width:20px">q</div>) => [30, 20]
       }.each do |inner, (y, h)|
         body = %(<table id="t" style="height:150px;border-spacing:0"><tr><td style="vertical-align:baseline">#{inner}</td>#{deep}</tr></table>)
-        expect_parity(body)
+        expect_layout(body)
         session = simulated_session(page(body))
         session.visit '/'
         got = session.evaluate_script("(() => { const e = document.getElementById('k'); const t = document.getElementById('t').getBoundingClientRect(); const r = e.getBoundingClientRect(); return [+(r.y - t.y).toFixed(2), +r.height.toFixed(2)]; })()")
@@ -1340,32 +1324,32 @@ RSpec.describe 'native layout table parity' do
     end
 
     # A box anchored to a CELL resolves its insets against the ROW-tall box (measured: a `bottom: 0` overlay in a
-    # 42px cell sits at 36, where the cell's own 12px content flow would put it at 6) — the oracle now defers
-    # those until `layoutTable` has the row height, which is also when native places them.
+    # 42px cell sits at 36, where the cell's own 12px content flow would put it at 6) — native defers
+    # those until it has the row height.
     it 'places a box anchored to a cell against the row-tall box' do
       %w[middle top bottom].each do |va|
-        expect_parity(%(<table style="border-spacing:0"><tr><td style="position:relative;vertical-align:#{va}"><div style="position:absolute;bottom:0;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>))
+        expect_layout(%(<table style="border-spacing:0"><tr><td style="position:relative;vertical-align:#{va}"><div style="position:absolute;bottom:0;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>))
       end
-      expect_parity('<table style="border-spacing:0"><tr><td style="position:relative"><div style="position:absolute;height:100%;width:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>')
+      expect_layout('<table style="border-spacing:0"><tr><td style="position:relative"><div style="position:absolute;height:100%;width:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>')
       # …including a cell with a DECLARED height, whose box looks definite but is still only a minimum until the
       # row speaks (measured: the overlay sits at 36 in a 42px row, not at 16 where the cell's own 20px would).
-      expect_parity('<table style="border-spacing:0"><tr><td style="position:relative;height:20px"><div style="position:absolute;bottom:0;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>')
-      expect_parity('<table style="border-spacing:0"><tr><td style="position:relative;height:20px"><div style="position:absolute;height:100%;width:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>')
+      expect_layout('<table style="border-spacing:0"><tr><td style="position:relative;height:20px"><div style="position:absolute;bottom:0;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>')
+      expect_layout('<table style="border-spacing:0"><tr><td style="position:relative;height:20px"><div style="position:absolute;height:100%;width:6px"></div><div style="height:10px"></div></td><td style="height:40px"><div style="height:40px"></div></td></tr></table>')
       # …and one still WAITING for an ancestor's size takes the same delta in its static position, so it lands
       # where the moved flow is (measured: 26 in a cell whose content the row centred, not 1).
-      expect_parity('<div style="position:relative"><table style="border-spacing:0"><tr><td style="vertical-align:middle"><div style="position:absolute;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table></div>')
-      expect_parity('<table style="position:relative;border-spacing:0"><tr><td style="vertical-align:middle"><div style="position:absolute;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table>')
-      expect_parity('<div style="position:relative"><table style="border-spacing:0;height:200px"><tr><td style="height:20px">a</td></tr><tr><td style="vertical-align:top"><div style="position:absolute;width:6px;height:6px"></div><div style="height:10px"></div></td></tr></table></div>')
+      expect_layout('<div style="position:relative"><table style="border-spacing:0"><tr><td style="vertical-align:middle"><div style="position:absolute;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table></div>')
+      expect_layout('<table style="position:relative;border-spacing:0"><tr><td style="vertical-align:middle"><div style="position:absolute;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table>')
+      expect_layout('<div style="position:relative"><table style="border-spacing:0;height:200px"><tr><td style="height:20px">a</td></tr><tr><td style="vertical-align:top"><div style="position:absolute;width:6px;height:6px"></div><div style="height:10px"></div></td></tr></table></div>')
       # …while a STATIC-position one is placed in the flow and moves down with the content it follows.
-      expect_parity('<table style="border-spacing:0"><tr><td style="vertical-align:middle"><div style="position:absolute;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table>')
-      expect_parity('<table style="border-spacing:0"><tr><td style="vertical-align:bottom"><div style="position:absolute;top:5px;left:5px;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table>')
+      expect_layout('<table style="border-spacing:0"><tr><td style="vertical-align:middle"><div style="position:absolute;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table>')
+      expect_layout('<table style="border-spacing:0"><tr><td style="vertical-align:bottom"><div style="position:absolute;top:5px;left:5px;width:6px;height:6px"></div><div style="height:10px"></div></td><td style="height:60px"><div style="height:60px"></div></td></tr></table>')
     end
 
     it 'reads a row height declaration the way Chrome does: a plain length or percentage, nothing else' do
-      expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:0%"><td>a</td></tr><tr><td>b</td></tr></table>')
-      expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:0"><td>a</td></tr><tr><td>b</td></tr></table>')
-      expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:calc(50% + 10px)"><td>a</td></tr><tr><td>b</td></tr></table>')
-      expect_parity('<table style="border-spacing:0;height:100px"><tr style="height:auto"><td>a</td></tr><tr style="height:40px"><td>b</td></tr></table>')
+      expect_layout('<table style="border-spacing:0;height:100px"><tr style="height:0%"><td>a</td></tr><tr><td>b</td></tr></table>')
+      expect_layout('<table style="border-spacing:0;height:100px"><tr style="height:0"><td>a</td></tr><tr><td>b</td></tr></table>')
+      expect_layout('<table style="border-spacing:0;height:100px"><tr style="height:calc(50% + 10px)"><td>a</td></tr><tr><td>b</td></tr></table>')
+      expect_layout('<table style="border-spacing:0;height:100px"><tr style="height:auto"><td>a</td></tr><tr style="height:40px"><td>b</td></tr></table>')
     end
   end
   # An atomic inline holding a box native once refused — a sticky block, an orphan `display: table-row` — in a CELL
@@ -1380,9 +1364,9 @@ RSpec.describe 'native layout table parity' do
   describe 'a cell or caption holding an atomic native once refused' do
     it 'lays out an auto, a fixed and a measured table around such a cell' do
       REFUSED_ATOMICS.each do |inner|
-        expect_parity(%{<div style="width:400px"><table><tr><td>a #{inner}</td></tr></table></div>})
-        expect_parity(%{<div style="width:400px"><table style="table-layout:fixed;width:300px"><tr><td>a #{inner}</td></tr></table></div>})
-        expect_parity(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><tr><td>a #{inner}</td></tr></table></div></div>})
+        expect_layout(%{<div style="width:400px"><table><tr><td>a #{inner}</td></tr></table></div>})
+        expect_layout(%{<div style="width:400px"><table style="table-layout:fixed;width:300px"><tr><td>a #{inner}</td></tr></table></div>})
+        expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><tr><td>a #{inner}</td></tr></table></div></div>})
       end
     end
 
@@ -1391,13 +1375,13 @@ RSpec.describe 'native layout table parity' do
         atomic = "a #{inner}"
         # a vertical-writing-mode block child, a `min-content` track and a normal-flow table all ask for the
         # caption's contribution
-        expect_parity(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><caption>#{atomic}</caption><tr><td>x</td></tr></table></div></div>})
-        expect_parity(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table></div>})
-        expect_parity(%{<table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table>})
-        expect_parity(%{<div style="width:400px"><table><caption>#{atomic}</caption><tr><td>x</td></tr></table></div>})
+        expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><table><caption>#{atomic}</caption><tr><td>x</td></tr></table></div></div>})
+        expect_layout(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table></div>})
+        expect_layout(%{<table style="border-spacing:0"><caption>#{atomic}</caption><tr><td style="padding:0">x</td></tr></table>})
+        expect_layout(%{<div style="width:400px"><table><caption>#{atomic}</caption><tr><td>x</td></tr></table></div>})
       end
-      expect_parity(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>cap</caption><tr><td style="padding:0">x</td></tr></table></div>})
-      expect_parity(%{<table style="border-spacing:0"><caption>cap</caption><tr><td style="padding:0">x</td></tr></table>})
+      expect_layout(%{<div style="display:grid;grid-template-columns:min-content;width:400px"><table style="border-spacing:0"><caption>cap</caption><tr><td style="padding:0">x</td></tr></table></div>})
+      expect_layout(%{<table style="border-spacing:0"><caption>cap</caption><tr><td style="padding:0">x</td></tr></table>})
     end
   end
 
@@ -1407,14 +1391,14 @@ RSpec.describe 'native layout table parity' do
   describe 'an orphan display: table-row' do
     it 'lays an empty one out natively, whatever flex properties it declares' do
       ['', 'flex-direction:column', 'flex-wrap:wrap', 'direction:rtl', 'writing-mode:vertical-rl'].each do |extra|
-        expect_parity(%(<div style="width:400px"><div style="display:table-row;#{extra}"></div><div style="height:4px"></div></div>))
+        expect_layout(%(<div style="width:400px"><div style="display:table-row;#{extra}"></div><div style="height:4px"></div></div>))
       end
       # …a child that generates NO BOX leaves it empty: a comment, a `display: none` element.
-      expect_parity('<div style="width:400px"><div style="display:table-row"><!--c--></div><div style="height:4px"></div></div>')
-      expect_parity('<div style="width:400px"><div style="display:table-row"><span style="display:none">x</span></div>' \
+      expect_layout('<div style="width:400px"><div style="display:table-row"><!--c--></div><div style="height:4px"></div></div>')
+      expect_layout('<div style="width:400px"><div style="display:table-row"><span style="display:none">x</span></div>' \
                     '<div style="height:4px"></div></div>')
       # …and the shape the 1,296 actually were.
-      expect_parity('<style>.p::before{content:"";display:table-row}</style>' \
+      expect_layout('<style>.p::before{content:"";display:table-row}</style>' \
                     '<div style="width:400px"><div class="p"></div><div style="height:4px"></div></div>')
     end
 
@@ -1426,12 +1410,12 @@ RSpec.describe 'native layout table parity' do
         '<style>.p::before{content:"xx";display:table-row}</style><div style="width:400px;font:16px monospace"><div id="m" class="p" style="display:inline-block"></div>y</div>' => [19.2, 22],
         '<style>.p::before{content:"a longer generated string";display:table-row}</style><div style="width:400px;font:16px monospace"><div id="m" class="p" style="width:max-content">z</div></div>' => [240.016, 44]
       }.each do |body, (w, h)|
-        expect_parity(body)
+        expect_layout(body)
         rect = laid_out_rect(body)
         expect(rect[2]).to be_within(0.02).of(w), body
         expect(rect[3]).to eq(h), body
       end
-      expect_parity('<div style="width:400px"><div style="display:table-row">x</div><div style="height:4px"></div></div>')
+      expect_layout('<div style="width:400px"><div style="display:table-row">x</div><div style="height:4px"></div></div>')
     end
 
     # …and one of BLOCK-LEVEL element children: stacked in one anonymous cell (the second at x 0), and cells shrunk to
@@ -1439,12 +1423,12 @@ RSpec.describe 'native layout table parity' do
     it 'lays one of block children out natively, in its anonymous table' do
       blocks = '<div style="width:300px;font:16px monospace"><div style="display:table-row"><div>aa</div><div id="m" style="width:50px">w</div></div></div>'
       cells = '<div style="width:300px;font:16px monospace"><div style="display:table-row"><div style="display:table-cell">aa</div><div id="m" style="display:table-cell">bb</div></div></div>'
-      [blocks, cells].each {|body| expect_parity(body) }
+      [blocks, cells].each {|body| expect_layout(body) }
       expect(laid_out_rect(blocks)[0]).to be_within(0.05).of(0), "#{blocks}: #m x"
       expect(laid_out_rect(cells)[2]).to be_within(0.05).of(19.2), "#{cells}: #m width"
       table = '<div style="width:300px;font:16px monospace"><div style="display:table-row"><table style="border-spacing:0"><tr><td>wideunbreakabletablecontent</td></tr></table>' \
               '<div id="m">b</div><div>c</div></div></div>'
-      expect_parity(table)
+      expect_layout(table)
       # (…stacked under the table in the one anonymous cell, as wide as the table makes it — Chrome: 0, 261.2)
       expect(laid_out_rect(table).values_at(0, 2).map {|v| v.round(1) }).to eq([0, 261.2])
     end
@@ -1459,11 +1443,11 @@ RSpec.describe 'native layout table parity' do
         '<div style="display:table-row;flex-flow:column-reverse wrap"><div id="m">o1</div><div>o2</div></div>' => 0
       }.each do |row, x|
         body = format(host, row)
-        expect_parity(body)
+        expect_layout(body)
         expect(laid_out_rect(body)[0]).to eq(x), body
       end
       body = format(host, '<div style="display:table-row"><div style="font-size:24px">big</div><div id="m" style="order:-1">o1</div></div>')
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[0]).to be_within(0.05).of(0), "#{body}: #m x"
     end
   end
@@ -1479,10 +1463,10 @@ RSpec.describe 'native layout table parity' do
       '<table style="width:300px;height:100px"><thead><tr><th>T</th></tr></thead><tbody id="m">  </tbody><tfoot><tr><td>f</td></tr></tfoot></table>',
       '<table style="width:300px;border-collapse:collapse"><caption>cap</caption><tbody id="m"></tbody><tbody><tr><td style="border:3px solid">a</td></tr></tbody></table>',
       '<div style="display:table;width:200px"><div id="m" style="display:table-row-group"></div><div style="display:table-row"><div style="display:table-cell">x</div></div></div>'
-    ].each {|body| expect_parity(body) }
+    ].each {|body| expect_layout(body) }
     expect(laid_out_rect('<table style="width:300px"><tbody id="m"></tbody></table>')).to eq([0, 0, 300, 0])
     ordered = '<table style="width:300px;border-spacing:4px"><tbody id="m"></tbody><tbody><tr><td>a</td></tr></tbody></table>'
-    expect_parity(ordered)
+    expect_layout(ordered)
     expect_shared_gap(laid_out_rect(ordered)[1], shared: 28, chrome: 0, what: "#{ordered}: #m y")
   end
 
@@ -1495,13 +1479,13 @@ RSpec.describe 'native layout table parity' do
     ['calc(40% + 10px)', 'clamp(30px, 50%, 200px)', 'min(90%, 250px)', 'max(60%, 40px)'].each do |w|
       body = %(<table style="width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="width:#{w};padding:0">lorem ipsum dolor</td>) +
              '<td style="padding:0">x</td></tr></table>'
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[2]).to be_within(0.05).of(377.75), w
     end
     ['calc(90% + 10px)', 'max(90%, 10px)'].each do |w|
       body = %(<table style="width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="width:#{w};padding:0">a</td>) +
              '<td style="padding:0">lorem ipsum dolor sit amet consectetur</td></tr></table>'
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[2]).to be_within(0.02).of(10.26), w
     end
   end
@@ -1516,7 +1500,7 @@ RSpec.describe 'native layout table parity' do
       '<div style="display:flex;flex-direction:column;width:320px;height:200px;font:16px monospace"><table style="border-spacing:2px"><tr><td id="m" style="min-width:30%">aa bb</td><td>cc</td></tr>' \
       '<tr><td colspan="2">dd ee ff</td></tr></table><div style="width:40px">y</div></div>' => 220.48
     }.each do |body, w|
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[2]).to be_within(0.05).of(w), body
     end
   end
@@ -1530,7 +1514,7 @@ RSpec.describe 'native layout table parity' do
       ['<table style="table-layout:fixed;width:400px;border-spacing:0;font:16px monospace"><tr><td id="m" style="width:100px;padding:0 10%">a</td><td>b</td></tr></table>', 180, 100],
       ['<table style="table-layout:fixed;width:400px;border-spacing:0;font:16px monospace"><tr><td style="width:100px;padding:0 max(5%, 30px)">a</td><td id="m">b</td></tr></table>', 240, nil]
     ].each do |body, w, chrome|
-      expect_parity(body)
+      expect_layout(body)
       if chrome
         expect_shared_gap(laid_out_rect(body)[2], shared: w, chrome: chrome, what: body)
       else
@@ -1551,7 +1535,7 @@ RSpec.describe 'native layout table parity' do
       '<div style="display:table;font:16px monospace;border-spacing:2px"><div style="display:table-row"><div style="display:table-cell">x</div></div>' \
       '<div id="m" style="display:table-row-group">tx <span style="display:inline-block;width:20px;height:5px"></span></div><div style="display:table-row"><div style="display:table-cell">b</div></div></div>' => [2, 26, 48.8, 22]
     }.each do |body, rect|
-      expect_parity(body)
+      expect_layout(body)
       laid_out_rect(body).zip(rect).each {|g, w| expect(g).to be_within(0.02).of(w), body }
     end
   end
@@ -1563,22 +1547,22 @@ RSpec.describe 'native layout table parity' do
     it 'lays one out as a block whose block-axis min/max do not apply' do
       %w[min-height:40px max-height:5px].each do |style|
         body = %(<div style="width:200px;font:16px monospace"><div id="m" style="display:table-cell;#{style}">aa bb</div></div>)
-        expect_parity(body)
+        expect_layout(body)
         expect(laid_out_rect(body)[3]).to eq(22)
       end
       body = '<div style="width:200px;font:16px monospace"><div id="m" style="display:table-cell;width:50%">aa bb</div></div>'
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[2]).to be_within(0.05).of(96.03), "#{body}: #m width"
       # (…the anonymous table resolves the cell's 50% against the room the table is given — Chrome's 96.03)
       # …and an orphan ROW with percentage edges and no in-flow item
-      expect_parity('<div style="width:200px"><div style="display:table-row;padding:10%;width:50%"></div><p>after</p></div>')
+      expect_layout('<div style="width:200px"><div style="display:table-row;padding:10%;width:50%"></div><p>after</p></div>')
       %w[table-row-group table-header-group table-caption].each do |display|
-        expect_parity(%(<div style="width:200px;font:16px monospace"><div style="display:#{display}">aa bb</div><p>after</p></div>))
+        expect_layout(%(<div style="width:200px;font:16px monospace"><div style="display:#{display}">aa bb</div><p>after</p></div>))
       end
       # …through a row group with no table of its own, and in a vertical writing mode, where the width is the axis
       # that goes unclamped.
-      expect_parity('<div style="width:200px;font:16px monospace"><div style="display:table-row-group"><div style="display:table-cell;max-height:5px">aa bb</div></div></div>')
-      expect_parity('<div style="width:200px;font:16px monospace"><div style="writing-mode:vertical-lr;height:120px"><div style="display:table-cell;max-width:20px">aa bb cc dd</div></div></div>')
+      expect_layout('<div style="width:200px;font:16px monospace"><div style="display:table-row-group"><div style="display:table-cell;max-height:5px">aa bb</div></div></div>')
+      expect_layout('<div style="width:200px;font:16px monospace"><div style="writing-mode:vertical-lr;height:120px"><div style="display:table-cell;max-width:20px">aa bb cc dd</div></div></div>')
     end
 
     # (…shrink-to-fit and side by side, as Chrome does)
@@ -1593,7 +1577,7 @@ RSpec.describe 'native layout table parity' do
         '<div id="m" style="display:table-row-group">aa bb</div>'                                 => [2, 48.02]
       }.each do |cells, (index, chrome)|
         body = %(<div style="width:200px;font:16px monospace">#{cells}</div>)
-        expect_parity(body)
+        expect_layout(body)
         expect(laid_out_rect(body)[index]).to be_within(0.05).of(chrome), "#{body}: #m rect[#{index}]"
       end
     end

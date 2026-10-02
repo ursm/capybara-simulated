@@ -1,33 +1,28 @@
 # frozen_string_literal: true
-# Native layout, block flow — geometry shadow-parity: the native pass's border-boxes must equal the JS
-# layout's `_lb`. It started as L1's invariant, "a pure block-flow page — explicit heights, no inline
-# text, no float, no abspos", and that is no longer what the file says: floats, abspos, inline runs,
-# atomics and mixed blocks all have examples below, because each was ported in turn and its parity
-# belongs beside the block one.
+# Native layout, block flow — each shape held to its recorded golden. It started as L1's invariant, "a pure
+# block-flow page — explicit heights, no inline text, no float, no abspos", and that is no longer what the
+# file says: floats, abspos, inline runs, atomics and mixed blocks all have examples below, because each was
+# ported in turn and belongs beside the block one.
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
-require_relative 'support/shadow_parity'
+require_relative 'support/chrome_figures'
 require_relative 'support/layout_golden'
-require_relative 'support/walk_refusals'
 
-RSpec.describe 'native layout L1 block-flow parity' do
+# Two shapes the JS walk once refused, kept as shapes the layout has to place: an inline-block holding a box of a VENDOR
+# `position` (`-webkit-sticky`, which declaration validation keeps), and an `inline-table` whose only column has no row
+# under it.
+STICKY_ATOMIC = '<span style="display:inline-block"><div style="position:-webkit-sticky;width:9px;height:4px"></div>t</span>'
+COLUMN_ONLY_INLINE_TABLE = '<div>a<table style="display:inline-table"><colgroup><col style="width:30px"></colgroup></table></div>'
+
+RSpec.describe 'native layout L1 block-flow' do
   def page(body)
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
   end
 
   # `app` is a whole document of the caller's own, where the shape is the body element itself.
-  def expect_parity(body, app: page(body))
-    expect_layout_golden(body, app: app) do
-      session = simulated_session(app); session.visit '/'
-      session.evaluate_script('document.body.offsetHeight')   # force a layout pass
-      r = session.evaluate_script('globalThis.__csimLayoutShadowRun()')
-      expect(r).to include('ok' => true), "harness bailed: #{r.inspect}"
-      expect(r['mismatches']).to eq(0), "mismatch: #{r.inspect}"
-      expect_no_dropped_records(r, body)
-    end
-  end
+  def expect_layout(body, app: page(body)) = expect_layout_golden(body, app:)
 
   def session_for(body)
     session = simulated_session(page(body))
@@ -72,7 +67,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
      ' style="margin:0 auto"', ' style="max-width:600px;margin:0 auto"', ' style="margin:0 5%;max-width:500px"',
      ' style="min-width:1200px"', ' style="margin-left:auto"'].each do |attr|
       html = %(<!doctype html><html><head><meta charset="utf-8"></head><body#{attr}><div id="d" style="margin:0 7px">x</div><p>p</p></body></html>)
-      expect_parity(html, app: Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app)
+      expect_layout(html, app: Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app)
     end
     # …and the percentage padding resolves against the viewport-wide root, as Chrome's does
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:20px;padding:0 10%"><div id="d">x</div></body></html>)
@@ -138,7 +133,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
   end
 
   it 'matches on stacked blocks with explicit heights' do
-    expect_parity(<<~HTML)
+    expect_layout(<<~HTML)
       <div style="height:50px"></div>
       <div style="height:30px"></div>
       <div style="height:auto"><div style="height:20px"></div><div style="height:25px"></div></div>
@@ -146,7 +141,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
   end
 
   it 'matches with margins, padding, borders, and box-sizing (margin collapsing)' do
-    expect_parity(<<~HTML)
+    expect_layout(<<~HTML)
       <div style="height:40px;margin:10px 0;padding:5px;border:2px solid #000"></div>
       <div style="box-sizing:border-box;width:200px;height:60px;padding:8px;border:3px solid #000">
         <div style="height:20px;margin-left:15px"></div>
@@ -155,7 +150,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
   end
 
   it 'matches complex collapsing: adjacent margins, closed edges, empty block, nesting' do
-    expect_parity(<<~HTML)
+    expect_layout(<<~HTML)
       <div style="margin-bottom:30px;height:20px"></div>
       <div style="margin-top:10px;height:20px"></div>
       <div style="margin:15px 0"></div>
@@ -169,7 +164,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
   end
 
   it 'matches declared-zero-height and wrapped collapse-through' do
-    expect_parity(<<~HTML)
+    expect_layout(<<~HTML)
       <div style="height:40px;margin-bottom:12px"></div>
       <div style="height:0;margin:18px 0"></div>
       <div style="height:25px;margin-top:6px"></div>
@@ -181,7 +176,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
   it 'matches a BFC wrapper keeping its child margin inside (no collapse-through the BFC)' do
     # overflow:hidden establishes a block formatting context, so the inner div's margin-top does NOT
     # collapse out of the wrapper (§8.3.1) — the child sits 30px down inside a 40px-tall wrapper.
-    expect_parity(<<~HTML)
+    expect_layout(<<~HTML)
       <div style="overflow:hidden;margin-top:20px">
         <div style="margin-top:30px;height:10px"></div>
       </div>
@@ -190,7 +185,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
   end
 
   it 'matches percentage and clamped widths' do
-    expect_parity(<<~HTML)
+    expect_layout(<<~HTML)
       <div style="width:60%;height:30px"></div>
       <div style="width:50%;max-width:120px;height:20px"></div>
       <div style="width:100px;min-width:300px;height:20px"></div>
@@ -198,32 +193,32 @@ RSpec.describe 'native layout L1 block-flow parity' do
   end
 
   it 'matches box-sizing:border-box whose border+padding exceed the declared size (border box floored at its edges)' do
-    expect_parity(<<~HTML)
+    expect_layout(<<~HTML)
       <div style="box-sizing:border-box;width:100px;height:20px;border:10px solid;padding:5px">x</div>
       <div style="box-sizing:border-box;width:15px;height:60px;border:10px solid;padding:5px"></div>
     HTML
   end
 
   # A display with no arm of its own — `-webkit-box`, `-webkit-inline-box`, `ruby`, `math`, `flow`, an orphan
-  # `table-column` — is laid out by the oracle's block flow as a plain block (`layoutElementInner`'s fallthrough),
-  # and the walk takes it as one since 2026-09-25 (it declined, `block-level-box-unplaceable`). Chrome does
-  # otherwise for the WebKit pair, and both engines share it: the line-clamp idiom clamps three lines to two (44,
-  # where both say 66), and `-webkit-inline-box` is inline-level (x 28.8 on the first line, where both put it at 0
-  # on the next).
-  it 'lays out a display with no arm of its own as the block the oracle makes it' do
+  # `table-column` — is laid out as a plain block, as the oracle's block flow laid it out (`layoutElementInner`'s
+  # fallthrough), and the walk takes it as one since 2026-09-25 (it declined, `block-level-box-unplaceable`).
+  # Chrome does otherwise for the WebKit pair: the line-clamp idiom clamps three lines to two (44, where native
+  # says 66), and `-webkit-inline-box` is inline-level (x 28.8 on the first line, where native puts it at 0 on the
+  # next).
+  it 'lays out a display with no arm of its own as a plain block' do
     clamp = '<div style="width:300px;font:16px monospace"><div id="m" style="display:-webkit-box;-webkit-line-clamp:2;' \
             '-webkit-box-orient:vertical;overflow:hidden">aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss tt uu vv ww xx yy zz</div></div>'
     inline = '<div style="width:300px;font:16px monospace">aa <span id="m" style="display:-webkit-inline-box">x</span> bb</div>'
-    [clamp, inline].each {|body| expect_parity(body) }
+    [clamp, inline].each {|body| expect_layout(body) }
     expect_shared_gap(laid_out_rect(clamp)[3], shared: 66, chrome: 44, what: "#{clamp}: #m height")
     expect_shared_gap(laid_out_rect(inline)[0], shared: 0, chrome: 28.81, what: "#{inline}: #m x")
     %w[ruby math flow table-column].each do |display|
-      expect_parity(%(<div style="width:200px;font:16px monospace">lead <div style="display:#{display};padding:0 5%">aa bb</div> tail</div>))
+      expect_layout(%(<div style="width:200px;font:16px monospace">lead <div style="display:#{display};padding:0 5%">aa bb</div> tail</div>))
     end
   end
 
   # A PERCENTAGE relative inset goes over as its `px + frac` pair and native resolves it against the containing
-  # block it lays the box out in — the oracle's box was the basis until 2026-09-24. Both engines and Chrome: 30/20
+  # block it lays the box out in — the oracle's box was the basis until 2026-09-24. Native and Chrome: 30/20
   # in a 300x200 block; a `top: 10%` of an INDEFINITE height resolves to nothing and `bottom: 4px` is used (-4) —
   # and so does a `top: 0%` or a `calc(0% + 5px)`, whose fraction is zero but which is a percentage all the same
   # (-10, -3; native read a zero fraction as "no percentage" and said 0 and 5); an over-constrained pair keeps the
@@ -264,19 +259,19 @@ RSpec.describe 'native layout L1 block-flow parity' do
       %(<div style="width:300px;height:150px;display:flex"><div style="display:table;width:100%">#{caption}#{row}</div><div>x</div></div>)                                        => 15,
       %(<div style="width:300px;display:grid;grid-template-columns:100px 1fr;grid-auto-rows:80px"><div style="display:table;width:100%">#{caption}#{row}</div><div>x</div></div>) => 8
     }.each do |body, y|
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[1]).to eq(y)
     end
-    # …the table's BORDER box, as the oracle hands it (11.6 of the 116 a content-box `height: 100px` table with
+    # …the table's BORDER box (11.6 of the 116 a content-box `height: 100px` table with
     # 5px padding and a 3px border comes to); Chrome's is its CONTENT box after its min/max (8.39 of that
-    # table, 12 of `height: 40px; min-height: 120px`, where both say 4). Shared.
+    # table, 12 of `height: 40px; min-height: 120px`, where native says 4). Shared.
     {
       'height:100px;padding:5px;border:3px solid' => [11.6, 8.39],
       'height:40px;min-height:120px'              => [4, 12]
     }.each do |table, (shared, chrome)|
       wrap = ->(cap) { %(<div style="width:300px"><div style="display:table;width:100%;#{table}">#{cap}#{row}</div></div>) }
       body = wrap.(caption)
-      expect_parity(body)
+      expect_layout(body)
       offset = laid_out_rect(body)[1] - laid_out_rect(wrap.(caption.sub('top:10%', 'top:0')))[1]
       expect_shared_gap(offset, shared: shared, chrome: chrome, what: "#{body}: #m's offset")
     end
@@ -292,13 +287,13 @@ RSpec.describe 'native layout L1 block-flow parity' do
       '<div style="display:flex;width:300px;height:150px"><table style="width:200px;min-height:120px"><caption id="m" style="position:relative;top:10%">cap</caption><tr><td style="height:40px">d</td></tr></table><div>y</div></div>'                               => 15,
       '<div style="display:flex;width:300px;height:150px;align-items:start"><table style="width:200px;height:100px"><caption id="m" style="position:relative;top:10%;height:50%">cap</caption><tr><td style="height:40px">d</td></tr></table><div>y</div></div>' => 10
     }.each do |body, y|
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[1]).to eq(y), body
     end
   end
 
-  # …but only a caption a TABLE lays out: an ORPHAN one is the JS model's plain block, whose offset resolves against
-  # its parent like any block's (the JS walk and the oracle agree on 20 / 12 / 20). The Rust walk wraps it in the
+  # …but only a caption a TABLE lays out: an ORPHAN one was the JS model's plain block, whose offset resolved against
+  # its parent like any block's (the JS walk and the oracle agreed on 20 / 12 / 20). The Rust walk wraps it in the
   # anonymous table CSS 2.1 §17.2.1 makes, of auto height, and says Chrome's 0.
   it 'resolves an orphan caption\'s fallback offset as its anonymous table does' do
     {
@@ -306,7 +301,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
       '<div style="display:grid;width:300px;grid-auto-rows:120px"><div><div id="m" style="display:table-caption;position:relative;top:10%">cap</div></div></div>'          => 12,
       '<div style="width:300px;height:200px"><div id="m" style="display:table-caption;position:relative;top:max(10%, 4px)">cap</div></div>'                            => 20
     }.each do |body, y|
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[1]).to be_within(0.05).of(0), "#{body}: #m y"
     end
   end
@@ -314,7 +309,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
   # A size is never negative, and only a math function can make one: `width: calc(10% - 100px)` in a 300px block is
   # a zero content box (its padding still around it, 10 wide), a negative `max-width` caps the box at nothing
   # rather than being ignored, and a negative height is 0. The oracle kept the negative figure (-70, -60, 300 for
-  # the `max-width`) until 2026-09-25, where native and Chrome said 0; both engines and Chrome agree now.
+  # the `max-width`) until 2026-09-25, where native and Chrome said 0.
   it 'floors a negative calc() size at zero' do
     {
       'width:calc(10% - 100px);height:10px'                => [0, 10],
@@ -323,16 +318,16 @@ RSpec.describe 'native layout L1 block-flow parity' do
       'min-width:calc(10% - 100px);width:50px;height:10px' => [50, 10]
     }.each do |style, size|
       body = %(<div style="width:300px"><div id="m" style="#{style}"></div></div>)
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[2, 2]).to eq(size)
     end
     body = '<div style="width:300px;height:100px"><div id="m" style="height:calc(10% - 100px)">x</div></div>'
-    expect_parity(body)
+    expect_layout(body)
     expect(laid_out_rect(body)[3]).to eq(0)
   end
 
   it 'matches an over-constrained (left AND right) position:relative child under rtl (§9.4.3: right wins)' do
-    expect_parity(<<~HTML)
+    expect_layout(<<~HTML)
       <div style="width:300px;direction:rtl">
         <div style="position:relative;left:10px;right:40px;width:100px;height:20px">a</div>
       </div>
@@ -342,7 +337,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
   it 'matches an rtl block: children start at the inline-start = right edge (r1)' do
     # A narrow fixed-width child sits at content_right - width - margin_right; an auto-width child fills and
     # lands back at content-left; an overflowing child hangs off the LEFT; a nested rtl block reverses too.
-    expect_parity(<<~HTML)
+    expect_layout(<<~HTML)
       <div style="width:300px;direction:rtl">
         <div style="width:100px;height:20px;margin-right:20px"></div>
         <div style="height:20px"></div>
@@ -356,20 +351,20 @@ RSpec.describe 'native layout L1 block-flow parity' do
   # positions it by its displacement from the block's border box, neither sizing nor shifting the in-flow
   # siblings.
   it 'matches an absolute child positioned by insets in a relative parent' do
-    expect_parity('<div style="position:relative;width:300px;height:200px"><div style="height:20px">flow</div><div style="position:absolute;top:10px;left:20px;width:50px;height:30px">a</div></div>')
+    expect_layout('<div style="position:relative;width:300px;height:200px"><div style="height:20px">flow</div><div style="position:absolute;top:10px;left:20px;width:50px;height:30px">a</div></div>')
   end
   it 'matches an absolute child whose width comes from left+right insets' do
-    expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;left:10px;right:40px;top:5px;height:25px">a</div></div>')
+    expect_layout('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;left:10px;right:40px;top:5px;height:25px">a</div></div>')
   end
   it 'matches an auto-positioned absolute child at its static position' do
-    expect_parity('<div style="position:relative;width:300px"><div style="height:20px">x</div><div style="position:absolute;width:60px;height:20px">a</div></div>')
+    expect_layout('<div style="position:relative;width:300px"><div style="height:20px">x</div><div style="position:absolute;width:60px;height:20px">a</div></div>')
   end
   it 'matches a fixed child, and two absolute children around in-flow content' do
-    expect_parity('<div style="width:300px;height:100px"><div style="position:fixed;top:5px;left:5px;width:40px;height:40px">f</div><div style="height:20px">flow</div></div>')
-    expect_parity('<div style="position:relative;width:300px;height:200px"><div style="height:30px">a</div><div style="position:absolute;top:0;right:0;width:40px;height:40px">b</div><div style="position:absolute;bottom:0;left:0;width:30px;height:30px">c</div><div style="height:20px">d</div></div>')
+    expect_layout('<div style="width:300px;height:100px"><div style="position:fixed;top:5px;left:5px;width:40px;height:40px">f</div><div style="height:20px">flow</div></div>')
+    expect_layout('<div style="position:relative;width:300px;height:200px"><div style="height:30px">a</div><div style="position:absolute;top:0;right:0;width:40px;height:40px">b</div><div style="position:absolute;bottom:0;left:0;width:30px;height:30px">c</div><div style="height:20px">d</div></div>')
   end
   it 'matches an absolute child that carries its own block subtree and margins' do
-    expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:10px;left:10px;width:100px;height:60px"><div style="height:20px;margin:5px">c</div></div></div>')
+    expect_layout('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:10px;left:10px;width:100px;height:60px"><div style="height:20px;margin:5px">c</div></div></div>')
   end
 
   # ANONYMOUS BLOCKS (§9.2.1.1): a block with BOTH inline and block children wraps each maximal run of
@@ -377,28 +372,28 @@ RSpec.describe 'native layout L1 block-flow parity' do
   # not compared) per group, interleaved with the real block children in document order, and Rust block flow
   # stacks them — so the block children land where the anonymous blocks' heights push them.
   it 'matches inline text then a block then inline text (two anonymous blocks around a block)' do
-    expect_parity('<div style="width:300px">some inline text<div style="height:30px">block</div>more inline text after</div>')
+    expect_layout('<div style="width:300px">some inline text<div style="height:30px">block</div>more inline text after</div>')
   end
   it 'matches a block, inline text, a block (an anonymous block between two blocks)' do
-    expect_parity('<div style="width:300px"><div style="height:20px">A</div>middle inline<div style="height:20px">B</div></div>')
+    expect_layout('<div style="width:300px"><div style="height:20px">A</div>middle inline<div style="height:20px">B</div></div>')
   end
   it 'matches leading and trailing inline runs around blocks' do
-    expect_parity('<div style="width:300px">lead<div style="height:20px">x</div>trail</div>')
+    expect_layout('<div style="width:300px">lead<div style="height:20px">x</div>trail</div>')
   end
   it 'matches inline ELEMENTS mixed with blocks (bold/italic in the anonymous runs)' do
-    expect_parity('<div style="width:300px">text <b>bold</b> here<div style="height:20px">block</div>after <i>it</i></div>')
+    expect_layout('<div style="width:300px">text <b>bold</b> here<div style="height:20px">block</div>after <i>it</i></div>')
   end
   it 'matches a WRAPPING inline run stacked with a block' do
-    expect_parity('<div style="width:120px">this inline text wraps across multiple lines here<div style="height:20px">block</div>and more text wrapping too</div>')
+    expect_layout('<div style="width:120px">this inline text wraps across multiple lines here<div style="height:20px">block</div>and more text wrapping too</div>')
   end
   it 'matches a block child with margins between anonymous inline blocks' do
-    expect_parity('<div style="width:300px">text before<div style="height:20px;margin:10px 0">block</div>text after</div>')
+    expect_layout('<div style="width:300px">text before<div style="height:20px;margin:10px 0">block</div>text after</div>')
   end
   it 'matches adjacent block children with collapsing margins amid inline runs' do
-    expect_parity('<div style="width:300px">t<div style="height:20px;margin-bottom:8px">B1</div><div style="height:20px;margin-top:12px">B2</div>t2</div>')
+    expect_layout('<div style="width:300px">t<div style="height:20px;margin-bottom:8px">B1</div><div style="height:20px;margin-top:12px">B2</div>t2</div>')
   end
   it 'matches a NESTED mixed block (a mixed block inside an anonymous-block sibling chain)' do
-    expect_parity('<div style="width:300px">outer<div style="width:200px">inner text<div style="height:15px">deep</div>inner tail</div>outer tail</div>')
+    expect_layout('<div style="width:300px">outer<div style="width:200px">inner text<div style="height:15px">deep</div>inner tail</div>outer tail</div>')
   end
   # …and so does an EMPTY inline box with no horizontal edges: a line of nothing else is zero-height (§9.4.2) and
   # separates no margins, so the `<p>`'s margin still leaves its parent (Chrome: div at 15, 18 tall; after a padded
@@ -422,7 +417,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
     end
   end
   it 'collapses whitespace-only inline content between blocks (no anonymous block)' do
-    expect_parity('<div style="width:300px"><div style="height:20px">a</div>   <div style="height:20px">b</div></div>')
+    expect_layout('<div style="width:300px"><div style="height:20px">a</div>   <div style="height:20px">b</div></div>')
   end
 
   # A FLOAT in the mix joins the anonymous group it is written in, as a marker on that group's lines — on the line
@@ -430,14 +425,14 @@ RSpec.describe 'native layout L1 block-flow parity' do
   # space and floats between two blocks) goes where that line would have started, as a float child of the block.
   # (A float native never placed has no record to compare, so those shapes put an atomic on the line after it.)
   it 'matches a float in a mixed block' do
-    expect_parity('<div style="width:300px;overflow:hidden">text<div style="float:left;width:50px;height:20px"></div><div style="height:20px">block</div>more</div>')
-    expect_parity('<div style="width:300px">text <span style="float:right;width:50px;height:30px"></span>more<p>b</p>after</div>')
-    expect_parity('<div style="width:300px"><p>a</p><span>x <span style="float:left;width:40%;height:15px"></span>y</span><p>b</p></div>')
-    expect_parity('<div style="width:300px"><p style="margin:10px 0">a</p> <div style="float:left;width:50px;height:30px"></div> <p style="margin:10px 0"><i style="display:inline-block;width:5px;height:5px"></i>b</p>tail</div>')
-    expect_parity('<div style="width:300px"><p>a</p> <span style="position:relative;left:6px"><span style="float:left;width:20px;height:20px"></span></span> <p><i style="display:inline-block;width:5px;height:5px"></i>b</p></div>')
+    expect_layout('<div style="width:300px;overflow:hidden">text<div style="float:left;width:50px;height:20px"></div><div style="height:20px">block</div>more</div>')
+    expect_layout('<div style="width:300px">text <span style="float:right;width:50px;height:30px"></span>more<p>b</p>after</div>')
+    expect_layout('<div style="width:300px"><p>a</p><span>x <span style="float:left;width:40%;height:15px"></span>y</span><p>b</p></div>')
+    expect_layout('<div style="width:300px"><p style="margin:10px 0">a</p> <div style="float:left;width:50px;height:30px"></div> <p style="margin:10px 0"><i style="display:inline-block;width:5px;height:5px"></i>b</p>tail</div>')
+    expect_layout('<div style="width:300px"><p>a</p> <span style="position:relative;left:6px"><span style="float:left;width:20px;height:20px"></span></span> <p><i style="display:inline-block;width:5px;height:5px"></i>b</p></div>')
     # …its percentages against the MIXED block, not the anonymous group it sits in (Chrome: 100 tall, 100 wide)
-    expect_parity('<div style="width:300px;height:200px"><p style="margin:0">a</p>x<span style="float:left;width:20px;height:50%"></span>y</div>')
-    expect_parity('<div style="writing-mode:vertical-lr;height:300px;width:200px"><p style="margin:0">a</p>x<span style="float:left;width:50%;height:20px;margin-left:10%"></span>y</div>')
+    expect_layout('<div style="width:300px;height:200px"><p style="margin:0">a</p>x<span style="float:left;width:20px;height:50%"></span>y</div>')
+    expect_layout('<div style="writing-mode:vertical-lr;height:300px;width:200px"><p style="margin:0">a</p>x<span style="float:left;width:50%;height:20px;margin-left:10%"></span>y</div>')
   end
 
   # A CSS-WIDE `position` computes as `getComputedStyle` has it — `unset` / `initial` the initial `static`, `revert` the
@@ -451,13 +446,13 @@ RSpec.describe 'native layout L1 block-flow parity' do
       '<div style="width:300px"><div id="m" style="position:revert;top:3px;height:10px">a</div></div>' => [0, 0, 300],
       '<div style="width:300px;position:absolute"><div id="m" style="position:inherit;top:3px;height:10px;width:20px">a</div><p>b</p></div>' => [0, 3, 20]
     }.each do |body, (x, y, w)|
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body).first(3)).to eq([x, y, w]), body
     end
     # …and `float` / `clear` likewise, `inherit` from the INHERITANCE parent (review rv54): a `float: inherit` span in a
     # right float floats right (Chrome 1014.39 of 1024), where read as an unknown side it stayed in flow.
     body = '<div style="float:right;font:16px monospace"><span id="m" style="float:inherit">f</span><span style="display:inline-block;width:4px;height:4px"></span></div>'
-    expect_parity(body)
+    expect_layout(body)
     expect(laid_out_rect(body)[0]).to be_within(0.05).of(1014.39)
   end
 
@@ -471,7 +466,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
       '<div style="font:12px Noto Sans"><div style="float:right"><ul style="margin:0;padding:0"><li style="float:left;list-style:none;margin:0 12px 0 0;white-space:nowrap"><a>Sign in</a></li>' \
       '<li id="m" style="float:left;list-style:none;margin:0;white-space:nowrap"><a>Register</a></li></ul></div></div>'
     ].each do |body|
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[1]).to eq(0), body
     end
   end
@@ -480,19 +475,19 @@ RSpec.describe 'native layout L1 block-flow parity' do
   # takes the same hook a text block's does: its record is emitted where the runs reach it and the marker
   # carries the index. It used to decline the whole pass (`abspos-in-mixed-block`, 1,393 shapes).
   #
-  # Where the two engines agree with each other and NOT with Chrome, which the harness cannot see: an
+  # Where native does NOT agree with Chrome: an
   # out-of-flow box is BLOCKIFIED (§9.7), so its static position is the one a block-level box would have had
-  # — the containing block's content edge, below the line it interrupts. Both engines give it the INLINE
-  # cursor instead: `text<div abspos></div>` is at x 23.99 / y 0 here and at 0 / 18 in Chrome. Both engines
-  # also drop the box's OWN margins there (§10.6.4's static position is the margin edge — Chrome puts a
-  # `margin-top: 7px; margin-left: 3px` box at 3/57 against our 0/50; the INSET path applies them), and both
-  # put it in the band a float leaves where Chrome, blockifying, does not. Shared and pre-existing, all of
-  # it, so it is recorded rather than fixed during the port — and it is why these assert PARITY.
-  # The one figure below that IS Chrome's is the one both engines had wrong, where parity says nothing.
+  # — the containing block's content edge, below the line it interrupts. Native gives it the INLINE
+  # cursor instead: `text<div abspos></div>` is at x 23.99 / y 0 here and at 0 / 18 in Chrome. Native
+  # also drops the box's OWN margins there (§10.6.4's static position is the margin edge — Chrome puts a
+  # `margin-top: 7px; margin-left: 3px` box at 3/57 against our 0/50; the INSET path applies them), and
+  # puts it in the band a float leaves where Chrome, blockifying, does not. Shared and pre-existing, all of
+  # it, so it is recorded rather than fixed during the port — and it is why these assert only the golden.
+  # The one figure below that IS Chrome's is the one both engines had wrong, where parity said nothing.
   it 'places an absolutely-positioned child of a mixed block' do
-    expect_parity('<div style="position:relative;width:300px">text<div style="position:absolute;top:5px;width:20px;height:20px"></div><div style="height:20px">block</div>more</div>')
-    expect_parity('<div style="position:relative;width:300px">text<div style="position:absolute;width:20px;height:20px"></div><div style="height:20px">block</div>more</div>')
-    expect_parity('<div style="position:relative;width:400px"><p>a</p>text<div style="position:absolute;width:5px;height:5px"></div><p>b</p></div>')
+    expect_layout('<div style="position:relative;width:300px">text<div style="position:absolute;top:5px;width:20px;height:20px"></div><div style="height:20px">block</div>more</div>')
+    expect_layout('<div style="position:relative;width:300px">text<div style="position:absolute;width:20px;height:20px"></div><div style="height:20px">block</div>more</div>')
+    expect_layout('<div style="position:relative;width:400px"><p>a</p>text<div style="position:absolute;width:5px;height:5px"></div><p>b</p></div>')
     # …one BEFORE any inline content in its group, where the static position is the group's own top — and the
     # preceding block's collapsed margin decides it. CHROME's figure, because BOTH engines had this wrong
     # (50 against 34) and a parity assertion would have passed on the pair of them: an out-of-flow box does
@@ -507,12 +502,12 @@ RSpec.describe 'native layout L1 block-flow parity' do
     end
     # …and one placed by its insets in a containing block with PERCENTAGE edges, which is the MIXED BLOCK and not
     # the anonymous group, or the group's origin is added on top of it.
-    expect_parity('<div style="position:relative;padding:10%;width:300px"><p>a</p>text<div style="position:absolute;top:5px;left:5px;width:20px;height:20px"></div><p>b</p></div>')
+    expect_layout('<div style="position:relative;padding:10%;width:300px"><p>a</p>text<div style="position:absolute;top:5px;left:5px;width:20px;height:20px"></div><p>b</p></div>')
   end
 
   # …and where the group it sits in holds nothing a line is made of. The box's static position is the line that
   # group never opened, and the ORACLE gives that line things a block record cannot carry: the group's
-  # `text-indent` where the box opens one (11) and a float band (80, which both engines and Chrome agree on).
+  # `text-indent` where the box opens one (11) and a float band (80, which native and Chrome agree on).
   # Emitting it against the block gets the container's cursor and neither.
   #
   # So such a group is KEPT — a text block of no line, as a block of its own with only an out-of-flow child already
@@ -522,7 +517,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
   # stayed at 0), so a centred or right-aligned block declined (`oof-in-collapsed-group`, 1,316 of the sweeps). An
   # empty line moves nothing that waits on it now, in `breakLine` as in a text block of no line. Chrome agrees for a
   # block-level box — x 0 below — and centres an INLINE-level one (150 in a 300px block): it tells the two apart by
-  # the display the box had before it was blockified, which neither engine asks yet (the cascade still has it).
+  # the display the box had before it was blockified, which native does not ask yet (the cascade still has it).
   # Shared, and pinned.
   #
   # THE REFUSAL WAS LIFTED ON 2026-09-23 AND PUT BACK THE SAME DAY, and what that cost is why a REPLAYED box keeps
@@ -530,7 +525,6 @@ RSpec.describe 'native layout L1 block-flow parity' do
   # rollback that precedes it had already spliced those records off the stream and nothing re-emits them, so
   # lifting it placed no box: it DROPPED 372 of them and reported `ok: true, mismatches: 0`. Three sweeps and the
   # parity spec that replaced this one all read clean, because a record that is not there compares as nothing.
-  # `droppedRecords` exists now (see `spec/support/shadow_parity.rb`), and `expect_parity` asks it.
   #
   # A group has no content for five reasons, not one — `hasContent` is set by text, content whitespace, a `<br>`,
   # an atomic or an edged inline's close — so BOTH the everyday routes are here: whitespace around the box,
@@ -541,20 +535,20 @@ RSpec.describe 'native layout L1 block-flow parity' do
       '<div style="position:relative;width:300px;ALIGN"><p>a</p>text<p>b</p><div id="m" style="position:absolute;width:20px;height:20px"></div></div>'          => [0, 118]
     }.each do |body, xy|
       ['', 'text-align:center', 'text-align:right', 'text-align:justify'].each do |align|
-        expect_parity(body.sub('ALIGN', align))
+        expect_layout(body.sub('ALIGN', align))
         expect(laid_out_rect(body.sub('ALIGN', align)).first(2)).to eq(xy)
       end
-      expect_parity(body.sub('ALIGN', 'direction:rtl'))
+      expect_layout(body.sub('ALIGN', 'direction:rtl'))
     end
     # …the containing block with a PERCENTAGE edge, and the group kept all the same.
-    expect_parity('<div style="width:300px"><div style="position:relative;padding:10%;text-align:center"><p>a</p> ' \
+    expect_layout('<div style="width:300px"><div style="position:relative;padding:10%;text-align:center"><p>a</p> ' \
                   '<div style="position:absolute;width:2px;height:2px"></div> <p>b</p>text</div></div>')
     span = '<div style="position:relative;width:300px;text-align:center"><p>a</p> <span id="m" style="position:absolute;width:20px;height:20px"></span> <p>b</p>text<p>c</p></div>'
-    expect_parity(span)
+    expect_layout(span)
     expect_shared_gap(laid_out_rect(span)[0], shared: 0, chrome: 150, what: "#{span}: #m x")
   end
-  # …where Chrome agrees on the plain line (x 0, below the block before it) and a float band (20), and both engines
-  # share two gaps with it: a `hanging` indent re-arms past a block child in both (12, Chrome 0), and a plain one
+  # …where Chrome agrees on the plain line (x 0, below the block before it) and a float band (20), and native
+  # has two gaps from it: a `hanging` indent re-arms past a block child (12, Chrome 0), and a plain one
   # does not (0, Chrome 50 — it indents the first line of every anonymous block). Each block holds TEXT, or it is
   # no mixed block and its out-of-flow child goes down the plain block path, which never needed the kept group.
   it 'places the box where the group never opened a line' do
@@ -579,8 +573,8 @@ RSpec.describe 'native layout L1 block-flow parity' do
   # which fails closed.
   it 'matches a preserve white-space mixed block' do
     ['pre', 'pre-wrap', 'break-spaces', 'pre-line'].each do |mode|
-      expect_parity(%(<div style="width:300px;font:16px monospace;white-space:#{mode}">text<div style="height:20px">block</div>more   here</div>))
-      expect_parity(%(<div style="width:300px;font:16px monospace;white-space:#{mode};text-indent:11px"><div>a</div>aa\tbb<div style="height:6px">b</div></div>))
+      expect_layout(%(<div style="width:300px;font:16px monospace;white-space:#{mode}">text<div style="height:20px">block</div>more   here</div>))
+      expect_layout(%(<div style="width:300px;font:16px monospace;white-space:#{mode};text-indent:11px"><div>a</div>aa\tbb<div style="height:6px">b</div></div>))
     end
     # …and NOTHING declines here any more. The guard that is left is a DRIFT check between cascade.js's
     # `WS_VALUES` and layout.js's `WS_MODE`, and it is unreachable by construction: `ownWhiteSpace` answers
@@ -588,10 +582,9 @@ RSpec.describe 'native layout L1 block-flow parity' do
     # `whiteSpaceOf` can only ever hand this a member of both. The LAYOUT is what is asserted here; this
     # engine's `getComputedStyle` reports `-moz-pre-wrap` where Chrome reports `normal`, and that is a
     # cascade divergence with no business being pinned by a layout spec.
-    expect_parity('<div style="width:300px;white-space:-moz-pre-wrap">text<div style="height:20px">block</div>more</div>')
+    expect_layout('<div style="width:300px;white-space:-moz-pre-wrap">text<div style="height:20px">block</div>more</div>')
   end
-  # Whitespace-only direct text between a preserve block's block children is line content (the oracle lays out
-  # a line box for it), which a plain block-container record would drop — so it is a MIXED block's anonymous
+  # Whitespace-only direct text between a preserve block's block children is line content (it makes a line box), which a plain block-container record would drop — so it is a MIXED block's anonymous
   # group, as the same white space beside a word always was. It declined as `white-space-only-block` until
   # 2026-09-24 (review finding, Phase 2b). Chrome: 54 and 27 tall.
   it 'lays out a preserve block container holding whitespace-only text beside its block children' do
@@ -599,36 +592,35 @@ RSpec.describe 'native layout L1 block-flow parity' do
       %(<div id="m" style="width:300px;font:16px monospace;white-space:pre-wrap"><div style="height:5px"></div>\n    <div style="height:5px"></div></div>) => 54,
       %(<div id="m" style="width:300px;font:16px monospace;white-space:pre">    <div style="height:5px"></div></div>)                             => 27
     }.each do |body, chrome_h|
-      expect_parity(body)
+      expect_layout(body)
       session = session_for(body)
       expect(session.evaluate_script("document.getElementById('m').getBoundingClientRect().height")).to eq(chrome_h)
     end
   end
 
-  # A text node holding only a no-break space (or another non-CSS space) is CONTENT: it makes a line box the
-  # oracle counts, so the walk must not drop it as white space (`String#trim` strips U+00A0).
+  # A text node holding only a no-break space (or another non-CSS space) is CONTENT: it makes a line box, so the walk must not drop it as white space (`String#trim` strips U+00A0).
   it 'matches a block whose only text is a no-break space' do
-    expect_parity('<div style="width:300px"><div>&nbsp;</div><div style="height:10px"></div></div>')
+    expect_layout('<div style="width:300px"><div>&nbsp;</div><div style="height:10px"></div></div>')
   end
 
   # An intrinsic-size KEYWORD (`min-content` / `max-content` / `fit-content`) sizes a box from its OWN CONTENT,
   # which native measures itself (`block_child_width` asks `intrinsic_widths` for the same figures the oracle's
-  # `intrinsicWidths` gives it, each carrying the percentage part of the box's own edges back — a
+  # `intrinsicWidths` gave it, each carrying the percentage part of the box's own edges back — a
   # `width: max-content; padding: 0 10%` box around "hello there" is 147.97 in Chrome, not the 67.97 the
   # contribution alone gives). `fit-content` is the room, clamped between the two.
   describe 'an intrinsic-size keyword width sizes a block from its content' do
     it 'lays out min-content, max-content and fit-content' do
-      expect_parity('<div style="width:400px"><div style="width:max-content">aa bb</div></div>')
-      expect_parity('<div style="width:400px"><div style="width:min-content">aa bb</div></div>')
-      expect_parity('<div style="width:400px"><div style="width:fit-content">aa bb</div></div>')
-      expect_parity('<div style="width:40px"><div style="width:fit-content">aa bb</div></div>')
-      expect_parity('<div style="width:400px"><div style="width:max-content;padding:0 10%">hello there</div></div>')
-      expect_parity('<div style="width:400px"><div style="box-sizing:border-box;width:max-content;padding:0 10px;border-left:3px solid">aa bb</div></div>')
+      expect_layout('<div style="width:400px"><div style="width:max-content">aa bb</div></div>')
+      expect_layout('<div style="width:400px"><div style="width:min-content">aa bb</div></div>')
+      expect_layout('<div style="width:400px"><div style="width:fit-content">aa bb</div></div>')
+      expect_layout('<div style="width:40px"><div style="width:fit-content">aa bb</div></div>')
+      expect_layout('<div style="width:400px"><div style="width:max-content;padding:0 10%">hello there</div></div>')
+      expect_layout('<div style="width:400px"><div style="box-sizing:border-box;width:max-content;padding:0 10px;border-left:3px solid">aa bb</div></div>')
       # …and the min/max clamp, the auto-margin centring and rtl all still act on the width it produces
-      expect_parity('<div style="width:400px"><div style="width:min-content;min-width:120px">aa bb</div></div>')
-      expect_parity('<div style="width:400px"><div style="width:max-content;max-width:30px">aa bb</div></div>')
-      expect_parity('<div style="width:400px"><div style="width:max-content;margin:0 auto">aa bb</div></div>')
-      expect_parity('<div style="width:400px;direction:rtl"><div style="width:max-content">aa bb</div></div>')
+      expect_layout('<div style="width:400px"><div style="width:min-content;min-width:120px">aa bb</div></div>')
+      expect_layout('<div style="width:400px"><div style="width:max-content;max-width:30px">aa bb</div></div>')
+      expect_layout('<div style="width:400px"><div style="width:max-content;margin:0 auto">aa bb</div></div>')
+      expect_layout('<div style="width:400px;direction:rtl"><div style="width:max-content">aa bb</div></div>')
     end
     # A KEYWORD box pins its own contribution to one figure (CSS Sizing 3 §5): a `min-content` box asks for the
     # same width whatever room it is offered, so both of an ancestor's figures see that one number. Native
@@ -636,29 +628,28 @@ RSpec.describe 'native layout L1 block-flow parity' do
     # nested keyword, a cell, a flex or grid item, an atomic — was measured unpinned.
     it 'pins its own contribution to the figure the keyword names' do
       %w[max-content min-content fit-content].each do |outer|
-        expect_parity(%(<div style="width:400px"><div style="width:#{outer}"><div style="width:min-content">aa bb cc</div></div></div>))
-        expect_parity(%(<div style="width:400px"><div style="width:#{outer}"><div style="width:max-content">aa bb cc</div></div></div>))
+        expect_layout(%(<div style="width:400px"><div style="width:#{outer}"><div style="width:min-content">aa bb cc</div></div></div>))
+        expect_layout(%(<div style="width:400px"><div style="width:#{outer}"><div style="width:max-content">aa bb cc</div></div></div>))
       end
-      expect_parity('<table style="border-spacing:0"><tr><td style="padding:0"><div style="width:min-content">aa bb</div></td></tr></table>')
-      expect_parity('<div style="display:flex;width:400px"><div><div style="width:min-content">aa bb</div></div></div>')
-      expect_parity('<div style="display:grid;grid-template-columns:min-content;width:400px"><div><div style="width:max-content">aa bb</div></div></div>')
-      expect_parity('<div style="width:400px"><span style="display:inline-block"><div style="width:min-content">aa bb</div></span></div>')
+      expect_layout('<table style="border-spacing:0"><tr><td style="padding:0"><div style="width:min-content">aa bb</div></td></tr></table>')
+      expect_layout('<div style="display:flex;width:400px"><div><div style="width:min-content">aa bb</div></div></div>')
+      expect_layout('<div style="display:grid;grid-template-columns:min-content;width:400px"><div><div style="width:max-content">aa bb</div></div></div>')
+      expect_layout('<div style="width:400px"><span style="display:inline-block"><div style="width:min-content">aa bb</div></span></div>')
     end
     # …and native MEASURES such a box, like the other route whose width comes from its own content (a vertical
     # writing mode), so what only a measure reads has to reach it too: a `text-indent`.
     it 'measures a keyword-width box with its text indent' do
-      expect_parity('<div style="width:400px"><div style="width:max-content;text-indent:30px">aa bb</div></div>')
+      expect_layout('<div style="width:400px"><div style="width:max-content;text-indent:30px">aa bb</div></div>')
     end
-    # A keyword on any of the OTHER five size properties is not a width native has to find: the oracle resolves
-    # a keyword `height` to `auto` and a keyword min/max to no clamp at all, which the record already says.
-    # (That the two engines AGREE there is the contract; that the oracle then differs from Chrome — which
-    # clamps `max-width: min-content` to 16 where this leaves 400 — is a conformance gap of its own, written up
-    # at `clampToMinMax` in layout.js.)
-    it 'lays out a keyword height, min-width and max-width as the oracle resolves them' do
-      expect_parity('<div style="width:400px"><div style="height:max-content">aa bb</div></div>')
-      expect_parity('<div style="width:400px"><div style="min-width:max-content">aa bb</div></div>')
-      expect_parity('<div style="width:400px"><div style="max-width:min-content">aa bb</div></div>')
-      expect_parity('<div style="width:400px"><div style="max-height:min-content;height:50px">aa bb</div></div>')
+    # A keyword on any of the OTHER five size properties is not a width native has to find: a keyword `height`
+    # resolves to `auto` and a keyword min/max to no clamp at all, which the record already says, as the oracle
+    # resolved them. (That this differs from Chrome — which clamps `max-width: min-content` to 16 where this
+    # leaves 400 — is a conformance gap of its own.)
+    it 'lays out a keyword height, min-width and max-width as auto and no clamp' do
+      expect_layout('<div style="width:400px"><div style="height:max-content">aa bb</div></div>')
+      expect_layout('<div style="width:400px"><div style="min-width:max-content">aa bb</div></div>')
+      expect_layout('<div style="width:400px"><div style="max-width:min-content">aa bb</div></div>')
+      expect_layout('<div style="width:400px"><div style="max-height:min-content;height:50px">aa bb</div></div>')
     end
     # An OUT-OF-FLOW box with a keyword width is measured against the room its insets leave (`place_out_of_flow`),
     # as a GRID item is against its area (`measure_grid`, native_layout_grid_spec) — and not stretched between
@@ -672,7 +663,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
         '<div id="m" style="position:absolute;left:10px;right:20px;margin:0 30px;width:fit-content">aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp</div>' => [40, 210]
       }.each do |box, (x, w)|
         body = %(<div style="width:300px;position:relative;font:16px monospace">#{box}</div>)
-        expect_parity(body)
+        expect_layout(body)
         got = session_for(body).evaluate_script("(r => [r.x, r.width])(document.getElementById('m').getBoundingClientRect())")
         expect(got[0]).to be_within(0.05).of(x)
         expect(got[1]).to be_within(0.05).of(w)
@@ -682,32 +673,32 @@ RSpec.describe 'native layout L1 block-flow parity' do
     # content it measures.
     it 'measures a keyword-width out-of-flow box around a half-empty inline table' do
       %w[left:0;right:0 left:0].each do |insets|
-        expect_parity(%(<div style="width:300px;position:relative"><div style="position:absolute;#{insets};width:fit-content">#{WalkRefusals::UNMEASURABLE}</div></div>))
+        expect_layout(%(<div style="width:300px;position:relative"><div style="position:absolute;#{insets};width:fit-content">#{COLUMN_ONLY_INLINE_TABLE}</div></div>))
       end
     end
     # A FLEX ITEM and a TABLE CELL carry one natively: their sizing paths ask for the box's intrinsic
-    # figures, which the pin has already answered. (A `<td style="width:min-content">` is 16 wide in both
-    # engines where Chrome's auto-table algorithm gives the column its max-content, 52.41 — an oracle gap of
-    # its own, untouched by this.)
+    # figures, which the pin has already answered. (A `<td style="width:min-content">` is 16 wide here
+    # where Chrome's auto-table algorithm gives the column its max-content, 52.41 — a gap of its own, untouched
+    # by this.)
     # A CSS-WIDE keyword resolves to whatever it stands for BEFORE the intrinsic-keyword test, so `width:
     # inherit` under a keyword parent IS a keyword width — and the cheap pre-test that keeps the question off
     # the hot path has to let it through, or the walk marks a box measured that native then measures without
     # the obligations measuring carries (it laid out a `text-indent`ed one at the wrong width, and threw a
     # whole pass away on a subtree it cannot measure).
     it 'sees a keyword width arriving through inherit' do
-      expect_parity('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></div></div>')
-      expect_parity('<table style="border-spacing:0"><tr><td style="padding:0;width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></td></tr></table>')
+      expect_layout('<div style="display:flex;width:400px"><div style="width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></div></div>')
+      expect_layout('<table style="border-spacing:0"><tr><td style="padding:0;width:min-content"><div style="width:inherit;text-indent:30px">aa bb cc</div></td></tr></table>')
       # …the inherited keyword measured like any other
-      expect_parity('<div style="width:400px"><div style="width:min-content"><div style="width:inherit">aa bb cc</div></div></div>')
-      expect_parity('<div style="width:400px"><span style="width:min-content"><span style="display:inline-block;width:inherit">bb cc</span></span></div>')
+      expect_layout('<div style="width:400px"><div style="width:min-content"><div style="width:inherit">aa bb cc</div></div></div>')
+      expect_layout('<div style="width:400px"><span style="width:min-content"><span style="display:inline-block;width:inherit">bb cc</span></span></div>')
     end
     it 'carries a keyword width on a flex item and a table cell' do
       %w[min-content max-content fit-content].each do |kw|
-        expect_parity(%(<div style="display:flex;width:400px"><div style="width:#{kw}">aa bb cc</div><div>x</div></div>))
-        expect_parity(%(<div style="display:flex;width:60px"><div style="width:#{kw};flex-shrink:1">aa bb cc</div><div>x</div></div>))
-        expect_parity(%(<div style="display:flex;flex-direction:column;width:400px;height:200px"><div style="width:#{kw}">aa bb cc</div></div>))
-        expect_parity(%(<table style="border-spacing:0"><tr><td style="padding:0;width:#{kw}">aa bb cc</td><td style="padding:0">xx</td></tr></table>))
-        expect_parity(%(<table style="border-spacing:0;table-layout:fixed;width:300px"><tr><td style="padding:0;width:#{kw}">aa bb cc</td><td style="padding:0">xx</td></tr></table>))
+        expect_layout(%(<div style="display:flex;width:400px"><div style="width:#{kw}">aa bb cc</div><div>x</div></div>))
+        expect_layout(%(<div style="display:flex;width:60px"><div style="width:#{kw};flex-shrink:1">aa bb cc</div><div>x</div></div>))
+        expect_layout(%(<div style="display:flex;flex-direction:column;width:400px;height:200px"><div style="width:#{kw}">aa bb cc</div></div>))
+        expect_layout(%(<table style="border-spacing:0"><tr><td style="padding:0;width:#{kw}">aa bb cc</td><td style="padding:0">xx</td></tr></table>))
+        expect_layout(%(<table style="border-spacing:0;table-layout:fixed;width:300px"><tr><td style="padding:0;width:#{kw}">aa bb cc</td><td style="padding:0">xx</td></tr></table>))
       end
     end
   end
@@ -724,41 +715,41 @@ RSpec.describe 'native layout L1 block-flow parity' do
     let(:cb) { 'position:relative;width:400px;height:200px' }
 
     it 'places by insets, stretches between two, and shares the slack out to auto margins' do
-      expect_parity(%(<div style="#{cb}"><div style="height:30px">a</div><div style="position:absolute;top:0;right:0;width:40px;height:40px">b</div><div style="position:absolute;bottom:0;left:0;width:30px;height:30px">c</div><div style="height:20px">d</div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;inset:0;margin:10px">stretched m</div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;left:0;right:0;width:100px;margin:0 auto;height:20px">centred</div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:0;bottom:0;height:50px;margin:auto 0;width:20px">v centred</div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;left:20px;margin-left:30px;width:20px;height:20px">m</div><div style="position:absolute;right:10px;margin-right:7px;width:20px;height:20px">r</div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="height:30px">a</div><div style="position:absolute;top:0;right:0;width:40px;height:40px">b</div><div style="position:absolute;bottom:0;left:0;width:30px;height:30px">c</div><div style="height:20px">d</div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;inset:0;margin:10px">stretched m</div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;left:0;right:0;width:100px;margin:0 auto;height:20px">centred</div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;top:0;bottom:0;height:50px;margin:auto 0;width:20px">v centred</div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;left:20px;margin-left:30px;width:20px;height:20px">m</div><div style="position:absolute;right:10px;margin-right:7px;width:20px;height:20px">r</div></div>))
     end
     it 'shrinks an auto width to fit the room, lays an auto height out from the content, anchors a bottom' do
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:10px">shrink to fit text</div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:300px">a long piece of text that must wrap in the room left</div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;bottom:10px">bottom anchored auto height<br>two lines</div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:0;bottom:0"><div style="height:50%">half</div></div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;top:10px">shrink to fit text</div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:300px">a long piece of text that must wrap in the room left</div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;bottom:10px">bottom anchored auto height<br>two lines</div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;top:0;bottom:0"><div style="height:50%">half</div></div></div>))
     end
     it 'measures the containing block as its padding box, and nests containing blocks' do
-      expect_parity(%(<div style="#{cb};padding:15px;border:3px solid"><div style="position:absolute;top:0;left:0;width:10px;height:10px"></div><div style="position:absolute;bottom:0;right:0;width:10px;height:10px"></div><div style="position:absolute;inset:0"></div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="position:relative;padding:10px;margin-top:20px"><div style="position:absolute;top:0;right:0;width:10px;height:10px"></div><div style="height:30px">inner cb</div></div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;inset:0"><div style="position:absolute;bottom:5px;right:5px;width:10px;height:10px"></div></div></div>))
+      expect_layout(%(<div style="#{cb};padding:15px;border:3px solid"><div style="position:absolute;top:0;left:0;width:10px;height:10px"></div><div style="position:absolute;bottom:0;right:0;width:10px;height:10px"></div><div style="position:absolute;inset:0"></div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:relative;padding:10px;margin-top:20px"><div style="position:absolute;top:0;right:0;width:10px;height:10px"></div><div style="height:30px">inner cb</div></div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;inset:0"><div style="position:absolute;bottom:5px;right:5px;width:10px;height:10px"></div></div></div>))
     end
     it 'takes the static position from the flow cursor (before an open margin), the content edge in rtl' do
-      expect_parity(%(<div style="#{cb}"><div style="height:20px">x</div><div style="position:absolute;width:60px;height:20px">a</div></div>))
-      expect_parity(%(<div style="#{cb}"><div><div style="height:20px">nested</div><div style="position:absolute;top:5px;width:10px;height:10px"></div><div style="height:20px">after</div></div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="margin-top:20px;height:20px">m</div><div style="position:absolute;width:10px;height:10px"></div><div style="margin-top:30px;height:20px">n</div></div>))
-      expect_parity(%(<div style="#{cb};direction:rtl"><div style="position:absolute;width:60px;height:20px">rtl static</div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="height:20px">x</div><div style="position:absolute;width:60px;height:20px">a</div></div>))
+      expect_layout(%(<div style="#{cb}"><div><div style="height:20px">nested</div><div style="position:absolute;top:5px;width:10px;height:10px"></div><div style="height:20px">after</div></div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="margin-top:20px;height:20px">m</div><div style="position:absolute;width:10px;height:10px"></div><div style="margin-top:30px;height:20px">n</div></div>))
+      expect_layout(%(<div style="#{cb};direction:rtl"><div style="position:absolute;width:60px;height:20px">rtl static</div></div>))
     end
     it 'aligns a flex container\'s out-of-flow child as the line\'s sole item, and a grid\'s at the content origin' do
-      expect_parity(%(<div style="#{cb}"><div style="display:flex;justify-content:center;align-items:center;height:100px"><div style="position:absolute;width:30px;height:20px">fs</div><div style="width:50px;height:20px"></div></div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="display:flex;justify-content:space-around;align-items:flex-end;height:100px;padding:5px"><div style="position:absolute;width:30px;height:20px;margin:4px">fs</div></div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="display:flex;flex-direction:column;justify-content:flex-end;height:100px"><div style="position:absolute;width:30px;height:20px;align-self:center">fs</div></div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="display:flex;flex-direction:row-reverse;height:100px"><div style="position:absolute;width:30px;height:20px">fs</div></div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="display:grid;grid-template-columns:100px 100px;padding:8px"><div style="height:20px">a</div><div style="position:absolute;width:30px;height:30px">p</div></div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="display:flex;justify-content:center;align-items:center;height:100px"><div style="position:absolute;width:30px;height:20px">fs</div><div style="width:50px;height:20px"></div></div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="display:flex;justify-content:space-around;align-items:flex-end;height:100px;padding:5px"><div style="position:absolute;width:30px;height:20px;margin:4px">fs</div></div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="display:flex;flex-direction:column;justify-content:flex-end;height:100px"><div style="position:absolute;width:30px;height:20px;align-self:center">fs</div></div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="display:flex;flex-direction:row-reverse;height:100px"><div style="position:absolute;width:30px;height:20px">fs</div></div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="display:grid;grid-template-columns:100px 100px;padding:8px"><div style="height:20px">a</div><div style="position:absolute;width:30px;height:30px">p</div></div></div>))
     end
     it 'sizes a replaced or flex out-of-flow box, and one with min/max and box-sizing' do
-      expect_parity(%(<div style="#{cb}"><img style="position:absolute;bottom:0;right:0"><input style="position:absolute;left:0;bottom:0"></div>))
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:10px;width:120px"><div style="display:flex"><div style="flex:1">a</div><div>b</div></div></div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:10px;min-width:100px;max-height:15px"><div style="height:50px"></div></div><div style="position:absolute;top:50px;box-sizing:border-box;width:50px;padding:10px;height:30px"></div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:50%;left:50%;width:50%;height:25%"></div></div>))
+      expect_layout(%(<div style="#{cb}"><img style="position:absolute;bottom:0;right:0"><input style="position:absolute;left:0;bottom:0"></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;top:10px;width:120px"><div style="display:flex"><div style="flex:1">a</div><div>b</div></div></div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:10px;min-width:100px;max-height:15px"><div style="height:50px"></div></div><div style="position:absolute;top:50px;box-sizing:border-box;width:50px;padding:10px;height:30px"></div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;top:50%;left:50%;width:50%;height:25%"></div></div>))
     end
     # A COMPARISON function in an inset is native's too: its program rides beside the pair (`NL_REC_INSET_MATH`) and
     # native evaluates it against the containing block it places the box in — the walk resolved it against the oracle's
@@ -768,7 +759,7 @@ RSpec.describe 'native layout L1 block-flow parity' do
         '<div style="position:relative;width:300px;height:200px"><div id="m" style="position:absolute;left:max(10%, 50px);top:min(20%, calc(10% + 5px), 30px);width:10px;height:10px"></div></div>' => [50, 25],
         '<div style="position:relative;width:300px;height:200px"><div id="m" style="position:absolute;right:clamp(5px, 10%, 20px);bottom:max(5%, min(40px, 30%));width:10px;height:10px"></div></div>' => [270, 150]
       }.each do |body, (x, y)|
-        expect_parity(body)
+        expect_layout(body)
         expect(laid_out_rect(body)[0, 2]).to eq([x, y])
       end
     end
@@ -783,36 +774,36 @@ RSpec.describe 'native layout L1 block-flow parity' do
     # axis it does not speak for. (Measured in Chrome: y = 25, which is the answer this pins.)
     it 'shifts a flex container\'s aligned static position by the relative inlines around it' do
       body = '<div style="width:200px;font:16px monospace"><span style="position:relative;top:10px">a<span style="display:inline-block"><div style="display:flex;width:50px;height:20px;align-items:flex-end"><i id="m" style="position:absolute;width:5px;height:5px"></i></div></span></span></div>'
-      expect_parity(body)
+      expect_layout(body)
       expect(laid_out_rect(body)[1]).to eq(25)
     end
     it 'aligns an auto-height out-of-flow flex child by its laid-out height' do
-      expect_parity('<div style="display:flex;position:relative;width:400px;height:100px;align-items:center"><div style="position:absolute;left:10px">row auto height</div></div>')
-      expect_parity('<div style="display:flex;position:relative;width:400px;height:100px;align-items:flex-end"><div style="position:absolute;left:10px">row auto height</div></div>')
-      expect_parity('<div style="display:flex;flex-direction:column;position:relative;width:400px;height:100px;justify-content:flex-end"><div style="position:absolute;left:10px"><div style="height:30px"></div></div></div>')
+      expect_layout('<div style="display:flex;position:relative;width:400px;height:100px;align-items:center"><div style="position:absolute;left:10px">row auto height</div></div>')
+      expect_layout('<div style="display:flex;position:relative;width:400px;height:100px;align-items:flex-end"><div style="position:absolute;left:10px">row auto height</div></div>')
+      expect_layout('<div style="display:flex;flex-direction:column;position:relative;width:400px;height:100px;justify-content:flex-end"><div style="position:absolute;left:10px"><div style="height:30px"></div></div></div>')
     end
     it 'mirrors the cross axis of an rtl column for its out-of-flow child' do
-      expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;position:relative;width:400px;height:100px"><div style="position:absolute;width:30px;height:20px">fs</div></div>')
-      expect_parity('<div style="display:flex;flex-direction:column;direction:rtl;position:relative;width:400px;height:100px;align-items:flex-end"><div style="position:absolute;width:30px;height:20px;margin:0 5px 0 9px">fs</div></div>')
+      expect_layout('<div style="display:flex;flex-direction:column;direction:rtl;position:relative;width:400px;height:100px"><div style="position:absolute;width:30px;height:20px">fs</div></div>')
+      expect_layout('<div style="display:flex;flex-direction:column;direction:rtl;position:relative;width:400px;height:100px;align-items:flex-end"><div style="position:absolute;width:30px;height:20px;margin:0 5px 0 9px">fs</div></div>')
     end
     it 'keeps a box anchored to a table cell where the cell\'s vertical-align moves only the content' do
-      expect_parity('<table style="border-spacing:0"><tr><td style="height:100px;width:100px;vertical-align:bottom;position:relative"><div style="height:10px">a</div><div style="position:absolute;top:0;left:0;width:10px;height:10px"></div></td></tr></table>')
-      expect_parity('<table style="border-spacing:0"><tr><td style="height:50px;width:100px;position:relative;border:3px solid"><div style="height:10px">a</div><div style="position:absolute;top:0;left:0;width:10px;height:10px"></div><div style="position:absolute;width:10px;height:10px"></div></td></tr></table>')
+      expect_layout('<table style="border-spacing:0"><tr><td style="height:100px;width:100px;vertical-align:bottom;position:relative"><div style="height:10px">a</div><div style="position:absolute;top:0;left:0;width:10px;height:10px"></div></td></tr></table>')
+      expect_layout('<table style="border-spacing:0"><tr><td style="height:50px;width:100px;position:relative;border:3px solid"><div style="height:10px">a</div><div style="position:absolute;top:0;left:0;width:10px;height:10px"></div><div style="position:absolute;width:10px;height:10px"></div></td></tr></table>')
     end
     it 'resolves a % margin of a flex container\'s out-of-flow child against the containing block' do
-      expect_parity('<div style="display:flex;position:relative;width:400px;padding:50px;height:100px"><div style="position:absolute;margin-left:10%;width:20px;height:20px"></div></div>')
-      expect_parity('<div style="display:flex;position:relative;width:400px;padding:50px;height:100px;justify-content:center"><div style="position:absolute;margin-left:10%;width:20px;height:20px"></div></div>')
+      expect_layout('<div style="display:flex;position:relative;width:400px;padding:50px;height:100px"><div style="position:absolute;margin-left:10%;width:20px;height:20px"></div></div>')
+      expect_layout('<div style="display:flex;position:relative;width:400px;padding:50px;height:100px;justify-content:center"><div style="position:absolute;margin-left:10%;width:20px;height:20px"></div></div>')
     end
     it 'places both an in-pass and a viewport containing block, and an abspos grid' do
       # …the `fixed` box included: its containing block is the viewport, whose rectangle rides its record
-      expect_parity('<div style="width:400px"><div style="position:relative;height:100px"><div style="position:absolute;top:10px;left:10px;width:20px;height:20px"></div></div><div style="position:fixed;top:5px;left:5px;width:40px;height:40px"></div></div>')
+      expect_layout('<div style="width:400px"><div style="position:relative;height:100px"><div style="position:absolute;top:10px;left:10px;width:20px;height:20px"></div></div><div style="position:fixed;top:5px;left:5px;width:40px;height:40px"></div></div>')
       # …and an abspos GRID is native's own now: its shrink-to-fit width is an intrinsic measure, which both
       # engines answer with the grid algorithm — one holding a contiguous run of TEXT included, since
       # `gridItems` wraps the run in the anonymous ITEM box §4 asks for (it replayed until 2026-09-22).
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;display:grid;grid-template-columns:100px 1fr"><div style="height:10px">a</div><div style="height:20px">b</div></div></div>))
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;display:grid;grid-template-columns:100px 1fr">a<div>b</div></div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;display:grid;grid-template-columns:100px 1fr"><div style="height:10px">a</div><div style="height:20px">b</div></div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px;display:grid;grid-template-columns:100px 1fr">a<div>b</div></div></div>))
       # …and one shrink-to-fitting around a half-empty `inline-table`
-      expect_parity(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px">#{WalkRefusals::UNMEASURABLE}</div></div>))
+      expect_layout(%(<div style="#{cb}"><div style="position:absolute;top:10px;left:20px">#{COLUMN_ONLY_INLINE_TABLE}</div></div>))
     end
 
     # ── The static position ON A LINE ───────────────────────────────────────────────────────────────────
@@ -825,92 +816,92 @@ RSpec.describe 'native layout L1 block-flow parity' do
       let(:mark) { '<div style="position:absolute;width:10px;height:10px"></div>' }
 
       it 'reads the inline offset, the line it fell on, and the line\'s alignment' do
-        expect_parity(%(<div style="#{tb}">hello #{mark}</div>))
-        expect_parity(%(<div style="#{tb}">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
-        expect_parity(%(<div style="#{tb}">one<br>#{mark}two</div>))
-        expect_parity(%(<div style="#{tb};text-align:right">hello #{mark}</div>))
-        expect_parity(%(<div style="#{tb};text-align:center">hello #{mark} tail</div>))
-        expect_parity(%(<div style="#{tb}">#{mark}hello</div>))
+        expect_layout(%(<div style="#{tb}">hello #{mark}</div>))
+        expect_layout(%(<div style="#{tb}">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
+        expect_layout(%(<div style="#{tb}">one<br>#{mark}two</div>))
+        expect_layout(%(<div style="#{tb};text-align:right">hello #{mark}</div>))
+        expect_layout(%(<div style="#{tb};text-align:center">hello #{mark} tail</div>))
+        expect_layout(%(<div style="#{tb}">#{mark}hello</div>))
       end
       # The collapsed space before it is part of where the flow has reached — it is only PEEKED, so the word
       # after may still wrap away from it — and an rtl flow reads no cursor at all: its corner is the content's
       # right edge less the box, wherever the line's text sits (`staticCornerFor`).
       it 'counts the collapsed space it interrupts, and takes the content edge in rtl' do
-        expect_parity(%(<div style="#{tb}">hello #{mark}world</div>))
-        expect_parity(%(<div style="#{tb}">hello#{mark}world</div>))
-        expect_parity(%(<div style="#{tb};direction:rtl">hello #{mark}</div>))
-        expect_parity(%(<div style="#{tb};direction:rtl;text-align:center">a long stretch of words that must wrap onto a second line #{mark}</div>))
+        expect_layout(%(<div style="#{tb}">hello #{mark}world</div>))
+        expect_layout(%(<div style="#{tb}">hello#{mark}world</div>))
+        expect_layout(%(<div style="#{tb};direction:rtl">hello #{mark}</div>))
+        expect_layout(%(<div style="#{tb};direction:rtl;text-align:center">a long stretch of words that must wrap onto a second line #{mark}</div>))
       end
       # An inline box around it moves the reading: its `position: relative` offset moves the content the
       # position is read off (§9.4.3), and its OPENING EDGE is not placed until the box's first content is, so
       # a marker written before that content waits for the edge — on whatever line the edge turns out to land.
       it 'moves with a relative inline and waits for an unplaced opening edge' do
-        expect_parity(%(<div style="#{tb}"><span style="position:relative;left:6px">x #{mark} y</span></div>))
-        expect_parity(%(<div style="#{tb}"><span style="position:relative;left:6px;top:3px"><span style="position:relative;left:4px">x #{mark}</span></span></div>))
-        expect_parity(%(<div style="#{tb}"><span style="padding-left:9px">#{mark}x</span></div>))
-        expect_parity(%(<div style="#{tb}">lead <span style="margin-left:9px;border-left:4px solid">#{mark}x</span></div>))
-        expect_parity(%(<div style="#{tb}">a long stretch of words that must wrap onto a second line <span style="padding-left:9px"><span style="padding-left:5px">#{mark}x</span></span></div>))
+        expect_layout(%(<div style="#{tb}"><span style="position:relative;left:6px">x #{mark} y</span></div>))
+        expect_layout(%(<div style="#{tb}"><span style="position:relative;left:6px;top:3px"><span style="position:relative;left:4px">x #{mark}</span></span></div>))
+        expect_layout(%(<div style="#{tb}"><span style="padding-left:9px">#{mark}x</span></div>))
+        expect_layout(%(<div style="#{tb}">lead <span style="margin-left:9px;border-left:4px solid">#{mark}x</span></div>))
+        expect_layout(%(<div style="#{tb}">a long stretch of words that must wrap onto a second line <span style="padding-left:9px"><span style="padding-left:5px">#{mark}x</span></span></div>))
       end
       # A block whose only line content is out of flow holds nothing to open a line WITH — but the line the flow
       # never opened is still where those boxes sit, and it starts at the indent and in the band a float leaves.
       # (Nothing closes it, so no alignment moves them, and the block is still an empty one.)
       it 'gives a block whose only line content is out of flow the line that never opened' do
-        expect_parity(%(<div style="#{tb};text-indent:12px"><span>   #{mark}   </span></div>))
-        expect_parity(%(<div style="#{tb};text-align:right"><span>   #{mark}   </span></div>))
-        expect_parity(%(<div style="#{tb};text-indent:12px"><span>#{mark}</span>x</div>))
-        expect_parity(%(<div style="#{tb};direction:rtl"><span>   #{mark}   </span></div>))
+        expect_layout(%(<div style="#{tb};text-indent:12px"><span>   #{mark}   </span></div>))
+        expect_layout(%(<div style="#{tb};text-align:right"><span>   #{mark}   </span></div>))
+        expect_layout(%(<div style="#{tb};text-indent:12px"><span>#{mark}</span>x</div>))
+        expect_layout(%(<div style="#{tb};direction:rtl"><span>   #{mark}   </span></div>))
       end
       # …and a static position is applied ONCE, to a shrink-to-fit box in an indented block (a box placed off its
       # container's origin and then settled again put it at 22 where the oracle says 11, 0x0 instead of its box —
       # found by a 4000-case fuzz).
       it 'places a shrink-to-fit box in an indented block once' do
-        expect_parity(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">#{WalkRefusals::POSITIONED}</div>mar</div>))
-        expect_parity(%(<div style="#{tb};text-indent:11px">lead <div style="position:absolute">#{WalkRefusals::POSITIONED}</div> tail</div>))
-        expect_parity(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">shrink to fit</div>mar</div>))
+        expect_layout(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">#{STICKY_ATOMIC}</div>mar</div>))
+        expect_layout(%(<div style="#{tb};text-indent:11px">lead <div style="position:absolute">#{STICKY_ATOMIC}</div> tail</div>))
+        expect_layout(%(<div style="#{tb};text-indent:11px"><div style="position:absolute">shrink to fit</div>mar</div>))
       end
       # `justify` widens the spaces between the words, and native spreads them itself (`line_gaps`): a box whose
       # static position comes off a justified line takes the offset that line's own gaps give it — where the walk
       # first declined the subtree and then replayed the oracle's box. However deep the box sits: a `<span>`'s
       # content is that line's.
       it 'takes a static position off a justified line' do
-        expect_parity(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
-        expect_parity(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line <span>#{mark}</span> tail here</div>))
-        expect_parity(%(<div style="#{tb};text-align:justify">a long stretch of <span>words that #{mark} must</span> wrap onto a second line tail here</div>))
-        expect_parity(%(<div style="#{tb};text-align:justify;direction:rtl">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
+        expect_layout(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
+        expect_layout(%(<div style="#{tb};text-align:justify">a long stretch of words that must wrap onto a second line <span>#{mark}</span> tail here</div>))
+        expect_layout(%(<div style="#{tb};text-align:justify">a long stretch of <span>words that #{mark} must</span> wrap onto a second line tail here</div>))
+        expect_layout(%(<div style="#{tb};text-align:justify;direction:rtl">a long stretch of words that must wrap onto a second line #{mark} tail</div>))
       end
       # ── Review findings (adversarial round, 2026-09-15): each was a SILENT WRONG ANSWER ────────────────
       # A line the flow never put anything on is not aligned: `alignLine` runs only for a line that was
       # PLACED, so a `<br>` closing a marker-only line leaves the marker at the start edge.
       it 'does not align a line that holds nothing but a marker' do
-        expect_parity(%(<div style="#{tb};text-align:right">#{mark}<br>x</div>))
-        expect_parity(%(<div style="#{tb};text-align:center">a<br>#{mark}<br>b</div>))
-        expect_parity(%(<div style="#{tb};white-space:pre;text-align:right">#{mark}
+        expect_layout(%(<div style="#{tb};text-align:right">#{mark}<br>x</div>))
+        expect_layout(%(<div style="#{tb};text-align:center">a<br>#{mark}<br>b</div>))
+        expect_layout(%(<div style="#{tb};white-space:pre;text-align:right">#{mark}
 x</div>))
         # …inside a natively laid-out atomic too, whose own line is aligned in its own width
-        expect_parity(%(<div style="position:relative;width:300px">x <span style="display:inline-block;width:100px;text-align:right">#{mark}<br>y</span> z</div>))
+        expect_layout(%(<div style="position:relative;width:300px">x <span style="display:inline-block;width:100px;text-align:right">#{mark}<br>y</span> z</div>))
       end
       # The edge a marker waits for is the one belonging to the inline it sits DIRECTLY in
       # (`openInlines[openInlines.length - 1]`) — a plain inner inline waits for nothing, however edged the
       # boxes around it are, and an inline whose only edge is on the END side has no opening edge to wait for.
       it 'waits only on its own inline\'s opening edge' do
-        expect_parity(%(<div style="position:relative;width:400px"><span style="padding-left:12px"><span>#{mark} Menu</span></span></div>))
-        expect_parity(%(<div style="#{tb}">lead <span style="padding-left:9px"><span style="padding-right:5px">#{mark} x</span></span></div>))
-        expect_parity(%(<div style="#{tb}"><span style="padding-left:12px"><span>Menu #{mark}</span></span></div>))
+        expect_layout(%(<div style="position:relative;width:400px"><span style="padding-left:12px"><span>#{mark} Menu</span></span></div>))
+        expect_layout(%(<div style="#{tb}">lead <span style="padding-left:9px"><span style="padding-right:5px">#{mark} x</span></span></div>))
+        expect_layout(%(<div style="#{tb}"><span style="padding-left:12px"><span>Menu #{mark}</span></span></div>))
       end
       # A marker's y is frozen where it was recorded: a line whose first word does not fit the band DROPS
       # below the float afterwards, and the box the flow had already passed does not go down with it.
       it 'keeps the line it was on when that line drops below a float' do
-        expect_parity(%(<div style="position:relative;width:100px"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace">#{mark} aaaaaaaaaa</div></div>))
+        expect_layout(%(<div style="position:relative;width:100px"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace">#{mark} aaaaaaaaaa</div></div>))
       end
       # Round 2. What a WAITING marker settles to is the cursor it STOOD at plus its own inline's opening edge
       # — the oracle's `line.minX + from.ce.left`. Not the cursor at settle time: an inline that opens AFTER it
       # puts its edge past the marker, and a collapsed space after it is the oracle's next placement, not this
       # one. (A collapsed space BEFORE it counts: the oracle places such a space where it meets it.)
       it 'settles a waiting marker at its own inline\'s content edge, not at whatever the cursor reached' do
-        expect_parity(%(<div style="#{tb}">A<span style="padding-left:6px">#{mark}<span style="padding-left:4px">x</span></span></div>))
-        expect_parity(%(<div style="#{tb}">A<span style="padding-left:6px">#{mark}<b style="margin-left:9px">x</b></span></div>))
-        expect_parity(%(<div style="#{tb}">AA<span style="padding-left:6px">#{mark} x</span></div>))
-        expect_parity(%(<div style="#{tb}">AA <span style="padding-left:6px">#{mark}<span style="padding-left:4px">x</span></span></div>))
+        expect_layout(%(<div style="#{tb}">A<span style="padding-left:6px">#{mark}<span style="padding-left:4px">x</span></span></div>))
+        expect_layout(%(<div style="#{tb}">A<span style="padding-left:6px">#{mark}<b style="margin-left:9px">x</b></span></div>))
+        expect_layout(%(<div style="#{tb}">AA<span style="padding-left:6px">#{mark} x</span></div>))
+        expect_layout(%(<div style="#{tb}">AA <span style="padding-left:6px">#{mark}<span style="padding-left:4px">x</span></span></div>))
       end
       # A forced break and a preserved space both PLACE the open edges first (`flushOpenEdges` inside
       # `placeOnLine`, and before `forceBreak`), which both settles a marker waiting on one and makes the line
@@ -919,48 +910,48 @@ x</div>))
       # in a run of its own so the two stay distinguishable.
       it 'settles a waiting marker at a preserved space and at a forced newline' do
         pre = 'position:relative;width:200px;font:16px monospace;white-space:pre'
-        expect_parity(%(<div style="#{pre}">A<span style="padding-left:6px">#{mark}\nx</span></div>))
-        expect_parity(%(<div style="#{pre};text-align:right">A<span style="padding-left:6px">#{mark}\nx</span></div>))
-        expect_parity(%(<div style="#{pre}">A<span style="padding-left:6px">#{mark}  x</span></div>))
-        expect_parity(%(<div style="#{pre}-wrap">AA<span style="padding-left:6px">#{mark} x</span></div>))
-        expect_parity(%(<div style="#{pre}-line">A<span style="padding-left:6px">#{mark}\nx</span></div>))
-        expect_parity(%(<div style="#{pre}-line">a much longer stretch of ordinary words that will wrap <span style="padding-left:6px">#{mark}\n<span>y</span></span> tail</div>))
+        expect_layout(%(<div style="#{pre}">A<span style="padding-left:6px">#{mark}\nx</span></div>))
+        expect_layout(%(<div style="#{pre};text-align:right">A<span style="padding-left:6px">#{mark}\nx</span></div>))
+        expect_layout(%(<div style="#{pre}">A<span style="padding-left:6px">#{mark}  x</span></div>))
+        expect_layout(%(<div style="#{pre}-wrap">AA<span style="padding-left:6px">#{mark} x</span></div>))
+        expect_layout(%(<div style="#{pre}-line">A<span style="padding-left:6px">#{mark}\nx</span></div>))
+        expect_layout(%(<div style="#{pre}-line">a much longer stretch of ordinary words that will wrap <span style="padding-left:6px">#{mark}\n<span>y</span></span> tail</div>))
       end
       # Round 3. A waiting marker's cursor is measured from the BAND, which a float drop moves under it: a
       # line too narrow for its first word goes down, WITHOUT closing, into the wider band it lands in.
       it 'follows the band when its line drops below a float while it waits' do
-        expect_parity(%(<div style="position:relative;width:100px"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace"><span style="padding-left:9px">#{mark}aaaaaaaaaa</span></div></div>))
-        expect_parity(%(<div style="position:relative;width:100px;text-align:right"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace"><span style="padding-left:9px">#{mark}aa</span></div></div>))
+        expect_layout(%(<div style="position:relative;width:100px"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace"><span style="padding-left:9px">#{mark}aaaaaaaaaa</span></div></div>))
+        expect_layout(%(<div style="position:relative;width:100px;text-align:right"><div style="float:left;width:80px;height:20px"></div><div style="font:16px monospace"><span style="padding-left:9px">#{mark}aa</span></div></div>))
       end
       # A COLLAPSED space inside the marker's own inline puts that inline's edge down where the oracle places
       # the space — so a marker written after it is waiting on nothing, and keeps its own inline's relative
       # offset. And edges that CANCEL (a negative margin outside a padding) are never placed at all, because
       # the flush is asked of their sum: the fragment then starts where its content does.
       it 'is not waiting once a collapsed space has put the edge down, and not fooled by cancelling edges' do
-        expect_parity(%(<div style="#{tb}">zz<span style="padding-left:9px;position:relative;left:2px"> #{mark}a</span></div>))
-        expect_parity(%(<div style="#{tb}">zz<span style="padding-left:9px;position:relative;top:3px"> #{mark}a</span></div>))
-        expect_parity(%(<div style="#{tb};direction:rtl">zz<span style="padding-left:9px;position:relative;top:3px"> #{mark}a</span></div>))
-        expect_parity(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">#{mark}aa</span></span></div>))
-        expect_parity(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:7px">#{mark}aa</span></span></div>))
+        expect_layout(%(<div style="#{tb}">zz<span style="padding-left:9px;position:relative;left:2px"> #{mark}a</span></div>))
+        expect_layout(%(<div style="#{tb}">zz<span style="padding-left:9px;position:relative;top:3px"> #{mark}a</span></div>))
+        expect_layout(%(<div style="#{tb};direction:rtl">zz<span style="padding-left:9px;position:relative;top:3px"> #{mark}a</span></div>))
+        expect_layout(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">#{mark}aa</span></span></div>))
+        expect_layout(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:7px">#{mark}aa</span></span></div>))
         # …and an edge that cancels is never placed AT ALL, so nothing in that inline is ever waiting: a
         # marker written AFTER its content reads the cursor, where holding it back would have put it at the
         # fragment's start (measured in Chrome: 38.41, which is the cursor).
-        expect_parity(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">word#{mark}more</span></span></div>))
-        expect_parity(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">word #{mark}more</span></span></div>))
+        expect_layout(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">word#{mark}more</span></span></div>))
+        expect_layout(%(<div style="#{tb}"><span style="margin-left:-6px"><span style="padding-left:6px">word #{mark}more</span></span></div>))
       end
       # What a held-back marker reads is where its fragment OPENED, which is not the fragment's leftmost
       # extent: content further along the line can reach further left than the box's own start (Chrome 6).
       it 'reads where its fragment opened, not how far left the fragment reaches' do
-        expect_parity(%(<div style="#{tb}"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-90px">beta</span></span></div>))
-        expect_parity(%(<div style="#{tb}"><span style="margin-left:6px"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-5px">beta</span></span></span></div>))
-        expect_parity(%(<div style="#{tb}"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-9px">beta</span></span></div>))
+        expect_layout(%(<div style="#{tb}"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-90px">beta</span></span></div>))
+        expect_layout(%(<div style="#{tb}"><span style="margin-left:6px"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-5px">beta</span></span></span></div>))
+        expect_layout(%(<div style="#{tb}"><span style="padding-left:6px">#{mark}alpha<span style="margin-left:-9px">beta</span></span></div>))
       end
       # An rtl corner is the container's, so the alignment never moves it and the cursor never reaches it —
       # but its BLOCK axis is the static position like any other, relative inlines included.
       it 'moves an rtl corner in the block axis only' do
-        expect_parity(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:3px;left:4px">#{mark} x</span></div>))
-        expect_parity(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:3px;padding-left:9px">#{mark} x</span></div>))
-        expect_parity(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:5px"><span style="position:relative;top:2px">x #{mark}</span></span></div>))
+        expect_layout(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:3px;left:4px">#{mark} x</span></div>))
+        expect_layout(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:3px;padding-left:9px">#{mark} x</span></div>))
+        expect_layout(%(<div style="#{tb};direction:rtl"><span style="position:relative;top:5px"><span style="position:relative;top:2px">x #{mark}</span></span></div>))
       end
     end
 
@@ -970,39 +961,39 @@ x</div>))
       let(:mark) { '<div style="position:absolute;width:10px;height:10px"></div>' }
 
       it 'starts at the unspent indent and in the float\'s band' do
-        expect_parity(%(<div style="position:relative;width:200px;text-indent:12px">#{mark}<div style="height:10px">b</div></div>))
-        expect_parity(%(<div style="position:relative;width:200px;text-indent:12px;padding-left:9px">#{mark}<div style="height:10px">b</div></div>))
-        expect_parity(%(<div style="position:relative;width:200px;text-indent:12px"><div style="height:10px">b</div>#{mark}</div>))
-        expect_parity(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
-        expect_parity(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:60px"></div><div style="height:10px">b</div>#{mark}</div>))
-        expect_parity(%(<div style="position:relative;width:200px;text-indent:12px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
-        expect_parity(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:10px"></div><div style="height:30px">b</div>#{mark}</div>))
+        expect_layout(%(<div style="position:relative;width:200px;text-indent:12px">#{mark}<div style="height:10px">b</div></div>))
+        expect_layout(%(<div style="position:relative;width:200px;text-indent:12px;padding-left:9px">#{mark}<div style="height:10px">b</div></div>))
+        expect_layout(%(<div style="position:relative;width:200px;text-indent:12px"><div style="height:10px">b</div>#{mark}</div>))
+        expect_layout(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
+        expect_layout(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:60px"></div><div style="height:10px">b</div>#{mark}</div>))
+        expect_layout(%(<div style="position:relative;width:200px;text-indent:12px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
+        expect_layout(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:10px"></div><div style="height:30px">b</div>#{mark}</div>))
       end
       # …a block holding NOTHING but out-of-flow children included: it lays out no lines, so it reads the same
       # cursor, at the same indent and in the same band.
       # The band is the one a LINE BOX meets, not a hairline at the cursor: a float that starts a few px below
       # it (after a collapsed margin, or a second float that dropped past the first) still shortens that line.
       it 'asks the band over a line box, not at the cursor' do
-        expect_parity(%(<div style="position:relative;width:100px;line-height:40px"><div style="height:10px;margin-bottom:15px">b</div><div style="float:left;width:30px;height:5px"></div>#{mark}</div>))
-        expect_parity(%(<div style="position:relative;width:100px"><div style="float:right;width:60px;height:5px"></div><div style="float:left;width:60px;height:30px"></div>#{mark}</div>))
+        expect_layout(%(<div style="position:relative;width:100px;line-height:40px"><div style="height:10px;margin-bottom:15px">b</div><div style="float:left;width:30px;height:5px"></div>#{mark}</div>))
+        expect_layout(%(<div style="position:relative;width:100px"><div style="float:right;width:60px;height:5px"></div><div style="float:left;width:60px;height:30px"></div>#{mark}</div>))
       end
       it 'reads it in a block whose only children are out of flow' do
-        expect_parity(%(<div style="position:relative;width:200px;text-indent:12px">#{mark}</div>))
-        expect_parity(%(<div style="position:relative;width:200px;text-indent:12px;padding-left:7px;border-left:3px solid">#{mark}#{mark}</div>))
-        expect_parity(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:20px"></div>#{mark}</div>))
+        expect_layout(%(<div style="position:relative;width:200px;text-indent:12px">#{mark}</div>))
+        expect_layout(%(<div style="position:relative;width:200px;text-indent:12px;padding-left:7px;border-left:3px solid">#{mark}#{mark}</div>))
+        expect_layout(%(<div style="position:relative;width:200px"><div style="float:left;width:30px;height:20px"></div>#{mark}</div>))
       end
       it 'leaves an rtl flow reading the content edge, whatever the band' do
-        expect_parity(%(<div style="position:relative;width:200px;direction:rtl;text-indent:12px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
+        expect_layout(%(<div style="position:relative;width:200px;direction:rtl;text-indent:12px"><div style="float:left;width:30px;height:60px"></div>#{mark}<div style="height:10px">b</div></div>))
       end
     end
   end
 
   # A block whose own BLOCK axis is the horizontal one (a vertical `writing-mode`) does not fill its containing
-  # block: its auto width is a BLOCK size, so the oracle takes it from the box's own content. Native used to
-  # fill it, which the harness admitted — a silent 400 where the oracle and Chrome agree on the content's own
-  # width. The oracle's model of it is an INLINE-axis shrink-to-fit (max-content clamped to the room), which
-  # coincides with Chrome for a single block child; Chrome sums a vertical block's children along the block
-  # axis, and rotates the flow, neither of which the oracle does. Parity is what these specs pin.
+  # block: its auto width is a BLOCK size, so it is taken from the box's own content. Native used to
+  # fill it, which the harness admitted — a silent 400 where the oracle and Chrome agreed on the content's own
+  # width. The model of it is an INLINE-axis shrink-to-fit (max-content clamped to the room), which coincides
+  # with Chrome for a single block child; Chrome sums a vertical block's children along the block axis, and
+  # rotates the flow, neither of which native does. These specs pin the oracle's model, carried over.
   describe 'a vertical writing mode shrink-to-fits its width' do
     # …but an ANONYMOUS block box does not. A mixed block's group is created by the flow, inherits the
     # parent's `writing-mode` like any anonymous box, and the vertical arm therefore used to shrink-to-fit
@@ -1012,28 +1003,27 @@ x</div>))
     # with FLEX and `wsmixed` crosses a mixed block with white-space, so the anonymous group — where a line's
     # alignment and indent actually live — was never under a writing mode at all.
     #
-    # All THREE figures are pinned, because neither engine is Chrome here and that is the point: this
-    # reproduces the ORACLE deliberately. Chrome lays vertical text out (`x` 262.5, `y` 28.81 — the atomic
-    # advances DOWN the line and the lines stack right-to-left); neither engine does, so both keep the atomic
-    # at a horizontal `y` and move it along `x`. Making native spec-correct on its own would be a parity break,
-    # and the pair is what the campaign holds. Real vertical inline layout is its own project.
+    # All THREE figures are pinned, because native is not Chrome here and that is the point: this reproduces
+    # the ORACLE deliberately. Chrome lays vertical text out (`x` 262.5, `y` 28.81 — the atomic advances DOWN
+    # the line and the lines stack right-to-left); native does not, so it keeps the atomic at a horizontal `y`
+    # and moves it along `x`. Real vertical inline layout is its own project.
     it "gives a mixed block's anonymous group the parent width, not a shrink-to-fit (Chrome: 262.5 / 28.81)" do
       atomic = '<span id="m" style="display:inline-block;width:9px;height:4px"></span>'
       mixed  = %(<div style="height:120px"><div style="font:16px monospace;width:300px;writing-mode:vertical-rl;text-align:center"><div style="height:6px">B</div>aa #{atomic} bb</div></div>)
       # …the same shape WITHOUT the block child, so the group is not anonymous: both engines already agreed
       # there, which is what said the anonymity was the axis and not the writing mode.
       plain  = %(<div style="height:120px"><div style="font:16px monospace;width:300px;writing-mode:vertical-rl;text-align:center">aa #{atomic} bb</div></div>)
-      # …and the horizontal twin, where all three engines agree.
+      # …and the horizontal twin, where native and Chrome agree.
       horiz  = %(<div style="height:120px"><div style="font:16px monospace;width:300px;text-align:center"><div style="height:6px">B</div>aa #{atomic} bb</div></div>)
       # …both axes pinned, and a tripwire on BOTH: `y` is where real vertical inline layout would show up first
-      # (Chrome advances the atomic DOWN the line, so it reads 28.81 where both engines read a horizontal 19),
+      # (Chrome advances the atomic DOWN the line, so it reads 28.81 where native reads a horizontal 19),
       # and a tripwire that guards only `x` would let that land unnoticed.
       {
         mixed => [[145.5, 19], [262.5, 28.81]],
         plain => [[145.5, 13], [284.5, 28.81]],
         horiz => [[145.5, 19], [145.5, 19]]
       }.each do |body, (shared, chrome)|
-        expect_parity(body)
+        expect_layout(body)
         session = simulated_session(page(body))
         session.visit '/'
         got = session.evaluate_script("(() => { const b = document.getElementById('m').getBoundingClientRect(); return [+b.x.toFixed(2), +b.y.toFixed(2)]; })()")
@@ -1044,99 +1034,99 @@ x</div>))
     end
 
     it 'sizes an auto-width vertical block from its content' do
-      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="width:40px;height:20px"></div></div></div>')
-      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-rl"><div style="width:40px;height:20px"></div></div></div>')
-      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr;padding:0 10%"><div style="width:40px;height:20px"></div></div></div>')
-      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr;margin:0 30px"><div style="width:40px;height:20px"></div></div></div>')
-      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="width:500px;height:20px"></div></div></div>')
-      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr;min-width:200px"><div style="width:40px;height:20px"></div></div></div>')
-      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr;max-width:20px"><div style="width:40px;height:20px"></div></div></div>')
+      expect_layout('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="width:40px;height:20px"></div></div></div>')
+      expect_layout('<div style="width:400px"><div style="writing-mode:vertical-rl"><div style="width:40px;height:20px"></div></div></div>')
+      expect_layout('<div style="width:400px"><div style="writing-mode:vertical-lr;padding:0 10%"><div style="width:40px;height:20px"></div></div></div>')
+      expect_layout('<div style="width:400px"><div style="writing-mode:vertical-lr;margin:0 30px"><div style="width:40px;height:20px"></div></div></div>')
+      expect_layout('<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="width:500px;height:20px"></div></div></div>')
+      expect_layout('<div style="width:400px"><div style="writing-mode:vertical-lr;min-width:200px"><div style="width:40px;height:20px"></div></div></div>')
+      expect_layout('<div style="width:400px"><div style="writing-mode:vertical-lr;max-width:20px"><div style="width:40px;height:20px"></div></div></div>')
     end
     it 'leaves a declared width alone, and a horizontal block filling' do
-      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr;width:50px;height:100px"><div style="width:40px;height:20px"></div></div></div>')
-      expect_parity('<div style="width:400px"><div><div style="width:40px;height:20px"></div></div></div>')
-      expect_parity('<div style="writing-mode:vertical-lr;width:400px;height:200px"><div style="width:40px;height:20px"></div></div>')
+      expect_layout('<div style="width:400px"><div style="writing-mode:vertical-lr;width:50px;height:100px"><div style="width:40px;height:20px"></div></div></div>')
+      expect_layout('<div style="width:400px"><div><div style="width:40px;height:20px"></div></div></div>')
+      expect_layout('<div style="writing-mode:vertical-lr;width:400px;height:200px"><div style="width:40px;height:20px"></div></div>')
     end
     # The shrink-to-fit is a real min/max-content pair, so what fits in the room decides the width — and the
     # mode INHERITS, so a plain child of a vertical block shrink-to-fits as well.
     it 'lets the available room decide, through an inherited writing mode and around its own float' do
-      expect_parity('<div style="width:60px"><div style="writing-mode:vertical-lr">hello there everyone</div></div>')
-      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr"><div><div style="width:40px;height:20px"></div></div></div></div>')
-      expect_parity('<div style="width:400px"><div style="writing-mode:vertical-lr;overflow:hidden"><div style="float:left;width:40px;height:20px"></div></div></div>')
+      expect_layout('<div style="width:60px"><div style="writing-mode:vertical-lr">hello there everyone</div></div>')
+      expect_layout('<div style="width:400px"><div style="writing-mode:vertical-lr"><div><div style="width:40px;height:20px"></div></div></div></div>')
+      expect_layout('<div style="width:400px"><div style="writing-mode:vertical-lr;overflow:hidden"><div style="float:left;width:40px;height:20px"></div></div></div>')
     end
     # `direction` runs the INLINE axis, which in a vertical mode is the vertical one: an rtl vertical block's
     # children still start at the LEFT content edge, where an rtl HORIZONTAL block's start at the right. Its
     # lines and their atomics, and an out-of-flow child's static corner, stay at the left with them.
     it 'keeps an rtl vertical block placing its children from the left' do
-      expect_parity('<div style="width:400px;direction:rtl;writing-mode:vertical-lr"><div style="width:40px;height:20px"></div></div>')
-      expect_parity('<div style="width:400px;direction:rtl;writing-mode:vertical-lr"><div style="width:40px;height:20px"></div><div style="width:60px;height:10px"></div></div>')
-      expect_parity('<div style="width:400px;direction:rtl;writing-mode:sideways-lr"><div style="width:40px;height:20px"></div></div>')
-      expect_parity('<div style="width:400px;direction:rtl"><div style="writing-mode:vertical-lr"><div style="width:40px;height:20px"></div></div></div>')
-      expect_parity('<div style="width:400px;direction:rtl"><div style="width:40px;height:20px"></div></div>')
-      expect_parity('<div style="width:400px;direction:rtl;writing-mode:vertical-lr">a <span style="display:inline-block;width:20px;height:10px"></span></div>')
-      expect_parity('<div style="width:400px;direction:rtl;writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:20px;height:10px"></div></div>')
+      expect_layout('<div style="width:400px;direction:rtl;writing-mode:vertical-lr"><div style="width:40px;height:20px"></div></div>')
+      expect_layout('<div style="width:400px;direction:rtl;writing-mode:vertical-lr"><div style="width:40px;height:20px"></div><div style="width:60px;height:10px"></div></div>')
+      expect_layout('<div style="width:400px;direction:rtl;writing-mode:sideways-lr"><div style="width:40px;height:20px"></div></div>')
+      expect_layout('<div style="width:400px;direction:rtl"><div style="writing-mode:vertical-lr"><div style="width:40px;height:20px"></div></div></div>')
+      expect_layout('<div style="width:400px;direction:rtl"><div style="width:40px;height:20px"></div></div>')
+      expect_layout('<div style="width:400px;direction:rtl;writing-mode:vertical-lr">a <span style="display:inline-block;width:20px;height:10px"></span></div>')
+      expect_layout('<div style="width:400px;direction:rtl;writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:20px;height:10px"></div></div>')
     end
     # …while what `direction` does key on its own is the MIRROR of a table's columns: the oracle's table path
-    # reads `flowSides(table).rtl` alone and mirrors along the PHYSICAL horizontal axis, because it never runs
-    # a table sideways (Chrome reverses the columns down its vertical inline axis instead — the oracle's gap to
-    # close, not native's). Native reproduces the oracle, so the mirror must not be paired with the axis here.
+    # read `flowSides(table).rtl` alone and mirrored along the PHYSICAL horizontal axis, because it never ran
+    # a table sideways (Chrome reverses the columns down its vertical inline axis instead). Native reproduces
+    # the oracle, so the mirror must not be paired with the axis here.
     it 'still mirrors the columns of an rtl table in a vertical writing mode' do
-      expect_parity('<div style="width:400px;direction:rtl;writing-mode:vertical-lr"><table><tr><td>a</td><td>bb</td></tr></table></div>')
-      expect_parity('<div style="width:400px;direction:rtl"><table><tr><td>a</td><td>bb</td></tr></table></div>')
+      expect_layout('<div style="width:400px;direction:rtl;writing-mode:vertical-lr"><table><tr><td>a</td><td>bb</td></tr></table></div>')
+      expect_layout('<div style="width:400px;direction:rtl"><table><tr><td>a</td><td>bb</td></tr></table></div>')
     end
   end
 
   # A containing block is a RECTANGLE wherever it lives. One that is a record of the pass hands native its own
   # box; one OUTSIDE the pass — the viewport of a `fixed` box, an ancestor above the pass root, a
   # relatively-positioned inline — used to make the whole box replay the oracle's resolved geometry. Now the
-  # oracle's `containingBlockFor` rectangle rides the record (rec[92..95]) and native sizes and places the box
+  # `containingBlockFor` rectangle rides the record (rec[92..95]) and native sizes and places the box
   # from it exactly as it does for an in-pass containing block.
   describe 'an out-of-flow box whose containing block is outside the pass' do
     it 'places a fixed box against the viewport itself' do
-      expect_parity('<div style="width:400px;height:200px"><div style="position:fixed;top:10px;left:20px;width:50px;height:30px">f</div><div style="height:20px">flow</div></div>')
-      expect_parity('<div style="width:400px;height:200px"><div style="position:fixed;top:0;right:0;width:40px;height:40px">f</div></div>')
-      expect_parity('<div style="width:400px;height:200px"><div style="position:fixed;bottom:5px;right:5px;width:30px;height:30px">br</div></div>')
-      expect_parity('<div style="width:400px;height:200px"><div style="position:fixed;inset:0">stretched</div></div>')
-      expect_parity('<div style="width:400px;height:200px"><div style="position:fixed;left:0;right:0;height:20px;margin:0 auto;width:100px">centred</div></div>')
-      expect_parity('<div style="width:400px;height:200px"><div style="position:fixed;top:10%;left:25%;width:10%;height:5%">pct</div></div>')
+      expect_layout('<div style="width:400px;height:200px"><div style="position:fixed;top:10px;left:20px;width:50px;height:30px">f</div><div style="height:20px">flow</div></div>')
+      expect_layout('<div style="width:400px;height:200px"><div style="position:fixed;top:0;right:0;width:40px;height:40px">f</div></div>')
+      expect_layout('<div style="width:400px;height:200px"><div style="position:fixed;bottom:5px;right:5px;width:30px;height:30px">br</div></div>')
+      expect_layout('<div style="width:400px;height:200px"><div style="position:fixed;inset:0">stretched</div></div>')
+      expect_layout('<div style="width:400px;height:200px"><div style="position:fixed;left:0;right:0;height:20px;margin:0 auto;width:100px">centred</div></div>')
+      expect_layout('<div style="width:400px;height:200px"><div style="position:fixed;top:10%;left:25%;width:10%;height:5%">pct</div></div>')
     end
     it 'places an absolute box against the initial containing block' do
-      expect_parity('<div style="width:400px;height:200px"><div style="position:absolute;top:10px;left:10px;width:50px;height:20px">a</div><div style="height:30px">flow</div></div>')
-      expect_parity('<div style="width:400px;height:200px"><div style="position:absolute;left:0;right:0;top:0;height:25px">stretch</div></div>')
-      expect_parity('<div style="width:400px;height:200px"><div style="position:absolute;width:60px;height:20px">staticpos</div></div>')
-      expect_parity('<div style="width:400px;height:200px"><div style="position:absolute;top:50%;left:50%;width:50px;height:20px">half</div></div>')
+      expect_layout('<div style="width:400px;height:200px"><div style="position:absolute;top:10px;left:10px;width:50px;height:20px">a</div><div style="height:30px">flow</div></div>')
+      expect_layout('<div style="width:400px;height:200px"><div style="position:absolute;left:0;right:0;top:0;height:25px">stretch</div></div>')
+      expect_layout('<div style="width:400px;height:200px"><div style="position:absolute;width:60px;height:20px">staticpos</div></div>')
+      expect_layout('<div style="width:400px;height:200px"><div style="position:absolute;top:50%;left:50%;width:50px;height:20px">half</div></div>')
       # …its auto width shrink-to-fitting against that rectangle, measured natively
-      expect_parity('<div style="width:400px;height:200px"><div style="position:absolute;left:30px">shrink to fit me</div></div>')
-      expect_parity('<div style="width:400px;height:200px"><div style="position:absolute;left:30px"><div style="width:80px;height:10px"></div></div></div>')
+      expect_layout('<div style="width:400px;height:200px"><div style="position:absolute;left:30px">shrink to fit me</div></div>')
+      expect_layout('<div style="width:400px;height:200px"><div style="position:absolute;left:30px"><div style="width:80px;height:10px"></div></div></div>')
     end
     # A containing block AWAY from the origin: the rectangle has to carry its position and its padding box, not
     # just its size — every viewport-rooted shape above would pass on a (0,0) rect.
     it 'places against a containing block away from the origin' do
       outer = 'position:relative;margin:30px 0 0 40px;border:5px solid;padding:10px;width:300px;height:200px'
-      expect_parity(%{<div style="#{outer}"><div id="sub" style="height:50px"><div style="position:absolute;bottom:0;right:0;width:20px;height:10px"></div></div></div>})
-      expect_parity(%{<div style="#{outer}"><div id="sub" style="height:50px"><div style="position:absolute;top:50%;left:50%;width:20px;height:10px"></div></div></div>})
+      expect_layout(%{<div style="#{outer}"><div id="sub" style="height:50px"><div style="position:absolute;bottom:0;right:0;width:20px;height:10px"></div></div></div>})
+      expect_layout(%{<div style="#{outer}"><div id="sub" style="height:50px"><div style="position:absolute;top:50%;left:50%;width:20px;height:10px"></div></div></div>})
       # …and one that is not the viewport and not a record either: a transformed ancestor contains a FIXED box
-      expect_parity(%{<div style="transform:translate(10px,20px);border:3px solid;width:300px;height:200px"><div id="sub" style="height:50px"><div style="position:fixed;top:10px;left:30px;width:20px;height:10px"></div></div></div>})
+      expect_layout(%{<div style="transform:translate(10px,20px);border:3px solid;width:300px;height:200px"><div id="sub" style="height:50px"><div style="position:fixed;top:10px;left:30px;width:20px;height:10px"></div></div></div>})
     end
     # …the one containing block that is INSIDE the pass and still has no record of its own: a relatively
-    # positioned inline, whose rectangle is the oracle's line layout (a pushed input, finer than the old replay).
+    # positioned inline, whose rectangle is the line layout's (a pushed input, finer than the old replay).
     it 'places against a relatively positioned inline' do
-      expect_parity('<div style="width:400px">t <span style="position:relative">a<span style="display:inline-block;width:30px;height:10px"><span style="position:absolute;top:1px;left:2px;width:20px;height:10px"></span></span></span></div>')
+      expect_layout('<div style="width:400px">t <span style="position:relative">a<span style="display:inline-block;width:30px;height:10px"><span style="position:absolute;top:1px;left:2px;width:20px;height:10px"></span></span></span></div>')
     end
     # …and one at its STATIC position inside an inline-block inside an inline box, which is the shape that
     # showed the oracle holding a stale static position: the atomic is laid out at the line's provisional y and
     # the baseline settle moves it afterwards, so the held position has to move with it (Chrome puts the box at
     # the atomic's own content origin, y = 30 on a 48px line, not at the block's top).
     it 'places one at its static position inside an atomic inline' do
-      expect_parity('<div style="width:400px;font-size:48px">Big <span>x<span style="display:inline-block;font-size:12px;width:60px;height:14px"><div style="position:absolute;width:10px;height:10px"></div></span></span></div>')
-      expect_parity('<div style="width:300px">t <span>a<span style="display:inline-block;width:30px;height:10px"><div style="position:fixed;width:5px;height:5px"></div></span></span></div>')
-      expect_parity('<div style="width:300px">t <span style="position:relative">a<span style="display:inline-block;width:30px;height:10px"><div style="position:absolute;width:5px;height:5px"></div></span></span></div>')
+      expect_layout('<div style="width:400px;font-size:48px">Big <span>x<span style="display:inline-block;font-size:12px;width:60px;height:14px"><div style="position:absolute;width:10px;height:10px"></div></span></span></div>')
+      expect_layout('<div style="width:300px">t <span>a<span style="display:inline-block;width:30px;height:10px"><div style="position:fixed;width:5px;height:5px"></div></span></span></div>')
+      expect_layout('<div style="width:300px">t <span style="position:relative">a<span style="display:inline-block;width:30px;height:10px"><div style="position:absolute;width:5px;height:5px"></div></span></span></div>')
     end
     # …and one shrink-to-fitting around an atomic that holds a `-webkit-sticky` box.
     it 'places one shrink-to-fitting around a positioned atomic' do
-      expect_parity(%{<div style="width:400px;height:200px"><div style="position:absolute;left:30px">a #{WalkRefusals::POSITIONED}</div></div>})
+      expect_layout(%{<div style="width:400px;height:200px"><div style="position:absolute;left:30px">a #{STICKY_ATOMIC}</div></div>})
     end
-    # The ROOT element is never an out-of-flow box's containing block, in either engine: the oracle assigns its box at
+    # The ROOT element is never an out-of-flow box's containing block here: the oracle assigned its box at
     # the end of the pass, so a first layout could not see it and every later one saw last pass's — the walk, which
     # finds the block without the oracle's boxes, took it for the viewport on the first pass and the oracle then
     # disagreed on every relayout. SHARED divergence: Chrome positions against a positioned `<html>`'s box. Each shape
@@ -1148,7 +1138,7 @@ x</div>))
         '<style>html{transform:translateZ(0)}</style><div id="p" style="height:2000px"><div style="position:fixed;bottom:0;width:40px;height:20px"></div></div>',
         '<style>html{filter:invert(1)}</style><div id="p" style="height:2000px"><div style="position:fixed;bottom:0;width:40px;height:20px"></div></div>'
       ].each do |body|
-        expect_parity(body)
+        expect_layout(body)
         session = session_for(body)
         rect = "(r => [r.x, r.y, r.width, r.height])(document.getElementById('p').firstElementChild.getBoundingClientRect())"
         first = session.evaluate_script(rect)
@@ -1163,40 +1153,40 @@ x</div>))
   # cannot MEASURE inside it is nobody's problem, because nobody measures it. Before this, the flag was
   # inherited and a pushed atomic inline inside an absolute box declined the whole pass.
   describe 'an out-of-flow box leaves the measured region' do
-    pushed_atomic = %(a #{WalkRefusals::POSITIONED})
+    pushed_atomic = %(a #{STICKY_ATOMIC})
     it 'lays out an absolute box whose content native cannot measure, inside a subtree it does measure' do
       # …its containing block outside the vertical block, and a `fixed` box the same
-      expect_parity(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_parity(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:fixed;top:0;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr"><div style="position:fixed;top:0;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
       # …and sized and placed by NATIVE itself, from both insets, from a declared width, or from a percentage
       # one (whose figure `used_width` takes from the record, so no intrinsic measure is asked at all)
-      expect_parity(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;left:0;right:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_parity(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:60px">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_parity(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:50%">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_parity(%{<div style="width:400px;position:relative"><div style="position:absolute;width:calc(50% + 10px)">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div>})
+      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;left:0;right:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:60px">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_layout(%{<div style="width:400px"><div style="writing-mode:vertical-lr;position:relative"><div style="position:absolute;width:50%">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_layout(%{<div style="width:400px;position:relative"><div style="position:absolute;width:calc(50% + 10px)">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div>})
     end
     # …and the other routes walked measured reach it too: an atomic inline, a flex item, a table cell, a grid
     # item. (Through a pure BLOCK child, because a text block holding an out-of-flow child declined outright.)
     it 'lays one out inside every other measured route' do
       oof = %{<div style="width:30px"><div style="position:absolute;width:60px">#{pushed_atomic}</div></div>}
-      expect_parity(%{<div style="width:400px">x <span style="display:inline-block;position:relative">#{oof}</span></div>})
-      expect_parity(%{<div style="width:400px;display:flex"><div style="position:relative">#{oof}</div></div>})
-      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0;position:relative">#{oof}</td></tr></table>})
-      expect_parity(%{<div style="display:grid;grid-template-columns:auto;width:400px"><div style="position:relative">#{oof}</div></div>})
+      expect_layout(%{<div style="width:400px">x <span style="display:inline-block;position:relative">#{oof}</span></div>})
+      expect_layout(%{<div style="width:400px;display:flex"><div style="position:relative">#{oof}</div></div>})
+      expect_layout(%{<table style="border-spacing:0"><tr><td style="padding:0;position:relative">#{oof}</td></tr></table>})
+      expect_layout(%{<div style="display:grid;grid-template-columns:auto;width:400px"><div style="position:relative">#{oof}</div></div>})
     end
     # An out-of-flow box whose OWN width IS a shrink-to-fit needs an intrinsic measure of its content, a pushed
     # atomic's included.
     it 'shrink-to-fits a box around its own content' do
-      expect_parity(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
-      expect_parity(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_layout(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute;left:0">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
+      expect_layout(%{<div style="width:400px;position:relative"><div style="writing-mode:vertical-lr"><div style="position:absolute">#{pushed_atomic}</div><div style="width:9px;height:4px"></div></div></div>})
       [
-        %(<span style="display:inline-block">#{WalkRefusals::POSITIONED}</span>),
-        WalkRefusals::POSITIONED
+        %(<span style="display:inline-block">#{STICKY_ATOMIC}</span>),
+        STICKY_ATOMIC
       ].each do |inner|
-        expect_parity(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a #{inner}</div><p>x</p></div>})
+        expect_layout(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a #{inner}</div><p>x</p></div>})
       end
       # …and around a plain inline-block
-      expect_parity(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a <span style="display:inline-block">ok</span></div><p>x</p></div>})
+      expect_layout(%{<div style="width:400px;position:relative"><div style="position:absolute;left:0">a <span style="display:inline-block">ok</span></div><p>x</p></div>})
     end
   end
 
@@ -1205,10 +1195,10 @@ x</div>))
   # whole table.
   describe 'a cell holding a positioned atomic' do
     it 'lays out a table around it' do
-      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a #{WalkRefusals::POSITIONED}</td><td style="padding:0">cc</td></tr></table>})
-      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0">a #{WalkRefusals::POSITIONED}</td></tr></table>})
-      expect_parity(%{<table style="border-spacing:0"><tr><td style="padding:0;width:50px">a #{WalkRefusals::POSITIONED}</td></tr></table>})
-      expect_parity(%{<div style="display:table;border-spacing:0"><div style="display:table-row"><div style="display:table-cell">a #{WalkRefusals::POSITIONED}</div></div></div>})
+      expect_layout(%{<table style="border-spacing:0"><tr><td style="padding:0">a #{STICKY_ATOMIC}</td><td style="padding:0">cc</td></tr></table>})
+      expect_layout(%{<table style="border-spacing:0"><tr><td style="padding:0">a #{STICKY_ATOMIC}</td></tr></table>})
+      expect_layout(%{<table style="border-spacing:0"><tr><td style="padding:0;width:50px">a #{STICKY_ATOMIC}</td></tr></table>})
+      expect_layout(%{<div style="display:table;border-spacing:0"><div style="display:table-row"><div style="display:table-cell">a #{STICKY_ATOMIC}</div></div></div>})
     end
   end
 
@@ -1221,23 +1211,23 @@ x</div>))
   describe 'a box that establishes its own formatting context' do
     it 'keeps a child margin inside contain and multicol' do
       %w[layout paint content].each do |kind|
-        expect_parity(%(<div style="width:400px"><div style="contain:#{kind}"><div style="margin-top:30px;height:10px"></div></div><div style="height:5px"></div></div>))
+        expect_layout(%(<div style="width:400px"><div style="contain:#{kind}"><div style="margin-top:30px;height:10px"></div></div><div style="height:5px"></div></div>))
       end
-      expect_parity('<div style="width:400px"><div style="contain:strict;height:40px"><div style="margin-top:30px;height:10px"></div></div><div style="height:5px"></div></div>')
-      expect_parity('<div style="width:400px"><div style="column-count:2"><div style="margin-top:30px;height:10px"></div></div><div style="height:5px"></div></div>')
-      expect_parity('<div style="width:400px"><div style="column-width:100px"><div style="margin-top:30px;height:10px"></div></div><div style="height:5px"></div></div>')
+      expect_layout('<div style="width:400px"><div style="contain:strict;height:40px"><div style="margin-top:30px;height:10px"></div></div><div style="height:5px"></div></div>')
+      expect_layout('<div style="width:400px"><div style="column-count:2"><div style="margin-top:30px;height:10px"></div></div><div style="height:5px"></div></div>')
+      expect_layout('<div style="width:400px"><div style="column-width:100px"><div style="margin-top:30px;height:10px"></div></div><div style="height:5px"></div></div>')
       # …its own margins collapse with its neighbours' as any block's do, and an EMPTY one does not collapse
       # through (a BFC root never does)
-      expect_parity('<div style="width:400px"><div style="contain:layout;margin-top:20px"><div style="margin-top:30px;height:10px"></div></div></div>')
-      expect_parity('<div style="width:400px"><div style="contain:layout;margin:20px 0"></div><div style="margin-top:30px;height:10px"></div></div>')
-      expect_parity('<div style="width:400px"><div style="contain:paint;margin-bottom:20px"><div style="margin-bottom:30px;height:10px"></div></div><div style="height:5px"></div></div>')
+      expect_layout('<div style="width:400px"><div style="contain:layout;margin-top:20px"><div style="margin-top:30px;height:10px"></div></div></div>')
+      expect_layout('<div style="width:400px"><div style="contain:layout;margin:20px 0"></div><div style="margin-top:30px;height:10px"></div></div>')
+      expect_layout('<div style="width:400px"><div style="contain:paint;margin-bottom:20px"><div style="margin-bottom:30px;height:10px"></div></div><div style="height:5px"></div></div>')
     end
     # …and it OWNS the floats inside it, which is the half this engine used to get wrong: the box is as tall as
     # its float, and a later `clear` sibling clears past the float's bottom rather than past nothing.
     it 'owns a float inside it, and its height' do
-      expect_parity('<div style="width:400px"><div style="contain:layout"><div style="float:left;width:50px;height:50px"></div></div><div style="height:5px"></div></div>')
-      expect_parity('<div style="width:400px"><div style="contain:layout"><div style="float:left;width:50px;height:50px"></div></div><div style="clear:left;margin-top:30px;height:5px"></div></div>')
-      expect_parity('<div style="width:400px"><div style="column-count:2"><div style="float:left;width:50px;height:50px"></div></div><div style="height:5px"></div></div>')
+      expect_layout('<div style="width:400px"><div style="contain:layout"><div style="float:left;width:50px;height:50px"></div></div><div style="height:5px"></div></div>')
+      expect_layout('<div style="width:400px"><div style="contain:layout"><div style="float:left;width:50px;height:50px"></div></div><div style="clear:left;margin-top:30px;height:5px"></div></div>')
+      expect_layout('<div style="width:400px"><div style="column-count:2"><div style="float:left;width:50px;height:50px"></div></div><div style="height:5px"></div></div>')
     end
   end
 
@@ -1247,24 +1237,24 @@ x</div>))
   # own height grew with it. The next sibling is still the FIRST whose top margin joins the parent's, which is
   # what the oracle's `topOnly` loop does by construction.
   it 'hoists a collapse-through first child once, not twice' do
-    expect_parity('<div style="width:400px"><div style="margin:20px 0"></div><div style="margin:15px 0"></div><div style="height:5px"></div></div>')
-    expect_parity('<div style="width:400px"><div style="margin:20px 0"></div><div style="margin-top:15px;height:5px"></div></div>')
-    expect_parity('<div style="width:400px"><div style="margin:20px 0"></div><div style="margin:10px 0"></div><div style="margin:30px 0"></div><div style="height:5px"></div></div>')
+    expect_layout('<div style="width:400px"><div style="margin:20px 0"></div><div style="margin:15px 0"></div><div style="height:5px"></div></div>')
+    expect_layout('<div style="width:400px"><div style="margin:20px 0"></div><div style="margin-top:15px;height:5px"></div></div>')
+    expect_layout('<div style="width:400px"><div style="margin:20px 0"></div><div style="margin:10px 0"></div><div style="margin:30px 0"></div><div style="height:5px"></div></div>')
     # …a closed top edge keeps the run inside, where it pushes the next sibling as any margin does
-    expect_parity('<div style="width:400px;padding-top:1px"><div style="margin:20px 0"></div><div style="margin:15px 0"></div><div style="height:5px"></div></div>')
-    expect_parity('<div style="width:400px"><div style="margin:20px 0;height:5px"></div><div style="margin:15px 0"></div><div style="height:5px"></div></div>')
+    expect_layout('<div style="width:400px;padding-top:1px"><div style="margin:20px 0"></div><div style="margin:15px 0"></div><div style="height:5px"></div></div>')
+    expect_layout('<div style="width:400px"><div style="margin:20px 0;height:5px"></div><div style="margin:15px 0"></div><div style="height:5px"></div></div>')
   end
 
   # …and where such a run comes to a NEGATIVE number the flow ends ABOVE the content top, which floors the
   # CONTENT height at zero and leaves the box's own padding taking its room: a `padding-top: 1px` wrapper is
   # 1 tall (Chrome-measured), where flooring the BORDER box instead made native answer 0.
   it 'floors the content height, not the border box, under a negative collapse-through run' do
-    expect_parity('<div style="width:400px;padding-top:1px"><div style="margin-top:-30px;margin-bottom:10px"></div><div style="height:5px"></div></div>')
-    expect_parity('<div style="width:400px;padding-top:1px;padding-bottom:2px"><div style="margin-top:-30px;margin-bottom:10px"></div><div style="height:5px"></div></div>')
-    expect_parity('<div style="width:400px;border-top:3px solid"><div style="margin-top:-30px;margin-bottom:10px"></div><div style="height:5px"></div></div>')
-    expect_parity('<div style="width:400px;padding-top:1px"><div style="margin-top:-40px"></div></div>')
+    expect_layout('<div style="width:400px;padding-top:1px"><div style="margin-top:-30px;margin-bottom:10px"></div><div style="height:5px"></div></div>')
+    expect_layout('<div style="width:400px;padding-top:1px;padding-bottom:2px"><div style="margin-top:-30px;margin-bottom:10px"></div><div style="height:5px"></div></div>')
+    expect_layout('<div style="width:400px;border-top:3px solid"><div style="margin-top:-30px;margin-bottom:10px"></div><div style="height:5px"></div></div>')
+    expect_layout('<div style="width:400px;padding-top:1px"><div style="margin-top:-40px"></div></div>')
     # …and with an OPEN top edge the run leaves the box entirely, which is zero tall either way
-    expect_parity('<div style="width:400px"><div style="margin-top:-30px;margin-bottom:10px"></div><div style="height:5px"></div></div>')
+    expect_layout('<div style="width:400px"><div style="margin-top:-30px;margin-bottom:10px"></div><div style="height:5px"></div></div>')
   end
 
   # Whether a height separates two margins is decided by the DECLARATION, and a CSS-wide keyword is not one:
@@ -1272,11 +1262,11 @@ x</div>))
   # stand for `auto`. Native reads that decision off rec[25]/rec[26], so the oracle taking `inherit` for auto
   # showed up here as a MISMATCH — native and Chrome said 80, the oracle 0.
   it 'reads a CSS-wide height keyword as the value it stands for' do
-    expect_parity('<div style="width:400px;height:80px"><div style="height:inherit"></div></div>')
-    expect_parity('<div style="width:400px;height:80px"><div style="min-height:inherit"></div></div>')
-    expect_parity('<div style="width:400px"><div style="height:inherit"><div style="margin:20px 0"></div></div><div style="height:5px"></div></div>')
+    expect_layout('<div style="width:400px;height:80px"><div style="height:inherit"></div></div>')
+    expect_layout('<div style="width:400px;height:80px"><div style="min-height:inherit"></div></div>')
+    expect_layout('<div style="width:400px"><div style="height:inherit"><div style="margin:20px 0"></div></div><div style="height:5px"></div></div>')
     %w[initial unset revert].each do |kw|
-      expect_parity(%(<div style="width:400px;height:80px"><div style="height:#{kw}"><div style="margin:20px 0"></div></div></div>))
+      expect_layout(%(<div style="width:400px;height:80px"><div style="height:#{kw}"><div style="margin:20px 0"></div></div></div>))
     end
   end
 
@@ -1287,23 +1277,23 @@ x</div>))
   # bottom rule's own answer now.
   it 'keeps a last child bottom margin inside a box with a declared height' do
     %w[0 0px 1px auto min-content max-content fit-content].each do |h|
-      expect_parity(%(<div style="width:400px;overflow:hidden"><div style="height:#{h}">) +
+      expect_layout(%(<div style="width:400px;overflow:hidden"><div style="height:#{h}">) +
                     '<div style="margin-bottom:12px;height:5px"></div></div></div>')
     end
     # …the same box still hands its child's TOP margin up, and still collapses through when it is empty
-    expect_parity('<div style="width:400px;overflow:hidden"><div style="height:0">' \
+    expect_layout('<div style="width:400px;overflow:hidden"><div style="height:0">' \
                   '<div style="margin-top:12px;height:5px"></div></div></div>')
-    expect_parity('<div style="width:400px"><div style="margin:20px 0"><div style="height:0"></div></div>' \
+    expect_layout('<div style="width:400px"><div style="margin:20px 0"><div style="height:0"></div></div>' \
                   '<div style="height:5px"></div></div>')
     # …and the USED height is what answers: a percentage against an INDEFINITE block is auto and lets the
     # margin out, against a definite one it is a height and keeps it in.
     %w[0% 50% 100% calc(50%)].each do |h|
-      expect_parity(%(<div style="width:400px;overflow:hidden"><div style="height:#{h}">) +
+      expect_layout(%(<div style="width:400px;overflow:hidden"><div style="height:#{h}">) +
                     '<div style="margin-bottom:12px;height:5px"></div></div></div>')
-      expect_parity(%(<div style="width:400px;overflow:hidden;height:40px"><div style="height:#{h}">) +
+      expect_layout(%(<div style="width:400px;overflow:hidden;height:40px"><div style="height:#{h}">) +
                     '<div style="margin-bottom:12px;height:5px"></div></div></div>')
       # …and where it shows: the SIBLING after the box, which the kept-in margin must not move
-      expect_parity(%(<div style="width:400px;height:60px"><div style="height:#{h}">) +
+      expect_layout(%(<div style="width:400px;height:60px"><div style="height:#{h}">) +
                     '<div style="margin-bottom:12px;height:5px"></div></div><div style="height:5px"></div></div>')
     end
   end
@@ -1313,33 +1303,33 @@ x</div>))
   # the web centre their shell, so until native did it, none of them laid out natively at all.
   describe 'auto horizontal margins place a block in its containing block' do
     it 'centres a block with both margins auto, and pushes one with a single auto' do
-      expect_parity('<div style="width:400px"><div style="width:100px;height:10px;margin:0 auto"></div></div>')
-      expect_parity('<div style="width:400px"><div style="width:100px;height:10px;margin-left:auto"></div></div>')
-      expect_parity('<div style="width:400px"><div style="width:100px;height:10px;margin-right:auto"></div></div>')
-      expect_parity('<div style="width:400px"><div style="width:100px;height:10px;margin:0 auto 0 20px"></div></div>')
+      expect_layout('<div style="width:400px"><div style="width:100px;height:10px;margin:0 auto"></div></div>')
+      expect_layout('<div style="width:400px"><div style="width:100px;height:10px;margin-left:auto"></div></div>')
+      expect_layout('<div style="width:400px"><div style="width:100px;height:10px;margin-right:auto"></div></div>')
+      expect_layout('<div style="width:400px"><div style="width:100px;height:10px;margin:0 auto 0 20px"></div></div>')
       # …and a text block, whose lines are laid out around the placement
-      expect_parity('<div style="width:400px"><div style="width:100px;margin:0 auto">text that wraps here</div></div>')
+      expect_layout('<div style="width:400px"><div style="width:100px;margin:0 auto">text that wraps here</div></div>')
     end
     # An AUTO width leaves nothing over (§10.3.3 resolves the margins to 0 first), and an over-constrained box
     # balances on its TRAILING margin — Chrome puts `width:600px; margin:0 auto` in 400px flush at x=0.
     it 'leaves an auto-width box alone and hangs an over-constrained one off the leading edge' do
-      expect_parity('<div style="width:400px"><div style="height:10px;margin:0 auto"></div></div>')
-      expect_parity('<div style="width:400px"><div style="width:600px;height:10px;margin:0 auto"></div></div>')
-      expect_parity('<div style="width:400px"><div style="width:600px;height:10px;margin-left:auto"></div></div>')
+      expect_layout('<div style="width:400px"><div style="height:10px;margin:0 auto"></div></div>')
+      expect_layout('<div style="width:400px"><div style="width:600px;height:10px;margin:0 auto"></div></div>')
+      expect_layout('<div style="width:400px"><div style="width:600px;height:10px;margin-left:auto"></div></div>')
     end
     # …on the FLOW's own axis: an `rtl` containing block balances on `margin-left`, so the same over-constrained
     # box hangs 200px off the LEFT (Chrome: x = -200).
     it 'balances on the leading margin of the flow, which rtl reverses' do
-      expect_parity('<div style="width:400px;direction:rtl"><div style="width:100px;height:10px;margin:0 auto"></div></div>')
-      expect_parity('<div style="width:400px;direction:rtl"><div style="width:600px;height:10px;margin:0 auto"></div></div>')
-      expect_parity('<div style="width:400px;direction:rtl"><div style="width:100px;height:10px;margin-left:auto"></div></div>')
+      expect_layout('<div style="width:400px;direction:rtl"><div style="width:100px;height:10px;margin:0 auto"></div></div>')
+      expect_layout('<div style="width:400px;direction:rtl"><div style="width:600px;height:10px;margin:0 auto"></div></div>')
+      expect_layout('<div style="width:400px;direction:rtl"><div style="width:100px;height:10px;margin-left:auto"></div></div>')
     end
     # A FLOAT computes its auto margins to ZERO instead (§10.3.5), and an atomic inline is placed on its line
     # by the line box, not by its margins — both must keep laying out the way they did.
     it 'gives a float and an atomic inline no slack' do
-      expect_parity('<div style="overflow:hidden;width:400px"><div style="float:left;width:100px;height:10px;margin:0 auto"></div></div>')
-      expect_parity('<div style="width:400px">t <span style="display:inline-block;width:50px;height:10px;margin:0 auto"></span> u</div>')
-      expect_parity('<div style="width:400px"><span style="display:inline-block;width:200px"><div style="width:50px;height:10px;margin:0 auto"></div></span></div>')
+      expect_layout('<div style="overflow:hidden;width:400px"><div style="float:left;width:100px;height:10px;margin:0 auto"></div></div>')
+      expect_layout('<div style="width:400px">t <span style="display:inline-block;width:50px;height:10px;margin:0 auto"></span> u</div>')
+      expect_layout('<div style="width:400px"><span style="display:inline-block;width:200px"><div style="width:50px;height:10px;margin:0 auto"></div></span></div>')
     end
     # The block flow places a child in FOUR places — the ordinary one, a text block, a box that establishes a
     # BFC beside a float, and one CLEARED past the floats — and §10.3.3 belongs to all of them. Native shared
@@ -1347,32 +1337,32 @@ x</div>))
     # at 0): a review found it, because no spec here had ever put an auto margin in a float context.
     it 'places a cleared, a BFC and a text-block child by the same rule' do
       float = '<div style="float:left;width:50px;height:20px"></div>'
-      expect_parity(%{<div style="overflow:hidden;width:400px">#{float}<div style="clear:left;width:100px;height:10px;margin:0 auto"></div></div>})
-      expect_parity(%{<div style="overflow:hidden;width:400px">#{float}<div style="clear:left;width:100px;height:10px;margin-left:auto"></div></div>})
-      expect_parity(%{<div align="center" style="overflow:hidden;width:400px">#{float}<div style="clear:left;width:100px;height:10px"></div></div>})
-      expect_parity(%{<div style="overflow:hidden;width:400px">#{float}<div style="overflow:hidden;width:100px;height:10px;margin:0 auto"></div></div>})
-      expect_parity(%{<div style="overflow:hidden;width:400px">#{float}<div style="width:100px;margin:0 auto">text</div></div>})
+      expect_layout(%{<div style="overflow:hidden;width:400px">#{float}<div style="clear:left;width:100px;height:10px;margin:0 auto"></div></div>})
+      expect_layout(%{<div style="overflow:hidden;width:400px">#{float}<div style="clear:left;width:100px;height:10px;margin-left:auto"></div></div>})
+      expect_layout(%{<div align="center" style="overflow:hidden;width:400px">#{float}<div style="clear:left;width:100px;height:10px"></div></div>})
+      expect_layout(%{<div style="overflow:hidden;width:400px">#{float}<div style="overflow:hidden;width:100px;height:10px;margin:0 auto"></div></div>})
+      expect_layout(%{<div style="overflow:hidden;width:400px">#{float}<div style="width:100px;margin:0 auto">text</div></div>})
     end
     # HTML's legacy alignment moves a narrower block-level DESCENDANT the same way `margin: auto` would —
     # `<center>` and the `align` attribute, still all over old app markup. Native laid these out at the start
     # edge and only the parity harness saw it (the walk had no gate for them at all).
     it 'moves a block the way <center> and an align attribute do' do
-      expect_parity('<center><div style="width:100px;height:10px"></div></center>')
-      expect_parity('<div align="center" style="width:400px"><div style="width:100px;height:10px"></div></div>')
-      expect_parity('<div align="right" style="width:400px"><div style="width:100px;height:10px"></div></div>')
-      expect_parity('<div align="left" style="width:400px;direction:rtl"><div style="width:100px;height:10px"></div></div>')
-      expect_parity('<div align="center" style="width:400px;direction:rtl"><div style="width:100px;height:10px"></div></div>')
+      expect_layout('<center><div style="width:100px;height:10px"></div></center>')
+      expect_layout('<div align="center" style="width:400px"><div style="width:100px;height:10px"></div></div>')
+      expect_layout('<div align="right" style="width:400px"><div style="width:100px;height:10px"></div></div>')
+      expect_layout('<div align="left" style="width:400px;direction:rtl"><div style="width:100px;height:10px"></div></div>')
+      expect_layout('<div align="center" style="width:400px;direction:rtl"><div style="width:100px;height:10px"></div></div>')
       # …and the two combinations that move NOTHING, because the box already starts at that end
-      expect_parity('<div align="right" style="width:400px;direction:rtl"><div style="width:100px;height:10px"></div></div>')
-      expect_parity('<div align="left" style="width:400px"><div style="width:100px;height:10px"></div></div>')
+      expect_layout('<div align="right" style="width:400px;direction:rtl"><div style="width:100px;height:10px"></div></div>')
+      expect_layout('<div align="left" style="width:400px"><div style="width:100px;height:10px"></div></div>')
       # …a VERTICAL-only auto margin distributes nothing across, so the legacy shift still applies through it
       # (Chrome: 150. The oracle read any auto margin as "this box distributes" and left it at 0.)
-      expect_parity('<div align="center" style="width:400px"><div style="width:100px;height:10px;margin-top:auto"></div></div>')
-      expect_parity('<div align="center" style="width:400px"><div style="width:100px;height:10px;margin-bottom:auto"></div></div>')
+      expect_layout('<div align="center" style="width:400px"><div style="width:100px;height:10px;margin-top:auto"></div></div>')
+      expect_layout('<div align="center" style="width:400px"><div style="width:100px;height:10px;margin-bottom:auto"></div></div>')
       # …and an auto margin wins over it: the box distributes, and the legacy shift is not applied on top.
-      expect_parity('<div align="center" style="width:400px"><div style="width:100px;height:10px;margin-left:auto"></div></div>')
+      expect_layout('<div align="center" style="width:400px"><div style="width:100px;height:10px;margin-left:auto"></div></div>')
       # …it reaches a DESCENDANT, not just a child (the attribute is inherited down the flow).
-      expect_parity('<div align="center" style="width:400px"><div><div style="width:100px;height:10px"></div></div></div>')
+      expect_layout('<div align="center" style="width:400px"><div><div style="width:100px;height:10px"></div></div></div>')
     end
   end
 
@@ -1381,16 +1371,16 @@ x</div>))
   # floor lifts it back (Chrome gives `box-sizing: border-box; padding: 0 10px; max-width: 5px` a width of 20).
   describe "a border box's edges floor its width after the min/max clamp" do
     it 'floors a width a max-width clamped below the box edges' do
-      expect_parity('<div style="width:400px"><div style="box-sizing:border-box;padding:0 10px;max-width:5px">x</div></div>')
-      expect_parity('<div style="width:400px"><div style="box-sizing:border-box;padding:40px;max-width:30px">x</div></div>')
-      expect_parity('<div style="width:400px"><div style="box-sizing:border-box;border:3px solid;padding:0 10px;max-width:8px;min-width:4px">x</div></div>')
-      expect_parity('<div style="width:400px"><div style="box-sizing:border-box;padding:0 10px;width:100px;max-width:5px">x</div></div>')
-      expect_parity('<div style="width:400px"><div style="box-sizing:border-box;padding:0 10px;max-width:5px;writing-mode:vertical-lr"><div style="width:40px;height:20px"></div></div></div>')
+      expect_layout('<div style="width:400px"><div style="box-sizing:border-box;padding:0 10px;max-width:5px">x</div></div>')
+      expect_layout('<div style="width:400px"><div style="box-sizing:border-box;padding:40px;max-width:30px">x</div></div>')
+      expect_layout('<div style="width:400px"><div style="box-sizing:border-box;border:3px solid;padding:0 10px;max-width:8px;min-width:4px">x</div></div>')
+      expect_layout('<div style="width:400px"><div style="box-sizing:border-box;padding:0 10px;width:100px;max-width:5px">x</div></div>')
+      expect_layout('<div style="width:400px"><div style="box-sizing:border-box;padding:0 10px;max-width:5px;writing-mode:vertical-lr"><div style="width:40px;height:20px"></div></div></div>')
     end
   end
 
   # `position: sticky` is IN FLOW, and its box is where a STATIC one's would be — not a relative one's. The
-  # oracle never puts the scroll-driven shift into `_lb`: `stickyDelta` is read by `scrollShift` and the
+  # oracle never put the scroll-driven shift into `_lb`: `stickyDelta` is read by `scrollShift` and the
   # `offsetTop` reader, so the shift lives entirely in the READ path and the layout knows nothing of it. Five
   # NINE separate gates refused sticky as "a scroll-driven shift native doesn't model", which mistook where
   # that shift is applied; native needed no new rule at all, only to stop refusing. (`nlSupported`,
@@ -1398,16 +1388,16 @@ x</div>))
   # arms of `nlGatherRuns`, the block-child arm, and the float arm — the last of which a sticky float needed.)
   describe 'a sticky box lays out where a static one would' do
     it 'takes a sticky box in every context that refused one' do
-      expect_parity('<div style="width:400px;height:200px;overflow:auto"><div style="height:50px"></div><div style="position:sticky;top:0;width:60px;height:20px"></div><div style="height:300px"></div></div>')
-      expect_parity('<div style="display:flex;width:400px"><div style="position:sticky;top:0;width:60px;height:20px"></div><div style="width:40px;height:30px"></div></div>')
-      expect_parity('<div style="display:grid;grid-template-columns:100px auto;width:400px"><div style="position:sticky;top:0;height:20px"></div><div>x</div></div>')
-      expect_parity('<table style="border-spacing:0"><tr><td style="padding:0"><div style="position:sticky;top:0">s</div></td><td style="padding:0">b</td></tr></table>')
-      expect_parity('<div style="width:400px">aaa <span style="position:sticky;top:0;display:inline-block;width:20px;height:10px"></span> bbb</div>')
+      expect_layout('<div style="width:400px;height:200px;overflow:auto"><div style="height:50px"></div><div style="position:sticky;top:0;width:60px;height:20px"></div><div style="height:300px"></div></div>')
+      expect_layout('<div style="display:flex;width:400px"><div style="position:sticky;top:0;width:60px;height:20px"></div><div style="width:40px;height:30px"></div></div>')
+      expect_layout('<div style="display:grid;grid-template-columns:100px auto;width:400px"><div style="position:sticky;top:0;height:20px"></div><div>x</div></div>')
+      expect_layout('<table style="border-spacing:0"><tr><td style="padding:0"><div style="position:sticky;top:0">s</div></td><td style="padding:0">b</td></tr></table>')
+      expect_layout('<div style="width:400px">aaa <span style="position:sticky;top:0;display:inline-block;width:20px;height:10px"></span> bbb</div>')
     end
     # …a FLOAT too: a sticky float is a float, and its box needs nothing a static one's does not.
     it 'takes a sticky float' do
-      expect_parity('<div style="width:400px"><div style="position:sticky;top:0;float:left;width:40px;height:10px"></div><div>text beside it</div></div>')
-      expect_parity('<div style="width:400px;height:200px;overflow:auto"><div style="height:50px"></div><div style="position:sticky;top:0;float:left;width:40px;height:10px"></div></div>')
+      expect_layout('<div style="width:400px"><div style="position:sticky;top:0;float:left;width:40px;height:10px"></div><div>text beside it</div></div>')
+      expect_layout('<div style="width:400px;height:200px;overflow:auto"><div style="height:50px"></div><div style="position:sticky;top:0;float:left;width:40px;height:10px"></div></div>')
     end
   end
 
@@ -1422,7 +1412,7 @@ x</div>))
   # around the band or CLEARS it stands where the unshifted rectangle puts it.
   describe 'a relatively shifted float' do
     # …and every shape here has to make the BAND observable, which is not automatic and is where a first
-    # version of this example went wrong: the parity compare looks at element BOXES, so a band that moved with
+    # version of this example went wrong: the parity compare looked at element BOXES, so a band that moved with
     # the box shows up only where some compared box reads it. A `clear` below a flow cursor that has already
     # passed the float reads nothing, and a purely HORIZONTAL shift moves only line content, which is not a
     # box at all. What works is a VERTICAL component on the float's own offset plus either an `overflow:hidden`
@@ -1430,23 +1420,23 @@ x</div>))
     # engine deliberately broken to move the band with the box: 8 of the first 10 shapes caught nothing.
     it 'moves the box and not the band, in each position the walk gates' do
       # a block-level float, an auto-width one, and a percentage offset
-      expect_parity('<div style="width:400px;overflow:hidden"><div style="position:relative;left:12px;top:-7px;float:left;width:40px;height:50px"></div><div>text beside it</div><div style="clear:left;height:5px"></div></div>')
-      expect_parity('<div style="width:400px;overflow:hidden"><div style="position:relative;left:-18px;top:6px;float:left">a b c</div><div>one two three four five six</div></div>')
-      expect_parity('<div style="width:400px;height:120px;overflow:hidden"><div style="position:relative;top:25%;float:right;width:40px;height:10px"></div><div>text</div><div style="clear:both;height:5px"></div></div>')
+      expect_layout('<div style="width:400px;overflow:hidden"><div style="position:relative;left:12px;top:-7px;float:left;width:40px;height:50px"></div><div>text beside it</div><div style="clear:left;height:5px"></div></div>')
+      expect_layout('<div style="width:400px;overflow:hidden"><div style="position:relative;left:-18px;top:6px;float:left">a b c</div><div>one two three four five six</div></div>')
+      expect_layout('<div style="width:400px;height:120px;overflow:hidden"><div style="position:relative;top:25%;float:right;width:40px;height:10px"></div><div>text</div><div style="clear:both;height:5px"></div></div>')
       # …written in INLINE content, which is a second gate (`nlGatherRuns`'s float hook)
-      expect_parity('<div style="width:200px;overflow:hidden">aaa <div style="position:relative;left:9px;top:6px;float:left;width:50px;height:20px"></div>bbb ccc ddd eee fff ggg</div>')
-      expect_parity('<div style="width:200px">aaa <div style="position:relative;left:9px;top:6px;float:left;width:50px;height:20px"></div>bbb ccc<div style="clear:left;height:5px"></div></div>')
+      expect_layout('<div style="width:200px;overflow:hidden">aaa <div style="position:relative;left:9px;top:6px;float:left;width:50px;height:20px"></div>bbb ccc ddd eee fff ggg</div>')
+      expect_layout('<div style="width:200px">aaa <div style="position:relative;left:9px;top:6px;float:left;width:50px;height:20px"></div>bbb ccc<div style="clear:left;height:5px"></div></div>')
       # …and in a MIXED block, which is a third (the anonymous group's own hook)
-      expect_parity('<div style="width:200px;overflow:hidden"><p>a</p>text <span style="position:relative;top:8px;left:-6px;float:left;width:50px;height:30px"></span>more text<p style="clear:left">b</p></div>')
+      expect_layout('<div style="width:200px;overflow:hidden"><p>a</p>text <span style="position:relative;top:8px;left:-6px;float:left;width:50px;height:30px"></span>more text<p style="clear:left">b</p></div>')
     end
     # …while an ancestor's shift and the float's own compose, each through its own record.
     it 'composes with an ancestor shift' do
-      expect_parity('<div style="width:400px;overflow:hidden"><div style="position:relative;top:10px;left:20px"><div style="position:relative;left:12px;top:9px;float:left;width:40px;height:50px"></div></div><div style="clear:left;height:5px"></div></div>')
+      expect_layout('<div style="width:400px;overflow:hidden"><div style="position:relative;top:10px;left:20px"><div style="position:relative;left:12px;top:9px;float:left;width:40px;height:50px"></div></div><div style="clear:left;height:5px"></div></div>')
     end
     # …and the insets it is given change nothing about the box, whichever way they point.
     it 'ignores the insets, which are the read path' do
       ['top:0', 'top:10px', 'bottom:0', 'left:0;top:0', 'top:-5px', 'bottom:20px;right:10px'].each do |inset|
-        expect_parity(%(<div style="width:400px;height:200px;overflow:auto"><div style="height:50px"></div><div style="position:sticky;#{inset};width:60px;height:20px"></div><div style="height:300px"></div></div>))
+        expect_layout(%(<div style="width:400px;height:200px;overflow:auto"><div style="height:50px"></div><div style="position:sticky;#{inset};width:60px;height:20px"></div><div style="height:300px"></div></div>))
       end
     end
   end
@@ -1466,7 +1456,7 @@ x</div>))
         '<div style="width:300px;height:200px"><div style="float:left;width:25%;height:10%">f</div><div style="height:20px"></div></div>',
         '<div style="width:300px;height:200px">t <span style="display:inline-block;width:40%;min-height:30%">ib</span></div>',
         '<div style="width:300px;height:200px"><div style="width:50%;height:50%"><div style="height:50%;width:50%">nested</div></div></div>'
-      ].each {|body| expect_parity(body) }
+      ].each {|body| expect_layout(body) }
     end
 
     # …and the MARGINS and PADDING, against the containing block's width on every side: the walk sends each edge's
@@ -1483,23 +1473,23 @@ x</div>))
         '<div style="width:300px"><div style="margin-top:10%"><div style="margin-top:5%">collapse</div></div></div>',
         '<div style="display:flex;width:420px"><div style="box-sizing:border-box;width:60%;padding:0 10%">item</div><div style="width:30px;height:10px"></div></div>',
         '<div style="width:260px"><div style="float:left;margin:-5% 0 0 -3%">f</div></div>'
-      ].each {|body| expect_parity(body) }
+      ].each {|body| expect_layout(body) }
     end
     # A text indent's percentage is of the block's CONTENT width — the padding it subtracts is the resolved one, not
     # the length part a percentage padding leaves on the record (80 where 64 is right, with `padding: 0 10%` and
     # `text-indent: 20%` in a 400px block).
     it 'measures a text indent against the padded content width' do
       # (the words fill the first line to within the 16px the wrong basis would take off it)
-      expect_parity(%(<div style="width:400px"><div style="padding:0 10%;text-indent:20%">#{(['ab'] * 27).join(' ')} cccccc</div></div>))
+      expect_layout(%(<div style="width:400px"><div style="padding:0 10%;text-indent:20%">#{(['ab'] * 27).join(' ')} cccccc</div></div>))
     end
     # The ORACLE's basis was `content.height || null`: a definite 0 read as none, and an IMPOSED height (a grid row,
     # both insets) not yet clamped by the box's own max-height. Chrome and native: a definite 0 is 0 (the embed
     # wrapper's child is its content's height, not 0 — its percentage height resolves to 0), and the clamp comes
     # first (`height: 50%` under a 100px row capped at 50 is 25).
     it 'resolves against a definite zero, and against an imposed height clamped' do
-      expect_parity('<div style="width:300px;height:0"><div style="height:50%">x</div></div>')
-      expect_parity('<div style="display:grid;grid-auto-rows:100px;width:300px"><div style="max-height:50px"><div style="height:50%">x</div></div></div>')
-      expect_parity('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:0;bottom:0;max-height:100px;width:200px"><div style="height:50%">x</div></div></div>')
+      expect_layout('<div style="width:300px;height:0"><div style="height:50%">x</div></div>')
+      expect_layout('<div style="display:grid;grid-auto-rows:100px;width:300px"><div style="max-height:50px"><div style="height:50%">x</div></div></div>')
+      expect_layout('<div style="position:relative;width:300px;height:200px"><div style="position:absolute;top:0;bottom:0;max-height:100px;width:200px"><div style="height:50%">x</div></div></div>')
       session = simulated_session(page('<div style="display:grid;grid-auto-rows:100px;width:300px"><div style="max-height:50px"><div id="t" style="height:50%">x</div></div></div>'))
       session.visit '/'
       expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")).to eq(25)
@@ -1508,13 +1498,13 @@ x</div>))
     # with an atomic inside it too: a percentage one once went over as a fraction that was then cleared, and the
     # item took its height from content with no floor (40 where the oracle's is 128).
     it 'keeps a flex item\'s percentage min-height around a positioned atomic' do
-      expect_parity(%(<div style="display:flex;height:180px;align-items:flex-start"><div style="display:flex;align-items:center;min-height:60%;padding:10px 0"><div>t #{WalkRefusals::POSITIONED}</div><div style="height:20px;width:10px"></div></div></div>))
+      expect_layout(%(<div style="display:flex;height:180px;align-items:flex-start"><div style="display:flex;align-items:center;min-height:60%;padding:10px 0"><div>t #{STICKY_ATOMIC}</div><div style="height:20px;width:10px"></div></div></div>))
     end
     # A box laid out twice under two different HEIGHT bases — a flex item measured with an auto height, then
     # stretched to its line — resolves a percentage min-height against the second. The oracle reused the first
     # layout (it checked the width basis only) and kept the unfloored 18 where Chrome and native give 96.
     it 'lays a percentage min-height out again once its height basis changes' do
-      expect_parity('<div style="display:flex;height:160px;width:400px"><div style="flex:1"><div style="min-height:60%">c</div></div></div>')
+      expect_layout('<div style="display:flex;height:160px;width:400px"><div style="flex:1"><div style="min-height:60%">c</div></div></div>')
       session = simulated_session(page('<div style="display:flex;height:160px;width:400px"><div style="flex:1"><div id="t" style="min-height:60%">c</div></div></div>'))
       session.visit '/'
       expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")).to eq(96)
@@ -1528,7 +1518,7 @@ x</div>))
   it 'resolves a margin and a padding written as comparison functions natively' do
     body = '<div style="width:300px"><div id="m" style="margin-top:max(10%, 12px);padding:clamp(4px, 5%, 30px) clamp(0px, 10% - 20px, 40px);' \
            'border:2px solid">x</div></div>'
-    expect_parity(body)
+    expect_layout(body)
     expect(laid_out_rect(body)).to eq([0, 30, 300, 52])
   end
   # …and a comparison inside a `calc()` SUM — subtracted, scaled by a number, divided — travels as a program too
@@ -1544,7 +1534,7 @@ x</div>))
       '<div style="display:flex;width:300px;column-gap:calc(min(10%, 20px) + 2px)"><div style="width:10px;height:10px"></div><div id="m" style="width:10px;height:10px"></div></div>' => [32, 0, 10, 10],
       '<div style="width:300px"><div id="m" style="position:relative;left:calc(50% - max(10%, 20px));height:10px"></div></div>' => [120, 0, 300, 10]
     }.each do |body, rect|
-      expect_parity(body)
+      expect_layout(body)
       laid_out_rect(body).zip(rect).each {|g, w| expect(g).to be_within(0.01).of(w), body }
     end
   end

@@ -2,100 +2,60 @@
 grid_table:
   counts:
     passes: 3
-    nl_passes: 0
-    nl_declines: 0
-    nl_records_copied: 0
-    nl_blocks_sent: 0
-    nl_gate_answers: 0
-    nl_measures_put_back: 1200
     rust_passes: 3
     rust_declines: 0
+    rust_measures_put_back: 1200
     rust_records_walked: 6015
     rust_records_spliced: 0
-    element_layouts: 0
-    reuse_hit: 0
-    reuse_remeasured: 0
-    reuse_escapingAbs: 0
   wall:
-    workload_ms: 113.982
-    calib_ms: 2.729
-    ratio: 41.773
+    workload_ms: 90.347
+    calib_ms: 2.713
+    ratio: 33.305
 shadow_host:
   counts:
     passes: 3
-    nl_passes: 0
-    nl_declines: 0
-    nl_records_copied: 0
-    nl_blocks_sent: 0
-    nl_gate_answers: 0
-    nl_measures_put_back: 1201
     rust_passes: 3
     rust_declines: 0
+    rust_measures_put_back: 1201
     rust_records_walked: 6017
     rust_records_spliced: 4
-    element_layouts: 0
-    reuse_hit: 0
-    reuse_remeasured: 0
-    reuse_escapingAbs: 0
   wall:
-    workload_ms: 116.872
-    calib_ms: 2.757
-    ratio: 42.392
+    workload_ms: 87.465
+    calib_ms: 2.704
+    ratio: 32.345
 layout_walk:
   counts:
-    ok: 1
-    nodes: 2329
-    compared: 2329
-    mismatches: 0
-    sibScans: 1
-    nativeAtomics: 700
-    nativeFlexRows: 8
-    nativeIntrinsicGrids: 0
-    nativeOutOfFlow: 0
-    pushedContributions: 0
+    passes: 3
+    rust_passes: 3
+    rust_declines: 0
+    rust_measures_put_back: 1209
+    rust_records_walked: 6340
+    rust_records_spliced: 650
   wall:
-    workload_ms: 218.06
-    calib_ms: 2.973
-    ratio: 73.346
+    workload_ms: 125.308
+    calib_ms: 2.782
+    ratio: 45.04
 flex_shell:
   counts:
     passes: 6
-    nl_passes: 0
-    nl_declines: 0
-    nl_records_copied: 0
-    nl_blocks_sent: 0
-    nl_gate_answers: 0
-    nl_measures_put_back: 2406
     rust_passes: 6
     rust_declines: 0
+    rust_measures_put_back: 2406
     rust_records_walked: 2124
     rust_records_spliced: 1500
-    element_layouts: 0
-    reuse_hit: 0
-    reuse_remeasured: 0
-    reuse_escapingAbs: 0
   wall:
-    workload_ms: 37.374
-    calib_ms: 2.743
-    ratio: 13.623
+    workload_ms: 37.701
+    calib_ms: 2.754
+    ratio: 13.69
 flex_row_shell:
   counts:
     passes: 5
-    nl_passes: 0
-    nl_declines: 0
-    nl_records_copied: 0
-    nl_blocks_sent: 0
-    nl_gate_answers: 0
-    nl_measures_put_back: 262
     rust_passes: 5
     rust_declines: 0
+    rust_measures_put_back: 262
     rust_records_walked: 7815
     rust_records_spliced: 7200
-    element_layouts: 0
-    reuse_hit: 0
-    reuse_remeasured: 0
-    reuse_escapingAbs: 0
   wall:
-    workload_ms: 81.881
-    calib_ms: 2.771
-    ratio: 29.545
+    workload_ms: 78.472
+    calib_ms: 2.761
+    ratio: 28.426

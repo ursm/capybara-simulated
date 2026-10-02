@@ -809,24 +809,14 @@ module Capybara
         c.eval_void('globalThis.__csimArenaVerify = true;') if ENV['CSIM_ARENA_VERIFY'] == '1'
       end
 
-      # The style engine and the native layout, in the main realm and in every frame realm alike: a frame's document is
-      # a page like any other, and seeding only the main one left every iframe to the JS layout (the oracle).
+      # The style engine and the layout, in the main realm and in every frame realm alike: a frame's document is a page
+      # like any other.
       def seed_layout(c)
         # The style engine (stylo): it styles the page, answers every style read and runs the CSS animations, and the
-        # Rust walk lays the page out from it. The JS cascade's declared values remain only for the JS layout (the oracle),
-        # which runs where the walk declines.
+        # Rust walk lays the page out from it.
         c.eval_void('__csimEnableStylo();')
-        # Native LAYOUT (the flip): the walk and the native pass lay the page out, and the JS layout runs only where
-        # they decline (layout.js `nativeLayoutPass`). ON BY DEFAULT since every gate, WPT and all five app suites
-        # passed under it; CSIM_NATIVE_LAYOUT=0 is the rollback switch.
-        c.eval_void('globalThis.__csimNativeLayout = true;') unless ENV['CSIM_NATIVE_LAYOUT'] == '0'
-        # …and the check on its subtree reuse: every pass walked again without it, and any difference thrown.
+        # …and the check on the Rust walk's subtree reuse: every pass walked again without it, and any difference thrown.
         c.eval_void('globalThis.__csimNativeLayoutVerifyReuse = true;') if ENV['CSIM_NL_REUSE_VERIFY'] == '1'
-        # …and the Rust walk held against the JS one, record by record, after every pass (`walk_ops.rs`).
-        c.eval_void('globalThis.__csimWalkParity = true;') if ENV['CSIM_WALK_PARITY'] == '1'
-        # …and under the style engine the RUST walk builds the native pass first (`nlRustPass`); CSIM_RUST_WALK=0 keeps the
-        # JS walk.
-        c.eval_void('globalThis.__csimRustWalk = false;') if ENV['CSIM_RUST_WALK'] == '0'
       end
 
       # The bridge calls `__csim_createFrameRealm(url, body, contentType, parentId)`
