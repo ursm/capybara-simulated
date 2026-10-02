@@ -17,20 +17,20 @@ mod cascade;
 mod document_encoding;
 mod dom;
 mod element_state;
-// Native text metrics (fontations) — used IN-PROCESS by native inline layout (L2, mod layout); JS
-// registers a font (registerFontPath) to a handle it passes in the layout inputs.
+// Native text metrics (fontations) — used IN-PROCESS by inline layout (mod layout); the JS side
+// registers a font (registerFontPath) to a handle it names the face by (`walkFace`).
 mod font;
 // HTML's presentational hints: the declarations an element's attributes add to the cascade.
 mod hints;
 mod html_parse;
-// Native layout (reader-flip endgame), stage L1 = block flow. Driven by the layoutPass / boxOf ops.
+// Layout: the records the walk builds (mod walk) laid out, driven by the `layoutBuild` op (mod walk_ops).
 mod layout;
 mod selector;
 // The style engine: stylo over the arena.
 mod style;
 mod style_fonts;
-// The Unicode classes the ORACLE asks a regex for, parsed out of that same regex by regex-syntax.
 mod text_codec;
+// The Unicode classes layout asks of a character, parsed out of the regex that spells them by regex-syntax.
 mod unicode;
 mod url_ops;
 mod validity;
@@ -53,7 +53,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // `require`, where magnus turns the panic into a Ruby-level failure that names it — not later on the
     // layout path, which runs inside a V8 `extern "C"` callback where the unwind aborts the process instead.
     unicode::init();
-    // …and expose them: the suite checks them against what the ORACLE's own engine answers for the same
+    // …and expose them: the suite checks them against what the JS engine (V8) answers for the same
     // regex, which is the invariant `unicode.rs` rests on. Nothing in the driver itself calls this.
     let native = ruby
         .define_module("Capybara")?

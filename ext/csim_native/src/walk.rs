@@ -1,20 +1,20 @@
-// The layout WALK in Rust: the arena and the style engine's computed values turned into the records the layout pass
-// reads (`layout::Input`, its runs and their texts) — what layout.js's `nlShadowRun` builds from the JS cascade, built
-// here from stylo's, with no V8 crossing per element. Step 3 of the native pipeline: one native path from style to
-// layout.
+// The layout WALK: the arena and the style engine's computed values turned into the records a layout pass reads
+// (`layout::Input`, its runs and their texts, its grid and inline tables), with no V8 crossing per element — the one
+// path from style to layout. `build` walks the flat tree from the pass root and `layout.rs` lays the records out.
 //
-// It produces the SAME records, and that is the contract while the JS walk still exists: the parity instrument
-// (`CSIM_WALK_PARITY=1`) builds from every pass root the JS walk laid out and compares the two field by field. So the
-// JS walk's MODEL rules are this walk's too, ported as they stand — a line height rounded to whole px, a baseline
-// floored within its line box, a face bucketed to regular / bold × italic — where the VALUES come from stylo: a
-// difference there is the two style systems disagreeing (stylo's lengths are f32; it snaps a border width), which the
-// instrument tallies apart from a record the walks built differently.
+// The VALUES come from the style engine; the MODEL rules are the walk's own — a line height rounded to whole px, a
+// baseline floored within its line box, a face bucketed to regular / bold × italic and resolved by the JS side
+// (`Outcome::NeedsFaces`), a generated box made by the JS side before its record can name it (`Outcome::NeedsBoxes`).
 //
-// It builds only what it has been taught, and DECLINES the rest by name — a grid, a vertical writing mode, a list-box
-// `<select>`, a shadow tree, a `display: contents` element — as the JS walk declines what native cannot lay out: the JS
-// walk then lays the page out as before. It mirrors that walk's FLIP mode, where every branch that
-// would read the JS layout's own boxes (a pushed size, a replayed box, a percentage resolved against the JS layout's
-// basis) declines the pass instead: so a shape it takes is one whose records say only what the page declares.
+// A pass that built a subtree's records exactly as the last one did reuses them: an unchanged subtree is spliced back
+// from the last kept pass (`Walk::splice`), and its layout put back from the measure cache (`walk_reuse`).
+//
+// It builds only what it has been taught, and DECLINES the rest by name (`Outcome::Declined`) — a box no container
+// arm lays out, an out-of-flow box whose containing block is outside the pass, a block-level box inside inline content
+// it cannot split, a run in a face that is no system font, a math function past what a program can hold, a table shape
+// it does not model, an edge whose percentages no pair or program reproduces at every basis. A declined walk declines
+// the whole page: layout.js lays the root box out alone and counts the reason. So a shape it takes is one whose
+// records say only what the page declares.
 
 use std::collections::HashMap;
 
@@ -30,12 +30,11 @@ use style::values::specified::box_::Overflow;
 use style::values::specified::box_::{Display, DisplayInside, DisplayOutside};
 
 // The display the walk lays a box out by: the style engine's, with a `-webkit-box` / `-webkit-inline-box` a plain
-// BLOCK — as the JS model lays out every display it has no arm of its own for (layout.js `nlBlockDisplay`), its
-// children in its flow rather than items — and a RUBY display an inline box, its annotation on the line beside its base
-// (as the JS model lays the `<ruby>` and `<rt>` elements out; a `block ruby` is a block). Chrome lays the first out as a
-// legacy flex box, clamping lines by `-webkit-line-clamp`, and a ruby with its annotation above its base: divergences
-// both engines share, recorded. (The JS model makes a ruby display an AUTHOR gives any other element a block, its
-// fallthrough; inline-level is what the spec and Chrome say, and which origin a display came from is no computed value.)
+// BLOCK, its children in its flow rather than items — and a RUBY display an inline box, its annotation on the line
+// beside its base (a `block ruby` is a block). Chrome lays the first out as a legacy flex box, clamping lines by
+// `-webkit-line-clamp`, and a ruby with its annotation above its base: divergences recorded. (A ruby display an AUTHOR
+// gives any other element is inline-level too: that is what the spec and Chrome say, and which origin a display came
+// from is no computed value.)
 // …except on a `<button>`, laid out by HTML's button layout: an inline-level display is an inline-block there and any
 // other a flow-root, and an internal ruby display is no inline-level one — a flow-root block, as Chrome lays it out
 // (`button-layout/display-other`). `tag` is the element's `rendering_tag`.
@@ -64,7 +63,7 @@ use crate::dom::{NodeId, NodeKind, RealmArena};
 use crate::layout::{MATH_LINE, MATH_MAX, MATH_MIN, MATH_NEG, MATH_SCALE, MATH_SUM};
 use crate::layout::{InlineBox, Input, Run, RunText, DISPLAY_BLOCK, DISPLAY_TEXT_BLOCK, RUN_ATOMIC, RUN_BR, RUN_CLOSE, RUN_FLOAT, RUN_OOF, RUN_OPEN, RUN_TEXT, RUN_WBR};
 
-// A face the walk measures a run in, as the JS side resolved it for the family and the weight / style bucket: the
+// A face the walk measures a run in, as the JS side resolves it for the family and the weight / style bucket: the
 // layout's font handle and the metrics the model rules read off it (per em — ascent, descent, line gap, and the
 // advance of a space, or the face's average where it has none).
 #[derive(Clone, Copy, Debug)]
@@ -91,8 +90,8 @@ fn same_face(a: Option<Face>, b: Option<Face>) -> bool {
     }
 }
 
-// Which face: the family list as the computed value serializes it, and the JS walk's bucket (`''`, `bold`, `italic`,
-// `bold:italic`).
+// Which face: the family list as the computed value serializes it, and its weight / style bucket (`''`, `bold`,
+// `italic`, `bold:italic`).
 pub(crate) type FaceKey = (String, &'static str);
 
 // The faces a realm has been told of — ONE table, which the walk and the style engine's font metrics (`ex`, `ch`) both
@@ -211,7 +210,7 @@ pub(crate) struct Built {
     pub(crate) paint: Vec<PaintMark>,
 }
 // A text run as a painter draws it: its run index, its baseline shift, and the element each part of it was written in
-// (`[(offset, nid)]`, the JS walk's `el` / `joins`).
+// (`[(offset, nid)]`).
 pub(crate) struct PaintMark {
     pub(crate) run: usize,
     pub(crate) shift: f64,
@@ -300,7 +299,6 @@ pub(crate) struct MathTable {
     index: HashMap<Vec<u64>, u32>,
 }
 
-// Walk the subtree at `root` — the element the JS walk took as its pass root.
 // The direction the ROOT element USES — the principal writing mode's (CSS Writing Modes 3 §8): its `<body>` child's where
 // it has one, else its own. `<body dir=rtl>` in an ltr document lays the body out from the right, and scrolls the
 // viewport from there (Chrome and Firefox alike); the root's COMPUTED `direction`, which `getComputedStyle` reports, is
@@ -422,12 +420,12 @@ fn flat_children<'a>(arena: &'a RealmArena, node: &'a crate::dom::NodeData) -> &
 
 // A pass's GENERATED CONTENT (`pseudoNodeFor`): each `::before` / `::after` box that renders, the element it is of, and
 // the text its `content` makes of the style engine's value. The box is the node the JS side registered for it
-// (`linkPseudoBox`), so both walks' records name the same box; its text is the one node the walk makes itself, since no
-// tree holds one — an id of its own generation, which no arena node has.
+// (`linkPseudoBox`), so the record names a node the JS side holds; its text is the one node the walk makes itself,
+// since no tree holds one — an id of its own generation, which no arena node has.
 //
 // An element's boxes are resolved the first time the walk asks for its children (`boxes_of`, from `push_children`) —
 // never for a subtree the walk does not enter — and a box that renders with no node linked for it is noted then, for the
-// pass to answer once the walk is done (`Outcome::NeedsBoxes`). The whole flat tree was scanned before every walk.
+// pass to answer once the walk is done (`Outcome::NeedsBoxes`).
 struct Generated<'a> {
     arena: &'a RealmArena,
     // (…the texts' home, which hands out references for as long as the walk runs)
@@ -449,8 +447,8 @@ const GENERATED_TEXT: u32 = u32::MAX;
 const PSEUDOS: [style::selector_parser::PseudoElement; 2] =
     [style::selector_parser::PseudoElement::Before, style::selector_parser::PseudoElement::After];
 // The elements that generate no content whatever they declare (`NO_GENERATED_CONTENT`): the replaced ones, the
-// controls, and the breaks — and a `<progress>` / `<meter>`, which the JS walk lays out as a leaf of its own size, so
-// no box it could generate is ever there (Chrome draws none either).
+// controls, and the breaks — and a `<progress>` / `<meter>`, which the walk lays out as a leaf of its own size, so no
+// box it could generate is ever there (Chrome draws none either).
 const NO_GENERATED_CONTENT: [&str; 16] = [
     "img", "input", "textarea", "select", "iframe", "video", "audio", "canvas", "object", "embed", "svg", "br", "wbr", "frame",
     "progress", "meter",
@@ -551,7 +549,7 @@ struct Walk<'a> {
     root: NodeId,
     saw_float: (bool, bool),
     // The element each gathered entry is of, each tabled inline box's entry by element, and the out-of-flow records whose
-    // containing block is an inline box (`NL_CB_INLINE`), named by its entry once the pass has tabled it.
+    // containing block is an inline box (`layout::CB_INLINE`), named by its entry once the pass has tabled it.
     entry_el: Vec<NodeId>,
     inline_of: HashMap<NodeId, usize>,
     inline_cbs: Vec<(i32, NodeId)>,
@@ -565,7 +563,7 @@ struct Walk<'a> {
     // What each record's subtree was (`Built::extents`).
     extents: Vec<Extent>,
     // The last kept pass, which an unchanged subtree is spliced back from (`splice`) — None where there is none, or
-    // where the pass has to be walked whole (the walk-parity instrument, the reuse check's second walk).
+    // where the pass has to be walked whole (a pass that paints, the reuse check's second walk).
     prior: Option<&'a Prior>,
     // How deep in an ATTEMPT the walk is — `mixed_block`'s group, taken back if it makes no line: nothing is spliced in
     // one, whose taking back would have to take the splice back too.
@@ -574,8 +572,7 @@ struct Walk<'a> {
     root_font_size: Option<f64>,
 }
 
-// An alignment keyword as the JS walk reads it (`alignKeyword`): `safe` / `unsafe` dropped, `first baseline` the
-// baseline.
+// An alignment keyword as the walk reads it: `safe` / `unsafe` dropped, `first baseline` the baseline.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Kw {
     Auto,
@@ -620,7 +617,7 @@ fn align_kw(flags: style::values::specified::align::AlignFlags) -> Kw {
         _ => Kw::Other,
     }
 }
-// `align-content` as the code native reads (`flexAlignContentCode`).
+// `align-content` as the code the layout reads.
 fn align_content_code(flags: style::values::specified::align::AlignFlags) -> u8 {
     match align_kw(flags) {
         Kw::FlexStart | Kw::Baseline => 0,
@@ -655,14 +652,14 @@ fn flow_sides(style: &ComputedValues) -> [Side; 4] {
     };
     if style.get_inherited_box().direction == Direction::Rtl { [bs, be, ie, is] } else { [bs, be, is, ie] }
 }
-// Does the element's inline axis start at the RIGHT (`startsInlineAtRight`) — what moves a line's alignment: `rtl` in a
+// Does the element's inline axis start at the RIGHT — what moves a line's alignment: `rtl` in a
 // horizontal writing mode, never in a vertical one, whose lines run down.
 fn starts_at_right(style: &ComputedValues) -> bool {
     matches!(flow_sides(style)[2], Side::Right)
 }
 
 // Where a line's baseline alignment is asked: a row keeps it, a column reads it along the axis, an out-of-flow box's
-// static position in the flow (`crossAlign`'s `baselineMode`).
+// static position in the flow.
 #[derive(Clone, Copy, PartialEq)]
 enum BaselineMode {
     Keep,
@@ -675,7 +672,7 @@ impl BaselineMode {
     }
 }
 
-// A flex container's axes (`flexAxisPlan` / `axisPlan`), in a horizontal writing mode: where the main axis starts, the
+// A flex container's axes, in a horizontal writing mode: where the main axis starts, the
 // cross axis starts, whether that is the far edge, and how the lines wrap (0 nowrap, 1 wrap, 2 wrap-reverse).
 struct FlexPlan {
     column: bool,
@@ -688,7 +685,7 @@ struct FlexPlan {
     cross_flip: bool,
     wrap: u8,
     // …and the side a line's LEFT is on in a vertical writing mode — the top, but `sideways-lr`'s bottom — which a
-    // vertical row's `justify-content: left` / `right` name (`justifyPhysicalTarget`)
+    // vertical row's `justify-content: left` / `right` name)
     line_left: Side,
 }
 impl FlexPlan {
@@ -735,7 +732,7 @@ impl FlexPlan {
             },
         }
     }
-    // `justify-content` as the code native reads (`flexJustifyCode`): physical `left` / `right` resolved against the
+    // `justify-content` as the code the layout reads: physical `left` / `right` resolved against the
     // main axis, a flow-relative keyword turned by a reversed direction.
     fn justify_code(&self, flags: style::values::specified::align::AlignFlags) -> u8 {
         let mut k = align_kw(flags);
@@ -775,7 +772,7 @@ impl FlexPlan {
             _ => 0,
         }
     }
-    // An item's cross alignment (`crossAlign`, and `crossAlignPhysical` where `physical`): its `align-self` (`own`),
+    // An item's cross alignment (PHYSICAL where `physical`): its `align-self` (`own`),
     // else the container's `align-items`, as a keyword along the cross axis — `self-start` / `self-end` by the item's
     // own flow (`own_sides`, its `flow_sides`).
     fn cross_align(&self, items: Kw, own: Kw, own_sides: [Side; 4], mode: BaselineMode, physical: bool) -> Kw {
@@ -823,10 +820,11 @@ impl FlexPlan {
         }
         a
     }
-    // An item's `auto` margins as native reads them (rec[41]): 1 main-lead, 2 main-trail, 4 cross-lead, 8 cross-trail —
+    // An item's `auto` margins as the layout reads them (`flex_item_auto`): 1 main-lead, 2 main-trail, 4 cross-lead,
+    // 8 cross-trail —
     // the main pair along the axis, the cross pair PHYSICALLY (top / bottom across a row, left / right across a column).
     fn auto_margin_bits(&self, auto: u8) -> u8 {
-        // (`auto` is rec[76]'s mask: 1 left, 2 right, 4 top, 8 bottom)
+        // (`auto` is `auto_margins`' mask: 1 left, 2 right, 4 top, 8 bottom)
         let bit = |side: Side| match side {
             Side::Left => auto & 1 != 0,
             Side::Right => auto & 2 != 0,
@@ -845,7 +843,7 @@ impl FlexPlan {
     }
 }
 
-// A gap as native resolves it (`gapSpec`): `normal` none, else its pair or program.
+// A gap as the layout resolves it: `normal` none, else its pair or program.
 fn gap(v: &style::values::computed::length::NonNegativeLengthPercentageOrNormal) -> Result<Spec, &'static str> {
     use style::values::generics::length::GenericLengthPercentageOrNormal as OrNormal;
     match v {
@@ -854,7 +852,8 @@ fn gap(v: &style::values::computed::length::NonNegativeLengthPercentageOrNormal)
     }
 }
 
-// An item's `flex-basis` as native resolves it against the main size (rec[63] / rec[97] / its program / rec[64]): none
+// An item's `flex-basis` as the layout resolves it against the main size (`flex_basis_cb` / `flex_basis_frac` /
+// `flex_basis_math` / `flex_basis_kw`): none
 // for `auto`, a keyword by its code (1 content, 2 min-content, 3 max-content, 4 fit-content), else its pair.
 struct FlexBasisSpec {
     px: f64,
@@ -1051,7 +1050,7 @@ fn combine(a: f64, b: f64) -> f64 {
 fn half(w: f64) -> f64 {
     if w < 0.0 { 0.0 } else { w / 2.0 }
 }
-// A grid's column template as the JS walk marshals it (`gridTemplateOf`): the tracks with an `auto-fill` / `auto-fit`
+// A grid's column template as the layout takes it: the tracks with an `auto-fill` / `auto-fit`
 // repeat left as ONE copy — where it starts, how long it is, and 1 fill / 2 fit (-1, 0, 0 for none) — and a literal
 // `repeat(N, …)` expanded. `none` is one implicit column the full width.
 struct GridTemplate {
@@ -1060,7 +1059,7 @@ struct GridTemplate {
     repeat_len: f64,
     repeat_kind: f64,
 }
-// One track (`parseTrack`): a length and / or a percentage (a linear `calc()` is both), an `fr`, a keyword, a
+// One track: a length and / or a percentage (a linear `calc()` is both), an `fr`, a keyword, a
 // `fit-content()` cap, and the floor a `minmax()` gives it.
 #[derive(Default)]
 struct GridTrack {
@@ -1187,14 +1186,14 @@ impl GridTrack {
         if min { SIDE_MIN } else { SIDE_MAX }
     }
 }
-// The height of a grid's auto rows (`gridRowHeight`): its `grid-auto-rows` where that is one plain length, else None —
+// The height of a grid's auto rows: its `grid-auto-rows` where that is one plain length, else None —
 // a `minmax()`, a `fit-content()`, a list and a percentage are content rows here.
 fn grid_row_height(rows: &style::values::computed::ImplicitGridTracks) -> Option<f64> {
     use style_traits::ToCss;
     let text = rows.to_css_string();
     text.strip_suffix("px").and_then(|v| v.parse::<f64>().ok()).filter(|&v| v >= 0.0)
 }
-// …and the floor a content row keeps (`gridRowFloor`): the length a single `minmax(<length>, <anything else>)` names.
+// …and the floor a content row keeps: the length a single `minmax(<length>, <anything else>)` names.
 fn grid_row_floor(rows: &style::values::computed::ImplicitGridTracks) -> Option<f64> {
     use style::values::generics::grid::{GenericTrackBreadth as Breadth, GenericTrackSize as Size};
     let [Size::Minmax(Breadth::Breadth(min), max)] = &rows.0[..] else { return None };
@@ -1203,7 +1202,7 @@ fn grid_row_floor(rows: &style::values::computed::ImplicitGridTracks) -> Option<
     }
     min.to_length().map(|l| f32_exact(l.px()))
 }
-// An item's declared column lines (`gridColumnPlacement`): its start and end LINE numbers (0 for `auto` or a name) and
+// An item's declared column lines: its start and end LINE numbers (0 for `auto` or a name) and
 // an explicit `span N` (0 for none).
 fn grid_column_placement(style: &ComputedValues) -> [f64; 3] {
     let pos = style.get_position();
@@ -1215,7 +1214,7 @@ fn grid_column_placement(style: &ComputedValues) -> [f64; 3] {
     let (start, end) = (&pos.grid_column_start, &pos.grid_column_end);
     [line(start), line(end), if span(start) != 0.0 { span(start) } else { span(end) }]
 }
-// A plain percentage — `50%`, no math function — as its fraction (`declaredPctFraction`).
+// A plain percentage — `50%`, no math function — as its fraction.
 fn plain_percentage(lp: &LengthPercentage) -> Option<f64> {
     use style::values::computed::length_percentage::Unpacked;
     match lp.unpack() {
@@ -1223,7 +1222,7 @@ fn plain_percentage(lp: &LengthPercentage) -> Option<f64> {
         _ => None,
     }
 }
-// How a cell's content sits in its row-tall box (`cellVAlign`): 0 baseline, 1 top, 2 middle, 3 bottom.
+// How a cell's content sits in its row-tall box: 0 baseline, 1 top, 2 middle, 3 bottom.
 fn cell_valign(style: &ComputedValues) -> u8 {
     use style::values::generics::box_::{BaselineShiftKeyword, GenericBaselineShift as BaselineShift};
     use style::values::specified::box_::AlignmentBaseline;
@@ -1244,11 +1243,11 @@ fn js_trim_empty(text: &[u16]) -> bool {
 enum FlexItem {
     Element(NodeId),
     // (…and which of the container's anonymous items it is, counted in document order: what names it to the JS side,
-    // whose `boxItems` made the same one)
+    // whose `boxItems` counts the same one)
     Anonymous(Vec<NodeId>, u32),
 }
 
-// A resolved `vertical-align` (`verticalAlignFor`): its mode and the shift it carries.
+// A resolved `vertical-align`: its mode and the shift it carries.
 #[derive(Clone, Copy)]
 struct Va {
     mode: VaMode,
@@ -1266,7 +1265,7 @@ enum VaMode {
     BaselineMiddle,
 }
 
-// What `record_as` settles about a box before its record is built (`walkFresh`): its `clear` (0 none, 1 left, 2
+// What `record_as` settles about a box before its record is built: its `clear` (0 none, 1 left, 2
 // right, 3 both), whether that gives it clearance, which side it floats to (0 none, 1 left, 2 right), and whether it
 // establishes a formatting context.
 struct Fresh {
@@ -1320,11 +1319,11 @@ struct Gather<'s> {
     makes_line: bool,
     // (…the floats among them, which an anonymous run that makes no line hands back to its block)
     floats: Vec<NodeId>,
-    // The `position: relative` offsets of the inline boxes the gather is inside, summed (`nlChainRel`).
+    // The `position: relative` offsets of the inline boxes the gather is inside, summed.
     rel: Option<Rel>,
 }
 
-// A chain of relative offsets as native resolves it against the block laying the lines out: `x + xf × W` across, and
+// A chain of relative offsets as the layout resolves it against the block laying the lines out: `x + xf × W` across, and
 // down `y + yf × H` where H is definite and `yi` where it is not, with a comparison's share as a program per axis.
 #[derive(Clone, Default)]
 struct Rel {
@@ -1373,8 +1372,8 @@ enum Pending {
     Atomic { ws: u8, rec: i32, shift: f64, code: u8, figure: f64, line_mode: u8 },
 }
 
-// An inline box's edges as its entry and its runs carry them (`edgeInsets` + `nlEdgeParts` / `nlClampedEdgeParts`,
-// arranged by `nlInlineEntry`): the margins, the border + padding sides, the borders, each side's fraction of the
+// An inline box's edges as its entry and its runs carry them (`Walk::entry`): the margins, the border + padding
+// sides, the borders, each side's fraction of the
 // block's width, each side's program in the table's order (ml, left, right, mr, top, bottom), and the four horizontal
 // ones at NO basis.
 #[derive(Default)]
@@ -1451,7 +1450,7 @@ impl Edges {
     }
 }
 
-// A block's font as its runs and its line box take it (`nlFontInfo`).
+// A block's font as its runs and its line box take it.
 #[derive(Clone, Copy, PartialEq)]
 struct FontInfo {
     face: i32,
@@ -1467,7 +1466,7 @@ struct FontInfo {
     split: bool,
 }
 
-// The white-space modes a record and a run carry (layout.js `WS_MODE`).
+// The white-space modes a record and a run carry.
 const WS_NORMAL: u8 = 0;
 const WS_NOWRAP: u8 = 1;
 const WS_PRE: u8 = 2;
@@ -1475,15 +1474,14 @@ const WS_PRE_WRAP: u8 = 3;
 const WS_PRE_LINE: u8 = 4;
 const WS_BREAK_SPACES: u8 = 5;
 
-// The elements HTML gives a formatting context of their own whatever their `display` (layout.js `OWN_CONTEXT_TAGS`:
-// the widgets and the replaced elements).
+// The elements HTML gives a formatting context of their own whatever their `display`: the widgets and the replaced
+// elements.
 const OWN_CONTEXT_TAGS: &[&str] = &[
     "button", "input", "select", "textarea", "fieldset", "meter", "progress", "marquee", "img", "canvas", "video", "audio",
     "object", "embed", "iframe", "frame", "svg",
 ];
 // Whether an element has an INTRINSIC size — a replaced element or a control, sized from data or UA rules — which is
-// what the JS model asks of a box to call it replaced (`intrinsicSize`): by its tag, but an `<object>` showing its
-// fallback content is no replaced element at all.
+// what makes a box replaced: by its tag, but an `<object>` showing its fallback content is no replaced element at all.
 fn replaced_or_control(arena: &RealmArena, id: NodeId, node: &crate::dom::NodeData) -> bool {
     match node.rendering_tag() {
         "object" => !renders_object_fallback(arena, id, node),
@@ -1502,14 +1500,14 @@ fn renders_object_fallback(arena: &RealmArena, id: NodeId, node: &crate::dom::No
             n.children.iter().filter_map(|&c| arena.get(c)).any(|c| c.kind == NodeKind::Element || (c.kind == NodeKind::Text && has_content(&c.data)))
         })
 }
-// …and HTML's WIDGETS, whose box the UA decides however the page spells a block-level `display` (layout.js
-// `WIDGET_TAGS` / `WIDGET_BLOCK_DISPLAYS`: a `<button style="display: table">` is a flow-root block).
+// …and HTML's WIDGETS, whose box the UA decides however the page spells a block-level `display` (a
+// `<button style="display: table">` is a flow-root block).
 fn widget_tag(tag: &str) -> bool {
     matches!(tag, "button" | "input" | "select" | "textarea" | "fieldset" | "meter" | "progress" | "marquee")
 }
 
 impl<'a> Walk<'a> {
-    // A record goes in — and where each stream stands as it does (`Built::marks`).
+    // A record goes in — and where each stream stands as it does (`Extent`).
     fn push_record(&mut self, rec: Input) {
         self.extents.push(Extent { start: self.stream_ends(), end: None, ctx: None, saw_out: (false, false) });
         self.inputs.push(rec);
@@ -1642,7 +1640,7 @@ impl<'a> Walk<'a> {
     }
     // Is `c` an element that generates no box of its own, but whose children stand in for it (`display: contents`)?
     // The `white-space` a text node collapses by: the box-less element's it is spliced out of where it is (the one
-    // property `inlineStyleOwner` hands it that decides whether its white space is content), else `ws_mode`, its box's.
+    // inherited property it takes from there that decides whether its white space is content), else `ws_mode`, its box's.
     fn text_ws_mode(&self, c: NodeId, ws_mode: u8) -> Result<u8, &'static str> {
         match self.parent_of(c).filter(|&p| self.boxless(p)) {
             Some(p) => ws_mode_of(&*self.style(p)?),
@@ -1661,7 +1659,7 @@ impl<'a> Walk<'a> {
         p
     }
 
-    // How a rendered legend sits across its fieldset (`Input::legend_align`, `legendAlignOf`): by its `justify-self`
+    // How a rendered legend sits across its fieldset (`Input::legend_align`): by its `justify-self`
     // where that is `left` / `center` / `right`, by its margins otherwise; 0 for any other element.
     fn legend_align(&self, id: NodeId, style: &ComputedValues) -> u8 {
         use style::values::specified::align::AlignFlags;
@@ -1709,7 +1707,7 @@ impl<'a> Walk<'a> {
     // …and no table box what can be none: a REPLACED element or a control with a table display is an inline-level box
     // (CSS Tables 3 §2.1, "a breaking change from CSS 2.1 but matches implementations" — Chrome and Firefox put an
     // `<img style="display: table-cell">` on the line, 20 x 20), and a `<button>` or a `<fieldset>` the flow-root
-    // block HTML lays one out as whatever display is not inline-level (layout.js `WIDGET_BLOCK_DISPLAYS`).
+    // block HTML lays one out as whatever display is not inline-level.
     fn laid_display(&self, id: NodeId, b: &style::properties::style_structs::Box) -> Display {
         let node = self.node(id);
         let d = b.walk_display(node.rendering_tag());
@@ -1731,14 +1729,14 @@ impl<'a> Walk<'a> {
         d
     }
 
-    // One element's record, and its subtree's (`walkRecord`) — an in-flow box's, or an out-of-flow one's that `oof`
+    // One element's record, and its subtree's — an in-flow box's, or an out-of-flow one's that `oof`
     // emits.
     fn record(&mut self, id: NodeId, parent: i32) -> Step {
         self.record_as(id, parent, Role::Flow)
     }
     fn record_as(&mut self, id: NodeId, parent: i32, role: Role) -> Step {
         // Whether a float is already placed in the formatting context this box is in, per side, is the walk's own
-        // document-order state (`walkFresh`): a box whose `clear` names such a side has CLEARANCE, and does not
+        // document-order state (`Fresh`): a box whose `clear` names such a side has CLEARANCE, and does not
         // collapse its top margin with its parent's (§8.3.1). A float marks its side; a box that establishes a
         // formatting context shows its content none of the floats around it.
         let style = self.style(id)?;
@@ -1816,8 +1814,8 @@ impl<'a> Walk<'a> {
         rec.parent = parent;
         rec.run_start = -1;
         rec.flex_shrink = 1.0;
-        // A FLEX ITEM's own sizing declarations (rec[59..62]): its `flex-basis` as a length (none at no basis), its
-        // factors.
+        // A FLEX ITEM's own sizing declarations (`flex_basis`, `flex_grow`, `flex_shrink`): its `flex-basis` as a length
+        // (none at no basis), its factors.
         if role == Role::Flow && self.flex_item(id)? {
             let p = style.get_position();
             use style::values::generics::flex::GenericFlexBasis as FlexBasis;
@@ -1833,14 +1831,14 @@ impl<'a> Walk<'a> {
         rec.border_box = pos.box_sizing == BoxSizing::BorderBox;
         rec.decl_border_box = rec.border_box;
         // The six sizes: a length as itself; one with a percentage in it resolved here against the pass root's
-        // containing block where the record is the ROOT's (native is handed no basis for it), and anywhere else
-        // handed to native as the pair — or the program — it resolves at the basis it has (`walkRecord`'s `size`).
+        // containing block where the record is the ROOT's (the layout is handed no basis for it), and anywhere else
+        // handed to the layout as the pair — or the program — it resolves at the basis it has.
         // (…a CELL's percentage sizes are none of its box's: its column takes a width's, a height's resolves against no
-        // basis until its row does — `size`'s table-cell rule, and `cbH`'s null for a part a table lays out)
+        // basis until its row does, as for every part a table lays out)
         let native_basis = parent >= 0 && role != Role::Cell;
         let edge_basis = parent >= 0;
-        // An intrinsic-size KEYWORD width is native's own (rec[65] bits 11-12: 1 min-content, 2 max-content, 3
-        // fit-content) — not on the pass root, sized from the width it is handed with no parent to mark it measured.
+        // An intrinsic-size KEYWORD width (`width_kw`: 1 min-content, 2 max-content, 3 fit-content) — not on the pass
+        // root, sized from the width it is handed with no parent to mark it measured.
         use style::values::generics::length::GenericSize as Size;
         rec.width_kw = match pos.width {
             // (…a fieldset's RENDERED LEGEND sizes an auto width as `fit-content`, shrink-to-fit whatever its display —
@@ -1851,9 +1849,8 @@ impl<'a> Walk<'a> {
             Size::MinContent => 1,
             Size::MaxContent => 2,
             Size::FitContent => 3,
-            // (…`stretch`, in either spelling, as the JS model has it: an auto width, which is what it is for a block
-            // in normal flow — filling its containing block — and not for a flex item or an out-of-flow box, which the two
-            // engines share)
+            // (…`stretch`, in either spelling, is taken for an auto width, which is what it is for a block in normal
+            // flow — filling its containing block — and not for a flex item or an out-of-flow box: a gap)
             Size::Stretch | Size::WebkitFillAvailable => 0,
             // (…and `fit-content(<length>)` the `auto` Chrome and Firefox give it, which take the declaration for invalid:
             // CSS Sizing 3's min(max-content, max(min-content, <length>)) wants its argument on the record, which has none)
@@ -1891,7 +1888,7 @@ impl<'a> Walk<'a> {
             }
         }
         [rec.width, rec.height, rec.min_w, rec.max_w, rec.min_h, rec.max_h] = slots;
-        // (…and a cell's min / max in its BLOCK axis are none: its row sizes it — `cellMinMaxFreeAxis`. Asked of the
+        // (…and a cell's min / max in its BLOCK axis are none: its row sizes it. Asked of the
         // display: a flex or grid item's is blockified and none. The block axis is
         // the WIDTH in a vertical writing mode, where a `min-height` does clamp: Chrome, 80.)
         let cell_free_x = matches!(display.inside(), DisplayInside::TableCell) && !style.writing_mode.is_horizontal();
@@ -1976,10 +1973,9 @@ impl<'a> Walk<'a> {
         self.block_contents(&kids, idx, &style)
     }
 
-    // A block container's children (`walkRecord`'s classify, then its text-block, mixed or container arm): block-level
-    // boxes, floats, out-of-flow boxes, or inline content.
+    // A block container's children: block-level boxes, floats, out-of-flow boxes, or inline content.
     fn block_contents(&mut self, kids: &[NodeId], idx: i32, style: &ComputedValues) -> Step {
-        // What the children are to this block's flow: block-level boxes, or inline content (`walkRecord`'s classify).
+        // What the children are to this block's flow: block-level boxes, or inline content.
         let ws_mode = ws_mode_of(style)?;
         // (…the block-level children and the out-of-flow ones, in document order: an out-of-flow box's static position
         // is where the flow reached it.)
@@ -2263,7 +2259,7 @@ impl<'a> Walk<'a> {
                     r.indent_math = math;
                     r.indent_hanging = bits & 256 != 0;
                     r.indent_each_line = bits & 512 != 0;
-                    // (…a block with no indent writes none of it, the `spent` bit included: `nlWriteIndent`)
+                    // (…a block with no indent writes none of it, the `spent` bit included)
                     r.indent_spent = !unspent && (bites || bits != 0);
                     unspent = false;
                     r.rtl = parent.rtl;
@@ -2436,14 +2432,14 @@ impl<'a> Walk<'a> {
         Ok(font_size(&*self.style(cur)?))
     }
 
-    // A REPLACED leaf's record (`walkRecord`'s replaced arm): a childless block sized from its intrinsic figures, its
+    // A REPLACED leaf's record: a childless block sized from its intrinsic figures, its
     // margins never adjoining, and — for a control that draws text — where its baseline sits in its font.
     fn replaced(&mut self, id: NodeId, idx: i32, style: &ComputedValues, intrinsic: Intrinsic) -> Step {
         let node = self.node(id);
         let tag = node.rendering_tag();
         let list_box = tag == "select" && self.arena.is_list_box(id);
-        // A LIST BOX showing rows is the control's box with its options stacked in it as ordinary block children
-        // (`nlListBoxWithRows`): its box from the intrinsic data like any replaced one's, its rows laid out inside it —
+        // A LIST BOX showing rows is the control's box with its options stacked in it as ordinary block children:
+        // its box from the intrinsic data like any replaced one's, its rows laid out inside it —
         // and its baseline read off them, not off the control.
         if list_box && self.lays_out_rows(id)? {
             let r = &mut self.inputs[idx as usize];
@@ -2496,7 +2492,7 @@ impl<'a> Walk<'a> {
         Ok(())
     }
 
-    // Does a replaced box lay CSS boxes out inside itself (`replacedLaysOutChildren`): a rendered element child?
+    // Does a replaced box lay CSS boxes out inside itself: a rendered element child?
     fn lays_out_rows(&self, id: NodeId) -> Result<bool, &'static str> {
         for c in self.children(id) {
             if self.node(c).kind == NodeKind::Element && !self.laid_display(c, self.style(c)?.get_box()).is_none() {
@@ -2565,8 +2561,8 @@ impl<'a> Walk<'a> {
         Ok((items, oof))
     }
 
-    // A GRID container (`walkRecord`'s grid arm): its gaps, its column template with an auto repeat left for native to
-    // count, its auto rows' height, each track's base and limit as the side specs native resolves, and each item's
+    // A GRID container: its gaps, its column template with an auto repeat left for the layout to
+    // count, its auto rows' height, each track's base and limit as the side specs the layout resolves, and each item's
     // declared column lines — then its items, each its own record, and its out-of-flow children.
     fn grid(&mut self, id: NodeId, idx: i32, style: &ComputedValues, parent: i32) -> Step {
         let pos = style.get_position();
@@ -2625,11 +2621,11 @@ impl<'a> Walk<'a> {
                 FlexItem::Element(c) => self.record(*c, idx)?,
                 FlexItem::Anonymous(run, ordinal) => self.anonymous_item(id, idx, style, run, *ordinal)?,
             }
-            // Under `grid-auto-rows`, an AUTO-height item IS the row height: native imposes the row on it as a definite
+            // Under `grid-auto-rows`, an AUTO-height item IS the row height: the layout imposes the row on it as a definite
             // border-box height (a replaced one keeps its own, and an anonymous one is auto).
             // (…and under a row that is only a FLOOR, stretched to it where it is shorter — its height still its own —
-            // where it STRETCHES across its row at all: `align-self`, else the grid's `align-items`, `gridItemFloored` —
-            // whose SHARED gap this is too: where an unstretched item then sits in its row is not modelled)
+            // where it STRETCHES across its row at all: `align-self`, else the grid's `align-items` — a gap: where an
+            // unstretched item then sits in its row is not modelled)
             let (auto, stretches) = match item {
                 FlexItem::Element(c) => {
                     let cs = self.style(*c)?;
@@ -2658,8 +2654,8 @@ impl<'a> Walk<'a> {
         Ok(())
     }
 
-    // A FLEX container (`walkRecord`'s flex arm): its axes as the codes native reads, its gaps, and its items — in
-    // `order`, each its own record with what native sizes it from — then its out-of-flow children, placed by its
+    // A FLEX container: its axes as the codes the layout reads, its gaps, and its items — in
+    // `order`, each its own record with what the layout sizes it from — then its out-of-flow children, placed by its
     // alignment.
     fn flex(&mut self, id: NodeId, idx: i32, style: &ComputedValues) -> Step {
         let (mut items, oof) = self.box_items(id)?;
@@ -2687,7 +2683,7 @@ impl<'a> Walk<'a> {
         [r.flex_cross_gap, r.flex_cross_gap_frac] = [cross_gap.px, cross_gap.frac];
         let cross_gap_math = self.math(cross_gap.prog.as_deref());
         self.inputs[idx as usize].flex_cross_gap_math = cross_gap_math;
-        // (…and the main gap only between two items or more, as the JS walk sends it)
+        // (…and the main gap only between two items or more)
         if items.len() > 1 {
             let main_gap_math = self.math(main_gap.prog.as_deref());
             let r = &mut self.inputs[idx as usize];
@@ -2717,8 +2713,7 @@ impl<'a> Walk<'a> {
             };
             let mode = BaselineMode::of(&plan);
             let align = match plan.cross_align(items_align, own_align, own_sides, mode, true) {
-                // (…a row whose main axis runs DOWN has no baseline geometry to align its items on: they sit at the start,
-                // as `nlCrossAlign` puts them)
+                // (…a row whose main axis runs DOWN has no baseline geometry to align its items on: they sit at the start)
                 Kw::Baseline | Kw::LastBaseline if mode == BaselineMode::Keep && !plan.main_is_x => Kw::FlexStart,
                 align => align,
             };
@@ -2753,7 +2748,7 @@ impl<'a> Walk<'a> {
         Ok(())
     }
 
-    // A TABLE (`walkRecord`'s table arm): its structure as the JS walk builds it (`tableGrid`) — its record, the
+    // A TABLE: its structure — its record, the
     // column declarations on the grids stream, a record per row group and row, its cells walked under their rows (an
     // anonymous one around each run of stray content), its captions and its out-of-flow children.
     fn table(&mut self, id: NodeId, idx: i32, style: &ComputedValues, role: Role, parent: i32) -> Step {
@@ -3056,7 +3051,7 @@ impl<'a> Walk<'a> {
         }
         Ok([out_t, out_r, out_b, out_l])
     }
-    // A row group's or a row's record (`emitRow` and the group arm): its element, its parent, its display, whether it
+    // A row group's or a row's record: its element, its parent, its display, whether it
     // scrolls.
     fn table_part(&mut self, el: NodeId, parent: i32, display: u8) -> Result<i32, &'static str> {
         let at = self.inputs.len() as i32;
@@ -3072,7 +3067,7 @@ impl<'a> Walk<'a> {
         self.rec_index.insert(el, at);
         Ok(at)
     }
-    // A row and its cells (`emitRow`).
+    // A row and its cells.
     fn table_row(&mut self, grid: &TableGrid, i: usize, parent: i32, table_style: &ComputedValues, anon_cells: &mut u32) -> Step {
         let row = &grid.rows[i];
         let at = match row.el {
@@ -3169,7 +3164,7 @@ impl<'a> Walk<'a> {
         self.push_record(rec);
         self.block_contents(run, at, style)
     }
-    // Does a cell hold a box whose height is a percentage — what makes a table lay it out twice (`cellHasPctHeightChild`):
+    // Does a cell hold a box whose height is a percentage — what makes a table lay it out twice:
     // down its in-flow boxes, past none with a definite height of its own or a table.
     fn pct_height_child(&self, cell: NodeId) -> Result<bool, &'static str> {
         for c in self.children(cell) {
@@ -3482,7 +3477,7 @@ impl<'a> Walk<'a> {
             saw_float: self.saw_float,
         }
     }
-    // …every stream, and the float state the attempt's floats marked (`emitAttempt`): a float walked again sees only
+    // …every stream, and the float state the attempt's floats marked: a float walked again sees only
     // the floats before it.
     fn rollback(&mut self, m: Mark) {
         self.inputs.truncate(m.inputs);
@@ -3510,7 +3505,7 @@ impl<'a> Walk<'a> {
     }
 
     // Each out-of-flow box whose containing block is an inline box, named by that box's entry in the inline table —
-    // one the pass tabled, or the box is declined: its containing block would be the JS layout's rectangle.
+    // one the pass tabled, or the box is declined (`containingBlockBox`): its containing block is no box of this pass.
     fn resolve_inline_cbs(&mut self) -> Step {
         for &(at, cb) in &self.inline_cbs {
             let entry = *self.inline_of.get(&cb).ok_or("containingBlockBox")?;
@@ -3519,9 +3514,9 @@ impl<'a> Walk<'a> {
         Ok(())
     }
 
-    // An OUT-OF-FLOW child of the container at record `parent` (`emitOutOfFlow`): its own record subtree, marked out of
+    // An OUT-OF-FLOW child of the container at record `parent`: its own record subtree, marked out of
     // flow and naming its CONTAINING BLOCK — a record of this pass by index, else the viewport's rectangle — with its
-    // insets for native to resolve against that block's padding box. Its record index.
+    // insets for the layout to resolve against that block's padding box. Its record index.
     fn out_of_flow(&mut self, id: NodeId, parent: i32) -> Result<i32, &'static str> {
         let style = self.style(id)?;
         let fixed = style.get_box().clone_position() == Position::Fixed;
@@ -3562,7 +3557,7 @@ impl<'a> Walk<'a> {
         Ok(at)
     }
 
-    // The element an out-of-flow box's insets measure against (`nlContainingBlockElement`): the nearest positioned
+    // The element an out-of-flow box's insets measure against: the nearest positioned
     // ancestor — a fixed one's only where a transform, a filter or containment makes one its containing block — the
     // root element never; None for the viewport. One outside this pass's records is declined.
     fn containing_block(&self, id: NodeId, fixed: bool) -> Result<Option<NodeId>, &'static str> {
@@ -3581,7 +3576,7 @@ impl<'a> Walk<'a> {
             let inline_flow = matches!(pd.outside(), DisplayOutside::Inline) && matches!(pd.inside(), DisplayInside::Flow);
             let block = inline_flow && self.holds_block_level(p)?;
             if !pd.is_none() && !pd.is_contents() && ((!fixed && ps.get_box().clone_position() != Position::Static) || contains_out_of_flow(&ps, self.arena, p, node)) {
-                // (…an inline box is no record: native lays its fragments out, and names it by its inline table entry)
+                // (…an inline box is no record: the layout lays its fragments out, and names it by its inline table entry)
                 let inline = inline_flow && !block;
                 return if inline || self.rec_index.contains_key(&p) { Ok(Some(p)) } else { Err("containingBlockBox") };
             }
@@ -3590,10 +3585,9 @@ impl<'a> Walk<'a> {
         Ok(None)
     }
 
-    // A relative box's offset (`relativeOffset`), or — where a percentage is in an inset — the pairs and programs
-    // native resolves against the containing block (`nlRelativeSpec`): `left`, else `right` negated (both set, the
-    // containing block's direction drops one), and `top` beside `bottom`, which native chooses between once it knows whether
-    // the height is definite.
+    // A relative box's offset, or — where a percentage is in an inset — the pairs and programs the layout resolves
+    // against the containing block: `left`, else `right` negated (both set, the containing block's direction drops one),
+    // and `top` beside `bottom`, which the layout chooses between once it knows whether the height is definite.
     fn relative(&mut self, id: NodeId, style: &ComputedValues, rec: &mut Input) -> Step {
         let pos = style.get_position();
         let [top, right, bottom, left] = [inset_lp(&pos.top)?, inset_lp(&pos.right)?, inset_lp(&pos.bottom)?, inset_lp(&pos.left)?];
@@ -3604,7 +3598,7 @@ impl<'a> Walk<'a> {
             let px = |lp: Option<&LengthPercentage>| lp.map_or(Ok(0.0), length);
             rec.rel_x = if keep_right { -px(right)? } else { px(left)? };
             rec.rel_y = if top.is_some() { px(top)? } else { -px(bottom)? };
-            // (…which the record also carries as the base the pairs resolve onto: `rel_pct[5..6]` are rec[39..40])
+            // (…which the record also carries in `rel_pct[5..6]`, as the base the pairs resolve onto)
             rec.rel_pct[5] = rec.rel_x;
             rec.rel_pct[6] = rec.rel_y;
             return Ok(());
@@ -3638,7 +3632,7 @@ impl<'a> Walk<'a> {
         Ok(())
     }
 
-    // A block of inline content — text and inline boxes — laid out in lines (`walkRecord`'s text-block arm).
+    // A block of inline content — text and inline boxes — laid out in lines.
     fn text_block(&mut self, kids: &[NodeId], idx: i32, style: &ComputedValues, ws_mode: u8) -> Step {
         let (indent, indent_bits) = indent(style)?;
         let indent_math = self.math(indent.prog.as_deref());
@@ -3646,8 +3640,8 @@ impl<'a> Walk<'a> {
         let align = align_code(style.get_inherited_text().text_align, starts_at_right(style));
         let mut g = Gather { block: style, idx, runs: Vec::new(), makes_line: false, floats: Vec::new(), rel: None };
         self.gather(kids, style, &font, ws_mode, wrap_mode(style), 0.0, &mut g)?;
-        // (…the indent and the alignment written before the gather, as the JS walk writes them: a block whose content
-        // makes no line keeps them too.)
+        // (…the indent and the alignment written before the gather: a block whose content makes no line keeps them
+        // too.)
         let rec = &mut self.inputs[idx as usize];
         rec.indent_px = indent.px;
         rec.indent_frac = indent.frac;
@@ -3657,7 +3651,7 @@ impl<'a> Walk<'a> {
         rec.text_align = align;
         rec.ws_mode = ws_mode;
         // Only white space: an empty block — unless an inline box or a `<wbr>` occupies a line, where a first-line
-        // indent is taken (`nlRunsOccupyALine`).
+        // indent is taken.
         if !g.makes_line && !g.runs.iter().any(|r| matches!(r, Pending::Open { .. } | Pending::Wbr { .. })) {
             rec.display = DISPLAY_BLOCK;
             return Ok(());
@@ -3669,8 +3663,8 @@ impl<'a> Walk<'a> {
         Ok(())
     }
 
-    // A block of lines' runs onto the streams, its inline boxes tabled in the order its runs open them
-    // (`commitInlines`), and onto its record.
+    // A block of lines' runs onto the streams, its inline boxes tabled in the order its runs open them, and onto its
+    // record.
     fn commit(&mut self, idx: i32, g: Gather) {
         let rec = &mut self.inputs[idx as usize];
         rec.run_start = self.runs.len() as i32;
@@ -3684,7 +3678,7 @@ impl<'a> Walk<'a> {
                     }
                     self.run_texts.push(Some(text.into()));
                     // The run's place on its line: its ascent, `vertical-align` included, and its line-height below
-                    // that — each raised to the deepest a split's faces need (`placeTextRun`), so the line never shrinks.
+                    // that — each raised to the deepest a split's faces need, so the line never shrinks.
                     let asc = font.asc + shift;
                     let (asc, line_height) = match vmax {
                         Some((va, vd)) => (asc.max(va), asc.max(va) + (font.lh - asc).max(vd)),
@@ -3772,7 +3766,7 @@ impl<'a> Walk<'a> {
         })
     }
 
-    // The runs of `parent`'s children in the inline formatting context `g` builds (`nlGatherRuns`): `owner` the
+    // The runs of `parent`'s children in the inline formatting context `g` builds: `owner` the
     // element whose font, `white-space` and wrap mode its text takes — the block, or the inline box it is in.
     fn gather(&mut self, kids: &[NodeId], owner: &ComputedValues, font: &FontInfo, ws_mode: u8, wrap: u8, shift: f64, g: &mut Gather) -> Step {
         for &c in kids {
@@ -3781,7 +3775,7 @@ impl<'a> Walk<'a> {
                 NodeKind::Text => {
                     // (…a run spliced out of a box-less element still draws with THAT element's font, collapses by its
                     // `white-space` and wraps by its rules — the inherited properties it hands its content, and only
-                    // those: `inlineStyleOwner`. Its `vertical-align` is none, so the shift stays the box's.)
+                    // those. Its `vertical-align` is none, so the shift stays the box's.)
                     let spliced = match self.parent_of(c).filter(|&p| self.boxless(p)) {
                         Some(p) => Some(self.style(p)?),
                         None => None,
@@ -3822,9 +3816,9 @@ impl<'a> Walk<'a> {
                         g.makes_line = true;
                     }
                     // Adjacent text is one run where it is the same font, shift, wrap and mode, the mode soft-wraps, the
-                    // join does not GLUE a word, and neither side of a `pre-line` join is white space alone (`appendText`).
+                    // join does not GLUE a word, and neither side of a `pre-line` join is white space alone.
                     // (…written in the element it is a child of in the flat tree: a box-less one's, where it was spliced
-                    // through one — `inlineStyleOwner` — a generated box's for its text)
+                    // through one, a generated box's for its text)
                     // (…asked only of a pass a painter records: no other reads it)
                     let written_in = if self.painting { self.parent_of(c).map_or(-1.0, |p| p.to_f64()) } else { -1.0 };
                     let vmax = self.split_vmax(owner, font, raw, ws_mode)?;
@@ -3885,19 +3879,17 @@ impl<'a> Walk<'a> {
         // MathML Core's math boxes are on the line or a line of their own)
         let d = self.laid_display(c, cs.get_box());
         // (…a `<br>` or a `<wbr>` a flex or grid container's run of bare text holds is still a line break, or a place for
-        // one, in the anonymous item: the style engine blockifies it as the container's child, where the JS model keeps
-        // it the inline it is)
+        // one, in the anonymous item, though the style engine blockifies it as the container's child)
         let blockified_break = matches!(tag, "br" | "wbr") && self.parent_is_item_container(c)?;
         if !matches!(d.outside(), DisplayOutside::Inline) && !blockified_break {
             return Err("block-level-box-in-inline-content");
         }
         // An ATOMIC inline — an `inline-block` — is one box on the line: its own record subtree under the block of
-        // lines, laid out and hung from its baseline by native (`atomicHook`); an inline-LEVEL `<br>` still breaks the
+        // lines, laid out and hung from its baseline by the layout; an inline-LEVEL `<br>` still breaks the
         // line whatever its inside display (`isLineBreak`).
         if (!matches!(d.inside(), DisplayInside::Flow) && tag != "br") || replaced_or_control(self.arena, c, node) {
             // (…`top` / `bottom` hang it from the LINE, with no ascent of its own; the others move its ascent: a SHIFT
-            // by itself, an alignment against the parent's font by the figure native reads when the box is laid out —
-            // `nlAtomicAlignment`)
+            // by itself, an alignment against the parent's font by the figure the layout reads when the box is laid out)
             let va = self.vertical_align(c, cs)?;
             let line_mode = match va {
                 Some(Va { mode: VaMode::Top, .. }) => 1,
@@ -3927,7 +3919,7 @@ impl<'a> Walk<'a> {
         let rel = self.chain_rel(c, cs, g.rel.as_ref())?;
         let cf = self.font_info(cs, g.block)?;
         // A `<br>` breaks the line, clearing the floats on the side it names; a `<wbr>` is a place it may. Each is an
-        // inline box of its own with NO edges, whatever it declares (`WBR_EDGES`).
+        // inline box of its own with NO edges, whatever it declares.
         if tag == "br" || (tag == "wbr" && matches!(d.inside(), DisplayInside::Flow)) {
             let entry = self.entry(c, cs, &Edges::default(), rel.as_ref())?;
             if tag == "br" {
@@ -3993,7 +3985,7 @@ impl<'a> Walk<'a> {
         Ok(())
     }
 
-    // An inline box's entry (`nlInlineEntry`): its edges — lengths, fractions and programs — its own font box and
+    // An inline box's entry: its edges — lengths, fractions and programs — its own font box and
     // ascent, and the relative offset its fragments take.
     fn entry(&mut self, c: NodeId, cs: &ComputedValues, e: &Edges, rel: Option<&Rel>) -> Result<usize, &'static str> {
         let face = self.face(cs)?;
@@ -4034,8 +4026,7 @@ impl<'a> Walk<'a> {
         Ok(self.entries.len() - 1)
     }
 
-    // `owner`'s font as a run takes it, its tab stops counted in `block`'s (`nlFontInfo` / `fontOf` / `lineHeightOf`
-    // / `baselineWithin` / `tabStopOf`).
+    // `owner`'s font as a run takes it, its tab stops counted in `block`'s.
     fn font_info(&mut self, owner: &ComputedValues, block: &ComputedValues) -> Result<FontInfo, &'static str> {
         let face = self.face(owner)?;
         let f = owner.get_font();
@@ -4067,11 +4058,11 @@ impl<'a> Walk<'a> {
     }
 
     // The line box a text node needs where its font splits its characters across faces by `unicode-range`: the deepest
-    // ascent and descent among the faces they select, each laid out as a face of its own would be (layout.js
-    // `runFaceVMax`) — a size-adjusted face that is not the primary still raises the line. None outside a split. Asked
-    // per text NODE, of its data as written, as the oracle asks it (`placeTextRun`): two nodes merge into one run only
-    // where it is the same. A node of white space that collapses is no run there — at most the one space of a gap, which
-    // the oracle places on the owner's own line box — so it raises nothing.
+    // ascent and descent among the faces they select, each laid out as a face of its own would be
+    // (`font::FontMetrics::run_vmax`) — a size-adjusted face that is not the primary still raises the line. None outside
+    // a split. Asked per text NODE, of its data as written: two nodes merge into one run only where it is the same. A
+    // node of white space that collapses is no run there — at most the one space of a gap, which sits on the owner's own
+    // line box — so it raises nothing.
     fn split_vmax(&mut self, owner: &ComputedValues, font: &FontInfo, text: &[u16], ws_mode: u8) -> Result<Option<(f64, f64)>, &'static str> {
         if !font.split || !(has_content(text) || white_space_only_is_content(text, ws_mode)) {
             return Ok(None);
@@ -4083,7 +4074,7 @@ impl<'a> Walk<'a> {
         Ok(crate::font::with_font(font.face, |m| m.run_vmax(text, font.size, fixed, primary)).flatten())
     }
 
-    // The face `style`'s font resolves to, as the JS side bucketed and resolved it.
+    // The face `style`'s font resolves to, as the JS side resolved it for its family and bucket.
     fn face(&mut self, style: &ComputedValues) -> Result<Face, &'static str> {
         let key = face_key(style.get_font());
         match self.faces.known.get(&key) {
@@ -4100,8 +4091,7 @@ impl<'a> Walk<'a> {
         }
     }
 
-    // Does `id` have a `::before` / `::after` that generates a box? (Not laid out here yet.)
-    // A box's `vertical-align` as the JS model resolves it (`resolveVerticalAlign`): None on the baseline, else its
+    // A box's resolved `vertical-align`: None on the baseline, else its
     // mode and the SHIFT it carries — its own (`sub` / `super` by the parent's font size, a length, a percentage of
     // its own line height) plus the one the inline box it is in carries, which a box that declares nothing still
     // takes (the shorthand's two longhands, `baseline-shift` and `alignment-baseline`, in the style engine).
@@ -4150,7 +4140,7 @@ impl<'a> Walk<'a> {
             _ => None,
         })
     }
-    // The shift the inline box a box sits in carries (`inlineParentShift`): a BLOCK ends the walk.
+    // The shift the inline box a box sits in carries: a BLOCK ends the walk.
     fn inline_parent_shift(&mut self, id: NodeId) -> Result<f64, &'static str> {
         let Some(p) = self.parent_of(id) else { return Ok(0.0) };
         if self.node(p).kind != NodeKind::Element {
@@ -4169,8 +4159,8 @@ impl<'a> Walk<'a> {
             _ => 0.0,
         })
     }
-    // Where an inline box's font box reaches above the baseline, `vertical-align` included (`inlineAscent` /
-    // `alignedAscent`): a shift moves it; `middle`, `text-top` and `text-bottom` place it against the PARENT's font.
+    // Where an inline box's font box reaches above the baseline, `vertical-align` included: a shift moves it; `middle`,
+    // `text-top` and `text-bottom` place it against the PARENT's font.
     fn inline_ascent(&mut self, id: NodeId, style: &ComputedValues, va: Option<Va>, base: f64) -> Result<f64, &'static str> {
         let Some(va) = va else { return Ok(base) };
         let outer = content_height(style, &self.face(style)?);
@@ -4183,7 +4173,7 @@ impl<'a> Walk<'a> {
             VaMode::BaselineMiddle => outer / 2.0 + va.px,
         })
     }
-    // The one figure of the parent's font an alignment against it reads (`vaParentFigure`): half its x-height for
+    // The one figure of the parent's font an alignment against it reads: half its x-height for
     // `middle`, its ascent for `text-top`, its descent for `text-bottom`.
     fn parent_figure(&mut self, id: NodeId, mode: VaMode) -> Result<f64, &'static str> {
         let p = self.parent_of(id).filter(|&p| self.node(p).kind == NodeKind::Element).unwrap_or(id);
@@ -4205,7 +4195,7 @@ impl<'a> Walk<'a> {
     }
 
     // The chain of relative offsets an inline box's content moves with: the boxes' around it, and its own where it is
-    // `position: relative` (`nlChainRel`).
+    // `position: relative`.
     fn chain_rel(&self, id: NodeId, style: &ComputedValues, base: Option<&Rel>) -> Result<Option<Rel>, &'static str> {
         if style.get_box().clone_position() != Position::Relative {
             return Ok(base.cloned());
@@ -4215,7 +4205,7 @@ impl<'a> Walk<'a> {
             Some(own) => Some(base.cloned().unwrap_or_default().plus(&own)),
         })
     }
-    // …onto an ATOMIC's or a FLOAT's record, whose containing block is the same block (`nlAddChainRel`): its lengths
+    // …onto an ATOMIC's or a FLOAT's record, whose containing block is the same block: its lengths
     // into the base its own offset is added to and beside it, its fractions and programs beside them.
     fn add_chain_rel(&mut self, rec: i32, rel: Option<&Rel>) {
         let Some(rel) = rel else { return };
@@ -4239,7 +4229,7 @@ impl<'a> Walk<'a> {
             r.chain_math[1] = m;
         }
     }
-    // (…a record's chain program summed with one more share: `nlMathSum`)
+    // (…a record's chain program summed with one more share)
     fn chain_program(&mut self, rec: i32, axis: usize, share: &[f64]) -> u32 {
         let at = self.inputs[rec as usize].chain_math[axis];
         let prog = match program_at(&self.maths, at) {
@@ -4250,7 +4240,7 @@ impl<'a> Walk<'a> {
     }
 
     // Does a non-replaced `display: inline` box hold a block-level box among its in-flow children — and so lay out as
-    // a BLOCK (layout.js `holdsBlockLevel`: the nearest the JS model comes to CSS 2.1 §9.2.1.1's split)?
+    // a BLOCK (the nearest this model comes to CSS 2.1 §9.2.1.1's split)?
     fn holds_block_level(&self, id: NodeId) -> Result<bool, &'static str> {
         if replaced_or_control(self.arena, id, self.node(id)) {
             return Ok(false);
@@ -4277,7 +4267,7 @@ impl<'a> Walk<'a> {
         Ok(true)
     }
 
-    // The side a box floats to (`floatSide`): 0 none, 1 left, 2 right — a flow-relative one by the direction of the
+    // The side a box floats to: 0 none, 1 left, 2 right — a flow-relative one by the direction of the
     // block it is in.
     fn float_code(&self, id: NodeId, style: &ComputedValues) -> Result<u8, &'static str> {
         Ok(match style.get_box().clone_float() {
@@ -4288,7 +4278,7 @@ impl<'a> Walk<'a> {
             Float::InlineEnd => if self.flow_relative_rtl(id)? { 1 } else { 2 },
         })
     }
-    // …and the side it clears (`clearCode`): 0 none, 1 left, 2 right, 3 both.
+    // …and the side it clears: 0 none, 1 left, 2 right, 3 both.
     fn clear_code(&self, id: NodeId, style: &ComputedValues) -> Result<u8, &'static str> {
         Ok(match style.get_box().clone_clear() {
             Clear::None => 0,
@@ -4318,7 +4308,7 @@ impl<'a> Walk<'a> {
         Ok(false)
     }
 
-    // Does the element establish a block formatting context (`computeEstablishesBFC`)? Asked of a block-level
+    // Does the element establish a block formatting context? Asked of a block-level
     // `flow` / `flow-root` box, which is all this walk takes: in flow, floated or out of flow.
     fn establishes_bfc(&self, id: NodeId, style: &ComputedValues) -> bool {
         let node = self.node(id);
@@ -4331,7 +4321,7 @@ impl<'a> Walk<'a> {
         }
         let b = style.get_box();
         // (…every box but an ordinary block or inline one: a caption's flow is its own too, and so is a `-webkit-box`'s,
-        // laid out as a block but no ordinary one — the JS model's context arm reads its own display)
+        // laid out as a block but no ordinary one, so its own display decides)
         let raw = b.clone_display();
         // (…a ruby box by the inline `walk_display` lays it out as; a `-webkit-box` by its own display, a block of its own)
         let d = if matches!(raw.inside(), DisplayInside::WebkitBox) { raw } else { self.laid_display(id, b) };
@@ -4382,9 +4372,8 @@ impl<'a> Walk<'a> {
         !visible(style)
     }
 
-    // HTML's LEGACY alignment for this block's block-level descendants (`legacyDescendantAlign`): `<center>`, or an
-    // `align` on a `div` / `p` / heading, the nearest ancestor-or-self deciding (rec[65] bits 3-4: 1 center, 2 right,
-    // 3 left).
+    // HTML's LEGACY alignment for this block's block-level descendants: `<center>`, or an `align` on a `div` / `p` /
+    // heading, the nearest ancestor-or-self deciding (`Input::legacy_align`: 1 center, 2 right, 3 left).
     fn legacy_align(&self, id: NodeId) -> u8 {
         let mut cur = Some(id);
         while let Some(at) = cur {
@@ -4410,24 +4399,161 @@ impl<'a> Walk<'a> {
     }
 }
 
-// A fresh record as the JS walk starts one (`newRecord`): every field 0, but the declared sizing auto, no comparison
-// program anywhere, no containing block in the pass, no pushed cell contribution or row height, no flex line, no
-// percentage to resolve, insets auto.
+// A fresh record, before the walk fills it in: every number 0 and every flag off, but the declared sizes, the
+// flex basis, the insets, a row's height and the percentages to resolve absent (NaN), no comparison program
+// anywhere, and no containing block in the pass.
 pub(crate) fn fresh_record() -> Input {
-    let mut r = [0.0f64; crate::dom::LAYOUT_STRIDE];
-    for m in crate::dom::MATH_SLOTS {
-        r[m] = f64::NAN;
+    use crate::layout::NO_MATH;
+    let nan = f64::NAN;
+    Input {
+        nid: 0.0,
+        parent: 0,
+        display: 0,
+        border_box: false,
+        width: 0.0,
+        height: 0.0,
+        min_w: 0.0,
+        max_w: 0.0,
+        min_h: 0.0,
+        max_h: 0.0,
+        mt: 0.0,
+        mr: 0.0,
+        mb: 0.0,
+        ml: 0.0,
+        pt: 0.0,
+        pr: 0.0,
+        pb: 0.0,
+        pl: 0.0,
+        bt: 0.0,
+        br: 0.0,
+        bb: 0.0,
+        bl: 0.0,
+        height_adjoins: false,
+        minh_adjoins: false,
+        bottom_adjoins: false,
+        run_start: 0,
+        run_count: 0,
+        strut_lh: 0.0,
+        strut_asc: 0.0,
+        float_kind: 0,
+        clear: 0,
+        takes_clearance: false,
+        starts_bfc: false,
+        flex_justify: 0,
+        flex_main_gap: 0.0,
+        flex_cross_align: 0,
+        flex_main_is_x: false,
+        flex_wrap: false,
+        flex_cross_flip: false,
+        flex_align_content: 0,
+        flex_cross_gap: 0.0,
+        flex_main_reverse: false,
+        flex_cross_far: false,
+        rel_x: 0.0,
+        rel_y: 0.0,
+        rel_pct: [nan, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        rel_x_px: 0.0,
+        rel_x_neg: false,
+        chain_rel: [0.0; 3],
+        chain_px: [0.0; 2],
+        chain_shift: [0.0; 2],
+        chain_math: [NO_MATH; 2],
+        rel_math: [NO_MATH; 3],
+        flex_item_auto: 0,
+        out_of_flow: 0,
+        sp_x: 0.0,
+        sp_y: 0.0,
+        cell_col: 0,
+        cell_colspan: 0,
+        cell_rowspan: 0,
+        caption_side: 0,
+        rtl: 0,
+        text_align: 0,
+        anon_cross: 0.0,
+        ws_mode: 0,
+        item_auto_height: false,
+        grid_start: 0,
+        decl_w: nan,
+        decl_min_w: nan,
+        decl_max_w: nan,
+        flex_basis: nan,
+        flex_grow: 0.0,
+        decl_border_box: false,
+        flex_shrink: 0.0,
+        flex_basis_cb: 0.0,
+        flex_basis_frac: nan,
+        flex_basis_math: NO_MATH,
+        pct_sizes: [nan; 6],
+        pct_px: [0.0; 6],
+        pct_math: [NO_MATH; 6],
+        edge_frac: [0.0; 8],
+        edge_px: [0.0; 8],
+        edge_math: [NO_MATH; 8],
+        basis_w: nan,
+        inset_frac: [0.0; 4],
+        inset_math: [NO_MATH; 4],
+        flex_main_gap_frac: 0.0,
+        flex_main_gap_math: NO_MATH,
+        flex_cross_gap_math: NO_MATH,
+        indent_math: NO_MATH,
+        flex_cross_gap_frac: 0.0,
+        flex_basis_kw: 0,
+        scrolls_x: false,
+        scrolls_y: false,
+        is_button: false,
+        self_sizes: false,
+        block_axis_is_x: false,
+        decl_edges_x: 0.0,
+        decl_margin_x: 0.0,
+        height_from_outside: false,
+        cell_pct: 0.0,
+        height_is_floor: false,
+        cell_valign: 0,
+        cell_pct_h_child: false,
+        anon_group: false,
+        group_pct_h: nan,
+        pct_h_decl: false,
+        row_imposed: false,
+        row_height: nan,
+        row_pct: nan,
+        row_rank: 0,
+        table_fixed: false,
+        flex_stretch: false,
+        flex_native: false,
+        flex_dir_reverse: false,
+        replaced: false,
+        lays_out_children: false,
+        ratio: false,
+        ratio_only: false,
+        shrinks_to_nothing: false,
+        form_control: false,
+        control_baseline: 0,
+        control_font_box: 0.0,
+        control_font_asc: 0.0,
+        intrinsic_w: 0.0,
+        intrinsic_h: 0.0,
+        cb_index: -1,
+        inset_top: nan,
+        inset_right: nan,
+        inset_bottom: nan,
+        inset_left: nan,
+        fits_content: 0,
+        auto_margins: 0,
+        legacy_align: 0,
+        legend_align: 0,
+        indent_px: 0.0,
+        indent_frac: 0.0,
+        indent_hanging: false,
+        indent_each_line: false,
+        indent_spent: false,
+        width_kw: 0,
+        height_kw: false,
+        cb_rect: [0.0; 4],
     }
-    // (…no percentage size, flex basis or relative inset to resolve, and insets auto)
-    for k in [56, 57, 58, 59, 72, 73, 74, 75, 84, 85, 86, 87, 97, 100, 101, 102, 103, 104, 105, 128, 129, 130] {
-        r[k] = f64::NAN;
-    }
-    r[71] = -1.0;
-    crate::dom::decode_input(&r)
 }
 
 // A box's four margins then four paddings as length-percentages (None for an `auto` margin), and which margins are
-// `auto` (rec[76]: 1 left, 2 right, 4 top, 8 bottom).
+// `auto` (`Input::auto_margins`: 1 left, 2 right, 4 top, 8 bottom).
 fn edge_lps(style: &ComputedValues) -> Result<([Option<&LengthPercentage>; 8], u8), &'static str> {
     use style::values::generics::length::GenericMargin as Margin;
     let m = style.get_margin();
@@ -4468,7 +4594,7 @@ fn used_borders(style: &ComputedValues) -> [f64; 4] {
         used(&bd.border_left_width, bd.border_left_style),
     ]
 }
-// A run that is an inline box's edge or a break (`nlEncodeRun`): its entry, the edge with no basis, its mode.
+// A run that is an inline box's edge or a break: its entry, the edge with no basis, its mode.
 fn edge_run(kind: u8, inline: usize, plain: f64, ws: u8) -> Run {
     Run {
         kind,
@@ -4487,12 +4613,12 @@ fn edge_run(kind: u8, inline: usize, plain: f64, ws: u8) -> Run {
         plain: if kind == RUN_OPEN || kind == RUN_CLOSE { plain } else { 0.0 },
     }
 }
-// Two runs' fonts one run can hold (`nlSameFi`).
+// Two runs' fonts one run can hold.
 fn same_font(a: &FontInfo, b: &FontInfo) -> bool {
     a.face == b.face && a.size == b.size && a.ls == b.ls && a.ws == b.ws && a.lh == b.lh && a.tab_px == b.tab_px && a.tab_min == b.tab_min
 }
-// The face's content box at the element's size (`fontContentHeight`: ascent + descent, each rounded) and its ascent
-// (`fontAscent`, what `inlineAscent` answers of a box on the baseline).
+// The face's content box at the element's size (ascent + descent, each rounded) and its ascent (what `inline_ascent`
+// answers of a box on the baseline).
 fn content_height(style: &ComputedValues, face: &Face) -> f64 {
     let size = font_size(style);
     js_round(face.asc * size) + js_round(face.desc * size)
@@ -4500,7 +4626,7 @@ fn content_height(style: &ComputedValues, face: &Face) -> f64 {
 fn content_ascent(style: &ComputedValues, face: &Face) -> f64 {
     js_round(face.asc * font_size(style))
 }
-// The used font size (`fontOf`'s `computedFontSizePx(el) || 16`).
+// The used font size: the computed one, 16 where that is 0.
 fn font_size(style: &ComputedValues) -> f64 {
     match f32_exact(style.get_font().font_size.computed_size().px()) {
         0.0 => 16.0,
@@ -4521,7 +4647,7 @@ fn display_decline(d: style::values::specified::box_::Display) -> &'static str {
     }
 }
 
-// An inline box's own relative offset as the chain carries it (`nlInlineRelSpec`): None where it moves nothing.
+// An inline box's own relative offset as the chain carries it: None where it moves nothing.
 // Where no inset has a percentage, it is its lengths; else each side's share — its pair (a fraction of `None` where
 // there is no percentage in it: `top` then falls back to `bottom` nowhere) or its program — `left`, else `right`
 // negated by the containing block's direction (`rtl`), `top`, else `bottom` negated, with `yi` what an indefinite height
@@ -4631,8 +4757,8 @@ fn contains_out_of_flow(style: &ComputedValues, arena: &RealmArena, id: NodeId, 
 }
 
 // A size's length-percentage, None for `auto` / `none` / a keyword — and for an `anchor-size()`, which takes the size of
-// an anchor neither layout models (CSS Anchor Positioning): the JS layout reads such a declaration as no size at all,
-// and so does this, alike (a shared gap — the fallback a function carries, and a real anchor's size, are backlog).
+// an anchor the layout does not model (CSS Anchor Positioning): such a declaration is read as no size at all (a gap —
+// the fallback a function carries, and a real anchor's size, are backlog).
 fn size_lp(v: &style::values::computed::Size) -> Option<&LengthPercentage> {
     use style::values::generics::length::GenericSize as Size;
     match v {
@@ -4648,12 +4774,12 @@ fn max_size_lp(v: &style::values::computed::MaxSize) -> Option<&LengthPercentage
     }
 }
 
-// A COMPARISON program (layout.js `nlMathProgram`, evaluated by `layout::math_at`): postfix triples `[op, a, b]` —
+// A COMPARISON program (evaluated by `layout::math_at`): postfix triples `[op, a, b]` —
 // `MATH_LINE` pushes `a + b × basis`, `MATH_MIN` / `MATH_MAX` / `MATH_SUM` fold the top two, `MATH_NEG` negates the top
 // and `MATH_SCALE` multiplies it by `a`. A piece with no comparison inside is ONE line, its `px + frac × basis`.
 
-// A value the record carries for native to resolve at the basis it has: `px + frac × basis`, or its program (whose pair
-// is then its figure at no basis) — `nlClampedSpec`'s `{px, frac, prog}`.
+// A value the record carries for the layout to resolve at the basis it has: `px + frac × basis`, or its program (whose
+// pair is then its figure at no basis).
 struct Spec {
     px: f64,
     frac: f64,
@@ -4850,7 +4976,7 @@ fn emit(node: &CalcNode, prog: &mut Vec<f64>) -> Step {
     }
     Ok(())
 }
-// A program at a basis — native's own evaluation (`layout::math_at`), which is what it will come to there.
+// A program at a basis — the layout's own evaluation (`layout::math_at`), which is what it will come to there.
 fn math_at(prog: &[f64], basis: f64) -> f64 {
     let mut table = Vec::with_capacity(prog.len() + 1);
     table.push((prog.len() / 3) as f64);
@@ -4858,12 +4984,12 @@ fn math_at(prog: &[f64], basis: f64) -> f64 {
     crate::layout::math_at(&table, 0, basis)
 }
 
-// The bases the JS walk probes an edge at to decide it is on its line (`NL_EDGE_PROBE` / `NL_EDGE_CHECKS`).
+// The bases a box's edges are probed at, to hold the form the record carries them in to what they are (`EdgeParts`).
 const EDGE_PROBE: f64 = 1_048_576.0;
 const EDGE_CHECKS: [f64; 4] = [217.0, 1531.0, 4099.0, 30011.0];
 
 // A box's four margins and four paddings as the record carries them: each one's length part, its fraction of the
-// containing block's width, and its program where a comparison bends it (`nlEdgeParts` / `nlClampedEdgeParts`).
+// containing block's width, and its program where a comparison bends it.
 struct EdgeParts {
     px: [f64; 8],
     frac: [f64; 8],
@@ -4928,8 +5054,8 @@ impl EdgeParts {
             };
             parts.prog[k] = prog;
         }
-        // (…held to what the edges ARE at the probes, as the JS walk holds them: a shape neither form reproduces is the
-        // one it would resolve against its own layout's basis, which this walk declines.)
+        // (…held to what the edges ARE at the probes: a shape neither form reproduces is one the record cannot carry,
+        // which this walk declines.)
         for basis in std::iter::once(EDGE_PROBE).chain(EDGE_CHECKS) {
             let want = Self::values(edges, basis)?;
             for k in 0..8 {
@@ -4946,14 +5072,13 @@ impl EdgeParts {
     }
 }
 
-// A length's px — a value with a percentage in it is not taught yet.
-// A style value as the page wrote it: the style engine keeps lengths, percentages and numbers as f32, where the JS side
-// reads the declaration's decimal into an f64 — `40%` is 0.4000000059604645 one way and 0.4 the other, and a table row
-// came out 40.00000059 against Chrome's 40. The f32's SHORTEST decimal (the fewest significant digits that read back as
-// it) is the value written wherever the page wrote one an f32 can hold, so that is what goes over. Found by rounding,
-// not by formatting: this runs for every length of every record, and a format and a parse per value cost a relayout
-// of fractional lengths 8-17%. (A value DERIVED from one — an `em`, a `calc()` — is only the f32 the engine computed,
-// which this cannot make the JS side's f64: those still agree to f32 precision, and no closer.)
+// A style value as the page wrote it: the style engine keeps lengths, percentages and numbers as f32, where the page
+// wrote a decimal — `40%` widened from its f32 is 0.4000000059604645, not 0.4, and a table row came out 40.00000059
+// against Chrome's 40. The f32's SHORTEST decimal (the fewest significant digits that read back as it) is the value
+// written wherever the page wrote one an f32 can hold, so that is what the record takes. Found by rounding, not by
+// formatting: this runs for every length of every record, and a format and a parse per value cost a relayout of
+// fractional lengths 8-17%. (A value DERIVED from one — an `em`, a `calc()` — is only the f32 the engine computed:
+// exact to f32 precision, and no closer.)
 pub(crate) fn f32_exact(v: f32) -> f64 {
     // (…an integer below 2^24 is every f32 in its range, so it IS the written one: the commonest value, skipped)
     if !v.is_finite() || (v == v.trunc() && v.abs() < 16_777_216.0) {
@@ -4970,6 +5095,7 @@ pub(crate) fn f32_exact(v: f32) -> f64 {
     }
     x
 }
+// A length's px — a value with a percentage in it is not taught yet.
 fn length(lp: &LengthPercentage) -> Result<f64, &'static str> {
     lp.to_length().map(|l: Length| f32_exact(l.px())).ok_or("percentage")
 }
@@ -4987,12 +5113,12 @@ fn spacing(lp: &LengthPercentage, style: &ComputedValues) -> f64 {
     }
     f32_exact(lp.resolve(Length::new(fs as f32)).px())
 }
-// Does a height leave the box's margins adjoining — `auto`, an intrinsic keyword, or a zero length (`autoOrZeroHeight`)?
+// Does a height leave the box's margins adjoining — `auto`, an intrinsic keyword, or a zero length?
 fn auto_or_zero(v: &style::values::computed::Size) -> bool {
     use style::values::generics::length::GenericSize as Size;
     match v {
         Size::LengthPercentage(lp) => lp.0.to_length().is_some_and(|l| l.px() == 0.0) || lp.0.to_percentage().is_some_and(|p| p.0 == 0.0),
-        // (…the intrinsic keywords are auto here, a `stretch` height a definite one: `AUTO_HEIGHT_KEYWORDS`)
+        // (…the intrinsic keywords are auto here, a `stretch` height a definite one)
         Size::Auto | Size::MinContent | Size::MaxContent | Size::FitContent => true,
         _ => false,
     }
@@ -5029,7 +5155,7 @@ fn has_content(text: &[u16]) -> bool {
 fn is_css_ws(u: u16) -> bool {
     matches!(u, 0x20 | 0x09 | 0x0A | 0x0D | 0x0C)
 }
-// Does white space alone make a line under `mode` (`whiteSpaceOnlyIsContent`)?
+// Does white space alone make a line under `mode`?
 fn white_space_only_is_content(text: &[u16], mode: u8) -> bool {
     if text.is_empty() {
         return false;
@@ -5040,12 +5166,12 @@ fn white_space_only_is_content(text: &[u16], mode: u8) -> bool {
         mode == WS_PRE_LINE && text.contains(&0x0A)
     }
 }
-// The block's `text-indent` as the record takes it (`nlIndentOf`): its Spec and the hanging / each-line bits.
+// The block's `text-indent` as the record takes it: its Spec and the hanging / each-line bits.
 fn indent(style: &ComputedValues) -> Result<(Spec, u32), &'static str> {
     let ti = &style.get_inherited_text().text_indent;
     Ok((spec(&ti.length)?, (if ti.hanging { 256 } else { 0 }) | (if ti.each_line { 512 } else { 0 })))
 }
-// The line alignment code (`nlAlignCode(textAlignOf(…))`): 0 left, 1 right, 2 center, 3 justify.
+// The line alignment code: 0 left, 1 right, 2 center, 3 justify.
 fn align_code(align: TextAlign, starts_at_right: bool) -> u8 {
     match align {
         TextAlign::Right | TextAlign::MozRight => 1,
@@ -5056,7 +5182,7 @@ fn align_code(align: TextAlign, starts_at_right: bool) -> u8 {
         _ => if starts_at_right { 1 } else { 0 },
     }
 }
-// The in-word break mode (`nlWrapMode`): 0 none, 1 break-all, 2 break-word, 3 anywhere, 4 break-all + break-word,
+// The in-word break mode: 0 none, 1 break-all, 2 break-word, 3 anywhere, 4 break-all + break-word,
 // 5 break-all + anywhere.
 fn wrap_mode(style: &ComputedValues) -> u8 {
     let t = style.get_inherited_text();

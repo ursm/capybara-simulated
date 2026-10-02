@@ -233,12 +233,12 @@ module Capybara
         '__csim_fontFile'            => ->(b, *a) { b.font_file(a[0], a[1]) },
         '__csim_fontAdvancesFromUrl' => ->(b, *a) { b.font_advance_table_from_url(a[0]) },
         # The on-disk SFNT path for an @font-face url (fetched + WOFF-decoded + cached) — so native layout can
-        # registerFontPath the SAME file the oracle measures advances from. nil when it can't be fetched/read.
+        # registerFontPath the SAME file the advance table (`advanceTableFor`) is read from. nil when it can't be fetched/read.
         '__csim_webFontFile'         => ->(b, *a) { b.font_file_for(a[0]) },
         '__csim_localFontTable'      => ->(b, *a) { b.local_font_table(a[0], a[1] || '') },
         # …and the installed file behind a `local()` source, the one that table was read from (nil when none).
-        # …the file only where the oracle's `localFaceTable` TAKES that local — found AND tabled: a `.ttc` fontconfig
-        # finds has no table, so the oracle falls to the next source while native, handed the file, declined the run.
+        # …the file only where `localFaceTable` TAKES that local — found AND tabled: a `.ttc` fontconfig finds has no
+        # table, so the face falls to the next source, and native layout must measure that one too.
         '__csim_localFontFile'       => ->(b, *a) { r = b.local_font_table(a[0], a[1] || ''); r['ok'] && r['table'] ? r['file'] : nil },
         '__csim_resourceTimingFetch' => ->(b, *a) { b.resource_timing_fetch(a[0], a[1] == true, a[2] || 'same-origin') },
         '__csim_takeModuleRt'        => ->(b, *a) { b.take_module_rt },

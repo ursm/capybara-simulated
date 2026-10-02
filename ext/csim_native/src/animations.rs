@@ -1166,7 +1166,7 @@ impl Animations {
 
     // The document timeline's time becomes `now` — the page's clock, read whenever an animation is asked about or
     // composed (a frame of this engine's clock is a tenth of a second, where a browser's is a sixtieth: between two,
-    // a page reading an animation reads the clock, as the JS model did). What runs moves with it.
+    // a page reading an animation reads the clock). What runs moves with it.
     pub(crate) fn set_timeline_time(&mut self, now: f64) {
         if self.timeline_time == Some(now) {
             return;

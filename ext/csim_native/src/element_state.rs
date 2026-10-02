@@ -495,7 +495,7 @@ impl RealmArena {
         });
         indicated == Some(id)
     }
-    // `:lang(ranges)` (selectors.js `matchesLang`): the element's language — the nearest shadow-including inclusive
+    // `:lang(ranges)`: the element's language — the nearest shadow-including inclusive
     // ancestor's `lang` in the XML namespace, or an HTML or SVG one's own `lang` — matches a range (comma-joined, lowercased)
     // equal to it, extended by it at a subtag boundary, or `*`; an empty language (lang="") none.
     pub(crate) fn matches_lang(&self, id: NodeId, ranges: &str) -> bool {

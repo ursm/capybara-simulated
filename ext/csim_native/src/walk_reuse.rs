@@ -1,7 +1,7 @@
 // What a Rust walk's pass keeps of the last one (step 3.9): the layout of every subtree the walk built exactly as it did
 // last time is put back instead of laid out again. The walk still builds every record — it reads the style engine's
 // values, and a subtree is known to be unchanged only once it is built — but the layout, which is most of a pass, is
-// the measure cache's to answer (`layout::MeasureCache`, the one a JS walk's kept chunks feed): each element's subtree
+// the measure cache's to answer (`layout::MeasureCache`): each element's subtree
 // is a CHUNK, and keeps its id from pass to pass for as long as it is the same.
 //
 // "The same" is decided against the last pass's records, bit for bit, with every position a record or a run names made
@@ -23,7 +23,7 @@ use crate::layout::{ChunkRoot, InlineBox, Input, MeasureCache, Run, RunText};
 use crate::walk::{Extent, MathTable, Prior, Splice};
 use crate::layout::{DISPLAY_GRID, DISPLAY_TABLE, RUN_ATOMIC, RUN_BR, RUN_CLOSE, RUN_FLOAT, RUN_OOF, RUN_OPEN, RUN_WBR};
 
-// A chunk not placed for this many passes is forgotten, its measures with it (as `dom.rs`'s JS chunks are).
+// A chunk not placed for this many passes is forgotten, its measures with it.
 const IDLE_PASSES: u64 = 16;
 
 #[derive(Default)]
@@ -69,7 +69,7 @@ pub(crate) struct Streams<'a> {
 }
 
 // How many values the math table grows to before it is started afresh — every offset moved, so nothing of the last pass
-// holds (the JS walk's table is capped alike).
+// holds.
 const MATH_TABLE_CAP: usize = 1 << 20;
 
 impl WalkReuse {
@@ -366,7 +366,7 @@ pub(crate) fn has_grid(x: &Input) -> bool {
     matches!(x.display, DISPLAY_GRID | DISPLAY_TABLE) && x.grid_start >= 0
 }
 
-// A run with the record or inline entry it names made the subtree's own (as `dom.rs` `emit_chunk` relocates them).
+// A run with the record or inline entry it names made the subtree's own.
 fn run_rel(r: &Run, b: &Base) -> Run {
     let mut r = *r;
     match r.kind {

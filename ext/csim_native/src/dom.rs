@@ -1,4 +1,5 @@
-// Native DOM: the per-realm node arena that backs native CSS cascade matching.
+// Native DOM: the per-realm node arena the native readers — selector matching, the style engine, the layout walk,
+// XPath — read.
 //
 // Lives in capybara-simulated's OWN native extension (not in rusty_racer, which stays a pure V8
 // binding). rusty_racer is linked as a library and exposes one generic seam — set_realm_init_hook —
@@ -8,8 +9,8 @@
 // `Dom` holds ONE `RealmArena` per realm (keyed by rusty_racer's context_id; see `install` / `realm`),
 // so main and frame realms each match over their own tree. The JS side (native-query-shadow.js) builds
 // a realm's arena from its parsed document (importNode + syncChildren) and keeps it current at the DOM
-// mutation seams; the Servo `selectors` matcher (selector.rs) reads a RealmArena directly. This is the
-// READER half of the DOM-in-Rust flip — the store stays in JS; only MATCHING is native.
+// mutation seams; the Servo `selectors` matcher (selector.rs), the style engine (style.rs) and the layout
+// walk (walk.rs) read a RealmArena directly. The store stays in JS; the arena is its READER copy.
 //
 // GENERATIONAL ARENA. A node lives in a SLOT (`Vec<Slot>`); a slot carries a `gen` counter and, when
 // free, an empty `data`. A `NodeId` is a `(index, gen)` pair — and so is every INTERNAL edge
@@ -140,9 +141,8 @@ pub(crate) struct NodeData {
     // the JS matcher it replaced; O(1) flips it). It counts ALL entries (a stale edge included), so the
     // sibling walks step from it and skip any stale neighbour they land on.
     pub(crate) child_index: usize,
-    // The border-box a native layout pass wrote for this node (document coords), read back by the JS
-    // geometry getters (getBoundingClientRect / offset* / scroll*). None until a pass lays it out;
-    // overwritten each pass. See mod layout + the layoutPass / boxOf ops.
+    // The box the last layout pass gave this node (`laid_answer`): what a pass's `changed` is decided against,
+    // so the JS side rewrites only a box that moved. None until a pass lays it out; overwritten each pass.
     pub(crate) layout_box: Option<crate::layout::Box>,
     // An element's live STATE that no attribute carries (`state` bits, below): what a script or the user did to it.
     pub(crate) state: u32,
@@ -435,8 +435,8 @@ pub(crate) struct RealmArena {
     // (`NodeData::stamp`), so a stamp past the epoch a walk began at is a change since that walk.
     pub(crate) layout_epoch: std::cell::Cell<u64>,
     // The elements whose style a restyle REPLACED since this side last took them (`note_restyled`, `styleRestyled`):
-    // what the JS layout's memos and its early return have to hear of, now that the engine — not the JS cascade's rule
-    // gates — decides what a change restyles. Past `RESTYLED_CAP` only that it overflowed is kept: then everything is.
+    // what the JS side's layout memos and its early return have to hear of, since the engine decides what a change
+    // restyles. Past `RESTYLED_CAP` only that it overflowed is kept: then everything is.
     pub(crate) restyled: std::cell::RefCell<(Vec<NodeId>, bool)>,
 }
 pub(crate) const RESTYLED_CAP: usize = 4096;
@@ -902,7 +902,7 @@ pub(crate) struct Dom {
     attrs_view_template: Option<v8::Global<v8::ObjectTemplate>>,
     // Each realm's static author rules (`cascadeLoad`), which `cascadeWinners` answers from.
     pub(crate) cascades: std::collections::HashMap<i32, crate::cascade::CascadeStore>,
-    // Each realm's style engine (`styleLoad`).
+    // Each realm's style engine (made by `styleSheets`).
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
     // Each realm's Rust walk's last pass and the measures kept of it (`walk_reuse`).
     pub(crate) walk_reuse: std::collections::HashMap<i32, crate::walk_reuse::WalkReuse>,
@@ -1113,12 +1113,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // Free a disposed realm's arena — csim calls this before tearing down a frame realm (main reuses
     // slot 0). Takes an explicit id (the realm being dropped), not the caller's own.
     register(scope, ns, "dropRealm", drop_realm, context_id);
-    // Native layout (reader-flip endgame, stage L1 = block flow): lay a subtree out from a flat buffer
-    // of per-node used values in ONE crossing, writing a border-box per node into the arena; boxOf reads
-    // one back for the JS geometry getters.
+    // The layout walk's reuse counts (the pass itself, `layoutBuild`, is walk_ops.rs's).
     register(scope, ns, "layoutMeasureCounts", layout_measure_counts, context_id);
-    // Native text metrics (fontations) for native inline layout (L2): register a font (fontconfig path
-    // or in-memory SFNT bytes) to a handle JS puts in the layout inputs; native measures runs in-process.
+    // Native text metrics (fontations) for inline layout: register a font (fontconfig path or in-memory
+    // SFNT bytes) to a handle the JS side names its faces by (`walkFace`); layout measures runs in-process.
     register(scope, ns, "registerFontPath", register_font_path, context_id);
     register(scope, ns, "registerFontScaled", register_font_scaled, context_id);
     register(scope, ns, "registerFontStack", register_font_stack, context_id);
@@ -1339,7 +1337,8 @@ fn set_natural_size(
 }
 
 // __dom.firstStrongDirection(text) -> 'rtl' | 'ltr' | null: the direction of the text's first STRONG character, by its
-// Bidi_Class (`unicode::first_strong_direction`) — what `dir=auto` asks, answered for both engines in one place.
+// Bidi_Class (`unicode::first_strong_direction`) — what `dir=auto` asks, answered for this side and the style engine's
+// `:dir()` in one place.
 fn first_strong_direction(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1602,7 +1601,7 @@ fn remove_child(
 // Each child is detached from any current parent first, so a MOVED node — still listed under its
 // old parent until that parent is itself synced — is re-homed correctly whichever order the two
 // syncs arrive in. The single structural-sync primitive the incremental (parse + mutation) arena
-// upkeep drives, replacing the shadow path's full rebuild. New nodes are created with
+// upkeep drives. New nodes are created with
 // importNode(parent = -1) first, then linked here.
 fn sync_children(
     scope: &mut v8::PinScope<'_, '_>,
@@ -1997,7 +1996,7 @@ fn xpath_evaluate(
 
 // __dom.compileSelector(text) -> handle. The authoritative cascade path calls this ONCE per rule and
 // caches the integer, then matches by handle (matchesCompiled) with no per-call string marshalling.
-// `>= 0` = a natively-matchable compiled selector; `-1` = invalid or needs JS fallback → use css.
+// `>= 0` = a natively-matchable compiled selector; `-1` = invalid or needs JS fallback → `matchesRule`.
 fn compile_selector(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2124,8 +2123,8 @@ pub(crate) fn style_op(scope: &mut v8::PinScope<'_, '_>, cid: i32, op: impl FnOn
             }
         }
     }
-    // Loud where the engine is being verified; elsewhere the page is answered as it was before the engine (by the JS
-    // side), with the bug on stderr.
+    // Loud where the engine is being verified; elsewhere the bug goes to stderr and the next op starts from a clean
+    // engine.
     let message = format!("style engine panicked: {}", what.unwrap_or_default());
     if !verifies {
         eprintln!("csim: {message}");
@@ -2541,9 +2540,8 @@ fn push_animation_events<'s>(
 // __dom.resetArena() — free the CALLING REALM's nodes for a new page (a navigation). Each occupied
 // slot's gen is bumped (not zeroed), so a detached element held across the navigation can't alias a
 // new-page node that reuses its index; the freed indices feed the new page.
-// …and its kept layout chunks, which name those nodes: dead the moment the page is, rather than after the idle passes
-// that would evict them (`CHUNK_IDLE_PASSES`). A block the walk still holds is sent again when a pass names it —
-// `layoutPass` answers with the ids it no longer holds.
+// …and its walk's kept pass and measures (`walk_reuse`), which name those nodes: dead the moment the page is, rather
+// than after the idle passes that would evict them (`walk_reuse::IDLE_PASSES`).
 fn reset_arena(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2655,20 +2653,10 @@ fn register_font_stack(
     rv.set_int32(crate::font::register_stack(primary, members));
 }
 
-// Fields per node in the layoutPass input buffer, and per run in the runs buffer (flat Float64Arrays).
-// Order MUST match the JS packer (layout.js `__csimLayoutShadowRun`) and layout::Input / layout::Run.
-pub(crate) const LAYOUT_STRIDE: usize = 165;
-// The record slots that name a comparison PROGRAM by its offset in the math table (layout.js `NL_REC_MATH_SLOTS`).
-pub(crate) const MATH_SLOTS: [usize; 27] = [
-    125, 126, 127, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 156, 157, 158, 159, 160, 161,
-    162,
-];
-
-// A Float64Array argument's values, read IN PLACE: a pass's records run to megabytes on a large page (1,320 bytes a
-// record), and copying them out — twice, through a byte vector — was a fifth of a pass. Copied only where the view is
-// not aligned for f64 (a view at an odd byte offset, which no caller makes). The borrow is sound because nothing between
-// here and the pass's answer runs JS or allocates on V8's heap, so nothing can move the data; the answer's arrays are
-// made after the last read.
+// A Float64Array argument's values, read IN PLACE rather than copied out twice through a byte vector. Copied only
+// where the view is not aligned for f64 (a view at an odd byte offset, which no caller makes). The borrow is sound
+// because nothing between here and the op's answer runs JS or allocates on V8's heap, so nothing can move the data;
+// the answer is made after the last read.
 enum F64Arg<'a> {
     Borrowed(&'a [f64]),
     Owned(Vec<f64>),
@@ -2701,171 +2689,6 @@ fn f64_arg<'a>(val: v8::Local<'a, v8::Value>) -> F64Arg<'a> {
     F64Arg::Owned(bytes.chunks_exact(8).map(|c| f64::from_ne_bytes(c.try_into().unwrap())).collect())
 }
 
-// One record of `layoutPass`'s input as the layout reads it — the whole of the record's contract with the JS packer
-// (`nlEncodeRecord`), in one place for the pass and for a kept chunk (`layoutChunkPut`).
-pub(crate) fn decode_input(r: &[f64]) -> crate::layout::Input {
-    crate::layout::Input {
-        nid: r[0],
-        parent: r[1] as i32,
-        display: r[2] as u8,
-        border_box: r[3] != 0.0,
-        width: r[4],
-        height: r[5],
-        min_w: r[6],
-        max_w: r[7],
-        min_h: r[8],
-        max_h: r[9],
-        mt: r[10],
-        mr: r[11],
-        mb: r[12],
-        ml: r[13],
-        pt: r[14],
-        pr: r[15],
-        pb: r[16],
-        pl: r[17],
-        bt: r[18],
-        br: r[19],
-        bb: r[20],
-        bl: r[21],
-        run_start: r[22] as i32,
-        run_count: r[23] as i32,
-        strut_lh: r[24],
-        height_adjoins: r[25] != 0.0,
-        minh_adjoins: r[26] != 0.0,
-        strut_asc: r[27],
-        float_kind: r[28] as u8,
-        clear: r[29] as u8,
-        starts_bfc: r[30] != 0.0,
-        flex_justify: r[31] as u8,
-        flex_main_gap: r[32],
-        flex_main_gap_math: crate::layout::math_ref(r[125]),
-        flex_cross_align: r[33] as u8,
-        flex_main_is_x: r[34] != 0.0,
-        flex_wrap: r[35] != 0.0,
-        flex_cross_flip: r[35] == 2.0,
-        flex_align_content: r[36] as u8,
-        flex_cross_gap: r[37],
-        flex_cross_gap_math: crate::layout::math_ref(r[126]),
-        flex_main_reverse: r[38] != 0.0,
-        flex_cross_far: (r[65] as u32) & 32768 != 0,
-        // A text block holding an out-of-flow child the walk REPLAYED. Those are the only children a text
-        // block has to lay out that its run stream does not name, and scanning for them costs a pass over
-        // every text block's children on a page that has none.
-        has_replayed_oof: (r[65] as u32) & 65536 != 0,
-        pushed_h_indefinite: (r[65] as u32) & 131072 != 0,
-        height_from_outside: (r[65] as u32) & 262144 != 0,
-        rel_x: r[39],
-        rel_y: r[40],
-        rel_pct: [r[130], r[131], r[132], r[133], r[134], r[39], r[40]],
-        rel_x_px: r[152],
-        chain_rel: [r[153], r[154], r[155]],
-        chain_px: [r[163], r[164]],
-        chain_shift: [r[163], r[164]],
-        chain_math: [crate::layout::math_ref(r[161]), crate::layout::math_ref(r[162])],
-        rel_x_neg: (r[65] as u32) & 8388608 != 0,
-        measured_as_block: (r[65] as u32) & 16777216 != 0,
-        equal_share: (r[65] as u32) & 33554432 != 0,
-        rel_math: std::array::from_fn(|k| crate::layout::math_ref(r[149 + k])),
-        flex_item_auto: r[41] as u8,
-        flex_baseline_asc: r[42],
-        flex_line_nat: r[128],
-        flex_line: r[129],
-        out_of_flow: r[43] as u8,
-        sp_x: r[44],
-        sp_y: r[45],
-        cell_col: r[46] as usize,
-        cell_colspan: r[47] as usize,
-        cell_rowspan: r[48] as usize,
-        caption_side: r[49] as u8,
-        rtl: r[50] as u8,
-        text_align: ((r[65] as u32) >> 5 & 3) as u8,
-        anon_cross: r[52],
-        ws_mode: r[53] as u8,
-        item_auto_height: r[54] != 0.0,
-        grid_start: r[55] as i32,
-        decl_w: r[56],
-        decl_min_w: r[57],
-        decl_max_w: r[58],
-        flex_basis: r[59],
-        flex_grow: r[60],
-        decl_border_box: r[61] != 0.0,
-        flex_shrink: r[62],
-        flex_basis_cb: r[63],
-        flex_basis_frac: r[97],
-        flex_basis_math: crate::layout::math_ref(r[156]),
-        pct_sizes: [r[100], r[101], r[102], r[103], r[104], r[105]],
-        pct_px: [r[119], r[120], r[121], r[122], r[123], r[124]],
-        pct_math: std::array::from_fn(|k| crate::layout::math_ref(r[135 + k])),
-        edge_frac: [r[106], r[107], r[108], r[109], r[110], r[111], r[112], r[113]],
-        basis_w: f64::NAN,
-        edge_px: [r[10], r[11], r[12], r[13], r[14], r[15], r[16], r[17]],
-        edge_math: std::array::from_fn(|k| crate::layout::math_ref(r[141 + k])),
-        inset_frac: [r[114], r[115], r[116], r[117]],
-        inset_math: std::array::from_fn(|k| crate::layout::math_ref(r[157 + k])),
-        flex_main_gap_frac: r[98],
-        flex_cross_gap_frac: r[99],
-        flex_basis_kw: r[64] as u8,
-        scrolls_x: (r[65] as u32) & 1 != 0,
-        scrolls_y: (r[65] as u32) & 2 != 0,
-        is_button: (r[65] as u32) & 128 != 0,
-        self_sizes: r[80] != 0.0,
-        block_axis_is_x: r[91] != 0.0,
-        decl_edges_x: r[89],
-        decl_margin_x: r[90],
-        cell_pct: r[81],
-        cell_min_content: r[84],
-        cell_max_content: r[85],
-        height_is_floor: r[82] != 0.0,
-        cell_valign: r[51] as u8,
-        row_height: r[86],
-        row_pct: r[87],
-        row_rank: r[88] as u8,
-        table_fixed: r[83] != 0.0,
-        flex_dir_reverse: (r[65] as u32) & 4 != 0,
-        flex_stretch: r[66] != 0.0,
-        flex_native: r[67] != 0.0,
-        intrinsic_w: r[68],
-        intrinsic_h: r[69],
-        replaced: (r[70] as u32) & 1 != 0,
-        lays_out_children: (r[70] as u32) & 16 != 0,
-        ratio: (r[70] as u32) & 2 != 0,
-        ratio_only: (r[70] as u32) & 4 != 0,
-        shrinks_to_nothing: (r[70] as u32) & 8 != 0,
-        form_control: (r[70] as u32) & 32 != 0,
-        cb_index: r[71] as i32,
-        cb_rect: [r[92], r[93], r[94], r[95]],
-        inset_top: r[72],
-        inset_right: r[73],
-        inset_bottom: r[74],
-        inset_left: r[75],
-        fits_content: 0,
-        auto_margins: r[76] as u8,
-        legacy_align: ((r[65] as u32) >> 3 & 3) as u8,
-        legend_align: ((r[65] as u32) >> 27 & 7) as u8,
-        indent_px: r[96],
-        indent_math: crate::layout::math_ref(r[127]),
-        indent_frac: r[118],
-        indent_hanging: (r[65] as u32) & 256 != 0,
-        indent_each_line: (r[65] as u32) & 512 != 0,
-        indent_spent: (r[65] as u32) & 1024 != 0,
-        width_kw: ((r[65] as u32) >> 11 & 3) as u8,
-        height_kw: (r[65] as u32) & 67108864 != 0,
-        takes_clearance: (r[65] as u32) & 8192 != 0,
-        bottom_adjoins: (r[65] as u32) & 16384 != 0,
-        // rec[65] bit 19: a table CELL holding a percentage-height descendant — the one thing that makes
-        // `measure_table` lay a cell out twice (§17.5.3). Asked by the WALK because it is a question about
-        // declarations down a subtree native may not walk at all.
-        cell_pct_h_child: (r[65] as u32) & 524288 != 0,
-        anon_group: (r[65] as u32) & 1048576 != 0,
-        group_pct_h: f64::NAN,
-        pct_h_decl: (r[65] as u32) & 2097152 != 0,
-        row_imposed: (r[65] as u32) & 4194304 != 0,
-        control_baseline: r[77] as u8,
-        control_font_box: r[78],
-        control_font_asc: r[79],
-    }
-}
-
 // __dom.layoutMeasureCounts() -> [put back, kept, records held, records spliced, records walked]: the Rust walk's kept
 // measures (`layout::MeasureCache` in `walk_reuse`), and the records it spliced back from its last pass rather than built
 // (`Walk::splice`) and those it built, for a spec and the perf gate.
@@ -2893,9 +2716,9 @@ fn layout_measure_counts(
 }
 
 
-// A laid-out pass as the JS side takes it: `[fragRows, boxRows, changed, textRows?]` — each box stored on its node as
-// well (`layout_box`, what `boxOf` reads), and `changed` naming the records whose box moved from the one stored.
-pub(crate) fn laid_answer<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, laid: crate::layout::Laid, texts: bool) -> v8::Local<'s, v8::Array> {
+// A laid-out pass as the JS side takes it: `[fragRows, boxRows, changed]` — each box stored on its node as
+// well (`layout_box`), and `changed` naming the records whose box moved from the one stored.
+pub(crate) fn laid_answer<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, laid: crate::layout::Laid) -> v8::Local<'s, v8::Array> {
     let st = realm(scope, cid);
     let mut rows: Vec<f64> = Vec::with_capacity(laid.boxes.len() * BOX_ROW);
     let mut changed: Vec<f64> = Vec::new();
@@ -2919,11 +2742,6 @@ pub(crate) fn laid_answer<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, laid: 
     answer.set_index(scope, 0, frag_rows);
     answer.set_index(scope, 1, box_rows);
     answer.set_index(scope, 2, changed);
-    if texts {
-        let flat: Vec<f64> = laid.texts.iter().flatten().copied().collect();
-        let text_rows: v8::Local<v8::Value> = f64_array(scope, &flat).into();
-        answer.set_index(scope, 3, text_rows);
-    }
     answer
 }
 
@@ -2936,12 +2754,13 @@ pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v
     v8::Float64Array::new(scope, buf, 0, vals.len()).expect("a Float64Array over its own backing store")
 }
 
-// One box as the JS side reads it (`boxOf`, and `layoutPass`'s box rows): `BOX_ROW` numbers — the twelve above, then its
-// edges as the pass used them (`layout::Box::edges`, NaN where it has none), which `auto` margins it has in the JS
-// side's mask (1 top, 2 right, 4 bottom, 8 left — `AUTO_MARGIN_BIT`) with 16 beside them where an edge resolved a
-// percentage, and where it is out of flow what placed it: `Box::out_of_flow`, `cb` (the record, or −1 the viewport,
-// −2 the inline entry after it, −3 nothing: a replayed box), `cb_inline` and `static_axes` — and its `position`
-// where the pass says (`Box::position`).
+// One box as the JS side reads it (`nlWriteBoxes`' box rows): `BOX_ROW` numbers — its border box `[x, y, w, h]`,
+// whether its height is `auto`, the basis its percentages resolved against, its used margins (top, right, bottom,
+// left) and its relative shift `[x, y]`, then its edges as the pass used them (`layout::Box::edges`, NaN where it has
+// none), which `auto` margins it has in the JS side's mask (1 top, 2 right, 4 bottom, 8 left — `AUTO_MARGIN_BIT`)
+// with 16 beside them where an edge resolved a percentage, and where it is out of flow what placed it:
+// `Box::out_of_flow`, `cb` (the record, or −1 the viewport, −2 the inline entry after it, −3 none), `cb_inline` and
+// `static_axes` — and its `position` (`Box::position`).
 pub(crate) const BOX_ROW: usize = 30;
 fn box_row(b: &crate::layout::Box) -> [f64; BOX_ROW] {
     let [mt, mr, mb, ml] = b.used_margins.unwrap_or([f64::NAN; 4]);

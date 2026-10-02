@@ -288,8 +288,8 @@ impl Default for ShadowStyles {
     }
 }
 
-// Whether `css` holds a `:has()` inside a `:host()` ARGUMENT — read off the text, as the JS cascade's
-// `hostReadsDescendants` reads it: between a `:host(` and the parenthesis that closes it (ASCII case-insensitively).
+// Whether `css` holds a `:has()` inside a `:host()` ARGUMENT — read off the text: between a `:host(` and the
+// parenthesis that closes it (ASCII case-insensitively).
 fn host_reads_descendants(css: &str) -> bool {
     let lower = css.to_ascii_lowercase();
     lower.match_indices(":host(").any(|(at, _)| {
@@ -1332,9 +1332,8 @@ impl StyleEngine {
     }
 
     // The properties the animations on `element` itself set, as their keyframes declare them (a shorthand expanded)
-    // and under the names of the shorthands those are part of — what the JS side's cascade and layout ask of an
-    // animated element, until they read the engine's styles (and whose longhand can be the engine's shorthand:
-    // `white-space`, `vertical-align`).
+    // and under the names of the shorthands those are part of — what the JS side asks of an animated element
+    // (`__dom.animProperties`), whose longhand can be the engine's shorthand: `white-space`, `vertical-align`.
     pub(crate) fn animated_properties(&self, element: NodeId) -> Vec<String> {
         let guard = self.lock.read();
         let mut out: Vec<String> = Vec::new();
@@ -3348,8 +3347,7 @@ fn font_face_src(src: &style::font_face::SourceList) -> String {
 }
 
 // Whether a sheet's text could paint an image: a `background` / `cursor` / `list-style` declaration with a `url(` in its
-// value (the JS model's `CSS_IMAGE_RE`, read the same way — a declaration is what lies between `;`, `{` and `}`, and the
-// property a keyword with a `:` after it).
+// value (a declaration is what lies between `;`, `{` and `}`, and the property a keyword with a `:` after it).
 fn css_image(css: &str) -> bool {
     let lower = css.to_ascii_lowercase();
     let bytes = lower.as_bytes();

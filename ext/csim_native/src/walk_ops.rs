@@ -91,7 +91,7 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths.values, f64::NAN, f64::NAN, root_cb_w, root_rtl, cache, texts);
     // (…and a pass that paints answers each text piece as the painter draws it — beside the rows that index the runs, which
     // only this side has: `[x, y, baseline, width, justify, owner nid]` and the text, the baseline's run shift taken back
-    // off and a hyphen's owner the character's before it, as `nlPaintRuns` makes them)
+    // off and a hyphen's owner the character's before it)
     let painted = match &out {
         crate::layout::Outcome::LaidOut(laid) if texts => Some(paint_rows(&laid.texts, &paint, &run_texts)),
         _ => None,
@@ -122,8 +122,8 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         rv.set(s.into());
         return;
     };
-    // (…and each box's `position`, which the walk read off the same style: the writer's own question of it, asked of
-    // the style engine here rather than of the JS cascade there)
+    // (…and each box's `position`, which the walk read off the same style: the writer's own question of it, answered
+    // by the style engine here)
     if let Some(arena) = dom(scope).realms.get(&cid) {
         for b in laid.boxes.iter_mut().filter(|b| b.nid >= 0.0) {
             b.position = NodeId::from_i64(b.nid as i64)
@@ -132,7 +132,7 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         }
     }
     // (…its text rows answered as the painter's pieces alone, below: nothing on that side reads the rows that index runs)
-    let answer = laid_answer(scope, cid, laid, false);
+    let answer = laid_answer(scope, cid, laid);
     if let Some((rows, strings)) = painted {
         let rows: v8::Local<v8::Value> = f64_array(scope, &rows).into();
         answer.set_index(scope, 8, rows);

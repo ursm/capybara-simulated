@@ -1,15 +1,15 @@
 // Native text metrics via fontations (skrifa / read-fonts) — the pure-Rust font stack Chrome and Servo
 // use. A font file is parsed ONCE into a small advance table (printable-ASCII em-fractions + their
 // mean, exactly the shape the host's `font_advance_table` builds, so run widths match bit-for-bit), and
-// native inline layout (mod layout, stage L2) measures a run's width IN-PROCESS — no per-run V8
-// crossing (the granularity that made a per-call __dom.measureRun op a wash; see perf_dead_ends).
+// inline layout (mod layout) measures a run's width IN-PROCESS — no per-run V8 crossing (the granularity
+// that made a per-call __dom.measureRun op a wash; see perf_dead_ends).
 //
-// PARITY is the contract: `measure_run` reproduces layout.js `measureRun`/`unitOf` exactly, in f64 (JS
-// Numbers are f64) — the ASCII table, NBSP-as-space, the CJK/fullwidth full-em fallback, the zero-width
-// classes, ZWJ joining, astral full-em, and letter/word spacing. It returns None only for a run holding a TAB
-// (the advance is the BLOCK's tab stops, not the run's); the caller declines such a block to JS. Every other
-// character is decidable, the combining marks (the oracle's `\p{M}`) through `unicode.rs`. Line HEIGHT is not computed here — JS pushes
-// the resolved line-height px, so no hhea/vertical-metric parity is needed for L2.
+// `measure_run` reproduces layout.js `measureRun`/`unitOf` exactly, in f64 (JS Numbers are f64) — the
+// ASCII table, NBSP-as-space, the CJK/fullwidth full-em fallback, the zero-width classes, ZWJ joining,
+// astral full-em, and letter/word spacing — since the JS side still measures a control's own text with
+// them (a button's label, a `<select>`'s widest option) and the two have to agree. Every character is
+// decidable, the combining marks (`\p{M}`) through `unicode.rs`. Line HEIGHT is not computed here: the walk
+// takes it from the style engine and the face's vertical metrics (`walk::Face`).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -31,7 +31,7 @@ pub(crate) struct FontMetrics {
 }
 
 // One face of a `unicode-range` split: its registered handle, the ranges it covers (None: every code point), and its
-// vertical metrics in ems — None where its table carries none (the JS model's `t.asc == null`).
+// vertical metrics in ems — None where its table carries none.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct StackMember {
     pub(crate) ranges: Option<Vec<(u32, u32)>>,
@@ -59,7 +59,7 @@ pub(crate) fn code_points(text: &[u16]) -> impl Iterator<Item = u32> + '_ {
 }
 
 impl FontMetrics {
-    // The advance of its `0`, in ems — what a `ch` is — else its mean advance, as the JS model's `chFactor` falls back.
+    // The advance of its `0`, in ems — what a `ch` is — else its mean advance, as font-metrics.js `chFactor` falls back.
     pub(crate) fn zero_advance(&self) -> f64 {
         self.ascii[b'0' as usize].filter(|&a| a > 0.0).unwrap_or(self.avg)
     }
@@ -74,7 +74,7 @@ impl FontMetrics {
     }
     // The line box a run of `text` needs in a split face, as the ascent and descent around its baseline: the deepest of
     // each among the faces its characters select, every one laid out as a face of its own would be — its box centred in
-    // `fixed_lh` (a `line-height` that is not `normal`), else in its own box and line gap (layout.js `runFaceVMax`). A
+    // `fixed_lh` (a `line-height` that is not `normal`), else in its own box and line gap. A
     // character no member covers takes `primary`, the face the run's style resolves to. None when nothing on the run
     // has vertical metrics, or the face does not split.
     pub(crate) fn run_vmax(&self, text: &[u16], size: f64, fixed_lh: Option<f64>, primary: Option<VerticalMetrics>) -> Option<(f64, f64)> {
@@ -133,9 +133,8 @@ impl FontMetrics {
     // the pen reaches it. So this never answers None itself; it stays an `Option` because its one caller
     // (`measure_at`) reaches it through `with_font`, which answers None for a font handle that is not
     // registered, and the two Nones are indistinguishable to the caller anyway.
-    // Bit-parity vs JS measureRun was validated over ~667k calls (perf log 2026-09-09) on the ASCII-and-Latin
-    // input this accepted then; the classes admitted since (wide characters, combining marks, tabs) are held
-    // to the box-level parity the shadow harness checks, not to that measurement.
+    // Bit-parity vs JS measureRun was validated over ~667k calls (perf log 2026-09-09) on ASCII-and-Latin
+    // input; the other classes (wide characters, combining marks, tabs) are not covered by that measurement.
     // `from` is the pen's distance from the block's content edge and `tab_px` / `tab_min` the stop pair a TAB
     // advances to (see `Run::tab_px`); every other character ignores all three.
     pub(crate) fn measure_run(&self, text: &[u16], size: f64, ls: f64, ws: f64, from: f64, tab_px: f64, tab_min: f64) -> f64 {
@@ -145,8 +144,8 @@ impl FontMetrics {
         let mut prev: i64 = -1;
         for cp in code_points(text) {
             if cp == 0x09 {
-                // The oracle's `tabAdvance`, on the pen this measure has reached: the distance to the next
-                // stop, or to the one AFTER it where that is nearer than half a space (Blink's `Font::TabWidth`
+                // A tab's advance (layout.js `tabAdvance`), on the pen this measure has reached: the distance to the
+                // next stop, or to the one AFTER it where that is nearer than half a space (Blink's `Font::TabWidth`
                 // — `tab-size: 20px` after 19.2px of text lands at 40, after 9.6px at 20). Stops are counted
                 // from the block's content edge, which `from` is measured from, and `text-indent` does not
                 // move them. It joins `spacing` rather than `units` because it is already a px advance.
@@ -157,7 +156,7 @@ impl FontMetrics {
                     let pen = from + units * size + spacing;
                     let into = pen - (pen / tab_px + 1e-9).floor() * tab_px;
                     let dist = tab_px - into;
-                    // `<` against a half-open epsilon, as the oracle writes it: Blink compares in float32, so
+                    // `<` against a half-open epsilon, as `tabAdvance` writes it: Blink compares in float32, so
                     // a stop exactly `tab_min` away counts as too near.
                     if dist < tab_min + 1e-6 { dist + tab_px } else { dist }
                 } else {
@@ -180,11 +179,11 @@ impl FontMetrics {
 }
 
 // layout.js isWideChar: CJK / fullwidth / Hangul are full-em in every font that has them — and, since the
-// break units follow the same classifier (`break_unit_len`), the ONE definition both sides read. BMP only,
-// exactly as the oracle's is: an astral code point is full-em there but never its own break unit.
+// break units follow the same classifier (`break_unit_len`), the ONE definition both read. BMP only, as
+// layout.js's is: an astral code point is full-em there but never its own break unit.
 pub(crate) fn is_wide_char(cp: u32) -> bool {
-    // The oracle's own gate (`u >= 0x1100 && isWideChar(...)`): every ASCII character answers on one compare
-    // instead of walking seven ranges, and this is asked per WORD of every line layout now, not per run.
+    // A gate first (`u >= 0x1100`): every ASCII character answers on one compare instead of walking seven ranges,
+    // and this is asked per WORD of every line layout, not per run.
     if cp < 0x1100 {
         return false;
     }
@@ -197,9 +196,8 @@ pub(crate) fn is_wide_char(cp: u32) -> bool {
         || (0xFFE0..=0xFFE6).contains(&cp)
 }
 
-// layout.js zeroWidth. Every code point is decidable: the ranges below from structure, and the rest from the
-// oracle's own `\p{M}` (see the last arm). This used to answer `None` where a combining-mark test was needed
-// and the whole layout pass fell back to JS — which is why `unicode.rs` exists.
+// layout.js zeroWidth. Every code point is decidable: the ranges below from structure, and the rest from
+// `\p{M}` (see the last arm).
 fn zero_width(cp: u32) -> bool {
     if cp < 0x20 {
         return true;
@@ -234,9 +232,8 @@ fn zero_width(cp: u32) -> bool {
     if (0xE0100..=0xE01EF).contains(&cp) {
         return true;
     }
-    // …and the one question structure cannot answer — is this a COMBINING MARK? — is answered by the oracle's
-    // own `\p{M}`, parsed out of the same regex (`unicode.rs`). So every character is decidable now: a CJK
-    // run, an em space, a dash, an emoji no longer reach an undecidable arm and take the whole pass with them.
+    // …and the one question structure cannot answer — is this a COMBINING MARK? — is answered by `\p{M}`, the
+    // regex layout.js `zeroWidth` writes, parsed (`unicode.rs`).
     crate::unicode::is_combining_mark(cp)
 }
 
@@ -305,10 +302,10 @@ pub(crate) fn register_path(path: &str) -> i32 {
     h
 }
 
-// The face `handle` under an `@font-face` `size-adjust` of `scale`: every advance its table gives scaled, as the JS
-// model's `applyFaceMetrics` reshapes the table (a full-em wide character is no advance of the table's, and stays one em
-// there too). Its own handle, shared per (face, scale); the face's handle where the scale is 1, and -1 for a face that
-// is not registered.
+// The face `handle` under an `@font-face` `size-adjust` of `scale`: every advance its table gives scaled, as
+// font-metrics.js `applyFaceMetrics` reshapes the table (a full-em wide character is no advance of the table's, and
+// stays one em there too). Its own handle, shared per (face, scale); the face's handle where the scale is 1, and -1 for
+// a face that is not registered.
 pub(crate) fn register_scaled(handle: i32, scale: f64) -> i32 {
     if scale == 1.0 || handle < 0 {
         return handle;
@@ -336,8 +333,9 @@ pub(crate) fn register_scaled(handle: i32, scale: f64) -> i32 {
     h
 }
 
-// A family stack whose `@font-face`s restrict their `unicode-range`s (layout.js `faceStackFor`): the face `primary`'s
-// own metrics — what a character no member covers is measured by, and what a `ch` is — and `members`, in pick order.
+// A family stack whose `@font-face`s restrict their `unicode-range`s (font-metrics.js `faceStackFor`): the face
+// `primary`'s own metrics — what a character no member covers is measured by, and what a `ch` is — and `members`, in
+// pick order.
 // Its own handle, shared per (primary, members); -1 for an unregistered primary.
 pub(crate) fn register_stack(primary: i32, members: Vec<StackMember>) -> i32 {
     if primary < 0 {

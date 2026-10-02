@@ -5,7 +5,7 @@ require_relative 'support/session_teardown'
 
 # An ANIMATION is the third place a declaration can come from, beside a rule and a style attribute.
 # The value model always knew that — `getComputedStyle` reported the interpolated value — but the
-# layout gates did not: `declaresLayoutProp` and `mayConstrainSize` ask a rule index and the
+# layout gates did not: a gate like `declaresLayoutProp` asks a rule index and the
 # element's inline map, and a property that only ever appears inside `@keyframes` or in an
 # `element.animate()` frame is in neither. So layout read the STATIC cascade and the two views of
 # the same element disagreed: an animated `translateX(100px)` reported `matrix(1, 0, 0, 1, 100, 0)`
@@ -66,8 +66,7 @@ RSpec.describe 'a value an animation declares reaches layout' do
     expect(rect(s)).to eq([100, 0, 100, 50])
   end
 
-  # Not only `transform`: `mayConstrainSize` is a second gate with the same shape, and a
-  # min/max size an animation declares has to reach the box the same way.
+  # Not only `transform`: a min/max size an animation declares has to reach the box the same way.
   it 'constrains a box by a max-width only an animation declares' do
     s = page_with('@keyframes m { from { max-width: 40px } to { max-width: 40px } }' \
                   '#t { animation: m 10s linear paused }',

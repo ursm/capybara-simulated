@@ -215,8 +215,8 @@ impl<'i> Parser<'i> for CsimParser<'_> {
                 return Ok(PseudoClass { name, arg: Some(ident) });
             }
         }
-        // `:lang(<range>#)` — idents or strings, each ASCII-lowercased; kept comma-joined, as selectors.js `langRanges`
-        // splits its argument.
+        // `:lang(<range>#)` — idents or strings, each ASCII-lowercased; kept comma-joined, as `matches_lang` splits its
+        // argument.
         if name == "lang" {
             let ranges = arguments.try_parse(|p| {
                 let ranges = p.parse_comma_separated(|p| {
@@ -571,8 +571,7 @@ impl<'a> Element for NodeRef<'a> {
     fn is_empty(&self) -> bool {
         self.arena.is_empty(self.id)
     }
-    // `:root` is the DOCUMENT's element only — a detached element, or a fragment's child, is no root (the JS matcher's
-    // `isDocumentRoot`).
+    // `:root` is the DOCUMENT's element only — a detached element, or a fragment's child, is no root.
     fn is_root(&self) -> bool {
         self.arena.parent_of(self.id).is_some_and(|p| self.arena.is_document(p))
     }

@@ -1,7 +1,7 @@
 // The font metrics stylo asks for (`ex`, `ch`, and the ascent `font-size-adjust` and `cap` fall back on), read from the face
-// the realm's JS side resolved the family to (`walk::SharedFaces`): its x-height and the advance of its `0`, as the JS
-// model's `exFactor` / `chFactor` read them. A face not resolved yet is the defaults, noted for the next walk to name —
-// and once it is told, the realm's styles are computed again (`walk_face`).
+// the realm's JS side resolved the family to (`walk::SharedFaces`): its x-height and the advance of its `0`, as
+// font-metrics.js `exFactor` / `chFactor` read them. A face not resolved yet is the defaults, noted for the next walk
+// to name — and once it is told, the realm's styles are computed again (`walk_face`).
 
 use style::device::servo::FontMetricsProvider;
 use style::font_metrics::FontMetrics;

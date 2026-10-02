@@ -1,24 +1,23 @@
-// The Unicode general categories the ORACLE asks a regex for, and that native therefore has to answer the
-// same way: `\p{M}`, which `font::zero_width` needs to decide whether a character at or above U+0300 is
-// zero-width, and `\p{L}` / `\p{N}`, which `layout::hyphen_breaks_after` needs because the oracle's
-// `HYPHEN_BREAK_RE` spells its classes that way.
+// The Unicode general categories layout asks of a character, as a regex spells them: `\p{M}`, which
+// `font::zero_width` needs to decide whether a character at or above U+0300 is zero-width (the JS text metrics
+// ask the engine's own `/^\p{M}$/u` the same question), and `\p{L}` / `\p{N}`, which `layout::hyphen_breaks_after`
+// reads a hyphen's neighbours by.
 //
-// The classes come from regex-syntax — the SAME regex the oracle writes, parsed rather than reimplemented —
-// and NOT from Rust std's `char::is_alphabetic` / `is_numeric`. FOUR Unicode versions live in this process
-// (the engine's, Ruby's, Rust std's and now regex-syntax's) and they move independently: rustc 1.98 knows
-// 4662 code points this V8 does not, and a native `is_letter` built on it broke a line after a hyphen that
-// the oracle kept whole, with the answer depending on the toolchain the extension happened to be built with.
-// `char::is_alphanumeric` is wrong for a second reason — it is Alphabetic ∪ N, which reads a COMBINING MARK
-// as a letter where `\p{L}` does not.
+// The classes come from regex-syntax — the regex parsed rather than reimplemented — and NOT from Rust std's
+// `char::is_alphabetic` / `is_numeric`. FOUR Unicode versions live in this process (the engine's, Ruby's, Rust
+// std's and regex-syntax's) and they move independently: rustc 1.98 knows 4662 code points this V8 does not, and an
+// `is_letter` built on it broke a line after a hyphen that the engine's classes keep whole, with the answer
+// depending on the toolchain the extension happened to be built with. `char::is_alphanumeric` is wrong for a second
+// reason — it is Alphabetic ∪ N, which reads a COMBINING MARK as a letter where `\p{L}` does not.
 //
-// WHAT THIS PINS US TO, plainly: the classes are now regex-syntax's UCD snapshot (16.0.0 as vendored), not
-// the engine's. They agree today — every range of every class — and `class_ranges` below exists so that
+// WHAT THIS PINS US TO, plainly: the classes are regex-syntax's UCD snapshot (16.0.0 as vendored), not the
+// engine's. They agree today — every range of every class — and `class_ranges` below exists so that
 // `spec/native_layout_text_spec.rb` can keep proving it against the engine's own answer. But when the engine
 // picks up a Unicode release first, there is no local fix: the two disagree on every code point the release
-// added (4699 of them for Unicode 17), and until regex-syntax ships a matching snapshot native LAYS OUT
-// THOSE CHARACTERS DIFFERENTLY FROM THE ORACLE — a red spec is the symptom, not the whole cost. The
-// alternative (generating the tables from the engine, as this file used to) had no such wait but carried 864
-// lines of table; the trade was made deliberately.
+// added (4699 of them for Unicode 17), and until regex-syntax ships a matching snapshot layout and the JS text
+// metrics read THOSE CHARACTERS DIFFERENTLY — a red spec is the symptom, not the whole cost. The alternative
+// (generating the tables from the engine) has no such wait but carries 864 lines of table; the trade was made
+// deliberately.
 use regex_syntax::hir::{Class, HirKind};
 use std::sync::LazyLock;
 
@@ -98,10 +97,10 @@ pub(crate) fn line_break_glues(prev: u32, next: u32) -> bool {
 }
 
 // The first STRONG directional character of a text (HTML §3.2.6.4, `dir=auto`): Some(true) for one of Bidi_Class R or AL,
-// Some(false) for L, None where there is none. The Unicode Bidi_Class itself — both engines ask it here
-// (`__dom.firstStrongDirection`), so the answer is the spec's and there is one: an Arabic-Indic digit (AN), a Hebrew
-// point (NSM) and a leading LRM (L) are what Chrome and Firefox make of them, where a script approximation called
-// the first two right-to-left and the third nothing.
+// Some(false) for L, None where there is none. The Unicode Bidi_Class itself — the style engine's `:dir()` and the JS
+// side (`__dom.firstStrongDirection`) both ask it here, so the answer is the spec's and there is one: an Arabic-Indic
+// digit (AN), a Hebrew point (NSM) and a leading LRM (L) are what Chrome and Firefox make of them, where a script
+// approximation calls the first two right-to-left and the third nothing.
 pub(crate) fn first_strong_direction(units: &[u16]) -> Option<bool> {
     use icu_properties::props::BidiClass;
     let classes = icu_properties::CodePointMapData::<BidiClass>::new();
@@ -127,7 +126,7 @@ fn in_ranges(table: &[(u32, u32)], cp: u32) -> bool {
 }
 
 // The tables themselves, for the drift check: `Capybara::Simulated::Native.unicode_class_ranges('L')` answers
-// what regex-syntax compiled in, and the spec compares it to what the ORACLE's own engine answers for
+// what regex-syntax compiled in, and the spec compares it to what the JS engine (V8) answers for
 // `/^\p{L}$/u`. It hands back the SAME statics the layout path reads, so what the spec proves is what layout
 // uses. This is a seam for a production invariant, not a test fixture — nothing else in the driver reads it.
 pub(crate) fn class_ranges(ruby: &magnus::Ruby, klass: String) -> Result<Vec<(u32, u32)>, magnus::Error> {

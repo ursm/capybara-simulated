@@ -1,78 +1,81 @@
-// Native layout — the reader-flip endgame: the layout PASS runs in Rust over the arena, so the
-// crossing is paid ONCE per pass (not per element/run — the per-call granularity that made native
-// measureRun a wash). JS cascade computes each element's used values and BATCH-pushes them as a flat
-// record buffer (one crossing in); native lays the tree out and writes a border-box per node (one
-// crossing out, read back by getBoundingClientRect / offset* / scroll*). Mirrors layout.js's model
-// exactly: `el._lb` is a BORDER-BOX in DOCUMENT coordinates, sub-pixel (no rounding — the read
-// boundary rounds the integer CSSOM properties). See the layout↔geometry interface mapping.
+// The layout. The Rust walk (`walk.rs`) builds the records from the arena and the computed styles — one `Input` per
+// box, in document order and parent-indexed (the pass root at index 0); a text block's inline content as a stream of
+// `Run`s with their `RunText`s; an `InlineBox` per inline element; the grid templates and item placements (`grids`);
+// the `calc()` / comparison-function programs (`maths`) — and `layout_block_in_place` turns them into a border-box per
+// box in DOCUMENT coordinates, sub-pixel (no rounding — the read boundary rounds the integer CSSOM properties). Two
+// phases: `measure` lays each subtree out relative to its own border-box origin, so a margin collapsing through a box
+// propagates up without a final position, then `place` walks once top-down adding the absolute offsets. The boxes
+// (`Box`), the inline boxes' fragments (`FragRow`) and, for a paint, the text pieces (`TextRow`) are written back as
+// `el._lb` / `el._lbFrags` for the geometry readers (getBoundingClientRect / offset* / client* / scroll*, hit testing,
+// the painter).
 //
-// STAGE L1 = block flow (width/height/min/max, box-sizing, margins/padding/borders, %-resolution, auto
-// width=fill, auto height=stacked children, full margin collapsing). STAGE L2 = pure-text blocks (an
-// inline formatting context): greedy line breaking with in-process font metrics (mod font / skrifa),
-// height = line count × the JS-resolved line-height. NOT YET: floats, inline elements / mixed
-// block+text, flex/grid/table (L3), abspos, native cascade (L4). A subtree using an unmodelled feature
-// is declined as a WHOLE (the pass returns Unsupported → JS lays it out), never mixed per-node. This
-// module is pure (no V8) so the block algorithm is unit-tested here; text-block parity is validated by
-// the JS shadow harness against the live layout.
+// What it models: block flow — used widths and heights, min / max, box-sizing, percentages and `calc()` resolved against
+// the box a child is laid out in, `auto` fill, shrink-to-fit and the intrinsic keywords, full margin collapsing,
+// clearance — and floats; inline formatting contexts — line breaking over the face's own advances (`font`), the
+// `white-space` modes, tab stops, soft hyphens, `text-indent`, `text-align` and justification, `vertical-align` and
+// line-box baselines, atomic inlines, `<br>` / `<wbr>`, and each inline box's fragments; relative, absolute and fixed
+// positioning from the static position; replaced elements and form controls; flex layout on either axis (line breaking,
+// flexible lengths, alignment, baselines); grid (column tracks from the template with `auto-fill` / `auto-fit` repeats,
+// placement, rows from their content or `grid-auto-rows`); CSS Tables 3 auto and fixed table layout with captions;
+// vertical writing modes, orthogonal flows and rtl. A subtree the walk built as the last pass built it gets its measure
+// back from `MeasureCache`. A construct it does not model declines the WHOLE pass (`Outcome::Unsupported`): layout.js
+// then lays out the root box alone and counts the decline by reason — never a page laid out partly. This module is pure
+// (no V8), so its algorithms are unit-tested here.
 
 use std::cell::Cell;
 
-// Sentinels in the input record: a used value that is `auto` / `none` arrives as f64::NAN (JS writes
+// Sentinels in the input record: a used value that is `auto` / `none` arrives as f64::NAN (the walk writes
 // NaN for auto width/height/margin and for absent min/max), distinguished from a real 0.
 fn is_auto(v: f64) -> bool {
     v.is_nan()
 }
-// An `imposed_h` that asks `measure` for a box's content height, its declared height set aside — see
-// `Input::with_imposed_height`. (A negative-infinite height is no height a layout could impose.)
-// How much a line may exceed its band and still count as fitting (the oracle's `LINE_FIT_EPS`). The two
-// engines add a line's widths in different orders — the oracle from the page origin, this one from the
-// content edge — so a box whose content is EXACTLY its band wide lands on the comparison to the last bit and
-// one ULP decides whether a line wraps. "Exactly fits" is the answer both should give.
+// How much a line may exceed its band and still count as fitting. A line's widths are summed word by word, so
+// a box whose content is EXACTLY its band wide lands on the comparison to the last bit and one ULP of
+// accumulated rounding would decide whether a line wraps. "Exactly fits" is the answer it should give.
 const LINE_FIT_EPS: f64 = 1e-9;
 // …and the same slack for the justify cut, which is a DIFFERENT question — which gaps hang off the line's
-// end — asked of the same two differently-accumulated sums. Named apart so retuning the fit allowance (to
-// 1/64px, say, to match a LayoutUnit) cannot silently start swallowing gaps.
+// end — asked of the same accumulated sums. Named apart so retuning the fit allowance (to 1/64px, say, to
+// match a LayoutUnit) cannot silently start swallowing gaps.
 //
-// ABSOLUTE, and that is a decision rather than an oversight. The two engines work in DIFFERENT FRAMES — the
-// oracle from the page origin, this one from the content edge — so a tolerance relative to the coordinate is
-// a different absolute slack in each, which is the asymmetry it exists to remove. The cost is a measured
-// ceiling: past 2²⁴ one ULP of the oracle's page coordinate exceeds 1e-9 and the cut decides on the bits
-// again (a 16,777,216px page offset puts this engine's atomic at 16777321.6 against the oracle's 16777360).
-// Not reachable on a real page, and the frame asymmetry behind it is wider than this line — the fit test has
-// it too — so it is recorded rather than papered over here.
+// ABSOLUTE, and that is a decision rather than an oversight: lines are measured from the content edge, so a
+// tolerance relative to the coordinate would be a different slack in every box. The cost is a ceiling: past
+// 2²⁴ one ULP of a page coordinate exceeds 1e-9 and the cut decides on the bits again. Not reachable on a
+// real page, and the fit test has the same ceiling, so it is recorded rather than papered over here.
 const GAP_CUT_EPS: f64 = 1e-9;
+// An `imposed_h` that asks `measure` for a box's content height, its declared height set aside — see
+// `Input::with_imposed_height`. (A negative-infinite height is no height a layout could impose.)
 const MEASURE_AUTO_HEIGHT: f64 = f64::NEG_INFINITY;
 
-// Display codes JS writes into the buffer. `display:none` nodes are NOT pushed (no box). A block whose
-// children are all block-level is DISPLAY_BLOCK; one whose content is pure text in a single font (an
-// inline formatting context — stage L2) is DISPLAY_TEXT_BLOCK; anything else (inline elements,
-// flex/grid/table, mixed block+text, …) is DISPLAY_UNSUPPORTED and the whole subtree falls back to JS.
+// Display codes the walk writes into each record. A `display: none` node has no record (no box). A block
+// container whose children are all block-level is DISPLAY_BLOCK; one that establishes an inline formatting
+// context (its content a run stream — text, inline boxes' edges, atomics) is DISPLAY_TEXT_BLOCK; a mixed block
+// is a DISPLAY_BLOCK whose inline runs the walk wraps in anonymous DISPLAY_TEXT_BLOCK groups (`anon_group`).
 pub(crate) const DISPLAY_BLOCK: u8 = 1;
 pub(crate) const DISPLAY_TEXT_BLOCK: u8 = 2;
 pub(crate) const DISPLAY_FLEX: u8 = 3;
-// CSS Tables 3 (t1): the table box and its internal structure. Cells are ordinary block / text blocks
+// CSS Tables 3: the table box and its internal structure. Cells are ordinary block / text blocks
 // (DISPLAY_BLOCK / DISPLAY_TEXT_BLOCK) laid out at the column width and row height the table computed for them.
 pub(crate) const DISPLAY_TABLE: u8 = 4;
 pub(crate) const DISPLAY_TABLE_ROW_GROUP: u8 = 5;
 pub(crate) const DISPLAY_TABLE_ROW: u8 = 6;
-// CSS Grid (§12), computed natively: the container's `grid_start` indexes the parallel `grids` buffer, which
-// holds the parsed column template + gaps + row height + per-item placement. measure_grid sizes the columns
-// (fixed / % / fr / intrinsic — measuring the items' min/max-content itself, `intrinsic_widths`) and lays out
-// each item at its track width — rows are content-height or the declared `grid-auto-rows` (reproducing the
-// coarse oracle). An out-of-flow item is replayed at its pushed box, as a block's abspos child is.
+// CSS Grid (§12): the container's `grid_start` indexes the parallel `grids` buffer, which holds the parsed
+// column template + gaps + row height + per-item placement. measure_grid sizes the columns (fixed / % / fr /
+// intrinsic — measuring the items' min/max-content itself, `intrinsic_widths`) and lays out each item at its
+// track width — rows are content-height or the declared `grid-auto-rows` (a coarse row model: no row template
+// sizing). An out-of-flow child is positioned against its containing block, as a block's is (`place_out_of_flow`).
 pub(crate) const DISPLAY_GRID: u8 = 7;
 // A table CAPTION keeps its own block / text display (measure lays out its subtree); it is identified
-// structurally as the table's only non-row/non-group child (t4), not by a display code.
-pub(crate) const DISPLAY_UNSUPPORTED: u8 = 255;
+// structurally as the table's only non-row/non-group child, not by a display code.
 
-// One element's used values for block layout, decoded from the flat buffer. Lengths are px; auto/none
-// are NaN. Border-box vs content-box is `border_box`. Percentages were ALREADY resolved JS-side against
-// the containing block where the used value needed it (matching resolveLayoutProp); what remains
-// auto here is genuine `auto` the layout algorithm resolves (width fill / height sum).
+// One box's computed values for layout, as the Rust walk builds its record. Lengths are px; auto/none are
+// NaN. Border-box vs content-box is `border_box`. A PERCENTAGE travels as a fraction beside its length part
+// (`pct_sizes` / `pct_px`, `edge_frac` / `edge_px`, …) and is resolved here, by the parent that lays the box
+// out (`with_percent_sizes`); what remains auto is genuine `auto` the layout algorithm resolves (width fill /
+// height sum).
 #[derive(Clone, Copy)]
 pub(crate) struct Input {
     pub(crate) nid: f64, // the arena NodeId (packed) to write the box back to
-    pub(crate) parent: i32, // index of the parent record in the buffer, -1 for the pass root
+    pub(crate) parent: i32, // index of the parent record in the pass's records, -1 for the pass root
     pub(crate) display: u8,
     pub(crate) border_box: bool,
     pub(crate) width: f64,
@@ -93,11 +96,11 @@ pub(crate) struct Input {
     pub(crate) br: f64,
     pub(crate) bb: f64,
     pub(crate) bl: f64,
-    // Margin-collapse basis, decided from the DECLARATION not the used size (mirrors the oracle's
-    // `autoOrZeroHeight`): `height_adjoins` is true when `height` is `auto` or resolves to zero
-    // (`height:0` / `0%` / …), i.e. the height does NOT keep the box's top and bottom margins apart —
-    // a `height:0` box still adjoins, and an indefinite `%` height (used value auto) does NOT. Can't
-    // come from the used `height` (0 and NaN can't tell these apart), so JS pushes the boolean.
+    // Margin-collapse basis, decided from the DECLARATION not the used size (the walk's `auto_or_zero`):
+    // `height_adjoins` is true when `height` is `auto` or resolves to zero (`height:0` / `0%` / …), i.e. the
+    // height does NOT keep the box's top and bottom margins apart — a `height:0` box still adjoins, and an
+    // indefinite `%` height (used value auto) does NOT. Can't come from the used `height` (0 and NaN can't
+    // tell these apart), so the walk sends the boolean.
     pub(crate) height_adjoins: bool,
     pub(crate) minh_adjoins: bool,
     // …and §8.3.1's BOTTOM rule, which is not the same question: it wants an AUTO height where the two above
@@ -114,12 +117,11 @@ pub(crate) struct Input {
     pub(crate) run_count: i32,
     pub(crate) strut_lh: f64,
     pub(crate) strut_asc: f64,
-    // Float positioning (§9.5), resolved JS-side to pure rectangle arithmetic. `float_kind` 0 none /
-    // 1 left / 2 right; `clear` 0 none / 1 left / 2 right / 3 both. `starts_bfc` marks a block that
-    // establishes a BLOCK FORMATTING CONTEXT — one flag because it is one property: no float crosses the
-    // boundary in either direction, and its own margins do NOT collapse with its children's (§8.3.1).
-    // For a floated box, its used width
-    // rides `width` (JS resolves the shrink-to-fit; native computes the auto height from the subtree).
+    // Float positioning (§9.5). `float_kind` 0 none / 1 left / 2 right; `clear` 0 none / 1 left / 2 right /
+    // 3 both. `starts_bfc` marks a block that establishes a BLOCK FORMATTING CONTEXT — one flag because it is
+    // one property: no float crosses the boundary in either direction, and its own margins do NOT collapse
+    // with its children's (§8.3.1). A float's auto width shrink-to-fits and its auto height is its subtree's
+    // (`measure_float`).
     pub(crate) float_kind: u8,
     pub(crate) clear: u8,
     // Whether that `clear` SEPARATES this box's top margin from its parent's (§8.3.1). Answered by the walk,
@@ -128,24 +130,22 @@ pub(crate) struct Input {
     // on them would be placed differently by the two measures the float paths take.
     pub(crate) takes_clearance: bool,
     pub(crate) starts_bfc: bool,
-    // Flex (§9.7) — the SIZING is resolved JS-side (each item's used main+cross size rides its
-    // width/height, like a float's shrink-to-fit width), so native does only PLACEMENT. On a flex
+    // Flex (§9) — PLACEMENT; the sizing inputs are further down (`flex_basis`, `flex_shrink`, …). On a flex
     // CONTAINER: `flex_justify` (main-axis distribution) 0 start / 1 center / 2 end / 3 space-between /
     // 4 space-around / 5 space-evenly, and `flex_main_gap` (px). On a flex ITEM: `flex_cross_align`
-    // 0 start-or-stretch / 1 center / 2 end (the item's used cross size already fills the line, so
-    // stretch folds to a zero offset).
+    // 0 start-or-stretch / 1 center / 2 end (a stretched item's cross size fills the line, so stretch folds
+    // to a zero offset).
     pub(crate) flex_justify: u8,
     pub(crate) flex_main_gap: f64,
     pub(crate) flex_cross_align: u8,
     // Flex main axis: true = row (main is X / width), false = column (main is Y / height). The item
-    // main/cross sizes swap accordingly; both come pushed.
+    // main/cross sizes swap accordingly.
     pub(crate) flex_main_is_x: bool,
     // Flex wrap: false = nowrap (one line, fills the cross), true = wrap or wrap-reverse (multi-line,
     // align-content stacks the lines). `flex_align_content` 0 flex-start / 1 center / 2 flex-end /
     // 3 space-between / 4 space-around / 5 space-evenly / 6 stretch / 7 start / 8 end — the last two kept
     // APART from 0 and 2 because they are flow-relative and only `align_content` knows which way the axis
-    // runs. Stretch's GROW is already baked into the pushed item cross sizes, so native only positions the
-    // lines (lead/between). `flex_cross_gap` is the px gap between lines.
+    // runs. `flex_cross_gap` is the px gap between lines.
     pub(crate) flex_wrap: bool,
     // `wrap-reverse`, which is NOT the same question as `flex_cross_far`: the wrap reversal is what the
     // flow-relative `start` / `end` follow, the physical direction is what every OFFSET is measured against,
@@ -157,8 +157,9 @@ pub(crate) struct Input {
     // physical edge back toward the near one. The abstract (main-start-relative) placement is unchanged;
     // only the final physical mapping mirrors, and the leading margin is the main-start-side one.
     pub(crate) flex_main_reverse: bool,
-    // …and whether the CROSS axis runs from the far physical edge back (`plan.crossFar`). The in-flow items do
-    // not need it — `crossAlignPhysical` has already flipped each item's align onto the physical axis — but an
+    // …and whether the CROSS axis runs from the far physical edge back (the walk's `FlexPlan::cross_far`). The
+    // in-flow items do not need it — the walk's `FlexPlan::cross_align` has already flipped each item's align
+    // onto the physical axis — but an
     // OUT-OF-FLOW child's static position is measured ALONG the axis itself, so it does. It is its own input
     // rather than `rtl`: those two agreed only while every non-`horizontal-tb` container was declined, and a
     // `vertical-rl` row's cross runs right-to-left with no `rtl` in sight.
@@ -169,9 +170,8 @@ pub(crate) struct Input {
     // the stack starts, a `stretch` line's far edge, which edge a baseline GROUP anchors at, and which margin
     // is the leading cross one.
     pub(crate) flex_cross_far: bool,
-    // rec[65] bit 16: this text block has an out-of-flow child the walk REPLAYED (see `measure`).
-    pub(crate) has_replayed_oof: bool,
-    // `position: relative` offset (§9.4.3), resolved JS-side (relativeOffset). It moves the box and its
+    // `position: relative` offset (§9.4.3), resolved by the walk where no inset is a percentage (its
+    // `relative`). It moves the box and its
     // subtree at PAINT time without touching the flow, so `place` adds it after the absolute origin; the
     // flow (margin collapse, sibling positions, float bands) is computed from the unshifted position. A box's
     // own offset PLUS the accumulated offset of the relative inline boxes whose fragment it sits in — those
@@ -179,155 +179,126 @@ pub(crate) struct Input {
     // it nor any inline above it is relative.
     pub(crate) rel_x: f64,
     pub(crate) rel_y: f64,
-    // …where its own inset is a PERCENTAGE, the walk sends the pairs instead and `with_percent_sizes` writes
-    // `rel_x` / `rel_y` from them: [x fraction (NaN = nothing to resolve), `top` fraction (NaN = no percentage),
-    // `top` length (NaN = auto), the same two for `bottom`, and what the record's rec[39..40] carried — the
-    // inline boxes' shift alone; the horizontal inset's length part is `rel_x_px`, clamped and negated with its
-    // fraction]. `top` wins where it resolves; a percentage one does not
-    // against an indefinite height, and `bottom` is used then — the oracle's `relativeOffset`, where such a `top`
-    // resolves to nothing. The base is kept apart because the resolved box REPLACES the input, and a box measured
-    // again must not add its offset twice.
+    // …where its own inset is a PERCENTAGE, the walk sends the pairs instead and `with_percent_sizes` writes `rel_x` /
+    // `rel_y` from them: [x fraction (NaN = nothing to resolve), `top` fraction (NaN = no percentage), `top` length
+    // (NaN = auto), the same two for `bottom`, and the base `rel_x` / `rel_y` carried before any resolve — the inline
+    // boxes' shift alone; the horizontal inset's length part is `rel_x_px`, clamped and negated with its fraction].
+    // `top` wins where it resolves; a percentage one does not against an indefinite height, and `bottom` is used then —
+    // such a `top` resolves to nothing. The base is kept apart because the resolved box REPLACES the input, and a box
+    // measured again must not add its offset twice.
     pub(crate) rel_pct: [f64; 7],
     // …the horizontal inset's LENGTH part beside `rel_pct[0]`, whether that inset is `right` and so NEGATED (after it is
     // resolved: a comparison is negated as a whole), and each inset's PROGRAM — horizontal, `top`, `bottom` — where it
     // is a comparison function over affine operands (`bounded`).
     pub(crate) rel_x_px: f64,
     pub(crate) rel_x_neg: bool,
-    // A FLEX record MEASURED AS A BLOCK (`content_intrinsic`): an orphan `display: table-row`, which the oracle lays out
-    // as a flex row and measures through its block-stacking arm — by its run range where it holds bare text (which the
-    // flex layout drops), else by its children stacked.
-    pub(crate) measured_as_block: bool,
-    // …and whose items take an EQUAL SHARE of the row (the oracle's `layoutFlexRow(…, {equalShare})`): each POSITIONED
-    // at `floor(available / n)` — a table at its own width where that is wider — and laid out at its own used width.
-    pub(crate) equal_share: bool,
-    // …and the relative INLINE boxes' chain it sits in, where one is a percentage (`nlAddChainRel`): its fraction of the
-    // containing block's width, of its height where definite, and the correction to the chain's length in `rel_pct[6]`
-    // where that height is not. [0, 0, 0] for none.
+    // …and the relative INLINE boxes' chain it sits in, where one is a percentage (the walk's `add_chain_rel`): its
+    // fraction of the containing block's width, of its height where definite, and the correction to the chain's length
+    // in `rel_pct[6]` where that height is not. [0, 0, 0] for none.
     pub(crate) chain_rel: [f64; 3],
-    // …and that chain's LENGTH parts (rec[163..164]), which `rel_pct[5..6]` (the base) already holds — kept apart so
+    // …and that chain's LENGTH parts, which `rel_pct[5..6]` (the base) already holds — kept apart so
     // the chain's WHOLE shift (`chain_shift`: these plus the fractions and programs at the basis, `with_relative_insets`)
     // can be taken back off, leaving the box's own (`Box::rel`).
     pub(crate) chain_px: [f64; 2],
     pub(crate) chain_shift: [f64; 2],
-    // …and that chain's comparison functions, a PROGRAM per axis (`nlChainRel`; `NO_MATH` for none).
+    // …and that chain's comparison functions, a PROGRAM per axis (the walk's `chain_rel`; `NO_MATH` for none).
     pub(crate) chain_math: [u32; 2],
     pub(crate) rel_math: [u32; 3],
     // A flex ITEM's AUTO margins. MAIN axis (§9.5): bit0 = main-start-side `auto`, bit1 = main-end-side —
     // these absorb the line's free space (free/autos each) before justify-content, which then yields
-    // (ZERO_JUSTIFY). CROSS axis (§8.1): bit2 = cross-start-side `auto`, bit3 = cross-end-side — these eat
-    // the line's leftover (autoMarginSplit) and win over align-self. Sides are resolved JS-side through the
-    // flex axis + main-reverse, so a given bit is always the abstract start/end margin native expects.
+    // (it distributes nothing). CROSS axis (§8.1): bit2 = cross-start-side `auto`, bit3 = cross-end-side — these eat
+    // the line's leftover and win over align-self. Sides are resolved by the walk through the flex axis +
+    // main-reverse (`FlexPlan::auto_margin_bits`), so a given bit is always the abstract start/end margin.
     pub(crate) flex_item_auto: u8,
-    // A flex ITEM aligned on the baseline (flex_cross_align == 3): its FIRST-baseline ascent within its
-    // MARGIN box (the oracle's baselineParts.asc — own baseline offset + top margin, or the bottom margin
-    // edge when the item has no line to give), resolved JS-side. NaN for a non-baseline item.
-    pub(crate) flex_baseline_asc: f64,
-    // A PUSHED item of a MULTI-LINE flex container: its line's NATURAL cross size, before `align-content` grew it
-    // (the oracle's `stackFlexLines`). A pushed box is final, so where its line mixes stretching and fixed items
-    // the stretched boxes already contain a share of the grow and the line cannot be rebuilt from them. NaN = not
-    // sent (a natively-sized container, a nowrap one, a non-flex parent).
-    pub(crate) flex_line_nat: f64,
-    // …and WHICH line the oracle put it on (its index in flow order): lines break on the items' HYPOTHETICAL
-    // sizes, which a pushed box no longer is — an item the line shrank no longer overflows, and re-breaking the
-    // final sizes kept the next item beside it. NaN = not sent.
-    pub(crate) flex_line: f64,
-    // An OUT-OF-FLOW flex child (position:absolute / fixed, §4.1): 1 = out of flow, 2 = out of flow as `position:
-    // fixed` (`OOF_FIXED`, which only the answer reads: `Box::out_of_flow`). It is removed from flex
-    // sizing and flow — its subtree lays out at its pushed border box, and it is placed at the container's
-    // border-box origin + its resolved displacement (rel_x/rel_y = el._lb − container._lb), so the insets /
-    // static position the oracle already resolved are replayed. 0 = an ordinary in-flow item.
+    // An OUT-OF-FLOW box (position:absolute / fixed; for a flex child, §4.1): 1 = out of flow, 2 = out of flow
+    // as `position: fixed` (`OOF_FIXED`, which only the answer reads: `Box::out_of_flow`). It is removed from
+    // the flow and from flex / grid sizing, and positioned against its containing block (`cb_index`, its
+    // insets) by `place_out_of_flow`. 0 = an ordinary in-flow box.
     pub(crate) out_of_flow: u8,
-    // TABLE border-spacing (§17.6.1), set only on a DISPLAY_TABLE node (0 elsewhere). The cell sizes (the
-    // column widths × row heights) are pushed like flex-item sizes; native reassembles the tracks and
-    // prefix-sums them with this spacing to position every cell, row, row-group, and the table box itself.
+    // TABLE border-spacing (§17.6.1), set only on a DISPLAY_TABLE node (0 elsewhere). `measure_table` sizes the
+    // columns and rows and prefix-sums the tracks with this spacing to position every cell, row, row-group,
+    // and the table box itself.
     pub(crate) sp_x: f64,
     pub(crate) sp_y: f64,
-    // A table CELL's grid placement (t2 spans): its starting COLUMN (the Nth cell in a row is NOT at column N
-    // once a colspan or a rowspan-from-above shifts it, so the oracle's resolved col is pushed) and its
-    // colspan / rowspan. Tracks (column widths / row heights) are derived only from NON-spanning cells
-    // (colspan==1 / rowspan==1); a spanning cell sits at col_x[col] / row_top[row] with its pushed spanned
-    // size (= Σ spanned tracks + internal spacing, checked by the safety net). 0 / 1 / 1 on a non-cell node.
+    // A table CELL's grid placement: its starting COLUMN (the Nth cell in a row is NOT at column N once a
+    // colspan or a rowspan-from-above shifts it, so the walk's table grid resolves it) and its colspan /
+    // rowspan. A spanning cell sits at col_x[col] / row_top[row] and is as large as the tracks it spans plus
+    // the spacing between them. 0 / 1 / 1 on a non-cell node.
     pub(crate) cell_col: usize,
     pub(crate) cell_colspan: usize,
     pub(crate) cell_rowspan: usize,
-    // (border-collapse needs no flag here: the oracle resolves the whole collapsed-border model and pushes it as
-    // ordinary edges — border-spacing 0, each cell's halved borders in its pushed box, and the table's OWN border
-    // set to the outer half of its rim cells' borders with no padding — so `measure_table` lays a collapse table
-    // out exactly like a separate one.)
-    // Caption placement (t4), on a table's CAPTION node: 0 = caption-side top (stacked above the grid, which is
+    // (border-collapse needs no flag here: the walk resolves the whole collapsed-border model (`collapse_borders`,
+    // CSS 2.1 §17.6.2) and sends it as ordinary edges — border-spacing 0, each cell's halved borders as its own,
+    // and the table's OWN border set to the outer half of its rim cells' borders with no padding — so
+    // `measure_table` lays a collapse table out exactly like a separate one.)
+    // Caption placement, on a table's CAPTION node: 0 = caption-side top (stacked above the grid, which is
     // offset down past every top caption), 1 = bottom (stacked below the grid). The caption's box is laid out by
-    // `measure_table`; the `<table>` el._lb is then the WRAPPER (captions + grid). 0 on every other node.
+    // `measure_table`; the `<table>` box is then the WRAPPER (captions + grid). 0 on every other node.
     pub(crate) caption_side: u8,
-    // `direction: rtl` (r1): the box's own INLINE axis runs backwards. 0 = ltr. Which PHYSICAL edge that
-    // inline-start is depends on the writing mode, so each consumer pairs this with the axis where the oracle
-    // does: the block flow places children from the right edge only where the inline axis is the horizontal one
-    // (`from_right`), while a TABLE mirrors its columns off `direction` ALONE (`measure_table`) — the oracle's
-    // table path reads `flowSides(table).rtl` and mirrors horizontally, because it never runs a table sideways.
-    // (Chrome reverses the columns down a vertical table's inline axis instead: the oracle's gap, not native's.)
+    // `direction: rtl`: the box's own INLINE axis runs backwards. 0 = ltr. Which PHYSICAL edge that
+    // inline-start is depends on the writing mode, so each consumer pairs this with the axis: the block flow
+    // places children from the right edge only where the inline axis is the horizontal one (`from_right`),
+    // while a TABLE mirrors its columns off `direction` ALONE (`measure_table`) and mirrors horizontally,
+    // because it never runs a table sideways. KNOWN GAP: Chrome reverses the columns down a vertical table's
+    // inline axis instead.
     pub(crate) rtl: u8,
-    // A text block's line alignment, PHYSICAL (the oracle's `textAlignOf` folds `start` / `end` through rtl):
-    // 0 left, 1 right, 2 center. It moves a line's atomics (`line_layout`); `justify` never reaches native.
+    // A text block's line alignment, PHYSICAL (the walk's `align_code` folds `start` / `end` through rtl):
+    // 0 left, 1 right, 2 center, 3 justify. It moves a line's content (`line_layout`).
     pub(crate) text_align: u8,
-    // A flex container's anonymous-item cross floor: the line-height of any bare (non-whitespace) text directly
-    // inside it (0 when there is none). The oracle does not lay that text out as a real flex item, it only
-    // floors the container's AUTO cross size at this line-height (`anonymousItemHeight`); native does the same.
-    // FLEX ONLY since 2026-09-22 — a GRID sends 0. Its bare run is a real anonymous ITEM in a row now (CSS
-    // Grid §4), so the row carries the height and the floor could only override a declared `grid-auto-rows`,
-    // which it did: 22 against Chrome's 5, in both engines, where the same grid with the text in a `<span>`
-    // gave 5. When flex gets its item, this field goes with it.
+    // A flex / grid container's floor on its AUTO cross size for bare text directly inside it. The walk always
+    // sends 0: such text is an anonymous ITEM of its own (CSS Flexbox §4 / CSS Grid §4, the walk's
+    // `FlexItem::Anonymous`), which carries its height into its line or row — a floor could only override a
+    // declared `grid-auto-rows` (22 against Chrome's 5, where the same grid with the text in a `<span>` gave 5).
     pub(crate) anon_cross: f64,
-    // A block's OWN `white-space` mode — a text block's, and since 2026-09-24 a block container's too, whose
+    // A block's OWN `white-space` mode — a text block's, and a block container's too, whose
     // intrinsic measure PINS min to max under 1 / 2 (`content_intrinsic`): 0 normal, 1 nowrap, 2 pre, 3 pre-wrap, 4 pre-line,
     // 5 break-spaces. The three orthogonal behaviours it names — COLLAPSE whitespace (0/1/4) vs PRESERVE it
     // (2/3/5), SOFT-WRAP at break opportunities (0/3/4/5) vs never (1/2), a NEWLINE forcing a break (2/3/4/5)
     // — belong to the RUN they are
     // about, so `line_layout` reads those off `Run::ws_mode`. What it still asks of the BLOCK is whether the
-    // LINE may break at all (`outerWraps`: a non-wrapping RUN forbids breaks inside itself, the opportunity
-    // before it is the block's to give), `pin` in `text_intrinsic` ("a box that never wraps has its
-    // max-content for a min-content", which the oracle asks of the element), and the mode an empty block and
-    // the anonymous groups are read under.
+    // LINE may break at all (a non-wrapping RUN forbids breaks inside itself, the opportunity before it is
+    // the block's to give), `pin` in `text_intrinsic` ("a box that never wraps has its max-content for a
+    // min-content", a question about the element), and the mode an empty block and the anonymous groups are
+    // read under.
     // 5 shares 3's triple, which is why `line_layout` needs no arm of its own for it: a line under
     // `break-spaces` is a line under `pre-wrap`. The two part in the INTRINSIC measure alone — every
     // preserved space is content that never hangs, with a break after each — which `text_intrinsic`'s `modes`
     // gives 5 a tuple of its own for, rather than measuring it by 3's rule.
     pub(crate) ws_mode: u8,
-    // A pushed flex ITEM whose OWN height is AUTO (content-derived), carried past the parent-push that
-    // overwrote `height` with the item's final (oracle-clamped) box. When set, `measure_flex` recomputes a
-    // ROW item's cross from its content and two-phases the min/max-height clamp (the items align in the
-    // pre-clamp content, the box floors/caps around them), instead of aligning in the pushed definite box —
-    // reproducing the oracle's auto-height two-phase for a nested min-height flex row (the Avo field-wrapper).
+    // The box is measured for its CONTENT height, its declared height set aside — set here, never by the walk:
+    // `with_imposed_height(MEASURE_AUTO_HEIGHT)`, as a flex column asks for an item's content height. Such a box
+    // takes the AUTO-height path wherever one is asked: a flex row recomputes its cross from its content and
+    // two-phases the min/max-height clamp (the items align in the pre-clamp content, the box floors/caps around
+    // them), and `definite_content_h` reports none.
     pub(crate) item_auto_height: bool,
-    // A PUSHED box's height (its final size written over the declared one) that was NOT definite when the container
-    // resolved its percentages — a grid's row gap, a flex container's gaps and basis (`markPushedHeight`).
-    pub(crate) pushed_h_indefinite: bool,
     // A grid container's offset into the parallel `grids` buffer (see measure_grid). Read only when
     // `display == DISPLAY_GRID`; 0 (unused) for every other node.
     pub(crate) grid_start: i32,
     // The DECLARED inline sizing with NO percentage basis — what an intrinsic measure reads (`intrinsic_widths`):
     // `width` / `min-width` / `max-width` as declared (a percentage is NaN = auto there, having nothing to
     // resolve against), the item's `flex-basis` (NaN = auto / content) and whether it may grow (`flex-grow` > 0),
-    // and the declared `box-sizing`. Kept apart from `width` / `min_w` / `max_w` / `border_box`, which a flex /
-    // out-of-flow / replay push overwrites with the USED box.
+    // and the declared `box-sizing`. Kept apart from `width` / `min_w` / `max_w` / `border_box`, which the layout
+    // overwrites with USED sizes — a resolved percentage, a box a parent imposes (a flexed or stretched item).
     pub(crate) decl_w: f64,
     pub(crate) decl_min_w: f64,
     pub(crate) decl_max_w: f64,
     pub(crate) flex_basis: f64,
     pub(crate) flex_grow: f64,
     pub(crate) decl_border_box: bool,
-    // Flex SIZING inputs (an item of a natively-sized container, `flex_native`): `flex-shrink`; `flex-basis`
+    // Flex SIZING inputs (an item of a container with `flex_native`): `flex-shrink`; `flex-basis`
     // resolved against the container's main size, or — beside a `flex_basis_frac` — the constant term that
     // fraction is added to (NaN = auto / a keyword — `flex_basis_kw` 0 none, 1 content,
     // 2 min-content, 3 max-content, 4 fit-content); whether the item scrolls across (its automatic minimum in
     // that axis is then zero, §4.5, and its baseline is clamped into its box); whether it STRETCHES in the
     // cross axis (`align-self: stretch` with an auto cross size and no auto cross margin). On a CONTAINER,
-    // `flex_native` = the items' main sizes are computed here (`flex_row_sizes` / `flex_column_sizes`) rather
-    // than pushed from the oracle.
+    // `flex_native` = the items' main sizes are computed here (`flex_row_sizes` / `flex_column_sizes`); the walk
+    // sets it on every flex container it records.
     pub(crate) flex_shrink: f64,
     pub(crate) flex_basis_cb: f64,
     // A PERCENTAGE `flex-basis` as a fraction of the container's main size (NaN = none), resolved here
     // (`flex_basis_at`) over the constant term `flex_basis_cb` carries beside it (a linear `calc()`'s; 0 for a
     // plain percentage) — and a container's main / cross gap percentages, over the px parts in
-    // `flex_main_gap` / `flex_cross_gap`. The walk used to resolve all three against the oracle's box.
+    // `flex_main_gap` / `flex_cross_gap`.
     pub(crate) flex_basis_frac: f64,
     // …and its PROGRAM, where it is a comparison function over affine operands (`max(30%, 10px)`).
     pub(crate) flex_basis_math: u32,
@@ -351,10 +322,11 @@ pub(crate) struct Input {
     pub(crate) edge_frac: [f64; 8],
     pub(crate) edge_px: [f64; 8],
     // …and each edge's PROGRAM where it is a comparison function over affine operands (`padding: clamp(1rem, 5%,
-    // 3rem)`), as the sizes carry theirs (`pct_math`) — a padding's floored at 0, as the walk's `edgeInsets` floors it.
+    // 3rem)`), as the sizes carry theirs (`pct_math`) — a padding's floored at 0, as a padding is never negative.
     pub(crate) edge_math: [u32; 8],
     // The containing-block width this box's percentages were last resolved against (`with_percent_sizes`) — the
-    // oracle's `_lbCbW`, which the geometry reads resolve a percentage padding / margin / inset against again.
+    // box's `cb_w`, written back as `_lbCbW`, which the geometry reads resolve a percentage padding / margin / inset
+    // against again.
     // NaN for a box whose percentages nothing resolved, as for one that has none: any basis answers alike there.
     pub(crate) basis_w: f64,
     // An out-of-flow box's inset percentages (top / right / bottom / left) as fractions of its containing block's
@@ -365,8 +337,8 @@ pub(crate) struct Input {
     pub(crate) flex_main_gap_frac: f64,
     // …and the PROGRAM of a value no pair can express, which is what a comparison function over affine operands is:
     // `min(10%, 20px)` is `10%` capped at 20, `clamp(5px, 10%, 12px)` is `10%` between 5 and 12, `min(10%, 5% + 20px,
-    // 90px)` two lines that cross, capped. The oracle resolves them, so every figure that can be written that way
-    // carries its program beside its pair and both engines evaluate it (`bounded`); `NO_MATH` where the pair is it.
+    // 90px)` two lines that cross, capped. Every figure that can be written that way carries its program beside its
+    // pair, evaluated at the basis (`bounded`); `NO_MATH` where the pair is it.
     pub(crate) flex_main_gap_math: u32,
     pub(crate) flex_cross_gap_math: u32,
     pub(crate) indent_math: u32,
@@ -380,20 +352,20 @@ pub(crate) struct Input {
     pub(crate) is_button: bool,
     // TABLE: whether the box is the table's OWN to size — an in-flow block-level table, whose auto width
     // shrink-to-fits its columns (§17.5.2). False where the parent handed it a box (a grid area, a flex item's
-    // pushed size, an out-of-flow inset box), and then the width the caller passed is the used one.
+    // flexed size, an out-of-flow inset box), and then the width the caller passed is the used one.
     pub(crate) self_sizes: bool,
-    // Whether the box's own BLOCK axis is the horizontal one — a vertical `writing-mode` (the oracle's
-    // `blockAxisOf(el) === 'width'`). Its AUTO width is then a BLOCK size, so as a block-level child it
+    // Whether the box's own BLOCK axis is the horizontal one — a vertical `writing-mode`. Its AUTO width is
+    // then a BLOCK size, so as a block-level child it
     // shrink-to-fits (`block_child_width`) instead of filling its containing block's inline size.
     pub(crate) block_axis_is_x: bool,
     // The horizontal EDGES with NO percentage basis — padding + border (`decl_edges_x`) and the margins
     // (`decl_margin_x`, `auto` counted as 0) as an INTRINSIC measure reads them, a percentage resolving to
-    // nothing (`edgeInsets(el, null)`). The record's own `pl`/`pr`/`ml`/`mr` are cbW-resolved, which is the right
+    // nothing. The record's own `pl`/`pr`/`ml`/`mr` are cbW-resolved, which is the right
     // figure for LAYOUT and the wrong one for an intrinsic contribution.
     pub(crate) decl_edges_x: f64,
     pub(crate) decl_margin_x: f64,
-    // Whether `height` is a USED size settled OUTSIDE this box — a flex line's cross size, an inset box's, a
-    // pushed replay — rather than its own declaration. Only a TABLE reads it, and the two differ for one: a
+    // Whether `height` is a USED size settled OUTSIDE this box — a flex line's cross size, an inset box's — rather
+    // than its own declaration; set by the layout where it imposes one. Only a TABLE reads it, and the two differ for one: a
     // DECLARED height is shared out over the rows with the caption stacked on top (Chrome: `height: 120px` plus
     // an 18px caption is 138 tall), while an imposed one is the WRAPPER's, the caption inside it (a stretched
     // flex item is exactly as tall as its line).
@@ -401,33 +373,27 @@ pub(crate) struct Input {
     // TABLE CELL: the `%` fraction its `width` declared (NaN where it declares none) — a column's `pct`,
     // resolved against the width the columns share out rather than the table's own box (`distribute_columns`).
     pub(crate) cell_pct: f64,
-    // TABLE CELL: its (min-content, max-content) contribution as the ORACLE measured it — NaN where native
-    // measures the cell itself (`nlIntrinsicMeasurable`). A cell native cannot measure (a control's chrome, CJK
-    // text, a nested grid, a `%` edge an intrinsic measure has no basis for) rides its resolved figures instead
-    // of declining the whole table, exactly as an un-measurable grid track does.
-    pub(crate) cell_min_content: f64,
-    pub(crate) cell_max_content: f64,
     // TABLE CELL: its declared `height` is a MINIMUM, not a size (§17.5.3) — content taller than it grows the
-    // box (the oracle's `growFloor`), and min/max-height clamp the result. Its natural flow height is kept in
+    // box, and min/max-height clamp the result. Its natural flow height is kept in
     // `Box::natural_h`, which is the slack `vertical-align` distributes against.
     pub(crate) height_is_floor: bool,
     // TABLE CELL: how its content sits in the row-tall box (§17.5.3) — 0 baseline (its first baseline meets the
     // row's), 1 top, 2 middle, 3 bottom.
     pub(crate) cell_valign: u8,
     // TABLE CELL: it holds a PERCENTAGE-height descendant, so it may need a SECOND layout at the final row
-    // height for that descendant to have a basis (§17.5.3 — the oracle's `pass2`). The walk answers it: the
+    // height for that descendant to have a basis (§17.5.3). The walk answers it: the
     // question runs down a subtree of DECLARATIONS, stopping at a definite-height child and at a nested table
-    // (each is its own percentages' containing block), and native may not walk that subtree at all.
+    // (each is its own percentages' containing block), and the layout may not walk that subtree at all.
     pub(crate) cell_pct_h_child: bool,
-    // A mixed block's ANONYMOUS GROUP (§9.2.1.1, the walk's record for a run of its inline content): a box the
-    // oracle has no box for, whose inline content's containing block is the mixed block itself. So the percentage
+    // A mixed block's ANONYMOUS GROUP (§9.2.1.1, the walk's record for a run of its inline content): an anonymous
+    // block box, whose inline content's containing block is the mixed block itself. So the percentage
     // HEIGHTS of what it holds resolve against the basis the mixed block hands its own children (`group_pct_h`,
     // written by that block when it measures its children), never against the group's own auto height.
     pub(crate) anon_group: bool,
     pub(crate) group_pct_h: f64,
     // The box DECLARES a percentage height (or min- / max-height), or a vertical percentage offset: what reads an
-    // INDEFINITE basis as nothing, which the layout around it counts (`INDEF_PCT_H_READS`) — the oracle's own count, so
-    // a flex column lays an item out again at its flexed height wherever the oracle refuses to reuse its measure.
+    // INDEFINITE basis as nothing, which the layout around it counts (`INDEF_PCT_H_READS`), so a flex column lays an
+    // item out again at its flexed height wherever its subtree read one: that measure cannot be reused at a definite basis.
     pub(crate) pct_h_decl: bool,
     // An AUTO-height GRID ITEM under a declared row height: its border box IS the row, floored at its own padding and
     // border — imposed by `measure_grid` once the track its percentage edges resolve against is known.
@@ -461,25 +427,24 @@ pub(crate) struct Input {
     pub(crate) ratio_only: bool,
     // The box has no content height to floor a flex column's automatic minimum at (an image, a ratio box).
     pub(crate) shrinks_to_nothing: bool,
-    // …and whether it is a FORM CONTROL — an `<input>`, a `<select>`, a `<textarea>`, a `<meter>`, a `<progress>` — whose percentage max-width
-    // compresses nothing, where every other replaced box's does (CSS Sizing 3 §5.2.2 as Chrome and Firefox read it).
+    // …and whether it is a FORM CONTROL — an `<input>`, a `<select>`, a `<textarea>`, a `<meter>`, a `<progress>` —
+    // whose percentage max-width compresses nothing, where every other replaced box's does (CSS Sizing 3 §5.2.2 as
+    // Chrome and Firefox read it).
     pub(crate) form_control: bool,
-    // A REPLACED box's baseline (the oracle's `controlBaseline`): 0 none — an `<img>`, the only one that has
+    // A REPLACED box's baseline: 0 none — an `<img>`, the only one that has
     // none at all; 1 a text-drawing control's font — the font box (`control_font_box`) centred in the content
     // box plus its ascent (`control_font_asc`); 2 a list box — its content box's bottom; 4 the BORDER box's
     // bottom, which every OTHER replaced box gives (a checkbox, a radio, a range, an image input, and the
     // non-controls: canvas, svg, video, iframe, object, embed, meter, progress, textarea). A `file` input is
-    // not one of them — it draws text, so it is kind 1. (3 is unused; it carried a replayed list-box figure
-    // until native learned to stack the rows itself.)
+    // not one of them — it draws text, so it is kind 1. (3 is unused.)
     pub(crate) control_baseline: u8,
     pub(crate) control_font_box: f64,
     pub(crate) control_font_asc: f64,
     pub(crate) intrinsic_w: f64,
     pub(crate) intrinsic_h: f64,
-    // An OUT-OF-FLOW box (`out_of_flow`) native positions itself (`place_out_of_flow`): the record index of its
-    // CONTAINING BLOCK (−1 = the oracle's whole box is replayed instead — an in-pass CB with percentage edges,
-    // or a shrink-to-fit width native cannot measure — so nothing here is usable), its
-    // insets resolved against the CB's padding box (NaN = auto), and which of its margins are `auto` (bit 1
+    // An OUT-OF-FLOW box (`out_of_flow`), positioned by `place_out_of_flow`: the record index of its CONTAINING
+    // BLOCK (or `CB_RECT` / `CB_INLINE`, below; `CB_NONE` on an in-flow box), its insets' length parts (NaN =
+    // auto), resolved against the CB's padding box with `inset_frac`, and which of its margins are `auto` (bit 1
     // left, 2 right, 4 top, 8 bottom — they take the slack between two insets).
     pub(crate) cb_index: i32,
     pub(crate) inset_top: f64,
@@ -497,15 +462,14 @@ pub(crate) struct Input {
     // HTML's LEGACY alignment on this box AS A CONTAINER (0 none, 1 center, 2 right, 3 left): `<center>` and
     // the `align` attribute move a narrower block-level descendant in its band the way `margin: auto` would.
     pub(crate) legacy_align: u8,
-    // …and, on a fieldset's RENDERED LEGEND, how it sits across its fieldset (`legendAlignOf`): 0 not one, 1 by its own
-    // margins as a block does, 2 left, 3 center, 4 right (its `justify-self`) — never by its container's legacy alignment.
+    // …and, on a fieldset's RENDERED LEGEND, how it sits across its fieldset (the walk's `legend_align`): 0 not one, 1 by
+    // its own margins as a block does, 2 left, 3 center, 4 right (its `justify-self`) — never by its container's legacy
+    // alignment.
     pub(crate) legend_align: u8,
     // `text-indent` on a TEXT BLOCK: the px the indent narrows a line by, from the line's START edge (the
-    // right one in rtl), resolved by the walk against the block's own content width. Which LINES take it: the
-    // first, or with `hanging` every line BUT the first, and with `each_line` the first after every forced
-    // break as well. The FLOW only — an INTRINSIC measure of an indented block is declined in the walk, so
-    // nothing here carries an indent into `text_intrinsic`.
-    // `text-indent`: the LENGTH part, and the percentage as a FRACTION of the block's own content width, which
+    // right one in rtl). Which LINES take it: the first, or with `hanging` every line BUT the first, and with
+    // `each_line` the first after every forced break as well.
+    // Its LENGTH part, and the percentage as a FRACTION of the block's own content width, which
     // the flow resolves (`line_layout`) and an INTRINSIC measure does not — a percentage has nothing to resolve
     // against before the box has been given any room (CSS Sizing 3), so `text_intrinsic` takes the length alone.
     pub(crate) indent_px: f64,
@@ -520,9 +484,9 @@ pub(crate) struct Input {
     // An INTRINSIC-SIZE KEYWORD on `width` (0 none, 1 min-content, 2 max-content, 3 fit-content): the box is as
     // wide as its own content asks rather than as wide as the room it is given — a block child, a flex or grid
     // item and an out-of-flow box alike. The pass ROOT and a REPLACED element have a basis of their own (the width
-    // handed in, the intrinsic size) and the walk declines the keyword there.
+    // handed in, the intrinsic size).
     pub(crate) width_kw: u8,
-    // …and one on `height` (rec[65] bit 26), which is the content height wherever a height is `auto` — so the one
+    // …and one on `height`, which is the content height wherever a height is `auto` — so the one
     // place it differs is where an auto height would NOT be its content: an out-of-flow box between both vertical
     // insets, which an auto height stretches over and a keyword does not (CSS Sizing 3 §3.1 — the dialog UA's
     // `height: fit-content; inset-block: 0; margin: auto` is how a modal centres itself). A flex or grid item's
@@ -533,7 +497,7 @@ pub(crate) struct Input {
     // `cb_index` is CB_RECT and these four are x / y / width / height. `place_out_of_flow` reads one or the other
     // and does the same arithmetic either way, so the only difference between a viewport-positioned box and an
     // in-pass one is where the rectangle came from. A relatively-positioned INLINE of the pass is neither: it has
-    // no record, but native lays its fragments out, so `cb_index` is CB_INLINE and `cb_rect[0]` its index in the
+    // no record, but the line layout lays its fragments out, so `cb_index` is CB_INLINE and `cb_rect[0]` its index in the
     // pass's inline table (`inline_padding_box`).
     pub(crate) cb_rect: [f64; 4],
 }
@@ -584,7 +548,7 @@ impl InlineBox {
 }
 impl Input {
     pub(crate) fn same(&self, o: &Input) -> bool {
-        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, has_replayed_oof, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, measured_as_block, equal_share, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, flex_baseline_asc, flex_line_nat, flex_line, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height, pushed_h_indefinite, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, cell_min_content, cell_max_content, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect, fits_content } = self;
+        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect, fits_content } = self;
         nid.bit_eq(&o.nid)
             && parent.bit_eq(&o.parent)
             && display.bit_eq(&o.display)
@@ -628,23 +592,17 @@ impl Input {
             && flex_cross_gap.bit_eq(&o.flex_cross_gap)
             && flex_main_reverse.bit_eq(&o.flex_main_reverse)
             && flex_cross_far.bit_eq(&o.flex_cross_far)
-            && has_replayed_oof.bit_eq(&o.has_replayed_oof)
             && rel_x.bit_eq(&o.rel_x)
             && rel_y.bit_eq(&o.rel_y)
             && rel_pct.bit_eq(&o.rel_pct)
             && rel_x_px.bit_eq(&o.rel_x_px)
             && rel_x_neg.bit_eq(&o.rel_x_neg)
-            && measured_as_block.bit_eq(&o.measured_as_block)
-            && equal_share.bit_eq(&o.equal_share)
             && chain_rel.bit_eq(&o.chain_rel)
             && chain_px.bit_eq(&o.chain_px)
             && chain_shift.bit_eq(&o.chain_shift)
             && chain_math.bit_eq(&o.chain_math)
             && rel_math.bit_eq(&o.rel_math)
             && flex_item_auto.bit_eq(&o.flex_item_auto)
-            && flex_baseline_asc.bit_eq(&o.flex_baseline_asc)
-            && flex_line_nat.bit_eq(&o.flex_line_nat)
-            && flex_line.bit_eq(&o.flex_line)
             && out_of_flow.bit_eq(&o.out_of_flow)
             && sp_x.bit_eq(&o.sp_x)
             && sp_y.bit_eq(&o.sp_y)
@@ -657,7 +615,6 @@ impl Input {
             && anon_cross.bit_eq(&o.anon_cross)
             && ws_mode.bit_eq(&o.ws_mode)
             && item_auto_height.bit_eq(&o.item_auto_height)
-            && pushed_h_indefinite.bit_eq(&o.pushed_h_indefinite)
             && grid_start.bit_eq(&o.grid_start)
             && decl_w.bit_eq(&o.decl_w)
             && decl_min_w.bit_eq(&o.decl_min_w)
@@ -693,8 +650,6 @@ impl Input {
             && decl_margin_x.bit_eq(&o.decl_margin_x)
             && height_from_outside.bit_eq(&o.height_from_outside)
             && cell_pct.bit_eq(&o.cell_pct)
-            && cell_min_content.bit_eq(&o.cell_min_content)
-            && cell_max_content.bit_eq(&o.cell_max_content)
             && height_is_floor.bit_eq(&o.height_is_floor)
             && cell_valign.bit_eq(&o.cell_valign)
             && cell_pct_h_child.bit_eq(&o.cell_pct_h_child)
@@ -772,8 +727,8 @@ pub(crate) const RUN_BR: u8 = 3;
 // is its margin-box width (advance), `asc` its ascent above the line baseline, `line_height` its full
 // margin-box height (asc + descent). Placed like an unbreakable word; grows the line box by asc / descent.
 pub(crate) const RUN_ATOMIC: u8 = 4;
-// How a NATIVE atomic hangs on its line when not by its own baseline (`nlAtomicAlignment`'s `NL_VA_CODE`): against the
-// parent's font box, from the figure of that font its run carries.
+// How an atomic hangs on its line when not by its own baseline (the code the walk's `vertical_align` arm sends): against
+// the parent's font box, from the figure of that font its run carries.
 const VA_MIDDLE: u8 = 1;
 const VA_TEXT_TOP: u8 = 2;
 const VA_TEXT_BOTTOM: u8 = 3;
@@ -790,11 +745,11 @@ pub(crate) const RUN_OOF: u8 = 6;
 pub(crate) const RUN_FLOAT: u8 = 7;
 
 // One item of a text block's inline stream. For TEXT: font/size/ls/ws/line_height measure its words,
-// and `asc` is the run's ascent within its line box (baselineWithin its owner) — its descent is
+// and `asc` is the run's ascent within its line box — its descent is
 // `line_height - asc`, so a line's box height is max(asc)+max(descent) over its runs and the strut.
 // For OPEN/CLOSE: the edges are the inline table's (`InlineBox`), `plain` their basis-less width. `kind` selects.
 // A run's text, as UTF-16 code units, SHARED: a kept chunk's runs go into every pass that puts it back
-// (`dom.rs` `ChunkStore`), and a count is cheaper than a copy per run per pass.
+// (`walk_reuse.rs` `KeptPass`), and a count is cheaper than a copy per run per pass.
 pub(crate) type RunText = Option<std::rc::Rc<[u16]>>;
 #[derive(Clone, Copy)]
 pub(crate) struct Run {
@@ -803,7 +758,7 @@ pub(crate) struct Run {
     pub(crate) size: f64,
     pub(crate) ls: f64,
     pub(crate) ws: f64,
-    // A TEXT run's line-height; on a CLOSE edge, the inline's font CONTENT height (`fontContentHeight`), the
+    // A TEXT run's line-height; on a CLOSE edge, the inline's font CONTENT height, the
     // box a landing close grows the line to — a content box, not a line-height, whatever the name says.
     pub(crate) line_height: f64,
     // An ascent above the line's baseline, whatever the kind: a TEXT run's, an ATOMIC's (its own baseline plus
@@ -817,13 +772,12 @@ pub(crate) struct Run {
     // one. (Chrome: `aaaa<span style="white-space:nowrap"> </span>bbbb` stays on one line, where the same space
     // in a wrapping span opens the line.)
     pub(crate) ws_mode: u8,
-    // The TAB STOP a tab in this run advances to, as `tabStopOf` resolves it: `tab_px` is the spacing between
+    // The TAB STOP a tab in this run advances to, as the walk resolves it: `tab_px` is the spacing between
     // stops — the tab's OWN element's `tab-size`, so an inner `code { tab-size: 4 }` stops every 4 inside a
     // `pre { tab-size: 8 }`, counted in the BLOCK's space advance where the value is a number — and `tab_min`
     // is the block's half-space, the least a tab may advance. Stops are measured from the BLOCK's content
     // edge, so what a tab is worth depends on where the pen stands (`measure_at`'s `from`). The pair arrives
-    // FINAL — a `tab-size` that resolved to zero took the block's letter-spacing as its spacing back in the
-    // oracle's `tabStopOf` — so a `tab_px` of 0 means there is no stop to reach and a tab advances nothing.
+    // FINAL, so a `tab_px` of 0 means there is no stop to reach and a tab advances nothing.
     // (An OUT-OF-FLOW run has no text and reuses the pair for its relative chain's PROGRAMS, across and down — an
     // offset into the math table, NaN for none; see its arm in `line_layout`.)
     pub(crate) tab_px: f64,
@@ -832,18 +786,17 @@ pub(crate) struct Run {
     // (`asc`, which every other `vertical-align` has already folded into), 1 the LINE BOX's top, 2 its bottom.
     // The two line-relative values cannot be an ascent, because the line's height is not known until every run
     // on it is placed — so such a box contributes none, raises `line_outer_min` instead, and is placed at the
-    // line close. CSS 2.1 §10.8.1; the oracle's `growAtomic` / `forceBreak` pair.
+    // line close. CSS 2.1 §10.8.1.
     // Its own field rather than one of the slots an ATOMIC leaves unread (`ls`, `ws`, `tab_px`, `tab_min`):
     // `line_height` and `metric` are already overloaded on this kind — they arrive as the alignment code and
     // the parent-font figure and leave as the box's outer height and advance — and a third reused slot is how
-    // that pair became hard to read. One `f64` per run in the buffer; the perf gate held.
+    // that pair became hard to read.
     pub(crate) line_mode: u8,
     // A CLOSE edge that MAY land on the line: either of its two halves (border + padding, then margin) has a
     // length or a percentage in it, whatever they sum to — it lands where one of them is still non-zero once
-    // resolved in the line's block (`line_layout`). The oracle places the halves as two edges (`placeInlineBox`:
-    // `if (ce.right)` and `if (ce.mr)`), so `padding-right:5px; margin-right:-5px` puts a line down — Chrome gives
-    // the block 22 — where a test on the SUM saw nothing. Carried in the buffer slot an edge leaves unread
-    // (`line_mode`'s), so the stride is unchanged; false on every other kind.
+    // resolved in the line's block (`line_layout`). The halves are placed as two edges, so
+    // `padding-right:5px; margin-right:-5px` puts a line down — Chrome gives the block 22 — where a test on the
+    // SUM saw nothing. False on every other kind.
     pub(crate) lands: bool,
     // An OPEN / CLOSE edge's width with NO percentage basis — what an INTRINSIC measure reads, where the laid-out
     // line resolves the box's edges from the inline table (`InlineBox::resolved`). 0 on every other kind.
@@ -851,15 +804,14 @@ pub(crate) struct Run {
 }
 
 impl Input {
-    // An out-of-flow box native positions from its containing block (vs one whose oracle box is replayed).
+    // An out-of-flow box with a containing block to be positioned from (every one the walk records has one).
     fn native_oof(&self) -> bool {
         self.out_of_flow != 0 && self.cb_index != CB_NONE
     }
     // This record with a border-box height IMPOSED on it (a flex item stretched to its line, or handed its
-    // resolved main size) — the oracle's `layoutElement(child, {height, autoHeight: false})`: the declared
-    // height is replaced (content-box per `box-sizing`), the min/max clamp still applies after
-    // (layoutElementInner clamps every box). NaN imposes nothing; MEASURE_AUTO_HEIGHT asks for the box's
-    // CONTENT height whatever it declares (the oracle's `measureItemHeight`: `{height: 0, autoHeight: true}`).
+    // resolved main size): the declared height is replaced (content-box per `box-sizing`), the min/max clamp
+    // still applies after (every box is clamped). NaN imposes nothing; MEASURE_AUTO_HEIGHT asks for the box's
+    // CONTENT height whatever it declares (`item_auto_height`).
     fn with_imposed_height(self, h: f64) -> Input {
         if is_auto(h) {
             return self;
@@ -872,7 +824,6 @@ impl Input {
         }
         n.height = if n.border_box { h } else { (h - n.edges_y()).max(0.0) };
         n.item_auto_height = false;
-        n.pushed_h_indefinite = false;
         n
     }
     // Sum of the horizontal / vertical non-content edges (padding + border), used to convert between
@@ -880,12 +831,12 @@ impl Input {
     fn edges_x(&self) -> f64 {
         self.pl + self.pr + self.bl + self.br
     }
-    // The CONTENT width inside a border box — the oracle's `box.width - edge.left - edge.right`, subtracted
-    // ONE SIDE AT A TIME because that is how the oracle spells it and floating-point subtraction is not
-    // associative. It matters on exactly the box this is for: a SHRINK-TO-FIT width is `max-content + edges`
-    // by construction, so its content width lands on the line-break boundary to the last bit, and summing the
-    // four edges first put it one ULP under — 249.27343749999997 against the oracle's 249.2734375, which is
-    // one more line in the float and a box a different height (`padding: 0 19.2px` around a 37-character run).
+    // The CONTENT width inside a border box — `w - (left edges) - (right edges)`, subtracted ONE SIDE AT A TIME
+    // because floating-point subtraction is not associative. It matters on exactly the box this is for: a
+    // SHRINK-TO-FIT width is `max-content + edges` by construction, so its content width lands on the line-break
+    // boundary to the last bit, and summing the four edges first put it one ULP under — 249.27343749999997
+    // against 249.2734375, which is one more line in the float and a box a different height (`padding: 0 19.2px`
+    // around a 37-character run).
     fn content_w(&self, w: f64) -> f64 {
         ((w - (self.pl + self.bl)) - (self.pr + self.br)).max(0.0)
     }
@@ -898,31 +849,31 @@ impl Input {
     // Whether the box lays its own content out from the RIGHT: its inline axis runs backwards (`direction:
     // rtl`) AND that axis is the horizontal one. In a VERTICAL writing mode the inline axis is the vertical
     // one, so `direction` orders the lines along it and leaves the horizontal (block) axis alone: the children
-    // still start at the left content edge — which is what the oracle's block flow does, and what its `lineup`
-    // and `staticCornerFor` read off the PHYSICAL inline-start rather than off `direction`.
+    // still start at the left content edge, and the line alignment and the static position read the PHYSICAL
+    // inline-start rather than `direction`.
     fn from_right(&self) -> bool {
         self.rtl != 0 && !self.block_axis_is_x
     }
-    // The CONTENT height when the box's height is definite — declared or imposed, not a pushed auto height — as
-    // the final box will be clamped (the oracle reads it back off `_lb.height` once `_lbDefiniteH` says so).
+    // The CONTENT height when the box's height is definite — declared or imposed, not one measured for its content
+    // (`item_auto_height`) — as the final box will be clamped.
     // …clamped by the min/max the RECORD carries, which for a TABLE CELL are none in its block axis: they do not
     // apply there at all (CSS 2.2 §17.5.3 leaves their effect undefined; Chrome and Firefox read both as `auto`),
-    // and the walk says so (`cellIgnoresMinMax`). The box's `box_h` clamps by the same record, and the two have to
+    // and the walk sends none there. The box's `box_h` clamps by the same record, and the two have to
     // agree, because this figure is the basis the cell's own PERCENTAGE-height descendants resolve against on its
-    // second pass: a `max-height: 20px` cell in a 200px table hands its `height: 50%` child a basis of 97, as the
-    // oracle and Chrome both say, not 20. A cell in a VERTICAL writing mode is the other way round — its height
-    // is its inline axis, and its min/max-height clamp it (80, not its 18px line; Chrome ignores the max under a
-    // declared height, which both engines share).
+    // second pass: a `max-height: 20px` cell in a 200px table hands its `height: 50%` child a basis of 97, as
+    // Chrome says, not 20. A cell in a VERTICAL writing mode is the other way round — its height is its inline
+    // axis, and its min/max-height clamp it (80, not its 18px line). KNOWN GAP: Chrome ignores the max under a
+    // declared height there.
     fn definite_content_h(&self) -> Option<f64> {
-        if is_auto(self.height) || self.item_auto_height || self.pushed_h_indefinite {
+        if is_auto(self.height) || self.item_auto_height {
             return None;
         }
         let to_border = |v: f64| if is_auto(v) || self.border_box { v } else { v + self.edges_y() };
         let border_h = clamp_min_max(to_border(self.height), to_border(self.min_h), to_border(self.max_h));
         Some((border_h.max(0.0) - self.edges_y()).max(0.0))
     }
-    // A flex COLUMN's main size as the oracle's `definiteMainHeight` has it: the definite content height, else a
-    // positive min-height FLOOR, else NaN (nothing to resolve a percentage basis against).
+    // A flex COLUMN's main size as a percentage basis: the definite content height, else a positive min-height
+    // FLOOR, else NaN (nothing to resolve a percentage basis against).
     fn column_main(&self) -> f64 {
         if let Some(h) = self.definite_content_h() {
             return h;
@@ -1047,30 +998,28 @@ impl Input {
     fn edges_y(&self) -> f64 {
         self.pt + self.pb + self.bt + self.bb
     }
-    // A box with no `_nid`: a mixed block's anonymous text-block group, an anonymous table row or cell, an
-    // anonymous grid item. NOT "it has no element" — `anonTableCell` and `anonGridItem` build real objects the
-    // oracle stamps a real `_lb` on, and layout.js says so where they are built. What they have in common is
-    // that they are no part of the DOM, so there is no arena id to read a box back by, which is why the walk
-    // marks them `rec[0] = -1` and the parity compare skips them.
+    // A box with no node: a mixed block's anonymous text-block group, an anonymous table and its rows and cells,
+    // an anonymous flex or grid item. What they have in common is that they are no part of the DOM, so there is
+    // no arena id to write a box back to, which is why the walk marks them `nid = -1`.
     // Named here so a rule that depends on it says so, rather than testing the sentinel in place and leaving
-    // the next reader to work out which of the four kinds it meant — and every such rule should ask WHICH,
-    // because the four have nothing else in common (see `block_child_width`'s use).
+    // the next reader to work out which of the kinds it meant — and every such rule should ask WHICH,
+    // because they have nothing else in common (see `block_child_width`'s use).
     //
     // BACKLOG, and it would remove a whole class rather than exempt one member of it: the anonymous group
     // carries `block_axis_is_x` only so `from_right` can pair it with the direction, and the WALK has already
-    // computed the answer (`startsInlineAtRight`). Send that bit instead and the group can answer `false` to
+    // computed the answer (`starts_at_right`). Send that bit instead and the group can answer `false` to
     // the width question honestly — no exemption, and nothing for a future anonymous kind to fall into.
     fn is_anonymous(&self) -> bool {
         self.nid < 0.0
     }
     // A used margin, `auto` counted as 0 for block flow's vertical stacking (horizontal auto margins
-    // centre, handled in width resolution). L1 does not centre yet — auto → 0.
+    // take the slack where the placement distributes it — `auto_margins`).
     fn m(v: f64) -> f64 {
         if is_auto(v) { 0.0 } else { v }
     }
 }
 
-// The border-box a pass writes per node, in document coordinates — the native `el._lb`.
+// The border-box a pass writes per node, in document coordinates — what layout.js writes back as `el._lb`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Box {
     pub(crate) nid: f64,
@@ -1079,7 +1028,7 @@ pub(crate) struct Box {
     pub(crate) w: f64,
     pub(crate) h: f64,
     pub(crate) auto_height: bool,
-    // The box's FIRST and LAST baselines as offsets from its border-box top (the oracle's `boxBaselineOffset`):
+    // The box's FIRST and LAST baselines as offsets from its border-box top:
     // a text block's first / last line baseline (the line's top + its ascent — strut and runs); a block, grid
     // or flex container's from the first / last in-flow child that has one (flex items in flex order); None
     // when no line is there to give one (a flex item then synthesises its bottom margin edge).
@@ -1087,30 +1036,29 @@ pub(crate) struct Box {
     pub(crate) last_baseline: Option<f64>,
     // The baseline an INLINE-BLOCK made of this box hangs by — its last baseline under one more rule Blink applies
     // down the tree (CSS2 §10.8.1: a box whose `overflow` is not visible hangs from its bottom margin edge): a
-    // SCROLL-CONTAINER child gives its bottom MARGIN edge, not its lines. The oracle's `boxBaselineOffset(el,
-    // true, inlineBlock = true)`.
+    // SCROLL-CONTAINER child gives its bottom MARGIN edge, not its lines.
     pub(crate) inline_block_baseline: Option<f64>,
     // A TABLE CELL's natural flow height (`height_is_floor`): what its content alone came to, before its own
     // declared floor or min/max raised the box and before the row stretched it — the slack `vertical-align`
-    // distributes against (the oracle's `_lbCellContentH`). None for every other box.
+    // distributes against. None for every other box.
     pub(crate) natural_h: Option<f64>,
     // Whether an AUTO height's min/max clamp MOVED it — its content was laid out against the height it came to,
-    // not the one it was cut to (the oracle's `_lbClampedH`), so a definite question asking for that same number
+    // not the one it was cut to, so a definite question asking for that same number
     // is not answered by laying it out at auto again (`flex_column_sizes`).
     pub(crate) clamped_h: bool,
     // The basis its percentages resolved against (`Input::basis_w`), None where nothing resolved one.
     pub(crate) cb_w: Option<f64>,
     // The margins its placement USED (top / right / bottom / left) where they are not what the record declared —
-    // an `auto` one given the slack, an over-constrained one the remainder — as the oracle stamps `_lbMargins` for
+    // an `auto` one given the slack, an over-constrained one the remainder — written back as `_lbMargins` for
     // `getComputedStyle` to report. None where every side is the declared one.
     pub(crate) used_margins: Option<[f64; 4]>,
     // Its OWN relative shift (x, y), already in `x` / `y` — the whole less the relative inline chain's around it
-    // (`Input::chain_shift`), which the oracle keeps on those inlines: its `_lbRel`, which the scrollable overflow
+    // (`Input::chain_shift`), which belongs to those inlines: written back as `_lbRel`, which the scrollable overflow
     // region reads (a shifted child extends its scroller from where it SITS, the end padding from where it was laid
     // out). (0, 0) for a box that did not move itself.
     pub(crate) rel: [f64; 2],
     // Its EDGES as the pass used them, the percentages resolved against `cb_w`: padding, border and margin, each top /
-    // right / bottom / left, an `auto` margin as 0 (the oracle's `edgeInsets`) — what the geometry reads (`clientWidth`,
+    // right / bottom / left, an `auto` margin as 0 — what the geometry reads (`clientWidth`,
     // the scrollable overflow's margin boxes, a used padding in `getComputedStyle`) take, rather than resolving them
     // again from the cascade. None for a table ROW or ROW GROUP, whose record carries none: margins and padding do not
     // apply to it (CSS 2.1 §17.5), and a border it declares is its cells' to draw, so what it declares is not what the
@@ -1120,7 +1068,7 @@ pub(crate) struct Box {
     // resolved a PERCENTAGE (`Input::has_percent_edges` — edges that hold for one basis only), and whether it is OUT
     // OF FLOW (`Input::out_of_flow`, `OOF_FIXED` for `position: fixed`) — and where it is, what placed it: its
     // containing block (`Input::cb_index`: a record, `CB_RECT` the viewport, `CB_INLINE` the inline entry `cb_inline`
-    // names, `CB_NONE` a box replayed rather than placed) and the axes it takes its static position in
+    // names, `CB_NONE` none) and the axes it takes its static position in
     // (`STATIC_BLOCK` / `STATIC_INLINE`: no inset on either side). `cb_inline` is −1 where there is none: no field of
     // a box may be NaN, which compares unequal to itself and makes every box of the pass a changed one.
     pub(crate) auto_margins: u8,
@@ -1129,8 +1077,8 @@ pub(crate) struct Box {
     pub(crate) cb: i32,
     pub(crate) cb_inline: i32,
     pub(crate) static_axes: u8,
-    // Its computed `position` where the pass that built it says (`POSITION_*`, the Rust walk's: `walk_ops::layout_build`),
-    // 0 where it does not — the JS walk's records carry none.
+    // Its computed `position` (`POSITION_*`), stamped by the walk's build (`walk_ops::layout_build`); 0 where the pass
+    // that built it set none.
     pub(crate) position: u8,
 }
 pub(crate) const ROOT_FLOAT_LEFT: u8 = 1;
@@ -1154,9 +1102,9 @@ fn clamp_min_max(v: f64, min: f64, max: f64) -> f64 {
     r
 }
 
-// The outcome of a native pass: laid-out boxes (one per in-flow block node, document coords), or
-// Unsupported when the subtree uses a feature L1 doesn't model — the caller then falls back to JS for
-// the WHOLE pass (never a per-node mix).
+// The outcome of a pass: laid-out boxes (one per record, document coords), or Unsupported when the subtree
+// uses a construct the layout does not model — the WHOLE pass is then declined (never a per-node mix): the
+// page lays out its root box alone and the reason is counted.
 pub(crate) enum Outcome {
     LaidOut(Laid),
     Unsupported,
@@ -1168,9 +1116,8 @@ pub(crate) struct Laid {
     pub(crate) texts: Vec<TextRow>,
 }
 
-// An inline box the run stream opens — its entry in the walk's inline table (`nlInlineEntry`), which the OPEN /
-// CLOSE / WBR runs name by index in their `font` slot: the box's own figures, which its FRAGMENTS are laid out
-// from (the oracle's `settleInlineBoxes`).
+// An inline box the run stream opens — its entry in the walk's inline table, which the OPEN / CLOSE / WBR runs
+// name by index in their `font` slot: the box's own figures, which its FRAGMENTS are laid out from.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct InlineBox {
     // The horizontal edges the line meets that the OPEN run's sum does not split: the opening margin (the fragment
@@ -1181,7 +1128,7 @@ pub(crate) struct InlineBox {
     // …and the vertical ones, which grow every fragment past the box's own font box without touching the line.
     pub(crate) top: f64,
     pub(crate) bottom: f64,
-    // The box's own font CONTENT height and its ascent above the line's baseline (`inlineAscent`).
+    // The box's own font CONTENT height and its ascent above the line's baseline.
     pub(crate) own_h: f64,
     pub(crate) own_asc: f64,
     // The `position: relative` offset accumulated down the inline chain, which moves the fragments at paint time.
@@ -1206,12 +1153,13 @@ pub(crate) struct InlineBox {
     // with its border — which is why the two opening halves are kept apart: each resolves on its own (`bounded`).
     pub(crate) left: f64,
     pub(crate) math: [u32; 6],
-    // …and the relative offset's percentages (`nlChainRel`): its fraction of the block's width, of its height where that
-    // is definite, and the vertical figure to take where it is not (`rel_y` being the definite one's length).
+    // …and the relative offset's percentages (the walk's `chain_rel`): its fraction of the block's width, of its
+    // height where that is definite, and the vertical figure to take where it is not (`rel_y` being the definite
+    // one's length).
     pub(crate) rel_xf: f64,
     pub(crate) rel_yf: f64,
     pub(crate) rel_yi: f64,
-    // …and its comparison functions' share, a PROGRAM per axis (`nlChainRel`): across, and down where the height is
+    // …and its comparison functions' share, a PROGRAM per axis: across, and down where the height is
     // definite.
     pub(crate) rel_math: [u32; 2],
 }
@@ -1233,7 +1181,7 @@ impl InlineBox {
         self
     }
 }
-// …and what native answers for one: [inline index, x, y, w, h] per fragment, in document coordinates.
+// …and what the pass answers for one: [inline index, x, y, w, h] per fragment, in document coordinates.
 pub(crate) type FragRow = [f64; 5];
 // One TEXT PIECE a line placed, for a painter: [run, start, end, x, y, baseline, width, justify] — the run's index in
 // the pass's stream and the UTF-16 range of its text the piece draws (an EMPTY range is the HYPHEN a soft hyphen shows
@@ -1244,10 +1192,10 @@ pub(crate) type FragRow = [f64; 5];
 // the document's, as a fragment is. Only glyph-bearing pieces: white space draws nothing.
 pub(crate) type TextRow = [f64; 8];
 
-// One line an inline box's content landed on — the oracle's `frag.lines` record (`notePlacement`): the leftmost
-// extent it reached there (`minX`, which starts past the box's own opening margin), the right edge of what it
-// placed, and of what HANGS at the line's end (a collapsible space a break may still eat). `top` / `asc` are the
-// line's own, stamped when it closes (`lineRecords[index]`), which is what puts the fragment on the line's baseline.
+// One line an inline box's content landed on: the leftmost extent it reached there (`min_x`, which starts past the
+// box's own opening margin), the right edge of what it placed, and of what HANGS at the line's end (a collapsible
+// space a break may still eat). `top` / `asc` are the line's own, stamped when it closes, which is what puts the
+// fragment on the line's baseline.
 struct FragLine {
     line_no: usize,
     top: f64,
@@ -1257,8 +1205,8 @@ struct FragLine {
     hang_pending: bool,
     asc: f64,
 }
-// …and the box itself as the line layout sees it: where it OPENED (the oracle's `frag.x` / `frag.y` / `frag.line`,
-// which an EMPTY box's fragment is read off), and whether the line it opened on became a line (`onLine`).
+// …and the box itself as the line layout sees it: where it OPENED (`open_x` / `open_top` / `open_line`, which an
+// EMPTY box's fragment is read off), and whether the line it opened on became a line (`on_line`).
 struct Frag {
     idx: usize,
     ib: InlineBox,
@@ -1277,7 +1225,7 @@ struct OpenBox {
 }
 // A soft hyphen's piece placed WITHOUT its hyphen: the hyphen's width, in the piece's own font, and the boxes that were
 // open at the piece — the ones that hold the hyphen where a break shows it, though they may have closed since and
-// others opened (the oracle's `barrier.shy`, `{ shy: owner, frags: openInlines.slice() }`).
+// others opened.
 struct PendingHyphen {
     w: f64,
     frags: Vec<usize>,
@@ -1320,8 +1268,8 @@ impl Drop for MathStore {
 thread_local! {
     static MATH: std::cell::RefCell<Vec<f64>> = const { std::cell::RefCell::new(Vec::new()) };
     static FRAG_PASS: std::cell::RefCell<Option<FragPass>> = const { std::cell::RefCell::new(None) };
-    // How many percentage heights (and vertical relative offsets) have met an INDEFINITE basis so far — the oracle's
-    // `INDEF_PCT_H_READS`: a running count, so a measure can tell whether its own subtree read one.
+    // How many percentage heights (and vertical relative offsets) have met an INDEFINITE basis so far: a running
+    // count, so a measure can tell whether its own subtree read one.
     static INDEF_PCT_H_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 struct FragStore(Option<FragPass>);
@@ -1378,8 +1326,8 @@ fn store_frags(i: usize, rows: Vec<FragRow>) {
     });
 }
 // The PADDING box of inline box `k` as a containing block (CSS 2.1 §10.1): from its FIRST fragment's top-left to
-// its LAST one's bottom-right — not their union — less its borders (the oracle's `paddingBoxOf` over
-// `inlineContainingBox`). Asked by `place_out_of_flow`, after `place` has moved the fragments into the document's
+// its LAST one's bottom-right — not their union — less its borders. Asked by `place_out_of_flow`, after `place`
+// has moved the fragments into the document's
 // frame: the record that laid them out is an ancestor of every box inside the inline.
 fn inline_padding_box(k: usize) -> Option<(f64, f64, f64, f64)> {
     FRAG_PASS.with(|m| {
@@ -1431,12 +1379,12 @@ fn store_texts(i: usize, rows: Vec<TextRow>) {
     });
 }
 
-// Lay out `inputs` (a flat buffer, parent-indexed, the root at index 0) starting from the root's
+// Lay out `inputs` (the pass's records, parent-indexed, the root at index 0) starting from the root's
 // border-box origin + width the caller fixes (from the viewport / initial containing block). Returns a
 // box per node in input order. Block flow: each block fills its containing block's content width (auto)
 // or takes its declared width; in-flow block children stack vertically at the content origin; auto
 // height is the children's stacked height (plus this box's own vertical edges).
-// A NaN origin is a pass root native places ITSELF — the document's body against the initial containing block
+// A NaN origin is a pass root the layout places ITSELF — the document's body against the initial containing block
 // `root_cb_w` wide, from its right edge where that is where the block starts (`root_from_right`: an rtl or a vertical-rl
 // principal writing mode) — where anything else is handed its origin.
 #[allow(clippy::too_many_arguments)]
@@ -1446,7 +1394,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[RunText]
 }
 // …laying the records out IN PLACE: a parent resolves its children's percentages against the box it lays them out in
 // and writes the resolved record back, so the records are the pass's to change — every one is written afresh for the
-// next (`dom.rs` assembles them), and a copy into cells first was a second copy of the page's records every pass.
+// next (`walk_ops::layout_build` assembles them), and a copy into cells first was a second copy of the page's records every pass.
 #[allow(clippy::too_many_arguments)]
 // …and with the chunks the pass placed, where each root is, and the measures kept of them (`MeasureCache`); `texts` asks
 // for the TEXT PIECES as well (`TextRow`), which only a paint does.
@@ -1454,13 +1402,6 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
     let _measure_guard = kept.map(|(cache, roots, check)| MeasureCacheGuard::install(cache, roots, check));
     if inputs.is_empty() {
         return Outcome::LaidOut(Laid { boxes: Vec::new(), frags: Vec::new(), texts: Vec::new() });
-    }
-    // Reject up front if any node uses an unmodelled display — a subtree is laid out natively only when
-    // every participant is a block-flow box or a text block. This is the whole-subtree gate.
-    for n in inputs.iter() {
-        if n.display == DISPLAY_UNSUPPORTED {
-            return Outcome::Unsupported;
-        }
     }
     // Precompute each node's in-flow child boxes (input indices), in document order. A text block has no
     // child records (its text is in `texts`); a block-container's children are block-level boxes.
@@ -1490,9 +1431,8 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
         .collect();
     // Two phases: MEASURE lays the subtree out relative to each node's own border-box origin (so
     // collapse-through margins can propagate UP through returns without knowing final positions), then
-    // PLACE walks once top-down adding absolute offsets. `failed` is set when a text block can't be
-    // measured natively (bad font handle, or a tab / combining mark / CJK the L2 line breaker declines)
-    // — the whole pass then falls back to JS.
+    // PLACE walks once top-down adding absolute offsets. `failed` is set when a box meets a construct the
+    // measure declines (a bad font handle, say) — the whole pass is then declined (`Outcome::Unsupported`).
     // Bound to a name, never `let _`: the guard has to LIVE to the end of the pass — dropped at the semicolon
     // it would clear the memo again immediately, silently, with nothing measuring the loss.
     let _math_guard = MathStore::install(maths);
@@ -1533,7 +1473,7 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
     if failed.get() {
         return Outcome::Unsupported;
     }
-    // …the BODY placed as the oracle's `layoutDocument` places it: at its leading margin — an `auto` pair splitting
+    // …a root placed by the pass itself (a NaN origin): at its leading margin — an `auto` pair splitting
     // what its width leaves of the initial containing block — and at its top margin collapsed with its first child's.
     let (root_x, root_y) = if root_x.is_nan() {
         let n = inputs[0].get();
@@ -1605,8 +1545,8 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
     }
     boxes[0].cb_w = Some(root_cb_w);
     // The inline boxes' fragments, each laid out by the text block its runs belong to and placed with it. A box no
-    // text block answered for is left out, which the harness counts as MISSING: every tabled box belongs to a
-    // committed stream, so an absent one is a bug to see, not a box to guess at.
+    // text block answered for is left out: every tabled box belongs to a committed stream, so an absent one is a
+    // bug to see, not a box to guess at.
     let (frags, texts) = FragStore::take();
     Outcome::LaidOut(Laid { boxes, frags, texts })
 }
@@ -1631,16 +1571,15 @@ fn is_ws_u16(u: u16) -> bool {
 }
 
 // A collapsed space waiting for the next word. Its `sep` is the question every reader below is really
-// asking — IS THIS A WORD SEPARATOR — and each of them asked it of the WIDTH instead until 2026-09-20,
-// which conflates two different things: a zero-advance pending space is normally the break OPPORTUNITY a
+// asking — IS THIS A WORD SEPARATOR — and not one to ask of the WIDTH, which conflates two different
+// things: a zero-advance pending space is normally the break OPPORTUNITY a
 // `pre` run (or a `nowrap` run's collapsed leading space) leaves behind, and no separator; but a REAL space
-// whose advance cancels to zero (`word-spacing: -9.6px` on a 9.6px space) is one. The oracle has no width
-// test anywhere here — what it mirrors is `placeOnLine(…, hangs)`, which pushes a gap and sets
-// `lineEndsWithSpace` because a collapsible space was PLACED, whatever it measured. Native dropped every gap
-// on such a line (its atomic at 19.2 against the oracle's and Chrome's 25.27), broke the line in two where
-// both said one, and kept a preserved run alive past the space that ends it.
+// whose advance cancels to zero (`word-spacing: -9.6px` on a 9.6px space) is one: a collapsible space that was
+// PLACED is a gap and ends the line in a space, whatever it measured. A width test would drop every gap on such a
+// line (its atomic at 19.2 against Chrome's 25.27), break the line in two where Chrome has one, and keep a
+// preserved run alive past the space that ends it.
 //
-// A STRUCT rather than the tuple it started as, for the reason `LineStyle` below gives: `breaks` and `sep`
+// A STRUCT, not a tuple, for the reason `LineStyle` below gives: `breaks` and `sep`
 // are adjacent `bool`s read through positional wildcards at a dozen sites, and transposing them compiles
 // clean while quietly rejustifying every page.
 #[derive(Clone, Copy)]
@@ -1648,15 +1587,15 @@ struct PendingSpace {
     w: f64,
     asc: f64,
     desc: f64,
-    // Whether a soft wrap may fall here — the QUEUING run's to say, not the consuming one's: the oracle
-    // leaves a `barrier` of `'hard'` behind a non-wrapping run's trailing space, so
+    // Whether a soft wrap may fall here — the QUEUING run's to say, not the consuming one's: a non-wrapping
+    // run's trailing space is no break opportunity, so
     // `aaa <span style="white-space:normal">bbbbbbbb</span>` in a `nowrap` block does not break before the
     // span however the span itself wraps.
     breaks: bool,
     // Whether it is a word separator at all, as against a zero-width break opportunity.
     sep: bool,
     // Already ON the line: its advance and its gap went down where an edge was placed after it (a closing or an
-    // opening edge the oracle puts down after the space it had placed where it met it), and what still waits
+    // opening edge put down after the space that was placed where it met it), and what still waits
     // is only what the space IS for the next word — its break opportunity, its metrics, and that a line
     // ending in it starts the next run's white space collapsed. `w` is 0 once placed.
     placed: bool,
@@ -1668,34 +1607,34 @@ struct PendingSpace {
 #[derive(Clone, Copy)]
 struct LineStyle {
     // The BLOCK's own `white-space`, which is the only thing it still decides: whether the line may break at
-    // all (`outerWraps`). A non-wrapping RUN forbids breaks inside itself; the opportunity BEFORE it is the
-    // block's to give.
+    // all. A non-wrapping RUN forbids breaks inside itself; the opportunity BEFORE it is the block's to give.
     ws_mode: u8,
     align:   u8,
     rtl:     bool,
     indent:  (f64, bool, bool, bool), // `text-indent`: px, hanging, each-line, first-line-spent (Input::indent_px)
     // The block's content height where definite (NaN where not): what a relative inline box's — or an out-of-flow
-    // marker's — vertical percentage offset resolves against, as the oracle's `placeInlineBox` stamps it.
+    // marker's — vertical percentage offset resolves against.
     pct_h:   f64,
 }
 
-// Greedy line layout for a text block's run/marker STREAM (`runs` / `run_texts` parallel, this block's
-// slice). TEXT runs tokenize into words (maximal non-`[ \t\n\r\f]+` — NBSP is NOT a break), each measured
-// in its own font; a collapsible space (the first ws at a boundary, that run's spaceW) is the break
-// opportunity. OPEN/CLOSE are an inline element's horizontal edges: OPEN reserves its opening edge (its `InlineBox`'s
-// margin and border + padding, resolved in this block) in the fit test (openEdgeWidth) and flushes onto the first line
-// content lands on; CLOSE adds the box's closing halves (from its `InlineBox`) on the current line. BR forces a line break. A line's box is max(ascent)+max(descent) over the STRUT
-// (`strut_lh` / `strut_asc`) and the runs on it (each run's descent = line_height - asc), §10.8 — so a
-// taller-metric run grows the box even under a fixed line-height; an empty line (a lone/leading `<br>`)
-// is the bare strut (asc + desc == strut_lh). Returns the content height (Σ line heights) and the first / last
-// heights). None when a construct isn't modelled — a tab / combining mark / CJK char, a WORD spanning
-// two runs (no space at the boundary), or a `<br>` while an inline edge is open — so the caller declines to JS.
+// Greedy line layout for a text block's run/marker STREAM (`runs` / `run_texts` parallel, this block's slice). TEXT
+// runs tokenize into words (maximal non-`[ \t\n\r\f]+` — NBSP is NOT a break), each measured in its own font; a
+// collapsible space (the first ws at a boundary, that run's `space_w`) is the break opportunity. OPEN/CLOSE are an
+// inline element's horizontal edges: OPEN reserves its opening edge (its `InlineBox`'s margin and border + padding,
+// resolved in this block) in the fit test and flushes onto the first line content lands on; CLOSE adds the box's
+// closing halves (from its `InlineBox`) on the current line. BR forces a line break. A line's box is
+// max(ascent)+max(descent) over the STRUT (`strut_lh` / `strut_asc`) and the runs on it (each run's descent =
+// line_height - asc), §10.8 — so a taller-metric run grows the box even under a fixed line-height; an empty line (a
+// lone/leading `<br>`) is the bare strut (asc + desc == strut_lh). Returns a `LineLayout`: the content height (Σ line
+// heights), the first / last line's (top, ascent), and where every atomic, out-of-flow marker, inline float, inline
+// fragment and text piece landed. None when a construct isn't modelled — a `\r` / `\f` in preserved white space, an
+// unknown run kind or `white-space` code, a bad font handle — so the caller declines the pass.
 //
 // FLOATS (§9.5): when `floats` is non-empty the block's lines route around them. Each line's usable width
 // is the band at its flow position `top + total` (owner frame; `cl`/`cr` are the block's content edges
-// there), queried at `strut_lh` tall (the oracle's `lineHeightOf`, not the grown line box); an empty line
+// there), queried at `strut_lh` tall (the block's own line-height, not the grown line box); an empty line
 // whose first word won't fit the band DROPS below the shallowest float squeezing it (float_fit_y). When
-// `floats` is empty the width is `content_w` exactly, so the no-float path is bit-identical to before.
+// `floats` is empty the width is `content_w` exactly, so the no-float path does no band arithmetic at all.
 // A FLOAT in the stream itself (RUN_FLOAT, its box already measured in `inline_floats`, in stream order) is
 // placed into `floats` where the flow reaches it, so every band asked for after it sees it.
 #[allow(clippy::too_many_arguments)]
@@ -1716,8 +1655,8 @@ fn line_layout(
     // (A Cell for the same reason `indent_now` is one: the band closures read the context the float arm writes.)
     let floats = std::cell::RefCell::new(floats);
     // The three orthogonal `white-space` behaviours (see Input::ws_mode), as ONE closed table rather than
-    // three predicates spelling out their own code lists. `no_wrap` keeps the old name for the soft-wrap gates
-    // below, and it is what a space writes into its own break OPPORTUNITY, because the opportunity belongs to
+    // three predicates spelling out their own code lists. `no_wrap` is what the soft-wrap gates below ask,
+    // and it is what a space writes into its own break OPPORTUNITY, because the opportunity belongs to
     // the run that queued the space, not to whatever meets it. `preserve` keeps every space as a real advance
     // rather than collapsing runs of whitespace to one break-opportunity; `break_nl` makes a literal newline
     // force a break in a COLLAPSING run (the preserving branch breaks on its own newlines regardless, so 2 / 3
@@ -1725,11 +1664,10 @@ fn line_layout(
     // …asked of the RUN that the behaviour is about, because an inline may declare its own `white-space`
     // (`Run::ws_mode`), and every run in the stream carries its owner's — the `<br>` and edge runs included.
     //
-    // A table, and an `Option`, for the same reason `text_intrinsic`'s `modes` is one: `WS_MODE` in `layout.js`
-    // is the only producer of these codes, and the day it grows one this has to REFUSE rather than guess. The
-    // predicates this replaced were three different shapes of guess — `m == 1 || m == 2` closed, `m >= 2` open
-    // — so a new code would have been given `pre-line`'s newline rule by an inequality nobody would have
-    // re-read. `break-spaces` (5) is 3's triple exactly; the pair that has to move together is this table and
+    // A table, and an `Option`, for the same reason `text_intrinsic`'s `modes` is one: the walk's white-space
+    // codes are the only producer of these, and the day they grow one this has to REFUSE rather than guess — an
+    // inequality (`m >= 2`) would hand a new code `pre-line`'s newline rule without anyone re-reading it.
+    // `break-spaces` (5) is 3's triple exactly; the pair that has to move together is this table and
     // `text_intrinsic`'s.
     let ws_modes = |m: u8| match m {
         0 => Some((false, false, false)),   // normal      — collapse, wrap
@@ -1744,16 +1682,15 @@ fn line_layout(
     // itself, but the opportunity before it is the block's to give.
     let outer_wraps = !ws_modes(ws_mode)?.0;
     let strut_desc = strut_lh - strut_asc;
-    // `text-indent` NARROWS the line from its start edge (the oracle's `applyIndent`: `lineLeft += px` in ltr,
-    // `lineRight -= px` in rtl) rather than moving a cursor inside it, so an indented empty line is still
-    // empty. `indent_first` is the oracle's `indentNext`: true for the FIRST line, and set again after a forced
-    // break under `each-line` (`next_line_indent`); the indent applies when it DISAGREES with `hanging`, which
-    // is what makes `hanging` indent every line BUT the first.
+    // `text-indent` NARROWS the line from its start edge (the left edge moves in ltr, the right one in rtl)
+    // rather than moving a cursor inside it, so an indented empty line is still empty. `indent_first` is true
+    // for the FIRST line, and set again after a forced break under `each-line` (`next_line_indent`); the indent
+    // applies when it DISAGREES with `hanging`, which is what makes `hanging` indent every line BUT the first.
     let (indent_px, indent_hanging, indent_each_line, indent_spent) = indent;
     // A Cell because the band closures below read it while the line loop writes it (one owner thread, no
     // borrow to keep): `indent_now` is what THIS line gives up, 0 on every line that takes no indent. The seed
-    // is the oracle's `indentNext = true` — unless this block's first line is not the BLOCK's first, where the
-    // flag starts false and a `hanging` indent is the one that applies.
+    // is "this is the first line" — unless this block's first line is not the BLOCK's first, where the flag
+    // starts false and a `hanging` indent is the one that applies.
     let indent_first = !indent_spent;
     let indent_now = std::cell::Cell::new(if indent_first != indent_hanging { indent_px } else { 0.0 });
     // The usable width of the line whose top is at `top + t` — the float band there, or the full content
@@ -1780,8 +1717,7 @@ fn line_layout(
     };
     let band_w = |t: f64| raw_band_w(t) - indent_now.get();
     let band_l = |t: f64| raw_band_l(t) + if rtl { 0.0 } else { indent_now.get() };
-    // A line has closed: the next one takes the indent only under `each-line`, and only after a FORCED break
-    // (the oracle's `endLine`, where `kind === 'forced'`).
+    // A line has closed: the next one takes the indent only under `each-line`, and only after a FORCED break.
     let next_line_indent = |forced: bool| {
         let takes = if indent_each_line && forced { !indent_hanging } else { indent_hanging };
         indent_now.set(if takes { indent_px } else { 0.0 });
@@ -1789,16 +1725,16 @@ fn line_layout(
     let mut line_x = 0.0f64;
     // The trailing white space on `line_x` since the last content — a collapsed space placed ahead of the word
     // that may then wrap away from it, or preserved spaces — which HANGS at a soft wrap: the line ends before it
-    // for alignment (the oracle's `trailingHang` / `trailingPreserved`).
+    // for alignment.
     let mut hang = 0.0f64;
-    // …and the same for PRESERVED trailing spaces, which the oracle keeps in a counter of their own
-    // (`trailingPreserved`). The two are MUTUALLY EXCLUSIVE — every placement zeroes the other — and only a
-    // line that WRAPPED hangs the preserved ones (`alignLine`: `trailingHang + (kind === 'wrap' ? … : 0)`).
+    // …and the same for PRESERVED trailing spaces, kept in a counter of their own. The two are MUTUALLY
+    // EXCLUSIVE — every placement zeroes the other — and only a line that WRAPPED hangs the preserved ones
+    // (`close_line!`).
     let mut hang_pre = 0.0f64;
     // …and WHICH of this line's gaps the collapsible hang began at, for the justify cut: the gaps from there on
-    // hang, the ones before are between words. By ORDER, as the oracle's `hangGapIndex`: an edge after the hang
-    // (a closing margin) moves the pen without ending it, and a negative one moves it back past a real gap, so
-    // no coordinate says where the hang began.
+    // hang, the ones before are between words. By ORDER, not by coordinate: an edge after the hang (a closing
+    // margin) moves the pen without ending it, and a negative one moves it back past a real gap, so no
+    // coordinate says where the hang began.
     let mut hang_gap: Option<usize> = None;
     let mut total = 0.0f64;
     // How many lines have CLOSED. A marker waiting on an opening edge recorded the cursor it stood at; that
@@ -1808,32 +1744,29 @@ fn line_layout(
     let mut line_asc = strut_asc;
     let mut line_desc = strut_desc;
     // What a LINE-RELATIVE atomic (`vertical-align: top` / `bottom`) asks of the line: not an ascent or a
-    // descent — it hangs from an edge the line does not have yet — but a HEIGHT the line must reach. The
-    // oracle's `lineOuterMin` / `growLineFor`.
+    // descent — it hangs from an edge the line does not have yet — but a HEIGHT the line must reach.
     let mut line_outer_min = 0.0f64;
-    // Two questions about the line, which the oracle keeps apart as `linePlaced` / `lineHasContent` and
-    // native had folded into one until it cost a parity break: whether the line EXISTS (anything at all went
-    // down on it, an inline's opening or closing edge included) and whether it holds something a break may
-    // leave BEHIND. An edge answers only the first — it is not content, so a line holding nothing but one
-    // is no line a break-before test may end: `<span style="padding-left:6px"></span><b inline-block>` on a
-    // 6px line keeps the atomic beside the edge and overflows, where asking the one flag broke before it.
-    // Every break-before test asks `line_has_content`; everything else — the line's close, its alignment,
-    // a float drop, a leading space's collapse — asks `line_placed`, each where its oracle counterpart does.
+    // Two questions about the line, kept apart: whether the line EXISTS (anything at all went down on it, an
+    // inline's opening or closing edge included) and whether it holds something a break may leave BEHIND. An
+    // edge answers only the first — it is not content, so a line holding nothing but one is no line a
+    // break-before test may end: `<span style="padding-left:6px"></span><b inline-block>` on a 6px line keeps
+    // the atomic beside the edge and overflows, where asking the one flag broke before it.
+    // Every break-before test, and whether a unit may DROP below the floats, asks `line_has_content`;
+    // everything else — the line's close, its alignment, where the pen stands on an edge-only line, a leading
+    // space's collapse — asks `line_placed`.
     let mut line_placed = false;
     let mut line_has_content = false;
-    // The INLINE BOXES this stream opens, laid out as FRAGMENTS the way the oracle's `placeInlineBox` /
-    // `notePlacement` / `settleInlineBoxes` lay them out: every box in open order, and the boxes this line holds pieces
-    // of (`lineFrags`), left empty (`lineEmpties`) or has a hanging space in (`lineHangs`), for the close to shift and
-    // settle.
+    // The INLINE BOXES this stream opens, laid out as FRAGMENTS — one piece per line box the inline spans (CSS 2
+    // §9.4.2): every box in open order, and the boxes this line holds pieces of (`line_frags`), left empty
+    // (`line_empties`) or has a hanging space in (`line_hangs`), for the close to shift and settle.
     let mut frags: Vec<Frag> = Vec::new();
-    // …and the ones still OPEN, innermost last (the oracle's `openInlines`), each with its opening edge and whether
-    // that has gone down yet — the unplaced ones' sum is `openEdgeWidth`, reserved in the fit test until the first
-    // content flushes it onto the line.
+    // …and the ones still OPEN, innermost last, each with its opening edge and whether that has gone down yet —
+    // the unplaced ones' sum is reserved in the fit test until the first content flushes it onto the line.
     let mut open: Vec<OpenBox> = Vec::new();
     let mut line_frags: Vec<usize> = Vec::new();
     let mut line_empties: Vec<usize> = Vec::new();
     let mut line_hangs: Vec<usize> = Vec::new();
-    // One placement held by box `$f` — the oracle's `notePlacement`: a fresh line record where the box has none on
+    // One placement held by box `$f`: a fresh line record where the box has none on
     // this line yet (its extent starting past `$inset`, the box's own opening margin), then its leftmost extent, and
     // the right edge of what it placed or of what HANGS (a collapsible space a break may still eat).
     macro_rules! note {
@@ -1870,7 +1803,7 @@ fn line_layout(
             }
         }};
     }
-    // …and a placement every OPEN box holds (`placeOnLine`'s `for (const frag of openInlines)`).
+    // …and a placement every OPEN box holds.
     macro_rules! note_open {
         ($from:expr, $to:expr, $hangs:expr) => {{
             if !open.is_empty() {
@@ -1889,8 +1822,7 @@ fn line_layout(
     let mut texts: Vec<TextRow> = Vec::new();
     // A piece of text that DRAWS went down at `$at`, `$w` wide: text `$start..$end` of run `$ri` (empty for a soft
     // hyphen's hyphen), inside the inline box `$inner` — whose `position: relative` offset moves its glyphs. That offset
-    // is the whole CHAIN's (`nlChainRel`), where a fragment takes only its own (the oracle's `shiftOwnedRuns` runs once
-    // per relative inline around the run).
+    // is the whole CHAIN's — every relative inline around the run — where a fragment takes only its own.
     macro_rules! note_text {
         ($ri:expr, $start:expr, $end:expr, $at:expr, $w:expr, $inner:expr) => {{
             if recording {
@@ -1902,7 +1834,7 @@ fn line_layout(
     // Move the pen past a placement `$w` wide, and say where it began and ended — the end read as the pen's new
     // `band_l + line_x`, the very sum every justification gap is read as, never as `at + $w`: the two differ in the
     // last bit, and a piece ending exactly where the next gap begins then counted that gap as one BEFORE its end
-    // and moved by a whole extra share of the spread (46.4 where the oracle and Chrome say 28).
+    // and moved by a whole extra share of the spread (46.4 where Chrome says 28).
     macro_rules! advance {
         ($w:expr) => {{
             let at = band_l(total) + line_x;
@@ -1910,8 +1842,8 @@ fn line_layout(
             (at, band_l(total) + line_x)
         }};
     }
-    // The oracle's `dropHangs`: content after a hanging space keeps it on the line (`false`); a line that closes eats
-    // it (`true`).
+    // Settle the boxes' hanging spaces: content after a hanging space keeps it on the line (`false`); a line that
+    // closes eats it (`true`).
     macro_rules! drop_hangs {
         ($eaten:expr) => {{
             for fi in line_hangs.drain(..) {
@@ -1925,9 +1857,8 @@ fn line_layout(
         }};
     }
     let mut pending_space: Option<PendingSpace> = None;
-    // An inline box OPENING where the flow stands, as the oracle's `placeInlineBox` records it (`x: lineX`, past a
-    // collapsed space still pending, which the oracle has already placed where it met it): that is where an EMPTY
-    // one sits.
+    // An inline box OPENING where the flow stands — past a collapsed space still pending, which counts as placed
+    // where the flow met it: that is where an EMPTY one sits.
     macro_rules! frag_here {
         ($idx:expr) => {{
             let idx: usize = $idx;
@@ -1948,10 +1879,10 @@ fn line_layout(
     // placement and at a line break.
     let mut atomic_break = false;
     // …and the same for a text run that ENDS OPEN: a WIDE character may break on both sides, and so may a
-    // trailing hyphen or dash, so either leaves an opportunity for whatever the next run starts with (the
-    // oracle's `endsWithBreak`) — where a word STARTING with a wide character may break before it however the
-    // previous run ended (`startsWithWide`), which the unit loop's `may_break` asks for itself. Carried across
-    // runs because that is where it matters: `abcdefghij<b>日本語</b>klmnopqrst` is three runs, and native
+    // trailing hyphen or dash, so either leaves an opportunity for whatever the next run starts with — where a
+    // word STARTING with a wide character may break before it however the previous run ended, which the unit
+    // loop's `may_break` asks for itself. Carried across
+    // runs because that is where it matters: `abcdefghij<b>日本語</b>klmnopqrst` is three runs, and the walk
     // merges only same-font ones — a plain `<b>` around a Japanese word, or around the hyphen of
     // `well<b>-</b>known`, already splits them.
     let mut ends_open = false;
@@ -1959,9 +1890,9 @@ fn line_layout(
     // closing mark after it, or anything after an opening one, glues to it (`unicode::line_break_glues`).
     let mut last_cp = 0x20u32;
     // …and a SOFT hyphen's piece placed without its hyphen, which is that opportunity too (`ends_open` is set with
-    // it) and whose hyphen still shows where the line breaks at it (`take_break!`): the oracle's `barrier.shy`. Carried
-    // across runs like the rest — `aa&shy;<b>bb</b>` breaks after `aa-` — and cleared wherever the oracle's ONE
-    // `barrier` is overwritten: at a space, a word, an atomic, a `<wbr>`, a line's close.
+    // it) and whose hyphen still shows where the line breaks at it (`take_break!`). Carried across runs like the
+    // rest — `aa&shy;<b>bb</b>` breaks after `aa-` — and cleared wherever a later break opportunity supersedes it:
+    // at a space, a word, an atomic, a `<wbr>`, a line's close.
     let mut shy_pending: Option<PendingHyphen> = None;
     // Close the current line and start a fresh one. `soft_break!` is the geometry alone (a mid-word wrap, a
     // between-words wrap, a break before an atomic — where no pending space or after-atomic break carries over);
@@ -1975,12 +1906,12 @@ fn line_layout(
     // Where each JUSTIFICATION gap sits on the current line — the origin of every space the line placed (a
     // preserved run contributes one per character, as Chrome widens a double space twice). A wrapped line shares
     // its free space out over the gaps BEFORE its content ends, and everything on the line moves by the gaps that
-    // precede it (the oracle's `lineGaps` / `alignLine`). Only boxes are compared, so only their offsets are
-    // settled here; the glyphs between them are the painter's business.
+    // precede it. Only boxes are written back, so only their offsets are settled here; the glyphs between them
+    // are the painter's business.
     let mut line_gaps: Vec<f64> = Vec::new();
     // …and the separators a NON-WRAPPING run ENDS in, held back: they are gaps only once a placement follows them
-    // on the line (the oracle's `tailGaps` — a `pre` run's trailing space at a wrap is the line's end and takes
-    // no share, Chrome-measured). A line that closes discards them.
+    // on the line (a `pre` run's trailing space at a wrap is the line's end and takes no share, Chrome-measured).
+    // A line that closes discards them.
     let mut tail_gaps: Vec<f64> = Vec::new();
     // Every one of these is JUSTIFY's bookkeeping and nothing else reads it, so a block that does not justify
     // pays nothing for it (rule 3: the hot path stays what it was).
@@ -1994,7 +1925,7 @@ fn line_layout(
     }
     // A collapsible space goes down on the line and HANGS there until content follows it: its advance, and — a
     // real separator, not a zero-width opportunity — its justification gap, the index the hang began at, and the
-    // end of any run of preserved spaces before it (the oracle's `placeOnLine(…, hangs)`).
+    // end of any run of preserved spaces before it.
     macro_rules! hang_space {
         ($sep:expr, $w:expr) => {{
             if $sep {
@@ -2008,9 +1939,9 @@ fn line_layout(
             hang += $w;
         }};
     }
-    // A collapsed space still pending goes down now, as a HANG, before the edge or break that comes next: the oracle
-    // placed it where it met it (dropped with a break instead, it moved every edge the break puts down back by its
-    // width). The space, for a site that keeps it pending as the zero-width opportunity it leaves.
+    // A collapsed space still pending goes down now, as a HANG, before the edge or break that comes next — it
+    // counts as placed where the flow met it (dropped with a break instead, it would move every edge the break
+    // puts down back by its width). The space, for a site that keeps it pending as the zero-width opportunity it leaves.
     macro_rules! place_pending_space {
         () => {{
             let p = pending_space.filter(|p| p.sep && !p.placed);
@@ -2029,7 +1960,7 @@ fn line_layout(
         }};
     }
     // A NO-BREAK SPACE is no break opportunity, but it IS a justification gap — CSS Text 3 §8.1, and Chrome
-    // widens one like an ordinary space (the oracle's `noteGapsInside` on any placed unit holding one). The pen
+    // widens one like an ordinary space, in any placed unit holding one. The pen
     // inside the placed text is where it sits. …and one the unit ENDS in is held back like any trailing
     // separator (`tail_gaps`): it is a gap once something follows it on the line, and nothing where the line
     // wraps right after it — `aa&nbsp;` closing a justified line spreads nothing over its own end.
@@ -2059,27 +1990,27 @@ fn line_layout(
     // the line's TOP, both settled at close so the line's alignment moves them exactly as it moves the atomics —
     // by the gaps before the FLOW's x, which the relative offset is no part of (it moves the content at paint
     // time, after the line is laid out): counted with it, a `left: 3px` inline gave a marker glued to a word the
-    // justification gap right after that word (64.2 where the oracle and Chrome say 57.6).
+    // justification gap right after that word (64.2 where Chrome says 57.6).
     let mut line_oofs: Vec<(usize, f64, f64, f64)> = Vec::new();
     let mut oofs: Vec<(usize, f64, f64)> = Vec::new();
     // …and the markers that cannot know that yet, because an inline box around them still holds an UNPLACED
     // opening edge: (record index, the inlines' relative offset x / y, the cursor and line to fall back on).
     // Where the flow has reached is then wherever that edge turns out to be placed — which may be a later line
-    // — exactly the oracle's `pendingStatic`, settled from the inline's first fragment.
+    // — settled from the inline's first fragment.
     let mut pending_oofs: Vec<(usize, f64, f64, usize, f64, usize)> = Vec::new();
     // Where each inline FLOAT landed: (record index, border-box x, border-box y), in the float context's frame.
     let mut placed_floats: Vec<(usize, f64, f64)> = Vec::new();
     let mut next_float = 0usize;
     // Close the current line: `$wrap` says a soft wrap closed it (its hanging white space is not part of the
     // line's extent; a hard break keeps preserved spaces before it), and `$forced` that a `<br>` or a preserved
-    // newline did (the oracle's `sawBreak`). The line's atomics move by the alignment
-    // (the oracle's `alignLine`): `right` takes the free width, `center` half — clamped at zero in ltr, where an
+    // newline did. The line's atomics move by the alignment: `right` takes the free width, `center` half —
+    // clamped at zero in ltr, where an
     // overflowing line stays at the start edge; in rtl the overflow hangs off the LEFT, so the shift goes negative.
     macro_rules! close_line {
         ($wrap:expr, $forced:expr) => {{
-            // The inline boxes' pieces first, in the oracle's `forceBreak` order: a space still hanging at the end
+            // The inline boxes' pieces first: a space still hanging at the end
             // is eaten, and a box left EMPTY that OPENED on this line — closed or not — learns whether the line is
-            // one (`onLine`), which a forced break makes it even with nothing on it (Chrome).
+            // one (`on_line`), which a forced break makes it even with nothing on it (Chrome).
             drop_hangs!(true);
             let on_line = line_placed || $forced;
             for &fi in &line_empties {
@@ -2093,8 +2024,7 @@ fn line_layout(
             }
             // The line-relative boxes are settled FIRST, because they can move the line's own ascent — which
             // everything below reads: the baselines this block hands its container, and where every
-            // baseline-aligned box on the line lands. The oracle does the same, in `forceBreak`, before it
-            // stamps `lastLineAsc`.
+            // baseline-aligned box on the line lands.
             //
             // The line grows AWAY from whichever edge asked for the most room (Chrome): a 40px `top` box
             // beside a 30px `bottom` one takes the line to 40 with its baseline where it already was, where
@@ -2110,9 +2040,8 @@ fn line_layout(
                     }
                 }
                 // …which is `line_outer_min` again, by construction: both are maxima over exactly the runs
-                // with a line mode. The second test is the oracle's shape (`forceBreak`), kept so the two read
-                // alike; what the scan is actually FOR is `max_top` vs `max_bottom`, which decides which edge
-                // moves.
+                // with a line mode. What the scan is actually FOR is `max_top` vs `max_bottom`, which decides
+                // which edge moves.
                 let need = max_top.max(max_bottom);
                 if need > line_asc + line_desc {
                     if max_bottom > max_top {
@@ -2127,9 +2056,9 @@ fn line_layout(
                 first_line = Some((total, line_asc));
             }
             last_line = Some((total, line_asc));
-            // The collapsible hang comes off EVERY line's end, the preserved one only a wrapped line's — the oracle's
-            // `trailingHang + (kind === 'wrap' ? trailingPreserved : 0)`. (A forced close had no collapsible hang
-            // to take off until a space pending at an edge started going down BEFORE the edge.)
+            // The collapsible hang comes off EVERY line's end, the preserved one only a wrapped line's. (A forced
+            // close has a collapsible hang to take off only where a space pending at an edge went down BEFORE the
+            // edge.)
             let end = line_x - hang - if $wrap { hang_pre } else { 0.0 };
             let free = band_w(total) - end;
             // `justify` (align 3) spreads the free space over this line's gaps — only a line that WRAPPED, with
@@ -2140,13 +2069,12 @@ fn line_layout(
             // `line_gaps` is pushed in flow order — not about x: a negative horizontal margin can carry a
             // later gap to a smaller coordinate, and a coordinate cut then keeps it and drops one before it.
             let gaps: Vec<f64> = if justifying && $wrap && free > 0.0 && line_placed {
-                // …to a TOLERANCE, for the reason `LINE_FIT_EPS` exists beside it: a gap's origin and the
-                // line's end are the same sum in different accumulation orders — this engine forms the end as
-                // `band_l + (line_x - hang - hang_pre)` and the oracle as `(band_l + line_x) - hang` — so a gap
-                // sitting EXACTLY at the end decides on the last bit, and one ULP there costs a whole gap's
-                // share of the free space. It is the only one of this line's four float tests whose two sides
-                // travel different routes; the others compare a gap against a pen off the same running
-                // variable, and coincide bit-exactly within each engine.
+                // …to a TOLERANCE, for the reason `LINE_FIT_EPS` exists beside it: a gap's origin
+                // (`band_l + line_x` when it was noted) and the line's end (`band_l + (line_x - hang - hang_pre)`)
+                // are sums accumulated in different orders, so a gap sitting EXACTLY at the end decides on the
+                // last bit, and one ULP there costs a whole gap's share of the free space. It is the only one of
+                // this line's four float tests whose two sides travel different routes; the others compare a gap
+                // against a pen off the same running variable, and coincide bit-exactly.
                 let hangs = match hang_gap {
                     Some(i) => i.min(line_gaps.len()),
                     None => line_gaps.iter().position(|&g| g >= end_x - GAP_CUT_EPS).unwrap_or(line_gaps.len()),
@@ -2156,9 +2084,8 @@ fn line_layout(
                 Vec::new()
             };
             let extra = if gaps.is_empty() { 0.0 } else { free / gaps.len() as f64 };
-            // A line the flow never put anything on is not aligned at all (the oracle's `forceBreak` calls
-            // `alignLine` only `if (linePlaced)`): a `<br>` closing a line that holds nothing but an
-            // out-of-flow marker leaves that marker at the start edge, not at the far one.
+            // A line the flow never put anything on is not aligned at all: a `<br>` closing a line that holds
+            // nothing but an out-of-flow marker leaves that marker at the start edge, not at the far one.
             let dx = if !line_placed {
                 0.0
             } else {
@@ -2166,7 +2093,7 @@ fn line_layout(
                     1 => if rtl { free } else { free.max(0.0) },
                     2 => if rtl { (free / 2.0).min(free) } else { (free / 2.0).max(0.0) },
                     // …a `justify` line the spread leaves alone starts at the inline-start edge, which in rtl is
-                    // the far one (the oracle's `align = rtl ? 'right' : 'left'`).
+                    // the far one.
                     3 => if extra > 0.0 { 0.0 } else if rtl { free } else { 0.0 },
                     _ => 0.0,
                 }
@@ -2179,20 +2106,19 @@ fn line_layout(
             let shift_box = |before: usize| if extra > 0.0 { before.min(gaps.len()) as f64 * extra } else { dx };
             // An out-of-flow MARKER is not a box on the line — it records a static position, which may sit
             // after a space the line has not placed yet (`pending_w`), so its gap count is not the one taken
-            // when it was recorded. It keeps the coordinate rule, which is what the oracle's `lineStatics`
-            // uses; the two engines have to ask the same question. (Where that rule is wrong, both are wrong
-            // together — see the campaign note.)
+            // when it was recorded. It keeps the coordinate rule: the gaps before its x. (KNOWN GAP: where that
+            // rule is wrong — a marker whose x a margin or offset carried across a gap — see the campaign note.)
             let shift_at = |x: f64| if extra > 0.0 { gaps.iter().filter(|&&g| g < x).count() as f64 * extra } else { dx };
             for (run, x, before) in line_atomics.drain(..) {
                 atomics.push(PlacedAtomic { run, x: x + shift_box(before), line_top: total, line_asc, line_h });
             }
-            // A marker's Y was frozen where it was recorded (the oracle reads `staticX`/`staticY` together and
-            // only ever shifts x afterwards): a line that later DROPS below a float moves `total`, and the box
+            // A marker's Y was frozen where it was recorded (its static position is read as one corner, and only
+            // its x is ever shifted afterwards): a line that later DROPS below a float moves `total`, and the box
             // does not go with it. Only the alignment reaches it here.
             for (ci, x, rx, y) in line_oofs.drain(..) {
                 oofs.push((ci, x + shift_at(x) + rx, y));
             }
-            // …and the text pieces, by the coordinate rule too (the oracle's `moveLine`): a piece with a gap INSIDE it —
+            // …and the text pieces, by the coordinate rule too: a piece with a gap INSIDE it —
             // a no-break space — widens by that gap's share, which the painter spreads over it; every piece sits on the
             // line's baseline.
             for (ri, start, end, x, w, rx, ry) in line_pieces.drain(..) {
@@ -2200,10 +2126,10 @@ fn line_layout(
                 let justify = if inside > 0 { extra } else { 0.0 };
                 texts.push([ri as f64, start, end, x + shift_at(x) + rx, total + ry, total + line_asc + ry, w + inside as f64 * extra, justify]);
             }
-            // …and the inline boxes' pieces on it, by the same COORDINATE rule the markers use (the oracle's
-            // `moveLine` asks `shiftFor` of a piece's `minX` and right edges, not how many gaps precede it), then
-            // stamped with the line's ascent — which is what puts each piece on the line's baseline. A box with no
-            // piece yet that opened here (`here(frag)`: this line, this top) moves with it too.
+            // …and the inline boxes' pieces on it, by the same COORDINATE rule the markers use (`shift_at` of a
+            // piece's `min_x` and right edges, not how many gaps precede it), then stamped with the line's ascent —
+            // which is what puts each piece on the line's baseline. A box with no piece yet that opened here (this
+            // line, this top) moves with it too.
             if line_placed {
                 for &fi in &line_frags {
                     if let Some(l) = frags[fi].lines.last_mut().filter(|l| l.line_no == line_no) {
@@ -2240,27 +2166,23 @@ fn line_layout(
     }
     // The opening edges just went onto the line, so every marker waiting on them now knows where the flow had
     // reached: the cursor that follows them, on the line they landed on. The RELATIVE offset of the inlines
-    // around it is NOT re-applied here — the oracle reads this corner back off the inline's own fragment
-    // (`line.minX + ce.left`, `line.y`) and that reading discards the offset it had added to the cursor. (Which
-    // is a divergence from Chrome, but so is the whole shape: Chrome splits a block-level box out of the inline
-    // it is written in, and puts its static position on a line of its own. Native's contract is the oracle.)
+    // around it is NOT re-applied here — the corner is read back off the inline's own fragment (its `min_x`
+    // plus its opening edge, on its line's top), which carries no offset. (KNOWN GAP: Chrome splits a
+    // block-level box out of the inline it is written in, and puts its static position on a line of its own.)
     // An inline's opening edge is PLACED: it goes onto the line at the cursor and makes the line a placed one
-    // (the oracle's `flushOpenEdges`, whose `seedStrut(); linePlaced = true` is what an alignment then reads).
-    // The oracle's `flushOpenEdges`: every pending edge goes down, one fragment at a time, each asked of its
-    // own width (`if (!w) continue`). A pair that cancels still places BOTH — the pen ends where it began,
-    // which is not the same thing as leaving them pending for someone else's sum to pick up later.
+    // (`line_placed`, which an alignment then reads). Every pending edge goes down, one fragment at a time, each
+    // asked of its own width (a zero one places nothing). A pair that cancels still places BOTH — the pen ends
+    // where it began, which is not the same thing as leaving them pending for someone else's sum to pick up
+    // later.
     //
-    // The oracle calls this FOUR ways and two of them are different questions, which native had folded into
-    // one macro until it cost a bug: at a box's CLOSE and at a forced BREAK it calls `flushOpenEdges()`
-    // outright, while `placeOnLine` asks `if (pending)` — the SUM — first. Folded together under the sum, a
-    // cancelling pair stayed pending at a close and the OUTER close then flushed an unbalanced sum
-    // (`<span ml:-6><span pl:6></span></span>` put the next box at -6, Chrome and the oracle at 0).
-    // So: this macro at the three DIRECT sites, `flush_open_edges!` at the `placeOnLine`-shaped ones. The
-    // two are indistinguishable by every instrument we have (~28,000 sweep cases, both spec files) at the
-    // word / atomic sites, which once spelled it out by hand a third way; each is used where its ORACLE
-    // counterpart is, because that is the only thing that decides it.
+    // Flushing is two different questions. At a box's CLOSE and at a forced BREAK every pending edge goes down
+    // outright (this macro); before content is placed the SUM is asked first (`flush_open_edges!`). Folded
+    // together under the sum, a cancelling pair stays pending at a close and the OUTER close then flushes an
+    // unbalanced sum (`<span ml:-6><span pl:6></span></span>` put the next box at -6, Chrome at 0). So: this
+    // macro at the three DIRECT sites, `flush_open_edges!` at the content sites. The two are indistinguishable
+    // by every instrument we have (~28,000 sweep cases) at the word / atomic sites.
     // …and each edge that goes down is a placement: the box it opens and every box around it hold it, the box
-    // itself from past its own opening margin (`notePlacement(openInlines[a], …, a === i ? ce.ml : 0)`).
+    // itself from past its own opening margin.
     macro_rules! flush_each_open_edge {
         () => {{
             for k in 0..open.len() {
@@ -2281,8 +2203,8 @@ fn line_layout(
         }};
     }
 
-    // …and `placeOnLine`'s `if (pending)` around it, for the sites that are its counterparts: the sum is
-    // what the content has to FIT, and where the pending edges cancel there is nothing to place.
+    // …and the SUM asked first, for the sites that place content: the sum is what the content has to FIT, and
+    // where the pending edges cancel there is nothing to place.
     macro_rules! flush_open_edges {
         () => {{
             let total_open: f64 = open.iter().filter(|o| !o.placed).map(|o| o.w).sum();
@@ -2296,13 +2218,12 @@ fn line_layout(
             // Asked once per placed word and atomic, and there is almost never one waiting: the length test
             // keeps that to a load and a branch rather than building a `Drain` guard per placement.
             if !pending_oofs.is_empty() {
-                // What the oracle settles a `pendingStatic` marker to is `line.minX + from.ce.left` — the
-                // content-left of the marker's OWN inline fragment. That is the cursor the marker STOOD at
-                // (recorded at push, the pending collapsed space counted in: the oracle places such a space
-                // where it meets it, exactly as for a marker that does not wait) plus that inline's own
-                // opening edge, and not one px more. Not the whole open stack: an inline that opened AFTER the
-                // marker has its edge past the marker, not before it, so only the first `depth` entries count.
-                // A wrap since then throws the recorded cursor away — the fragment starts the new line.
+                // A waiting marker settles to the content-left of its OWN inline fragment. That is the cursor the
+                // marker STOOD at (recorded when it was queued, the pending collapsed space counted in: such a space
+                // counts as placed where the flow met it, exactly as for a marker that does not wait) plus that
+                // inline's own opening edge, and not one px more. Not the whole open stack: an inline that opened AFTER
+                // the marker has its edge past the marker, not before it, so only the first `depth` entries count. A
+                // wrap since then throws the recorded cursor away — the fragment starts the new line.
                 for (ci, rx, _, depth, at, was) in pending_oofs.drain(..) {
                     // …measured from the BAND, not from the content edge: a line too narrow for its first word
                     // DROPS below the float (`total` moves with no line closing), and the fragment then starts
@@ -2334,10 +2255,10 @@ fn line_layout(
             shy_pending = None;
         }};
     }
-    // …a wrap taken where a SOFT hyphen's piece still waits for its hyphen shows it first, on the line it ends (the
-    // oracle's `takeBreak`: "aa\u00ADbb\u00ADcc" in 39px is "aa-" / "bbcc") — inside the boxes that were open at the
-    // piece, and only those (Chrome: `<b>aaaa&shy;</b><i>bbbb</i>` gives the `<b>` the hyphen and the `<i>` nothing
-    // on that line). An EDGE to the oracle (`placeOnLine(…, edge)`), which is not content: the edges still pending
+    // …a wrap taken where a SOFT hyphen's piece still waits for its hyphen shows it first, on the line it ends
+    // ("aa\u00ADbb\u00ADcc" in 39px is "aa-" / "bbcc") — inside the boxes that were open at the piece, and only
+    // those (Chrome: `<b>aaaa&shy;</b><i>bbbb</i>` gives the `<b>` the hyphen and the `<i>` nothing on that
+    // line). The hyphen is placed as an EDGE, which is not content: the edges still pending
     // stay pending, to open on the fresh line, and the separators a run ended in stay held — an NBSP before the
     // hyphen is no gap the line widens, and an out-of-flow box after it counts none.
     macro_rules! take_break {
@@ -2353,15 +2274,15 @@ fn line_layout(
         }};
     }
     // An EMPTY line — no CONTENT on it — too narrow for what is about to go on it drops below the float squeezing
-    // it (§9.5), growing the block by the gap: the oracle's `retakeBand(need)`. A line holding only an inline box's
-    // EDGES is such a line too, and Chrome leaves the edge on it and sends the content below the float at its left,
-    // so that line closes first (a wrap) and the fresh one drops (x 0 where both engines overflowed at 35).
+    // it (§9.5), growing the block by the gap. A line holding only an inline box's EDGES is such a line too, and
+    // Chrome leaves the edge on it and sends the content below the float at its left, so that line closes first
+    // (a wrap) and the fresh one drops (x 0, where overflowing in place gave 35).
     // `$w` is what has to fit, open edges included; the indent is added here, as the band leaves it out.
     macro_rules! drop_below_floats {
         ($w:expr) => {{
             let w = $w;
             // (…from where the pen stands on an edge-only line: a negative edge moves it back, and a word behind
-            // one fits a band its width alone does not — the oracle's `used`.)
+            // one fits a band its width alone does not.)
             let used = if line_placed { line_x } else { 0.0 };
             if !floats.borrow().is_empty() && !line_has_content && used + w > band_w(total) + LINE_FIT_EPS {
                 let fy = top + total;
@@ -2406,26 +2327,21 @@ fn line_layout(
                 open.push(OpenBox { w, placed: false, frag: frags.len() - 1 });
             }
             RUN_CLOSE => {
-                // Nothing landed inside it, so the box shows its edges where it OPENED. The oracle flushes
-                // the WHOLE open stack at the close of any box whose own opening edge is still pending
-                // (`if (frag.pendingOpen) flushOpenEdges()`, "Chrome gives a lone padded empty `<span>` a
-                // 10x27 box on its line") — native dropped it instead, under a comment claiming that matched
-                // JS. It never did: `<span style="padding-left:6px"></span>` puts the next box at 6 in the
-                // oracle and in Chrome and at 0 here, and an out-of-flow child of such a box read the cursor
-                // BEFORE the edge rather than past it. Both were invisible, behind the walk's
-                // `edged-inline-without-content` refusal — which named a line-box height as its cause, and
-                // this is not that.
+                // Nothing landed inside it, so the box shows its edges where it OPENED: the close of a box whose
+                // own opening edge is still pending puts the WHOLE open stack down (Chrome gives a lone padded
+                // empty `<span>` a 10x27 box on its line, and `<span style="padding-left:6px"></span>` puts the
+                // next box at 6), and an out-of-flow child of such a box reads the cursor past the edge.
                 // Settled BEFORE the flush, as at every other flush site: a marker's own edges are the ones
                 // still unflushed, so reading them after would add nothing.
-                // …and flushed PER FRAGMENT, not behind the sum guard: the oracle asks `if (frag.pendingOpen)`
-                // here — this box's own edge — and then places every pending one, cancelling pairs included.
+                // …and flushed PER FRAGMENT, not behind the sum guard: the question is this box's own edge,
+                // and then every pending one goes down, cancelling pairs included.
                 let flushes = open.last().is_some_and(|o| !o.placed && o.w != 0.0);
-                // An edge put down here goes AFTER a collapsed space still pending: the oracle placed that space
-                // where it met it, so the space's advance and its justification gap come BEFORE the edge. Kept
-                // pending, native placed both after it, and a marker inside the inline — past the space, before
-                // the gap — was not moved by the spread (48 where the oracle and Chrome say 60.4).
+                // An edge put down here goes AFTER a collapsed space still pending: that space counts as placed
+                // where the flow met it, so the space's advance and its justification gap come BEFORE the edge.
+                // Kept pending, both would land after it, and a marker inside the inline — past the space, before
+                // the gap — would miss the spread (48 where Chrome says 60.4).
                 // …and whether the close LANDS: a half the walk saw a length or a percentage in, still there once it is
-                // resolved (a `calc()` cancelling to nothing in this block lands nothing, as in the oracle).
+                // resolved (a `calc()` cancelling to nothing in this block lands nothing).
                 let closing = &frags[open.last()?.frag].ib;
                 let lands = run.lands && (closing.right != 0.0 || closing.mr != 0.0);
                 if flushes || lands {
@@ -2438,9 +2354,9 @@ fn line_layout(
                     flush_each_open_edge!();
                 }
                 let own = open.pop()?.frag; // LIFO (a CLOSE with nothing open is no stream the walk makes)
-                // The closing edge goes down as its two halves, as the oracle places them (`if (ce.right)`, then
-                // `if (ce.mr)`): the border and padding inside the box, which the box itself holds, then the margin
-                // outside it, which only the boxes around it do.
+                // The closing edge goes down as its two halves, each only where it is non-zero: the border and
+                // padding inside the box, which the box itself holds, then the margin outside it, which only the
+                // boxes around it do.
                 let (right, mr) = (frags[own].ib.right, frags[own].ib.mr);
                 if right != 0.0 {
                     let (at, to) = advance!(right);
@@ -2455,15 +2371,14 @@ fn line_layout(
                 if frags[own].lines.is_empty() && frags[own].open_line == line_no {
                     line_empties.push(own);
                 }
-                // Neither `hang` nor `hang_pre` is cleared: an edge is `edge` to the oracle, which leaves the
-                // spaces before it hanging (`trailingHang` is reset only `if (!edge)`) — only a real placement
-                // ends their run.
-                // A close that LANDS is an edge PLACEMENT, and the oracle's `placeOnLine` grows the line for one
-                // like any other non-hanging placement: first by the metrics of the collapsible space hanging at
-                // the line's end — banked here, so a wrap that drops the space still leaves the line as tall —
-                // then by the inline's own FONT box (`fontContentHeight` at `inlineAscent`), which is taller than
-                // its line-height contribution wherever the font's content area is (Chrome: an empty
-                // `font-size:30px; padding-right:5px` span makes a 16px line 41 tall, not 22).
+                // Neither `hang` nor `hang_pre` is cleared: an edge is not content, and leaves the spaces before
+                // it hanging — only a real placement ends their run.
+                // A close that LANDS is an edge PLACEMENT, and it grows the line like any other non-hanging
+                // placement: first by the metrics of the collapsible space hanging at the line's end — banked
+                // here, so a wrap that drops the space still leaves the line as tall — then by the inline's own
+                // FONT box (the run's `asc` / `line_height`), which is taller than its line-height contribution
+                // wherever the font's content area is (Chrome: an empty `font-size:30px; padding-right:5px` span
+                // makes a 16px line 41 tall, not 22).
                 if lands {
                     line_placed = true;
                     if let Some(p) = pending_space.filter(|p| p.sep) {
@@ -2475,13 +2390,11 @@ fn line_layout(
                 }
             }
             RUN_BR => {
-                // The oracle's `<br>` puts every opening edge still pending down on the line it ENDS
-                // (`flushOpenEdges()` outright, then `forceBreak()` — Chrome gives `<span style="padding-left:20px">
-                // <br>b</span>` two fragments, the first that padding), which is exactly what the preserved-newline
-                // arm does: settle the markers waiting on those edges, flush them DIRECT, break. The inline then
-                // continues on the next line with its edge already down, and its CLOSE lands there. This used to
-                // decline any open edge (`br-in-edged-inline` in the walk) as a fragment native could not place;
-                // it never needed to.
+                // A `<br>` puts every opening edge still pending down on the line it ENDS, then breaks (Chrome
+                // gives `<span style="padding-left:20px"><br>b</span>` two fragments, the first that padding),
+                // which is exactly what the preserved-newline arm does: settle the markers waiting on those
+                // edges, flush them DIRECT, break. The inline then continues on the next line with its edge
+                // already down, and its CLOSE lands there.
                 settle_pending_oofs!();
                 // …the edges this break puts down landing after a collapsed space still pending, as at a close.
                 place_pending_space!();
@@ -2498,12 +2411,11 @@ fn line_layout(
                 }
                 break_line!(); // an empty line's box is the bare strut
                 // …and a `<br clear>` moves the flow past the floats it names before the next line opens
-                // (HTML's pre-CSS float break; the oracle's `brClear` / `clearanceY`). The side arrives
-                // resolved on the run — 1 left, 2 right, 3 both — because `clear: inline-start` is a
-                // question about the containing block's direction, which the walk has and this does not.
-                // Moving `total` is the whole move: `band_l` / `band_w` read it when they are called, so
-                // the band, the indent and the rtl origin all come from the new y (the oracle needs an
-                // explicit `retakeBand()` there only because it caches them).
+                // (HTML's pre-CSS float break, `clearance_y`). The side arrives resolved on the run — 1 left,
+                // 2 right, 3 both — because `clear: inline-start` is a question about the containing block's
+                // direction, which the walk has and this does not. Moving `total` is the whole move:
+                // `band_l` / `band_w` read it when they are called, so the band, the indent and the rtl origin
+                // all come from the new y.
                 let clear = run.metric as u8;
                 if clear != 0 {
                     let fy = top + total;
@@ -2520,28 +2432,26 @@ fn line_layout(
                 // paragraph, and one declaring `pre` keeps its own spaces.
                 let ws_mode = run.ws_mode;
                 let (no_wrap, preserve, break_nl) = ws_modes(ws_mode)?;
-                // A run that does not wrap is placed WHOLE by the oracle, one newline segment at a time: ONE
-                // `placeOnLine` — which turns the separators held back before it into gaps — and then
-                // `noteGapsInside` over its body, which holds each separator back in turn until a non-separator of
-                // the body follows it (a body ENDING in separators leaves them held). Native places such a run piece by
-                // piece, so it keeps the same books: its first piece flushes (`body_started`), and after that a
-                // separator is held and a non-separator flushes — a collapsed space INSIDE the body included
-                // (`body_space`), which is no hang at the line's end. Counting those at once put a marker after
-                // `<span style="white-space:nowrap">?\n&nbsp;…</span>` at the end of a justified line (45 where the
-                // oracle and Chrome say 28.8).
+                // A run that does not wrap is ONE unit per newline segment: its first piece turns the separators
+                // held back before it into gaps (`body_started`), and after that each separator of its body is
+                // held back in turn until a non-separator follows it (a body ENDING in separators leaves them
+                // held) — a collapsed space INSIDE the body included (`body_space`), which is no hang at the
+                // line's end. Counting those at once put a marker after
+                // `<span style="white-space:nowrap">?\n&nbsp;…</span>` at the end of a justified line (45 where
+                // Chrome says 28.8).
                 let mut body_started = false;
                 let mut body_space = false;
                 let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
-                // A run that does not soft-wrap is ONE token: the oracle places `collapseRun(…)` less a
-                // trailing collapsible space in a single `placeOnLine`, and the only decision the line makes
-                // about it is whether to break BEFORE it. So the fit test is asked ONCE, of the whole run,
-                // rather than word by word — which is what let a `<span style="white-space:nowrap">` place its
-                // first word and overflow the rest. Only where the LINE may break at all (`outerWraps`, the
-                // block's mode): inside an unbreakable block there is nothing to decide.
+                // A run that does not soft-wrap is ONE token — its collapsed text less a trailing collapsible
+                // space — and the only decision the line makes about it is whether to break BEFORE it. So the
+                // fit test is asked ONCE, of the whole run, rather than word by word, or a
+                // `<span style="white-space:nowrap">` would place its first word and overflow the rest. Only
+                // where the LINE may break at all (`outer_wraps`, the block's mode): inside an unbreakable block
+                // there is nothing to decide.
                 //
-                // The unit is the run and never more: the oracle tokenises per text NODE, so a `<b>` inside
-                // the span is a second run with a second decision. Under a PRESERVING mode the unit is the
-                // first newline-SEGMENT — a newline after it breaks the line regardless.
+                // The unit is the run and never more: a `<b>` inside the span is a second run with a second
+                // decision. Under a PRESERVING mode the unit is the first newline-SEGMENT — a newline after it
+                // breaks the line regardless.
                 let space_w = measure_word(run, &[0x20])?;
                 // A run of collapsible white space that is not a `pre-line` newline's: ONE space where it collapses
                 // into content, nothing (but its break opportunity) where it does not.
@@ -2549,15 +2459,15 @@ fn line_layout(
                     () => {{
                         if !line_has_content {
                             // At a line start — no CONTENT on it yet; an inline box's edges alone do not
-                            // end it (the oracle's `lineHasContent`) — the space itself collapses away, but
-                            // the BARRIER it leaves does not: the oracle sets `barrier` from a whitespace-only
-                            // run whether or not it placed anything (`modeWraps(owner) ? null : 'hard'`). A non-wrapping run
-                            // leaves HARD, which an atomic after it may neither break at nor drop below a
-                            // float at; a wrapping one leaves null, which CLEARS whatever stood there.
+                            // end it (`line_has_content`) — the space itself collapses away, but the break
+                            // opportunity it leaves does not, whether or not it placed anything. A non-wrapping
+                            // run leaves a HARD barrier (a zero-width pending space that does not break), which
+                            // an atomic after it may neither break at nor drop below a float at; a wrapping one
+                            // leaves nothing, which CLEARS whatever stood there.
                             // No metrics as well as zero width: nothing was placed, so nothing grows the
                             // line box — a taller space that collapsed away was raising the line by its own
-                            // leading. And NO metrics is `-inf`, the identity for a max, not zero (the
-                            // oracle's `lineHangAsc` says why): ZERO is a height, and at a line-height below
+                            // leading. And NO metrics is `-inf`, the identity for a max, not zero: ZERO is a
+                            // height, and at a line-height below
                             // the font box the line's descent is NEGATIVE, so a word taking this placeholder
                             // on a line an edge had started grew `line-height: 8px` to 10.
                             ends_open = false;
@@ -2571,11 +2481,10 @@ fn line_layout(
                         } else {
                             match pending_space {
                                 // A REAL collapsed space is already waiting: a run of white space is ONE
-                                // space, so this one collapses away — but its OPPORTUNITY survives. The
-                                // oracle rescues `barrier` to `null` for a wrapping segment that starts
-                                // with white space arriving on a line that already ends with one, which is
-                                // how a `nowrap` block's space still opens a line for the wrapping inline
-                                // after it.
+                                // space, so this one collapses away — but its OPPORTUNITY survives: a
+                                // wrapping segment that starts with white space arriving on a line that
+                                // already ends with one makes the waiting space a break, which is how a
+                                // `nowrap` block's space still opens a line for the wrapping inline after it.
                                 Some(ps) if ps.sep => {
                                     if !no_wrap && !ps.breaks {
                                         pending_space = Some(PendingSpace { breaks: true, ..ps });
@@ -2583,31 +2492,29 @@ fn line_layout(
                                 }
                                 // …otherwise this space takes the slot: either nothing was waiting, or all
                                 // that was is the zero-width OPPORTUNITY a preserved space left behind
-                                // (the oracle's `lineEndsWithSpace` is false after one, so it places this
-                                // space like any other).
+                                // (the line does not end in a collapsible space after one, so this space is
+                                // placed like any other).
                                 _ => {
-                                    // The oracle PLACES it where it meets it (`placeInlineChild`'s
-                                    // whitespace branch, under the `linePlaced` this `line_placed` is),
-                                    // and placing anything puts the open inline edges down first. So the
-                                    // edges go down HERE — and a marker written after them is not waiting
-                                    // on anything, which is what lets it keep the relative offset of its
-                                    // own inline. The space's ADVANCE still only waits (one the next wrap
-                                    // drops grows nothing), but the line holds CONTENT from here on:
-                                    // `placeOnLine` sets `lineHasContent` for anything but an edge, and a
-                                    // non-wrapping run's pre-pass asks that before any word consumes the
-                                    // space — after an edge-only line, ` <nowrap>aaaa</nowrap>` in a 30px
-                                    // block stayed on the line where the oracle wraps it.
+                                    // The space counts as PLACED where the flow meets it, and placing
+                                    // anything puts the open inline edges down first. So the edges go down
+                                    // HERE — and a marker written after them is not waiting on anything,
+                                    // which is what lets it keep the relative offset of its own inline. The
+                                    // space's ADVANCE still only waits (one the next wrap drops grows
+                                    // nothing), but the line holds CONTENT from here on: anything but an
+                                    // edge sets `line_has_content`, and a non-wrapping run's pre-pass asks
+                                    // that before any word consumes the space — or, after an edge-only line,
+                                    // ` <nowrap>aaaa</nowrap>` in a 30px block would stay on the line rather
+                                    // than wrap.
                                     settle_pending_oofs!();
                                     flush_open_edges!();
-                                    // …and it is the oracle's placement of it, as a HANG, which every open box
-                                    // holds from here: the space itself only waits (below), but where it will
+                                    // …and it is placed as a HANG, which every open box holds from here: the
+                                    // space itself only waits (below), but where it will
                                     // sit is where the flow stands now.
                                     // (…its end read as the pen will read it once the space is placed.)
                                     note_open!(band_l(total) + line_x, band_l(total) + (line_x + space_w), true);
                                     // …and it REPLACES the opportunity the text before it left (a hyphen,
-                                    // a wide character): the oracle overwrites `barrier` at any trailing
-                                    // white space. Whether it breaks is ITS OWN mode's to say — the
-                                    // whitespace-only-node arm is `modeWraps(owner) ? null : 'hard'`.
+                                    // a wide character): trailing white space supersedes any earlier
+                                    // opportunity. Whether it breaks is ITS OWN mode's to say (`!no_wrap`).
                                     ends_open = false;
                                     shy_pending = None;
                                     atomic_break = false;    // …as above: one barrier, and this is it now
@@ -2637,19 +2544,18 @@ fn line_layout(
                         } else {
                             text.len()
                         };
-                        // The oracle strips a run's LEADING white space only at a line start, which is an
-                        // empty line or one already ending in a real hanging space (`collapseRun`'s
-                        // `!linePlaced || lineEndsWithSpace`). Anywhere else it stays in the body and
-                        // in the width the fit test is asked of. A PRESERVED space is not a hanging one, so
-                        // the zero-width marker does not count.
+                        // A run's LEADING white space is stripped only at a line start, which is an empty
+                        // line or one already ending in a real hanging space. Anywhere else it stays in the
+                        // body and in the width the fit test is asked of. A PRESERVED space is not a hanging
+                        // one, so the zero-width marker does not count.
                         // …and only a COLLAPSING run ever asks: a preserved space is kept wherever it sits,
                         // so both readers below already stand behind `!preserve`.
-                        // (…where no CONTENT is on the line: an inline box's edges alone leave it at its start — the
-                        // oracle's `!lineHasContent`, and what `text_intrinsic` assumes.)
+                        // (…where no CONTENT is on the line: an inline box's edges alone leave it at its start —
+                        // `!line_has_content`, and what `text_intrinsic` assumes.)
                         let at_line_start = !preserve
                             && (!line_has_content || pending_space.is_some_and(|p| p.sep));
-                        // …and `body` is the oracle's string test: a run that is non-empty but zero-advance
-                        // (a U+200B) is still a body, and still asks the question.
+                        // …and `has_body` is a test of the TEXT, not of its advance: a run that is non-empty but
+                        // zero-advance (a U+200B) is still a body, and still asks the question.
                         let has_body = if preserve {
                             end > 0
                         } else {
@@ -2665,8 +2571,8 @@ fn line_layout(
                             let mut k = 0usize;
                             let mut first = true;
                             // …and the early-out only where nothing else needs the full width: the float drop
-                            // below is asked of the WHOLE run (`retakeBand(runW + openEdgeWidth())`), so a
-                            // truncated prefix would drop the line on the wrong answer.
+                            // below is asked of the WHOLE run plus the pending open edges, so a truncated prefix
+                            // would drop the line on the wrong answer.
                             let stop_at = if floats.borrow().is_empty() { room } else { f64::INFINITY };
                             while k < end && line_x + pending_w + ow + unit <= stop_at {
                                 if is_ws_u16(text[k]) {
@@ -2695,16 +2601,16 @@ fn line_layout(
                             }
                         }
                         if breaks && has_body && line_x + pending_w + ow + unit > room {
-                            // The collapsed space still pending goes down first, as a HANG: the oracle placed it
-                            // where it met it, and that placement ends any run of preserved spaces before it
-                            // (`trailingPreserved = 0`) — dropped with the line instead, the wrapped line was
-                            // aligned as if they still hung (28.8 where the oracle and Chrome say 19.2).
+                            // The collapsed space still pending goes down first, as a HANG: it counts as placed
+                            // where the flow met it, and that placement ends any run of preserved spaces before
+                            // it — dropped with the line instead, the wrapped line would be aligned as if they
+                            // still hung (28.8 where Chrome says 19.2).
                             place_pending_space!();
                             take_break!();
                             pending_space = None;
                             atomic_break = false;
                             ends_open = false;
-                            // …and the oracle decided `atLineStart` BEFORE this break, so a leading collapsible
+                            // …and `at_line_start` was decided BEFORE this break, so a leading collapsible
                             // space it kept is part of the body and goes down with it on the fresh line. The
                             // word loop below would drop it (nothing precedes it there), so it is placed here
                             // and the loop starts past it.
@@ -2717,19 +2623,19 @@ fn line_layout(
                                 }
                             }
                         }
-                        // …and a line still too narrow for the whole unit DROPS below the float instead (the
-                        // oracle's `retakeBand(runW + openEdgeWidth())`, asked of the whole run and not of its
-                        // first word — a `nowrap` span beside a float goes under it, not through it). Asked of
+                        // …and a line still too narrow for the whole unit DROPS below the float instead (asked
+                        // of the whole run plus the pending open edges, and not of its first word — a `nowrap`
+                        // span beside a float goes under it, not through it). Asked of
                         // the line the unit LANDS on, which is why the leading space above is only NOTED here
                         // and placed below: putting it down first would make the line look occupied.
                         if has_body {
                             drop_below_floats!(unit + ow);
                         }
-                        // …and only now does the kept leading space go down (the oracle's `collapseRun` put it
-                        // inside the body, so it rides the line the body landed on).
+                        // …and only now does the kept leading space go down (it is inside the body, so it rides
+                        // the line the body landed on).
                         if lead_space {
-                            // …after the open edges, which the oracle's body placement puts down first (`placeOnLine`
-                            // flushes before it places), and as CONTENT: it is part of the body.
+                            // …after the open edges, which any content placement puts down first, and as
+                            // CONTENT: it is part of the body.
                             settle_pending_oofs!();
                             flush_open_edges!();
                             // (…the body's first piece, and a separator of it.)
@@ -2769,19 +2675,18 @@ fn line_layout(
                                 match text[i] {
                                     0x0A => {
                                         // A preserved newline ends this line with the open edges FLUSHED onto
-                                        // it (`flushOpenEdges(); forceBreak();`): they go down here, and the
+                                        // it: they go down here, and the
                                         // line becomes a PLACED one, so its `text-align` moves what sits on it
                                         // — a marker waiting on one of those edges included.
                                         settle_pending_oofs!();
-                                        // (…after a collapsed space still pending, which the oracle placed where
-                                        // it met it — as at a `<br>`.)
+                                        // (…after a collapsed space still pending, which counts as placed where
+                                        // the flow met it — as at a `<br>`.)
                                         place_pending_space!();
-                                        flush_each_open_edge!();   // …DIRECT, as the oracle's `i > 0` arm is
+                                        flush_each_open_edge!();   // …DIRECT, as at a `<br>`
                                         break_line!(); // newline → forced break
                                         body_started = false; // …and the next segment is a placement of its own
                                         // …and the SEGMENT it opens drops below a float as one unit, exactly
-                                        // as the first did: the oracle runs `retakeBand(runW + …)` for every
-                                        // segment, not only the run's first (`segments.forEach`).
+                                        // as the first did: every segment asks, not only the run's first.
                                         if no_wrap && outer_wraps && !floats.borrow().is_empty() {
                                             let from = i + 1;
                                             let seg_end = text[from..]
@@ -2810,14 +2715,14 @@ fn line_layout(
                                     0x20 | 0x09 => {
                                         // A preserved space is content on the line: it grows the line box by its
                                         // run's metrics as a word would (a lone space in a larger font is a fragment
-                                        // there). It goes through the oracle's `placeOnLine` like any other run,
+                                        // there). It is a placement like any other run's,
                                         // so the open edges are PLACED before it — and a marker waiting on one
                                         // settles here, on this line, rather than wherever the next word lands.
                                         settle_pending_oofs!();
                                         line_has_content = true; // the space itself is content on this line
                                         line_placed = true;
                                         // A COLLAPSED space still waiting from an earlier run is placed first —
-                                        // the oracle placed it where it met it, and a preserved space is a
+                                        // it counts as placed where the flow met it, and a preserved space is a
                                         // placement like any other, so it does not swallow the one before it.
                                         // BEFORE the open edges, which went down after it there: the gap it
                                         // leaves and the edge's fragment both start where the space ends.
@@ -2831,25 +2736,21 @@ fn line_layout(
                                             line_desc = line_desc.max(d);
                                             if ps.sep {
                                                 // …a REAL collapsed space ENDS the run of preserved ones before
-                                                // it: the oracle places it with `hangs`, whose `!edge` arm
-                                                // zeroes `trailingPreserved` before `placePreservedSpace`
-                                                // re-seeds it. The zero-width marker is only an opportunity and
-                                                // ends nothing — and "real" is a question about what the space
-                                                // IS, not about what it measures, the same one the gap above
-                                                // asks. (Here the two engines then agree on a figure CHROME
-                                                // does not share: the oracle zeroes `trailingPreserved` on any
-                                                // collapsible-space placement and Chrome does not, so a
-                                                // cancelled separator between two `pre-wrap` runs is 132.4 in
-                                                // both against Chrome's 151.578. Recorded, not fixed here.)
+                                                // it (`hang_pre` is zeroed, then re-seeded below). The zero-width
+                                                // marker is only an opportunity and ends nothing — and "real" is
+                                                // a question about what the space IS, not about what it
+                                                // measures, the same one the gap above asks. (KNOWN GAP: Chrome
+                                                // does not end the preserved run at a collapsible-space
+                                                // placement, so a cancelled separator between two `pre-wrap`
+                                                // runs is 132.4 here against Chrome's 151.578.)
                                                 hang_pre = 0.0;
                                             }
                                         }
                                         flush_open_edges!();
                                         // The separators an earlier non-wrapping run ENDED in become gaps where
-                                        // THIS run is placed WHOLE — the oracle's `placeOnLine` for a `pre` run is
-                                        // a content placement, which flushes the tail it follows — and stay held
-                                        // past a wrapping run's preserved spaces, which are white space and not
-                                        // content (`placePreservedSpace`).
+                                        // THIS run is placed WHOLE — a `pre` run is a content placement, which
+                                        // flushes the tail it follows — and stay held past a wrapping run's
+                                        // preserved spaces, which are white space and not content.
                                         if no_wrap && !body_started {
                                             flush_tail_gaps!();
                                             body_started = true;
@@ -2857,8 +2758,7 @@ fn line_layout(
                                         // Measured HERE, after the waiting space and the open edges have moved
                                         // the pen: a tab's advance is the gap to the next stop from the block's
                                         // content edge, and everything placed before it on this line is part of
-                                        // where it stands. (The oracle reaches the same pen as
-                                        // `lineX + openEdgeWidth() - content.x`.)
+                                        // where it stands.
                                         let adv = if text[i] == 0x09 {
                                             measure_at(run, &text[i..i + 1], band_l(total) + line_x)?
                                         } else {
@@ -2880,11 +2780,9 @@ fn line_layout(
                                         hang = 0.0;
                                         hang_gap = None;              // …and it is not a COLLAPSED hang any more
                                         if no_wrap {
-                                            // A `pre` run is placed WHOLE, through the oracle's non-wrapping
-                                            // branch, where `placeOnLine`'s `!edge` arm zeroes the preserved
-                                            // hang: its spaces are content on the line, never hanging off it.
-                                            // (`placePreservedSpace`, which seeds that hang, is the wrapping
-                                            // branch's alone.) It still ENDS a `pre-wrap` hang before it.
+                                            // A `pre` run is placed WHOLE, as content: its spaces are on the
+                                            // line, never hanging off it (only a WRAPPING run's preserved spaces
+                                            // seed that hang). It still ENDS a `pre-wrap` hang before it.
                                             hang_pre = 0.0;
                                         } else {
                                             hang_pre += adv;
@@ -2892,16 +2790,16 @@ fn line_layout(
                                         line_asc = line_asc.max(run.asc);
                                         line_desc = line_desc.max(run.line_height - run.asc);
                                         // …and it REPLACES whatever opportunity the text before it left, just
-                                        // as a collapsed space does: the oracle sets `barrier` at ANY trailing
-                                        // white space — `null` where the run wraps, `'hard'` where it does not.
-                                        // A `pre` run leaving none at all is what let a hyphen, a wide
-                                        // character or an atomic on the far side of it open the line. Zero
-                                        // width, because the advance is already on the line.
+                                        // as a collapsed space does: ANY trailing white space supersedes it —
+                                        // a break where the run wraps, a hard barrier where it does not. A
+                                        // `pre` run leaving none at all would let a hyphen, a wide character or
+                                        // an atomic on the far side of it open the line. Zero width, because
+                                        // the advance is already on the line.
                                         ends_open = false;
                                         shy_pending = None;
                                         atomic_break = false;    // …the atomic's / `<wbr>`'s opportunity too:
-                                                                 // the oracle keeps ONE `barrier`, and a space
-                                                                 // overwrites whatever stood there
+                                                                 // there is ONE pending opportunity, and a
+                                                                 // space overwrites whatever stood there
                                         pending_space = Some(PendingSpace { w: 0.0, asc: run.asc, desc: run.line_height - run.asc, breaks: !no_wrap, sep: false, placed: false });
                                     }
                                     _ => return None, // \r / \f — not modelled
@@ -2915,8 +2813,8 @@ fn line_layout(
                             // lines), so count them.
                             let mut nl = 0u32;
                             // …and whether any of it comes BEFORE the first newline: that much is a collapsible
-                            // space on the line the newline ends, which the oracle places there like any other
-                            // (its first `\n`-segment) and the break then eats — so an empty inline box holding
+                            // space on the line the newline ends, placed there like any other (its first
+                            // `\n`-segment) and then eaten by the break — so an empty inline box holding
                             // ` \n ` has a line record there, and hangs from that line's baseline.
                             let spaces_first = !break_nl || text[i] != 0x0A;
                             while i < text.len() && is_ws_u16(text[i]) {
@@ -2930,18 +2828,14 @@ fn line_layout(
                             }
                             if break_nl && nl > 0 {
                                 // …and a `pre-line` newline ends its line the same way a preserved one does,
-                                // with the open edges on it. This used to be asked only of a run carrying REAL
-                                // content, because a whitespace-ONLY one took the oracle's collapsed branch and
-                                // never reached `placeTextRun` at all — a divergence native recorded here
-                                // rather than bending to, since Chrome breaks and the oracle did not. The
-                                // oracle routes a `pre-line` run holding a NEWLINE through the breaker now, so
-                                // the two sides agree and the flush is unconditional again. It has to be: a
-                                // marker waiting on an open edge settled on the line AFTER the break otherwise
-                                // (`<span style="padding-left:6px"><i abspos></i>\n<span>y</span></span>` put
-                                // it at y 22 where Chrome and the oracle say 0).
+                                // with the open edges on it — whitespace-only run or not (Chrome breaks for
+                                // both). Unconditionally: a marker waiting on an open edge would otherwise
+                                // settle on the line AFTER the break
+                                // (`<span style="padding-left:6px"><i abspos></i>\n<span>y</span></span>` puts
+                                // it at y 0 in Chrome, not 22).
                                 settle_pending_oofs!();
                                 place_pending_space!();
-                                flush_each_open_edge!();   // …DIRECT, as the oracle's `i > 0` arm is
+                                flush_each_open_edge!();   // …DIRECT, as at a `<br>`
                                 for _ in 0..nl {
                                     break_line!();
                                 }
@@ -2954,8 +2848,7 @@ fn line_layout(
                         }
                         let word = &text[start..i];
                         // A WORD holds no tab: the tokenizer splits on white space and a tab is white space.
-                        // So it is measured with no pen, exactly as the oracle measures it (`breakUnits` calls
-                        // `measureRun` with neither `from` nor `tab`), and so are the pieces it splits into.
+                        // So it is measured with no pen (`measure_word`), and so are the pieces it splits into.
                         let width = measure_word(run, word)?;
                         // `space_before` is the ADVANCE that is waiting; `space_breaks` is whether it opens a
                         // line here, which is the mode of the run that queued it.
@@ -2968,14 +2861,14 @@ fn line_layout(
                         // word like `foo<b>bar</b>` or `H<sub>2</sub>O` where the edgeless inline emits no
                         // OPEN/CLOSE run to split the fonts — has `space_before` false, so the break-before test
                         // below already skips it: it places right after the leading segment, glued, and its tail
-                        // simply overflows the line when the whole unit runs long. This matches the oracle's greedy
-                        // breaker exactly — a mid-word run boundary is never a line-break opportunity (§ CSS Text:
-                        // no break within a word), and ONLY the unit's leading word is fit-tested against the band.
+                        // simply overflows the line when the whole unit runs long — a mid-word run boundary is never a
+                        // line-break opportunity (CSS Text: no break within a word), and ONLY the unit's leading word is
+                        // fit-tested against the band.
                         // The collapsed space lands on the line as a fragment of ITS run — a whitespace-only inline in
                         // a larger font grows the line it sits on (Chrome: 47 for `a<span style="font-size:40px"> </span>b`
-                        // in a 16px block). The oracle grows it only where the space STAYS (a space the wrap drops
-                        // grows nothing there; Chrome grows the line for any fragment on it — a shared gap, see the
-                        // native_layout_text spec), so the growth is applied once the line the space sits on is settled.
+                        // in a 16px block). It grows the line only where the space STAYS, so the growth is applied once
+                        // the line the space sits on is settled. (KNOWN GAP: a space the wrap drops grows nothing here,
+                        // where Chrome grows the line for any fragment on it — see the native_layout_text spec.)
                         let space_on_line = space_before && line_placed;
                         if space_on_line {
                             // …an OPPORTUNITY is no gap: what is asked is what the pending space IS, not what it
@@ -3007,15 +2900,15 @@ fn line_layout(
                         // 5 = break-all WITH break-word / anywhere, which fills the line by break-all's rules and keeps
                         // the overflow-wrap's emergency break for a unit those rules glue wider than the band.
                         // A WIDE character takes the same loop by a different door (below), so this is
-                        // `charUnits` either way — one unit per code point under a per-character mode, wide
+                        // `break_unit_len` either way — one unit per code point under a per-character mode, wide
                         // characters as units of their own otherwise.
                         let wrap_mode = run.metric as u8;
                         let break_all = wrap_mode == 1 || wrap_mode >= 4;
                         // A word holding a WIDE character always breaks into units — it is not a question of
                         // room, the character IS the opportunity — where an in-word Latin break is offered only
-                        // to a word too wide for the band. The two cannot both apply: the oracle's `anywhere`
-                        // is `!wide && breaksAnywhere(el)`, so a wide word takes wide units, not per-character
-                        // ones, and never the fresh line `break-word` moves an over-long word to.
+                        // to a word too wide for the band. The two cannot both apply: a per-character break is
+                        // offered only to a piece holding no wide character, so a wide word takes wide units, not
+                        // per-character ones, and never the fresh line `break-word` moves an over-long word to.
                         let has_wide = run_has_wide && text[start..i].iter().any(|&u| is_wide_unit(u));
                         // …and a HYPHEN or dash inside the word is an opportunity of its own, whatever the room
                         // (§UAX #14): `well-known` is two PIECES wherever it sits, so the word takes the unit
@@ -3032,17 +2925,16 @@ fn line_layout(
                         let word_shy = run_has_shy && text[start..i].contains(&SOFT_HYPHEN);
                         // The band this word's units are cut against — `None` where the word has no units at
                         // all, which is most words and skips the float-list walk `band_w` does. (Not under an
-                        // in-word mode: a container that declares one — `wrapRulesOf` names Discourse's `.cooked`
-                        // and Forem's article body — asks the band of every word, as it did before this was a
-                        // question at all.) Read ONCE for the whole word as the oracle reads it (`breakUnits(
-                        // token, owner, lineRight - lineLeft)`); the line's own fit tests below stay live,
-                        // following the band down past a float the word drops below.
+                        // in-word mode: a container that declares one — Discourse's `.cooked` and Forem's article
+                        // body do — asks the band of every word.) Read ONCE for the whole word, as the band its
+                        // units are cut against; the line's own fit tests below stay live, following the band
+                        // down past a float the word drops below.
                         // …and under `word-break: break-all` a word the line has no ROOM left for is cut too, though
                         // it fits the band: every boundary between its characters is an ordinary opportunity, so it
                         // fills the line it is on rather than moving whole (Chrome: `aa bbbc` in 50px is "aa bb" /
                         // "bc"). That holds for a word GLUED to the text before it across a run boundary
-                        // (`ab<b>cd</b>ef`) — no space, no atomic, no hyphen the text before ended in (the oracle's
-                        // `barrier === 'text'`) — which is the same word, so the boundary is an opportunity like any
+                        // (`ab<b>cd</b>ef`) — no space, no atomic, no hyphen the text before ended in
+                        // (`glued_break`) — which is the same word, so the boundary is an opportunity like any
                         // other between two of its characters (Chrome: `ab<b>cd</b>ef` in 20px is three lines)… unless
                         // the punctuation there forbids one (`abc<b>.</b>` keeps the `.` on the line with the `c`).
                         // The room is what is left after the edges the word opens, as the unit loop asks it. (Not
@@ -3076,7 +2968,7 @@ fn line_layout(
                                 // hyphen cuts it. The PIECE is what the fit question is asked of: a per-character
                                 // mode cuts inside one only where that piece alone does not fit the band, which is
                                 // how `super-cali-fragilistic` breaks at its hyphens and only `fragilistic` breaks
-                                // between characters (the oracle's `charUnits(piece, el, avail)`).
+                                // between characters.
                                 let pend = if word_hyphen || word_shy { hyphen_piece_end(text, u, i) } else { i };
                                 let piece_wide = has_wide && text[u..pend].iter().any(|&c| is_wide_unit(c));
                                 let piece_w = if u == start && pend == i { width } else { measure_word(run, &text[u..pend])? };
@@ -3090,8 +2982,8 @@ fn line_layout(
                                     space_pending = false; // dropped with the line it closed
                                 }
                                 // (…a soft hyphen ENDING the piece is no unit of its own: it rides the piece's last one,
-                                // which is the unit the oracle's `shy` flag is on — cut per character, the SHY alone was
-                                // a zero-wide unit that decided the hyphen in the 'b' of `ab&shy;cd`'s stead.)
+                                // which is the unit that decides the hyphen — cut per character, the SHY alone would be
+                                // a zero-wide unit deciding the hyphen in the 'b' of `ab&shy;cd`'s stead.)
                                 let tail = if word_shy { trailing_shys(&text[u..pend]) } else { 0 };
                                 let cut_end = if tail > 0 && pend - u > tail { pend - tail } else { pend };
                                 // (…where an emergency break cut a glued unit, up to the end of what it cut.)
@@ -3119,8 +3011,7 @@ fn line_layout(
                                     }
                                     let ow_now: f64 = open.iter().filter(|o| !o.placed).map(|o| o.w).sum();
                                     // A unit boundary is always an opportunity (`u > start`); the first unit breaks only
-                                    // where one already preceded the word (a space / atomic / line start) — the oracle's
-                                    // `mayBreak = u > 0 || textMayBreak()`.
+                                    // where one already preceded the word (a space / atomic / line start).
                                     let may_break = !first || preceded || !line_has_content || is_wide_unit(text[u]);
                                     // A SOFT hyphen's piece (its last unit) shows the hyphen only where the line breaks
                                     // at it: it goes plain where the next unit fits beside it, takes the hyphen where
@@ -3128,8 +3019,8 @@ fn line_layout(
                                     // previous soft hyphen, whose hyphen shows after all (`take_break!`), or at the
                                     // space — and the choice is made again on the fresh line, hyphen and all even where
                                     // that overflows ("aaaabbb\u00ADcc" in 60px is "aaaabbb-" / "cc"). Decided on the
-                                    // band the piece LANDS on (an empty line too narrow for it drops first), and in the
-                                    // oracle's own comparisons, which take no tolerance (`breakUnits`' caller).
+                                    // band the piece LANDS on (an empty line too narrow for it drops first), in plain
+                                    // comparisons that take no `LINE_FIT_EPS` tolerance.
                                     let shy_unit = word_shy && u + ulen == pend && text[pend - 1] == SOFT_HYPHEN;
                                     let mut hyphen = None;
                                     let broke = if shy_unit {
@@ -3171,8 +3062,8 @@ fn line_layout(
                                         broke
                                     };
                                     // The pending space's line is settled only once the first unit is placed on it or
-                                    // wraps away from it: a space the wrap DROPS grows nothing (the oracle), so the
-                                    // metrics are applied after the break test, never before it.
+                                    // wraps away from it: a space the wrap DROPS grows nothing, so the metrics are
+                                    // applied after the break test, never before it.
                                     if space_pending {
                                         if !broke {
                                             line_asc = line_asc.max(sasc);
@@ -3185,8 +3076,8 @@ fn line_layout(
                                     settle_pending_oofs!();
                                     flush_open_edges!();
                                     flush_tail_gaps!();
-                                    // (…the piece's own text, a soft hyphen it ends in left out as the oracle's piece leaves
-                                    // it: zero-wide and no content, it must not make an NBSP before it an inner gap.)
+                                    // (…the piece's own text, a soft hyphen it ends in left out: zero-wide and no content,
+                                    // it must not make an NBSP before it an inner gap.)
                                     let gap_end = u + ulen - trailing_shys(&text[u..u + ulen]);
                                     note_nbsp_gaps!(run, &text[u..gap_end], band_l(total) + line_x);
                                     let (at, to) = advance!(cw);
@@ -3242,8 +3133,8 @@ fn line_layout(
                             }
                             // An empty line whose first word won't fit the band drops below the float squeezing
                             // it (§9.5, "if a shortened line box is too small…"), growing the block by the gap. A
-                            // `nowrap` line is NOT shortened by a float and never drops — it overlaps it on one line
-                            // (the oracle does no float handling for a nowrap block), so skip this too.
+                            // `nowrap` line is NOT shortened by a float and never drops — it overlaps it on one line,
+                            // so skip this too.
                             if !no_wrap {
                                 drop_below_floats!(width + ow);
                             }
@@ -3287,8 +3178,8 @@ fn line_layout(
                 // sets `atomic_break` so the NEXT box may break before itself too.
                 let width = run.metric;
                 // An atomic is a break opportunity on both sides — but a space that is NOT one does not
-                // become one by having an atomic after it: the oracle leaves `barrier = 'hard'` behind a
-                // non-wrapping run's trailing space and hands that to the atomic as `decided`.
+                // become one by having an atomic after it: a non-wrapping run's trailing space leaves a HARD
+                // barrier (`breaks: false`), and the atomic honours it.
                 let (space_before, sw, sasc, sdesc, space_breaks, space_sep, space_placed) = match pending_space.take() {
                     Some(p) => (true, p.w, p.asc, p.desc, p.breaks, p.sep, p.placed),
                     None => (false, 0.0, 0.0, 0.0, false, false, false),
@@ -3302,11 +3193,10 @@ fn line_layout(
                 let ow: f64 = open.iter().filter(|o| !o.placed).map(|o| o.w).sum();
                 // An atomic is a break opportunity before it (§ line breaking) — but not under `white-space:
                 // nowrap`, which never soft-wraps.
-                // …and whether one may fall here is ONE question, and no `white-space` mode is part of it: the
-                // oracle hands the atomic `placeOnLine(need, 0, barrier === 'hard', …)`, whose break test is
-                // `!decided && lineHasContent && overflows(…)`. An atomic is a break opportunity on both
-                // sides; the only thing that takes that away is a HARD barrier, which is what a non-wrapping
-                // run's trailing space leaves. Neither the atomic's own mode nor the block's is asked.
+                // …and whether one may fall here is ONE question, and no `white-space` mode is part of it: an
+                // atomic is a break opportunity on both sides, and the only thing that takes that away is a HARD
+                // barrier, which is what a non-wrapping run's trailing space leaves. Neither the atomic's own
+                // mode nor the block's is asked.
                 let may_break_here = !space_is_hard;
                 if may_break_here && line_has_content && line_x + ow + width > band_w(total) + LINE_FIT_EPS {
                     take_break!(); // break before the atomic (drop any hanging space)
@@ -3317,12 +3207,9 @@ fn line_layout(
                     line_desc = line_desc.max(sdesc);
                 }
                 // An ATOMIC drops the line below a float here WHATEVER the block's mode — including a `nowrap` /
-                // `pre` block, whose TEXT arm above never drops (`!no_wrap`). So does the oracle's `placeOnLine`
-                // (`retakeBand(w + pending)`, no mode test), and the two agree. Chrome does not: it never drops a
+                // `pre` block, whose TEXT arm above never drops (`!no_wrap`). KNOWN GAP: Chrome never drops a
                 // no-wrap line below a float, so a `nowrap` block with a 5px inline-block beside a 90px float of 80
-                // is 60 tall there and 82 in both engines. SHARED, so recorded rather than fixed. (This comment
-                // said the opposite until 2026-09-23 — "a nowrap line is not dropped below a float" — which is
-                // true of the text arm and was never true here.)
+                // is 60 tall there and 82 here.
                 if may_break_here {
                     drop_below_floats!(width + ow);
                 }
@@ -3334,8 +3221,8 @@ fn line_layout(
                 let (at, to) = advance!(width);
                 line_atomics.push((ri, at, line_gaps.len())); // its margin box starts here on this line
                 line_x += run.size; // …and a grown flex container's growth moves the pen, not the break
-                // (…which the boxes around it do not hold: the oracle notes the reserved width and grows the
-                // container afterwards, moving only the pen.)
+                // (…which the boxes around it do not hold: they note the reserved width, and the growth moves
+                // only the pen.)
                 drop_hangs!(false);
                 note_open!(at, to, false);
                 hang = 0.0;
@@ -3359,15 +3246,15 @@ fn line_layout(
                 // marker), and what is wanted is only WHERE the flow had reached: this x on this line. A line
                 // that holds nothing else is still a line the flow reached — `line_placed` is untouched,
                 // so an empty block keeps its zero height and the marker settles at the line that never opens
-                // (top 0, x 0), which is what the oracle gives it.
+                // (top 0, x 0).
                 //
-                // A collapsed space still PENDING is part of where the flow has reached — the oracle puts the
-                // box after it (`hello ` + an abspos is x = 35.99, not 31.99) — so its width counts here. It is
+                // A collapsed space still PENDING is part of where the flow has reached — the box goes after
+                // it (`hello ` + an abspos is x = 35.99, not 31.99) — so its width counts here. It is
                 // only PEEKED: the space has not been placed, and the next real content still places it (and
                 // may still wrap away from it), which an out-of-flow box neither prevents nor consumes.
                 //
                 // An inline axis running from the RIGHT has no cursor to read at all: its static corner is the
-                // content's right edge less the box (`staticCornerFor`), so the position is final the moment it
+                // content's right edge less the box, so the position is final the moment it
                 // is taken — nothing on the line, and no alignment shift, moves it. `place_out_of_flow` reads
                 // this the same way block flow's rtl static does (the content's far edge, the box subtracted
                 // once its width is known), so what is recorded here is that edge.
@@ -3389,10 +3276,10 @@ fn line_layout(
                 // asked of their SUM, as the flush is, so a pair that CANCELS is never "unplaced" to wait for — has
                 // not told the flow where it reaches: the edge goes down when the box's first content does, which
                 // may be a later line than this one.
-                // (The SUM is `placeOnLine`'s question, never the close's — see the two macros above.)
+                // (The SUM is the content sites' question, never the close's — see the two macros above.)
                 // Wait for it, keeping the cursor as the fallback for an edge that never lands. An edge further
-                // OUT is not waited on — the oracle asks only `openInlines[openInlines.length - 1]`, so a plain
-                // inner inline reads the cursor however edged the boxes around it are.
+                // OUT is not waited on — only the innermost open box is asked, so a plain inner inline reads the
+                // cursor however edged the boxes around it are.
                 let unplaced: f64 = open.iter().filter(|o| !o.placed).map(|o| o.w).sum();
                 if unplaced != 0.0 && open.last().is_some_and(|o| o.w != 0.0 && !o.placed) {
                     // (`open.len()` is its own inline's depth.)
@@ -3406,13 +3293,12 @@ fn line_layout(
                 }
             }
             RUN_FLOAT => {
-                // Placed as block flow places a float (`place_float`), from the top of the line the flow is on —
-                // the oracle's `placeFloat(…, flowY)` — beside the floats already there, whatever this line holds
-                // so far. The line then takes the band the float leaves (`retakeBand`), which moves only its
-                // LEFT edge and never the content already on it: the pen stays where it stood, so in the band's
-                // frame it steps back by however far the band's left edge moved. (Chrome instead moves the
-                // placed content past a left float, or drops a float that does not fit beside it to the next
-                // line; both engines share this model.)
+                // Placed as block flow places a float (`place_float`), from the top of the line the flow is on,
+                // beside the floats already there, whatever this line holds so far. The line then takes the band
+                // the float leaves, which moves only its LEFT edge and never the content already on it: the pen
+                // stays where it stood, so in the band's frame it steps back by however far the band's left edge
+                // moved. (KNOWN GAP: Chrome instead moves the placed content past a left float, or drops a float
+                // that does not fit beside it to the next line.)
                 let f = inline_floats.get(next_float)?;
                 next_float += 1;
                 let left_before = raw_band_l(total);
@@ -3431,20 +3317,20 @@ fn line_layout(
                 }
             }
             RUN_WBR => {
-                // …an inline box of its own to the oracle (`placeInlineBox`), opened and closed where the flow stands
-                // with nothing in it: an EMPTY fragment there.
+                // …an inline box of its own, opened and closed where the flow stands with nothing in it: an EMPTY
+                // fragment there.
                 frags.push(frag_here!(run.font as usize));
                 line_empties.push(frags.len() - 1);
-                // `<wbr>`: a zero-width soft-wrap opportunity — exactly the oracle's `barrier = null`, the same
-                // thing it sets after an atomic inline. So carry it on `atomic_break` (the after-atomic break
+                // `<wbr>`: a zero-width soft-wrap opportunity — the same thing an atomic inline leaves after
+                // itself. So carry it on `atomic_break` (the after-atomic break
                 // flag) rather than the `pending_space` slot: the next box may break before it, yet a collapsible
                 // space that immediately FOLLOWS still installs its own advance (a phantom width-0 pending space
                 // would suppress that space's width). Under `nowrap` the break-before tests ignore the flag.
                 atomic_break = true;
                 shy_pending = None;
-                // …and it OVERWRITES what stood there, a non-wrapping run's hard space included: the oracle
-                // keeps ONE `barrier` and a `<wbr>` sets it to `null` outright. Without this the atomic arm's
-                // `!space_is_hard` veto cancelled the opportunity the `<wbr>` had just installed.
+                // …and it OVERWRITES what stood there, a non-wrapping run's hard space included: there is ONE
+                // pending opportunity, and a `<wbr>` makes it a break outright. Without this the atomic arm's
+                // `!space_is_hard` veto would cancel the opportunity the `<wbr>` had just installed.
                 if let Some(ps) = pending_space {
                     pending_space = Some(PendingSpace { breaks: true, ..ps });
                 }
@@ -3457,14 +3343,11 @@ fn line_layout(
         close_line!(false, false); // close the final line (a trailing <br>'s fresh empty line is NOT closed)
     }
     // An opening edge that never landed (its inline closed holding nothing the flow placed) leaves the cursor
-    // read at the marker standing, which is what `pendingStatic` falls back to when the inline has no fragment.
-    // Believed UNREACHABLE, though no longer for the reason it used to be: the walk admits an edged inline
-    // holding nothing at all now, and what makes this dead is the CLOSE — an inline with a non-zero opening
-    // edge settles its waiting markers and flushes on the way out, so a marker can only still be pending if
-    // the edge it waited on was zero, and the push condition (the innermost open box's edge `o.w != 0.0`) never
-    // records one of those. Kept because the alternative to a wrong answer here is no answer at all —
-    // and if it ever does fire, note that the oracle's own fallback is still moved by the line's alignment
-    // (`lineStatics`), which this is not.
+    // read at the marker standing, the fallback for an inline that has no fragment. Believed UNREACHABLE: an
+    // inline with a non-zero opening edge settles its waiting markers and flushes at its CLOSE, so a marker can
+    // only still be pending if the edge it waited on was zero, and the queueing condition (the innermost open
+    // box's edge `o.w != 0.0`) never records one of those. Kept because the alternative to a wrong answer here
+    // is no answer at all — and if it ever does fire, note that it is not moved by the line's alignment.
     for (ci, rx, ry, _, at, was) in pending_oofs.drain(..) {
         let x = if rtl {
             content_w + rx
@@ -3476,11 +3359,11 @@ fn line_layout(
     // …and a line that never OPENED never closed, so the markers on it are still waiting: a block whose only
     // children are out-of-flow has no content to close a line with, and the cursor those boxes read is the one
     // an empty line starts at — the indent, the band a float leaves. No line means no alignment, either (the
-    // oracle's `alignLine` runs at a close that does not happen here), so they settle where they stand.
+    // alignment runs at a close that does not happen here), so they settle where they stand.
     for (ci, x, rx, y) in line_oofs.drain(..) {
         oofs.push((ci, x + rx, y));
     }
-    // The inline boxes' fragments, as the oracle's `settleInlineBoxes` makes them: a rect per line the box's content
+    // The inline boxes' fragments: a rect per line the box's content
     // reached — from its leftmost extent to the furthest of what it placed and what still hangs there, hung from the
     // line's baseline by the box's own ascent and grown by its vertical edges — skipping a line whose only
     // placement a break ate; an EMPTY box a zero-width rect on the first line it reached, or where it opened (on
@@ -3545,18 +3428,18 @@ struct LineLayout {
     texts: Vec<TextRow>,
 }
 
-// `\p{L}\p{N}`, which is how the oracle's `HYPHEN_BREAK_RE` spells its classes — read from that same regex
-// (`unicode.rs` parses it), never from Rust std. The Unicode tables in this process disagree and move
+// `\p{L}\p{N}`, the general categories the hyphen-break rule is spelled in — read from regex-syntax's tables
+// (`unicode.rs` parses the classes), never from Rust std. The Unicode tables in this process disagree and move
 // independently: rustc's `char::is_alphabetic` knows 4662 code points this V8 does not, and
-// `char::is_alphanumeric` is Alphabetic ∪ N, which reads a COMBINING MARK as a letter where the regex does
-// not. Either one MOVES BOXES — `abab-\u{93E}cdcd` and `abab-\u{A7F1}cdcd` break after the hyphen in native
-// and not in the oracle — and with Rust std the answer moved with the toolchain the build happened to use.
+// `char::is_alphanumeric` is Alphabetic ∪ N, which reads a COMBINING MARK as a letter where `\p{L}` does
+// not. Either one MOVES BOXES — under it `abab-\u{93E}cdcd` and `abab-\u{A7F1}cdcd` break after the hyphen,
+// under `\p{L}` they do not — and with Rust std the answer moves with the toolchain the build happened to use.
 fn letter_or_number(c: char) -> bool {
     let cp = c as u32;
     crate::unicode::is_letter(cp) || crate::unicode::is_number(cp)
 }
 // Is there a line-break opportunity BETWEEN `text[i]` and `text[i + 1]`, because of a hyphen or dash? UAX #14
-// as Chrome applies it, and as `HYPHEN_BREAK_RE` spells it: a hyphen, figure dash or en dash breaks AFTER
+// as Chrome applies it: a hyphen, figure dash or en dash breaks AFTER
 // itself when it joins two words (or opens one, as in `-leading`), and an EM DASH breaks on both sides.
 fn hyphen_breaks_after(text: &[u16], i: usize, end: usize) -> bool {
     const EM_DASH: u16 = 0x2014;
@@ -3571,7 +3454,7 @@ fn hyphen_breaks_after(text: &[u16], i: usize, end: usize) -> bool {
     if !dash(here) {
         return false;
     }
-    // The regex's classes are asked of CODE POINTS, so an astral letter (`ab-𝔘`) has to be decoded out of its
+    // The classes are asked of CODE POINTS, so an astral letter (`ab-𝔘`) has to be decoded out of its
     // surrogate pair to be one: reading the lone surrogate says "not a letter" and loses the break.
     let after = cp_forward(text, i + 1, end);
     let before = cp_back(text, i);
@@ -3581,7 +3464,7 @@ fn hyphen_breaks_after(text: &[u16], i: usize, end: usize) -> bool {
         return letter_num(after) || matches!(after, Some('-' | '"' | '(' | '\u{A0}'));
     }
     // …and one that opens a word instead: `-leading` breaks after the hyphen, `2-3` does not (the arm above
-    // already took that one). `\p{L}` alone here, as the regex has it.
+    // already took that one). `\p{L}` alone here.
     after.is_some_and(|c| crate::unicode::is_letter(c as u32) || c == '-')
 }
 // The code point that STARTS at `i` (a surrogate pair decoded, a lone surrogate `None`), and the one that ENDS
@@ -3620,10 +3503,10 @@ fn last_base_code_point(word: &[u16]) -> u32 {
     }
     0x20
 }
-// A text run ENDING in this unit leaves a break opportunity for whatever the next one starts with — the
-// oracle's `endsWithBreak`: a dash, a wide character, a ZERO WIDTH SPACE (ZW, which is there to be one: Chrome breaks
+// A text run ENDING in this unit leaves a break opportunity for whatever the next one starts with: a dash, a wide
+// character, a ZERO WIDTH SPACE (ZW, which is there to be one: Chrome breaks
 // `ab&#x200B;<b>cdcd</b>`), or a white-space character UAX #14 breaks after. That is
-// not JS `\s`, which both engines used to ask: of its 25 characters Chrome breaks after none of U+00A0, U+2007,
+// not JS `\s`: of its 25 characters Chrome breaks after none of U+00A0, U+2007,
 // U+202F (GL), U+FEFF (WJ) or U+000B — no UAX #14 case at all: a vertical tab is neither CSS white space nor a
 // segment break, so there is no opportunity beside it to begin with (measured over all 25). None of them is CSS
 // white space either, so each stays inside a word, where only this test sees it (and of the `0x09..=0x0D | 0x20`
@@ -3634,12 +3517,12 @@ fn ends_with_break(u: u16) -> bool {
         || matches!(u, 0x09 | 0x0A | 0x0C | 0x0D | 0x20 | 0x1680 | 0x2000..=0x2006 | 0x2008..=0x200B | 0x2028 | 0x2029 | 0x205F | 0x3000)
 }
 // Where the HYPHEN PIECE starting at `u` ends: after the first hyphen the word may break at, which the piece
-// keeps (`well-known` is `well-` then `known`), or at the word's end where there is none — the oracle's
-// `hyphenPieces`. Only hyphens cut here: a wide character inside a piece is the unit loop's business, not this
-// one's, so the two cuts compose the way `breakUnits` composes them.
-// A RUN of soft hyphens is ONE opportunity, ending the piece after the last of them: the oracle splits on each and
-// drops the empty parts between (`aa&shy;&shy;bb` is `aa` then `bb`), where cutting after the first made the second a
-// zero-wide piece of its own that decided the hyphen against nothing (Chrome: 88 tall where native said 66).
+// keeps (`well-known` is `well-` then `known`), or at the word's end where there is none. Only hyphens cut here: a
+// wide character inside a piece is the unit loop's business (`break_unit_len`), not this one's, and the two cuts
+// compose: hyphen pieces first, then units within each.
+// A RUN of soft hyphens is ONE opportunity, ending the piece after the last of them (`aa&shy;&shy;bb` is `aa` then
+// `bb`): cutting after the first would make the second a zero-wide piece of its own that decides the hyphen against
+// nothing (Chrome: 88 tall where that cut gives 66).
 fn hyphen_piece_end(text: &[u16], u: usize, end: usize) -> usize {
     match (u..end).find(|&k| text[k] == SOFT_HYPHEN || hyphen_breaks_after(text, k, end)) {
         Some(k) if text[k] == SOFT_HYPHEN => (k..end).find(|&j| text[j] != SOFT_HYPHEN).unwrap_or(end),
@@ -3654,12 +3537,12 @@ fn trailing_shys(text: &[u16]) -> usize {
 }
 // A SOFT hyphen (U+00AD) is zero-wide (`font::zero_width`) and an opportunity wherever it sits; where the line breaks
 // at it, it shows a hyphen — the bare `-` advance of its run's font, no letter-spacing after it (Chrome: `aaaa&shy;bbbb`
-// under `letter-spacing: 2px` breaks at 56.02, not 58) — the oracle's `hyphenWidth`.
+// under `letter-spacing: 2px` breaks at 56.02, not 58).
 const SOFT_HYPHEN: u16 = 0xAD;
 fn soft_hyphen_width(run: &Run) -> Option<f64> {
     measure_word(&Run { ls: 0.0, ws: 0.0, ..*run }, &[0x2D])
 }
-// The next break UNIT at `u` in `text[..end]`, as the oracle's `charUnits` cuts one: a WIDE character is its
+// The next break UNIT at `u` in `text[..end]`: a WIDE character is its
 // own — which is what makes a Japanese paragraph wrap at all, having no spaces to break at — under `per_char`
 // (`word-break: break-all`, `overflow-wrap: anywhere`) every character is one (but for the punctuation break-all's
 // own rules glue to it, below), and otherwise a maximal run of
@@ -3738,9 +3621,8 @@ fn attaches(cp: u32) -> bool {
         || (0xE0020..=0xE007F).contains(&cp)
 }
 // A UTF-16 unit whose code point is a WIDE character, and so a break unit of its own. One definition, shared
-// with the metrics (`font::is_wide_char`): a second copy drifted once already — it counted a high surrogate as
-// wide, which made every astral emoji its own break unit and split a ZWJ sequence into three full-em glyphs,
-// where the oracle's `isWideChar` is BMP-only.
+// with the metrics (`font::is_wide_char`, BMP-only): a second copy that counted a high surrogate as wide would
+// make every astral emoji its own break unit and split a ZWJ sequence into three full-em glyphs.
 fn is_wide_unit(u: u16) -> bool {
     crate::font::is_wide_char(u as u32)
 }
@@ -3783,7 +3665,7 @@ impl FloatCtx {
 }
 
 // The band [l, r] a line or box of height `h` starting at `y` has to itself: the content edges
-// [left, right] moved in by every float overlapping [y, y + max(h, 1)). Mirrors layout.js floatBand.
+// [left, right] moved in by every float overlapping [y, y + max(h, 1)).
 fn float_band(items: &[FloatItem], y: f64, h: f64, left: f64, right: f64) -> (f64, f64) {
     let mut l = left;
     let mut r = right;
@@ -3805,7 +3687,7 @@ fn float_band(items: &[FloatItem], y: f64, h: f64, left: f64, right: f64) -> (f6
 
 // The first y at or below `y` where a band of height `h` is at least `w` wide (§9.5.1 rule 3) — where a
 // float that doesn't fit beside the ones there drops to, and where a line too narrow for its first word
-// starts. The band only widens at a float bottom, so this scans those, not pixels. Mirrors floatFitY.
+// starts. The band only widens at a float bottom, so this scans those, not pixels.
 fn float_fit_y(items: &[FloatItem], y: f64, w: f64, left: f64, right: f64, h: f64) -> f64 {
     if items.is_empty() {
         return y;
@@ -3820,14 +3702,14 @@ fn float_fit_y(items: &[FloatItem], y: f64, w: f64, left: f64, right: f64, h: f6
     for &at in &stops {
         let (bl, br) = float_band(items, at, h, left, right);
         if br - bl >= w - LINE_FIT_EPS {
-            return at; // (…to the line's tolerance: the oracle's `floatFitY` says why)
+            return at; // (…to the line's tolerance, `LINE_FIT_EPS`: a float exactly as wide as the band fits it)
         }
     }
     *stops.last().unwrap()
 }
 
-// Where a box with `clear` starts: at or below every float bottom on the side(s) it named. Mirrors
-// clearanceY (clear: CLEAR_LEFT / CLEAR_RIGHT / CLEAR_BOTH).
+// Where a box with `clear` starts: at or below every float bottom on the side(s) it named (`clear`:
+// CLEAR_LEFT / CLEAR_RIGHT / CLEAR_BOTH).
 fn clearance_y(items: &[FloatItem], y: f64, clear: u8) -> f64 {
     let mut out = y;
     for f in items {
@@ -3854,7 +3736,7 @@ struct FloatBox {
 }
 // Lay a float's subtree out (in a fresh context — a float starts its own BFC) in `content_w` of room. §10.3.5: its
 // AUTO width SHRINKS TO FIT where a block's fills — its min-content widened to the room its containing block leaves
-// it (its own margins off, as the oracle's `avail`), capped at its max-content, and then through `used_width` for
+// it (its own margins off), capped at its max-content, and then through `used_width` for
 // its min/max and the border-box floor like any declared one. That is `block_child_width`'s own `fit-content` arm,
 // and an intrinsic-size KEYWORD on a float wants the same treatment as on any other box, so the one helper answers
 // both — reading only `is_auto` would send `width: max-content` down the fit-content path, which is the same answer
@@ -3917,7 +3799,7 @@ fn place_float(items: &mut Vec<FloatItem>, f: &FloatBox, top0: f64, cl: f64, cr:
 }
 
 // The lowest edge any float reaches — what a box that CONTAINS its floats (started the context) grows
-// to. -inf when there are none, so `max` with the flow bottom is a no-op. Mirrors floatsBottom.
+// to. -inf when there are none, so `max` with the flow bottom is a no-op.
 fn floats_bottom(items: &[FloatItem]) -> f64 {
     let mut b = f64::NEG_INFINITY;
     for f in items {
@@ -3972,13 +3854,12 @@ impl CMargin {
     }
 }
 
-// What a measured node exposes to its parent: its collapsed top and bottom margins (each a set, so the
-// parent can go on collapsing), and whether the node collapses THROUGH (empty, no border/padding/height
-// — its top and bottom margins are one and the same, and adjoining margins pass straight through it).
-// `top_only` is the run ABOVE the box's own bottom margin — its top margin joined with its first
-// children's, but NOT its own bottom (§8.3.1). It equals `top` for a non-through box; for a through box
-// it is where the box is PLACED (its bottom margin still folds on to the next sibling), the oracle's
-// `topOnly` — so a `margin-top:5; margin-bottom:40` empty spacer sits 5 below, not 40.
+// What a measured node exposes to its parent: its collapsed top and bottom margins (each a set, so the parent can go on
+// collapsing), and whether the node collapses THROUGH (empty, no border/padding/height — its top and bottom margins are
+// one and the same, and adjoining margins pass straight through it). `top_only` is the run ABOVE the box's own bottom
+// margin — its top margin joined with its first children's, but NOT its own bottom (§8.3.1). It equals `top` for a
+// non-through box; for a through box it is where the box is PLACED (its bottom margin still folds on to the next
+// sibling) — so a `margin-top:5; margin-bottom:40` empty spacer sits 5 below, not 40.
 #[derive(Clone, Copy)]
 struct MInfo {
     top: CMargin,
@@ -3987,20 +3868,19 @@ struct MInfo {
     collapse_through: bool,
 }
 
-// ── The measure cache ──────────────────────────────────────────────────────────────────────────────────────────────
-// A KEPT subtree — one the walk put back whole from a chunk (`dom.rs` `Chunk`), not one of whose records changed —
-// measured under the same record for its root (where it stands in the pass aside: `Input::at_rest`), at the same width
-// and imposed height and at the same place in its formatting context's frame, with no float of an outer context to
-// meet and none of its own leaving, lays out exactly as it did last time: the same boxes relative to its root, the
-// same writes into its records (the percentages its boxes resolve for their children), the same fragments on its lines
-// and the same count of indefinite percentage heights read. So the first such measure of a chunk is KEPT and a later
-// one under the same conditions PUT BACK (`measure`), instead of laying the subtree out again: a text edit relaid every
-// row of a 1,500-row list to change one. Kept per chunk (a few conditions each: a flex item is measured at more than
-// one size in a pass) and dropped with the chunk.
-// What a put-back measure does NOT reproduce, on purpose: the intrinsic-width memo (`IW_MEMO`, pass-local — a later
-// question asks again), and in the records it writes back, every field that names a POSITION in this pass — a
-// record's parent, its run and grid start (the chunk may sit elsewhere than when it was kept) and the containing block
-// an out-of-flow box names (this pass's patch, read only by `place`).
+// ── The measure cache ────────────────────────────────────────────────────────────────────────────────────────────── A
+// KEPT subtree — one the walk spliced back whole from the last kept pass (`walk.rs` `Prior`), not one of whose records
+// changed — measured under the same record for its root (where it stands in the pass aside: `Input::at_rest`), at the
+// same width and imposed height and at the same place in its formatting context's frame, with no float of an outer
+// context to meet and none of its own leaving, lays out exactly as it did last time: the same boxes relative to its
+// root, the same writes into its records (the percentages its boxes resolve for their children), the same fragments on
+// its lines and the same count of indefinite percentage heights read. So the first such measure of a chunk is KEPT and
+// a later one under the same conditions PUT BACK (`measure`), instead of laying the subtree out again: a text edit
+// relaid every row of a 1,500-row list to change one. Kept per chunk (a few conditions each: a flex item is measured at
+// more than one size in a pass) and dropped with the chunk. What a put-back measure does NOT reproduce, on purpose: the
+// intrinsic-width memo (`IW_MEMO`, pass-local — a later question asks again), and in the records it writes back, every
+// field that names a POSITION in this pass — a record's parent, its run and grid start (the chunk may sit elsewhere
+// than when it was kept) and the containing block an out-of-flow box names (this pass's patch, read only by `place`).
 pub(crate) struct Measured {
     root: Input,
     w: u64,
@@ -4320,8 +4200,8 @@ fn measure_uncached(
     let content_top_rel = n.bt + n.pt;
     let content_w = n.content_w(w);
     // This box is its in-flow children's containing block: their percentage sizes resolve against its content
-    // width and — where it is definite — its content height (a flex COLUMN's main size, floor included), which is
-    // what the oracle hands `usedSize` for them. Resolved afresh on every measure, so a box measured again at
+    // width and — where it is definite — its content height (a flex COLUMN's main size, floor included). Resolved
+    // afresh on every measure, so a box measured again at
     // another width or under an imposed height hands them the box it has now.
     // …with ONE exception, and it is a table cell's first pass (§17.5.3). A cell holding a percentage-height
     // descendant is laid out TWICE — first to SIZE it, with those descendants treated as AUTO so they cannot
@@ -4364,11 +4244,10 @@ fn measure_uncached(
         boxes[i].w = w;
         boxes[i].h = h;
         boxes[i].auto_height = false;
-        // The oracle asks a replaced box for its baseline through TWO functions that do not agree, so native
-        // keeps the two answers apart. `boxBaselineOffset` — what a container's baseline scan takes from it —
-        // gives the CHROME's baseline where the control draws text and NOTHING otherwise. `atomicBaselineOffset`
-        // — what it hands the line it sits on — gives `controlBaseline` for any replaced box, which for one that
-        // draws no text is its border-box bottom (a checkbox, a radio, a range, an image input, and every
+        // A replaced box has TWO baselines that do not agree, so the two answers are kept apart. What a container's
+        // baseline scan takes from it is the CHROME's baseline where the control draws text and NOTHING otherwise.
+        // What it hands the line it sits on is its control baseline (`control_baseline`) for any replaced box,
+        // which for one that draws no text is its border-box bottom (a checkbox, a radio, a range, an image input, and every
         // non-control replaced box; only an `<img>` has none, and a box that SCROLLS is answered before this
         // — which is why a `<textarea>` gives none: it scrolls, not because it draws no text).
         let chrome = match n.control_baseline {
@@ -4379,15 +4258,15 @@ fn measure_uncached(
         boxes[i].first_baseline = chrome;
         boxes[i].last_baseline = chrome;
         // …including what a PARENT's inline-block baseline scan takes from this box, which is the same
-        // `boxBaselineOffset` answer. The atomic's own contribution to its LINE is the other one, and only the
+        // box-scan answer. The atomic's own contribution to its LINE is the other one, and only the
         // line site asks for it (see `line_layout`'s native-atomic loop).
         boxes[i].inline_block_baseline = chrome;
         let top = CMargin::of(Input::m(n.mt));
         return MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false };
     }
 
-    // A flex container (§9.7): the item SIZING is resolved JS-side (each item's used main/cross size rides
-    // its width/height); native does only the placement — main-axis distribution + cross-axis alignment.
+    // A flex container (§9.7): `measure_flex` sizes the items (resolving the flexible lengths) and places them —
+    // main-axis distribution + cross-axis alignment.
     if n.display == DISPLAY_FLEX {
         return measure_flex(i, w, imposed_h, inputs, runs, run_texts, grids, children, boxes, failed);
     }
@@ -4408,7 +4287,7 @@ fn measure_uncached(
     // A text block (inline formatting context): its content height is the greedy line layout over its
     // run sequence, measured natively (font.rs) with no per-run crossing. Its runs are
     // runs[run_start..run_start+run_count]; its only child records are the atomic inlines it lays out itself.
-    // If it can't be measured (bad font / tab / combining / CJK / mixed-font word), flag the pass for JS.
+    // If it can't be measured, the pass fails (`failed`) and declines.
     if n.display == DISPLAY_TEXT_BLOCK {
         // The block's content edges and top in the float context's (owner's) frame — the lines route
         // around any floats that overlap them. `fc.items` is empty for the ordinary text block, and then
@@ -4423,9 +4302,9 @@ fn measure_uncached(
             // margins; a declared width wins), laid out at that width, hanging from its own inline-block baseline
             // (its bottom margin edge when it has no line, or scrolls) plus its top margin, raised by the baseline
             // SHIFT the run carries in `asc` — or, aligned against the parent's font box, where that alignment puts
-            // its margin box: the oracle's `growAtomic` / `atomicBaselineOffset` / `alignedAscent`.
+            // its margin box.
             // The settled margin box, ascent and outer height ride a copy of the run stream (taken only when
-            // there is such an atomic), which `line_layout` places like any pushed atomic.
+            // there is such an atomic), which `line_layout` places like any other atomic.
             let has_native_atomic = runs[rs..re].iter().any(|r| r.kind == RUN_ATOMIC && r.font >= 0);
             let mut owned: Vec<Run> = if has_native_atomic { runs[rs..re].to_vec() } else { Vec::new() };
             for r in owned.iter_mut() {
@@ -4440,11 +4319,10 @@ fn measure_uncached(
                 } else if !is_auto(k.width) {
                     0.0 // a declared width discards it — and asking would walk a subtree for nothing (see place_out_of_flow)
                 } else {
-                    // …else it shrink-to-fits in the block's own content width (the oracle's inline-level path
-                    // passes that as both the room and the percentage basis) — and an intrinsic-size KEYWORD takes
-                    // the figure it names. (For min / max-content that is the figure the shrink-to-fit width was
-                    // already pinned to; `fit-content` clamps that width again as the oracle's `usedSize` clamps its
-                    // `autoW`, so the float steps are the oracle's too.)
+                    // …else it shrink-to-fits in the block's own content width (both the room and the percentage
+                    // basis) — and an intrinsic-size KEYWORD takes the figure it names. (For min / max-content that is
+                    // the figure the shrink-to-fit width was already pinned to; `fit-content` clamps the shrink-to-fit
+                    // width again.)
                     let sized = shrink_to_fit_width(c, content_w, inputs, runs, run_texts, grids, children).and_then(|stf| {
                         if k.width_kw == 0 { Some(stf) } else { content_sized_width(c, stf, inputs, runs, run_texts, grids, children) }
                     });
@@ -4459,17 +4337,16 @@ fn measure_uncached(
                 let w = used_width(&k, auto_w);
                 measure(c, w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                 let h = boxes[c].h;
-                // The oracle's `atomicBaselineOffset`: a box that SCROLLS has no baseline of its own (CSS Align
+                // The baseline the atomic hands its line: a box that SCROLLS has no baseline of its own (CSS Align
                 // §9 reads one off its border box) except a button, which is a button however it scrolls —
-                // and everything else hands over its own. A REPLACED box is not the exception it used to look
-                // like: `inline_block_baseline` is already None for the ones that have none (an image, a
-                // chromeless control) and the CHROME's baseline for the ones that do, which is what
-                // `controlBaseline` gives the oracle. Refusing it here hung a text-drawing control from its
-                // bottom margin edge and grew every line it sat on by its descent.
+                // and everything else hands over its own. For a REPLACED box `inline_block_baseline` is None for
+                // the ones that have none (an image, a chromeless control) and the CHROME's baseline for the ones
+                // that do. Refusing it here would hang a text-drawing control from its bottom margin edge and grow
+                // every line it sat on by its descent.
                 let own = if k.scrolls_y && !k.is_button {
                     None
                 } else if k.replaced {
-                    // `atomicBaselineOffset` asks `controlBaseline` of ANY replaced box, which is its
+                    // The line takes the control baseline of ANY replaced box, which is its
                     // border-box bottom where the control draws no text (kind 4) — not the `None` that the
                     // box-scan answer carries for one. Only an `<img>` (kind 0) has no baseline at all.
                     match k.control_baseline {
@@ -4481,7 +4358,7 @@ fn measure_uncached(
                     boxes[c].inline_block_baseline
                 };
                 // The run's `line_height` / `metric` slots arrive as the alignment code and the parent-font figure
-                // it reads (`nlAtomicAlignment`), and leave as the box's outer height and advance.
+                // it reads (the walk's `vertical_align`), and leave as the box's outer height and advance.
                 let outer = h + mt + mb;
                 let parent_figure = r.metric;
                 r.asc += match r.line_height as u8 {
@@ -4494,10 +4371,9 @@ fn measure_uncached(
                 r.metric = w + ml + mr;
                 r.line_height = outer;
                 // An auto-width WRAPPING flex container is then GROWN to what its own layout reached — its lines
-                // can add up past the intrinsic figure (two columns of 50 and 80 make 130) — as the oracle's
-                // atomic placement grows it from `_lbFlowRight`. After the line has decided where it breaks,
-                // which the oracle decided on the width it reserved: the growth rides `size` (a slot no atomic
-                // reads) and only moves the pen.
+                // can add up past the intrinsic figure (two columns of 50 and 80 make 130) — `flow_right`. After
+                // the line has decided where it breaks, on the width it reserved: the growth rides `size` (a slot no
+                // atomic reads) and only moves the pen.
                 if k.display == DISPLAY_FLEX && k.flex_wrap && is_auto(k.width) && k.width_kw == 0 {
                     let reach = flow_right(c, inputs, children, boxes);
                     if reach > boxes[c].w {
@@ -4535,7 +4411,7 @@ fn measure_uncached(
                         let c = r.font as usize;
                         let k = inputs[c].get();
                         // …by its own baseline, or — `vertical-align: top` / `bottom` — against the edge of the
-                        // line box the close settled. The oracle's `dy` in `forceBreak`, exactly.
+                        // line box the close settled.
                         let dy = match r.line_mode {
                             1 => 0.0,
                             2 => a.line_h - r.line_height,
@@ -4545,8 +4421,8 @@ fn measure_uncached(
                         boxes[c].y = content_top_rel + a.line_top + dy + Input::m(k.mt);
                     }
                     // …and each OUT-OF-FLOW child records its STATIC POSITION, which is what the flow would
-                    // have given it: the inline offset it interrupted and the top of that line (measured off
-                    // the oracle — after `hello ` on a 200px block it is x = 57.6, y = 0; wrapped onto the
+                    // have given it: the inline offset it interrupted and the top of that line (after
+                    // `hello ` on a 200px block it is x = 57.6, y = 0; wrapped onto the
                     // second line, x = 153.6, y = 22; under `text-align: right`, the aligned offset). Same
                     // contract as block flow's `(content_left_rel, cursor)`, which `place_out_of_flow` reads
                     // once every box is final.
@@ -4574,22 +4450,6 @@ fn measure_uncached(
             failed.set(true);
             0.0
         };
-        // An out-of-flow child the walk REPLAYED (its box is the oracle's, riding the record) is laid out at
-        // that box and positioned by `place` from rec[39..40] — the same two lines block flow gives it. It has
-        // no marker on any line (the walk emits none for it), so nothing here has touched it, and a text block
-        // that never looked at its non-atomic children would have left it a 0x0 box at the origin. The record
-        // says whether there is one, so a page whose text blocks hold none pays a bit read rather than a scan.
-        if n.has_replayed_oof {
-            for &c in &children[i] {
-                let cn = inputs[c].get();
-                if cn.out_of_flow != 0 && !cn.native_oof() {
-                    let cw = resolve_width(&cn, content_w);
-                    measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-                    boxes[c].x = 0.0;
-                    boxes[c].y = 0.0;
-                }
-            }
-        }
         // What the lines alone came to — the auto height, and a table cell's `natural_h` (whose declared height
         // is a FLOOR the content grows past, §17.5.3).
         let flow_h = content_top_rel + content_h + n.pb + n.bb;
@@ -4668,14 +4528,14 @@ fn measure_uncached(
             // few lines up. Measured: `<p>block</p><div abspos></div><p>tail</p>` puts the box at 50 in
             // Chrome and at 34 without this, the `<p>`'s 16px bottom margin missing.
             // (Its OWN margins are still dropped on this path — §10.6.4's static position is the MARGIN
-            // edge, and Chrome puts a `margin-top: 7px; margin-left: 3px` box at 3/57 where both engines
-            // say 0/50. The inset path applies them correctly. Shared, so recorded rather than fixed here.)
-            // Replayed, its subtree is laid out at its pushed border box (in a fresh context — it
-            // establishes a BFC) and its box reset to this block's origin; `place` then positions it by rel_x/rel_y
-            // alone (el._lb − container._lb). Neither touches the cursor / margin / has_child state.
+            // edge, and Chrome puts a `margin-top: 7px; margin-left: 3px` box at 3/57 where this says 0/50. The
+            // inset path applies them correctly. A KNOWN GAP, recorded rather than fixed here.)
+            // One with no containing block in the pass (`CB_NONE`) has its subtree laid out at its own width (in a
+            // fresh context — it establishes a BFC) and its box reset to this block's origin; `place` then positions
+            // it by rel_x/rel_y alone. Neither touches the cursor / margin / has_child state.
             if cn.native_oof() {
                 // That cursor is a LINE cursor: it starts in the band a float leaves at this y — asked over a
-                // LINE BOX's height, as `line_layout` asks it and as `retakeBand` does, so a float whose band
+                // LINE BOX's height, as `line_layout` asks it, so a float whose band
                 // starts just below the cursor is not missed — and it carries the block's FIRST-LINE INDENT
                 // until an in-flow child spends it (an out-of-flow box is not a child that does). An rtl flow
                 // reads neither: its corner is the content's right edge.
@@ -4746,8 +4606,8 @@ fn measure_uncached(
             if cn.clear != 0 {
                 // Measure FIRST, in an empty context — the general path's probe: only the COLLAPSING top margin
                 // (cm.top_only) comes out of it — its own margin joined with any a first descendant folds
-                // through its open top edge — which is what the oracle advances the flow by
-                // (collapsingTopMargin); the own declared margin alone would drop the descendant's.
+                // through its open top edge — which is what the flow advances by; the own declared margin
+                // alone would drop the descendant's.
                 let cm = measure(c, width_in(c, content_w), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                 if cm.collapse_through {
                     // A cleared box that collapses THROUGH — the clearfix `<div style="clear: both">` — does
@@ -4755,7 +4615,7 @@ fn measure_uncached(
                     // (§8.3.1), from where the last border box ended, and the box sits past the margins above
                     // it there. Its run then stays open past the line for whatever follows. Under an open top
                     // edge one that takes clearance ends the hoisting: its run was never part of this block's
-                    // margin (`marginInfo` stops at it), so it opens here and the next child is placed below
+                    // margin (the margin run stops at it), so it opens here and the next child is placed below
                     // it — which is also why a block holding floats and a clearfix is as tall as its floats.
                     let spent = first && top_open;
                     let clear_to = clearance_y(&ctx.items, cursor, cn.clear);
@@ -4810,9 +4670,8 @@ fn measure_uncached(
                     // Chrome asks the question two ways and this is one of them (measured, 153, ~80 shapes —
                     // the campaign memory has the matrix): a float placed while this block was laid out
                     // separates whatever its geometry, an INHERITED one only where it reaches below the box.
-                    // Reading the second like the first is a bounded gap both engines share on purpose: it is
-                    // the answer they can both give, and making it geometric means making the oracle's margin
-                    // HOIST geometric, which runs before a single float is placed.
+                    // Reading the second like the first is a bounded KNOWN GAP: making it geometric means making
+                    // the margin HOIST geometric, and that runs before a single float is placed.
                     let y0 = if first && top_open {
                         if !cn.takes_clearance {
                             top_m.merge(cm.top);
@@ -4825,8 +4684,8 @@ fn measure_uncached(
                     let y = clearance_y(&ctx.items, y0, cn.clear);
                     // One that starts its own context meets the floats only as the band they leave at the
                     // clearance line: placed there exactly as the BFC arm below places one from the flow. Past
-                    // every float that band is the whole content width — the oracle's own `band == null`, auto
-                    // margins and legacy alignment included — and the measure above already laid it out in it.
+                    // every float that band is the whole content width — auto margins and legacy alignment
+                    // included — and the measure above already laid it out in it.
                     if cn.starts_bfc {
                         if y < floats_bottom(&ctx.items) {
                             place_beside_floats!(y);
@@ -4846,7 +4705,7 @@ fn measure_uncached(
                     // side it does not name still reaches that line (§9.5 routes the LINES inside it round one
                     // that does). Past every float it still is not an empty context: a descendant a negative
                     // margin pulls ABOVE the clearance line meets the floats there, and clears them or wraps round
-                    // them (the oracle, which lays the box out in the shared context, does both).
+                    // them, so the box is laid out in the shared context, read in its own frame.
                     let child_w = width_in(c, content_w);
                     let across = block_child_across(&n, &cn, content_left_rel, content_left_rel + content_w, child_w);
                     let cx = across.x;
@@ -4896,7 +4755,7 @@ fn measure_uncached(
                     cursor + pending.value()
                 };
                 // In an rtl block a NARROWER text block sits at the inline-start = RIGHT (its right edge at
-                // content_right - margin_right), mirroring the no-float placement below. A full-width one lands
+                // content_right - margin_right), as the no-float placement below puts it. A full-width one lands
                 // back at content_left either way. `child_w` is its border box (`boxes[c].w` isn't set until the
                 // measure below). Its lines still route around the floats through the shared `ctx`.
                 let child_w = width_in(c, content_w);
@@ -4939,8 +4798,8 @@ fn measure_uncached(
         // Asked of the CONTEXT, never of the child's own top: a descendant pulled ABOVE that top by a
         // negative margin meets floats the child's border box never reaches (a `margin-top:-40px` pull-up
         // under a box starting below the float laid its text out full width where Chrome wraps it round).
-        // Measured, native alone: one 1px float in a block costs ~3x over an 8191-node subtree under it
-        // (+6% of a whole shadow pass, which the JS walk dominates), ~2.5x on a page-shaped one. The factor
+        // Measured: one 1px float in a block costs ~3x over an 8191-node subtree under it, ~2.5x on a
+        // page-shaped one. The factor
         // grows with nesting DEPTH, not with how far the float reaches — a translated context stays
         // non-empty all the way down, and a 1px float measures the same as a 3000px one — but only through
         // NON-first children: a chain of first children under open top edges needs no probe at all and
@@ -4970,13 +4829,13 @@ fn measure_uncached(
             // The floats were translated to the position the probe's margin gave the box; if this measure
             // would put it anywhere else, that translation is stale and so is everything laid out against it.
             // A BACKSTOP, and deliberately so: a margin that depends on the floats around it is the thing
-            // this design cannot have, and the one case that produced one — a cleared descendant, whose
-            // margin the clear arm dropped only when the floats were in hand — was fixed at the source by
-            // putting that answer on the record. Nothing known reaches this now; it stays because the
-            // alternative to a decline here is a box laid out against a frame nobody believes.
+            // this design cannot have, and the one case known to produce one — a cleared descendant, whose
+            // margin would depend on whether the floats were in hand — is answered on the record instead
+            // (`takes_clearance`). Nothing known reaches this; it stays because the alternative to a decline
+            // here is a box laid out against a frame nobody believes.
             // It compares the POSITION rather than the margins on purpose: a run joins `pos` and `neg`
             // independently, so two different margin sets can share a value and still place the box
-            // differently — reading `CMargin::value()` here was 10px of silent wrongness.
+            // differently — reading `CMargin::value()` here would be 10px of silent wrongness.
             if let Some(p) = probe {
                 let cy2 = cursor + pending.peek(cm2.top_only);
                 if cm2.collapse_through != p.collapse_through || (cy2 - cy).abs() > 0.01 {
@@ -5027,11 +4886,10 @@ fn measure_uncached(
                 pending = cm.top;
             } else if cm.collapse_through {
                 // …and a child that collapses THROUGH leaves the run where it put it — in the parent's own
-                // top margin — without also pushing the next sibling with it, which counted it twice (a
-                // `margin: 20px 0` empty box followed by a `margin: 15px 0` one put the second at 40 where
-                // Chrome and the oracle say 20). The next sibling is still the FIRST whose top joins the
-                // parent's, exactly as the oracle's `topOnly` loop keeps joining while children come back
-                // through: leave `first` alone and `pending` empty.
+                // top margin — without also pushing the next sibling with it, which would count it twice (a
+                // `margin: 20px 0` empty box followed by a `margin: 15px 0` one would put the second at 40 where
+                // Chrome says 20). The next sibling is still the FIRST whose top joins the parent's — the run
+                // keeps joining while children come back through: leave `first` alone and `pending` empty.
             } else {
                 cursor = content_top_rel + boxes[c].h;
                 pending = cm.bottom;
@@ -5057,7 +4915,7 @@ fn measure_uncached(
         }
     }
 
-    // The block's baselines: the first / last in-flow, non-floated child that has one (`baselineCandidates`).
+    // The block's baselines: the first / last in-flow, non-floated child that has one (`child_baselines`).
     let (fb, lb, ib) = child_baselines(children[i].iter().copied(), inputs, boxes);
     boxes[i].first_baseline = fb;
     boxes[i].last_baseline = lb;
@@ -5081,7 +4939,7 @@ fn measure_uncached(
         let floats_to = if n.starts_bfc { floats_bottom(&ctx.items) } else { f64::NEG_INFINITY };
         // The CONTENT height is what floors at zero — a net-negative run of collapse-through children can
         // leave the flow ABOVE the content top, and the block is then zero-content-tall, not zero-tall: its
-        // own padding and borders still take their room (`grown` in the oracle).
+        // own padding and borders still take their room.
         content_top_rel + (flow_bottom.max(floats_to) - content_top_rel).max(0.0) + n.pb + n.bb
     } else {
         f64::NAN
@@ -5112,7 +4970,7 @@ fn measure_uncached(
     // to its neighbours — when it has no border/padding, an adjoining height and min-height (auto or
     // zero, per the DECLARATION), a zero box, and every in-flow child itself collapses through (so a
     // childless empty block, and a wrapper whose children are all empty, both collapse; a text-block or
-    // sized child stops it). Mirrors the oracle's `marginInfo(el).through`.
+    // sized child stops it).
     let collapse_through = !n.starts_bfc
         && n.height_adjoins
         && n.minh_adjoins
@@ -5130,20 +4988,16 @@ fn measure_uncached(
     MInfo { top: top_m, top_only: top_m, bottom: bottom_m, collapse_through: false }
 }
 
-// Native flex PLACEMENT for a `row` OR `column` (§9.7), nowrap or wrap, main axis forward or reversed, in any
-// writing mode — `flex_main_is_x` is the PLAN's answer (`flexAxisPlan`), so a vertical row arrives here as a
+// Flex layout for a `row` OR `column` (§9.7), nowrap or wrap, main axis forward or reversed, in any writing
+// mode — `flex_main_is_x` is the PLAN's answer (the walk's `FlexPlan`), so a vertical row arrives here as a
 // main-Y layout and needs no mode of its own.
-// The item SIZING is resolved JS-side — each item's used main and cross size rides its record (width/height,
-// swapped by `flex_main_is_x`), like a float's shrink-to-fit width — so this only DISTRIBUTES the items on
-// the MAIN axis (justify-content + gap + main-axis auto margins) and ALIGNS them on the CROSS axis
-// (align-items/self + cross-axis auto margins), then sizes the container's own box (clamping a ROW's box
-// height by min/max-height — two-phase, so an auto-height row's items stay content-aligned). Each item's
-// subtree is laid out by the ordinary `measure` at its pushed border-box, in
-// a fresh float context (an item is its own formatting context). Mirrors layoutFlexRow / layoutFlexColumn /
-// stackFlexLines / crossAlignPhysical / autoMarginSplit. The harness bails a cross axis running bottom→top,
-// one running right→left that also wraps or carries a cross auto margin, wrap-reverse, `position: sticky`, a
-// WRAPPING auto-height column with a max-height, unsupported-nested-flex and replaced.
-// CSS Flexbox §9.7, "resolve the flexible lengths" — the oracle's `resolveFlexibleLengths`: the line's free
+// `measure_flex` SIZES the items (`flex_row_sizes` / `flex_column_sizes`: flex base, clamps, line breaking,
+// grow / shrink), DISTRIBUTES them on the MAIN axis (justify-content + gap + main-axis auto margins) and ALIGNS
+// them on the CROSS axis (align-items/self + cross-axis auto margins), then sizes the container's own box
+// (clamping a ROW's box height by min/max-height — two-phase, so an auto-height row's items stay
+// content-aligned). Each item's subtree is laid out by the ordinary `measure` at its resolved border box, in a
+// fresh float context (an item is its own formatting context).
+// CSS Flexbox §9.7, "resolve the flexible lengths": the line's free
 // space goes to (or comes from) the items in proportion to their factors, each result clamped by that item's
 // own minimum and maximum (`clamp_of`). Which way the line flexes is decided ONCE, from the HYPOTHETICAL sizes
 // (each base already clamped). An item that cannot flex that way, or whose base already violates its clamp in
@@ -5212,16 +5066,14 @@ fn resolve_flexible_lengths(bases: &[f64], inner: &[f64], grow: &[f64], shrink: 
     sizes
 }
 
-// A flex ROW's item widths, resolved natively — the oracle's `flexRowMetrics` + `resolveFlexRowWidths` per
-// line. `flow` indexes the in-flow items (positions into `kids`); `lines` groups them. Each item's flex BASE is,
-// in the spec's order, its `flex-basis` (a length, or an intrinsic keyword answered from its content), else its
-// declared width (unless the basis is `content`), else its content's max-content (`intrinsic_widths`) — and
-// whether that base came FROM the content, in which case it is its own minimum and no floor can bind. The
-// automatic minimum (`min-width: auto`) is the item's min-content — zero when it scrolls in the main axis —
-// applied only where it can bind; a declared min/max-width clamps on top (max first, §4.5). What an item's
-// lines have left is shared by `resolve_flexible_lengths` — an item that measured nothing being 0 wide, as in Chrome
-// and Firefox (the oracle's `resolveFlexRowWidths`). Returns the per-position width, or None when an item's
-// content isn't natively measurable (the JS gate should have routed the container to the pushed path).
+// A flex ROW's item widths, per line. `flow` indexes the in-flow items (positions into `kids`); `lines` groups them.
+// Each item's flex BASE is, in the spec's order, its `flex-basis` (a length, or an intrinsic keyword answered from its
+// content), else its declared width (unless the basis is `content`), else its content's max-content
+// (`intrinsic_widths`) — and whether that base came FROM the content, in which case it is its own minimum and no floor
+// can bind. The automatic minimum (`min-width: auto`) is the item's min-content — zero when it scrolls in the main axis
+// — applied only where it can bind; a declared min/max-width clamps on top (max first, §4.5). What an item's lines have
+// left is shared by `resolve_flexible_lengths` — an item that measured nothing being 0 wide, as in Chrome and Firefox.
+// Returns the per-position width, or None when an item's content can't be measured (the caller then fails the pass).
 fn flex_row_sizes(
     kids: &[usize],
     flow: &[usize],
@@ -5266,7 +5118,7 @@ fn flex_row_sizes(
             content_based[p] = true;
             // What the item's CONTENT wants, its BASIS-LESS edges corrected to the real ones: a percentage
             // padding resolves against nothing in an intrinsic measure but against this container's content width
-            // in the item's box (the oracle's `flexRowMetrics`). The two arms differ in BOTH of the ways that
+            // in the item's box. The two arms differ in BOTH of the ways that
             // matters: `flex-basis: content` looks PAST a declared width, which only `content_intrinsic` does
             // (`intrinsic_widths` would pin the base to it) — and it answers a CONTENT width, so the real edges
             // go on whole, where `intrinsic_widths` already carries the basis-less ones. Using `content_intrinsic`
@@ -5280,8 +5132,7 @@ fn flex_row_sizes(
         };
     }
     // The automatic minimum (`min-width: auto`), measured at most once per item and only where the clamp can
-    // ask for it — the oracle measures lazily, at the first round that shrinks an item below its base. A
-    // content-based item's base is its own maximum, so its floor is asked only once its line SHRINKS; every
+    // ask for it. A content-based item's base is its own maximum, so its floor is asked only once its line SHRINKS; every
     // other auto-minimum item's floor is asked by its hypothetical size.
     let floor_of = |p: usize, inputs: &[Cell<Input>]| -> Option<f64> {
         let c = kids[p];
@@ -5308,7 +5159,7 @@ fn flex_row_sizes(
         }
         out
     };
-    // Lines are broken on the HYPOTHETICAL outer sizes (each base clamped) — `flexLines`. A content-based
+    // Lines are broken on the HYPOTHETICAL outer sizes (each base clamped). A content-based
     // item's hypothetical size is at least its base, so no unmeasured floor is consulted here.
     let clamp_of = |p: usize, size: f64| clamp_with(&min_auto, p, size);
     if wrap && flow.len() > 1 {
@@ -5318,7 +5169,7 @@ fn flex_row_sizes(
         for &p in flow {
             let k = inputs[kids[p]].get();
             let outer = clamp_of(p, base[p]) + Input::m(k.ml) + Input::m(k.mr);
-            if !cur.is_empty() && used + gap + outer > content_w + LINE_FIT_EPS { // (the oracle's `flexLines`)
+            if !cur.is_empty() && used + gap + outer > content_w + LINE_FIT_EPS { // (…to the line's tolerance)
                 ls.push(std::mem::take(&mut cur));
                 used = 0.0;
             }
@@ -5366,7 +5217,7 @@ fn flex_row_sizes(
     Some(widths)
 }
 
-// A flex COLUMN's item sizes, resolved natively — the oracle's `layoutFlexColumn` up to placement. The CROSS axis
+// A flex COLUMN's item sizes, everything up to placement. The CROSS axis
 // first: an item's width is its declared width, else the container's room when it stretches (a single-line
 // column's line IS the container) or its shrink-to-fit width (`intrinsic_widths` clamped to the room), clamped by
 // its min/max-width. Its flex BASE is its `flex-basis` (a length against the main size, content-box per
@@ -5377,8 +5228,8 @@ fn flex_row_sizes(
 // is then widened to its line (`restretched`). Each line's heights are shared by `resolve_flexible_lengths`
 // against the definite main size, or re-resolved against a `min-height` floor the items underrun or a
 // `max-height` cap they overrun. Returns per position (width, height, imposed): `imposed` says the height is
-// handed to the item as definite (the oracle's `imposed` — a definite column, a restretched item, or a height
-// the measure did not already produce); else the item keeps its auto height. `main` is the definite main size
+// handed to the item as definite (a definite column, a restretched item, or a height the measure did not
+// already produce); else the item keeps its auto height. `main` is the definite main size
 // or the min-height floor (NaN = none); `capacity` the size lines break against (NaN = single line).
 fn flex_column_sizes(
     kids: &[usize],
@@ -5417,7 +5268,7 @@ fn flex_column_sizes(
         // A stretched item fills its line — the container, single-line; a multi-line column's line is only as wide
         // as its widest item, so the item starts at its shrink-to-fit width and is re-stretched once the line has
         // a size — except a RATIO box, whose two axes are derived from each other: it takes the container's width
-        // in both paths (the oracle's `ratioBox`).
+        // either way.
         let auto_w = if k.flex_stretch && (!multiline || (k.replaced && k.ratio)) {
             avail_w
         } else {
@@ -5425,7 +5276,7 @@ fn flex_column_sizes(
         };
         width[p] = used_width(&k, auto_w);
         // STRETCH beats an intrinsic size: a replaced item with a size but no ratio (a control, an iframe) is the
-        // line's cross size; a ratio box keeps its own (the oracle re-derives nothing through the ratio).
+        // line's cross size; a ratio box keeps its own (nothing is re-derived through the ratio).
         if k.replaced && !k.ratio && k.flex_stretch && !multiline {
             let extra = if k.border_box { 0.0 } else { k.edges_x() };
             let to_border = |v: f64| if is_auto(v) { v } else { v + extra };
@@ -5452,8 +5303,7 @@ fn flex_column_sizes(
             let reads = INDEF_PCT_H_READS.with(|n| n.get());
             measure(c, width[p], MEASURE_AUTO_HEIGHT, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             // (…except a TABLE with captions, whose flexed main size is the WRAPPER's: imposed, `measure_table` reads it as
-            // the rows' and stacks the captions on top — 72 where the oracle and Chrome keep 50 — so the measure is its
-            // answer, as the oracle's `reuseSubtree` exempts it under `mainImposed`.)
+            // the rows' and stacks the captions on top — 72 where Chrome keeps 50 — so the measure is its answer.)
             let read_indefinite = INDEF_PCT_H_READS.with(|n| n.get()) != reads && !table_has_caption(c, inputs, children);
             measured[p] = Some((boxes[c].h, boxes[c].clamped_h || read_indefinite));
         }
@@ -5488,12 +5338,11 @@ fn flex_column_sizes(
         }
         auto_min[p].unwrap()
     };
-    // The floor is asked wherever the clamp can bind AT THE BASE already — the oracle's `clampOf` measures it
-    // when `known == null || size < known`, `known` being the measure (an item whose base was measured already
-    // holds it) or the declared height: an auto-height item with a basis has no other minimum, and a basis
-    // BELOW a declared height binds on any line. Only a declared-height item at or above its declaration is
-    // measured lazily, where a line SHRINKS it (the oracle's lazy `automaticMinHeight`), so a column of
-    // fixed-height rows costs one layout per item.
+    // The floor is asked wherever the clamp can bind AT THE BASE already — it is measured when nothing is known
+    // or the size is below what is known, that being the measure (an item whose base was measured already holds
+    // it) or the declared height: an auto-height item with a basis has no other minimum, and a basis BELOW a
+    // declared height binds on any line. Only a declared-height item at or above its declaration is measured
+    // lazily, where a line SHRINKS it, so a column of fixed-height rows costs one layout per item.
     for &p in flow {
         if is_auto(inputs[kids[p]].get().min_h) {
             let known = if base_measured[p] { measured[p].map(|m| m.0) } else if is_auto(decl_h[p]) { None } else { Some(decl_h[p]) };
@@ -5531,7 +5380,7 @@ fn flex_column_sizes(
         for &p in flow {
             let k = inputs[kids[p]].get();
             let outer = clamp_of(p, base[p]) + Input::m(k.mt) + Input::m(k.mb);
-            if !cur.is_empty() && used + gap + outer > capacity + LINE_FIT_EPS { // (the oracle's `flexLines`)
+            if !cur.is_empty() && used + gap + outer > capacity + LINE_FIT_EPS {
                 ls.push(std::mem::take(&mut cur));
                 used = 0.0;
             }
@@ -5615,18 +5464,16 @@ fn flex_column_sizes(
         }
         for (j, &p) in line.iter().enumerate() {
             let h = heights[j];
-            // An item that ended up at EXACTLY the height its own measure produced is laid out at that auto
-            // height again, definite column or not — which is what the oracle does by REUSING the measuring
-            // layout. Imposing the same number instead is not a no-op for every box: a TABLE reads an imposed
-            // height as its rows' and stacks its caption on top of it (72 where Chrome and the oracle say 54).
-            // …unless that measure is no answer to a definite question (its own min/max-height CLAMPED it, or a
-            // percentage height in it read the indefinite basis as nothing), in a definite column: the oracle imposes the
-            // height there and will not reuse such a layout for it (`reuseSubtree`), so the content is laid out again
-            // against the height it came to — a `height: 50%` inside a `min-height: 60%` item resolves against the 90
-            // it was floored to (Chrome 45), and a `height: 40%` image in a flexed item against its flexed height.
-            // (A DECLARED height imposes itself only where the base came from it: a `flex-basis: content` / keyword
-            // item's base is its content's, the declaration set aside, and one that comes to exactly that is laid
-            // out at auto like any measured item — Chrome: a `height: 50%` child of a `flex: 1 1 content;
+            // An item that ended up at EXACTLY the height its own measure produced keeps that auto-height layout,
+            // definite column or not. Imposing the same number instead is not a no-op for every box: a TABLE reads an
+            // imposed height as its rows' and stacks its caption on top of it (72 where Chrome says 54). …unless that
+            // measure is no answer to a definite question (its own min/max-height CLAMPED it, or a percentage height in
+            // it read the indefinite basis as nothing), in a definite column: the height is imposed there and the
+            // content is laid out again against the height it came to — a `height: 50%` inside a `min-height: 60%` item
+            // resolves against the 90 it was floored to (Chrome 45), and a `height: 40%` image in a flexed item against
+            // its flexed height. (A DECLARED height imposes itself only where the base came from it: a `flex-basis:
+            // content` / keyword item's base is its content's, the declaration set aside, and one that comes to exactly
+            // that is laid out at auto like any measured item — Chrome: a `height: 50%` child of a `flex: 1 1 content;
             // height: 200px` item that flexed to its 50px content is 0 tall, not 25.)
             let imposed = restretched[p] || (!is_auto(decl_h[p]) && !base_measured[p]) ||
                           measured[p].map_or(true, |(m, stale)| m != h || (height_definite && stale));
@@ -5657,8 +5504,8 @@ fn measure_flex(
     // The gaps' percentage parts resolve here: the MAIN gap against a row's content width or a column's main size
     // (nothing where that is indefinite), the CROSS gap against a row's definite content height or a column's width.
     let main_basis = if main_is_x { content_w } else { n.column_main() };
-    // (…never below zero: a gap is non-negative, and a math function that comes out negative is clamped to it — the
-    // oracle's `axisGap`, and Chrome.)
+    // (…never below zero: a gap is non-negative, and a math function that comes out negative is clamped to it, as
+    // Chrome does.)
     let gap = bounded(
         n.flex_main_gap + if n.flex_main_gap_frac != 0.0 && !is_auto(main_basis) { n.flex_main_gap_frac * main_basis } else { 0.0 },
         n.flex_main_gap_math,
@@ -5671,31 +5518,28 @@ fn measure_flex(
 
     let kids: Vec<usize> = children[i].clone();
     // In-flow item positions (into `kids`). OUT-OF-FLOW children (abspos/fixed, §4.1) are removed from flex
-    // sizing and line breaking — their subtrees are laid out at their pushed box, and they are placed separately.
+    // sizing and line breaking, and placed separately.
     let flow: Vec<usize> = (0..cnt).filter(|&p| inputs[kids[p]].get().out_of_flow == 0).collect();
-    // A ROW sized NATIVELY (`flex_native`): each in-flow item's width is resolved here (`flex_row_sizes` —
-    // base, clamps, line breaking, grow/shrink), and its subtree laid out at that width; the pushed path lays
-    // each item out at its oracle-resolved box. Either way record order == flex order (the harness sorted by
-    // `order`), each item in a fresh float context.
-    // (…an EQUAL-SHARE row is no flex sizing: its items are sized and its one line built below, `share_pos`.)
-    let native_row = n.flex_native && main_is_x && !n.equal_share;
+    // A container that SIZES its items (`flex_native`, which the walk sets on every flex container): each in-flow
+    // item's main size is resolved here (`flex_row_sizes` / `flex_column_sizes` — base, clamps, line breaking,
+    // grow/shrink), and its subtree laid out at it; without it each item is laid out at the box its record
+    // carries. Either way record order == flex order (the walk sorts the items by `order`), each item in a fresh
+    // float context.
+    let native_row = n.flex_native && main_is_x;
     let native_col = n.flex_native && !main_is_x;
     let mut native_lines: Vec<Vec<usize>> = Vec::new();
-    let mut native_line_crosses: Vec<f64> = Vec::new(); // a native multi-line column's NATURAL line crosses
+    let mut native_line_crosses: Vec<f64> = Vec::new(); // a sizing (`flex_native`) multi-line column's NATURAL line crosses
     // Which row items' measures read a percentage height against the indefinite basis (`INDEF_PCT_H_READS`): a stretched
     // one's height is DEFINITE (§9.8), so it is laid out again at it even where it comes to the height it measured.
     let mut read_indefinite = vec![false; cnt];
-    // …and an equal-share row's items' POSITIONING widths (their shares), which are not their boxes.
-    let mut share_pos = vec![f64::NAN; cnt];
     if native_col {
         // The column's main size: its definite content height, else a min-height FLOOR (NaN = none); lines break
         // against the definite height or a max-height CAP (NaN = one line).
         let to_border_y = |v: f64| if is_auto(v) || n.border_box { v } else { v + edges_y };
-        // Definite as the oracle reads it: a declared or imposed height — not a PUSHED auto-height column
-        // (`item_auto_height`), whose record carries its final box but whose main size is still its content.
+        // Definite: a declared or imposed height — not a column measured for its content height
+        // (`item_auto_height`), whose main size is its content whatever it declares.
         let height_definite = n.definite_content_h().is_some();
-        // (…never below the min-height: where the two conflict the minimum wins, CSS 2.2 §10.7 — the oracle's
-        // `maxMainHeight`.)
+        // (…never below the min-height: where the two conflict the minimum wins, CSS 2.2 §10.7.)
         let min_main = if is_auto(n.min_h) || n.min_h < 0.0 { 0.0 } else { (to_border_y(n.min_h) - edges_y).max(0.0) };
         let cap_main = if is_auto(n.max_h) || n.max_h < 0.0 { f64::NAN } else { (to_border_y(n.max_h) - edges_y).max(0.0).max(min_main) };
         let main = n.column_main();
@@ -5709,34 +5553,11 @@ fn measure_flex(
         };
         for &p in &flow {
             let (w_p, h_p, imposed) = sizes[p];
-            // An item whose measure already produced its height keeps that layout (the oracle reuses it); the
-            // rest are laid out at their resolved height, definite.
+            // An item whose measure already produced its height keeps that layout; the rest are laid out at
+            // their resolved height, definite.
             if imposed || boxes[kids[p]].w != w_p {
                 measure(kids[p], w_p, if imposed { h_p } else { f64::NAN }, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             }
-        }
-        for &c in &kids {
-            if inputs[c].get().out_of_flow != 0 && !inputs[c].get().native_oof() {
-                let iw = resolve_width(&inputs[c].get(), content_w);
-                measure(c, iw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-            }
-        }
-    } else if n.equal_share && main_is_x {
-        // An EQUAL SHARE of the row (the oracle's `layoutFlexRow(…, {equalShare})`, an orphan table row): the gaps and
-        // the items' margins come out first, the rest is floored into equal shares, and each item is laid out at its
-        // own used width — a declared one kept, an auto one the share, both clamped by its min/max — where its
-        // POSITION takes the share (`share_pos`, read below). A TABLE is laid out at its share and positioned at
-        // whichever is wider (`growMainSizes`).
-        let taken: f64 = gap * flow.len().saturating_sub(1) as f64
-            + flow.iter().map(|&p| { let k = inputs[kids[p]].get(); Input::m(k.ml) + Input::m(k.mr) }).sum::<f64>();
-        let avail = (content_w - taken).max(0.0);
-        let share = if flow.is_empty() { avail } else { (avail / flow.len() as f64 + LINE_FIT_EPS).floor() };
-        for &p in &flow {
-            let k = inputs[kids[p]].get();
-            let reads = INDEF_PCT_H_READS.with(|n| n.get());
-            measure(kids[p], used_width(&k, share), f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
-            read_indefinite[p] = INDEF_PCT_H_READS.with(|n| n.get()) != reads;
-            share_pos[p] = if k.display == DISPLAY_TABLE { share.max(boxes[kids[p]].w) } else { share };
         }
         for &c in &kids {
             if inputs[c].get().out_of_flow != 0 && !inputs[c].get().native_oof() {
@@ -5774,9 +5595,9 @@ fn measure_flex(
     }
 
     // Per-item OUTER extents (size + the two margins) along the main and cross axes, plus the leading
-    // main/cross margin, parallel to `children[i]` (so the line logic never re-borrows `boxes`). The item
-    // cross sizes are the FINAL (pushed, post-stretch) ones, so a line's cross already includes whatever
-    // align-content:stretch grew it to — native positions the lines, it never re-grows them.
+    // main/cross margin, parallel to `children[i]` (so the line logic never re-borrows `boxes`). These are the
+    // sizes the items were just laid out at: a column's items already widened to their grown lines, a row's
+    // stretched below, once its lines have a cross size.
     let main_reverse = n.flex_main_reverse;
     let (mut mo, mut co, mut ml_lead, mut cl_lead) = (Vec::with_capacity(cnt), Vec::with_capacity(cnt), Vec::with_capacity(cnt), Vec::with_capacity(cnt));
     for &c in &kids {
@@ -5785,8 +5606,7 @@ fn measure_flex(
         // physical side (a row-reverse item's leading margin is its right margin). The cross is forward here,
         // so the leading cross margin is the ordinary near-side one.
         if main_is_x {
-            let pos = share_pos[mo.len()];
-            mo.push(if pos.is_nan() { boxes[c].w } else { pos } + Input::m(cn.ml) + Input::m(cn.mr));
+            mo.push(boxes[c].w + Input::m(cn.ml) + Input::m(cn.mr));
             co.push(boxes[c].h + Input::m(cn.mt) + Input::m(cn.mb));
             ml_lead.push(Input::m(if main_reverse { cn.mr } else { cn.ml }));
             cl_lead.push(Input::m(cn.mt));
@@ -5806,12 +5626,12 @@ fn measure_flex(
     // extent its items are justified within.
     let gap_total = gap * flow.len().saturating_sub(1) as f64;
     let sum_main: f64 = flow.iter().map(|&p| mo[p]).sum();
-    let used_main = sum_main + gap_total; // the items are PUSHED (grow/shrink resolved), so this is final
+    let used_main = sum_main + gap_total; // the items are sized (grow/shrink resolved), so this is final
     // An AUTO-height column's main extent for a run of items `used` tall: a max-height CAPACITY the content overruns
-    // (the items overflow it), else the content floored by min-height. Asked PER LINE, as the oracle's column pass
-    // asks it (`extent = capped ?? max(used, floor)`): a wrapping column broken against a max-height has as many
-    // extents as lines, the box is the TALLEST (`contentExtent`), and each line justifies within its own — where one
-    // extent for all the items made the box the capacity (30 where the oracle and Chrome say 20, the tallest line).
+    // (the items overflow it), else the content floored by min-height. Asked PER LINE: a wrapping column broken
+    // against a max-height has as many extents as lines, the box is the TALLEST, and each line justifies within its
+    // own — one extent for all the items would make the box the capacity (30 where Chrome says 20, the tallest
+    // line).
     let col_floor = if is_auto(n.min_h) { 0.0 } else { (to_border_y(n.min_h) - edges_y).max(0.0) };
     let col_cap = if is_auto(n.max_h) { f64::INFINITY } else { (to_border_y(n.max_h) - edges_y).max(0.0).max(col_floor) }; // (min wins, §10.7)
     let col_extent = |used: f64| if used > col_cap { col_cap } else { used.max(col_floor) };
@@ -5821,43 +5641,28 @@ fn measure_flex(
         // A COLUMN's main is its HEIGHT; with the items already sized, the extent they are justified within
         // is a max-height CAPACITY the content overruns (items overflow it), else the content floored by
         // min-height (a min-height the items underflow IS a main size for justify to distribute —
-        // `min-h-screen` on a page shell). No min/max → just the stacked items. (A wrapping column with a
-        // min/max-height bails in the harness — this is its single line's extent.)
+        // `min-h-screen` on a page shell). No min/max → just the stacked items. (This is the extent of all
+        // the items as one line; a wrapping column's lines each justify within their own, below.)
         col_extent(used_main)
     } else {
         (clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0) - edges_y).max(0.0)
     };
 
-    // Break into flex lines (positions into `kids`). Wrapping needs a DEFINITE main capacity: a row always
-    // has one (its content width), but an AUTO-height column has none — the oracle keeps it a single line
-    // structurally (capacity == null → never calls flexLines), so native must too rather than re-breaking
-    // a summed capacity (which a FP-non-associative re-accumulation could trip into a spurious split).
-    // nowrap is also one line holding everything; otherwise wrap greedily starts a new line when the next
-    // item (plus the main gap) would overflow the main extent. Mirrors flexLines.
+    // Break into flex lines (positions into `kids`). A container that sized its items (`flex_native`) broke
+    // them already, on the hypothetical sizes. Otherwise wrapping needs a DEFINITE main capacity: a row always
+    // has one (its content width), but an AUTO-height column has none, so it stays a single line rather than
+    // re-breaking a summed capacity (which a FP-non-associative re-accumulation could trip into a spurious
+    // split). nowrap is also one line holding everything; otherwise wrap greedily starts a new line when the
+    // next item (plus the main gap) would overflow the main extent.
     let wrap_capacity = main_is_x || !is_auto(n.height);
-    // A PUSHED multi-line container takes the ORACLE's lines where its items carry them (`flex_line`): they broke
-    // on the hypothetical sizes, which the final boxes here are not.
-    let oracle_lines = !n.flex_native && n.flex_wrap && !flow.is_empty()
-        && flow.iter().all(|&p| !inputs[kids[p]].get().flex_line.is_nan());
     let lines: Vec<Vec<usize>> = if native_row || native_col {
         native_lines // broken on the hypothetical sizes by flex_row_sizes / flex_column_sizes
-    } else if oracle_lines {
-        let mut ls: Vec<Vec<usize>> = Vec::new();
-        for &p in &flow {
-            let li = inputs[kids[p]].get().flex_line as usize;
-            while ls.len() <= li {
-                ls.push(Vec::new());
-            }
-            ls[li].push(p);
-        }
-        ls.retain(|l| !l.is_empty());
-        ls
     } else if n.flex_wrap && wrap_capacity {
         let mut ls: Vec<Vec<usize>> = Vec::new();
         let mut cur: Vec<usize> = Vec::new();
         let mut used = 0.0;
         for &p in &flow {
-            if !cur.is_empty() && used + gap + mo[p] > content_main + LINE_FIT_EPS { // (the oracle's `flexLines`)
+            if !cur.is_empty() && used + gap + mo[p] > content_main + LINE_FIT_EPS {
                 ls.push(std::mem::take(&mut cur));
                 used = 0.0;
             }
@@ -5886,23 +5691,18 @@ fn measure_flex(
     let mut line_first_extent = vec![0.0f64; nlines];
     let mut line_last_asc = vec![0.0f64; nlines];
     let mut line_last_extent = vec![0.0f64; nlines];
-    // Each item's baseline ASCENT within its margin box — the oracle's `baselineParts.asc`: its own first (or, for
-    // a `last baseline` item, last) baseline plus its top margin, clamped into the box when the item scrolls
-    // down (a scroll container's baseline comes from its border box), else its bottom margin edge when it has no
-    // line to give. Read from the natively laid-out item where this container sizes its items itself; a pushed
-    // item carries the oracle's figure (rec[42]).
+    // Each item's baseline ASCENT within its margin box: its own first (or, for a `last baseline` item, last)
+    // baseline plus its top margin, clamped into the box when the item scrolls down (a scroll container's baseline
+    // comes from its border box), else its bottom margin edge when it has no line to give.
     // …asked only where a member actually hangs from a baseline, which almost no page does: the scan below
     // reads two `Box` fields per item and allocates a vector per container, on a path every flex container
-    // takes (rule 3, the `mayConstrainSize` pattern). One pass over the aligns answers it.
+    // takes (rule 3: gate the work on a constant-time question first). One pass over the aligns answers it.
     let any_baseline = kids
         .iter()
         .any(|&c| matches!(inputs[c].get().flex_cross_align, CROSS_BASELINE | CROSS_BASELINE_LAST));
     let bl_asc: Vec<f64> = if !any_baseline { Vec::new() } else { (0..cnt).map(|p| {
         let c = kids[p];
         let k = inputs[c].get();
-        if !n.flex_native {
-            return k.flex_baseline_asc;
-        }
         let own = if k.flex_cross_align == CROSS_BASELINE_LAST { boxes[c].last_baseline } else { boxes[c].first_baseline };
         match own {
             Some(o) => (if k.scrolls_y { o.max(0.0).min(boxes[c].h) } else { o }) + Input::m(k.mt),
@@ -5923,19 +5723,11 @@ fn measure_flex(
                 _ => plain = plain.max(co[p]),
             }
         }
-        // A natively-sized multi-line COLUMN's line cross is its NATURAL one (the widest item before any stretch
-        // widened it to the grown line) — `align-content` below grows it, as the oracle's stackFlexLines does; the
-        // final item widths already fill the grown line, so measuring from them would grow it twice.
-        // …and a PUSHED multi-line container's line is the natural cross its items carry (`flex_line_nat`), the
-        // oracle's own figure, where one exists: its final boxes cannot say it where the line mixes stretching and
-        // fixed items (`align-content: stretch` grew it, and the stretched boxes hold the grow).
-        let pushed_nat = if n.flex_native { f64::NAN } else {
-            line.iter().map(|&p| inputs[kids[p]].get().flex_line_nat).filter(|v| !v.is_nan()).fold(f64::NAN, f64::max)
-        };
+        // A sizing (`flex_native`) multi-line COLUMN's line cross is its NATURAL one (the widest item before any
+        // stretch widened it to the grown line) — `align-content` below grows it; the final item widths already fill
+        // the grown line, so measuring from them would grow it twice.
         line_cross[li] = if native_col && li < native_line_crosses.len() {
             native_line_crosses[li]
-        } else if !pushed_nat.is_nan() {
-            pushed_nat
         } else {
             plain.max(fa + fb).max(la + lb)
         };
@@ -5951,30 +5743,28 @@ fn measure_flex(
     let mut clamped = false;
     let (box_w, box_h, container_cross, definite_cross) = if main_is_x {
         // A ROW's cross is its HEIGHT, clamped by min/max-height — but the clamp is TWO-PHASE and hinges on
-        // whether the height is declared (the oracle: `definiteCross = box.height !== 0 || autoHeight ===
-        // false`, clamp applied in layoutElement). A DECLARED height is clamped BEFORE layout, so the items
-        // align in the clamped cross (definite). An AUTO height is NOT: the items align in the CONTENT cross
-        // (the stacked lines), and min/max-height then grows/shrinks the FINAL box around them WITHOUT moving
+        // whether the height is DEFINITE. A DECLARED height is clamped BEFORE layout, so the items align in
+        // the clamped cross (definite). An AUTO height is NOT: the items align in the CONTENT cross (the
+        // stacked lines), and min/max-height then grows/shrinks the FINAL box around them WITHOUT moving
         // them — so container_cross stays the unclamped content (a min-height:100 app-shell row of a 30px
-        // item keeps the item at the top and grows the box to 100; align-content sees free = 0). A pushed flex
-        // ITEM whose OWN height is auto reaches here with `height` overwritten by its final (clamped) box, but
-        // `item_auto_height` (rec[54]) carries its autoHeight so it takes this SAME auto path — recomputing the
-        // box from its content and two-phasing the clamp (a min-height FLOOR aligns its items in the pre-floor
-        // content, a max-height CAP its taller content overflows — the Avo `field-wrapper` row). A genuinely
-        // DEFINITE height (declared, or stretch/abspos-imposed — autoHeight false) takes the else branch below.
+        // item keeps the item at the top and grows the box to 100; align-content sees free = 0). A row
+        // measured for its content height (`item_auto_height`, `MEASURE_AUTO_HEIGHT`) takes this SAME auto
+        // path whatever it declares — the box from its content and the clamp two-phased (a min-height FLOOR
+        // aligns its items in the pre-floor content, a max-height CAP its taller content overflows — the Avo
+        // `field-wrapper` row). A genuinely DEFINITE height (declared, or imposed by a stretch or an inset
+        // box) takes the else branch below.
         if is_auto(n.height) || n.item_auto_height {
             // A bare-text anonymous item floors the row's auto cross at its line-height. Unlike a min-height
-            // (clamped later, outside the flex pass), the oracle folds it into box.height HERE and reads
-            // container_cross back from the grown box (layout.js: `containerCross = box.height - edges`), so the
-            // single nowrap line grows to it and its items align WITHIN that floor — and a wrapping row shares
-            // the surplus (anon − stacked) out through align-content. So container_cross carries the floor too,
-            // not just box_h. (Pre-clamp, like the oracle: box.height is grown before the outer min/max clamp.)
+            // (clamped after), the floor is part of the content cross, so the single nowrap line grows to it
+            // and its items align WITHIN that floor — and a wrapping row shares the surplus (anon − stacked)
+            // out through align-content. So container_cross carries the floor too, not just box_h, and it is
+            // applied before the outer min/max clamp.
             let flowed = lines_cross_sum.max(n.anon_cross) + edges_y;
             let bh = clamp_min_max(flowed, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
             clamped = bh != flowed;
             (w, bh, lines_cross_sum.max(n.anon_cross), false)
         } else {
-            // A declared height is never smaller than the box's own border+padding (usedSize's border-box floor).
+            // A declared height is never smaller than the box's own border+padding (the border-box floor).
             let bh = clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(edges_y).max(0.0);
             (w, bh, (bh - edges_y).max(0.0), true)
         }
@@ -5985,7 +5775,7 @@ fn measure_flex(
             // items overflow). A ROW's is `content_main.max(used_main)`; a COLUMN's is asked per LINE — the
             // tallest line's extent or content (`col_extent`), which for one line is that same figure.
             // A bare-text anonymous item floors the box height (a column's MAIN) at its line-height, applied
-            // after the items' extent exactly as the oracle's `max(contentExtent, anonymousItemHeight)`.
+            // after the items' extent.
             let tallest = lines.iter().map(|line| {
                 let lm: f64 = line.iter().map(|&p| mo[p]).sum::<f64>() + gap * line.len().saturating_sub(1) as f64;
                 col_extent(lm).max(lm)
@@ -6015,7 +5805,7 @@ fn measure_flex(
         line_lc[0] = if definite_cross { container_cross } else { line_cross[0].max(container_cross) };
         line_cs[0] = cross_start_base;
     } else {
-        // free is measured from the FINAL (pushed) line crosses: for align-content:stretch a line whose
+        // free is measured from the FINAL line crosses: for align-content:stretch a line whose
         // items already fill it (align-items stretch on an auto cross size) contributes its grown cross, so
         // free is 0 there and no grow is double-applied; a line of explicit-size items contributes its
         // natural cross, so the leftover grows the lines to position the later ones (§9.6).
@@ -6035,22 +5825,21 @@ fn measure_flex(
             cross_at += line_lc[li] + cross_gap + ac_between;
         }
         // Lines that STRETCH fill the cross size exactly, so the last one PLACED is closed against the
-        // container's far edge rather than left where an equal share of the free space accumulated to
-        // (stackFlexLines).
+        // container's far edge rather than left where an equal share of the free space accumulated to.
         if ac_grow > 0.0 && nlines > 0 {
             let last = placed(nlines - 1);
             line_lc[last] = (cross_start_base + container_cross - line_cs[last]).max(0.0);
         }
     }
 
-    // A natively-sized row STRETCHES its stretching items to their line now that the lines have a cross size
+    // A sizing (`flex_native`) row STRETCHES its stretching items to their line now that the lines have a cross size
     // (§9.4 step 11): the item is laid out again at the line's cross less its margins as an IMPOSED height
     // (its min/max-height still clamp), so its own contents see the taller box. The line's cross was measured
-    // from the items' natural (hypothetical) heights, as the oracle's measureLineCross does before stackFlexLines.
+    // from the items' natural (hypothetical) heights, before the lines were stacked.
     // …and where the item's measure read a percentage height against the indefinite basis it is laid out again even at
     // the height it came to: the stretched size is definite (§9.8), and that percentage resolves against it (Chrome: a
     // `height: 10%` child of an item stretched to its own 22 is 2.19, overflowing it).
-    if native_row || n.equal_share {
+    if native_row {
         for (li, line) in lines.iter().enumerate() {
             for &p in line {
                 let c = kids[p];
@@ -6078,10 +5867,8 @@ fn measure_flex(
         let cs = line_cs[li];
         let line_main: f64 = line.iter().map(|&p| mo[p]).sum::<f64>() + gap * line.len().saturating_sub(1) as f64;
         // (…an auto-height column's line justifies within its OWN extent — see `col_extent`.)
-        // (…and so does a PUSHED one whose record carries its final box as a height it never declared — an auto-height
-        // flex item's (`item_auto_height`), or one the oracle laid out with no definite height at all
-        // (`pushed_h_indefinite`, a wrapping column inside a definite-height column): only a DEFINITE content height
-        // is the one extent every line justifies within, the question `definite_content_h` answers.)
+        // (…and so does one measured for its content height (`item_auto_height`): only a DEFINITE content height is the
+        // one extent every line justifies within, the question `definite_content_h` answers.)
         let line_extent = if !main_is_x && n.definite_content_h().is_none() { col_extent(line_main) } else { content_main };
         let free = line_extent - line_main;
         // Auto main-axis margins take the line's free space (free/autos each) BEFORE justify-content, which
@@ -6111,7 +5898,7 @@ fn measure_flex(
             }
             // A CROSS-axis auto margin (§8.1) eats the line's leftover and WINS over align-self, which
             // then has no free space left to place the item with (bit2 = cross-start-side auto, bit3 =
-            // cross-end-side). `autoMarginSplit`: both auto centre, one auto pushes to the other edge, and
+            // cross-end-side). `auto_margin_split`: both auto centre, one auto pushes to the other edge, and
             // an over-constrained item (leftover <= 0) sits flush at the cross-start with a negative trail.
             let cross_margins = (auto & 0b1100 != 0).then(|| {
                 let cross_box = if main_is_x { boxes[c].h } else { boxes[c].w };
@@ -6127,12 +5914,11 @@ fn measure_flex(
                     // baseline: hang from the line's shared baseline (the group's deepest ascent), so every
                     // member's own baseline coincides at line_first_asc. The FIRST-baseline group anchors at
                     // the cross-START and the LAST-baseline one at the cross-END — which physical edge each of
-                    // those is is what a REVERSED cross swaps (the oracle's `baselineOffset`: `atStart =
-                    // first !== crossFlip`).
-                    // (Only a ROW ever arrives here with the keyword: a real COLUMN has `plan.baselineMode`
-                    // `axis`, so `crossAlignPhysical` resolved it away, and a VERTICAL writing mode's row —
-                    // which lays out along Y and has no baseline geometry to offer — is sent as `flex-start`
-                    // by the walk, for the same reason the oracle's column routine ignores the keyword there.)
+                    // those is is what a REVERSED cross swaps.
+                    // (Only a ROW ever arrives here with the keyword: a real COLUMN's baseline mode is the axis,
+                    // so the walk's `cross_align` resolved it away, and a VERTICAL writing mode's row — which
+                    // lays out along Y and has no baseline geometry to offer — is sent as `flex-start` by the
+                    // walk.)
                     CROSS_BASELINE => {
                         let group_top = if cross_far { lc - line_first_extent[li] } else { 0.0 };
                         group_top + line_first_asc[li] - asc_of(p)
@@ -6175,10 +5961,9 @@ fn measure_flex(
         }
     }
 
-    // OUT-OF-FLOW children (§4.1): removed from the flow above, each is placed at the container's border-box
-    // origin + its resolved displacement (rel_x/rel_y = el._lb − container._lb, replaying the insets or the
-    // justify/align static position the oracle already resolved). Reset its box to the origin so `place`
-    // positions it by rel_x/rel_y alone (over the container origin); its Phase-A subtree follows.
+    // OUT-OF-FLOW children (§4.1): removed from the flow above. Each box is reset to the container's origin:
+    // one with a containing block (`native_oof`) is then positioned by `place_out_of_flow`, one without by its
+    // `rel_x` / `rel_y` alone over the container origin; its measured subtree follows.
     for &c in &kids {
         if inputs[c].get().out_of_flow != 0 {
             boxes[c].x = 0.0;
@@ -6187,7 +5972,7 @@ fn measure_flex(
     }
 
     // The container's baselines: from its items in FLEX order — record order, reversed for a `*-reverse`
-    // direction (`baselineCandidates`; an rtl row is not reversed there).
+    // direction (an rtl row is not reversed: its order is the flex order, only its axis runs backwards).
     let order: Vec<usize> = if n.flex_dir_reverse { flow.iter().rev().map(|&p| kids[p]).collect() } else { flow.iter().map(|&p| kids[p]).collect() };
     let (fb, lb, ib) = child_baselines(order.into_iter(), inputs, boxes);
     boxes[i].first_baseline = fb;
@@ -6209,8 +5994,7 @@ fn measure_flex(
 // caller), so the grow is never double-applied.
 //
 // `cross_far` says the cross axis runs back from the far physical edge, which the returned LEAD is already
-// measured against. The oracle's `alignContentLines`, transcribed in ITS OWN ORDER, because each of its
-// three steps sees a different keyword.
+// measured against. The ORDER of its three steps matters, because each sees a different keyword.
 fn align_content(code: u8, free: f64, count: usize, cross_far: bool, cross_flip: bool) -> (f64, f64, f64) {
     if code == 6 {
         // Growing lines fill the container, so where the stack STARTS matters only when they OVERFLOW it —
@@ -6246,7 +6030,7 @@ fn align_content(code: u8, free: f64, count: usize, cross_far: bool, cross_flip:
 }
 
 // Main-axis free-space distribution → (leading offset before the first item, extra space between items).
-// Mirrors the oracle's distributionOffsets: center/end apply even when free is negative (overflow);
+// center/end apply even when free is negative (overflow);
 // space-* collapse to 0 (start) when free is non-positive.
 fn flex_distribution(code: u8, free: f64, n: usize) -> (f64, f64) {
     if n == 0 {
@@ -6274,19 +6058,18 @@ fn flex_distribution(code: u8, free: f64, n: usize) -> (f64, f64) {
 // height's surplus shared over the body group's auto rows — and prefix-sums both tracks with border-spacing to
 // position every cell and DERIVE every row, row-group and the table's OWN box. All boxes are written in their
 // immediate parent's
-// border-box frame; `place` composes the origins table → group → row → cell → content. Mirrors layoutTable /
-// tableColumns / distributeColumns / fixedColumnWidths / tableIntrinsicWidths / tableGrid. Spans, captions,
-// colgroup, thead/tfoot reorder, fixed layout, rtl AND border-collapse are all IN scope (the oracle folds the
-// collapsed borders into the pushed edges, so a collapse table sizes here exactly like a separate one).
-// nlTableSupported declines only what native can't reproduce: a SECOND caption or a nested-table one, a cell
-// whose percentage-height content needs a second pass, an empty or interleaved row group, a nested table, a row
-// whose cells all span rows (no row height to read), and a HALF-empty table — columns with no rows under them.
-// A wholly EMPTY one is in scope: no grid at all, just the table's edges, its declaration and its caption.
-// A table's ROW / COLUMN structure, recovered from the record tree the walk emitted (the oracle's `tableGrid`
+// border-box frame; `place` composes the origins table → group → row → cell → content. Spans, captions,
+// colgroup, thead/tfoot reorder, fixed layout, rtl AND border-collapse are all IN scope (the walk folds the
+// collapsed borders into the records' edges, `collapse_borders`, so a collapse table sizes here exactly like a
+// separate one). The walk declines a row group interleaved with another and a HALF-empty table — columns with
+// no rows under them. A wholly EMPTY one is in scope: no grid at all, just the table's edges, its declaration
+// and its caption.
+// A table's ROW / COLUMN structure, recovered from the record tree the walk emitted (the walk's `table_grid`
 // resolved the anonymous boxes and the render order): every row in render order with the row GROUP it belongs
-// to, the caption (the table's only non-row / non-group child), and the column count: `declared_cols` (the
-// oracle's, which a `<col>` / `<colgroup span>` raises past the cells' own reach) or the last column any cell
-// reaches, whichever is larger. `None` for a table native can't read (no rows, no columns, a malformed span).
+// to, the captions (the table's non-row / non-group children), and the column count: `declared_cols` (the
+// walk's, which a `<col>` / `<colgroup span>` raises past the cells' own reach) or the last column any cell
+// reaches, whichever is larger. `None` for a table that can't be read (no columns over rows that have cells, a
+// malformed span).
 struct TableGrid {
     rows: Vec<usize>,
     row_group: Vec<Option<usize>>,
@@ -6340,7 +6123,7 @@ fn table_grid(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], declare
     // An EMPTY table — no rows AND no columns — is a grid of nothing, which `measure_table` sizes from the
     // table's own edges, its declaration and its caption alone (§17.5.3 still floors that empty region at an
     // imposed height: Chrome makes an empty `height: 100px` table 100 tall). A HALF-empty one is not: columns
-    // with no rows under them, or a row with no cells to give it a height, are `nlTableSupported`'s to decline.
+    // with no rows under them the walk declines (`table-half-empty`), and cells that reach no column are `None`.
     // (…rows of no cell at all are no half: they are as tall as they declare, and as wide as nothing; nor are columns over
     // no row, which are as wide as they declare and of no height)
     if c_count == 0 && !rows.iter().all(|&r| children[r].is_empty()) {
@@ -6361,7 +6144,7 @@ fn table_grid(i: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], declare
 fn table_gaps(count: usize, sp: f64) -> f64 {
     if count == 0 { 0.0 } else { (count as f64 + 1.0) * sp }
 }
-// Each column's sizing inputs — the oracle's `tableColumns`. `min` / `max` are the widest its cells NEED and
+// Each column's sizing inputs. `min` / `max` are the widest its cells NEED and
 // WANT (their own `intrinsic_widths`, so a cell's declared width and min/max-width already speak there); `spec`
 // is the width a column was GIVEN by a cell's declared LENGTH and `pct` the fraction a `%` gave it, 0 for
 // neither — either makes the column "constrained", taking no part in sharing out space beyond max-content. A
@@ -6373,8 +6156,8 @@ struct TableCols {
     spec: Vec<f64>,
     pct: Vec<f64>,
 }
-// A table's COLUMNS as the walk marshalled them on its side-channel (`grid_start`): how many there are — the
-// oracle's count, which a `<col>` / `<colgroup span>` raises past the cells' own reach — and what each one was
+// A table's COLUMNS as the walk marshalled them on its side-channel (`grid_start`): how many there are — a
+// count a `<col>` / `<colgroup span>` raises past the cells' own reach — and what each one was
 // DECLARED, as the px length (NaN for none) and the `%` fraction (0 for none) a `<col>` gave it. `None` for a
 // table with no channel (one built without a walk — the unit tests): the caller then counts the columns the
 // cells reach and takes no `<col>` declaration.
@@ -6419,24 +6202,20 @@ fn table_columns(
     for &r in &g.rows {
         for &c in &children[r] {
             let k = inputs[c].get();
-            let (imin, imax) = if is_auto(k.cell_min_content) {
-                let (imin, imax) = intrinsic_widths(c, inputs, runs, run_texts, grids, children)?;
-                // A cell's declared width is no narrower than its content's min-content: the column's minimum is the
-                // larger of the two (CSS 2.1 §17.5.2.2, CSS Tables 3) — Chrome makes `<td style="width: 1px;
-                // white-space: nowrap">` as wide as its line, the idiom a table's shrink-to-content column is written in.
-                // (…the floor clamped by the cell's own min / max-width, as its contribution is: Chrome makes a `width: 10px;
-                // max-width: 5px` cell around a long word 7 wide)
-                if is_auto(k.decl_w) {
-                    (imin, imax)
-                } else {
-                    let extra = k.decl_edges_x;
-                    let to_border = |v: f64| if is_auto(v) || k.decl_border_box { v } else { v + extra };
-                    let content = content_intrinsic(c, inputs, runs, run_texts, grids, children)?.0;
-                    let floor = clamp_min_max(content + extra, to_border(k.decl_min_w), to_border(k.decl_max_w));
-                    (imin.max(floor), imax.max(floor))
-                }
+            let (imin, imax) = intrinsic_widths(c, inputs, runs, run_texts, grids, children)?;
+            // A cell's declared width is no narrower than its content's min-content: the column's minimum is the
+            // larger of the two (CSS 2.1 §17.5.2.2, CSS Tables 3) — Chrome makes `<td style="width: 1px;
+            // white-space: nowrap">` as wide as its line, the idiom a table's shrink-to-content column is written in.
+            // (…the floor clamped by the cell's own min / max-width, as its contribution is: Chrome makes a `width: 10px;
+            // max-width: 5px` cell around a long word 7 wide)
+            let (imin, imax) = if is_auto(k.decl_w) {
+                (imin, imax)
             } else {
-                (k.cell_min_content, k.cell_max_content) // the oracle's contribution: native can't measure this cell
+                let extra = k.decl_edges_x;
+                let to_border = |v: f64| if is_auto(v) || k.decl_border_box { v } else { v + extra };
+                let content = content_intrinsic(c, inputs, runs, run_texts, grids, children)?.0;
+                let floor = clamp_min_max(content + extra, to_border(k.decl_min_w), to_border(k.decl_max_w));
+                (imin.max(floor), imax.max(floor))
             };
             if k.cell_colspan > 1 {
                 spans.push((k.cell_col, k.cell_colspan, imin, imax));
@@ -6492,7 +6271,7 @@ fn distribute_span(widths: &mut [f64], start: usize, span: usize, required: f64)
 // the assignable width interpolated between whichever two it falls between: min-content (every column at its
 // minimum), specified-width (…and the columns GIVEN a width or a percentage raised to it), max-content (…and
 // every remaining column raised to its maximum), beyond (the surplus shared over the columns given neither).
-// The oracle's `distributeColumns`, Chrome-exact on every branch.
+// Chrome-exact on every branch.
 fn distribute_columns(cols: &TableCols, assignable: f64) -> Vec<f64> {
     let n = cols.min.len();
     if n == 0 {
@@ -6564,8 +6343,8 @@ fn fixed_column_widths(
         } else {
             continue;
         };
-        // …a BORDER box, its horizontal edges resolved against the width being shared out, as the oracle's
-        // `fixedColumnWidths` resolves them (`edgeInsets(cell, assignable)`): a percentage padding is a share of THAT.
+        // …a BORDER box, its horizontal edges resolved against the width being shared out: a percentage padding
+        // is a share of THAT.
         let border = if k.decl_border_box { declared } else { declared + k.with_percent_sizes(assignable, f64::NAN).edges_x() };
         let each = border / k.cell_colspan as f64;
         for ci in k.cell_col..(k.cell_col + k.cell_colspan).min(n) {
@@ -6590,13 +6369,13 @@ fn fixed_column_widths(
     vec![assignable / n as f64; n]
 }
 
-// A table's own (min-content, max-content) BORDER-box widths — the oracle's `tableIntrinsicWidths`, the answer
-// `intrinsic_widths` gives for a table (its rows are not blocks to be measured one at a time). Each column
-// contributes its minimum / maximum, floored by the LENGTH a `<col>` or a cell gave it, plus the frame (the
-// gaps and the table's own border + padding). A PERCENTAGE column widens the max-content so the table can be
-// wide enough for the column to BE that fraction of it — its own want divided by the fraction — and, when the
-// percentages leave room, wide enough that the non-percentage columns' content is the share that remains. A
-// caption's margin box spans the table's border box, so its min-content floors the whole figure.
+// A table's own (min-content, max-content) BORDER-box widths — the answer `intrinsic_widths` gives for a table (its
+// rows are not blocks to be measured one at a time). Each column contributes its minimum / maximum, floored by the
+// LENGTH a `<col>` or a cell gave it, plus the frame (the gaps and the table's own border + padding). A PERCENTAGE
+// column widens the max-content so the table can be wide enough for the column to BE that fraction of it — its own want
+// divided by the fraction — and, when the percentages leave room, wide enough that the non-percentage columns' content
+// is the share that remains. A caption's margin box spans the table's border box, so its min-content floors the whole
+// figure.
 fn table_intrinsic_widths(
     i: usize,
     inputs: &[Cell<Input>],
@@ -6610,18 +6389,17 @@ fn table_intrinsic_widths(
     let g = table_grid(i, inputs, children, decls.as_ref().map_or(0, |d| d.count))?;
     let cols = table_columns(&g, n.sp_x, decls.as_ref(), inputs, runs, run_texts, grids, children)?;
     let floor = caption_floor(&g.captions, inputs, runs, run_texts, grids, children)?;
-    // An intrinsic CONTRIBUTION reads the table's own edges basis-less, like every other box's (the oracle's
-    // `tableIntrinsicWidths` uses `edgeInsets(table, null)`).
+    // An intrinsic CONTRIBUTION reads the table's own edges basis-less, like every other box's (`decl_edges_x`).
     Some(table_min_max_with_caption(&n, &g, &cols, floor, n.decl_edges_x))
 }
-// The border-box width a table's CAPTION requires of it (the oracle's `captionsFloor`): the caption's MARGIN box
+// The border-box width a table's CAPTION requires of it: the caption's MARGIN box
 // spans the table's border box (§17.4), and what it cannot be squeezed below is its own min-content contribution
 // — a declared LENGTH pinning it, a `%` one indefinite while the table's width is still being decided, the
 // min/max-width clamping it — plus its horizontal margins. Those are read BASIS-LESS (`decl_margin_x`, an `auto`
 // one already 0), because the table's width is what a percentage among them would resolve against and it is the
 // figure being decided here; the same margins are resolved against it once it has settled, in `measure_table`.
-// The oracle's figure where native cannot measure the caption; the widest of them where there are several (each
-// spans the same box); 0 without one.
+// The widest of them where there are several (each spans the same box); 0 without one; `None` where a caption
+// cannot be measured.
 fn caption_floor(
     captions: &[usize],
     inputs: &[Cell<Input>],
@@ -6632,27 +6410,9 @@ fn caption_floor(
 ) -> Option<f64> {
     let mut floor = 0.0f64;
     for &cap in captions {
-        floor = floor.max(caption_intrinsic(cap, inputs, runs, run_texts, grids, children)?.0 + inputs[cap].get().decl_margin_x);
+        floor = floor.max(intrinsic_widths(cap, inputs, runs, run_texts, grids, children)?.0 + inputs[cap].get().decl_margin_x);
     }
     Some(floor)
-}
-// A caption's min/max-content: native's own measure, or — where the walk could not measure the subtree and
-// PARKED it — the oracle's pushed contribution off rec[84..85], exactly as an unmeasurable CELL travels
-// (`table_columns` reads the same pair the same way).
-fn caption_intrinsic(
-    cap: usize,
-    inputs: &[Cell<Input>],
-    runs: &[Run],
-    run_texts: &[RunText],
-    grids: &[f64],
-    children: &[Vec<usize>],
-) -> Option<(f64, f64)> {
-    let k = inputs[cap].get();
-    if is_auto(k.cell_min_content) {
-        intrinsic_widths(cap, inputs, runs, run_texts, grids, children)
-    } else {
-        Some((k.cell_min_content, k.cell_max_content))
-    }
 }
 // …from columns already measured: the figure `measure_table` needs, where the frame carries the table's edges as
 // the box uses them (RESOLVED) rather than as an intrinsic contribution reads them (basis-less), and the caption's
@@ -6758,16 +6518,16 @@ fn measure_table(
     // speak here: it already did, when the column was sized.
     // The table's own BORDER box is settled here — its columns and spacing decide it, and the rows cannot move
     // it — so the CAPTION, which spans that box, is laid out before the rows: the height it takes is height the
-    // rows do NOT get (a table told to be 120 tall holds its caption inside that 120, Chrome and the oracle).
+    // rows do NOT get (a table told to be 120 tall holds its caption inside that 120, as Chrome does).
     let sum_col: f64 = col_w.iter().sum();
     let grid_w = sum_col + table_gaps(c_count, sx);
     // With NO columns the tracks say nothing about the width: a populated table's columns have already shared
     // out whatever it was given (so `grid_w` carries it back), while an empty one keeps the width it resolved —
     // its declaration, or the box it was handed — floored by its caption.
     let table_w = if c_count == 0 { border_w.max(cap_floor) } else { (grid_w + n.edges_x()).max(cap_floor) };
-    // A CELL's percentage edges resolve against THAT box's content — the containing block the oracle's `layoutTable`
-    // sizes it in (`layoutSize(cell, …, content.width)`), after the columns have grown the table past a declared width
-    // they overflow — so they are resolved here, before any cell is laid out. (Its column contribution is read off the
+    // A CELL's percentage edges resolve against THAT box's content — the cell's containing block, after the columns
+    // have grown the table past a declared width they overflow — so they are resolved here, before any cell is laid
+    // out. (Its column contribution is read off the
     // basis-less `decl_edges_x`, so the columns never asked for it.)
     let cells_w = n.content_w(table_w);
     for &r in rows {
@@ -6784,9 +6544,9 @@ fn measure_table(
     // nothing (Chrome keeps such a caption its content's height, whatever the table's). Its MARGINS resolve
     // against that border box too — the block it spans — which is why the measure comes after `table_w`.
     // …while a RELATIVE caption's percentage offset resolves against the table's own height where the table has one
-    // yet — declared or imposed, its BORDER box as the oracle's `box.height || null` has it; `auto` is none. (Chrome
-    // resolves against the table's CONTENT height after its min/max — 8.39 for a padded 100px table where both
-    // engines say 11.6 — 10% of its border box; shared, pinned in the block spec.)
+    // yet — declared or imposed, its BORDER box; `auto` is none. (KNOWN GAP: Chrome resolves against the table's
+    // CONTENT height after its min/max — 8.39 for a padded 100px table where this says 11.6, 10% of its border box;
+    // pinned in the block spec.)
     let offset_h = if is_auto(n.height) {
         f64::NAN
     } else {
@@ -6796,23 +6556,22 @@ fn measure_table(
     for &cap in captions {
         let k = inputs[cap].get().with_percent_sizes(table_w, f64::NAN).with_relative_insets(table_w, offset_h);
         inputs[cap].set(k);
-        // Its used width is the oracle's `layoutSize(caption, availW, 0, box.width, null)`, and `usedSize`
-        // sizes a box from its own content for ONE reason: an intrinsic-size KEYWORD. Not for a vertical
-        // writing mode's auto width, and not for a `<button>` — both fill the wrapper there, where
-        // `block_child_width` (every other block-level child's route) would shrink them, so this is that
-        // function minus the two arms the oracle does not have rather than a call to it.
+        // Its used width fills the wrapper, and is sized from its own content for ONE reason: an intrinsic-size
+        // KEYWORD. Not for a vertical writing mode's auto width, and not for a `<button>` — both fill the
+        // wrapper here, where `block_child_width` (every other block-level child's route) would shrink them, so
+        // this is that function minus those two arms rather than a call to it.
         let room = (table_w - Input::m(k.ml) - Input::m(k.mr)).max(0.0);
         let cap_w = if k.width_kw == 0 {
             used_width(&k, room)
         } else {
-            match caption_intrinsic(cap, inputs, runs, run_texts, grids, children) {
+            match intrinsic_widths(cap, inputs, runs, run_texts, grids, children) {
                 Some((imin, imax)) => used_width(&k, keyword_width(k.width_kw, imin, imax, room, k.pct_edges_x())),
                 None => return bail(failed),
             }
         };
         measure(cap, cap_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     }
-    // What the wrapper stacks is each caption's MARGIN box (the oracle's `layCaption`: `y += mt + height + mb`), the
+    // What the wrapper stacks is each caption's MARGIN box (top margin + height + bottom margin), the
     // top ones above the grid and the bottom ones below it, each side in document order — so the vertical margins are
     // height the rows do not get, and the LEADING horizontal one insets it from the wrapper's inline-start edge — an
     // `auto` pair centring it, one `auto` pushing it to the other side (§10.3.3), exactly as `block_child_across` places a
@@ -6879,16 +6638,7 @@ fn measure_table(
         let capped = if is_auto(n.max_h) { declared } else { declared.min(to_content(n.max_h)) };
         if is_auto(n.min_h) { capped } else { capped.max(to_content(n.min_h)) }
     };
-    // …and what a percentage row resolves against is that height only where it is DEFINITE: a PUSHED box whose height
-    // the oracle laid it out at as `auto` (`pushed_h_indefinite` — a pushed flex item's content height) shares out its
-    // rows at that figure, but its percentage rows met no basis there — only its min-height, as an auto table's do
-    // (a `height: 50%` row of a pushed 70px flex-item table came out 35 + 46 = 81, where the oracle and Chrome say 70).
-    let pct_imposed_h = if n.pushed_h_indefinite {
-        if is_auto(n.min_h) { 0.0 } else { to_content(n.min_h).max(0.0) }
-    } else {
-        imposed_h
-    };
-    let row_pct_basis = if pct_imposed_h > 0.0 { (pct_imposed_h - table_gaps(r_count, sy)).max(0.0) } else { f64::NAN };
+    let row_pct_basis = if imposed_h > 0.0 { (imposed_h - table_gaps(r_count, sy)).max(0.0) } else { f64::NAN };
     let mut row_h = vec![0.0f64; r_count];
     let mut row_declared = vec![false; r_count];
     let mut row_baseline = vec![0.0f64; r_count];
@@ -6975,21 +6725,19 @@ fn measure_table(
         }
     }
 
-    // border-collapse:collapse (§17.6.2) needs no special frame here: the oracle folds each shared edge into
-    // one border split between the two cells, and the table's OWN border (`n.bl`/`n.bt`/`n.br`/`n.bb`, pushed
-    // from `edgeInsets`) is already the outer half of its rim cells' collapsed borders, with no padding. So a
-    // collapse table self-sizes from its tracks + edges exactly like a separate one — only with border-spacing
-    // 0 and the halved borders the oracle pushed.
+    // border-collapse:collapse (§17.6.2) needs no special frame here: the walk folds each shared edge into
+    // one border split between the two cells, and the table's OWN border (`n.bl`/`n.bt`/`n.br`/`n.bb`) is
+    // already the outer half of its rim cells' collapsed borders, with no padding. So a collapse table
+    // self-sizes from its tracks + edges exactly like a separate one — only with border-spacing 0 and the
+    // halved borders on its records.
     // The table (WRAPPER) SELF-sizes from its grid tracks + spacing plus its own edges (`table_w`, settled with
-    // the columns above) and stacks the caption with the grid: the `<table>` el._lb is the WRAPPER, a
+    // the columns above) and stacks the caption with the grid: the `<table>` box is the WRAPPER, a
     // caption-side:top caption offsetting the whole grid down by its height and a bottom one sitting below it.
     let sum_row: f64 = row_h.iter().sum();
     // …and an imposed height with NO rows to share it out still makes the grid region that tall (the
     // distribution above had no target to give it to). It is live for a POPULATED table too, where the rows
     // have already been grown to fill it — to within the ulp the per-row `room * (row_h[i] / weight)` shares
-    // come to — and that is fine because the ORACLE floors in exactly the same place and the same way
-    // (`layoutTable`: `if (imposedContentH > y - gridTop) y = gridTop + imposedContentH;`). Agreement, not a
-    // line that never fires.
+    // come to — where the floor makes the grid EXACTLY the imposed height.
     let grid_h = (sum_row + table_gaps(r_count, sy)).max(imposed_h);
     let content_left = n.bl + n.pl;
     let content_top = n.bt + n.pt + caption_top_h;
@@ -7009,8 +6757,8 @@ fn measure_table(
         accy += row_h[ri] + sy;
     }
     let (row_x, row_w) = match c_count {
-        // (…with NO column the row spans the table's content box, as the oracle's `rowW` falls back to
-        // `content.width`: an empty `<tbody>` alone in a table is that wide in both.)
+        // (…with NO column the row spans the table's content box: an empty `<tbody>` alone in a table is that
+        // wide.)
         0 => (content_left, cells_w),
         _ => (col_x[0], col_x[c_count - 1] + col_w[c_count - 1] - col_x[0]),
     };
@@ -7036,10 +6784,10 @@ fn measure_table(
 
     // Row-group boxes (relative to the table): span their rows across the full row width — and, in the same
     // walk of the table's children, its OUT-OF-FLOW ones (§9.7 / §4.1). The walk gathers every one of those —
-    // written in the table, in a row group or in a ROW — under the TABLE record, because that is where the
-    // oracle places them all: at the GRID's top-left corner, past a top caption and inside the table's own
-    // border+padding (`layoutTable`'s `placeAbsolute(child, pos, content.x, gridTop, ctx)`). None of them
-    // advances the flow or sizes a track; `place_out_of_flow` sizes and positions the rest from that corner.
+    // written in the table, in a row group or in a ROW — under the TABLE record, because they all take their
+    // static position at the GRID's top-left corner, past a top caption and inside the table's own
+    // border+padding. None of them advances the flow or sizes a track; `place_out_of_flow` sizes and positions
+    // the rest from that corner.
     // (One walk rather than two: a table with bare rows has every row in this list, so a second pass would be
     // an O(rows) scan per layout for a feature almost no table has — block flow gates the same loop behind a
     // bit and the grid folds it into a loop it was running anyway.)
@@ -7050,7 +6798,8 @@ fn measure_table(
                 boxes[ch].x = content_left;
                 boxes[ch].y = content_top;
             } else {
-                // Replayed: lay the subtree out at its pushed border box; `place` positions it by rel_x/rel_y.
+                // No containing block (`CB_NONE`): lay the subtree out at its own width; `place` positions it by
+                // rel_x/rel_y.
                 let cw = resolve_width(&cn, (table_w - n.edges_x()).max(0.0));
                 measure(ch, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                 boxes[ch].x = 0.0;
@@ -7080,8 +6829,8 @@ fn measure_table(
             boxes[ch].h = row_top[last] + row_h[last] - row_top[f];
         } else {
             // An EMPTY group (a `<tbody>` with no rows — Discourse's topic list) is a zero-height box at the grid's
-            // bottom edge, its trailing spacing included, as the oracle's `layoutTable` settles one: where its `y`
-            // stands once the rows are placed, before an imposed height floors the grid.
+            // bottom edge, its trailing spacing included: where the flow stands once the rows are placed, before
+            // an imposed height floors the grid.
             boxes[ch].y = content_top + sum_row + table_gaps(r_count, sy);
             boxes[ch].h = 0.0;
         }
@@ -7090,16 +6839,15 @@ fn measure_table(
     // §17.5.3 PASS 2. A cell is a definite containing block for its percentage-height descendants only when its
     // own height is definite — and they resolve against its USED height, which is the ROW's and is known only
     // now. So such a cell was laid out INDEFINITELY above, with those descendants treated as auto so they could
-    // not inflate it, and is laid out again here at the final height (the oracle's `pass2` / `cbox2`).
+    // not inflate it, and is laid out again here at the final height.
     //
     // Which cells: one holding a percentage-height descendant (`cell_pct_h_child`, the walk's answer) AND
     // either a definite height of its own or a table height imposed from somewhere — a row that is merely
     // TALLER because a sibling cell is does NOT make it definite, which is why `imposed_h` is asked here and
     // not just `h > content_h`. Its height is then definite if it declared one, or if the row stretched it past
     // its own content; an auto-height cell whose own CONTENT drives the row stays INDEFINITE, and re-laying
-    // that one reproduces the first pass exactly — same box, same floor — so native re-measures the definite
-    // ones and no others. (The oracle re-lays it anyway; that costs it a second walk of the subtree and
-    // changes nothing.)
+    // that one reproduces the first pass exactly — same box, same floor — so only the definite ones are
+    // measured again.
     for (ri, &r) in rows.iter().enumerate() {
         for &c in &children[r] {
             let k = inputs[c].get();
@@ -7161,13 +6909,13 @@ fn measure_table(
             boxes[c].y = 0.0;
             // …and the ROW's own baselines, for the TABLE to hand its container. NOT `row_baseline[ri]`, which
             // is the baseline GROUP's figure and exists only for cells that align on it — every default `<td>`
-            // computes `vertical-align: inherit`, so a real table's rows have none. The oracle's
-            // `boxBaselineOffset` walks the row's CELLS whatever their alignment and takes the first answer.
+            // computes `vertical-align: inherit`, so a real table's rows have none. The row's baseline is the
+            // first answer among its CELLS, whatever their alignment.
             //
-            // FIRST and LAST are different cells AND different lines inside them, because `baselineCandidates`
-            // REVERSES the children at every level of a `last = true` walk: the first is the first cell's FIRST
-            // line, the last the last cell's LAST line. An atomic on a line reads the last (`atomicBaselineOffset`
-            // asks `last = true`); a flex line and a baseline cell read the first.
+            // FIRST and LAST are different cells AND different lines inside them, because a last-baseline search
+            // runs the children backwards at every level: the first is the first cell's FIRST line, the last the
+            // last cell's LAST line. An atomic on a line reads the last; a flex line and a baseline cell read the
+            // first.
             if row_first_base.is_none() {
                 if let Some(b) = boxes[c].first_baseline {
                     row_first_base = Some(shift + b);
@@ -7178,16 +6926,17 @@ fn measure_table(
             }
             // …and a THIRD figure, for an atomic: what this CELL hands the row under the atomic rules — its
             // own bottom margin edge if it scrolls, else what its children gave it (a scroll container inside
-            // it gives ITS bottom margin edge, a table inside it gives nothing). The oracle reaches all of
-            // these through the same cell, because its `inlineBlock` flag carries down the whole recursion.
+            // it gives ITS bottom margin edge, a table inside it gives nothing) — the atomic rules hold down the
+            // whole subtree, not just at the cell.
             if let Some(b) = atomic_baseline_of(c, boxes[c].inline_block_baseline, inputs, boxes) {
                 row_atomic_base = Some(shift + b);
             }
             if shift > 0.0 {
                 for &ch in &children[c] {
-                    // …but not a REPLAYED out-of-flow child: its box comes from the oracle's own displacement
-                    // (`rel_y`, applied in `place`), which already carries the shift. One native positions itself
-                    // does move with the content, since its static position is the cell's flow.
+                    // …but not an out-of-flow child with no containing block (`CB_NONE`): its box is its own
+                    // displacement (`rel_y`, applied in `place`), which already carries the shift. One
+                    // `place_out_of_flow` positions does move with the content, since its static position is the
+                    // cell's flow.
                     let cn = inputs[ch].get();
                     if cn.out_of_flow != 0 && !cn.native_oof() {
                         continue;
@@ -7213,13 +6962,13 @@ fn measure_table(
 
     // A table's OWN baselines, offset into its border box — read by a flex line, a baseline-aligned cell and
     // an `inline-table` on a line. A table with no row that answers has none, and hangs from its bottom margin
-    // edge. RECORDED, not fixed (`conformance は後回し`): Chrome takes an inline-table's baseline from its
-    // FIRST row and asks a CELL for its FIRST line whatever the direction, so the first / last split below is
-    // the oracle's rule rather than the specs' (CSS 2.1 §10.8.1 / §17.5.4); and for a row whose cells are not
-    // baseline-aligned Chrome falls back to the bottom of that row's cell CONTENT box, where both engines take
-    // a cell's text baseline — a plain `<table>` inline-table is line 24 / baseline 17 here, 25 / 21 in Chrome.
-    // A SCROLLING inline-table is the same rule again: both engines hang it from its bottom margin edge
-    // (line 24 / baseline 20) where Chrome still reads its first row's first line (20 / 14).
+    // edge. KNOWN GAPS, recorded rather than fixed: Chrome takes an inline-table's baseline from its FIRST row
+    // and asks a CELL for its FIRST line whatever the direction, where the first / last split below is neither
+    // Chrome's rule nor the specs' (CSS 2.1 §10.8.1 / §17.5.4); and for a row whose cells are not
+    // baseline-aligned Chrome falls back to the bottom of that row's cell CONTENT box, where this takes a
+    // cell's text baseline — a plain `<table>` inline-table is line 24 / baseline 17 here, 25 / 21 in Chrome.
+    // A SCROLLING inline-table is the same rule again: this hangs it from its bottom margin edge (line 24 /
+    // baseline 20) where Chrome still reads its first row's first line (20 / 14).
     boxes[i].first_baseline = table_first_base;
     boxes[i].last_baseline = table_last_base;
     boxes[i].inline_block_baseline = atomic_by_child
@@ -7236,10 +6985,10 @@ fn measure_table(
 
 // One column of a computed grid's template (§12.4), decoded from `grids` at 7 values per column: `(base_kind,
 // base_val, limit_kind, limit_val, is_fr, fr_weight, is_auto)`. A SIDE (the track's base or its limit) is either a
-// px figure (kind 0: fixed / %-resolved — or an intrinsic side the oracle already resolved, the fallback when
-// native can't measure an item) or an intrinsic reference native resolves from the column's content
-// contribution: kind 1 = the column's min-content, 2 = its max-content, 3 = `fit-content(val)` = max-content
-// capped at `val`, never below min-content. The kinds mirror the oracle's `trackSideSpec`.
+// px length (kind 0), a fraction of the grid's content width (kind 4, beside a constant term; kind 5 is
+// `fit-content` capped at one), or an intrinsic reference resolved from the column's content contribution:
+// kind 1 = the column's min-content, 2 = its max-content, 3 = `fit-content(val)` = max-content capped at `val`,
+// never below min-content. The walk writes the kinds (`GridTrack::side` in walk.rs).
 #[derive(Clone, Copy)]
 struct GridTrack {
     base_kind: u8,
@@ -7254,15 +7003,15 @@ struct GridTrack {
     base_px: f64,
     limit_px: f64,
 }
-// …9 since 2026-09-23: each side carries the CONSTANT term beside its fraction, so a `calc(25% + 10px)`
-// track is `frac * content_w + px`. A plain percentage sends 0 there.
+// …9 values per column: the seven above, then each side's CONSTANT term beside its fraction, so a
+// `calc(25% + 10px)` track is `frac * content_w + px`. A plain percentage sends 0 there.
 const GRID_TRACK_STRIDE: usize = 9;
 // A grid's header in `grids`: the number of track specs that follow, column gap (px, fraction), row gap (px,
 // fraction), declared row height, and the `auto-fill` / `auto-fit` repeat inside those specs — where its ONE
 // marshalled copy starts, how long it is, and its kind (1 fill, 2 fit; -1 / 0 / 0 when there is none).
 // …then each gap's PROGRAM where it is a comparison function (an offset into the pass's math table, NaN = none: its
 // `px + frac` pair is the gap), so a `gap: min(10%, 20px)` is a figure this computes rather than one it has to be
-// handed resolved — bounds beside the pair from 2026-09-22, a program since 2026-09-26 — and the FLOOR a content row
+// handed resolved — and the FLOOR a content row
 // keeps (`minmax(<length>, auto)`: at least that tall, taller round a taller item; NaN = none).
 const GRID_HEADER: usize = 12;
 impl GridTrack {
@@ -7302,7 +7051,7 @@ fn resolve_track_side(kind: u8, val: f64, col: (f64, f64), content_w: f64, px: f
 
 // The column widths a computed grid hands its items (§12.4-12.7). Each track's base and limit resolve from its
 // spec (a px figure, or an intrinsic reference into `cols`, the per-column content contributions — `None` when
-// no track asks for one). Native then runs the two distributions: §12.6 "maximize" grows the non-fr tracks
+// no track asks for one). It then runs the two distributions: §12.6 "maximize" grows the non-fr tracks
 // toward their limits sharing free space equally, then §12.7 hands the remainder to the `fr` tracks (weight
 // sum floored at 1, floors refrozen), or — with no `fr` — stretches the `auto` tracks to fill
 // (`justify-content: normal`).
@@ -7387,14 +7136,12 @@ struct GridCell {
 }
 // A declared grid line as a 1-based line NUMBER: a negative one counts back from the end of the track list
 // (`-1` is the line after the last track), so `1 / -1` — the full-bleed idiom — is every column there is.
-// Mirrors the oracle's `gridLine`.
 fn grid_line(n: f64, cols: usize) -> f64 {
     if n < 0.0 { cols as f64 + 1.0 + n + 1.0 } else { n }
 }
 // Item `k`'s (start column, span) resolved against a track list `cols` long, from the LINES it declared
-// (`gridColumnPlacement`: start, end, explicit `span N` — 0 for "auto" in each). The oracle's `gridColumnStart`
-// / `gridColumnSpan` with the same count give the same answer; the count is what an `auto-fill` repeat makes
-// vary, which is why the lines cross unresolved.
+// (`grid_column_placement`: start, end, explicit `span N` — 0 for "auto" in each). The count is what an
+// `auto-fill` repeat makes vary, which is why the lines cross unresolved.
 fn grid_item_columns(grids: &[f64], place_base: usize, k: usize, cols: usize) -> (Option<usize>, usize) {
     let (start_n, end_n, span_n) = (grids[place_base + 3 * k], grids[place_base + 3 * k + 1], grids[place_base + 3 * k + 2]);
     let span = if span_n > 0.0 {
@@ -7412,12 +7159,11 @@ fn grid_item_columns(grids: &[f64], place_base: usize, k: usize, cols: usize) ->
     };
     (start, span.clamp(1, cols.max(1)))
 }
-// How many columns the template makes in a content box `content_w` wide: the marshalled specs as they stand,
-// with the `auto-fill` / `auto-fit` repeat inside them made as many copies as fit. Mirrors the oracle's
-// `autoRepeatCount` — how many fit is decided by each body track's MINIMUM (a `minmax(200px, 1fr)` card grid
-// fits `content_w / 200` of them and the `1fr` shares out the rest), the minimum falling back to the maximum
-// where it isn't a definite length; a pattern with nothing definite in it, or no width to fit against, is ONE
-// repetition. `auto-fit` then collapses the copies placement leaves empty.
+// How many columns the template makes in a content box `content_w` wide: the marshalled specs as they stand, with the
+// `auto-fill` / `auto-fit` repeat inside them made as many copies as fit (§7.2.3.2) — how many fit is decided by each
+// body track's MINIMUM (a `minmax(200px, 1fr)` card grid fits `content_w / 200` of them and the `1fr` shares out the
+// rest), the minimum falling back to the maximum where it isn't a definite length; a pattern with nothing definite in
+// it, or no width to fit against, is ONE repetition. `auto-fit` then collapses the copies placement leaves empty.
 fn grid_repeat_count(grids: &[f64], gs: usize, tmpl_base: usize, content_w: f64, gap: f64, place_base: usize, n_items: usize) -> usize {
     let repeat_kind = grids[gs + 8] as u8;
     let repeat_len = grids[gs + 7] as usize;
@@ -7450,7 +7196,7 @@ fn grid_repeat_count(grids: &[f64], gs: usize, tmpl_base: usize, content_w: f64,
     if per <= 0.0 {
         return 1;
     }
-    let fits = (((content_w + gap + LINE_FIT_EPS) / per).floor() as usize).max(1); // (the oracle's `autoRepeatCount`)
+    let fits = (((content_w + gap + LINE_FIT_EPS) / per).floor() as usize).max(1);
     if repeat_kind == 2 {
         let spanned: usize = (0..n_items)
             .map(|k| grid_item_columns(grids, place_base, k, fits * repeat_len).1)
@@ -7461,8 +7207,8 @@ fn grid_repeat_count(grids: &[f64], gs: usize, tmpl_base: usize, content_w: f64,
     }
     fits
 }
-// The marshalled specs with the repeat made `count` copies — the track list both engines size, and how many
-// columns that is. Mirrors `expandTemplate`.
+// The marshalled specs with the repeat made `count` copies — the track list the grid sizes, and how many
+// columns that is.
 fn grid_expanded_tracks(grids: &[f64], gs: usize, tmpl_base: usize, literal: usize, count: usize) -> Vec<GridTrack> {
     let decode = |c: usize| GridTrack::decode(grids, tmpl_base + GRID_TRACK_STRIDE * c);
     let repeat_len = grids[gs + 7] as usize;
@@ -7477,10 +7223,10 @@ fn grid_expanded_tracks(grids: &[f64], gs: usize, tmpl_base: usize, literal: usi
     out.extend((start + repeat_len..literal).map(decode));
     out
 }
-// Row-major auto-placement, mirroring the oracle (`layoutGrid` / `gridColumnContent` agree on the columns): an
-// explicit start that fits resets the column (a new row if the cursor already passed it); otherwise a span that
-// would overflow wraps; a filled row advances at once. `grids[place_base + 3k ..]` holds item k's declared lines
-// (`grid_item_columns`). Shared by the content measure (which columns an item contributes to) and the layout.
+// Row-major auto-placement (a coarse §8.5: no dense packing, no row-axis lines): an explicit start that fits resets the
+// column (a new row if the cursor already passed it); otherwise a span that would overflow wraps; a filled row advances
+// at once. `grids[place_base + 3k ..]` holds item k's declared lines (`grid_item_columns`). Shared by the content
+// measure (which columns an item contributes to) and the layout.
 fn grid_placement(grids: &[f64], place_base: usize, col_count: usize, n_items: usize) -> Vec<GridCell> {
     let mut cells = Vec::with_capacity(n_items);
     let mut col = 0usize;
@@ -7509,9 +7255,8 @@ fn grid_placement(grids: &[f64], place_base: usize, col_count: usize, n_items: u
 }
 
 // Each column's (min, max) content contribution: the widest item placed in it — a spanning item's contribution
-// divided EVENLY across its columns (the coarse oracle's `gridColumnContent`). `None` when an item's intrinsic
-// widths aren't natively measurable (the JS gate should have routed such a grid to the resolved-px fallback; this
-// is the safety net that declines the pass rather than lay out a wrong column).
+// divided EVENLY across its columns (coarser than §12.5's spanning-item distribution). `None` when an item's
+// intrinsic widths aren't measurable, which declines the pass rather than lay out a wrong column.
 fn grid_column_content(
     kids: &[usize],
     cells: &[GridCell],
@@ -7535,26 +7280,24 @@ fn grid_column_content(
     Some(cols)
 }
 
-// A box's (min-content, max-content) BORDER-box widths — CSS Sizing 3's intrinsic contribution, the oracle's
-// `intrinsicWidths` on the record tree. A declared width pins both (border-box per `box-sizing`); a text block
-// measures its inline content (`text_intrinsic`); a block container is as wide as its widest child's margin
-// box, for min and max alike; a flex container stacks its items along its main axis (`flex_intrinsic_widths`);
-// a TABLE runs its own column algorithm (`table_intrinsic_widths`, which answers a border box unclamped, as the
-// oracle's early return does); then the box's own edges add on and its min/max-width clamp the contribution
-// (border-box per `box-sizing`, min winning over max). EVERY figure read is the record's DECLARED, BASIS-LESS
-// one — the sizes in `decl_*`, the horizontal edges in `decl_edges_x` / `decl_margin_x` — because a percentage
-// resolves against nothing in an intrinsic measure (CSS Sizing 3, and the oracle's `edgeInsets(el, null)`),
-// never the used box a push may have written nor the cbW-resolved edges a laid-out box uses. Floats pack on a
-// line inside a block container as inline boxes would. `None` for what isn't measured: a replayed grid, a pushed
-// atomic inline, an unmodelled run.
-// `intrinsic_widths` is a pure function of the RECORD TREE's DECLARED sizing, which no pass ever changes (a parent
-// does write its children's USED sizes — their percentages resolved, `with_percent_sizes` — but no intrinsic
-// measure reads those; and nothing under it touches `boxes` or `failed`) — so within one pass each node's answer is
-// asked once and kept. That is the memo's contract, and a pass that ever DOES adjust a record and measure again owes
-// it a clear: park or drop the memo there, the way `IwMemo` parks an outer one. Without the memo every shrink-to-fit route re-walks the whole
-// subtree under it, and since `writing-mode` INHERITS, a vertical page asks for EVERY nested block: the walk
-// goes O(nodes × depth) (measured: 80 records nested 48 deep took 80 ms, against 17 ms for the same tree with
-// declared widths, and it scaled with DEPTH — 20 / 35 / 79 ms at depth 12 / 24 / 48).
+// A box's (min-content, max-content) BORDER-box widths — CSS Sizing 3's intrinsic contribution, on the record tree. A
+// declared width pins both (border-box per `box-sizing`); a text block measures its inline content (`text_intrinsic`);
+// a block container is as wide as its widest child's margin box, for min and max alike; a flex container stacks its
+// items along its main axis (`flex_intrinsic_widths`); a TABLE runs its own column algorithm (`table_intrinsic_widths`,
+// which answers a border box, unclamped); then the box's own edges add on and its min/max-width clamp the contribution
+// (border-box per `box-sizing`, min winning over max). EVERY figure read is the record's DECLARED, BASIS-LESS one — the
+// sizes in `decl_*`, the horizontal edges in `decl_edges_x` / `decl_margin_x` — because a percentage resolves against
+// nothing in an intrinsic measure (CSS Sizing 3), never the used box a parent may have written nor the cbW-resolved
+// edges a laid-out box uses. Floats pack on a line inside a block container as inline boxes would. `None` for what
+// isn't measured: an unmodelled run. `intrinsic_widths` is a pure function of the RECORD TREE's DECLARED sizing, which
+// no pass ever changes (a parent does write its children's USED sizes — their percentages resolved,
+// `with_percent_sizes` — but no intrinsic measure reads those; and nothing under it touches `boxes` or `failed`) — so
+// within one pass each node's answer is asked once and kept. That is the memo's contract, and a pass that ever DOES
+// adjust a record and measure again owes it a clear: park or drop the memo there, the way `IwMemo` parks an outer one.
+// Without the memo every shrink-to-fit route re-walks the whole subtree under it, and since `writing-mode` INHERITS, a
+// vertical page asks for EVERY nested block: the walk goes O(nodes × depth) (measured: 80 records nested 48 deep took
+// 80 ms, against 17 ms for the same tree with declared widths, and it scaled with DEPTH — 20 / 35 / 79 ms at depth 12 /
+// 24 / 48).
 //
 // The memo exists only FOR the duration of a pass (`IwMemo::install`, dropped when `layout_block` returns or
 // unwinds), which is what makes "the tree cannot change under it" true rather than hopeful — a direct caller
@@ -7564,7 +7307,7 @@ thread_local! {
 }
 // The guard PARKS whatever memo was installed and restores it on the way out, so a pass nested inside another
 // gets a memo of its own size rather than reading the outer pass's answers at its own indices. (No path nests
-// today — Rust never calls back into JS — which is exactly why the invariant belongs in the guard.)
+// today, which is exactly why the invariant belongs in the guard.)
 struct IwMemo(Option<Vec<Option<Option<(f64, f64)>>>>);
 impl IwMemo {
     fn install(len: usize) -> Self {
@@ -7579,7 +7322,7 @@ impl Drop for IwMemo {
 fn intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[RunText], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     // The borrow is taken and released around the recursion, never across it (`intrinsic_widths_of` recurses
     // back in here). The outer Option is "asked before"; the inner one is the answer, `None` included — a
-    // subtree native cannot measure is asked about as often as a measurable one.
+    // subtree the measure does not model is asked about as often as a measurable one.
     if let Some(hit) = IW_MEMO.with(|m| m.borrow().as_ref().and_then(|v| v.get(i).copied()).flatten()) {
         return hit;
     }
@@ -7601,24 +7344,24 @@ fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts
         (w, w)
     } else if n.replaced && !n.ratio_only {
         (n.intrinsic_w, n.intrinsic_w) // a replaced box wants its intrinsic width (a ratio-only one, its container's)
-    } else if n.display == DISPLAY_FLEX && !n.measured_as_block {
+    } else if n.display == DISPLAY_FLEX {
         flex_intrinsic_widths(i, inputs, runs, run_texts, grids, children)?
     } else if n.display == DISPLAY_TABLE {
         // A table brings its own algorithm for the same question, and its rows are not blocks to be measured one
-        // at a time. That answer is already a BORDER-box figure (the frame included) and the oracle returns it
-        // unclamped, so it stands as it is — no edges, no min/max-width clamp. KNOWN GAP, faithfully mirrored:
-        // returning here also skips the keyword PIN below, so a `width: min-content` TABLE contributes its
-        // range where Chrome contributes the one figure (`<div style="width:min-content"><table
-        // style="width:max-content">aa bb cc` is 52.41 in Chrome, 16 in both engines).
+        // at a time. That answer is already a BORDER-box figure (the frame included), unclamped, so it stands as
+        // it is — no edges, no min/max-width clamp. KNOWN GAP: returning here also skips the keyword PIN below,
+        // so a `width: min-content` TABLE contributes its range where Chrome contributes the one figure
+        // (`<div style="width:min-content"><table style="width:max-content">aa bb cc` is 52.41 in Chrome, 16
+        // here).
         return table_intrinsic_widths(i, inputs, runs, run_texts, grids, children);
     } else {
         content_intrinsic(i, inputs, runs, run_texts, grids, children)?
     };
-    // …and a COMPRESSIBLE replaced box can be squeezed to nothing, its min-content contribution 0 (CSS Sizing 3 §5.2.2):
-    // one sized by a percentage width, and any but a form control by a percentage max-width too, whatever width it
-    // declares (an image, a canvas, a video, a frame: Chrome and Firefox squeeze each to its room). Chrome and Firefox: a `width: 100%` input in a `width: 50px` cell leaves the cell 52
-    // wide, a `width: 300px; max-width: 100%` image shrinks a float to its 100px room, and a `max-width: 100%` input
-    // does not (185 in that float).
+    // …and a COMPRESSIBLE replaced box can be squeezed to nothing, its min-content contribution 0 (CSS Sizing 3
+    // §5.2.2): one sized by a percentage width, and any but a form control by a percentage max-width too, whatever
+    // width it declares (an image, a canvas, a video, a frame: Chrome and Firefox squeeze each to its room). Chrome and
+    // Firefox: a `width: 100%` input in a `width: 50px` cell leaves the cell 52 wide, a `width: 300px; max-width: 100%`
+    // image shrinks a float to its 100px room, and a `max-width: 100%` input does not (185 in that float).
     let pct = |k: usize| !n.pct_sizes[k].is_nan() || n.pct_math[k] != NO_MATH;
     let inner_min = if n.replaced && (pct(0) || (!n.form_control && pct(3))) { 0.0 } else { inner_min };
     // `width: min-content` / `max-content` PIN the box to that one figure (CSS Sizing 3 §5) — the box asks for
@@ -7637,18 +7380,16 @@ fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts
     Some((min, max))
 }
 
-// What a box CONTAINS, as (min-content, max-content) content widths — the oracle's `contentIntrinsicWidths`:
-// a text block's inline content (`text_intrinsic`); a block container's children, each contributing its
-// margin box (a float packs on a line, a block-level child ends it). Asked of a FLEX container too — for a
-// keyword `flex-basis` or its automatic minimum the oracle walks its children as block-level boxes (the same
-// widest-child answer), not along the flex axis. No declared width, no edges, no clamp: those are
-// `intrinsic_widths`' business.
+// What a box CONTAINS, as (min-content, max-content) content widths: a text block's inline content
+// (`text_intrinsic`); a grid's tracks; a flex container's items along its main axis (`flex_intrinsic_widths`);
+// a block container's children, each contributing its margin box (a float packs on a line, a block-level child
+// ends it). No declared width, no edges, no clamp: those are `intrinsic_widths`' business.
 fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[RunText], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let n = inputs[i].get();
     match n.display {
         DISPLAY_TEXT_BLOCK => runs_intrinsic(&n, inputs, runs, run_texts, grids, children),
-        // …a LIST BOX excepted: its rows ARE CSS content, and the oracle's `minContentWidth` reads them (it asks
-        // `contentIntrinsicWidths` for one rather than the control's own width).
+        // …a LIST BOX excepted: its rows ARE CSS content, and its min-content width (`min_content_width`) is
+        // theirs rather than the control's own width.
         _ if n.replaced && !n.lays_out_children => Some((0.0, 0.0)), // a replaced box holds no CSS content
         // A GRID answers with its own algorithm: each TRACK contributes the figure its spec names — a length, or
         // the column's content min / max where it asks for one — and the gaps between them add on (CSS Grid §12.5:
@@ -7708,9 +7449,8 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
         }
         // A FLEX container with its own algorithm as well (CSS Flexbox §9.9.1): its items' contributions summed along a
         // row, the widest down a column — its runs of text among them, as the anonymous items the walk sends them as.
-        // (An orphan table row is no flex container, and measures as the block it is laid out beside — below.)
-        DISPLAY_FLEX if !n.measured_as_block => flex_intrinsic_widths(i, inputs, runs, run_texts, grids, children),
-        DISPLAY_BLOCK | DISPLAY_FLEX | DISPLAY_GRID => {
+        DISPLAY_FLEX => flex_intrinsic_widths(i, inputs, runs, run_texts, grids, children),
+        DISPLAY_BLOCK | DISPLAY_GRID => {
             let (mut min, mut max) = (0.0f64, 0.0f64);
             let mut line = 0.0f64; // floats pack beside each other on a line, as inline boxes would
             for &c in &children[i] {
@@ -7724,7 +7464,7 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
                 let m = k.decl_margin_x;
                 if k.float_kind != 0 {
                     // A FLOAT packs beside its neighbours like an inline-level box: its max-content joins the
-                    // line, its min-content stands alone (the oracle's float arm — no line end).
+                    // line, its min-content stands alone (no line end).
                     line += cmax + m;
                     min = min.max(cmin + m);
                     continue;
@@ -7736,22 +7476,12 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
                 max = max.max(cmax + m);
             }
             let max = max.max(line);
-            // …and an ORPHAN ROW's bare text, which the oracle's pen measures as LINES between the children it
-            // blockifies and the layout drops: its run stream is for this measure alone, a BR between two lines (the
-            // walk's segments), and the widest line stands beside the widest child.
-            let (min, max) = if n.display == DISPLAY_FLEX && n.run_count > 0 {
-                let (tmin, tmax) = runs_intrinsic(&n, inputs, runs, run_texts, grids, children)?;
-                (min.max(tmin), max.max(tmax))
-            } else {
-                (min, max)
-            };
             // …and a NON-WRAPPING block container is ONE unbreakable token whatever it holds, its block children
-            // and its floats' line included: the oracle ends `contentIntrinsicWidths` with `min = max` for a
-            // `nowrap` / `pre` box that does not blockify (a flex container's items are blocks of their own, so it
-            // pins nothing), and parity is the bar. It is the ORACLE's rule, not Chrome's: Chrome pins only inline
+            // and its floats' line included: `min = max` for a `nowrap` / `pre` block container (a flex
+            // container's items are blocks of their own, so it pins nothing). KNOWN GAP: Chrome pins only inline
             // content, so a float, or a child that declares a wrapping mode of its own, keeps its min-content there
-            // — the only cases where this pin changes anything, each pinned as a shared gap in the specs. (A child
-            // with no mode of its own already pinned itself; the walk declined every such box until 2026-09-24.)
+            // — the only cases where this pin changes anything, each pinned as a gap in the specs. (A child with
+            // no mode of its own already pinned itself.)
             if n.display == DISPLAY_BLOCK && matches!(n.ws_mode, 1 | 2) {
                 return Some((max, max));
             }
@@ -7761,50 +7491,31 @@ fn content_intrinsic(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
     }
 }
 
-// A record's own run stream measured as INLINE content (`text_intrinsic`): a text block's lines, and a flex
-// container's bare text (`content_intrinsic`) — whose SEGMENTS, split at a BR run marked -1 (the walk's
-// `NL_BR_SEGMENT`, an unforced line end at a blockified child), are measured apart, the indent spent on every one
-// but the first, as a mixed block's anonymous groups are; the widest of each figure wins.
+// A text block's own run stream measured as INLINE content (`text_intrinsic`).
 fn runs_intrinsic(n: &Input, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[RunText], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
     if re > runs.len() || rs > re {
         return None;
     }
     // …the indent CLAMPED at a basis of ZERO, which is what an intrinsic measure has: a `clamp(5px, 50%, 30px)`
-    // indent contributes its LOWER bound there, not its constant term. Without the clamp here the measure took 0
-    // where the oracle takes 5, and the 39 mismatches that found it were the first cases any sweep had of an indent
-    // inside a comparison function.
+    // indent contributes its LOWER bound there (5), not its constant term (0).
     let indent_px = bounded(n.indent_px, n.indent_math, 0.0);
-    let (mut min, mut max) = (0.0f64, 0.0f64);
-    let mut start = rs;
-    let mut spent = n.indent_spent;
-    for at in rs..=re {
-        if at < re && !(runs[at].kind == RUN_BR && runs[at].metric < 0.0) {
-            continue;
-        }
-        let (smin, smax) = text_intrinsic(&runs[start..at], &run_texts[start..at], n.ws_mode,
-                                          (indent_px, n.indent_hanging, n.indent_each_line, spent),
-                                          inputs, runs, run_texts, grids, children)?;
-        min = min.max(smin);
-        max = max.max(smax);
-        start = at + 1;
-        spent = true;
-    }
-    Some((min, max))
+    let (min, max) = text_intrinsic(&runs[rs..re], &run_texts[rs..re], n.ws_mode,
+                                    (indent_px, n.indent_hanging, n.indent_each_line, n.indent_spent),
+                                    inputs, runs, run_texts, grids, children)?;
+    Some((min.max(0.0), max.max(0.0)))
 }
 
-// A box's min-content WIDTH as a flex item's automatic minimum (§4.5) — the oracle's `minContentWidth`: the
-// content's min-content plus the box's RESOLVED edges (this is a floor on a used size, not an intrinsic
-// contribution — see the body), capped by a declared width (border-box per `box-sizing`; a percentage is auto,
-// `decl_w`).
+// A box's min-content WIDTH as a flex item's automatic minimum (§4.5): the content's min-content plus the box's
+// RESOLVED edges (this is a floor on a used size, not an intrinsic contribution — see the body), capped by a declared
+// width (border-box per `box-sizing`; a percentage is auto, `decl_w`).
 fn min_content_width(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[RunText], grids: &[f64], children: &[Vec<usize>]) -> Option<f64> {
     let n = inputs[i].get();
     if n.replaced && !n.ratio_only && !n.lays_out_children {
-        return Some(n.intrinsic_w); // the oracle's minContentWidth: the intrinsic width, edges not counted
+        return Some(n.intrinsic_w); // the intrinsic width, edges not counted
     }
     // A TABLE answers for itself, and its figure is already a BORDER box (the frame included), so no edges go on
-    // top of it — `intrinsic_widths` returns its own algorithm's, a declared width still pinning it, exactly as
-    // the oracle's `minContentWidth` reads `intrinsicWidths(el).min` for one.
+    // top of it — `intrinsic_widths` returns its own algorithm's, a declared width still pinning it.
     if n.display == DISPLAY_TABLE {
         return Some(intrinsic_widths(i, inputs, runs, run_texts, grids, children)?.0);
     }
@@ -7819,7 +7530,7 @@ fn min_content_width(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
     Some(declared.min(content))
 }
 
-// A flex container's (min-content, max-content) CONTENT widths — the oracle's `flexIntrinsicWidths`: its in-flow
+// A flex container's (min-content, max-content) CONTENT widths (CSS Flexbox §9.9.1, coarsely): its in-flow
 // items' contributions stacked along the main axis. Along a ROW they sum, margins and the main gap between them
 // (the min-content too, unless the row WRAPS — then each item may have a line to itself and the widest wins);
 // down a COLUMN the widest wins. A row item's contribution is its intrinsic box, its `flex-basis` pinning it — or,
@@ -7838,8 +7549,7 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_tex
         }
         let (mut imin, mut imax) = intrinsic_widths(c, inputs, runs, run_texts, grids, children)?;
         if !column {
-            // …converted with the BASIS-LESS edges, like every other figure an intrinsic measure reads (the
-            // oracle's `flexIntrinsicWidths` uses `edgeInsets(child, null)`).
+            // …converted with the BASIS-LESS edges, like every other figure an intrinsic measure reads.
             let extra = if k.decl_border_box { 0.0 } else { k.decl_edges_x };
             if !is_auto(k.flex_basis) {
                 let fixed = k.flex_basis + extra;
@@ -7875,8 +7585,7 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_tex
     }
     if !column && count > 1 {
         // The main gap with NO basis, as every percentage is in an intrinsic measure: its length part, or its program at
-        // 0 (the oracle's `axisGap(el, …, null)`) — a percentage part is nothing here, so a `10%` gap adds 0 and a
-        // `calc(10% + 4px)` one 4, where the walk refused every such container as unmeasurable.
+        // 0 — a percentage part is nothing here, so a `10%` gap adds 0 and a `calc(10% + 4px)` one 4.
         let gaps = bounded(n.flex_main_gap, n.flex_main_gap_math, 0.0).max(0.0) * (count as f64 - 1.0);
         max += gaps;
         if !wrap {
@@ -7886,28 +7595,28 @@ fn flex_intrinsic_widths(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_tex
     Some((min, max))
 }
 
-// The (min-content, max-content) widths of a text block's inline content — the oracle's `contentIntrinsicWidths`
-// pen-walk over the same run stream `line_layout` lays out. ONE pen runs along the line: `line` is the width the
+// The (min-content, max-content) widths of a text block's inline content — a pen-walk over the same run stream
+// `line_layout` lays out. ONE pen runs along the line: `line` is the width the
 // content reaches with no soft wrap (the widest line is the MAX-content), `word` the unbreakable run since the
 // last break opportunity, across run boundaries (the widest is the MIN-content); a `<br>` or a preserved newline
 // ends the line. Under a COLLAPSING mode (normal / nowrap / pre-line) a run of white space is one space, content
 // only once something follows it on the line — a leading one at line start is nothing, a trailing one hangs
-// pending until the next word takes it (the LAST pending run's space width wins, as the oracle overwrites it) —
+// pending until the next word takes it (the LAST pending run's space width wins) —
 // and, when the mode wraps, a break opportunity; pre-line's newlines end the line. Under a PRESERVING mode (pre /
 // pre-wrap) every space is content on the line, an opportunity only when the mode wraps. A mode that never wraps
 // (nowrap / pre) pins the min-content to the max-content. An inline element's EDGES (OPEN / CLOSE) are content
-// on the line and in the word — and an inline with any edge takes the pending space at its open (the oracle
-// reads its close edge there too). `<wbr>` is a bare opportunity. A run under `word-break: break-all` /
+// on the line and in the word — and an inline with any edge takes the pending space at its open (its close edge
+// is read there too). `<wbr>` is a bare opportunity. A run under `word-break: break-all` /
 // `overflow-wrap: anywhere` (wrap mode 1 / 3) breaks between ANY two characters for the min-content: each
-// character's UNSPACED advance is a unit of its own (the oracle's `charAdvances` — letter/word-spacing is left
-// out of both figures there); `break-word` (2) leaves the measure alone. An atomic inline native lays
-// out itself contributes its own intrinsic widths (plus margins) as one unbreakable unit with an opportunity on
-// each side. `None` for a PUSHED atomic (its box is not in the stream), a tab / other control, or a ZWJ under
-// per-character breaking (the oracle's per-character advance carries the previous character).
+// character's SPACED advance is a unit of its own (letter-spacing follows every character, as the line lays it
+// out);
+// `break-word` (2) leaves the measure alone. An atomic inline with a record contributes its own intrinsic widths
+// (plus margins) as one unbreakable unit with an opportunity on each side. `None` for a run kind it does not
+// know, a tab / other control, or a ZWJ under per-character breaking (a per-character advance carries the
+// previous character).
 #[allow(clippy::too_many_arguments)]
 // A value at a basis: `v`, its pair as the caller resolved it — or, where it is a comparison function over affine
-// operands, its PROGRAM, which is the whole value and leaves the pair unread. The one arithmetic the two engines have
-// to agree on for the family (layout.js `nlClampedAt`).
+// operands, its PROGRAM, which is the whole value and leaves the pair unread.
 fn bounded(v: f64, prog: u32, basis: f64) -> f64 {
     if prog == NO_MATH {
         v
@@ -7915,11 +7624,11 @@ fn bounded(v: f64, prog: u32, basis: f64) -> f64 {
         MATH.with(|m| math_at(&m.borrow(), prog as usize, basis))
     }
 }
-// A program of the pass's math table at `at` (layout.js `nlMathProgram` / `nlPackMath`): its length in triples, then
+// A program of the pass's math table at `at` (the walk's `program`, entered by its `math`): its length in triples, then
 // `[op, a, b]` apiece in postfix — `MATH_LINE` pushes the operand `a + b x basis`, `MATH_MIN` / `MATH_MAX` / `MATH_SUM`
-// fold the top two, `MATH_NEG` negates the top, `MATH_SCALE` multiplies it by `a`. A min / max takes a NaN through as `Math.min` / `Math.max` do, which `f64::min` does not; the two
-// engines have to agree on every figure, an unresolvable one included. A table the walk did not write — an offset
-// past its end, a fold with nothing to fold, a stack deeper than the walk ever builds — is NaN, not a panic.
+// fold the top two, `MATH_NEG` negates the top, `MATH_SCALE` multiplies it by `a`. A min / max takes a NaN through (an
+// unresolvable operand leaves the whole value unresolved), which `f64::min` does not. A table the walk did not write —
+// an offset past its end, a fold with nothing to fold, a stack deeper than the walk ever builds — is NaN, not a panic.
 pub(crate) const MATH_LINE: f64 = 0.0;
 pub(crate) const MATH_MIN: f64 = 1.0;
 pub(crate) const MATH_MAX: f64 = 2.0;
@@ -8061,7 +7770,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
     // the two together — and differs only here: a `pre-wrap` space is a gap the line may break BEFORE and that
     // HANGS off the end, while a `break-spaces` space is CONTENT that joins the word, never hangs, and carries
     // the opportunity AFTER it. So the min-content of `aa   bb` is `aa ` wide (28.8) where `pre-wrap` gives
-    // `aa` (19.2). Chrome-measured, and the oracle's `contentIntrinsicWidths` says the same.
+    // `aa` (19.2). Chrome-measured.
     let modes = |m: u8| match m {
         0 => Some((true, false, false, false)),  // normal:   wraps, collapses, no forced newline
         1 => Some((false, false, false, false)), // nowrap
@@ -8072,8 +7781,8 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
         _ => None,
     };
     // `pin` — "this box never wraps, so its min-content IS its max-content" — is the BLOCK's, not the runs':
-    // the oracle ends `contentIntrinsicWidths` with `NON_WRAPPING_WS.has(whiteSpaceOf(el))`, asked of the
-    // ELEMENT. A wrapping inline inside a `nowrap` block does not unpin it.
+    // it is asked of the block's own `white-space` (`ws_mode`). A wrapping inline inside a `nowrap` block does not
+    // unpin it.
     let pin = !modes(ws_mode)?.0;
     // …while the four behaviours are set from each RUN's own mode as the loop reaches it.
     let (mut wraps, mut preserve, mut break_nl, mut brk_spaces);
@@ -8081,15 +7790,14 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
     let (mut line, mut word) = (0.0f64, 0.0f64);
     // `text-indent` narrows the line it applies to, so both figures carry it — and it is TAKEN by the first thing
     // that occupies the line (a word, an atomic, an inline box, a `<br>`, a `<wbr>`, a preserved segment), never
-    // seeded into the pen: a line nothing occupies carries none (the oracle's `takeIndent`, Chrome-measured — an
-    // empty `<td>` under an inherited indent is 0 wide). `hanging` indents every line BUT the first, and after a
+    // seeded into the pen: a line nothing occupies carries none (Chrome-measured — an empty `<td>` under an
+    // inherited indent is 0 wide). `hanging` indents every line BUT the first, and after a
     // forced break `each-line` arms the next one (inverted again under `hanging each-line`); every line an
     // intrinsic measure closes is a forced one, since it has no room to wrap in.
     // …and the FIRST line is the block's first only where nothing SPENT it: a mixed block's anonymous group after
-    // a block child starts on a line that is not (`indent_spent`), where the oracle's pen has closed a line for
-    // the block child and re-armed the indent as any non-first line — `hanging ? px : 0`. The same test the flow
-    // makes (`line_layout`'s `indent_first != indent_hanging`); without it the measure indented a group the
-    // layout did not (30.2 where the oracle says 20.6).
+    // a block child starts on a line that is not (`indent_spent`): the block child closed a line and re-armed the
+    // indent as any non-first line — `hanging ? px : 0`. The same test the flow makes (`line_layout`'s
+    // `indent_first != indent_hanging`), so the measure indents exactly the groups the layout does.
     let (indent_px, indent_hanging, indent_each_line, indent_spent) = indent;
     let mut pending_indent = if !indent_spent != indent_hanging { indent_px } else { 0.0 };
     macro_rules! take_indent {
@@ -8101,8 +7809,8 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
     }
     let mut inline_on_line = false; // content has landed on this line (a space after it is pending, not dropped)
     // A collapsible space waiting for content to follow it, and whether it JOINS the word rather than opening
-    // a break — which is the mode of the run that QUEUED it (the oracle's `pend(w, joins)` / `pendingJoins`),
-    // never the one that takes it. Live now that a non-wrapping run may sit in a wrapping box.
+    // a break — which is the mode of the run that QUEUED it, never the one that takes it (a non-wrapping run may
+    // sit in a wrapping box).
     let mut pending_space = 0.0f64;
     let mut pending_joins = false;
     macro_rules! opportunity {
@@ -8162,7 +7870,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
             RUN_OOF => {}
             // A FLOAT packs beside its neighbours as an inline-level box does (a box holding two 50px floats wants
             // 100 at max-content, 50 at min-content), its margins with it — but it is not inline CONTENT: it takes
-            // no pending space and brings no break opportunity (the oracle's float arm).
+            // no pending space and brings no break opportunity.
             RUN_FLOAT => {
                 let c = run.font as usize;
                 let (imin, imax) = intrinsic_widths(c, inputs, all_runs, all_texts, grids, children)?;
@@ -8201,10 +7909,9 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
             }
             RUN_TEXT => {
                 let text = run_texts.get(ri).and_then(|t| t.as_ref())?;
-                // Per-character breaking is the OWNER's mode (`minBreaksAnywhere`), never conditioned on what
-                // the run holds — the oracle's `addUnit` reads it that way, and a single CJK character in a
-                // paragraph must not stop its Latin words from breaking. Whether a WORD holds a wide character
-                // is asked per word below, where `charUnits` asks it. (A ZWJ binds what follows it into its unit:
+                // Per-character breaking is the OWNER's mode (the run's `metric`), never conditioned on what the run
+                // holds — a single CJK character in a paragraph must not stop its Latin words from breaking. Whether a
+                // WORD holds a wide character is asked per word below. (A ZWJ binds what follows it into its unit:
                 // `break_unit_len`.)
                 let per_char = matches!(run.metric as u8, 1 | 3 | 4 | 5);
                 // …whose units are glued by break-all's rules, except under `anywhere`, whose emergency breaks
@@ -8231,13 +7938,12 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
                             i += 1;
                         }
                         if preserve {
-                            // Every space is content on the line (an opportunity, when the mode wraps, before it
-                            // — the oracle's order), and each newline ends the line where it sits. The spaces of
-                            // each NEWLINE-SEGMENT are a placement of their own: they take the collapsed space
-                            // waiting from an earlier run and they put content on the line (the oracle's
-                            // `takePending(); inlineOnLine = true`, which it does per segment). Per segment and
-                            // not once per run, so a segment the newline before it emptied starts over — and a
-                            // run that OPENS with a newline drops the pending space with the line it ends.
+                            // Every space is content on the line (an opportunity, when the mode wraps, before it), and
+                            // each newline ends the line where it sits. The spaces of each NEWLINE-SEGMENT are a
+                            // placement of their own: they take the collapsed space waiting from an earlier run and
+                            // they put content on the line. Per segment and not once per run, so a segment the newline
+                            // before it emptied starts over — and a run that OPENS with a newline drops the pending
+                            // space with the line it ends.
                             let mut seg_open = false;
                             take_indent!(); // this segment occupies its line, an EMPTY one too
                             for &u in &text[start..i] {
@@ -8252,10 +7958,9 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
                                         seg_open = true;
                                     }
                                     // A TAB's advance is the gap to the next stop from the pen, which here is
-                                    // `line` — the oracle passes exactly that as `measureRun`'s `from` in its
-                                    // own intrinsic arm. (It measures the whole whitespace TOKEN at once and
-                                    // takes one opportunity for it; per character is the same arithmetic and
-                                    // the same opportunities, since closing an empty word is a no-op.)
+                                    // `line` (`measure_at`'s `from`). Measured per character: the same arithmetic
+                                    // and the same opportunities as the whole whitespace TOKEN at once, since
+                                    // closing an empty word is a no-op.
                                     let adv = if u == 0x09 { measure_at(run, &[u], line)? } else { space_w };
                                     // …and under `break-spaces` the space is CONTENT: it joins the word like a
                                     // non-wrapping one and takes its opportunity AFTER, where a `pre-wrap` space
@@ -8277,9 +7982,9 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
                             }
                         } else if inline_on_line {
                             // A collapsed space: pending after content on the line, nothing at all at a line start
-                            // — deleted there (CSS Text 3 §4.1.2), and no break opportunity with it: it used to be
-                            // one, "a no-op, the word is empty", which an inline box's edges or the indent it took
-                            // made false (the oracle's pen, the same change).
+                            // — deleted there (CSS Text 3 §4.1.2), and no break opportunity with it: the word is
+                            // not necessarily empty there, since an inline box's edges or the indent it took are in
+                            // it.
                             pend!(space_w);
                         }
                     } else {
@@ -8295,15 +8000,14 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
                         let word_wide = run_has_wide && text[start..i].iter().any(|&u| is_wide_unit(u));
                         // A HYPHEN is an opportunity here too, or min-content would be the whole hyphenated word
                         // where the flow can break it (`well-known` measures `known`, not both halves glued) —
-                        // and it is the ONLY one the word then has: the oracle's `addUnit` returns on its hyphen
-                        // branch, so a piece is measured whole however the mode would cut it in the flow. (Which
-                        // is right for `overflow-wrap: break-word`, whose in-word breaks min-content ignores
-                        // anyway, and is what parity asks of the other two.)
+                        // and it is the ONLY one the word then has: a piece is measured whole however the mode
+                        // would cut it in the flow. (Which is right for `overflow-wrap: break-word`, whose in-word
+                        // breaks min-content ignores anyway, and coarse for the other two.)
                         let word_hyphen = run_has_hyphen
                             && text[start..i].iter().any(|&u| is_hyphen_unit(u))
                             && (start..i).any(|k| hyphen_breaks_after(text, k, i));
-                        // …and a SOFT hyphen, whose piece counts the hyphen it would show at the break (the oracle's
-                        // `addUnit`: `word + hyphenWidth(owner)` is a min-content candidate for every such piece).
+                        // …and a SOFT hyphen, whose piece counts the hyphen it would show at the break (the word so
+                        // far plus `soft_hyphen_width` is a min-content candidate for every such piece).
                         let word_shy = run_has_shy && text[start..i].contains(&SOFT_HYPHEN);
                         if word_hyphen || word_shy {
                             let mut u = start;
@@ -8323,14 +8027,13 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
                         } else if per_char || word_wide {
                             let mut u = start;
                             while u < i {
-                                // `own = perChar || isWideChar(cp)` — the oracle's `addUnit`, and BOTH halves of
-                                // it matter. Under a per-character mode every code point is a unit, a wide-bearing
-                                // word included (grouping its Latin tail back into one measured 58.63 where the
-                                // oracle and Chrome say 50); otherwise only the WIDE units are opportunities, and
-                                // the maximal Latin run between them is glued to whatever precedes it. Bracketing
-                                // every unit instead closed the word at the Latin run's own edges, losing whatever
-                                // was glued across a run boundary — `abcdef<b>gh日</b>` measured 42.63 against the
-                                // oracle's 59.53, and a padded inline lost its 20px edge outright.
+                                // `own = per_char || is_wide_unit(..)`, and BOTH halves of it matter. Under a
+                                // per-character mode every code point is a unit, a wide-bearing word included
+                                // (grouping its Latin tail back into one measures 58.63 where Chrome says 50);
+                                // otherwise only the WIDE units are opportunities, and the maximal Latin run between
+                                // them is glued to whatever precedes it. Bracketing every unit instead would close
+                                // the word at the Latin run's own edges, losing whatever was glued across a run
+                                // boundary (`abcdef<b>gh日</b>`) and a padded inline's edge outright.
                                 // (…an emergency break inside a word falls between grapheme clusters under `anywhere`, the one
                                 // mode whose in-word breaks min-content counts; every unit SPACED, as the line lays it out —
                                 // letter-spacing follows every character, so the units sum to the spaced word, where unspaced
@@ -8359,8 +8062,8 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
                 }
             }
             RUN_ATOMIC if run.font >= 0 => {
-                // A natively laid-out atomic: one unbreakable unit the line may break on either side of, its
-                // own intrinsic widths plus its margins (the oracle's atomic arm).
+                // An atomic inline: one unbreakable unit the line may break on either side of, its own
+                // intrinsic widths plus its margins.
                 let c = run.font as usize;
                 let k = inputs[c].get();
                 let (imin, imax) = intrinsic_widths(c, inputs, all_runs, all_texts, grids, children)?;
@@ -8373,7 +8076,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
                 inline_on_line = true;
                 opportunity!();
             }
-            _ => return None, // a PUSHED atomic — its intrinsic box is not in the stream
+            _ => return None, // a run this measure does not model
         }
     }
     max = max.max(line); // the last line closes without a reset
@@ -8381,27 +8084,26 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
     if pin {
         min = max;
     }
-    // KNOWN GAP (both engines, measured): a box can come back wanting MORE at min-content than at max — a SOFT
+    // KNOWN GAP (measured): a box can come back wanting MORE at min-content than at max — a SOFT
     // HYPHEN puts its width in `min` alone (`aaaa&shy;` is 33.73/28.41 here, 33.73/33.73 in Chrome, which
     // closes the gap by raising the max). Left alone deliberately: the rule that reproduces every figure is
     // Chrome's real break pass at zero available width, not a clamp on these two numbers.
     Some((min.max(0.0), max.max(0.0)))
 }
 
-// A GRID container (§12, see DISPLAY_GRID). Sizes the columns natively — measuring each item's min/max-content
-// itself when a track asks for content (`intrinsic_widths`) — then runs the oracle's row-major placement: each
-// in-flow item is laid out at its track width (auto fills the track less its margins; a length uses its
-// resolved box); rows are as tall as their content (the tallest item's border box — a top margin moves the item
-// but, matching the coarse oracle, neither grows the row nor stretches a shorter item) or, under
-// `grid-auto-rows`, the declared height whatever the content (the container still reaches under an overflowing
-// item). Bare text directly in the grid is an anonymous ITEM with a box of its own (CSS Grid §4, `gridItems`
-// in `layout.js`), placed in a row like any other item and walked here as an ordinary block record with no
-// element behind it — so `anon_cross` arrives as 0 for a grid and the floor it carries is FLEX's alone. It
-// floored a grid's auto height until 2026-09-22, which overrode a declared `grid-auto-rows` (22 against
-// Chrome's 5) in both engines at once. An out-of-flow child joins no row: its subtree lays out at its
-// pushed box and `place` positions it by its displacement. The buffer at `grids[grid_start..]` is
-// `[col_count, col_gap px, col_gap fraction, row_gap px, row_gap fraction, decl_row_h (NaN = content rows),
-// template (GRID_TRACK_STRIDE per column), (col_start | -1, span) per in-flow item]`.
+// A GRID container (§12, see DISPLAY_GRID). Sizes the columns — measuring each item's min/max-content when a
+// track asks for content (`intrinsic_widths`) — then places the items row-major (`grid_placement`): each in-flow
+// item is laid out at its track width (auto fills the track less its margins; a length uses its resolved box);
+// rows are as tall as their content (the tallest item's border box — a top margin moves the item but, coarsely,
+// neither grows the row nor stretches a shorter item) or, under `grid-auto-rows`, the declared height whatever
+// the content (the container still reaches under an overflowing item). Bare text directly in the grid is an
+// anonymous ITEM with a box of its own (CSS Grid §4), placed in a row like any other item and walked here as an
+// ordinary block record with no element behind it — so `anon_cross` arrives as 0 for a grid and the floor it
+// carries is FLEX's alone (a floor would override a declared `grid-auto-rows`: Chrome gives 5, not the text's
+// 22). An out-of-flow child joins no row: it sits at the grid's content origin as its static position and
+// `place_out_of_flow` sizes and places it. The buffer at `grids[grid_start..]` is the header (`GRID_HEADER`),
+// the template (GRID_TRACK_STRIDE per marshalled column), then each in-flow item's declared lines (3 apiece,
+// `grid_item_columns`).
 fn measure_grid(
     i: usize,
     w: f64,
@@ -8427,9 +8129,9 @@ fn measure_grid(
         return bail(failed);
     }
     let literal = grids[gs] as usize;
-    // The gaps arrive as `px + fraction` of the content box along their axis (`gapSpec`): a row gap's fraction
-    // resolves against the content height where that is DEFINITE — declared or imposed — and is nothing where the
-    // height is the rows' own, as the oracle's `layoutGrid` has it.
+    // The gaps arrive as `px + fraction` of the content box along their axis: a row gap's fraction resolves
+    // against the content height where that is DEFINITE — declared or imposed — and is nothing where the height is
+    // the rows' own.
     let col_gap = bounded(grids[gs + 1] + grids[gs + 2] * content_w, math_ref(grids[gs + 9]), content_w).max(0.0);
     let row_h = n.definite_content_h().unwrap_or(0.0);
     let row_gap = bounded(grids[gs + 3] + if grids[gs + 4] != 0.0 { grids[gs + 4] * row_h } else { 0.0 }, math_ref(grids[gs + 10]), row_h).max(0.0);
@@ -8444,9 +8146,8 @@ fn measure_grid(
         return bail(failed);
     }
     // …and how many columns those specs actually make is this box's own answer: an `auto-fill` / `auto-fit`
-    // repeat makes as many copies as THIS content box fits, with the gap between them counting toward each. The
-    // oracle counts them against its own `content_w`; the two figures are the same box, so they must agree
-    // bit-for-bit — a 1-ulp difference at an exact boundary is a whole column, not a rounding error.
+    // repeat makes as many copies as THIS content box fits, with the gap between them counting toward each — a
+    // 1-ulp difference at an exact boundary is a whole column, not a rounding error, hence `LINE_FIT_EPS` there.
     let count = grid_repeat_count(grids, gs, tmpl_base, content_w, col_gap, place_base, kids.len());
     let tracks = grid_expanded_tracks(grids, gs, tmpl_base, literal, count);
     let col_count = tracks.len();
@@ -8461,7 +8162,8 @@ fn measure_grid(
                 boxes[c].y = content_top_rel;
                 continue;
             }
-            // Replayed: lay the subtree out at its pushed border box; `place` positions it by rel_x/rel_y alone.
+            // One with no containing block (`CB_NONE`): its subtree lays out at its own resolved width, and `place`
+            // positions it by rel_x/rel_y alone.
             let cw = resolve_width(&cn, content_w);
             measure(c, cw, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             boxes[c].x = 0.0;
@@ -8469,7 +8171,7 @@ fn measure_grid(
         }
     }
     // An intrinsic track (auto / min|max-content / fit-content / a minmax side) sizes from the items' content —
-    // measured natively here; a template of px / % / fr sides needs no measure at all.
+    // measured here; a template of px / % / fr sides needs no measure at all.
     let cols = if tracks.iter().any(GridTrack::needs_content) {
         match grid_column_content(&kids, &cells, col_count, inputs, runs, run_texts, grids, children) {
             Some(cols) => Some(cols),
@@ -8489,10 +8191,10 @@ fn measure_grid(
     // …and on the BLOCK axis its containing block is the ROW: a DECLARED row height is that basis outright,
     // and where the rows are content-sized the grid's own definite content height stands in. Loop-invariant,
     // so it is computed once — a grid item's sizing is a hot path (rule 3).
-    // The fallback is right for the single row a grid usually has and wrong otherwise, and the walk shares it:
-    // `grid-auto-rows` is the only row declaration either engine reads (`gridRowHeight`), a content row's
-    // height is not known until its items are measured, and a `grid-row: span` is not modelled. Recorded, not
-    // fixed here — Chrome gives a `height: 50%` item in the second of two content rows 50 where both say 150.
+    // KNOWN GAP: the fallback is right for the single row a grid usually has and wrong otherwise:
+    // `grid-auto-rows` is the only row declaration read (the walk's `grid_row_height`), a content row's height is
+    // not known until its items are measured, and a `grid-row: span` is not modelled — Chrome gives a
+    // `height: 50%` item in the second of two content rows 50 where this gives 150.
     let pct_h = if is_auto(decl_row_h) { n.definite_content_h().unwrap_or(f64::NAN) } else { decl_row_h };
     // Rows advance by the tallest item placed (content rows), or by the declared row height.
     let mut row_top = 0.0f64; // relative to the content origin
@@ -8520,8 +8222,8 @@ fn measure_grid(
         // …and an auto-height item under a declared row is that row's height, imposed as its border box on the
         // edges just resolved and floored at them — a row shorter than the item's own padding and border leaves the
         // box at those (Chrome), and the box IS that figure, a border-box one included: a table's caption resolves
-        // its percentage offset against it (`layoutGrid`'s `Math.max(declaredRowH, ce.top + ce.bottom)`). Derived
-        // from the row, never from the height it wrote, so it too is idempotent.
+        // its percentage offset against it. Derived from the row, never from the height it wrote, so it too is
+        // idempotent.
         if item.row_imposed && !is_auto(decl_row_h) {
             item = item.with_imposed_height(decl_row_h.max(item.edges_y()));
             inputs[c].set(item);
@@ -8557,8 +8259,8 @@ fn measure_grid(
         if ih > row_h {
             row_h = ih;
         }
-        // …and the content ends where the ROWS do: an item taller than a FIXED row overflows it (`layoutGrid`). A zero
-        // row is the oracle's auto placeholder, and its items still size the grid.
+        // …and the content ends where the ROWS do: an item taller than a FIXED row overflows it. A zero declared row
+        // counts as content-sized here, and its items still size the grid.
         let row_end = if is_auto(decl_row_h) || decl_row_h == 0.0 { ih.max(row_floor) } else { decl_row_h };
         if row_top + row_end > bottom {
             bottom = row_top + row_end;
@@ -8589,13 +8291,12 @@ fn measure_grid(
 
 // A container's first / last baseline from its children in the given order — the first that has a first
 // baseline and the last that has a last baseline, each offset by the child's relative top; out-of-flow and
-// floated children give none (the oracle's `baselineCandidates`).
-// What a box hands its PARENT under the ATOMIC rules — the rule `boxBaselineOffset` applies to the box it is
-// looking AT, at every level of the walk while its `inlineBlock` flag is set: a scroll container gives its
-// bottom margin edge (a BUTTON excepted, which is a button however it scrolls) and masks everything inside it,
-// anything else hands over what its own children gave it. `Box::inline_block_baseline` is only that second
-// half, so a table's CELL, ROW or ROW GROUP that is itself a scroll container needs this on top of it (120
-// shapes of a 2744-case sweep: the oracle's line 22 against native's 18).
+// floated children give none.
+// What a box hands its PARENT under the ATOMIC rules (CSS 2.1 §10.8.1's inline-block baseline), applied at every
+// level of the recursion: a scroll container gives its bottom margin edge (a BUTTON excepted, which is a button
+// however it scrolls) and masks everything inside it, anything else hands over what its own children gave it.
+// `Box::inline_block_baseline` is only that second half, so a table's CELL, ROW or ROW GROUP that is itself a
+// scroll container needs this on top of it (the line is 22 tall, not 18).
 fn atomic_baseline_of(b: usize, inner: Option<f64>, inputs: &[Cell<Input>], boxes: &[Box]) -> Option<f64> {
     let k = inputs[b].get();
     if k.scrolls_y && !k.is_button { Some(boxes[b].h + Input::m(k.mb)) } else { inner }
@@ -8618,20 +8319,17 @@ fn child_baselines(order: impl Iterator<Item = usize> + Clone, inputs: &[Cell<In
             last = Some(boxes[c].y + b);
         }
         // A scroll container gives its bottom margin edge — except a BUTTON, which is a button however it
-        // scrolls (the oracle's exception; a control atomic reaches native now, so this is live rather than
-        // pushed, but the rule has to be the same rule).
+        // scrolls.
         //
         // …and a TABLE child answers NOTHING here, at every level: an atomic hangs from a LINE BOX (CSS 2.1
         // §10.8.1) and a table generates none, so an `inline-block` whose content is a table — however deep —
-        // hangs from its bottom margin edge. That is the oracle's rule: `boxBaselineOffset` carries its
-        // `inlineBlock` flag down the whole recursion, and `baselineCandidates` skips every table-display
-        // child while it is set. The `first` / `last` answers above are untouched, because those are what a
-        // flex line and a baseline-aligned cell read, and a table does answer them.
+        // hangs from its bottom margin edge. The `first` / `last` answers above are untouched, because those are
+        // what a flex line and a baseline-aligned cell read, and a table does answer them.
         //
-        // RECORDED, not fixed: Chrome asks the CONTAINER KIND instead — a box whose own baseline comes from
-        // LINE BOXES refuses a table child (inline-block, all three engines 22 / 14), but a FLEX or GRID
-        // container's baseline IS its first item's, table included (Flexbox §8.5, Align §9: Chrome 18 / 10
-        // where both engines give 22 / 14; 21 vs 25 for a `<button style="display:inline-flex">`).
+        // KNOWN GAP: Chrome asks the CONTAINER KIND instead — a box whose own baseline comes from LINE BOXES
+        // refuses a table child (inline-block, Chrome 22 / 14 as here), but a FLEX or GRID container's baseline
+        // IS its first item's, table included (Flexbox §8.5, Align §9: Chrome 18 / 10 where this gives 22 / 14;
+        // 21 vs 25 for a `<button style="display:inline-flex">`).
         if cn.display != DISPLAY_TABLE {
             if cn.scrolls_y && !cn.is_button {
                 inline_block = Some(boxes[c].y + boxes[c].h + Input::m(cn.mb));
@@ -8643,11 +8341,11 @@ fn child_baselines(order: impl Iterator<Item = usize> + Clone, inputs: &[Cell<In
     (first, last, inline_block)
 }
 
-// A REPLACED box's used border-box (width, height) — the oracle's `usedSize` for a box with an intrinsic size:
+// A REPLACED box's used border-box (width, height) (CSS 2.1 §10.3.2 / §10.6.2):
 // the declared width / height win (content-box unless `box-sizing: border-box`), else the intrinsic size plus the
 // edges (a ratio-only box with no declared width takes `auto_w`, the room on offer); an intrinsic RATIO derives
 // the other axis from a declared one (or from the room, for a ratio-only box); min/max clamp through the ratio
-// (`clampWithRatio`: the binding clamp scales the content box, the other axis follows) or plainly without one; a
+// (the binding clamp scales the content box, the other axis follows) or plainly without one; a
 // border box is floored at its own edges. Never auto-height: a replaced box is definite.
 fn replaced_box(n: &Input, auto_w: f64) -> (f64, f64) {
     let (extra_w, extra_h) = (n.edges_x(), n.edges_y());
@@ -8761,7 +8459,7 @@ fn block_child_across(n: &Input, cn: &Input, band_l: f64, band_r: f64, w: f64) -
     } else {
         (cn.auto_margins & 1 != 0, cn.auto_margins & 2 != 0)
     };
-    // (…a rendered legend with a `justify-self` sits by it, physically, its margins kept — `placeAcross`)
+    // (…a rendered legend with a `justify-self` sits by it, physically, its margins kept)
     if (2..=4).contains(&cn.legend_align) {
         let spare = (band_r - band_l - w - ml - mr).max(0.0);
         let lead = ml + match cn.legend_align { 3 => spare / 2.0, 4 => spare, _ => 0.0 };
@@ -8798,9 +8496,9 @@ fn legacy_align_shift(legacy_align: u8, from_right: bool, spare: f64) -> f64 {
     }
 }
 
-// The slack between two insets shared out to `auto` margins (CSS 2.1 §10.3.7 across, §10.6.4 down) — the
-// oracle's `autoMarginSplit`: both auto centre the box, one auto takes it all, and an over-constrained box (no
-// slack) sits flush at the lead edge with the trailing margin absorbing the negative remainder.
+// The slack between two insets shared out to `auto` margins (CSS 2.1 §10.3.7 across, §10.6.4 down): both auto
+// centre the box, one auto takes it all, and an over-constrained box (no slack) sits flush at the lead edge with
+// the trailing margin absorbing the negative remainder.
 fn auto_margin_split(lead_auto: bool, trail_auto: bool, lm: f64, tm: f64, available: f64, size: f64) -> (f64, f64) {
     if !lead_auto && !trail_auto {
         return (lm, tm);
@@ -8815,8 +8513,8 @@ fn auto_margin_split(lead_auto: bool, trail_auto: bool, lm: f64, tm: f64, availa
     if lead_auto { (spare, tm) } else { (lm, spare) }
 }
 
-// Where `justify-content` puts the SOLE flex item of a line — an out-of-flow child's static position (§4.1, the
-// oracle's `justifyOffsets` with `staticPos`): a distribution keyword falls back to its alignment even when the
+// Where `justify-content` puts the SOLE flex item of a line — an out-of-flow child's static position (§4.1): a
+// distribution keyword falls back to its alignment even when the
 // box overflows (`space-around` / `space-evenly` centre it, `space-between` packs at the start).
 fn static_justify_lead(code: u8, free: f64) -> f64 {
     match code {
@@ -8826,7 +8524,7 @@ fn static_justify_lead(code: u8, free: f64) -> f64 {
     }
 }
 
-// Size and place an OUT-OF-FLOW box (§10.3.7 / §10.6.4 — the oracle's `placeAbsolute`) from its containing
+// Size and place an OUT-OF-FLOW box (§10.3.7 / §10.6.4) from its containing
 // block, now that every box is final: the CB's padding box in absolute coordinates gives the insets their basis;
 // both insets on an axis STRETCH an auto size between them (less the box's margins, an `auto` margin taking the
 // slack), one or none leaves an auto width to SHRINK TO FIT (its intrinsic widths clamped to the room; a
@@ -8848,8 +8546,8 @@ fn place_out_of_flow(
 ) {
     // The containing block's PADDING box, in document coordinates: from its record where the pass holds one
     // (its border box less its borders, final by the time `place` reaches here), from its fragments where it is an
-    // inline box of the pass, else the rectangle the walk pushed for a CB outside the pass (the viewport, an
-    // ancestor above the root).
+    // inline box of the pass, else the rectangle the walk wrote into `cb_rect` for a CB outside the pass (the
+    // viewport, an ancestor above the root).
     let declared = inputs[c].get();
     let (cb_x, cb_y, cb_w, cb_h) = if declared.cb_index == CB_RECT {
         (declared.cb_rect[0], declared.cb_rect[1], declared.cb_rect[2], declared.cb_rect[3])
@@ -8891,19 +8589,19 @@ fn place_out_of_flow(
     let avail_h = if stretched_v { (cb_h - top - bottom).max(0.0) } else { 0.0 };
     // The static position its parent recorded (relative to the parent's border box), read before the box is sized.
     let (static_rx, static_ry) = (boxes[c].x, boxes[c].y);
-    // Between BOTH insets the room is what they leave less the box's own margins — what an auto width fills and
-    // what an intrinsic-size keyword measures against (the oracle's stretched `autoW`, which `usedSize` hands both
-    // uses). A keyword width is no `auto`, though: it takes its own figure of that room rather than filling it.
+    // Between BOTH insets the room is what they leave less the box's own margins — what an auto width fills and what an
+    // intrinsic-size keyword measures against. A keyword width is no `auto`, though: it takes its own figure of that
+    // room rather than filling it.
     let fill_w = (avail_w - ml - mr).max(0.0);
     let auto_w = if (stretched && n.width_kw == 0) || (n.replaced && n.ratio_only) {
         fill_w
     } else if !is_auto(n.width) {
         // A DECLARED width: `used_width` answers from the declaration and discards `auto_w`, so the
         // shrink-to-fit measure is not merely wasted work (an O(subtree) walk per out-of-flow box) — asked, it
-        // descends where the WALK did not gate for it. The record's `decl_w` is basis-less, so a PERCENTAGE
+        // can fail the pass over a figure nobody reads. The record's `decl_w` is basis-less, so a PERCENTAGE
         // width reads as `auto` inside `intrinsic_widths` and the walk it short-circuits for a length runs
-        // after all: a `position: absolute; width: 50%` box holding an atomic native cannot measure failed the
-        // whole pass over a figure nobody reads.
+        // after all: a `position: absolute; width: 50%` box holding something the intrinsic measure does not
+        // model would decline the whole pass.
         0.0
     } else {
         // …an AUTO width shrinks to fit the room its insets leave, and an intrinsic-size KEYWORD asks its own
@@ -8919,13 +8617,13 @@ fn place_out_of_flow(
         }
     };
     let w = used_width(&n, auto_w);
-    // A stretched AUTO height is imposed (usedSize hands it in as the box's height; the flow keeps a non-zero one) —
-    // a zero one is the oracle's auto placeholder and back-fills from the content.
+    // A stretched AUTO height is imposed as the box's height where it is non-zero — a zero one is taken as no
+    // stretch, and the height back-fills from the content.
     // (…an intrinsic-size KEYWORD height is no `auto`: it is the content's, between the insets or not, and the auto
     // margins centre it in what is left.)
     let auto_h = if stretched_v && !n.height_kw { (avail_h - mt - mb).max(0.0) } else { 0.0 };
     // …a REPLACED box excepted: its height is its own intrinsic size, which §10.6.5 keeps whatever the insets say
-    // (the oracle's `usedSize` keeps it; native stretched an inset `<input>` / list box to the inset height).
+    // (an inset `<input>` / list box keeps its own height rather than stretching to the inset one).
     let imposed = if is_auto(n.height) && auto_h > 0.0 && !n.replaced { auto_h } else { f64::NAN };
     measure(c, w, imposed, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     let h = boxes[c].h;
@@ -8951,7 +8649,7 @@ fn place_out_of_flow(
         };
         // A cross axis that runs from the far physical edge back — an rtl COLUMN, a `*-rl` ROW, anything
         // under `wrap-reverse` — puts its cross-start at the far edge: the leading cross margin is the one on
-        // that side and the cross offset is measured back from it (the oracle's `alongAxis`).
+        // that side and the cross offset is measured back from it (`along`).
         let cross_far = pn.flex_cross_far;
         let (cross_lead, cross_item) = if pn.flex_main_is_x {
             (if cross_far { mb } else { mt }, h + mt + mb)
@@ -8973,13 +8671,9 @@ fn place_out_of_flow(
         }
     } else if pn.from_right() && pn.display != DISPLAY_TABLE {
         // …and an inline axis running from the RIGHT puts the static corner at the content's right edge, less
-        // the box (`staticCornerFor`, which asks for that physical side — a vertical mode's rtl has none).
-        // A TABLE is the one container that does NOT: `layoutTable` places its out-of-flow children with no
-        // aligned corner at all (`placeAbsolute(child, pos, content.x, gridTop, ctx)` — it stops at `ctx`,
-        // where block flow and grid go on to pass `order` and `staticAlign`), so an rtl table leaves one at
-        // its content's LEFT edge. Chrome
-        // puts it at the right, like every other rtl container; that is an oracle divergence recorded rather
-        // than fixed while the port is running, and fixing it means giving the ORACLE the corner it skips.
+        // the box (`from_right`, which asks for that physical side — a vertical mode's rtl has none).
+        // KNOWN GAP: a TABLE is the one container that does NOT — an rtl table leaves an out-of-flow child at its
+        // content's LEFT edge, where Chrome puts it at the right, like every other rtl container.
         (px + static_rx - w, py + static_ry)
     } else {
         (px + static_rx, py + static_ry)
@@ -9019,9 +8713,8 @@ fn resolve_width(n: &Input, cb_w: f64) -> f64 {
     used_width(n, (cb_w - Input::m(n.ml) - Input::m(n.mr)).max(0.0))
 }
 // How far right a box's IN-FLOW content reaches, off its own border-box origin, recursively — never short of the
-// box itself (the oracle's `_lbFlowRight`, which `stampExtent` unions the same way). An out-of-flow box is not
-// part of what its parent wraps, and neither is anything inside it. A relative shift is: the oracle folds it into
-// the box before the extent is stamped.
+// box itself. An out-of-flow box is not part of what its parent wraps, and neither is anything inside it. A
+// relative shift is (`rel_x`).
 fn flow_right(c: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], boxes: &[Box]) -> f64 {
     let mut reach = boxes[c].w;
     for &k in &children[c] {
@@ -9032,12 +8725,11 @@ fn flow_right(c: usize, inputs: &[Cell<Input>], children: &[Vec<usize>], boxes: 
     }
     reach
 }
-// What an AUTO width becomes for a box sized from its own CONTENT in `room` of inline space — the oracle's
-// `shrinkToFitWidth`: its min-content, widened to the room, capped at its max-content. Both figures carry the
+// What an AUTO width becomes for a box sized from its own CONTENT in `room` of inline space — shrink-to-fit
+// (CSS 2.1 §10.3.5): its min-content, widened to the room, capped at its max-content. Both figures carry the
 // percentage part of the box's own edges, which an intrinsic CONTRIBUTION reads as nothing and a USED size
-// puts back (`pct_edges_x`). `None` where native cannot measure the subtree; each caller decides what that
-// means (a whole-pass failure, or `?` out of its own sizing). What `room` is differs by caller — the callers
-// mirror the basis their oracle counterpart passes.
+// puts back (`pct_edges_x`). `None` where the subtree is not measurable; each caller decides what that
+// means (a whole-pass failure, or `?` out of its own sizing). What `room` is differs by caller.
 fn shrink_to_fit_width(
     c: usize,
     room: f64,
@@ -9054,9 +8746,9 @@ fn shrink_to_fit_width(
 // The BORDER-BOX width an in-flow BLOCK-LEVEL child uses, given the inline room its containing block leaves it
 // (`avail` — the content width, or the band a float narrows it to). Normally that is the containing block's
 // room (`resolve_width`); a box whose own block axis is the HORIZONTAL one (a vertical `writing-mode`) has no
-// inline size to fill there, so its auto width comes from its own content instead. The walk both refuses such
-// a child native cannot measure and walks the rest MEASURED (`nlIntrinsicMeasurable` + `walkMeasured`), so
-// `None` here means that gate has a hole — fail the pass rather than answer with a width nothing measured.
+// inline size to fill there, so its auto width comes from its own content instead. `None` here means the
+// subtree holds something the intrinsic measure does not model — fail the pass rather than answer with a width
+// nothing measured.
 #[allow(clippy::too_many_arguments)]
 fn block_child_width(
     c: usize,
@@ -9071,26 +8763,22 @@ fn block_child_width(
     let cn = &inputs[c].get();
     // A box sized from its OWN CONTENT here rather than from the room on offer: an intrinsic-size KEYWORD, a
     // vertical writing mode's auto width — and a `<button>`, which is as wide as its content wants whatever
-    // display it has and however much room it is given (HTML's button layout IS the shrink-to-fit algorithm;
-    // the oracle's `shrinkWrapsToFit`). A block-level one filled its container here, which is 900px of
-    // clickable target where Chrome draws 132.
+    // display it has and however much room it is given (HTML's button layout IS the shrink-to-fit algorithm).
+    // A block-level one filling its container would be 900px of clickable target where Chrome draws 132.
     //
-    // …except for an ANONYMOUS block box, which the flow creates and the ORACLE gives its parent's content
-    // width outright. A mixed block's group inherits the parent's `writing-mode` like any anonymous box, so
-    // the vertical arm above used to catch it and shrink-to-fit it — and then a `text-align: center` had
-    // nothing to centre in: the atomic sat at 28.8 where the oracle put it at 145.5, on 400 of 4,032 shapes
-    // (`sweeps/genvwmmix.rb`, the cross of a writing mode with a mixed block, which no generator had).
-    // Reproducing the oracle here rather than the spec on purpose: NEITHER engine lays vertical text out —
-    // both put the atomic at the same `y` and move it along `x` — and Chrome, which does, says 262.5/28.81
-    // to our 145.5/19. The whole area is an approximation shared by the two engines, and the campaign's bar is
-    // that they share it. Real vertical inline layout is its own project; see the sweep.
+    // …except for an ANONYMOUS block box, which the flow creates and gives its parent's content width outright.
+    // A mixed block's group inherits the parent's `writing-mode` like any anonymous box, so the vertical arm
+    // above would catch it and shrink-to-fit it — and then a `text-align: center` would have nothing to centre
+    // in (the atomic at 28.8 rather than 145.5). KNOWN GAP: vertical text is not laid out — the atomic sits at
+    // the same `y` and moves along `x` — and Chrome, which does lay it out, says 262.5/28.81 to our 145.5/19.
+    // Real vertical inline layout is its own project.
     // …and the exemption is the TEXT BLOCK specifically, not "anonymous". The other three anonymous kinds take
     // their width from somewhere else entirely — a cell from its COLUMN, a grid item from its AREA — and none
     // of them reaches block flow today (`measure` routes on `display` with no fallback, and an instrumented run
     // over ~90k corpus shapes saw only `DISPLAY_TEXT_BLOCK` arrive here). What makes the narrow test worth
     // writing anyway is the kind that does NOT exist yet: block-in-inline's split, which a real browser makes into
     // anonymous BLOCKS and this engine does not — it lays a block-holding inline out as an ordinary block record of
-    // its element (layout.js `holdsBlockLevel`). The split's pieces would arrive here as anonymous `DISPLAY_BLOCK`s,
+    // its element. The split's pieces would arrive here as anonymous `DISPLAY_BLOCK`s,
     // and a blanket `is_anonymous()` would hand each one its parent's width without anyone deciding that it should
     // get one.
     let anon_group = cn.is_anonymous() && cn.display == DISPLAY_TEXT_BLOCK;
@@ -9107,12 +8795,11 @@ fn block_child_width(
         }
     }
 }
-// What a box sized from its OWN CONTENT comes to in `room` of inline space (the oracle's `usedSize` for the
-// same box): an intrinsic-size KEYWORD asks for its min-content, its max-content, or — `fit-content` — the
-// room clamped between the two; no keyword is the shrink-to-fit rule, which is `fit-content` by another name
+// What a box sized from its OWN CONTENT comes to in `room` of inline space: an intrinsic-size KEYWORD asks for its
+// min-content, its max-content, or — `fit-content` — the room clamped between the two; no keyword is the shrink-to-fit rule, which is `fit-content` by another name
 // and what a float's `auto` width means (§10.3.5), and a vertical writing mode's auto width again. Each
 // figure carries the percentage part of the box's own edges back (`pct_edges_x`, which an intrinsic
-// CONTRIBUTION leaves out). `None` where native cannot measure the subtree — the caller decides.
+// CONTRIBUTION leaves out). `None` where the subtree is not measurable — the caller decides.
 #[allow(clippy::too_many_arguments)]
 fn content_sized_width(
     c: usize,
@@ -9132,10 +8819,8 @@ fn content_sized_width(
 }
 // …the keyword arithmetic alone, over a pair already in hand: `min-content` and `max-content` take their side
 // outright and `fit-content` takes the room clamped between them — min-content winning where the two figures
-// cross (a negative margin can take max-content under the widest piece), as the oracle's
-// `Math.max(min, Math.min(max, …))` has it. Each carries back the percentage part of the box's own edges, which
-// an intrinsic CONTRIBUTION leaves out. Shared with `measure_table`'s caption, whose pair may be the ORACLE's
-// pushed one rather than a measure of its own.
+// cross (a negative margin can take max-content under the widest piece). Each carries back the percentage part
+// of the box's own edges, which an intrinsic CONTRIBUTION leaves out. Shared with `measure_table`'s caption.
 fn keyword_width(kw: u8, imin: f64, imax: f64, room: f64, pct: f64) -> f64 {
     match kw {
         1 => imin + pct,
@@ -9143,8 +8828,8 @@ fn keyword_width(kw: u8, imin: f64, imax: f64, room: f64, pct: f64) -> f64 {
         _ => (room - pct).min(imax).max(imin) + pct,
     }
 }
-// The BORDER-BOX width a box uses given what an AUTO width would be (`auto_w` — the oracle's `usedSize` with
-// its `autoW`: the containing block's room in block flow, or a content size where the box is sized from its own
+// The BORDER-BOX width a box uses given what an AUTO width would be (`auto_w`: the containing block's room in
+// block flow, or a content size where the box is sized from its own
 // content there — a vertical writing mode, a flex column item, an out-of-flow or atomic box —
 // `shrink_to_fit_width`): a declared width converted to border-box, else `auto_w`, clamped by min/max-width
 // (same box model).
@@ -9163,10 +8848,10 @@ fn used_width(n: &Input, auto_w: f64) -> f64 {
     let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_x() };
     let w = clamp_min_max(border_w, to_border(n.min_w), to_border(n.max_w));
     // A BORDER box is never smaller than the border and padding inside it — the content box floors at zero, it
-    // does not go negative. The floor comes LAST, AFTER the clamp, exactly as `usedSize` applies it: a
+    // does not go negative. The floor comes LAST, AFTER the clamp: a
     // `max-width` below the box's own edges clamps the width under them and the floor lifts it back
     // (`box-sizing: border-box; padding: 0 10px; max-width: 5px` is 20 wide in Chrome, not 5). Floored first,
-    // the max clamped it below its own padding again.
+    // the max would clamp it below its own padding again.
     if n.border_box { w.max(n.edges_x()) } else { w.max(0.0) }
 }
 
@@ -9199,7 +8884,7 @@ mod tests {
             br: 0.0,
             bb: 0.0,
             bl: 0.0,
-            height_adjoins: true, // auto height/min-height adjoin (autoOrZeroHeight); overridden per test
+            height_adjoins: true, // an auto height/min-height adjoins; overridden per test
             minh_adjoins: true,
             bottom_adjoins: true,
             run_start: -1,
@@ -9220,23 +8905,17 @@ mod tests {
             flex_cross_gap: 0.0,
             flex_main_reverse: false,
             flex_cross_far: false,
-            has_replayed_oof: false,
             rel_x: 0.0,
             rel_y: 0.0,
             rel_pct: [f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, 0.0, 0.0],
             rel_x_px: 0.0,
             rel_x_neg: false,
-            measured_as_block: false,
-            equal_share: false,
             chain_rel: [0.0; 3],
             chain_px: [0.0; 2],
             chain_shift: [0.0; 2],
             chain_math: [NO_MATH; 2],
             rel_math: [NO_MATH; 3],
             flex_item_auto: 0,
-            flex_baseline_asc: f64::NAN,
-            flex_line_nat: f64::NAN,
-            flex_line: f64::NAN,
             out_of_flow: 0,
             sp_x: 0.0,
             sp_y: 0.0,
@@ -9249,7 +8928,6 @@ mod tests {
             anon_cross: 0.0,
             ws_mode: 0,
             item_auto_height: false,
-            pushed_h_indefinite: false,
             height_from_outside: false,
             lays_out_children: false,
             indent_frac: 0.0,
@@ -9287,8 +8965,6 @@ mod tests {
             decl_edges_x: 0.0,
             decl_margin_x: 0.0,
             cell_pct: f64::NAN,
-            cell_min_content: f64::NAN,
-            cell_max_content: f64::NAN,
             height_is_floor: false,
             cell_valign: 0,
             cell_pct_h_child: false,
@@ -9400,7 +9076,7 @@ mod tests {
     fn border_box_size_is_floored_at_its_edges() {
         // box-sizing:border-box with border+padding LARGER than the declared size: the content box can't go
         // below 0, so the border box is max(declared, edges) — width 100 vs edges 30 → 100; height 20 vs edges
-        // 30 → 30 (Chrome / the oracle grow it, native used to keep the too-small 20).
+        // 30 → 30 (Chrome grows it rather than keeping the too-small 20).
         let mut a = blk(1.0, 0);
         a.border_box = true;
         a.width = 100.0;
@@ -9433,9 +9109,8 @@ mod tests {
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 100.0, false));
         // a is the first child of an OPEN-top root, so its margin-top collapses through the root and is
         // absorbed (§8.3.1) — a sits at the root's content top (y = 0), not pushed down by its own margin.
-        // (This is what a body's first child does — the margin escapes to the top; the JS layout puts
-        // body._lb there so native matches.) Border-box width = 100 - 0 margins = 100; auto height =
-        // 20 + pt+pb+bt+bb = 34.
+        // (This is what a body's first child does — the margin escapes to the top.) Border-box width =
+        // 100 - 0 margins = 100; auto height = 20 + pt+pb+bt+bb = 34.
         assert_eq!(bx[1].y, 0.0);
         assert_eq!(bx[1].w, 100.0);
         assert_eq!(bx[1].h, 34.0);
@@ -9565,11 +9240,20 @@ mod tests {
     }
     fn item(nid: f64, parent: i32, w: f64, h: f64) -> Input {
         let mut c = blk(nid, parent);
-        c.border_box = true; // the pushed used size is a border box
+        c.border_box = true; // the item's used size, as a border box
         c.width = w;
         c.height = h;
         c.height_adjoins = false;
         c.bottom_adjoins = false;
+        c
+    }
+    // …one whose first and last baseline sit `asc` below its top: a replaced box that draws its text at its content
+    // bottom (`control_baseline` 2), with the rest of its height as bottom padding.
+    fn baseline_item(nid: f64, parent: i32, w: f64, h: f64, asc: f64) -> Input {
+        let mut c = item(nid, parent, w, h);
+        c.replaced = true;
+        c.control_baseline = 2;
+        c.pb = h - asc;
         c
     }
 
@@ -9631,12 +9315,10 @@ mod tests {
         // Two baseline items: a (outer 37, asc 29) and b (outer 18, asc 14). They hang from the deepest
         // ascent (firstAsc=29): a at y=0, b at y=29-14=15. Line cross = 29 + max(37-29, 18-14) = 37.
         let f = flex(0.0, -1, 400.0);
-        let mut a = item(1.0, 0, 39.0, 37.0);
+        let mut a = baseline_item(1.0, 0, 39.0, 37.0, 29.0);
         a.flex_cross_align = CROSS_BASELINE;
-        a.flex_baseline_asc = 29.0;
-        let mut b = item(2.0, 0, 16.0, 18.0);
+        let mut b = baseline_item(2.0, 0, 16.0, 18.0, 14.0);
         b.flex_cross_align = CROSS_BASELINE;
-        b.flex_baseline_asc = 14.0;
         let inputs = vec![f, a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!([bx[1].y, bx[2].y], [0.0, 15.0]);
@@ -9676,16 +9358,14 @@ mod tests {
 
     #[test]
     fn flex_row_baseline_group_extent_counts_the_deepest_ascent() {
-        // A text item (outer 37, asc 29) beside a text-less box whose synthesised baseline is its bottom edge
+        // A baseline item (outer 37, asc 29) beside a text-less box whose synthesised baseline is its bottom edge
         // (outer 60, asc 60). firstAsc=60, firstBelow=max(37-29, 60-60)=8 → line cross 68; text at 60-29=31,
         // box at 60-60=0.
         let f = flex(0.0, -1, 400.0);
-        let mut t = item(1.0, 0, 39.0, 37.0);
+        let mut t = baseline_item(1.0, 0, 39.0, 37.0, 29.0);
         t.flex_cross_align = CROSS_BASELINE;
-        t.flex_baseline_asc = 29.0;
         let mut bx2 = item(2.0, 0, 40.0, 60.0);
         bx2.flex_cross_align = CROSS_BASELINE;
-        bx2.flex_baseline_asc = 60.0;
         let inputs = vec![f, t, bx2];
         let b = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!([b[1].y, b[2].y], [31.0, 0.0]);
@@ -9700,12 +9380,10 @@ mod tests {
         f.height = 80.0;
         f.height_adjoins = false;
         f.bottom_adjoins = false;
-        let mut a = item(1.0, 0, 39.0, 37.0);
+        let mut a = baseline_item(1.0, 0, 39.0, 37.0, 29.0);
         a.flex_cross_align = CROSS_BASELINE_LAST;
-        a.flex_baseline_asc = 29.0;
-        let mut b = item(2.0, 0, 16.0, 18.0);
+        let mut b = baseline_item(2.0, 0, 16.0, 18.0, 14.0);
         b.flex_cross_align = CROSS_BASELINE_LAST;
-        b.flex_baseline_asc = 14.0;
         let inputs = vec![f, a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!([bx[1].y, bx[2].y], [43.0, 58.0]);
@@ -9719,12 +9397,10 @@ mod tests {
         f.height = 80.0;
         f.height_adjoins = false;
         f.bottom_adjoins = false;
-        let mut a = item(1.0, 0, 39.0, 37.0);
+        let mut a = baseline_item(1.0, 0, 39.0, 37.0, 29.0);
         a.flex_cross_align = CROSS_BASELINE;
-        a.flex_baseline_asc = 29.0;
-        let mut b = item(2.0, 0, 16.0, 18.0);
+        let mut b = baseline_item(2.0, 0, 16.0, 18.0, 14.0);
         b.flex_cross_align = CROSS_BASELINE_LAST;
-        b.flex_baseline_asc = 14.0;
         let inputs = vec![f, a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!([bx[1].y, bx[2].y], [0.0, 62.0]);
@@ -9872,7 +9548,7 @@ mod tests {
     #[test]
     fn flex_column_max_height_caps_the_box_while_content_overflows() {
         // Auto-height column, three non-shrinking 30px items (content 90). max-height:40 caps the BOX at 40,
-        // but the items (pushed at their own size) overflow it — extent = capacity, justify free negative.
+        // but the items (laid out at their own size) overflow it — extent = capacity, justify free negative.
         let mut f = flex_col(0.0, -1, 100.0);
         f.max_h = 40.0;
         let inputs = vec![f, item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 30.0), item(3.0, 0, 100.0, 30.0)];
@@ -9983,14 +9659,6 @@ mod tests {
         assert!(bx[0].auto_height);
     }
 
-    #[test]
-    fn unsupported_subtree_declines() {
-        let mut a = blk(1.0, 0);
-        a.display = DISPLAY_UNSUPPORTED; // e.g. flex
-        let inputs = vec![blk(0.0, -1), a];
-        assert!(matches!(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false), Outcome::Unsupported));
-    }
-
     fn tbl(nid: f64, parent: i32, sx: f64, sy: f64) -> Input {
         let mut c = blk(nid, parent);
         c.display = DISPLAY_TABLE;
@@ -10067,7 +9735,7 @@ mod tests {
     #[test]
     fn table_ragged_grid_lays_out_present_cells() {
         // A ragged grid (row 1 missing its col-1 cell) is fine once cells carry their own column: the present
-        // cells sit at their columns, and the absent slot simply has no box — matching the oracle.
+        // cells sit at their columns, and the absent slot simply has no box.
         let inputs = vec![
             tbl(0.0, -1, 4.0, 4.0),
             rowel(1.0, 0),
@@ -10107,7 +9775,7 @@ mod tests {
     #[test]
     fn table_rowspan_cell_spans_rows() {
         // t2: a rowspan=2 cell (col 0) in a 2-column, 2-row table; its height = rowH[0] + sy + rowH[1]. Row 1
-        // has only the col-1 cell (col 0 occupied by the span), so that cell's pushed col is 1, not 0.
+        // has only the col-1 cell (col 0 occupied by the span), so that cell's `cell_col` is 1, not 0.
         let inputs = vec![
             tbl(0.0, -1, 4.0, 4.0),            // 0 table
             rowgroup(1.0, 0),                  // 1
@@ -10121,16 +9789,16 @@ mod tests {
         assert_eq!([bx[0].w, bx[0].h], [96.0, 71.0]); // 4+32+4+52+4 ; 4+22+4+37+4
         assert_eq!([bx[3].x, bx[3].y, bx[3].h], [4.0, 4.0, 63.0]); // the rowspan cell
         assert_eq!([bx[4].x, bx[4].y], [40.0, 4.0]); // col 1 row 0
-        assert_eq!([bx[6].x, bx[6].y], [40.0, 30.0]); // col 1 row 1 (pushed col = 1)
+        assert_eq!([bx[6].x, bx[6].y], [40.0, 30.0]); // col 1 row 1 (`cell_col` = 1)
     }
 
     #[test]
     fn table_collapse_frame_is_the_tables_own_outer_half_border() {
-        // border-collapse: spacing 0, and the oracle resolves the whole collapsed-border model up front — it
-        // pushes each cell's border box already carrying its halved borders (col widths 46/56, rows 26/36) and
-        // the TABLE's own border as the outer half of its rim cells' borders (2 on every side). So native needs
-        // no frame of its own: it self-sizes from Σtracks + its edges, placing the grid inside that border,
-        // exactly as for a separate table.
+        // border-collapse: spacing 0, and the walk resolves the whole collapsed-border model up front
+        // (`collapse_borders`) — each cell's record already carries its halved borders (col widths 46/56, rows
+        // 26/36) and the TABLE's own border is the outer half of its rim cells' borders (2 on every side). So the
+        // layout needs no frame of its own: the table self-sizes from Σtracks + its edges, placing the grid inside
+        // that border, exactly as for a separate table.
         let mut t = tbl(0.0, -1, 0.0, 0.0);
         t.bt = 2.0;
         t.br = 2.0;
@@ -10330,15 +9998,15 @@ mod tests {
         }
     }
 
-    // `intrinsic_widths` reads the DECLARED sizing (decl_*), never the used box a push wrote into width/min_w/
-    // max_w/border_box: a flex item pushed to a 100-wide used box with an auto declared width measures from its
-    // content (a 40-wide declared child), and a declared border-box width pins the box less nothing.
+    // `intrinsic_widths` reads the DECLARED sizing (decl_*), never the used size in width/min_w/max_w/
+    // border_box: a flex item with a 100-wide used box and an auto declared width measures from its content (a
+    // 40-wide declared child), and a declared border-box width pins the box less nothing.
     #[test]
     fn intrinsic_widths_reads_declared_not_pushed_sizing() {
         let mut root = blk(0.0, -1);
         root.display = DISPLAY_FLEX;
         let mut flex_item = blk(1.0, 0);
-        flex_item.width = 100.0; // the flex push
+        flex_item.width = 100.0; // a used width, ignored
         flex_item.border_box = true;
         flex_item.min_w = f64::NAN;
         let mut child = blk(2.0, 1);
@@ -10353,7 +10021,7 @@ mod tests {
         pinned.decl_border_box = true;
         pinned.pl = 10.0;
         pinned.decl_edges_x = 10.0;
-        pinned.width = 200.0; // pushed, ignored
+        pinned.width = 200.0; // a used width, ignored
         let inputs = [root, flex_item, child, pinned];
         let children = vec![vec![1, 3], vec![2], vec![], vec![]];
         assert_eq!(intrinsic_widths(1, &inputs.map(Cell::new), &[], &[], &[], &children), Some((50.0, 50.0)));
@@ -10394,7 +10062,8 @@ mod tests {
 
     // ── the grid template's auto repeat ────────────────────────────────────────────────────────────────────
     // A marshalled grid buffer: the header, `specs` track sides (base kind/val, limit kind/val, is_fr, weight,
-    // is_auto, base px, limit px) and `places` item placements (start line, end line, span) — the shape `nlShadowRun` writes.
+    // is_auto, base px, limit px) and `places` item placements (start line, end line, span) — the shape the walk's `grid`
+    // writes.
     fn grid_buffer(literal: usize, repeat: (f64, usize, u8), specs: &[[f64; 9]], places: &[[f64; 3]]) -> Vec<f64> {
         // …GRID_HEADER wide, and the tail is the two gaps' PROGRAMS (none) and the row floor (none). Built by hand here,
         // so the header's length is one of the three places a stride change has to be made — this test file is the
@@ -10419,8 +10088,8 @@ mod tests {
     const AUTO_TRACK: [f64; 9] = [1.0, 0.0, 2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]; // `auto`: min-content base, max-content limit
     const NO_PLACE: [f64; 3] = [0.0, 0.0, 0.0];
 
-    // A program is `[length, op, a, b, …]` in postfix (layout.js `nlMathProgram` / `nlPackMath`), and `math_at` has to
-    // give what `nlMathAt` gives: n-ary folds as binary ones, `clamp()` as CSS's `max(lo, min(v, hi))`, a NaN carried
+    // A program is `[length, op, a, b, …]` in postfix (the walk's `program`, packed into its `MathTable`), and
+    // `math_at` evaluates it: n-ary folds as binary ones, `clamp()` as CSS's `max(lo, min(v, hi))`, a NaN carried
     // through a fold as `Math.min` carries it, and NaN for a table the walk never writes rather than a panic.
     #[test]
     fn evaluates_a_comparison_program_as_the_walk_does() {
@@ -10445,7 +10114,7 @@ mod tests {
         table.extend(program(&[line(0.0, 0.0), line(0.0, 0.1), line(100.0, -0.2), fold(MATH_MIN), fold(MATH_MAX)]));
         assert_eq!(math_at(&table, at, 400.0), 20.0);
         assert_eq!(math_at(&table, at, 0.0), 0.0);
-        // …a padding's border added back (`NL_MATH_SUM`)
+        // …a padding's border added back (`MATH_SUM`)
         let summed = program(&[line(0.0, 0.1), line(2.0, 0.0), [3.0, 0.0, 0.0]]);
         assert_eq!(math_at(&summed, 0, 100.0), 12.0);
         // …a `right` inset's share of a relative chain, negated

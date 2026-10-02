@@ -8461,7 +8461,7 @@ module Capybara
           return @@local_font_cache[key] if @@local_font_cache.key?(key)
         end
         file   = resolved_family_file(name.to_s, weight_style.to_s)
-        # (…and the FILE beside its table, which native layout registers so it measures the very face the oracle does.)
+        # (…and the FILE beside its table, which native layout registers so it measures the very face the table describes.)
         result = file ? {'table' => font_table_from_file(file), 'ok' => true, 'file' => file} : {'table' => nil, 'ok' => false}
         @@font_file_lock.synchronize { @@local_font_cache[key] = result }
         result
