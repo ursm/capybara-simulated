@@ -1904,6 +1904,9 @@ fn line_layout(
     // merges only same-font ones — a plain `<b>` around a Japanese word, or around the hyphen of
     // `well<b>-</b>known`, already splits them.
     let mut ends_open = false;
+    // …and the last character a word put on the line, which `word-break: break-all` asks across a run boundary: a
+    // closing mark after it, or anything after an opening one, glues to it (`unicode::line_break_glues`).
+    let mut last_cp = 0x20u32;
     // …and a SOFT hyphen's piece placed without its hyphen, which is that opportunity too (`ends_open` is set with
     // it) and whose hyphen still shows where the line breaks at it (`take_break!`): the oracle's `barrier.shy`. Carried
     // across runs like the rest — `aa&shy;<b>bb</b>` breaks after `aa-` — and cleared wherever the oracle's ONE
@@ -2980,28 +2983,35 @@ fn line_layout(
                         // question at all.) Read ONCE for the whole word as the oracle reads it (`breakUnits(
                         // token, owner, lineRight - lineLeft)`); the line's own fit tests below stay live,
                         // following the band down past a float the word drops below.
-                        // …and a word GLUED to the text before it across a run boundary (`ab<b>cd</b>ef`) is that same
-                        // word: under `word-break: break-all`, where every boundary between characters is an ordinary
-                        // opportunity, a glued piece the line has no room left for is cut too, the boundary included —
-                        // where it overflowed whole (Chrome: `ab<b>cd</b>ef` under break-all in 20px is three lines).
-                        // GLUED: no opportunity before it at all — no space, no atomic, no hyphen the text before ended
-                        // in (the oracle's `barrier === 'text'`). (Not under `anywhere` / `break-word`, whose in-word
-                        // breaks are a last resort: Chrome takes an earlier opportunity on the line first and carries the
-                        // word's placed head down with it, which a greedy line cannot take back — recorded.)
-                        let glued_split = wrap_mode == 1
+                        // …and under `word-break: break-all` a word the line has no ROOM left for is cut too, though
+                        // it fits the band: every boundary between its characters is an ordinary opportunity, so it
+                        // fills the line it is on rather than moving whole (Chrome: `aa bbbc` in 50px is "aa bb" /
+                        // "bc"). That holds for a word GLUED to the text before it across a run boundary
+                        // (`ab<b>cd</b>ef`) — no space, no atomic, no hyphen the text before ended in (the oracle's
+                        // `barrier === 'text'`) — which is the same word, so the boundary is an opportunity like any
+                        // other between two of its characters (Chrome: `ab<b>cd</b>ef` in 20px is three lines)… unless
+                        // the punctuation there forbids one (`abc<b>.</b>` keeps the `.` on the line with the `c`).
+                        // The room is what is left after the edges the word opens, as the unit loop asks it. (Not
+                        // under `anywhere` / `break-word`, whose in-word breaks are a last resort: Chrome takes an
+                        // earlier opportunity on the line first and carries the word's placed head down with it,
+                        // which a greedy line cannot take back — recorded.)
+                        let fills = wrap_mode == 1
                             && !no_wrap
+                            && line_has_content
+                            && line_x + open.iter().filter(|o| !o.placed).map(|o| o.w).sum::<f64>() + width
+                                > band_w(total) + LINE_FIT_EPS;
+                        let glued_break = fills
                             && !space_before
                             && !(space_breaks || atomic_break || ends_open)
-                            && line_has_content
-                            && line_x + width > band_w(total) + LINE_FIT_EPS;
+                            && !crate::unicode::line_break_glues(last_cp, crate::font::code_points(&text[start..i]).next().unwrap_or(0));
                         let split_band = (!no_wrap && (has_wide || word_hyphen || word_shy || wrap_mode != 0))
                             .then(|| band_w(total))
-                            .filter(|&a| has_wide || word_hyphen || word_shy || glued_split || width > a + LINE_FIT_EPS);
+                            .filter(|&a| has_wide || word_hyphen || word_shy || fills || width > a + LINE_FIT_EPS);
                         if let Some(avail) = split_band {
                             // The over-long word's break opportunity before it (a space / atomic) is what `first`
                             // and the loop's fit tests act on; capture it before the fresh-line break clears the
                             // line, so `atomic_break` need only be consumed once, after the word is placed.
-                            let preceded = space_breaks || atomic_break || ends_open || glued_split;
+                            let preceded = space_breaks || atomic_break || ends_open || glued_break;
                             // The space before the word stays on the line it hangs from — unless a fresh line is
                             // taken below before anything is placed, which drops it with the line it closes.
                             let mut space_pending = space_on_line;
@@ -3016,7 +3026,7 @@ fn line_layout(
                                 let pend = if word_hyphen || word_shy { hyphen_piece_end(text, u, i) } else { i };
                                 let piece_wide = has_wide && text[u..pend].iter().any(|&c| is_wide_unit(c));
                                 let piece_w = if u == start && pend == i { width } else { measure_word(run, &text[u..pend])? };
-                                let per_char = wrap_mode != 0 && !piece_wide && (glued_split || piece_w > avail + LINE_FIT_EPS);
+                                let per_char = wrap_mode != 0 && !piece_wide && (fills || piece_w > avail + LINE_FIT_EPS);
                                 // break-word / anywhere first move a piece they must cut to a fresh line, where a
                                 // break opportunity sits — exactly the normal break-before condition, which the
                                 // over-long piece always satisfies. break-all takes no fresh line: it fills the
@@ -3139,6 +3149,7 @@ fn line_layout(
                             // soft hyphen that ends its last piece, whose hyphen waits for whatever comes next — a
                             // space (which clears it) or the next run.
                             ends_open = shy_pending.is_some() || ends_with_break(text[i - 1]);
+                            last_cp = crate::font::code_points(&text[i.saturating_sub(2).max(start)..i]).last().unwrap_or(0x20);
                         } else {
                             let ow: f64 = open.iter().filter(|o| !o.placed).map(|o| o.w).sum();
                             // A break opportunity precedes this word at a collapsed space OR right after an atomic —
@@ -3182,6 +3193,7 @@ fn line_layout(
                             atomic_break = false; // consumed the after-atomic break opportunity
                             // …and this word leaves one behind when it ENDS in a wide character or a dash.
                             ends_open = ends_with_break(text[i - 1]);
+                            last_cp = crate::font::code_points(&text[i.saturating_sub(2).max(start)..i]).last().unwrap_or(0x20);
                             shy_pending = None;
                             if space_on_line && !broke {
                                 line_asc = line_asc.max(sasc); // the space stayed: its run's metrics grow the line
@@ -3518,20 +3530,16 @@ fn is_hyphen_unit(u: u16) -> bool {
     matches!(u, 0x2D | 0x2010 | 0x2012 | 0x2013 | 0x2014)
 }
 // A text run ENDING in this unit leaves a break opportunity for whatever the next one starts with — the
-// oracle's `endsWithBreak`: `BREAK_AFTER_RE` is a dash or a JS `\s`, and its other half is a wide character.
-// JS `\s` is WIDER than the CSS white-space set, and that difference is why the units are named here at all:
-// a U+00A0, U+000B, U+2009 or U+FEFF is not CSS white space, so none of them reaches native as a space run of
-// its own — each stays inside the word, where only this test can see it. (Which is also why, of the
-// `0x09..=0x0D | 0x20` block, only U+000B can ever be asked: the others end a word, so `is_ws_u16` cut it
-// first.) Of those, Chrome breaks after none of U+00A0, U+2007, U+202F (GL in UAX #14), U+FEFF (WJ) or
-// U+000B — which is no UAX #14 case at all: a vertical tab is neither CSS white space nor a segment break,
-// just a character, so there is no opportunity beside it to begin with. Measured over all 25 of JS `\s`:
-// those five and no others. The oracle's `\s` is therefore five characters too wide; native follows it for
-// parity, and correcting BOTH engines is a backlog item, as with the run tokenisation in `appendText`.
+// oracle's `endsWithBreak`: a dash, a wide character, or a white-space character UAX #14 breaks after. That is
+// not JS `\s`, which both engines used to ask: of its 25 characters Chrome breaks after none of U+00A0, U+2007,
+// U+202F (GL), U+FEFF (WJ) or U+000B — no UAX #14 case at all: a vertical tab is neither CSS white space nor a
+// segment break, so there is no opportunity beside it to begin with (measured over all 25). None of them is CSS
+// white space either, so each stays inside a word, where only this test sees it (and of the `0x09..=0x0D | 0x20`
+// block only U+000B could ever be asked: the others end a word, so `is_ws_u16` cut it first).
 fn ends_with_break(u: u16) -> bool {
     is_hyphen_unit(u)
         || is_wide_unit(u)
-        || matches!(u, 0x09..=0x0D | 0x20 | 0xA0 | 0x1680 | 0x2000..=0x200A | 0x2028 | 0x2029 | 0x202F | 0x205F | 0x3000 | 0xFEFF)
+        || matches!(u, 0x09 | 0x0A | 0x0C | 0x0D | 0x20 | 0x1680 | 0x2000..=0x2006 | 0x2008..=0x200A | 0x2028 | 0x2029 | 0x205F | 0x3000)
 }
 // Where the HYPHEN PIECE starting at `u` ends: after the first hyphen the word may break at, which the piece
 // keeps (`well-known` is `well-` then `known`), or at the word's end where there is none — the oracle's
@@ -3609,7 +3617,17 @@ fn break_unit_len(text: &[u16], u: usize, end: usize, per_char: bool, grapheme: 
     };
     let first = cluster(u);
     if per_char || is_wide_unit(text[u]) {
-        return first - u;
+        // …and under `word-break: break-all` (a per-character LINE break, not an emergency one) a unit runs on through
+        // whatever the punctuation's own rules glue to it: `c.` is one unit, and so is `(c` (`line_break_glues`).
+        let mut e = first;
+        if per_char && !grapheme {
+            let mut base = cp_at(u);
+            while e < end && crate::unicode::line_break_glues(base, cp_at(e)) {
+                base = cp_at(e);
+                e = cluster(e);
+            }
+        }
+        return e - u;
     }
     let mut e = first;
     while e < end && !is_wide_unit(text[e]) {

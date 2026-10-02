@@ -370,12 +370,12 @@ RSpec.describe 'native layout inline box fragments' do
     end
   end
 
-  # Both engines break after a U+00A0 at an inline boundary, which is no break opportunity (UAX #14: NBSP is GL);
-  # Chrome keeps `aa&nbsp;bb` on one line and overflows.
-  it 'breaks after a no-break space at an inline boundary (shared)' do
+  # A U+00A0 at an inline boundary is no break opportunity (UAX #14: NBSP is GL): Chrome keeps `aa&nbsp;bb` on one line
+  # and overflows, where both engines broke after it (they asked JS `\s`, which holds it).
+  it 'breaks after no no-break space at an inline boundary' do
     expect_fragments(
       '<div style="font:16px monospace;width:45px"><b>aa&nbsp;</b><b id="m">bb</b></div>',
-      shared: [[0, 22, 19.2, 22]], shared_chrome: [[28.8125, 0, 19.203125, 22]]
+      chrome: [[28.8125, 0, 19.203125, 22]]
     )
   end
 

@@ -68,6 +68,33 @@ pub(crate) fn is_extended_pictographic(cp: u32) -> bool {
     icu_properties::CodePointSetData::new::<icu_properties::props::ExtendedPictographic>().contains32(cp)
 }
 
+// Whether UAX #14 forbids a line break between `prev` and `next` even where `word-break: break-all` has made every
+// letter breakable (which it does by reading letters and digits as ideographs, CSS Text 3 §5.2 — the PUNCTUATION keeps
+// its rules): none BEFORE a closing mark, `!` / `?`, an infix separator or a `/` (LB13), none AFTER an opening one
+// (LB14), none on either side of a quotation mark (LB19) or a word joiner (LB11), none before a combining mark or a
+// joiner (LB9, which binds one across an element boundary too), and none around a no-break space (LB12, LB12a — whose
+// break before one survives only after a space, a hyphen or a break-after character).
+// Chrome: `abc.` in 30px under break-all is "ab" / "c.", not "abc" / ".".
+pub(crate) fn line_break_glues(prev: u32, next: u32) -> bool {
+    use icu_properties::props::LineBreak as Lb;
+    let classes = icu_properties::CodePointMapData::<Lb>::new();
+    let (p, n) = (classes.get32(prev), classes.get32(next));
+    matches!(p, Lb::OpenPunctuation | Lb::Quotation | Lb::Glue | Lb::WordJoiner)
+        || matches!(
+            n,
+            Lb::ClosePunctuation
+                | Lb::CloseParenthesis
+                | Lb::Exclamation
+                | Lb::InfixNumeric
+                | Lb::BreakSymbols
+                | Lb::Quotation
+                | Lb::WordJoiner
+                | Lb::CombiningMark
+                | Lb::ZWJ
+        )
+        || (n == Lb::Glue && !matches!(p, Lb::Space | Lb::BreakAfter | Lb::Hyphen))
+}
+
 // The first STRONG directional character of a text (HTML §3.2.6.4, `dir=auto`): Some(true) for one of Bidi_Class R or AL,
 // Some(false) for L, None where there is none. The Unicode Bidi_Class itself — both engines ask it here
 // (`__dom.firstStrongDirection`), so the answer is the spec's and there is one: an Arabic-Indic digit (AN), a Hebrew

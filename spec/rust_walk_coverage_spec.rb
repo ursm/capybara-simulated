@@ -437,6 +437,60 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # …and a word that fits the band but not the ROOM left on the line is cut there too, filling the line: break-all never
+  # needs a fresh line (Chrome: `aa bbbc` in 50px is "aa bb" / "bc", and `aa bbb<b>cdef</b>` is two lines, where the head
+  # moved down whole and the tail took a third). The room is what is left past the edges the word opens: `abc<b
+  # style="padding-left:5px">d</b>` in 40px puts the `d` on the second line (y 110 below the first two), where it
+  # overflowed the first.
+  it 'fills the line with a break-all word the room left on it does not hold', :aggregate_failures do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0"><div style="word-break: break-all">' \
+      '<div style="width: 50px"><b id="a">aa bbbc</b></div>' \
+      '<div style="width: 50px" id="b">aa bbb<b>cdef</b></div>' \
+      '<div style="width: 40px">abc<b id="c" style="padding-left: 5px">d</b></div></div></body>'
+    )
+    expect(s.evaluate_script(<<~JS)).to eq([[48, 19.2], 44, [0, 110]])
+      [[...a.getClientRects()].map((r) => +r.width.toFixed(2)), b.getBoundingClientRect().height, [c.getBoundingClientRect().x, c.getBoundingClientRect().y]]
+    JS
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
+  # break-all makes letters breakable, not punctuation (UAX #14 as CSS Text 3 §5.2 applies it): no break before a closing
+  # mark or after an opening one, none on either side of a quotation mark. Chrome: `abc.` in 30px is "ab" / "c.", `ab"cd`
+  # is "a" / `b"c` / "d", and the min-content of `ab.` and `(ab)` is 19.2 — where each character was a unit of its own.
+  it 'keeps punctuation with the letter it belongs to under break-all', :aggregate_failures do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0"><div style="word-break: break-all">' \
+      '<div style="width: 30px"><b id="a">abc.</b></div>' \
+      '<div style="width: 30px"><b id="b">ab&quot;cd</b></div>' \
+      '<div style="width: min-content" id="c">ab.</div><div style="width: min-content" id="d">(ab)</div></div></body>'
+    )
+    expect(s.evaluate_script(<<~JS)).to eq([[19.2, 19.2], [9.6, 28.8, 9.6], 19.2, 19.2])
+      [
+        [...a.getClientRects()].map((r) => +r.width.toFixed(2)),
+        [...b.getClientRects()].map((r) => +r.width.toFixed(2)),
+        +c.getBoundingClientRect().width.toFixed(2),
+        +d.getBoundingClientRect().width.toFixed(2)
+      ]
+    JS
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
+  # A line breaks after no no-break space — U+00A0, U+2007, U+202F — across an element's edge either (Chrome keeps
+  # `ab&nbsp;<b>cd</b>` on one 22-tall line in 30px; both engines asked JS `\s`, which holds all three), and a word joiner
+  # or a bidi isolate has no advance (Chrome: `a&#x2060;b&#x2066;c` is 28.8 wide, where each drew a 9.6 glyph).
+  it 'breaks after no no-break space and draws no format character', :aggregate_failures do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0">' \
+      '<div style="width: 30px" id="a">ab&nbsp;<b>cd</b></div><div style="width: 30px" id="b">ab&#x202F;<b>cd</b></div>' \
+      '<span id="c">a&#x2060;b&#x2066;c</span></body>'
+    )
+    expect(s.evaluate_script(<<~JS)).to eq([22, 22, 28.8])
+      [a.getBoundingClientRect().height, b.getBoundingClientRect().height, +c.getBoundingClientRect().width.toFixed(2)]
+    JS
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # A node of nothing but soft hyphens under `hyphens: none` is a zero-wide word that still makes its line (Chrome: 22
   # tall), and a preserved node of nothing but a CR under a text indent is laid out as nothing (Chrome measures the indent
   # into a shrink-to-fit width — 20 — which goes unmeasured here) — where the walk declined both.

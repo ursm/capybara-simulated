@@ -1051,6 +1051,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setNaturalSize", set_natural_size, context_id);
     register(scope, ns, "linkPseudoBox", link_pseudo_box, context_id);
     register(scope, ns, "firstStrongDirection", first_strong_direction, context_id);
+    register(scope, ns, "lineBreakGlues", line_break_glues, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
     register(scope, ns, "setAssignedNodes", set_assigned_nodes, context_id);
     register(scope, ns, "setValue", set_value, context_id);
@@ -1359,6 +1360,18 @@ fn first_strong_direction(
         }
         None => rv.set_null(),
     }
+}
+
+// __dom.lineBreakGlues(prev, next) -> bool: whether UAX #14 forbids a line break between two code points even under
+// `word-break: break-all` (`unicode::line_break_glues`) — the Line_Break classes, which JS has no regex property for.
+fn line_break_glues(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let prev = args.get(0).uint32_value(scope).unwrap_or(0);
+    let next = args.get(1).uint32_value(scope).unwrap_or(0);
+    rv.set_bool(crate::unicode::line_break_glues(prev, next));
 }
 
 // __dom.linkPseudoBox(nid, which, boxNid): the box an element's `::before` (0) or `::after` (1) generates.

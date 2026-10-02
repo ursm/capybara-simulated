@@ -54,7 +54,7 @@ impl StackMember {
 }
 
 // The code points of a UTF-16 run, a lone surrogate standing for itself (JavaScript's `codePointAt`).
-fn code_points(text: &[u16]) -> impl Iterator<Item = u32> + '_ {
+pub(crate) fn code_points(text: &[u16]) -> impl Iterator<Item = u32> + '_ {
     char::decode_utf16(text.iter().copied()).map(|r| r.map_or_else(|e| e.unpaired_surrogate() as u32, |c| c as u32))
 }
 
@@ -220,6 +220,12 @@ fn zero_width(cp: u32) -> bool {
         return true;
     }
     if (0x202A..=0x202E).contains(&cp) {
+        return true;
+    }
+    // …the word joiner, the invisible operators and the bidi isolates / deprecated format characters after it, the
+    // Mongolian vowel separator and the Arabic letter mark: format characters Chrome draws with no advance (all
+    // sixteen of U+2060..U+206F measured, and the two others).
+    if (0x2060..=0x206F).contains(&cp) || cp == 0x180E || cp == 0x061C {
         return true;
     }
     if (0xFE00..=0xFE0F).contains(&cp) {
