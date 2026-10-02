@@ -138,6 +138,38 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # …and the viewport scrolls from where the root sits: a `vertical-rl` page wider than the viewport, or an rtl one, is
+  # reached by NEGATIVE offsets (CSSOM View §6), where the left of it was out of reach — Chrome: scrollWidth 2016,
+  # `scrollTo(-500, 0)` at -500, `scrollIntoView` of a box at the far left at -984 (the box then at 0); rtl 2008 / -500.
+  it 'scrolls a page that starts at the right with negative offsets', :aggregate_failures do
+    probe = lambda {|html_attrs|
+      s = page(
+        "<html #{html_attrs}><body><div style=\"width: 2000px; height: 30px; writing-mode: horizontal-tb\">" \
+        '<span id="m" style="display: inline-block; width: 10px; height: 10px"></span></div></body></html>'
+      )
+      s.evaluate_script(<<~'JS')
+        (() => {
+          const r = [document.scrollingElement.scrollWidth];
+          window.scrollTo(-500, 0); r.push(window.scrollX);
+          window.scrollTo(0, 0);
+          m.scrollIntoView(); r.push(window.scrollX, Math.round(m.getBoundingClientRect().x));
+          return r;
+        })()
+      JS
+    }
+    expect(probe.call('style="writing-mode: vertical-rl; font: 16px monospace"')).to eq([2016, -500, -984, 0])
+    expect(probe.call('dir="rtl" style="font: 16px monospace"')).to eq([2008, -500, 0, 1006])
+  end
+
+  # A fieldset's RENDERED legend is a block box to the readers whatever inline-level display it declares (HTML blockifies
+  # it): transformed, with a client box and a transform origin (Chrome: x 23, clientWidth 23, `11.6px 11px`).
+  it 'reads a rendered legend as the block it is laid out as' do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0"><fieldset><legend id="l" style="display: ruby; transform: translateX(7px)">lg</legend>c</fieldset></body>'
+    )
+    expect(s.evaluate_script('[Math.round(l.getBoundingClientRect().x), l.clientWidth, getComputedStyle(l).transformOrigin]')).to eq([23, 23, '11.6px 11px'])
+  end
+
   # …and the JS side's geometry readers take a ruby display for the inline box the walk lays it out as: a transform does
   # not apply to it and it has no client box (Chrome: x 19.2, clientWidth 0 for a `display: ruby` span after "xx" with
   # `transform: translateX(50px)` and `overflow: hidden`), where they took it for a block (69.2, 77). A `<button>` with
