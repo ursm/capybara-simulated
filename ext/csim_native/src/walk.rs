@@ -1458,22 +1458,6 @@ const WS_PRE_WRAP: u8 = 3;
 const WS_PRE_LINE: u8 = 4;
 const WS_BREAK_SPACES: u8 = 5;
 
-// The HTML element names the JS model keys a rule on — its UA tables (`DEFAULT_DISPLAY`, `UA_DEFAULTS`) and its tag
-// checks (replaced sizes, breaks, options, cells, legacy alignment) — which it asks of `el._tag`, the lowercased local
-// name in ANY namespace. An element of another namespace so named is that HTML element to the JS walk and a plain box to
-// this one (and to the spec, and Chrome): declined, so the two do not answer differently. Sorted, for `binary_search`.
-const JS_MODEL_TAGS: &[&str] = &[
-    "a", "abbr", "address", "area", "article", "aside", "audio", "b", "base", "basefont", "bdi", "bdo", "big",
-    "blockquote", "body", "br", "button", "canvas", "caption", "center", "cite", "code", "col", "colgroup", "data",
-    "datalist", "dd", "del", "details", "dfn", "dialog", "dir", "div", "dl", "dt", "em", "embed", "fieldset",
-    "figcaption", "figure", "footer", "form", "frame", "frameset", "h1", "h2", "h3", "h4", "h5", "h6", "head",
-    "header", "hgroup", "hr", "html", "i", "iframe", "img", "input", "ins", "kbd", "label", "legend", "li", "link",
-    "listing", "main", "mark", "marquee", "menu", "meta", "meter", "nav", "nobr", "noembed", "noframes", "noscript",
-    "object", "ol", "optgroup", "option", "p", "param", "plaintext", "pre", "progress", "q", "rp", "rt", "ruby",
-    "s", "samp", "script", "search", "section", "select", "slot", "small", "span", "strike", "strong", "style",
-    "sub", "summary", "sup", "svg", "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "time",
-    "title", "tr", "tt", "u", "ul", "var", "video", "wbr", "xmp"
-];
 // A ruby display an AUTHOR gave: the JS model lays one out as a BLOCK (its fallthrough; a widget so displayed as a
 // flow-root) on any element, `<ruby>` and `<rt>` included, where `walk_display` makes a ruby display the inline the UA's
 // `<ruby>` and `<rt>` are to it. Every ruby display but the UA sheet's own two — `display: ruby` on a `<ruby>`,
@@ -1780,9 +1764,6 @@ impl<'a> Walk<'a> {
         // Core's rules, which this walk has not; any other element is the box its style makes it — `rendering_tag`)
         if node.ns == web_atoms::ns!(mathml) {
             return Err("mathml");
-        }
-        if tag.is_empty() && JS_MODEL_TAGS.binary_search(&&*node.local_name.to_ascii_lowercase()).is_ok() {
-            return Err("foreign element named as an HTML one");
         }
         if authored_ruby(tag, &style) {
             return Err("ruby");
@@ -2355,10 +2336,6 @@ impl<'a> Walk<'a> {
             let n = self.node(c);
             if n.kind != NodeKind::Element {
                 continue;
-            }
-            // (…an `option` / `optgroup` of another namespace is one to the JS model, which keys on the local name)
-            if n.rendering_tag().is_empty() && matches!(&*n.local_name.to_ascii_lowercase(), "option" | "optgroup") {
-                return Err("foreign element named as an HTML one");
             }
             if n.rendering_tag() != "option" {
                 let inner = if n.rendering_tag() == "optgroup" { indent + 15.0 } else { indent };
@@ -3898,9 +3875,6 @@ impl<'a> Walk<'a> {
         // Core's rules, which this walk has not; any other element is the box its style makes it — `rendering_tag`)
         if node.ns == web_atoms::ns!(mathml) {
             return Err("mathml");
-        }
-        if tag.is_empty() && JS_MODEL_TAGS.binary_search(&&*node.local_name.to_ascii_lowercase()).is_ok() {
-            return Err("foreign element named as an HTML one");
         }
         if authored_ruby(tag, cs) {
             return Err("ruby");

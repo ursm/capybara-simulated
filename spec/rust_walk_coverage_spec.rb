@@ -33,8 +33,7 @@ RSpec.describe 'Rust walk coverage' do
   end
 
   # An element of no namespace the walk knows is the box its style makes it (an `inline` one here — Chrome: 28.81 x 22
-  # for "abc" in 16px monospace), where the walk refused every element outside HTML and the svg root. (One named as an
-  # HTML element is still declined: the JS model takes it for that element, whatever its namespace.)
+  # for "abc" in 16px monospace), where the walk refused every element outside HTML and the svg root.
   it 'lays a foreign element out as the box its style makes it' do
     script = <<~'JS'
       const u = document.createElementNS('urn:x', 'thing');
@@ -46,6 +45,24 @@ RSpec.describe 'Rust walk coverage' do
     u = rust.find {|b| b[0] == 'thing' }
     expect(u[3]).to be_within(0.02).of(28.81)
     expect(u[4]).to eq(22)
+  end
+
+  # …and so is one NAMED as an HTML element: a `urn:x` `<img>`, `<br>`, `<div>` or `<option>` is an inline holding its
+  # text (Chrome: four 28.81 x 22 boxes on one line), where the JS model, keying its rules on the local name in any
+  # namespace, takes each for the HTML element — the walk declined them rather than answer differently from it.
+  it 'lays out a foreign element named as an HTML one as the box its style makes it' do
+    s = page('<div id="b" style="font: 16px monospace"></div>')
+    s.execute_script(<<~'JS')
+      const b = document.getElementById('b');
+      for (const n of ['img', 'br', 'div', 'option']) { const u = document.createElementNS('urn:x', n); u.textContent = 'abc'; b.appendChild(u); }
+    JS
+    boxes = s.evaluate_script("[...document.getElementById('b').children].map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.x * 100) / 100, r.y, Math.round(r.width * 100) / 100, r.height]; })")
+    [[8, 8, 28.81, 22], [36.81, 8, 28.81, 22], [65.63, 8, 28.81, 22], [94.44, 8, 28.81, 22]].zip(boxes) do |chrome, box|
+      expect(box[1]).to eq(chrome[1])
+      expect(box[3]).to eq(chrome[3])
+      [0, 2].each {|i| expect(box[i]).to be_within(0.05).of(chrome[i]) }
+    end
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # An orphan `display: table-row` — of block children, and of bare text — as the JS model lays it out: an equal-share
