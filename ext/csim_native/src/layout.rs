@@ -1426,11 +1426,12 @@ fn store_texts(i: usize, rows: Vec<TextRow>) {
 // or takes its declared width; in-flow block children stack vertically at the content origin; auto
 // height is the children's stacked height (plus this box's own vertical edges).
 // A NaN origin is a pass root native places ITSELF — the document's body against the initial containing block
-// `root_cb_w` wide, in the root element's direction (`root_rtl`) — where anything else is handed its origin.
+// `root_cb_w` wide, from its right edge where that is where the block starts (`root_from_right`: an rtl or a vertical-rl
+// principal writing mode) — where anything else is handed its origin.
 #[allow(clippy::too_many_arguments)]
 #[cfg(test)]
-pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[RunText], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_rtl: bool) -> Outcome {
-    layout_block_in_place(&mut inputs.to_vec(), runs, run_texts, grids, inlines, maths, root_x, root_y, root_cb_w, root_rtl, None, false)
+pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[RunText], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_from_right: bool) -> Outcome {
+    layout_block_in_place(&mut inputs.to_vec(), runs, run_texts, grids, inlines, maths, root_x, root_y, root_cb_w, root_from_right, None, false)
 }
 // …laying the records out IN PLACE: a parent resolves its children's percentages against the box it lays them out in
 // and writes the resolved record back, so the records are the pass's to change — every one is written afresh for the
@@ -1438,7 +1439,7 @@ pub(crate) fn layout_block(inputs: &[Input], runs: &[Run], run_texts: &[RunText]
 #[allow(clippy::too_many_arguments)]
 // …and with the chunks the pass placed, where each root is, and the measures kept of them (`MeasureCache`); `texts` asks
 // for the TEXT PIECES as well (`TextRow`), which only a paint does.
-pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_texts: &[RunText], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_rtl: bool, kept: Option<(&mut MeasureCache, std::collections::HashMap<usize, ChunkRoot>, bool)>, texts: bool) -> Outcome {
+pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_texts: &[RunText], grids: &[f64], inlines: &[InlineBox], maths: &[f64], root_x: f64, root_y: f64, root_cb_w: f64, root_from_right: bool, kept: Option<(&mut MeasureCache, std::collections::HashMap<usize, ChunkRoot>, bool)>, texts: bool) -> Outcome {
     let _measure_guard = kept.map(|(cache, roots, check)| MeasureCacheGuard::install(cache, roots, check));
     if inputs.is_empty() {
         return Outcome::LaidOut(Laid { boxes: Vec::new(), frags: Vec::new(), texts: Vec::new() });
@@ -1492,7 +1493,12 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
     let failed = std::cell::Cell::new(false);
     // The root is sized as any block-level box is in the room it is handed — a vertical writing mode's auto width from
     // its own content, as the root element's is in Chrome (the width of its columns), not the initial containing block.
-    let root_w = block_child_width(0, root_cb_w, inputs, runs, run_texts, grids, &children, &failed);
+    // …except where a child of it is ORTHOGONAL to it: a horizontal box in a vertical root, whose inline size its
+    // indefinite block size cannot give, takes the initial containing block's (CSS Writing Modes 3 §7.3) — and the
+    // root, its column, is as wide (Chrome: a horizontal body in a vertical html is 1008, the html 1024).
+    let root = inputs[0].get();
+    let orthogonal = root.block_axis_is_x && children[0].iter().any(|&c| !inputs[c].get().block_axis_is_x);
+    let root_w = if orthogonal { resolve_width(&root, root_cb_w) } else { block_child_width(0, root_cb_w, inputs, runs, run_texts, grids, &children, &failed) };
     let mut root_fc = FloatCtx::new();
     let root_margins = measure(0, root_w, f64::NAN, inputs, runs, run_texts, grids, &children, &mut boxes, &failed, &mut root_fc, 0.0, 0.0);
     if failed.get() {
@@ -1503,14 +1509,21 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
     let (root_x, root_y) = if root_x.is_nan() {
         let n = inputs[0].get();
         let w = boxes[0].w;
-        let (lm, tm) = if root_rtl { (Input::m(n.mr), Input::m(n.ml)) } else { (Input::m(n.ml), Input::m(n.mr)) };
-        let (lead_auto, trail_auto) = if root_rtl {
+        let (lm, tm) = if root_from_right { (Input::m(n.mr), Input::m(n.ml)) } else { (Input::m(n.ml), Input::m(n.mr)) };
+        let (lead_auto, trail_auto) = if root_from_right {
             (n.auto_margins & 2 != 0, n.auto_margins & 1 != 0)
         } else {
             (n.auto_margins & 1 != 0, n.auto_margins & 2 != 0)
         };
-        let lead = if n.auto_margins & 3 != 0 { auto_margin_split(lead_auto, trail_auto, lm, tm, root_cb_w, w).0 } else { lm };
-        (if root_rtl { root_cb_w - w - lead } else { lead }, root_margins.top_only.value())
+        // (…an `auto` pair splits the room only on the root's INLINE axis: on its block axis, a vertical root's, it is 0)
+        let lead = if n.auto_margins & 3 == 0 {
+            lm
+        } else if n.block_axis_is_x {
+            if lead_auto { 0.0 } else { lm }
+        } else {
+            auto_margin_split(lead_auto, trail_auto, lm, tm, root_cb_w, w).0
+        };
+        (if root_from_right { root_cb_w - w - lead } else { lead }, root_margins.top_only.value())
     } else {
         (root_x, root_y)
     };

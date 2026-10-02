@@ -138,6 +138,38 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # …and the JS side's geometry readers take a ruby display for the inline box the walk lays it out as: a transform does
+  # not apply to it and it has no client box (Chrome: x 19.2, clientWidth 0 for a `display: ruby` span after "xx" with
+  # `transform: translateX(50px)` and `overflow: hidden`), where they took it for a block (69.2, 77). A `<button>` with
+  # `display: table-row` is no orphan row but the flow-root of HTML's button layout (`button-layout/shrink-wrap`: 100
+  # wide in 50px of room, its widest inline-block's).
+  it 'reads a ruby display as an inline box, and a table-row button as a button', :aggregate_failures do
+    s = page(
+      '<body style="font: 16px monospace; margin: 0"><div>xx<span id="t" style="display: ruby; transform: translateX(50px); ' \
+      'overflow: hidden; width: 5px">ruby</span></div><div style="width: 50px"><button id="b" style="display: table-row; border: none; ' \
+      'padding: 0"><span style="display: inline-block; width: 100px">x</span><span style="display: inline-block; width: 50px">x</span></button></div></body>'
+    )
+    expect(s.evaluate_script('[t.getBoundingClientRect().x, t.clientWidth, b.clientWidth]')).to eq([19.2, 0, 100])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
+  # …and an element of another namespace named like an image, a video or an input is none of them to those readers
+  # either: no replaced box a transform moves (Chrome: a `urn:x` `<img class=t>` stays at 19.2 under
+  # `x|*.t { transform: translateX(50px) }`, its clientWidth 0).
+  it 'reads a foreign element named as a replaced one as the inline box it is', :aggregate_failures do
+    s = page(
+      '<style>@namespace x url(urn:x); x|*.t { transform: translateX(50px) }</style><body style="font: 16px monospace; margin: 0">' \
+      '<div id="host">aa</div></body>'
+    )
+    s.execute_script(<<~'JS')
+      for (const n of ['img', 'video', 'input']) {
+        const e = document.createElementNS('urn:x', n); e.id = n; e.setAttribute('class', 't'); e.textContent = n;
+        const d = document.createElement('div'); d.append('aa', e); document.body.append(d);
+      }
+    JS
+    expect(s.evaluate_script("['img', 'video', 'input'].map((n) => [Math.round(document.getElementById(n).getBoundingClientRect().x * 100) / 100, document.getElementById(n).clientWidth])")).to eq([[19.2, 0]] * 3)
+  end
+
   # A root element in a vertical writing mode is sized as every vertical block is — its auto width from its content —
   # and placed at its margins, where the walk declined it and the JS layout gave it the initial containing block's width
   # at 0,0 whatever its margins said. Chrome (800px window): `vertical-lr` puts the html at 7,5 and 109 wide, its
@@ -151,6 +183,25 @@ RSpec.describe 'Rust walk coverage' do
     expect(html[0, 2]).to eq([7, 5])
     expect(html[2]).to eq(body[2] + 6)
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
+  # …where it STARTS: a `vertical-rl` root against the right edge of the initial containing block (Chrome: 979 for a
+  # 45-wide html), a `vertical-lr` one against the left whatever its `direction` says (in a vertical mode the horizontal
+  # axis is the block axis) — and a root with a child ORTHOGONAL to it as wide as the initial containing block: a
+  # horizontal body's inline size is the ICB's (CSS Writing Modes 3 §7.3; Chrome: html 1024, body and its blocks 1008, a
+  # 50% one 504), where the root's own content width made it 38.4.
+  it 'places a vertical root at its start edge and fills it for an orthogonal child', :aggregate_failures do
+    boxes = lambda {|html|
+      s = page(html)
+      expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+      s.evaluate_script("[...document.querySelectorAll('html, body, div')].map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.x * 100) / 100, Math.round(r.width * 100) / 100]; })")
+    }
+    expect(boxes.call('<html style="writing-mode: vertical-rl; font: 16px monospace"><body>abc</body></html>')).to eq([[979.2, 44.8], [987.2, 28.8]])
+    expect(boxes.call('<html dir="rtl" style="writing-mode: vertical-lr; font: 16px monospace"><body>abc</body></html>')).to eq([[0, 44.8], [8, 28.8]])
+    expect(boxes.call(
+      '<html style="writing-mode: vertical-lr; font: 16px monospace"><body style="writing-mode: horizontal-tb">' \
+      '<div style="text-align: center">abc</div><div style="width: 50%">half</div></body></html>'
+    )).to eq([[0, 1024], [8, 1008], [8, 1008], [8, 504]])
   end
 
   # A face the page adds through the `FontFace` API is measured natively: its `size-adjust` reads 100% — the identity —

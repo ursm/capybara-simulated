@@ -306,10 +306,23 @@ pub(crate) struct MathTable {
 // viewport from there (Chrome and Firefox alike); the root's COMPUTED `direction`, which `getComputedStyle` reports, is
 // its own either way.
 pub(crate) fn principal_rtl(arena: &RealmArena, root: NodeId) -> bool {
+    principal_style(arena, root).is_some_and(|s| s.get_inherited_box().direction == Direction::Rtl)
+}
+// …and whether the initial containing block STARTS at its right, which is where the root then sits: a horizontal
+// principal writing mode's inline start under `rtl`, a vertical one's BLOCK start under `vertical-rl` / `sideways-rl`
+// (Chrome puts a `vertical-rl` html against the right edge, a `vertical-lr` one with `dir=rtl` against the left: in a
+// vertical mode the horizontal axis is the block axis, which `direction` has no say in).
+pub(crate) fn principal_starts_right(arena: &RealmArena, root: NodeId) -> bool {
+    principal_style(arena, root).is_some_and(|s| match s.writing_mode {
+        wm if wm.is_vertical() => !wm.is_vertical_lr(),
+        _ => s.get_inherited_box().direction == Direction::Rtl,
+    })
+}
+fn principal_style(arena: &RealmArena, root: NodeId) -> Option<Arc<ComputedValues>> {
     let body = arena.get(root).filter(|r| r.is_html_named("html")).and_then(|r| {
         r.children.iter().copied().find(|&c| arena.get(c).is_some_and(|n| matches!(n.rendering_tag(), "body" | "frameset")))
     });
-    crate::style::primary_style(arena, body.unwrap_or(root)).is_some_and(|s| s.get_inherited_box().direction == Direction::Rtl)
+    crate::style::primary_style(arena, body.unwrap_or(root))
 }
 
 // A computed `position` as a box answers it (`layout::Box::position`).
@@ -1686,7 +1699,8 @@ impl<'a> Walk<'a> {
     // An ORPHAN `display: table-row` — no table above it through row groups (`nlOrphanRow`). A browser wraps one in an
     // anonymous table; the JS model lays it out as an equal-share flex row, and so does this walk (`orphan_row`).
     fn is_orphan_row(&self, id: NodeId, display: Display) -> Result<bool, &'static str> {
-        Ok(matches!(display.inside(), DisplayInside::TableRow) && !self.under_a_table(id)?)
+        // (…a widget's block-level displays are a flow-root block's, a `table-row` one's included: `widget_block`)
+        Ok(matches!(display.inside(), DisplayInside::TableRow) && !widget_tag(self.node(id).rendering_tag()) && !self.under_a_table(id)?)
     }
 
     // Whether a TABLE lays this box out: one above it through nothing but row groups, climbed by box (`nlUnderATable`).

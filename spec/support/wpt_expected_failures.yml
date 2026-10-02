@@ -3883,8 +3883,6 @@ html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-c
 - "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-containing-block-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-content-before-legend.html:
 - fieldset content before legend
-html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-display.html:
-- 'fieldset with display: inline'
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-generated-content.html:
 - fieldset generated content
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/fieldset-overflow-cssomview.html:

@@ -203,8 +203,8 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let check = args.get(5).is_true();
     let d = dom(scope);
     let Some(arena) = d.realms.get(&cid) else { return };
-    // (…the direction the root USES, which places it: `walk::principal_rtl`)
-    let root_rtl = walk::principal_rtl(arena, root);
+    // (…the edge of the initial containing block the root sits at: `walk::principal_starts_right`)
+    let root_rtl = walk::principal_starts_right(arena, root);
     // (…splicing back from the last kept pass what did not change since it: `Walk::splice`; under the check, the pass is
     // walked whole as well, and the two held against each other)
     let (maths, prior) = d.walk_reuse.entry(cid).or_default().for_walk(&generation);
