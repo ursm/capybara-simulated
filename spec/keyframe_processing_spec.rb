@@ -266,16 +266,19 @@ RSpec.describe 'processing a keyframes argument' do
 
   # A member names a keyframe property as that property's own attribute, or a legacy name alias's (`gridColumnGap`,
   # reported as `columnGap`); a vendor-prefixed alias (`webkitTransform`), or the lowercase legacy spelling of a
-  # `-webkit-` property (`webkitLineClamp`, whose own is `WebkitLineClamp`), names none (Chrome).
+  # `-webkit-` property (`webkitLineClamp`, whose own is `WebkitLineClamp`), names none (Chrome), and neither does a
+  # spelling that is no attribute (`Opacity`).
   it 'reads a member under a legacy name alias, and none under a vendor-prefixed one' do
     expect(results(
       "new KeyframeEffect(el, [{webkitTransform: 'translateX(0px)'}, {webkitTransform: 'translateX(9px)'}]).getKeyframes().map((k) => Object.keys(k).sort())",
       "new KeyframeEffect(el, [{webkitLineClamp: '2'}, {transform: 'none'}]).getKeyframes().map((k) => Object.keys(k).sort())",
-      "new KeyframeEffect(el, {gridColumnGap: ['0px', '10px'], wordWrap: ['normal', 'anywhere']}).getKeyframes().map((k) => Object.keys(k).sort())"
+      "new KeyframeEffect(el, {gridColumnGap: ['0px', '10px'], wordWrap: ['normal', 'anywhere']}).getKeyframes().map((k) => Object.keys(k).sort())",
+      "new KeyframeEffect(el, {Opacity: [0, 1]}).getKeyframes().length"
     )).to eq([
       '[["composite","computedOffset","easing","offset"],["composite","computedOffset","easing","offset"]]',
       '[["composite","computedOffset","easing","offset"],["composite","computedOffset","easing","offset","transform"]]',
-      '[["columnGap","composite","computedOffset","easing","offset","overflowWrap"],["columnGap","composite","computedOffset","easing","offset","overflowWrap"]]'
+      '[["columnGap","composite","computedOffset","easing","offset","overflowWrap"],["columnGap","composite","computedOffset","easing","offset","overflowWrap"]]',
+      '0'
     ])
   end
 end
