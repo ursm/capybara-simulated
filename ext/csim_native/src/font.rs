@@ -24,16 +24,77 @@ use skrifa::{FontRef, MetadataProvider};
 pub(crate) struct FontMetrics {
     ascii: [Option<f64>; 128],
     avg: f64,
-    // A `unicode-range` SPLIT (`registerFontStack`): the faces a run's characters pick from, each its registered handle
-    // and the ranges it covers (None: every code point) — the first that covers a character measures it, and one none
-    // covers is this face's own (layout.js `pickCharCand`). None for a single face.
-    split: Option<Vec<(Option<Vec<(u32, u32)>>, i32)>>,
+    // A `unicode-range` SPLIT (`registerFontStack`): the faces a run's characters pick from, in order — the first that
+    // covers a character measures it, and one none covers is this face's own (layout.js `pickCharCand`). None for a
+    // single face.
+    split: Option<Vec<StackMember>>,
+}
+
+// One face of a `unicode-range` split: its registered handle, the ranges it covers (None: every code point), and its
+// vertical metrics in ems — None where its table carries none (the JS model's `t.asc == null`).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct StackMember {
+    pub(crate) ranges: Option<Vec<(u32, u32)>>,
+    pub(crate) handle: i32,
+    pub(crate) vertical: Option<VerticalMetrics>,
+}
+
+// A face's ascent, descent and line gap, in ems.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct VerticalMetrics {
+    pub(crate) asc: f64,
+    pub(crate) desc: f64,
+    pub(crate) gap: f64,
+}
+
+impl StackMember {
+    fn covers(&self, cp: u32) -> bool {
+        self.ranges.as_ref().is_none_or(|r| r.iter().any(|&(lo, hi)| (lo..=hi).contains(&cp)))
+    }
+}
+
+// The code points of a UTF-16 run, a lone surrogate standing for itself (JavaScript's `codePointAt`).
+fn code_points(text: &[u16]) -> impl Iterator<Item = u32> + '_ {
+    char::decode_utf16(text.iter().copied()).map(|r| r.map_or_else(|e| e.unpaired_surrogate() as u32, |c| c as u32))
 }
 
 impl FontMetrics {
     // The advance of its `0`, in ems — what a `ch` is — else its mean advance, as the JS model's `chFactor` falls back.
     pub(crate) fn zero_advance(&self) -> f64 {
         self.ascii[b'0' as usize].filter(|&a| a > 0.0).unwrap_or(self.avg)
+    }
+    // The face of a split that a character takes — the first member covering it — or None, where it takes this face's
+    // own (no split, or no member covers it).
+    fn member_for(&self, cp: u32) -> Option<&StackMember> {
+        self.split.as_ref()?.iter().find(|m| m.covers(cp))
+    }
+    // Whether this face splits a run's characters across faces (`registerFontStack`).
+    pub(crate) fn is_split(&self) -> bool {
+        self.split.is_some()
+    }
+    // The line box a run of `text` needs in a split face, as the ascent and descent around its baseline: the deepest of
+    // each among the faces its characters select, every one laid out as a face of its own would be — its box centred in
+    // `fixed_lh` (a `line-height` that is not `normal`), else in its own box and line gap (layout.js `runFaceVMax`). A
+    // character no member covers takes `primary`, the face the run's style resolves to. None when nothing on the run
+    // has vertical metrics, or the face does not split.
+    pub(crate) fn run_vmax(&self, text: &[u16], size: f64, fixed_lh: Option<f64>, primary: Option<VerticalMetrics>) -> Option<(f64, f64)> {
+        self.split.as_ref()?;
+        let round = crate::walk::js_round;
+        let mut seen: Vec<VerticalMetrics> = Vec::new();
+        let mut most: Option<(f64, f64)> = None;
+        for cp in code_points(text) {
+            let Some(v) = self.member_for(cp).map_or(primary, |m| m.vertical) else { continue };
+            if seen.contains(&v) {
+                continue;
+            }
+            seen.push(v);
+            let bx = round(v.asc * size) + round(v.desc * size);
+            let lh = fixed_lh.unwrap_or_else(|| bx + round(v.gap * size));
+            let asc = ((lh - bx) / 2.0).floor() + round(v.asc * size);
+            let (a, d) = most.unwrap_or((0.0, 0.0));
+            most = Some((a.max(asc), d.max(lh - asc)));
+        }
+        most
     }
     // Build from font file bytes (SFNT: TTF/OTF; WOFF/WOFF2 decoded host-side). None when the file can't
     // be parsed, has no units-per-em, or maps no printable ASCII with a positive advance.
@@ -82,17 +143,7 @@ impl FontMetrics {
         let mut units = 0.0f64;
         let mut spacing = 0.0f64;
         let mut prev: i64 = -1;
-        let mut i = 0usize;
-        while i < text.len() {
-            let u = text[i];
-            let cp: u32 = if (0xD800..=0xDBFF).contains(&u) && i + 1 < text.len() && (0xDC00..=0xDFFF).contains(&text[i + 1]) {
-                let hi = (u as u32) - 0xD800;
-                let lo = (text[i + 1] as u32) - 0xDC00;
-                i += 1;
-                0x10000 + (hi << 10) + lo
-            } else {
-                u as u32
-            };
+        for cp in code_points(text) {
             if cp == 0x09 {
                 // The oracle's `tabAdvance`, on the pen this measure has reached: the distance to the next
                 // stop, or to the one AFTER it where that is nearer than half a space (Blink's `Font::TabWidth`
@@ -113,24 +164,16 @@ impl FontMetrics {
                     0.0
                 };
                 prev = cp as i64;
-                i += 1;
                 continue;
             }
-            units += match &self.split {
+            units += match self.member_for(cp) {
+                Some(m) => with_font(m.handle, |fm| unit_of(cp, prev, fm)).unwrap_or_else(|| unit_of(cp, prev, self)),
                 None => unit_of(cp, prev, self),
-                Some(split) => {
-                    let member = split.iter().find(|(ranges, _)| ranges.as_ref().is_none_or(|r| r.iter().any(|&(lo, hi)| (lo..=hi).contains(&cp))));
-                    match member {
-                        Some(&(_, handle)) => with_font(handle, |fm| unit_of(cp, prev, fm)).unwrap_or_else(|| unit_of(cp, prev, self)),
-                        None => unit_of(cp, prev, self),
-                    }
-                }
             };
             if spaced && takes_spacing(cp, prev) {
                 spacing += ls + if cp == 0x20 || cp == 0x00A0 { ws } else { 0.0 };
             }
             prev = cp as i64;
-            i += 1;
         }
         units * size + spacing
     }
@@ -295,9 +338,9 @@ pub(crate) fn register_scaled(handle: i32, scale: f64) -> i32 {
 }
 
 // A family stack whose `@font-face`s restrict their `unicode-range`s (layout.js `faceStackFor`): the face `primary`'s
-// own metrics — what a character no member covers is measured by — and `members`, in order, each a registered face
-// and its ranges (None: universal). Its own handle, shared per (primary, members); -1 for an unregistered primary.
-pub(crate) fn register_stack(primary: i32, members: Vec<(Option<Vec<(u32, u32)>>, i32)>) -> i32 {
+// own metrics — what a character no member covers is measured by, and what a `ch` is — and `members`, in pick order.
+// Its own handle, shared per (primary, members); -1 for an unregistered primary.
+pub(crate) fn register_stack(primary: i32, members: Vec<StackMember>) -> i32 {
     if primary < 0 {
         return -1;
     }

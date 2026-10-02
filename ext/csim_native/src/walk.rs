@@ -1341,7 +1341,8 @@ impl Rel {
 // A run before its block commits it: its inline box is named by the gather's entry, tabled at the commit.
 enum Pending {
     // (…with the element each part of it was written in, as `[(offset, nid)]` — the painter's colour and font)
-    Text { font: FontInfo, text: Vec<u16>, wrap: u8, ws: u8, shift: f64, owners: Vec<(u32, f64)> },
+    // (…and, in a `unicode-range` split, the ascent and descent its characters' faces need: `split_vmax`)
+    Text { font: FontInfo, text: Vec<u16>, wrap: u8, ws: u8, shift: f64, vmax: Option<(f64, f64)>, owners: Vec<(u32, f64)> },
     Open { plain: f64, ws: u8, entry: usize },
     Close { plain: f64, ws: u8, entry: usize, lands: bool, own_h: f64, own_asc: f64 },
     Br { ws: u8, clear: u8, entry: usize },
@@ -1444,6 +1445,9 @@ struct FontInfo {
     asc: f64,
     tab_px: f64,
     tab_min: f64,
+    // Whether `face` splits a run's characters across faces by `unicode-range` — then a run's line box is the deepest
+    // its characters select (`split_vmax`).
+    split: bool,
 }
 
 // The white-space modes a record and a run carry (layout.js `WS_MODE`).
@@ -3690,19 +3694,26 @@ impl<'a> Walk<'a> {
         let mut table: Vec<Option<usize>> = Vec::new();
         for r in g.runs {
             let run = match r {
-                Pending::Text { font, text, wrap, ws, shift, owners } => {
+                Pending::Text { font, text, wrap, ws, shift, vmax, owners } => {
                     if self.painting {
                         self.paint.push(PaintMark { run: self.runs.len(), shift, owners });
                     }
                     self.run_texts.push(Some(text.into()));
+                    // The run's place on its line: its ascent, `vertical-align` included, and its line-height below
+                    // that — each raised to the deepest a split's faces need (`placeTextRun`), so the line never shrinks.
+                    let asc = font.asc + shift;
+                    let (asc, line_height) = match vmax {
+                        Some((va, vd)) => (asc.max(va), asc.max(va) + (font.lh - asc).max(vd)),
+                        None => (asc, font.lh),
+                    };
                     Run {
                         kind: RUN_TEXT,
                         font: font.face,
                         size: font.size,
                         ls: font.ls,
                         ws: font.ws,
-                        line_height: font.lh,
-                        asc: font.asc + shift,
+                        line_height,
+                        asc,
                         metric: wrap as f64,
                         ws_mode: ws,
                         tab_px: font.tab_px,
@@ -3837,9 +3848,11 @@ impl<'a> Walk<'a> {
                     // through one — `inlineStyleOwner` — a generated box's for its text)
                     // (…asked only of a pass a painter records: no other reads it)
                     let written_in = if self.painting { self.parent_of(c).map_or(-1.0, |p| p.to_f64()) } else { -1.0 };
-                    if let Some(Pending::Text { font: lf, text, wrap: lw, ws: lws, shift: ls, owners }) = g.runs.last_mut() {
+                    let vmax = self.split_vmax(owner, font, &td)?;
+                    if let Some(Pending::Text { font: lf, text, wrap: lw, ws: lws, shift: ls, vmax: lv, owners }) = g.runs.last_mut() {
                         let joinable = *lw == wrap
                             && *ls == shift
+                            && *lv == vmax
                             && *lws == ws_mode
                             && owner_wraps
                             && same_font(lf, font)
@@ -3853,7 +3866,7 @@ impl<'a> Walk<'a> {
                             continue;
                         }
                     }
-                    g.runs.push(Pending::Text { font: *font, text: td.into_owned(), wrap, ws: ws_mode, shift, owners: if self.painting { vec![(0, written_in)] } else { Vec::new() } });
+                    g.runs.push(Pending::Text { font: *font, text: td.into_owned(), wrap, ws: ws_mode, shift, vmax, owners: if self.painting { vec![(0, written_in)] } else { Vec::new() } });
                 }
                 NodeKind::Element => {
                     let cs = self.style(c)?;
@@ -4077,7 +4090,23 @@ impl<'a> Walk<'a> {
             LengthOrNumber::Length(l) => f32_exact(l.0.px()),
         };
         let tab = if raw.is_finite() { if raw > 0.0 { raw } else { bls } } else { 8.0 * unit_space };
-        Ok(FontInfo { face: face.handle, size, ls, ws, lh, asc, tab_px: tab.max(0.0), tab_min: bare / 2.0 })
+        let split = crate::font::with_font(face.handle, |m| m.is_split()).unwrap_or(false);
+        Ok(FontInfo { face: face.handle, size, ls, ws, lh, asc, tab_px: tab.max(0.0), tab_min: bare / 2.0, split })
+    }
+
+    // The line box a text node needs where its font splits its characters across faces by `unicode-range`: the deepest
+    // ascent and descent among the faces they select, each laid out as a face of its own would be (layout.js
+    // `runFaceVMax`) — a size-adjusted face that is not the primary still raises the line. None outside a split. Asked
+    // per text NODE, as the oracle asks it (`placeTextRun`): two nodes merge into one run only where it is the same.
+    fn split_vmax(&mut self, owner: &ComputedValues, font: &FontInfo, text: &[u16]) -> Result<Option<(f64, f64)>, &'static str> {
+        if !font.split {
+            return Ok(None);
+        }
+        let face = self.face(owner)?;
+        let primary = (!face.asc.is_nan()).then_some(crate::font::VerticalMetrics { asc: face.asc, desc: face.desc, gap: face.gap });
+        use style::values::generics::font::GenericLineHeight as LineHeight;
+        let fixed = (!matches!(owner.get_font().line_height, LineHeight::Normal)).then_some(font.lh);
+        Ok(crate::font::with_font(font.face, |m| m.run_vmax(text, font.size, fixed, primary)).flatten())
     }
 
     // The face `style`'s font resolves to, as the JS side bucketed and resolved it.
@@ -5006,7 +5035,7 @@ fn wrap_mode(style: &ComputedValues) -> u8 {
     if wrap == OverflowWrap::Anywhere { 3 } else { 2 }
 }
 // JavaScript's `Math.round`: halves go UP, toward +∞.
-fn js_round(x: f64) -> f64 {
+pub(crate) fn js_round(x: f64) -> f64 {
     (x + 0.5).floor()
 }
 

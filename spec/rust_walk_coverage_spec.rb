@@ -155,6 +155,33 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
+  # …and a split's faces RAISE the line a run's characters select them on, each laid out as a face of its own would be,
+  # where the walks took the line box from the primary face alone: Ahem at 150% for A–Z, under a Lato primary for a–z,
+  # puts "ab ABC cd ef gh ij kl" on two 30px lines (Chrome 55: it raises only the LINE the tall face is on, where the JS
+  # model raises every line of the text node — a divergence all three engines here share). A `ch`
+  # is the primary face's — Lato at 120%, the face covering `0` — not the system font a character no face covers falls to
+  # (Chrome: 139.19 for 10ch, where the system font's `0` gave 120).
+  it "raises a split's line box to the faces its characters select", :aggregate_failures do
+    dir = File.join(__dir__, 'wpt/fonts')
+    files = {'/Ahem.ttf' => File.binread("#{dir}/Ahem.ttf"), '/Lato.ttf' => File.binread("#{dir}/Lato-Medium.ttf")}
+    css = '@font-face { font-family: F; src: url(/Ahem.ttf); unicode-range: U+0041-005A; size-adjust: 150%; } ' \
+          '@font-face { font-family: F; src: url(/Lato.ttf); unicode-range: U+0061-007A; } ' \
+          '@font-face { font-family: G; src: url(/Lato.ttf); unicode-range: U+0000-00FF; size-adjust: 120%; }'
+    body = '<div style="font: 20px F, sans-serif; width: 120px">ab ABC cd ef gh ij kl</div>' \
+           '<div style="font: 20px G, sans-serif; width: 300px">abc → 漢字 def</div><div style="font: 20px G, sans-serif; width: 10ch"></div>'
+    s = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'font/ttf'}, [files[env['PATH_INFO']]]] if files.key?(env['PATH_INFO'])
+
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><style>#{css}</style><body style=\"margin: 0\">#{body}</body>"]]
+    })
+    s.visit '/'
+    s.execute_script("document.body.style.color = 'red'")
+    sizes = s.evaluate_script("[...document.querySelectorAll('div')].map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.width * 100) / 100, r.height]; })")
+    expect(sizes).to eq([[120, 60], [300, 29], [139.2, 0]])
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('__csimLayoutShadowRun(null, {rust: true}).mismatches')).to eq(0)
+  end
+
   # A face whose descriptors change after the first layout is the new face to the style engine's `ch` / `ex` too: the
   # faces it computed a metric from are asked for again once the faces' generation moves, where it kept the old one's.
   it "follows a face's size-adjust into ch and ex when it changes" do

@@ -2639,8 +2639,9 @@ fn register_font_scaled(
     rv.set_int32(if scale.is_finite() && scale > 0.0 { crate::font::register_scaled(handle, scale) } else { -1 });
 }
 
-// __dom.registerFontStack(primary, members) -> handle: a `unicode-range` split, `members` a flat [handle, rangeCount,
-// lo, hi, …] list in pick order (rangeCount -1: the member covers every code point).
+// __dom.registerFontStack(primary, members) -> handle: a `unicode-range` split, `members` a flat [handle, asc, desc, gap,
+// rangeCount, lo, hi, …] list in pick order — the vertical metrics in ems, NaN where the face has none, and rangeCount -1
+// where the member covers every code point.
 fn register_font_stack(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2650,9 +2651,9 @@ fn register_font_stack(
     let flat = f64_arg(args.get(1));
     let mut members = Vec::new();
     let mut i = 0;
-    while i + 1 < flat.len() {
-        let (handle, count) = (flat[i] as i32, flat[i + 1]);
-        i += 2;
+    while i + 4 < flat.len() {
+        let (handle, asc, desc, gap, count) = (flat[i] as i32, flat[i + 1], flat[i + 2], flat[i + 3], flat[i + 4]);
+        i += 5;
         let ranges = if count < 0.0 {
             None
         } else {
@@ -2664,7 +2665,8 @@ fn register_font_stack(
             i += 2 * n;
             Some(r)
         };
-        members.push((ranges, handle));
+        let vertical = (!asc.is_nan()).then_some(crate::font::VerticalMetrics { asc, desc, gap });
+        members.push(crate::font::StackMember { ranges, handle, vertical });
     }
     rv.set_int32(crate::font::register_stack(primary, members));
 }
