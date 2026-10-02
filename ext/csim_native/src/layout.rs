@@ -1509,9 +1509,11 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
                 cb_w - right - rm - w
             };
             let y = if top.is_finite() && bottom.is_finite() && n.auto_margins & 12 != 0 {
-                // (…and `auto` margins between both share what the height leaves them, §10.6.4: centred at 240.5 of 681)
+                // (…and `auto` margins between both share what the height leaves them, §10.6.4: centred at 240.5 of 681 —
+                // a share that may be NEGATIVE, as the inline axis's may not: Chrome puts a `min-height: 1000px` root in a
+                // 768 viewport at -116)
                 let fixed = if n.auto_margins & 4 != 0 { 0.0 } else { tm } + if n.auto_margins & 8 != 0 { 0.0 } else { bm };
-                let slack = (cb_h - top - bottom - h - fixed).max(0.0);
+                let slack = cb_h - top - bottom - h - fixed;
                 top + if n.auto_margins & 4 == 0 { tm } else if n.auto_margins & 8 != 0 { slack / 2.0 } else { slack }
             } else if top.is_finite() || !bottom.is_finite() {
                 or0(top) + tm

@@ -743,8 +743,10 @@ RSpec.describe 'Rust walk coverage' do
     expect(root['float: right'].evaluate_script(read)).to eq([902.4, 0, 121.6, 38])
     # (…clamped by its max-width between both insets, and centred there on `auto` margins: Chrome's 500 at 262)
     expect(root['position: absolute; top: 0; left: 0; right: 0; max-width: 500px; margin: auto'].evaluate_script(read)).to eq([262, 0, 500, 38])
-    # (…and as tall as the room between both vertical insets, clamped by its max-height and centred on `auto` margins)
+    # (…and as tall as the room between both vertical insets, clamped by its min / max-height and centred on `auto`
+    # margins — which, on this axis, may go negative: a 1000 tall root in the 768 viewport sits at -116, as in Chrome)
     expect(root['position: fixed; inset: 0; max-width: 300px; max-height: 200px; margin: auto'].evaluate_script(read)).to eq([362, 284, 300, 200])
+    expect(root['position: absolute; top: 0; bottom: 0; min-height: 1000px; margin: auto 0'].evaluate_script(read)[1]).to eq(-116)
     # (…and a `fit-content()` track capped by a function over a percentage: Chrome's 160 | 240)
     fit = page('<body style="margin: 0"><div style="width: 400px; display: grid; grid-template-columns: fit-content(min(40%, 300px)) 1fr">' \
                '<div>aaaa bbbb cccc dddd eeee ffff</div><div id="k">b</div></div></body>')
