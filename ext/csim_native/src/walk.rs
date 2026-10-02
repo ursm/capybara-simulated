@@ -74,6 +74,19 @@ pub(crate) struct Face {
     pub(crate) xh: f64,
 }
 
+// Whether two answers for a face are the same face, to the bit: its handle (a `size-adjust` is a handle of its own) and
+// its metrics.
+fn same_face(a: Option<Face>, b: Option<Face>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            a.handle == b.handle
+                && [a.asc, a.desc, a.gap, a.space, a.xh].iter().zip([b.asc, b.desc, b.gap, b.space, b.xh]).all(|(x, y)| x.to_bits() == y.to_bits())
+        }
+        _ => false,
+    }
+}
+
 // Which face: the family list as the computed value serializes it, and the JS walk's bucket (`''`, `bold`, `italic`,
 // `bold:italic`).
 pub(crate) type FaceKey = (String, &'static str);
@@ -90,6 +103,10 @@ pub(crate) struct Faces {
     // …and the faces it DID compute a metric from: what has to be asked for again, and its styles computed again, once
     // what they resolve by moves (`at_generation`).
     metrics_used: Vec<FaceKey>,
+    // …and what each of those was before it was asked for again: told the same face, nothing it computed changes, and
+    // nothing is restyled — the generation moves on every style sheet change, and a restyle of everything costs the
+    // transitions their before-change styles.
+    prior: HashMap<FaceKey, Option<Face>>,
     // The generation the faces were resolved at (`natFontGen`: the rules and the FontFaceSet a family resolves by).
     generation: String,
 }
@@ -124,8 +141,9 @@ impl Faces {
     // its styles to be computed again.
     pub(crate) fn learn(&mut self, key: FaceKey, face: Option<Face>) -> bool {
         let asked = self.metrics_missing.iter().position(|k| *k == key).map(|at| self.metrics_missing.remove(at)).is_some();
+        let unchanged = self.prior.remove(&key).is_some_and(|was| same_face(was, face));
         self.known.insert(key, face);
-        asked
+        asked && !unchanged
     }
     // The face the style engine's font metrics are read from: its own where it is known, else None — noted, where it has
     // not been asked for yet, for the next walk to name.
@@ -154,12 +172,15 @@ impl Faces {
     // one, since nothing computed from it is computed again until it is told (`learn`, then a restyle).
     pub(crate) fn at_generation(&mut self, generation: &str) {
         if self.generation != generation {
-            self.known.clear();
             for key in std::mem::take(&mut self.metrics_used) {
+                if let Some(&was) = self.known.get(&key) {
+                    self.prior.insert(key.clone(), was);
+                }
                 if !self.metrics_missing.contains(&key) {
                     self.metrics_missing.push(key);
                 }
             }
+            self.known.clear();
             self.generation = generation.to_owned();
         }
     }
