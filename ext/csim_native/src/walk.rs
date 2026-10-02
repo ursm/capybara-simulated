@@ -1513,13 +1513,31 @@ impl<'a> Walk<'a> {
         [self.runs.len(), self.grids.len(), self.inlines.len()]
     }
 
+    // The root element's box. A floated or absolutely positioned root is no float and no out-of-flow box of anything —
+    // there is nothing around it — but it is sized as one, shrink-to-fit, and a positioned one placed at its `top` /
+    // `left` against the viewport (Chrome: `html { position: absolute; top: 10px; left: 20px }` holding "hello world"
+    // is 121.61 wide at (20, 10)).
     fn root(&mut self, root: NodeId) -> Step {
         let style = self.style(root)?;
         let b = style.get_box();
-        if matches!(b.clone_position(), Position::Absolute | Position::Fixed) || b.clone_float() != Float::None {
-            return Err("root unsupported");
+        let positioned = matches!(b.clone_position(), Position::Absolute | Position::Fixed);
+        self.record(root, -1)?;
+        if positioned || b.clone_float() != Float::None {
+            let pos = style.get_position();
+            let (w, h) = (self.basis.w, self.basis.h);
+            let at = |inset: &style::values::computed::position::Inset, basis: f64| -> Result<f64, &'static str> {
+                Ok(match inset_lp(inset)? {
+                    Some(lp) if positioned => lp.resolve(style::values::computed::Length::new(basis as f32)).px() as f64,
+                    _ => 0.0,
+                })
+            };
+            let (left, top) = (at(&pos.left, w)?, at(&pos.top, h)?);
+            let r = &mut self.inputs[0];
+            r.fits_content = true;
+            r.inset_left = left;
+            r.inset_top = top;
         }
-        self.record(root, -1)
+        Ok(())
     }
 
     // The offset of `prog` in the pass's math table, entered once; NO_MATH for none.
@@ -1716,7 +1734,8 @@ impl<'a> Walk<'a> {
             3 => self.saw_float.0 || self.saw_float.1,
             _ => false,
         };
-        let floated = self.float_code(id, &style)?;
+        // (…the root is no float, whatever it declares: `root`)
+        let floated = if parent < 0 { 0 } else { self.float_code(id, &style)? };
         match floated {
             1 => self.saw_float.0 = true,
             2 => self.saw_float.1 = true,
@@ -1773,7 +1792,7 @@ impl<'a> Walk<'a> {
             return Err(display_decline(display));
         }
         let position = b.clone_position();
-        if matches!(position, Position::Absolute | Position::Fixed) != out_of_flow {
+        if parent >= 0 && matches!(position, Position::Absolute | Position::Fixed) != out_of_flow {
             return Err("positioned");
         }
         let idx = self.inputs.len() as i32;
@@ -2536,14 +2555,16 @@ impl<'a> Walk<'a> {
     // declared column lines — then its items, each its own record, and its out-of-flow children.
     fn grid(&mut self, id: NodeId, idx: i32, style: &ComputedValues, parent: i32) -> Step {
         let pos = style.get_position();
-        let (col_gap, row_gap) = (gap(&pos.column_gap)?, gap(&pos.row_gap)?);
+        let (col_gap, mut row_gap) = (gap(&pos.column_gap)?, gap(&pos.row_gap)?);
+        // (…the ROOT's percentage row gap resolves against a height nothing imposes on it — an indefinite one, against
+        // which a percentage gap is 0: Chrome's `html { display: grid; row-gap: 10% }` spaces its rows by nothing)
+        if parent < 0 && self.inputs[idx as usize].height.is_nan() {
+            row_gap.frac = 0.0;
+            row_gap.prog = None;
+        }
         // (…a comparison gap rides beside its pair as its PROGRAM's offset in the math table, NaN for none)
         let program = |walk: &mut Self, prog: Option<&[f64]>| prog.map_or(f64::NAN, |p| walk.math(Some(p)) as f64);
         let (col_gap_math, row_gap_math) = (program(self, col_gap.prog.as_deref()), program(self, row_gap.prog.as_deref()));
-        // (…the pass ROOT's percentage row gap resolves against a height its parent imposed, which the pass has not)
-        if parent < 0 && row_gap.frac != 0.0 && self.inputs[idx as usize].height.is_nan() {
-            return Err("grid root row gap");
-        }
         let template = GridTemplate::of(&pos.grid_template_columns)?;
         let (items, oof) = self.box_items(id)?;
         let row_h = grid_row_height(&pos.grid_auto_rows);
@@ -2763,13 +2784,6 @@ impl<'a> Walk<'a> {
         for g in &grid.groups {
             if g.first >= 0 && (g.first..=g.last).any(|i| grid.rows[i as usize].group != Some(g.index)) {
                 return Err("table-group-interleaved");
-            }
-        }
-        for row in &grid.rows {
-            for cell in &row.cells {
-                if cell.col + cell.col_span > grid.col_count {
-                    return Err("table-span-past-columns");
-                }
             }
         }
         // A COLLAPSING table (§17.6.2) spaces nothing, and where it has a grid its border is the outer half of its rim
@@ -3224,9 +3238,19 @@ impl<'a> Walk<'a> {
             }
         }
         grid.col_count = count.max(if grid.rows.iter().any(|r| !r.cells.is_empty()) { 1 } else { 0 });
+        // …and a spanning cell clamped to those columns, placed again: one that STARTS past them — pushed there by a row
+        // span above it — makes a column of its own (Chrome: `<td rowspan=2>` over a `<td colspan=2>` is two columns,
+        // the span clamped to the one it starts in), which may move what follows it, so until no cell starts past them.
         if spanned {
-            let n = grid.col_count;
-            self.place_cells(&mut grid, n);
+            loop {
+                let n = grid.col_count;
+                self.place_cells(&mut grid, n);
+                let past = grid.rows.iter().flat_map(|r| &r.cells).map(|c| c.col + 1).max().unwrap_or(0);
+                if past <= n {
+                    break;
+                }
+                grid.col_count = past;
+            }
         }
         Ok(grid)
     }
@@ -4764,6 +4788,47 @@ fn emit(node: &CalcNode, prog: &mut Vec<f64>, depth: &mut usize, deepest: &mut u
         Node::Sign(n) => {
             emit(n, prog, depth, deepest)?;
             prog.extend([crate::layout::MATH_SIGN, 0.0, 0.0]);
+        }
+        Node::Round { strategy, value, step } => {
+            use style::values::generics::calc::RoundingStrategy as Strategy;
+            emit(value, prog, depth, deepest)?;
+            emit(step, prog, depth, deepest)?;
+            fold(prog, depth, match strategy {
+                Strategy::Nearest => crate::layout::MATH_ROUND_NEAREST,
+                Strategy::Up => crate::layout::MATH_ROUND_UP,
+                Strategy::Down => crate::layout::MATH_ROUND_DOWN,
+                Strategy::ToZero => crate::layout::MATH_ROUND_TO_ZERO,
+            });
+        }
+        Node::ModRem { dividend, divisor, op } => {
+            use style::values::generics::calc::ModRemOp;
+            emit(dividend, prog, depth, deepest)?;
+            emit(divisor, prog, depth, deepest)?;
+            fold(prog, depth, if matches!(op, ModRemOp::Mod) { crate::layout::MATH_MOD } else { crate::layout::MATH_REM });
+        }
+        Node::Hypot(args) => {
+            for (i, a) in args.iter().enumerate() {
+                emit(a, prog, depth, deepest)?;
+                if i > 0 {
+                    fold(prog, depth, crate::layout::MATH_HYPOT);
+                }
+            }
+            if args.is_empty() {
+                return Err("math function");
+            }
+            // (…one argument is its absolute value)
+            if args.len() == 1 {
+                prog.extend([crate::layout::MATH_ABS, 0.0, 0.0]);
+            }
+        }
+        Node::Pow(base, exponent) => {
+            emit(base, prog, depth, deepest)?;
+            emit(exponent, prog, depth, deepest)?;
+            fold(prog, depth, crate::layout::MATH_POW);
+        }
+        Node::Sqrt(n) => {
+            emit(n, prog, depth, deepest)?;
+            prog.extend([crate::layout::MATH_SQRT, 0.0, 0.0]);
         }
         // (…a bare number among them: an operand of the plain value it is)
         Node::Leaf(style::values::computed::length_percentage::ComputedLeaf::Number(n)) => {

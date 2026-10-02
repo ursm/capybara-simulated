@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/layout_golden'
+require_relative 'support/chrome_figures'
 
 # Shapes the Rust walk used to decline, sending the pass to the JS walk (and from there, often, to the oracle): it lays
 # each out itself now, held to Chrome's figures where a shape names them and to its recorded geometry
@@ -671,5 +672,42 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script(read)).to eq(%w[300px 72px])
     s.execute_script("document.getElementById('ff').textContent = '@font-face { font-family: F; src: url(/Ahem.ttf); size-adjust: 50%; }'")
     expect(s.evaluate_script(read)).to eq(%w[100px 24px])
+  end
+
+  # What the walk declined, with no layout behind it, blanked the page: every element 0 x 0. Each of these declined and
+  # now lays out as Chrome does — a cell pushed by a row span to start past the columns makes a column of its own (its
+  # span clamped to it), a percentage under `round()` / `mod()` / `hypot()` resolves, and a floated or positioned ROOT is
+  # sized shrink-to-fit and placed at its `top` / `left` (Chrome: 53.2 wide, its `b` at 31.6; 147, 30, 98.49; the root
+  # 121.6 wide at (20, 10)).
+  it 'lays out the shapes it once declined, as Chrome does', :aggregate_failures do
+    table = '<table id="t" cellspacing="10" style="font: 16px monospace"><tr><td rowspan="2">a</td></tr><tr><td id="b" colspan="2">b</td></tr></table>'
+    math = %w[round(50%,7px) mod(50%,40px) hypot(30%,40px)].map {|v| %(<div class="m" style="width: #{v}">x</div>) }.join
+    s = page(%(<body style="margin: 0">#{table}<div style="width: 300px">#{math}</div></body>))
+    expect(s.evaluate_script(<<~JS)).to eq([53.2, 31.6, 147, 30, 98.49])
+      [
+        +t.getBoundingClientRect().width.toFixed(2),
+        +b.getBoundingClientRect().x.toFixed(2),
+        ...[...document.querySelectorAll('.m')].map((e) => +e.getBoundingClientRect().width.toFixed(2))
+      ]
+    JS
+    root = page(
+      '<html style="position: absolute; top: 10px; left: 20px"><body style="margin: 8px; font: 16px monospace">' \
+      '<div>hello world</div></body></html>'
+    )
+    expect(root.evaluate_script('(r => [r.x, r.y, +r.width.toFixed(2)])(document.documentElement.getBoundingClientRect())')).to eq([20, 10, 121.6])
+    # …and a face the walk cannot measure — a colour emoji font maps no letters — lays its text out in the face it falls
+    # back to, sans-serif; Chrome keeps the emoji face's own space and line box (62.6 x 19 for `abc def`).
+    emoji = page('<body><span id="e" style="font-family: emoji">abc def</span></body>')
+    expect_shared_gap(emoji.evaluate_script('+e.getBoundingClientRect().width.toFixed(1)'), shared: 52.5, chrome: 62.6, what: 'emoji face')
+  end
+
+  # A document whose root the walk lays nothing out for — an SVG one — has the root's box alone, and keeps it after a
+  # style read reaches the root (the read declared its memos and wiped the box the root-alone layout had written).
+  it "keeps an SVG document's root box after a read reaches the root" do
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect id="r" width="10" height="10"/></svg>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'image/svg+xml'}, [svg]] })
+    s.visit '/'
+    s.evaluate_script("document.getElementById('r').getBoundingClientRect().width")
+    expect(s.evaluate_script('(r => [r.width, r.height])(document.documentElement.getBoundingClientRect())')).to eq([200, 100])
   end
 end

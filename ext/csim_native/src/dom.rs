@@ -2838,6 +2838,7 @@ pub(crate) fn decode_input(r: &[f64]) -> crate::layout::Input {
         inset_right: r[73],
         inset_bottom: r[74],
         inset_left: r[75],
+        fits_content: false,
         auto_margins: r[76] as u8,
         legacy_align: ((r[65] as u32) >> 3 & 3) as u8,
         legend_align: ((r[65] as u32) >> 27 & 7) as u8,

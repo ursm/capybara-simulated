@@ -33,15 +33,32 @@ module SimulatedSessionTeardown
     end
   end
 
-  # What the Rust walk declined on the session's page, by reason — or nil. A page it declines is laid out as its root
-  # alone, which a spec reading a box at the root would never notice, so every session a spec built is asked at its end
-  # (an example that declines on purpose says so: `rust_declines: true`).
+  # What the Rust walk declined on the session's page and in every frame under it, by reason — or nil. A page it declines
+  # is laid out as its root alone, which a spec reading a box at the root would never notice, so every session a spec
+  # built is asked at its end (an example that declines on purpose says so: `rust_declines: true`).
+  RUST_DECLINES_JS = <<~JS
+    (() => {
+      const all = {};
+      const visit = (win) => {
+        const stats = win.__csimNativeLayoutStats ? win.__csimNativeLayoutStats().rustFellBack : {};
+        for (const [reason, n] of Object.entries(stats)) all[reason] = (all[reason] || 0) + n;
+        for (const id of win.__csimChildRealmIds || []) {
+          const child = globalThis.RustyRacer.contextGlobal(id);
+          if (child) visit(child);
+        }
+      };
+      visit(globalThis);
+      return JSON.stringify(all);
+    })()
+  JS
   def rust_declines(session)
     return unless session.instance_variable_defined?(:@driver)
 
-    declined = session.evaluate_script('JSON.stringify(globalThis.__csimNativeLayoutStats ? __csimNativeLayoutStats().rustFellBack : {})')
+    declined = session.driver.browser.evaluate_script(RUST_DECLINES_JS)
     declined == '{}' ? nil : declined
-  rescue StandardError
+  rescue StandardError => e
+    # (…a session the example already closed cannot answer; one that cannot for another reason says so)
+    warn "[spec] asking a session for the Rust walk's declines failed: #{e.class}: #{e.message}" unless e.message.include?('disposed')
     nil
   end
 

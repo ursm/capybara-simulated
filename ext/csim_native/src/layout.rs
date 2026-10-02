@@ -486,6 +486,9 @@ pub(crate) struct Input {
     pub(crate) inset_right: f64,
     pub(crate) inset_bottom: f64,
     pub(crate) inset_left: f64,
+    // A ROOT sized from its content — a floated or absolutely positioned root element — and placed at its `inset_left`
+    // / `inset_top`.
+    pub(crate) fits_content: bool,
     // Which of this box's margins are `auto` (1 left, 2 right, 4 top, 8 bottom) — the record carries the mask
     // because a resolved `auto` margin arrives as 0, indistinguishable from a declared one. The slack goes to
     // them: between the INSETS of an out-of-flow box (§10.3.7 / §10.6.4), and in the containing block for an
@@ -581,7 +584,7 @@ impl InlineBox {
 }
 impl Input {
     pub(crate) fn same(&self, o: &Input) -> bool {
-        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, has_replayed_oof, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, measured_as_block, equal_share, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, flex_baseline_asc, flex_line_nat, flex_line, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height, pushed_h_indefinite, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, cell_min_content, cell_max_content, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect } = self;
+        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, has_replayed_oof, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, measured_as_block, equal_share, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, flex_baseline_asc, flex_line_nat, flex_line, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, anon_cross, ws_mode, item_auto_height, pushed_h_indefinite, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, cell_min_content, cell_max_content, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_native, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect, fits_content } = self;
         nid.bit_eq(&o.nid)
             && parent.bit_eq(&o.parent)
             && display.bit_eq(&o.display)
@@ -733,6 +736,7 @@ impl Input {
             && width_kw.bit_eq(&o.width_kw)
             && height_kw.bit_eq(&o.height_kw)
             && cb_rect.bit_eq(&o.cb_rect)
+            && fits_content.bit_eq(&o.fits_content)
     }
 }
 // `cb_index` for a box that has no containing block of this kind — an in-flow one.
@@ -1502,7 +1506,16 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
     // root, its column, is as wide (Chrome: a horizontal body in a vertical html is 1008, the html 1024).
     let root = inputs[0].get();
     let orthogonal = root.block_axis_is_x && children[0].iter().any(|&c| !inputs[c].get().block_axis_is_x);
-    let root_w = if orthogonal { resolve_width(&root, root_cb_w) } else { block_child_width(0, root_cb_w, inputs, runs, run_texts, grids, &children, &failed) };
+    let root_w = if orthogonal {
+        resolve_width(&root, root_cb_w)
+    } else if root.fits_content && root.width.is_nan() {
+        let Some(w) = shrink_to_fit_width(0, root_cb_w - Input::m(root.ml) - Input::m(root.mr), inputs, runs, run_texts, grids, &children) else {
+            return Outcome::Unsupported;
+        };
+        w
+    } else {
+        block_child_width(0, root_cb_w, inputs, runs, run_texts, grids, &children, &failed)
+    };
     let mut root_fc = FloatCtx::new();
     let root_margins = measure(0, root_w, f64::NAN, inputs, runs, run_texts, grids, &children, &mut boxes, &failed, &mut root_fc, 0.0, 0.0);
     if failed.get() {
@@ -1527,7 +1540,11 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
         } else {
             auto_margin_split(lead_auto, trail_auto, lm, tm, root_cb_w, w).0
         };
-        (if root_from_right { root_cb_w - w - lead } else { lead }, root_margins.top_only.value())
+        if n.fits_content {
+            (n.inset_left + lm, n.inset_top + Input::m(n.mt))
+        } else {
+            (if root_from_right { root_cb_w - w - lead } else { lead }, root_margins.top_only.value())
+        }
     } else {
         (root_x, root_y)
     };
@@ -7880,6 +7897,17 @@ pub(crate) const MATH_MUL: f64 = 6.0;
 pub(crate) const MATH_INV: f64 = 7.0;
 pub(crate) const MATH_ABS: f64 = 8.0;
 pub(crate) const MATH_SIGN: f64 = 9.0;
+// …and the stepped-value and exponential functions on the top two (`round()` by its strategy, `mod()`, `rem()`,
+// `hypot()` folded pairwise, `pow()`) or the top one (`sqrt()`), as the style engine evaluates them where it can.
+pub(crate) const MATH_ROUND_NEAREST: f64 = 10.0;
+pub(crate) const MATH_ROUND_UP: f64 = 11.0;
+pub(crate) const MATH_ROUND_DOWN: f64 = 12.0;
+pub(crate) const MATH_ROUND_TO_ZERO: f64 = 13.0;
+pub(crate) const MATH_MOD: f64 = 14.0;
+pub(crate) const MATH_REM: f64 = 15.0;
+pub(crate) const MATH_HYPOT: f64 = 16.0;
+pub(crate) const MATH_POW: f64 = 17.0;
+pub(crate) const MATH_SQRT: f64 = 18.0;
 pub(crate) const MATH_DEPTH: usize = 16;
 pub(crate) fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
     let Some(&len) = table.get(at) else { return f64::NAN };
@@ -7896,7 +7924,7 @@ pub(crate) fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
             sp += 1;
             continue;
         }
-        if op == MATH_NEG || op == MATH_SCALE || op == MATH_INV || op == MATH_ABS || op == MATH_SIGN {
+        if op == MATH_NEG || op == MATH_SCALE || op == MATH_INV || op == MATH_ABS || op == MATH_SIGN || op == MATH_SQRT {
             if sp == 0 {
                 return f64::NAN;
             }
@@ -7909,6 +7937,8 @@ pub(crate) fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
                 1.0 / x
             } else if op == MATH_ABS {
                 x.abs()
+            } else if op == MATH_SQRT {
+                x.sqrt()
             } else if x == 0.0 || x.is_nan() {
                 x // (…`sign()` of a zero is that zero, of NaN NaN)
             } else {
@@ -7929,13 +7959,58 @@ pub(crate) fn math_at(table: &[f64], at: usize, basis: f64) -> f64 {
             x.max(y)
         } else if op == MATH_MUL {
             x * y
-        } else {
+        } else if op == MATH_SUM {
             x + y
+        } else if op == MATH_HYPOT {
+            x.hypot(y)
+        } else if op == MATH_POW {
+            x.powf(y)
+        } else if op == MATH_MOD || op == MATH_REM {
+            mod_rem(x, y, op == MATH_MOD)
+        } else {
+            round_to(x, y, op)
         };
     }
     // (…and a figure that is no number — a division by a percentage of a zero basis, `calc(1px / (10% - 10%))` — is
     // none either: the value it sizes is unresolvable, `auto`, never the infinity a division makes)
     if sp == 1 && stack[0].is_finite() { stack[0] } else { f64::NAN }
+}
+// `mod()` / `rem()` (CSS Values 4 §10.3): the remainder of the division of `a` by `b`, with the sign of `b` for `mod()`
+// and of `a` for `rem()` — and NaN for a `mod()` of an infinite `b` against an `a` of the other sign (§10.9).
+fn mod_rem(a: f64, b: f64, modulo: bool) -> f64 {
+    if modulo && b.is_infinite() && a.is_sign_negative() != b.is_sign_negative() {
+        return f64::NAN;
+    }
+    let (r, sign_of) = if modulo { (a - b * (a / b).floor(), b) } else { (a - b * (a / b).trunc(), a) };
+    if r == 0.0 && sign_of.is_sign_negative() { -0.0 } else { r }
+}
+// `round()` of `value` to a multiple of `step` by `strategy` (§10.2), a tie to the upper bound, with §10.9's infinities.
+fn round_to(value: f64, step: f64, strategy: f64) -> f64 {
+    let step = step.abs();
+    if step == 0.0 {
+        return f64::NAN;
+    }
+    if value.is_infinite() {
+        return if step.is_infinite() { f64::NAN } else { value };
+    }
+    if step.is_infinite() {
+        let neg = value.is_sign_negative();
+        return match strategy {
+            MATH_ROUND_UP if !neg && value != 0.0 => f64::INFINITY,
+            MATH_ROUND_DOWN if neg && value != 0.0 => f64::NEG_INFINITY,
+            MATH_ROUND_UP | MATH_ROUND_DOWN if value == 0.0 => value,
+            _ if neg => -0.0,
+            _ => 0.0,
+        };
+    }
+    let div = value / step;
+    let (lower, upper) = (div.floor() * step, div.ceil() * step);
+    match strategy {
+        MATH_ROUND_UP => upper,
+        MATH_ROUND_DOWN => lower,
+        MATH_ROUND_TO_ZERO => if lower.abs() < upper.abs() { lower } else { upper },
+        _ => if value - lower < upper - value { lower } else { upper },
+    }
 }
 fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64, bool, bool, bool), inputs: &[Cell<Input>], all_runs: &[Run], all_texts: &[RunText], grids: &[f64], children: &[Vec<usize>]) -> Option<(f64, f64)> {
     // …per RUN, because an inline may declare its own `white-space` (`Run::ws_mode`) and every one of these is
@@ -9204,6 +9279,7 @@ mod tests {
             inset_right: f64::NAN,
             inset_bottom: f64::NAN,
             inset_left: f64::NAN,
+            fits_content: false,
             auto_margins: 0,
             legacy_align: 0,
             legend_align: 0,

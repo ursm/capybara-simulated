@@ -4,6 +4,7 @@ require 'timeout'
 require 'yaml'
 require 'capybara/simulated'
 require 'capybara/spec/spec_helper'
+require_relative 'session_teardown'
 
 # Capybara's upstream shared-spec suite run against our `:simulated` driver.
 # The expected-pending set covers tests that need a real layout engine
@@ -135,7 +136,10 @@ module CapybaraShared
       end
 
       after do
+        # (…asked, as every session a spec builds is, whether the Rust walk declined a page: `rust_declines`)
+        declines = rust_declines(session)
         session.reset_session!
+        raise rust_decline_message([declines]) if declines && !RSpec.current_example.metadata[:rust_declines]
       end
 
       before :each, :psc do
