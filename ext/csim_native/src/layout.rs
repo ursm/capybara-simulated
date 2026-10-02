@@ -1484,13 +1484,15 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
     // Bound to a name, never `let _`: the guard has to LIVE to the end of the pass — dropped at the semicolon
     // it would clear the memo again immediately, silently, with nothing measuring the loss.
     let _math_guard = MathStore::install(maths);
-    let root_w = resolve_width(&inputs[0], root_cb_w);
     let _iw_guard = IwMemo::install(inputs.len());
     let _frag_guard = FragStore::install(inlines, inputs.len(), texts);
     // Each record in a CELL: a parent resolves its children's percentages against the box it lays them out in
     // (`Input::with_percent_sizes`) and writes the resolved copy back before they are measured.
     let inputs: &[Cell<Input>] = Cell::from_mut(inputs).as_slice_of_cells();
     let failed = std::cell::Cell::new(false);
+    // The root is sized as any block-level box is in the room it is handed — a vertical writing mode's auto width from
+    // its own content, as the root element's is in Chrome (the width of its columns), not the initial containing block.
+    let root_w = block_child_width(0, root_cb_w, inputs, runs, run_texts, grids, &children, &failed);
     let mut root_fc = FloatCtx::new();
     let root_margins = measure(0, root_w, f64::NAN, inputs, runs, run_texts, grids, &children, &mut boxes, &failed, &mut root_fc, 0.0, 0.0);
     if failed.get() {

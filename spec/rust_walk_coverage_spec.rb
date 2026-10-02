@@ -104,6 +104,21 @@ RSpec.describe 'Rust walk coverage' do
     expect(rust).to eq(js)
   end
 
+  # A root element in a vertical writing mode is sized as every vertical block is — its auto width from its content —
+  # and placed at its margins, where the walk declined it and the JS layout gave it the initial containing block's width
+  # at 0,0 whatever its margins said. Chrome (800px window): `vertical-lr` puts the html at 7,5 and 109 wide, its
+  # columns'; a `vertical-rl` one sits at the RIGHT edge (684), which no box here does — vertical flow is not laid out.
+  it 'lays out a root element in a vertical writing mode' do
+    s = page(
+      '<html style="writing-mode: vertical-lr; margin: 5px 7px; font: 16px monospace"><body style="margin: 3px">' \
+      '<div>abc</div><div style="width: 30px; height: 40px"></div><p>hello world</p></body></html>'
+    )
+    html, body = s.evaluate_script("['html', 'body'].map((t) => { const r = document.querySelector(t).getBoundingClientRect(); return [r.x, r.y, r.width]; })")
+    expect(html[0, 2]).to eq([7, 5])
+    expect(html[2]).to eq(body[2] + 6)
+    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+  end
+
   # A face the page adds through the `FontFace` API is measured natively: its `size-adjust` reads 100% — the identity —
   # where it sets none, which was taken for a metric descriptor and declined every such face.
   it 'lays out text in a FontFace face' do

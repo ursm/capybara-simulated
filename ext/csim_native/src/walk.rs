@@ -1819,12 +1819,6 @@ impl<'a> Walk<'a> {
         if matches!(position, Position::Absolute | Position::Fixed) != out_of_flow {
             return Err("positioned");
         }
-        // (…the pass ROOT in a vertical writing mode takes its width from its content, which native sizes it by only
-        // where it declares one: `resolve_width` would fill the room instead — and the JS layout, which the JS walk sends
-        // such a root to as well, ignores the root's margins and min / max width there)
-        if parent < 0 && !style.writing_mode.is_horizontal() && size_lp(&style.get_position().width).is_none_or(|lp| lp.has_percentage()) {
-            return Err("vertical root");
-        }
         let idx = self.inputs.len() as i32;
         let mut rec = fresh_record();
         rec.nid = id.to_f64();
