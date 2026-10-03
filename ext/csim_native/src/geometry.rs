@@ -42,6 +42,43 @@ pub(crate) fn flat_children<'a>(arena: &'a RealmArena, node: &'a crate::dom::Nod
     }
 }
 
+// Whether `id` is a fieldset's RENDERED LEGEND (HTML §15.3.13): the first child box of the fieldset's box that is a
+// `<legend>`, neither floated nor absolutely positioned — so one that generates no box is passed over, one reached
+// through a `display: contents` wrapper or a slot counts, and a box-less fieldset has none (Chrome and Firefox).
+pub(crate) fn rendered_legend(arena: &RealmArena, id: NodeId) -> bool {
+    use style::computed_values::float::T as Float;
+    use style::computed_values::position::T as Position;
+    use style::values::specified::box_::Display;
+    if !arena.get(id).is_some_and(|n| n.is_html_named("legend")) {
+        return false;
+    }
+    let boxless = |c: NodeId| arena.get(c).is_some_and(|n| n.kind == NodeKind::Element)
+        && box_style(arena, c).is_some_and(|s| s.get_box().walk_display(arena.get(c).map_or("", |n| n.rendering_tag())).is_contents());
+    let mut fieldset = flat_parent(arena, id);
+    while let Some(p) = fieldset.filter(|&p| boxless(p)) {
+        fieldset = flat_parent(arena, p);
+    }
+    let Some(fieldset) = fieldset.filter(|&p| arena.get(p).is_some_and(|n| n.is_html_named("fieldset"))) else { return false };
+    let mut stack: Vec<NodeId> = arena.get(fieldset).map_or(Vec::new(), |n| flat_children(arena, n).iter().rev().copied().collect());
+    while let Some(c) = stack.pop() {
+        if boxless(c) {
+            stack.extend(arena.get(c).map_or(Vec::new(), |n| flat_children(arena, n).iter().rev().copied().collect::<Vec<_>>()));
+            continue;
+        }
+        if !arena.get(c).is_some_and(|n| n.is_html_named("legend")) {
+            continue;
+        }
+        let in_flow = box_style(arena, c).is_some_and(|cs| {
+            let b = cs.get_box();
+            b.clone_display() != Display::None && b.clone_float() == Float::None && !matches!(b.clone_position(), Position::Absolute | Position::Fixed)
+        });
+        if in_flow {
+            return c == id;
+        }
+    }
+    false
+}
+
 // The style a box was laid out with: an element's, or a generated box's — its element's `::before` / `::after`.
 pub(crate) fn box_style(arena: &RealmArena, id: NodeId) -> Option<Arc<ComputedValues>> {
     match arena.get(id)?.generated_of {
@@ -519,16 +556,17 @@ fn is_boxless(arena: &RealmArena, node: NodeId, style: &ComputedValues) -> bool 
 // holds among them (a used display, no computed one — a rendered `<legend>` is a block whatever it declares).
 pub(crate) fn non_replaced_inline(arena: &RealmArena, node: NodeId, style: &ComputedValues) -> bool {
     let Some(n) = arena.get(node) else { return false };
+    let tag = n.rendering_tag();
+    // (…a widget's inline-level box is an inline-block whatever the lines made of it — HTML's button layout — a
+    // replaced element's is atomic, and a fieldset's rendered legend is a block whatever it declares)
+    if crate::walk::replaced_or_control(arena, node, n) || crate::walk::widget_tag(tag) || rendered_legend(arena, node) {
+        return false;
+    }
     if laid_frags(arena, n).is_some() {
         return true;
     }
-    let tag = n.rendering_tag();
     let d = style.get_box().walk_display(tag);
-    matches!(d.outside(), DisplayOutside::Inline)
-        && matches!(d.inside(), DisplayInside::Flow)
-        && !crate::walk::replaced_or_control(arena, node, n)
-        && !crate::walk::widget_tag(tag)
-        && tag != "legend"
+    matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow)
 }
 
 // A rect's image under `m`: the axis-aligned box its transformed quad occupies, which both rect APIs report. A corner
@@ -890,6 +928,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "scrollSize", scroll_size_op, context_id);
     register(scope, ns, "boxInfo", box_info_op, context_id);
     register(scope, ns, "usedInsets", used_insets_op, context_id);
+    register(scope, ns, "renderedLegend", rendered_legend_op, context_id);
     register(scope, ns, "boxFragments", box_fragments_op, context_id);
     register(scope, ns, "scrollOffset", scroll_offset, context_id);
     register(scope, ns, "setScrollOffset", set_scroll_offset, context_id);
@@ -944,7 +983,8 @@ fn answer_into<const N: usize>(
 // margins its placement used (top, right, bottom, left), its own relative shift `[x, y]`, its edges as the pass used
 // them (padding, border, margin, each top / right / bottom / left), which margins are `auto` (1 top, 2 right, 4 bottom,
 // 8 left, with 16 where an edge resolved a percentage), whether it is out of flow (1, 2 `fixed`) and placed against the
-// viewport, whether its height is `auto`, its `position` and how it clips — NaN for what it has none of.
+// viewport, whether its height is `auto`, its `position`, how it clips, and whether it is a non-replaced inline box and
+// a table box (`put_kind`) — NaN for what it has none of.
 pub(crate) const BOX_INFO: usize = 32;
 fn box_info(arena: &RealmArena, id: NodeId) -> Option<[f64; BOX_INFO]> {
     let node = arena.get(id)?;
@@ -961,6 +1001,7 @@ fn box_info(arena: &RealmArena, id: NodeId) -> Option<[f64; BOX_INFO]> {
         out[27] = if b.auto_height { 1.0 } else { 0.0 };
         out[28] = f64::from(b.position);
         out[29] = f64::from(b.clip);
+        put_kind(arena, id, &mut out);
         return Some(out);
     }
     let frags = laid_frags(arena, node)?;
@@ -969,7 +1010,22 @@ fn box_info(arena: &RealmArena, id: NodeId) -> Option<[f64; BOX_INFO]> {
     out[10..12].copy_from_slice(&[0.0; 2]);
     out[25..30].copy_from_slice(&[0.0, 0.0, 1.0, 0.0, 0.0]);
     put_edges(arena, id, &mut out);
+    put_kind(arena, id, &mut out);
     Some(out)
+}
+// …what kind of box it is: a non-replaced INLINE box, one laid out as a block for the block it holds included (no
+// client box, no transform, an offset origin at its border box), and a TABLE box (its client box its border box).
+fn put_kind(arena: &RealmArena, id: NodeId, out: &mut [f64; BOX_INFO]) {
+    let Some(style) = box_style(arena, id) else { return };
+    out[30] = if non_replaced_inline(arena, id, &style) { 1.0 } else { 0.0 };
+    // (…a table display as the walk lays it out: a widget's is HTML's flow-root block — `<button style="display:
+    // table">`, `button-layout/display-other` — and a replaced element's an inline-block)
+    let Some(n) = arena.get(id) else { return };
+    let tag = n.rendering_tag();
+    let table = matches!(style.get_box().walk_display(tag).inside(), DisplayInside::Table)
+        && !crate::walk::widget_tag(tag)
+        && !crate::walk::replaced_or_control(arena, id, n);
+    out[31] = if table { 1.0 } else { 0.0 };
 }
 fn put_edges(arena: &RealmArena, id: NodeId, out: &mut [f64; BOX_INFO]) {
     if let Some(Edges { e, auto, percent }) = edges(arena, id) {
@@ -1020,6 +1076,12 @@ pub(crate) fn edges(arena: &RealmArena, id: NodeId) -> Option<Edges> {
 // them (`used_insets`), written to the Float64Array `out`.
 fn used_insets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, used_insets);
+}
+// __dom.renderedLegend(nid) -> whether the element is its fieldset's rendered legend (`rendered_legend`).
+fn rendered_legend_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let legend = crate::dom::nid_arg(scope, &args, 0).is_some_and(|id| rendered_legend(crate::dom::realm(scope, cid), id));
+    rv.set(v8::Boolean::new(scope, legend).into());
 }
 fn box_info_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, box_info);
