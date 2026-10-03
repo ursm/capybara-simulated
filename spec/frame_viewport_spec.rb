@@ -102,6 +102,19 @@ RSpec.describe 'frame viewport' do
     end
   end
 
+  # A window resize fires `resize` at the top window first, then — at its next rendering update — at a frame whose
+  # container it moved (Chrome: top 800, then the frame 400), and none for a resize to the size it already has.
+  it 'fires resize at the top window before its frames, and not for the same size' do
+    s = framed('width:50%;height:200px;border:0')
+    s.execute_script("window.top.__log = []; addEventListener('resize', () => top.__log.push('top ' + innerWidth))")
+    s.within_frame(0) { s.execute_script("addEventListener('resize', () => top.__log.push('frame ' + innerWidth))") }
+    s.current_window.resize_to(800, 600)
+    3.times { s.evaluate_script('__runLoopStep(50, 50, false)') }
+    s.current_window.resize_to(800, 600)
+    3.times { s.evaluate_script('__runLoopStep(50, 50, false)') }
+    expect(s.evaluate_script('top.__log')).to eq(['top 800', 'frame 400'])
+  end
+
   # A transform draws the frame elsewhere and sizes no viewport (Chrome: a 200x80 frame under `scale(0.5)` keeps an
   # `innerWidth` of 200).
   it 'is not resized by a transform on its container' do

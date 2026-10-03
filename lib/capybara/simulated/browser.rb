@@ -2095,9 +2095,8 @@ module Capybara
         # and dispatches only on transitions — cheap no-op when no
         # query is open.
         @runtime.call('__csimViewportChanged') if @document_handle.to_i > 0
-        # Re-fire a `resize` event so libraries that re-layout on
-        # resize (responsive nav, sidebar collapse) see the new size.
-        @runtime.eval_void("try { (globalThis.dispatchEvent || function(){})(new Event('resize')); } catch (_) {}")
+        # The window's `resize` fires at the next rendering update, as a browser's does — and
+        # then each frame's whose container the new size moved (`__csimResizeSteps`).
         nil
       end
       def viewport_width                  ; @viewport_width  || SCREEN_SIZE[0] ; end
