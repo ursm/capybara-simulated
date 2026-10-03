@@ -640,10 +640,10 @@ impl RealmArena {
             .is_some_and(|n| (n.is_html_named("details") || n.is_html_named("dialog")) && n.plain_attr("open").is_some())
     }
 
-    // HTML "actually disabled" (form-helpers.js `isNodeActuallyDisabled`): a form control — a form-associated custom
-    // element included — with its own `disabled`, or inside a disabled `<fieldset>` but not in that fieldset's first
-    // `<legend>`; an `<optgroup>` or `<option>` with its own, or in a disabled `<optgroup>` / `<select>` it belongs
-    // to.
+    // HTML "actually disabled": a form control — a form-associated custom element included — with its own
+    // `disabled`, or inside a disabled `<fieldset>` but not in that fieldset's first `<legend>`; an `<optgroup>` or
+    // `<option>` with its own, or in a disabled `<optgroup>` / `<select>` it belongs to. Ancestors in its own tree: a
+    // control in a shadow tree under a disabled fieldset is not disabled by it (Chrome, as the spec's "ancestor").
     pub(crate) fn is_actually_disabled(&self, id: NodeId) -> bool {
         let Some(n) = self.get(id) else { return false };
         if !n.is_html() {
@@ -662,7 +662,7 @@ impl RealmArena {
             // does a second `<optgroup>` (a nested one is no member), while any other element is a transparent
             // wrapper.
             let mut crossed_optgroup = false;
-            let mut cur = self.shadow_including_parent(id);
+            let mut cur = self.parent_of(id);
             while let Some(c) = cur {
                 let Some(p) = self.get(c) else { break };
                 if p.kind == NodeKind::Element {
@@ -681,18 +681,18 @@ impl RealmArena {
                         _ => {}
                     }
                 }
-                cur = self.shadow_including_parent(c);
+                cur = self.parent_of(c);
             }
             return false;
         }
-        let mut cur = self.shadow_including_parent(id);
+        let mut cur = self.parent_of(id);
         while let Some(c) = cur {
             if self.get(c).is_some_and(|p| p.is_html_named("fieldset") && p.plain_attr("disabled").is_some())
                 && !self.in_first_legend(id, c)
             {
                 return true;
             }
-            cur = self.shadow_including_parent(c);
+            cur = self.parent_of(c);
         }
         false
     }

@@ -1,7 +1,7 @@
 // HTML constraint validation over the arena: whether a control is a candidate (`willValidate`), which of its
 // constraints it suffers from (`validity`), and the pseudo-classes read off those — `:valid`, `:invalid` (a form or a
 // fieldset by its controls), `:user-valid`, `:user-invalid`, `:in-range`, `:out-of-range`. dom-nodes.js `validity`
-// is the other engine; the two answer the same, CSIM_ARENA_VERIFY holds them together.
+// is what a page reads them through (`validityFlags`, `willValidate`).
 //
 // `pattern` is an ECMAScript regular expression, compiled with the `v` flag: regress (a JS-syntax engine in Rust)
 // evaluates it over the value's UTF-16 code units, as a page's RegExp does, from a cache of compiled patterns.
@@ -574,6 +574,34 @@ impl RealmArena {
         }
         Some(self.validity(id) & (RANGE_UNDERFLOW | RANGE_OVERFLOW) == 0)
     }
+}
+
+pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "validityFlags", validity_flags, context_id);
+    crate::dom::register(scope, ns, "willValidate", will_validate, context_id);
+    crate::dom::register(scope, ns, "actuallyDisabled", actually_disabled, context_id);
+}
+
+// __dom.validityFlags(nid) -> the constraints the element suffers from (`validity`), its ValidityState's flags in IDL
+// order, bit 0 `valueMissing` to bit 9 `customError`.
+fn validity_flags(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_int32(0) };
+    rv.set_int32(i32::from(crate::dom::realm(scope, cid).validity(id)));
+}
+
+// __dom.willValidate(nid) -> whether the element is a candidate for constraint validation (`will_validate`).
+fn will_validate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(crate::dom::realm(scope, cid).will_validate(id));
+}
+
+// __dom.actuallyDisabled(nid) -> whether the element is actually disabled (`element_state::is_actually_disabled`).
+fn actually_disabled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(crate::dom::realm(scope, cid).is_actually_disabled(id));
 }
 
 // HTML "rules for parsing integers", or None.

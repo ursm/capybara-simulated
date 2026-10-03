@@ -1860,10 +1860,7 @@ custom-elements/form-associated/ElementInternals-reportValidity-delegatesFocus.h
 - "!= custom-elements/form-associated/ElementInternals-reportValidity-delegatesFocus-notref.html"
 custom-elements/form-associated/disabled-delegatesFocus.html:
 - Focus events fire on disabled form-associated custom elements with delegatesFocus
-custom-elements/form-associated/focusability.html:
-- Focusability of form-associated custom elements
 custom-elements/form-associated/form-disabled-callback.html:
-- Disabled attribute affects focus-capability
 - Relationship with FIELDSET
 custom-elements/form-associated/form-reset-callback.html:
 - Clicking a reset button invokes formResetCallback in a microtask
