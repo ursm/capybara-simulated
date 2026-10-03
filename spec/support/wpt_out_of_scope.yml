@@ -38240,6 +38240,16 @@ fetch/api/redirect/redirect-location-escape.tentative.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+fetch/api/response/response-consume.html:
+- name: 'Consume response''s body: from FormData to blob'
+  reason: 'Asserts the blob''s type is the raw Content-Type lowercased (`multipart/form-data;
+    boundary=…`, its space kept), which is Chrome''s. The Fetch Standard says otherwise:
+    "return a Blob whose contents are bytes and whose type attribute is the result of get
+    the MIME type with this", and "get the MIME type" is "the result of extracting a MIME
+    type from headers" — a MIME type record, serialized `multipart/form-data;boundary=…`
+    (mimesniff parsing.any.js asserts that serialization). Firefox extracts and serializes
+    as the spec says (lowercasing the result, as both engines'' blob types are) and fails
+    this subtest too.'
 fetch/h1-parsing/h1-parsing.tentative.html:
 - name: COLON at <after-colon> should result in Network Error (fetch)
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
