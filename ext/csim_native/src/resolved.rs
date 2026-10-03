@@ -18,15 +18,11 @@ pub(crate) enum Resolved {
     NeedsLayout,
 }
 
-// The longhands whose resolved value layout gives: the box's size, margins, padding, borders and insets, in either
-// spelling, the origins, and `transform`.
+// The longhands whose resolved value layout gives: the box's size, margins, padding and insets, in either spelling, the
+// origins, and `transform`. (A border's width is its computed value, which is the width the box is laid out with.)
 fn layouts(longhand: LonghandId) -> bool {
     use LonghandId::*;
-    used(longhand)
-        || matches!(
-            longhand,
-            TransformOrigin | PerspectiveOrigin | Transform | BorderBlockStartWidth | BorderBlockEndWidth | BorderInlineStartWidth | BorderInlineEndWidth
-        )
+    used(longhand) || matches!(longhand, TransformOrigin | PerspectiveOrigin | Transform)
 }
 // …of which these are the box's own used figures (geometry.rs `used_value`).
 fn used(longhand: LonghandId) -> bool {
@@ -36,7 +32,6 @@ fn used(longhand: LonghandId) -> bool {
         Width | Height | InlineSize | BlockSize
             | PaddingTop | PaddingRight | PaddingBottom | PaddingLeft
             | PaddingBlockStart | PaddingBlockEnd | PaddingInlineStart | PaddingInlineEnd
-            | BorderTopWidth | BorderRightWidth | BorderBottomWidth | BorderLeftWidth
             | MarginTop | MarginRight | MarginBottom | MarginLeft
             | MarginBlockStart | MarginBlockEnd | MarginInlineStart | MarginInlineEnd
             | Top | Right | Bottom | Left
@@ -83,21 +78,21 @@ pub(crate) fn resolved_value(engine: &mut StyleEngine, arena: &RealmArena, id: N
         Err(_) => false,
     };
     if !layout_bound {
-        return engine.value(arena, id, name, pseudo, now).map_or(Resolved::None, Resolved::Value);
+        return engine.property_value(arena, id, &property, pseudo, now).map_or(Resolved::None, Resolved::Value);
     }
     let Some(style) = engine.computed_style(arena, id, pseudo, now) else { return Resolved::None };
-    // (…a STATIC box's insets are their computed values, told with nothing laid out: on a page nothing has laid out
-    // yet, reading `top` would otherwise lay the whole of it out to answer with the value it started from)
-    let static_insets = style.get_box().clone_position() == style::computed_values::position::T::Static
+    // (…a box only where the element is rendered: one that is not has none, whatever the last layout left it)
+    let rendered = pseudo.is_some() || crate::rendered::rendered(engine, arena, id, true, false, None, now);
+    let reader = Reader { engine, arena, id, style: &style, boxed: if rendered { box_of(arena, id, pseudo) } else { None } };
+    let needs_layout = rendered
         && match property.as_shorthand() {
-            Ok(shorthand) => shorthand.longhands().all(inset),
-            Err(PropertyDeclarationId::Longhand(longhand)) => inset(longhand),
+            Ok(shorthand) => shorthand.longhands().any(|l| reader.needs_layout(l)),
+            Err(PropertyDeclarationId::Longhand(longhand)) => reader.needs_layout(longhand),
             Err(_) => false,
         };
-    if !laid_out && !static_insets {
+    if needs_layout && !laid_out {
         return Resolved::NeedsLayout;
     }
-    let reader = Reader { engine, arena, id, style: &style, boxed: box_of(arena, id, pseudo) };
     let value = match property.as_shorthand() {
         Ok(shorthand) => reader.shorthand(shorthand),
         Err(PropertyDeclarationId::Longhand(longhand)) => reader.longhand(longhand),
@@ -152,6 +147,25 @@ impl Reader<'_> {
         Some(computed)
     }
 
+    // Whether the layout has to be up to date to tell `longhand` of a rendered element: what its style alone tells — a
+    // static box's insets, a used size a non-replaced inline box does not have, a transform with no percentage to
+    // resolve against its box, an origin with no box to resolve against — is told with nothing laid out (a page that
+    // dirties its layout and reads one of those every frame would otherwise lay itself out every frame).
+    fn needs_layout(&self, longhand: LonghandId) -> bool {
+        if !layouts(longhand) {
+            return false;
+        }
+        match longhand {
+            LonghandId::Transform => {
+                !self.style.get_box().transform.0.is_empty()
+                    && self.engine.longhand_value(self.arena, self.id, self.style, PropertyDeclarationId::Longhand(longhand)).contains('%')
+            }
+            LonghandId::TransformOrigin | LonghandId::PerspectiveOrigin => self.boxed.is_some_and(|b| matches!(self.origin_box_free(b), Some(None))),
+            _ if inset(longhand) => self.style.get_box().clone_position() != style::computed_values::position::T::Static,
+            _ => used(longhand) && !self.skips_used(longhand),
+        }
+    }
+
     // Does the box owe no used value of `longhand`? A non-replaced INLINE box has no used width or height — they do
     // not apply to it — and a `display: contents` element no box at all: both report the computed value, as a browser
     // does (`display: inline; width: 10em` is `160px`). An inline box's margins and padding do apply, and are used.
@@ -191,7 +205,7 @@ impl Reader<'_> {
         if !text.contains('(') {
             return None;
         }
-        let owes = !keyword_resolves(longhand) && self.has_used_box();
+        let owes = !keyword_resolves(longhand) && !self.skips_used(longhand) && self.has_used_box();
         (!owes).then_some(text)
     }
 
@@ -231,16 +245,20 @@ impl Reader<'_> {
     // element's (but the root's) none that is modelled.
     fn origin_box(&self) -> Option<[f64; 2]> {
         let b = self.boxed?;
+        match self.origin_box_free(b)? {
+            Some(size) => Some(size),
+            None => placed_box(self.arena, b).map(|[_, _, w, h]| [w, h]),
+        }
+    }
+    // …as far as the style alone tells it: None where no box is modelled (an SVG element but the root), a zero box for a
+    // non-replaced inline, and Some(None) where it is the border box the layout placed.
+    fn origin_box_free(&self, b: NodeId) -> Option<Option<[f64; 2]>> {
         let node = self.arena.get(b)?;
         if node.ns == web_atoms::ns!(svg) && &*node.local_name != "svg" {
             return None;
         }
         let style = box_style(self.arena, b)?;
-        if inline_by_display(self.arena, b, &style) {
-            return Some([0.0, 0.0]);
-        }
-        let [_, _, w, h] = placed_box(self.arena, b)?;
-        Some([w, h])
+        Some(inline_by_display(self.arena, b, &style).then_some([0.0, 0.0]))
     }
 
     // `transform` as the matrix its function list composes to on the element's border box, written the way a browser

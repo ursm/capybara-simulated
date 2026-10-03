@@ -2077,9 +2077,9 @@ module Capybara
         @viewport_height = h.to_i
         invalidate_find_cache
         # One slot for the viewport (`__csimViewport`): `innerWidth` / `innerHeight` are
-        # `[Replaceable]` accessors over it, the `@media` cascade and the layout engine read it
-        # directly, and the setter re-pushes every live frame's content box — a frame lays out
-        # against its container, which just changed size too.
+        # `[Replaceable]` accessors over it, and the `@media` cascade and the layout engine read it
+        # directly. Every live frame's content box moves with it — a frame lays out against its
+        # container — handed on by the resize steps below.
         @runtime.eval_void("globalThis.__csimSetViewport(#{@viewport_width}, #{@viewport_height});")
         # Recompute the cascade `@media` rules against the new
         # viewport so visibility checks (Capybara `visible?`,
@@ -2087,16 +2087,11 @@ module Capybara
         # `display: none` / `display: block` flips. Without this the
         # style engine keeps the pre-resize media answers.
         @runtime.call('__csimRebuildCascade') if @document_handle.to_i > 0
-        # Fire `change` events on every live MediaQueryList whose
-        # match state flipped, so libraries that hold `matchMedia(...)`
-        # listeners (Discourse's `TrackedMediaQuery` powering the
-        # viewport-based mobile/desktop class swap) reactively
-        # re-render. The JS-side function iterates `_activeQueries`
-        # and dispatches only on transitions — cheap no-op when no
-        # query is open.
-        @runtime.call('__csimViewportChanged') if @document_handle.to_i > 0
-        # The window's `resize` fires at the next rendering update, as a browser's does — and
-        # then each frame's whose container the new size moved (`__csimResizeSteps`).
+        # …and the resize steps, now rather than at the next rendering update, which a page with
+        # nothing scheduled never runs: the window's `resize`, its `matchMedia` listeners' `change`s
+        # (Discourse's viewport-based mobile/desktop class swap), then each frame's whose container
+        # the new size moved.
+        @runtime.call('__csimResizeSteps') if @document_handle.to_i > 0
         nil
       end
       def viewport_width                  ; @viewport_width  || SCREEN_SIZE[0] ; end

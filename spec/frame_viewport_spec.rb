@@ -108,10 +108,9 @@ RSpec.describe 'frame viewport' do
     s = framed('width:50%;height:200px;border:0')
     s.execute_script("window.top.__log = []; addEventListener('resize', () => top.__log.push('top ' + innerWidth))")
     s.within_frame(0) { s.execute_script("addEventListener('resize', () => top.__log.push('frame ' + innerWidth))") }
+    # (…on a page with nothing scheduled, which runs no rendering update after it: `resize_to` runs the steps itself)
     s.current_window.resize_to(800, 600)
-    3.times { s.evaluate_script('__runLoopStep(50, 50, false)') }
     s.current_window.resize_to(800, 600)
-    3.times { s.evaluate_script('__runLoopStep(50, 50, false)') }
     expect(s.evaluate_script('top.__log')).to eq(['top 800', 'frame 400'])
   end
 

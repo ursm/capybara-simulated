@@ -1831,8 +1831,12 @@ impl StyleEngine {
         pseudo: Option<&str>,
         now_ms: f64,
     ) -> Option<String> {
-        let style = self.computed_style(arena, id, pseudo, now_ms)?;
         let property = PropertyId::parse_enabled_for_all_content(name).ok()?;
+        self.property_value(arena, id, &property, pseudo, now_ms)
+    }
+    // …of a property already parsed.
+    pub(crate) fn property_value(&mut self, arena: &RealmArena, id: NodeId, property: &PropertyId, pseudo: Option<&str>, now_ms: f64) -> Option<String> {
+        let style = self.computed_style(arena, id, pseudo, now_ms)?;
         match property.as_shorthand() {
             Ok(shorthand) => self.shorthand_value(&style, shorthand),
             Err(longhand) => Some(self.longhand_value(arena, id, &style, longhand)),
