@@ -721,7 +721,7 @@ fn resolve(lp: &style::values::computed::LengthPercentage, basis: f64) -> f64 {
 }
 
 // Does `node` generate no box of its own — `display: contents`?
-fn is_boxless(arena: &RealmArena, node: NodeId, style: &ComputedValues) -> bool {
+pub(crate) fn is_boxless(arena: &RealmArena, node: NodeId, style: &ComputedValues) -> bool {
     arena.get(node).is_some_and(|n| style.get_box().walk_display(n.rendering_tag()).is_contents())
 }
 // …or is it a non-replaced INLINE box: one the lines broke into fragments, or one laid out as a BLOCK for the block it
@@ -1323,10 +1323,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "clientBox", client_box_op, context_id);
     register(scope, ns, "frameViewport", frame_viewport_op, context_id);
     register(scope, ns, "usedInsets", used_insets_op, context_id);
-    register(scope, ns, "renderedLegend", rendered_legend_op, context_id);
     register(scope, ns, "clientRects", client_rects_op, context_id);
     register(scope, ns, "offsets", offsets_op, context_id);
-    register(scope, ns, "usedValue", used_value_op, context_id);
     register(scope, ns, "paintTransform", paint_transform_op, context_id);
     register(scope, ns, "paintQuad", paint_quad_op, context_id);
     register(scope, ns, "clipBoxes", clip_boxes_op, context_id);
@@ -1419,12 +1417,6 @@ pub(crate) fn edges(arena: &RealmArena, id: NodeId) -> Option<[f64; 12]> {
 fn used_insets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, used_insets);
 }
-// __dom.renderedLegend(nid) -> whether the element is its fieldset's rendered legend (`rendered_legend`).
-fn rendered_legend_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let legend = crate::dom::nid_arg(scope, &args, 0).is_some_and(|id| rendered_legend(crate::dom::realm(scope, cid), id));
-    rv.set(v8::Boolean::new(scope, legend).into());
-}
 // __dom.clientBox(nid, out) / frameViewport(nid, out) -> whether `nid` has one: its client box (`client_box`), and the
 // viewport a frame element gives the document inside it (`frame_viewport`) — written to the Float64Array `out`.
 fn client_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
@@ -1435,17 +1427,6 @@ fn frame_viewport_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 }
 
 
-// __dom.usedValue(nid, property) -> the px `getComputedStyle` reports of `property` as a used value (`used_value`), or
-// null where the computed value stands.
-fn used_value_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let property = args.get(1).to_rust_string_lossy(scope);
-    let used = crate::dom::nid_arg(scope, &args, 0).and_then(|id| used_value(crate::dom::realm(scope, cid), id, &property));
-    match used {
-        Some(px) => rv.set(v8::Number::new(scope, px).into()),
-        None => rv.set_null(),
-    }
-}
 // __dom.offsets(nid, out) -> whether `nid` has a box, and `[offsetParent nid, left, top, width, height]` written to `out`
 // (`offsets`).
 fn offsets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {

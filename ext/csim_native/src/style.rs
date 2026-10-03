@@ -1272,16 +1272,23 @@ impl StyleEngine {
     // both leave out while it is `currentcolor` (`<del>`'s is `line-through`), however it resolves: taken COMPUTED, it is
     // the initial the shortest serialization omits. (`text-emphasis` keeps its resolved one in both: `none rgb(0, 0, 0)`.)
     fn shorthand_value(&self, style: &ComputedValues, shorthand: ShorthandId) -> Option<String> {
-        let mut block = PropertyDeclarationBlock::new();
-        let mut parsed = SourcePropertyDeclaration::default();
-        for longhand in shorthand.longhands() {
-            let value = if longhand == LonghandId::TextDecorationColor {
+        self.serialize_shorthand(shorthand, |longhand| {
+            Some(if longhand == LonghandId::TextDecorationColor {
                 let mut computed = String::new();
                 style.computed_or_resolved_value(longhand, None, &mut computed).ok()?;
                 computed
             } else {
                 style.computed_value_to_string(PropertyDeclarationId::Longhand(longhand))
-            };
+            })
+        })
+    }
+    // …and a shorthand serialized from its longhands' values as `value_of` gives each: None where one has none, or
+    // they do not make one.
+    pub(crate) fn serialize_shorthand(&self, shorthand: ShorthandId, mut value_of: impl FnMut(LonghandId) -> Option<String>) -> Option<String> {
+        let mut block = PropertyDeclarationBlock::new();
+        let mut parsed = SourcePropertyDeclaration::default();
+        for longhand in shorthand.longhands() {
+            let value = value_of(longhand)?;
             parse_one_declaration_into(
                 &mut parsed,
                 PropertyId::NonCustom(longhand.into()),
@@ -1807,27 +1814,6 @@ impl StyleEngine {
         if style.get_inherited_box().visibility == style::computed_values::visibility::T::Visible { 1 } else { 2 }
     }
 
-    // `id`'s `transform` as the 4x4 its computed list composes to, about a reference box `width` x `height` (its border
-    // box, which a percentage resolves against), in CSS `matrix3d()` order — at the engine's own precision, where the
-    // value it serializes rounds every angle to six figures. None where it has no style; Some(None) for `none`.
-    pub(crate) fn transform_matrix(
-        &mut self,
-        arena: &RealmArena,
-        id: NodeId,
-        width: f32,
-        height: f32,
-        now_ms: f64,
-    ) -> Option<Option<[f64; 16]>> {
-        use style::values::computed::Length;
-        self.flush(arena, now_ms);
-        let style = primary_style(arena, id).or_else(|| self.undisplayed_style(arena, id))?;
-        let transform = &style.get_box().transform;
-        if transform.0.is_empty() {
-            return Some(None);
-        }
-        let reference = euclid::default::Rect::new(euclid::default::Point2D::origin(), euclid::default::Size2D::new(Length::new(width), Length::new(height)));
-        Some(transform.to_transform_3d_matrix_f64(Some(&reference)).ok().map(|(m, _)| m.to_array()))
-    }
 
     // Whether `id` SKIPS its contents (`skips_contents`), as the document is styled now — shown itself, and nothing under it.
     pub(crate) fn skips(&mut self, arena: &RealmArena, id: NodeId, now_ms: f64) -> bool {
@@ -1845,20 +1831,27 @@ impl StyleEngine {
         pseudo: Option<&str>,
         now_ms: f64,
     ) -> Option<String> {
+        let style = self.computed_style(arena, id, pseudo, now_ms)?;
+        let property = PropertyId::parse_enabled_for_all_content(name).ok()?;
+        match property.as_shorthand() {
+            Ok(shorthand) => self.shorthand_value(&style, shorthand),
+            Err(longhand) => Some(self.longhand_value(arena, id, &style, longhand)),
+        }
+    }
+    // The style `getComputedStyle` reads of `id` — or of its `pseudo`-element — brought up to date: one not rendered
+    // has the style it would have (`undisplayed_style`); None for an element not in the document.
+    pub(crate) fn computed_style(&mut self, arena: &RealmArena, id: NodeId, pseudo: Option<&str>, now_ms: f64) -> Option<Arc<ComputedValues>> {
         self.flush(arena, now_ms);
         let primary = primary_style(arena, id).or_else(|| self.undisplayed_style(arena, id))?;
-        let style = match pseudo {
-            None => primary,
-            Some(pseudo) => self.pseudo_style(arena, id, pseudo, &primary)?,
-        };
-        let style = &*style;
-        let property = PropertyId::parse_enabled_for_all_content(name).ok()?;
-        let longhand = match property.as_shorthand() {
-            Ok(shorthand) => return self.shorthand_value(style, shorthand),
-            Err(longhand) => longhand,
-        };
+        match pseudo {
+            None => Some(primary),
+            Some(pseudo) => self.pseudo_style(arena, id, pseudo, &primary),
+        }
+    }
+    // …and a longhand's computed value in it, serialized.
+    pub(crate) fn longhand_value(&self, arena: &RealmArena, id: NodeId, style: &ComputedValues, longhand: PropertyDeclarationId) -> String {
         let value = style.computed_value_to_string(longhand);
-        Some(match longhand {
+        match longhand {
             // CSSOM's resolved value of an automatic minimum size: the keyword on a flex or grid item, whose layout
             // gives it meaning, and zero on anything else.
             PropertyDeclarationId::Longhand(
@@ -1871,7 +1864,7 @@ impl StyleEngine {
                 }
             }
             _ => value,
-        })
+        }
     }
 }
 
