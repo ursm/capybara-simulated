@@ -1134,6 +1134,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setNaturalSize", set_natural_size, context_id);
     register(scope, ns, "linkPseudoBox", link_pseudo_box, context_id);
     register(scope, ns, "firstStrongDirection", first_strong_direction, context_id);
+    register(scope, ns, "directionality", directionality, context_id);
     register(scope, ns, "setContainerMargins", set_container_margins, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
     register(scope, ns, "setAssignedNodes", set_assigned_nodes, context_id);
@@ -1456,6 +1457,14 @@ fn set_natural_size(
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.natural_size = (w > 0.0 && h > 0.0).then_some((w, h));
     }
+}
+
+// __dom.directionality(nid) -> whether the element's directionality is rtl (`element_state::is_rtl`, what `:dir()`
+// matches).
+fn directionality(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(realm(scope, cid).is_rtl(id));
 }
 
 // __dom.firstStrongDirection(text) -> 'rtl' | 'ltr' | null: the direction of the text's first STRONG character, by its
