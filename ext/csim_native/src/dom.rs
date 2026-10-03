@@ -1214,6 +1214,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::canvas_path::install(scope, ns, context_id);
     crate::dom_matrix::install(scope, ns, context_id);
     crate::validity::install(scope, ns, context_id);
+    crate::input_value::install(scope, ns, context_id);
     crate::html_parse::install(scope, ns, context_id);
     crate::url_ops::install(scope, ns, context_id);
     crate::text_codec::install(scope, ns, context_id);
@@ -1319,7 +1320,7 @@ fn create_node(
 }
 
 // A string argument's UTF-16 code units, exactly (empty for a non-string).
-fn utf16_arg(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>) -> Vec<u16> {
+pub(crate) fn utf16_arg(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>) -> Vec<u16> {
     let Ok(s) = v8::Local::<v8::String>::try_from(val) else { return Vec::new() };
     let mut u = vec![0u16; s.length()];
     s.write_v2(scope, 0, &mut u, v8::WriteFlags::empty());
@@ -1704,7 +1705,7 @@ fn inspect_node(
 }
 
 // A JS string of these UTF-16 code units.
-fn utf16_value<'s>(scope: &mut v8::PinScope<'s, '_>, units: &[u16]) -> v8::Local<'s, v8::Value> {
+pub(crate) fn utf16_value<'s>(scope: &mut v8::PinScope<'s, '_>, units: &[u16]) -> v8::Local<'s, v8::Value> {
     match v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal) {
         Some(s) => s.into(),
         None => v8::undefined(scope).into(),

@@ -10,6 +10,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::input_value::{number_of, parse_float, step_scale};
 use web_atoms::local_name;
 use crate::dom::{
     NodeData, NodeId, NodeKind, RealmArena, STATE_CUSTOM_ERROR, STATE_DIRTY_BY_USER, STATE_FORM_ASSOCIATED,
@@ -37,8 +38,6 @@ const READONLY_TYPES: [&str; 12] = [
 // The `<input>` types `minlength` / `maxlength` apply to.
 const LENGTH_TYPES: [&str; 6] = ["text", "search", "url", "tel", "email", "password"];
 
-const MS_PER_DAY: f64 = 86_400_000.0;
-
 fn is_ascii_ws(c: char) -> bool {
     matches!(c, '\t' | '\n' | '\x0C' | '\r' | ' ')
 }
@@ -55,130 +54,6 @@ pub(crate) fn parse_non_negative(s: &str) -> Option<u64> {
         return None;
     }
     Some(digits.bytes().fold(0u64, |v, d| v.saturating_mul(10).saturating_add(u64::from(d - b'0'))))
-}
-
-// HTML "valid floating-point number" (and finite), as its number.
-pub(crate) fn parse_float(s: &str) -> Option<f64> {
-    crate::element_state::is_valid_floating_point(s).then(|| s.parse::<f64>().ok()).flatten()
-}
-
-// The number a temporal `type` gives `s` — ms since the epoch for a date / datetime-local / week, ms since midnight for
-// a time, months since 1970-01 for a month — or None when `s` is not a valid one (dom-nodes.js `temporalToNumber`).
-fn temporal_number(ty: &str, s: &str) -> Option<f64> {
-    let b = s.as_bytes();
-    let digits = |from: usize, to: usize| -> Option<i64> {
-        let part = s.get(from..to)?;
-        (!part.is_empty() && part.bytes().all(|c| c.is_ascii_digit())).then(|| part.parse().ok()).flatten()
-    };
-    // A year: four or more digits, then `-`.
-    let year_end = b.iter().position(|&c| c == b'-')?;
-    if year_end < 4 {
-        return None;
-    }
-    let year = digits(0, year_end)?;
-    if year < 1 {
-        return None;
-    }
-    let rest = &s[year_end + 1..];
-    match ty {
-        "month" => {
-            let m = (rest.len() == 2).then(|| digits(year_end + 1, s.len())).flatten()?;
-            (1..=12).contains(&m).then(|| ((year - 1970) * 12 + (m - 1)) as f64)
-        }
-        "week" => {
-            let w = (rest.len() == 3 && rest.starts_with('W')).then(|| digits(year_end + 2, s.len())).flatten()?;
-            if w < 1 || w > iso_weeks_in_year(year) {
-                return None;
-            }
-            let jan4 = days_from_civil(year, 1, 4);
-            let dow = (jan4 + 3).rem_euclid(7); // 0 = Monday (1970-01-01 was a Thursday)
-            Some((jan4 - dow + (w - 1) * 7) as f64 * MS_PER_DAY)
-        }
-        "date" => {
-            if rest.len() != 5 || rest.as_bytes()[2] != b'-' {
-                return None;
-            }
-            let (m, d) = (digits(year_end + 1, year_end + 3)?, digits(year_end + 4, s.len())?);
-            valid_day(year, m, d).then(|| days_from_civil(year, m, d) as f64 * MS_PER_DAY)
-        }
-        "datetime-local" => {
-            if rest.len() < 11 || rest.as_bytes()[2] != b'-' || !matches!(rest.as_bytes()[5], b'T' | b' ') {
-                return None;
-            }
-            let (m, d) = (digits(year_end + 1, year_end + 3)?, digits(year_end + 4, year_end + 6)?);
-            let time = time_of_day(&rest[6..])?;
-            valid_day(year, m, d).then(|| days_from_civil(year, m, d) as f64 * MS_PER_DAY + time)
-        }
-        _ => None,
-    }
-}
-// A time of day `HH:MM[:SS[.fff]]` (one to three fraction digits) in ms, or None.
-fn time_of_day(s: &str) -> Option<f64> {
-    let two = |p: &str| (p.len() == 2 && p.bytes().all(|c| c.is_ascii_digit())).then(|| p.parse::<u32>().ok()).flatten();
-    let (hm, sec) = match s.len() {
-        5 => (s, None),
-        n if n >= 8 && s.as_bytes()[5] == b':' => (&s[..5], Some(&s[6..])),
-        _ => return None,
-    };
-    if hm.as_bytes()[2] != b':' {
-        return None;
-    }
-    let (h, mi) = (two(&hm[..2])?, two(&hm[3..])?);
-    let (se, ms) = match sec {
-        None => (0, 0),
-        Some(sec) => {
-            let se = two(sec.get(..2)?)?;
-            let ms = match sec.get(2..) {
-                Some("") => 0,
-                Some(f) if f.starts_with('.') && (2..=4).contains(&f.len()) && f[1..].bytes().all(|c| c.is_ascii_digit()) => {
-                    format!("{:0<3}", &f[1..]).parse::<u32>().ok()?
-                }
-                _ => return None,
-            };
-            (se, ms)
-        }
-    };
-    (h <= 23 && mi <= 59 && se <= 59).then(|| f64::from(((h * 60 + mi) * 60 + se) * 1000 + ms))
-}
-fn is_leap(y: i64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
-}
-fn valid_day(y: i64, m: i64, d: i64) -> bool {
-    let days = [31, if is_leap(y) { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    (1..=12).contains(&m) && d >= 1 && d <= days[(m - 1) as usize]
-}
-fn iso_weeks_in_year(y: i64) -> i64 {
-    let jan1 = (days_from_civil(y, 1, 1) + 4).rem_euclid(7); // 0 = Sunday
-    if jan1 == 4 || (is_leap(y) && jan1 == 3) { 53 } else { 52 }
-}
-// Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's days_from_civil).
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let mp = (m + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
-}
-
-// A step range's scale and default step, and whether `ty` has one.
-fn step_scale(ty: &str) -> Option<(f64, f64)> {
-    Some(match ty {
-        "number" | "range" => (1.0, 1.0),
-        "date" => (MS_PER_DAY, 1.0),
-        "datetime-local" | "time" => (1000.0, 60.0),
-        "month" => (1.0, 1.0),
-        "week" => (7.0 * MS_PER_DAY, 1.0),
-        _ => return None,
-    })
-}
-fn number_of(ty: &str, s: &str) -> Option<f64> {
-    match ty {
-        "number" | "range" => parse_float(s),
-        "time" => time_of_day(s),
-        _ => temporal_number(ty, s),
-    }
 }
 
 // An exact decimal (coefficient, digits after the point), for a step check a double cannot resolve.
@@ -257,23 +132,10 @@ impl RealmArena {
         }
         n.plain_attr("value").unwrap_or("").to_string()
     }
-    // An `<input>`'s value, sanitized for its type as the `value` getter returns it (dom-nodes.js
-    // `sanitizeInputValue`) — for the types a constraint reads the value of.
+    // An `<input>`'s value, sanitized for its type as the `value` getter returns it (`input_value::sanitize`) — for the
+    // types a constraint reads the value of (a colour is none of them).
     fn sanitized_value(&self, n: &NodeData, ty: &str) -> String {
-        let raw = self.raw_value(n);
-        let strip = |s: &str| s.chars().filter(|&c| c != '\r' && c != '\n').collect::<String>();
-        match ty {
-            "text" | "search" | "tel" | "password" => strip(&raw),
-            "url" => trim_ascii_ws(&strip(&raw)).to_string(),
-            "email" if n.plain_attr("multiple").is_some() => raw.split(',').map(trim_ascii_ws).collect::<Vec<_>>().join(","),
-            "email" => trim_ascii_ws(&strip(&raw)).to_string(),
-            "number" => if parse_float(&raw).is_some() { raw } else { String::new() },
-            "date" | "month" | "week" | "datetime-local" => {
-                if temporal_number(ty, &raw).is_some() { raw } else { String::new() }
-            }
-            "time" => if time_of_day(&raw).is_some() { raw } else { String::new() },
-            _ => raw,
-        }
+        crate::input_value::sanitize(ty, &self.raw_value(n), &crate::input_value::Attrs::of(n), &|v| v.to_string())
     }
 
     // `willValidate`: a submittable control of a validating kind — an `<input>` but a hidden / reset / button one, a
@@ -417,7 +279,7 @@ impl RealmArena {
         let step_value = step * scale;
         // The step base: `min`, else the `value` attribute, else the type's default.
         let base = min.or_else(|| n.plain_attr("value").and_then(|x| number_of(ty, x))).unwrap_or(if ty == "week" {
-            temporal_number("week", "1970-W01").unwrap_or(0.0)
+            number_of("week", "1970-W01").unwrap_or(0.0)
         } else {
             0.0
         });
