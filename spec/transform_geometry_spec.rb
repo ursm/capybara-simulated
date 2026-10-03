@@ -126,4 +126,11 @@ RSpec.describe 'transform geometry' do
     expect(s.evaluate_script("(document.elementFromPoint(100, 25) || {}).id")).not_to eq('a')
     expect(s.evaluate_script("(document.elementFromPoint(50, 50) || {}).id")).not_to eq('a')
   end
+  # …but the OFFSET box is the layout's, which no transform moves: a `rotate(45deg)` 100×50 box is still 100 wide and
+  # 50 tall, at its flow position (Chrome: 0, 0, 100, 50 — where its client rect is 106.07 square).
+  it 'leaves the offset box where layout put it' do
+    s = page_with('<div class=b id=r style="top:0;transform:rotate(45deg)"></div>')
+    expect(s.evaluate_script("(e => [e.offsetLeft, e.offsetTop, e.offsetWidth, e.offsetHeight])(document.getElementById('r'))"))
+      .to eq([0, 0, 100, 50])
+  end
 end

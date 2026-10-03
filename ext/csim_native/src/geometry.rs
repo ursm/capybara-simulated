@@ -407,6 +407,126 @@ pub(crate) fn placed_box(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
     Some([x0, y0, x1 - x0, y1 - y0])
 }
 
+// ── offsets ────────────────────────────────────────────────────────────────────────────────────────────────────
+// CSSOM View's `offsetParent`, `offsetLeft` / `offsetTop` and `offsetWidth` / `offsetHeight` of `id`, as `[offsetParent
+// nid (-1 for none), left, top, width, height]` — None for an element with no box (a `display: contents` one, one not
+// rendered), whose offsets are all 0. Layout positions, in document space: no scroll moves them and no transform (Chrome:
+// a `rotate(45deg)` 100x50 box is 100 wide, its client rect 106).
+pub(crate) fn offsets(arena: &RealmArena, id: NodeId) -> Option<[f64; 5]> {
+    let [x, y] = offset_origin(arena, id)?;
+    let [_, _, w, h] = placed_box(arena, id)?;
+    let round = crate::walk::js_round;
+    // (…the BODY's own position is 0, whatever its margin puts it at: CSSOM View answers zero for "the HTML body element")
+    if is_body(arena, id) {
+        return Some([-1.0, 0.0, 0.0, round(w), round(h)]);
+    }
+    let parent = offset_parent(arena, id);
+    let [px, py] = match parent {
+        // (…from the offsetParent's PADDING edge — but a static `<body>`'s offsets are the document's, its margin NOT
+        // subtracted: a body-level element is at 8, not 0)
+        Some(p) if !(is_body(arena, p) && !positioned(arena, p)) => {
+            let [bx, by] = offset_origin(arena, p)?;
+            // (…and a NON-ATOMIC inline offsetParent's BORDER edge: a positioned `<span style="border: 5px">` puts a child
+            // at its own border edge 5 from it, where an `inline-block` in the same shape says 0)
+            let inline = box_style(arena, p).is_some_and(|s| non_replaced_inline(arena, p, &s));
+            let e = if inline { [0.0; 12] } else { edges(arena, p).map_or([0.0; 12], |e| e.e) };
+            [bx + e[7], by + e[4]]
+        }
+        _ => [0.0, 0.0],
+    };
+    Some([parent.map_or(-1.0, NodeId::to_f64), round(x - px), round(y - py), round(w), round(h)])
+}
+// Where `id`'s offsets are measured from, in document space: its first CSS box's corner — a broken inline's FIRST piece,
+// not the union, whose left edge is the leftmost line's (Chrome: a link 36px into a line that wraps is at 36, its
+// bounding rect at 0) — moved by how far it has stuck if it is sticky (`rect.top + scrollY` stays its `offsetTop`).
+fn offset_origin(arena: &RealmArena, id: NodeId) -> Option<[f64; 2]> {
+    let style = box_style(arena, id)?;
+    if is_boxless(arena, id, &style) {
+        return None;
+    }
+    let node = arena.get(id)?;
+    let [x, y] = match laid_frags(arena, node).filter(|f| f.len() > 1) {
+        Some(frags) => [frags[0][0], frags[0][1]],
+        None => {
+            let [x, y, _, _] = placed_box(arena, id)?;
+            [x, y]
+        }
+    };
+    let [dx, dy] = sticky_delta(arena, id).unwrap_or([0.0; 2]);
+    Some([x + dx, y + dy])
+}
+// CSSOM View's `offsetParent`: none for the root, the body, and a FIXED box no ancestor is the containing block of
+// (Chrome: null, and `left: 40px` as its offsetLeft whatever it sits in); else the nearest FLAT-TREE ancestor that is
+// one of its shadow-including ancestors and the containing block of absolutely positioned boxes — positioned, or transformed,
+// filtered, contained (a `translateX(10px)` div is an absolute child's, 4 from it, where the body is 14) — or the body,
+// or, for a static `id`, an HTML `<td>` / `<th>` / `<table>` with a box (by tag: a `display: block` `<td>` still counts,
+// a `display: table-cell` `<div>` does not, a box-less one is passed). A fixed box's is the one ancestor that contains
+// it, whatever positioned ones lie between. A positioned shadow HOST is one, its shadow content its descendants; a box
+// in a shadow tree its slotted content is not in is passed — hidden from it whether the tree is open or closed, as
+// `offsetParent-across-shadow-boundaries.html` holds both engines to (the spec's text says closed only) — and a FIXED
+// one there that nothing contains ends the walk with none.
+fn offset_parent(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
+    use style::computed_values::position::T as Position;
+    let node = arena.get(id)?;
+    if is_body(arena, id) || node.parent.and_then(|p| arena.get(p)).is_some_and(|p| p.kind == crate::dom::NodeKind::Document) {
+        return None;
+    }
+    let style = box_style(arena, id)?;
+    let contains = |p: NodeId| {
+        let (Some(pn), Some(ps)) = (arena.get(p), box_style(arena, p)) else { return false };
+        !is_boxless(arena, p, &ps) && crate::walk::contains_out_of_flow(&ps, arena, p, pn)
+    };
+    // (…whether some flat-tree ancestor of `from` is the containing block of fixed boxes)
+    let contained = |from: NodeId| std::iter::successors(flat_parent(arena, from), |&q| flat_parent(arena, q)).any(contains);
+    let fixed = style.get_box().clone_position() == Position::Fixed;
+    if fixed && !contained(id) {
+        return None;
+    }
+    let static_id = style.get_box().clone_position() == Position::Static;
+    let mut at = flat_parent(arena, id);
+    while let Some(p) = at {
+        let pn = arena.get(p)?;
+        if pn.kind != crate::dom::NodeKind::Element {
+            break;
+        }
+        // (…one in a shadow tree `id` is not in is no offset parent of its: slotted content is not told of a positioned
+        // box inside the shadow tree it is slotted through, open or closed — `offsetParent-across-shadow-boundaries`)
+        let hidden = !shadow_including_ancestor(arena, p, id);
+        if hidden && box_style(arena, p).is_some_and(|s| s.get_box().clone_position() == Position::Fixed) && !contained(p) {
+            return None;
+        }
+        // (…a fixed box's only the one that contains it: a positioned ancestor or the body inside that is passed)
+        let cell = static_id && ["td", "th", "table"].iter().any(|t| pn.is_html_named(t)) && offset_origin(arena, p).is_some();
+        let qualifies = if fixed { contains(p) } else { is_body(arena, p) || positioned(arena, p) || contains(p) || cell };
+        if !hidden && qualifies {
+            return Some(p);
+        }
+        at = flat_parent(arena, p);
+    }
+    None
+}
+// Is `ancestor` one of `node`'s shadow-including inclusive ancestors?
+fn shadow_including_ancestor(arena: &RealmArena, ancestor: NodeId, node: NodeId) -> bool {
+    let mut at = Some(node);
+    while let Some(n) = at {
+        if n == ancestor {
+            return true;
+        }
+        at = arena.get(n).and_then(|d| d.parent.or(d.host));
+    }
+    false
+}
+// Is `id` its document's BODY: the root `<html>`'s `<body>` child?
+fn is_body(arena: &RealmArena, id: NodeId) -> bool {
+    let parent = |n: NodeId| arena.get(n).and_then(|n| n.parent).and_then(|p| arena.get(p).map(|d| (p, d)));
+    arena.get(id).is_some_and(|n| n.is_html_named("body"))
+        && parent(id).is_some_and(|(p, html)| html.is_html_named("html") && parent(p).is_some_and(|(_, d)| d.kind == crate::dom::NodeKind::Document))
+}
+// Is `id` positioned — a box whose `position` is anything but `static`?
+fn positioned(arena: &RealmArena, id: NodeId) -> bool {
+    box_style(arena, id).is_some_and(|s| s.get_box().clone_position() != style::computed_values::position::T::Static && !is_boxless(arena, id, &s))
+}
+
 // …and where the page's scrolling has carried it to (`laidOutBox`): in VIEWPORT coordinates, untransformed.
 pub(crate) fn laid_out_box(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
     let [x, y, w, h] = placed_box(arena, id)?;
@@ -448,7 +568,7 @@ fn flatten(m: &M4) -> M4 {
     out
 }
 
-// The map from `id`'s box to the viewport (`transformChain`), None where nothing on the way transforms it: its own step,
+// The map from `id`'s box to the viewport, None where nothing on the way transforms it: its own step,
 // then each ancestor's after crossing into it — and the chain an ancestor maps ITS box by, taken whole, from the first
 // crossing that FLATTENS (or that carries no map at all): `flatten(A · B)` is `flatten(A) · B` only where B is flat,
 // so across a `preserve-3d` boundary the steps are composed one by one.
@@ -1055,7 +1175,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "stickyOffset", sticky_offset, context_id);
     register(scope, ns, "laidOutBox", laid_out_box_op, context_id);
     register(scope, ns, "renderedBox", rendered_box_op, context_id);
-    register(scope, ns, "transformChain", transform_chain_op, context_id);
     register(scope, ns, "scrollSize", scroll_size_op, context_id);
     register(scope, ns, "scrollRange", scroll_range_op, context_id);
     register(scope, ns, "boxInfo", box_info_op, context_id);
@@ -1063,6 +1182,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "renderedLegend", rendered_legend_op, context_id);
     register(scope, ns, "boxFragments", box_fragments_op, context_id);
     register(scope, ns, "clientRects", client_rects_op, context_id);
+    register(scope, ns, "offsets", offsets_op, context_id);
     register(scope, ns, "paintTransform", paint_transform_op, context_id);
     register(scope, ns, "paintQuad", paint_quad_op, context_id);
     register(scope, ns, "scrollOffset", scroll_offset, context_id);
@@ -1082,10 +1202,9 @@ fn scroll_shift_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     crate::dom::write_f64s(args.get(1), &shift);
 }
 
-// __dom.laidOutBox(nid, out) / renderedBox(nid, out) / transformChain(nid, out) / scrollSize(nid, out) -> whether `nid`
-// has one: its box where the page's scrolling carried it (`laid_out_box`), that box as the page measures it
-// (`rendered_box`), the 4x4 that maps it to the viewport (`transform_chain`), and its scrollable overflow region's size
-// (`scroll_size`) — written to the Float64Array `out`.
+// __dom.laidOutBox(nid, out) / renderedBox(nid, out) / scrollSize(nid, out) -> whether `nid` has one: its box where the
+// page's scrolling carried it (`laid_out_box`), that box as the page measures it (`rendered_box`), and its scrollable
+// overflow region's size (`scroll_size`) — written to the Float64Array `out`.
 fn laid_out_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, laid_out_box);
 }
@@ -1099,9 +1218,6 @@ fn scroll_size_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // max x, min y, max y]` (`scroll_range`): what a scroll offset written to it is clamped to.
 fn scroll_range_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, |arena, id| scroll_range(arena, id).map(|[[x0, x1], [y0, y1]]| [x0, x1, y0, y1]));
-}
-fn transform_chain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    answer_into(scope, &args, rv, transform_chain);
 }
 fn answer_into<const N: usize>(
     scope: &mut v8::PinScope<'_, '_>,
@@ -1243,6 +1359,11 @@ fn box_fragments_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     rv.set(crate::dom::f64_array(scope, &flat).into());
 }
 
+// __dom.offsets(nid, out) -> whether `nid` has a box, and `[offsetParent nid, left, top, width, height]` written to `out`
+// (`offsets`).
+fn offsets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, offsets);
+}
 // __dom.clientRects(nid) -> Float64Array: `nid`'s client rects, `[x, y, w, h]` each (`client_rects`), none for no box.
 fn client_rects_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
