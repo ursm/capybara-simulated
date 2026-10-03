@@ -119,9 +119,68 @@ pub(crate) fn serialize(mime: &MimeType) -> String {
     out
 }
 
+// Fetch's "extract a MIME type" from a `Content-Type` header's combined value: the last of its comma-separated values
+// that parses (and is not `*/*`), a charset an earlier value of the same essence gave it carried on where it names none.
+// None where no value parses.
+pub(crate) fn extract(header: &str) -> Option<MimeType> {
+    let mut charset: Option<String> = None;
+    let mut essence: Option<String> = None;
+    let mut mime: Option<MimeType> = None;
+    for value in split_values(header) {
+        let Some(mut parsed) = parse(&value).filter(|m| m.essence != "*/*") else { continue };
+        let own = parsed.parameters.iter().find(|(n, _)| n == "charset").map(|(_, v)| v.clone());
+        if essence.as_deref() != Some(parsed.essence.as_str()) {
+            charset = own;
+            essence = Some(parsed.essence.clone());
+        } else if let (None, Some(carried)) = (own, &charset) {
+            parsed.parameters.push(("charset".to_owned(), carried.clone()));
+        }
+        mime = Some(parsed);
+    }
+    mime
+}
+// A header's value split at its commas, as Fetch's "getting, decoding, and splitting" does: a comma inside a quoted
+// string is part of it, and each value is trimmed of tabs and spaces.
+fn split_values(value: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                current.push('"');
+                while let Some(q) = chars.next() {
+                    current.push(q);
+                    if q == '\\' {
+                        if let Some(escaped) = chars.next() {
+                            current.push(escaped);
+                        }
+                    } else if q == '"' {
+                        break;
+                    }
+                }
+            }
+            ',' => out.push(std::mem::take(&mut current)),
+            c => current.push(c),
+        }
+    }
+    out.push(current);
+    out.into_iter().map(|v| v.trim_matches([' ', '\t']).to_owned()).collect()
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "mimeParse", mime_parse, context_id);
     crate::dom::register(scope, ns, "mimeSerialize", mime_serialize, context_id);
+    crate::dom::register(scope, ns, "mimeExtract", mime_extract, context_id);
+}
+
+// __dom.mimeExtract(headerValue) -> the MIME type a `Content-Type` value gives (`extract`), serialized — or null.
+fn mime_extract(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let header = args.get(0).to_rust_string_lossy(scope);
+    match extract(&header).and_then(|m| v8::String::new(scope, &serialize(&m))) {
+        Some(s) => rv.set(s.into()),
+        None => rv.set_null(),
+    }
 }
 
 // __dom.mimeParse(text) -> `[essence, name, value, …]` (`parse`), or null where it is no MIME type.
@@ -169,5 +228,16 @@ mod tests {
         assert_eq!(round_trip("text/"), None);
         assert_eq!(round_trip("/html"), None);
         assert_eq!(round_trip("te xt/html"), None);
+    }
+
+    #[test]
+    fn extracts_from_a_header() {
+        let extracted = |v: &str| extract(v).map(|m| serialize(&m));
+        assert_eq!(extracted("TEXT/HTML;CHARSET=GBK"), Some("text/html;charset=GBK".to_owned()));
+        assert_eq!(extracted("text/html;charset=gbk;charset=windows-1255"), Some("text/html;charset=gbk".to_owned()));
+        assert_eq!(extracted("text/plain;charset=gbk, text/plain"), Some("text/plain;charset=gbk".to_owned()));
+        assert_eq!(extracted("text/plain;charset=gbk, text/html"), Some("text/html".to_owned()));
+        assert_eq!(extracted("text/html;charset=\"a,b\", */*"), Some("text/html;charset=\"a,b\"".to_owned()));
+        assert_eq!(extracted("bogus, */*"), None);
     }
 }
