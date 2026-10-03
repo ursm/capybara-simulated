@@ -347,6 +347,46 @@ pub(crate) fn store_layout(arena: &mut RealmArena, laid: &crate::layout::Laid, i
             node.anon_boxes = Some(boxes.into_boxed_slice());
         }
     }
+    reclamp_scrolls(arena);
+}
+
+// Every scroll offset the page holds, clamped to the range its box has now — a scroller whose content shrank shows its
+// end, as a browser re-clamps (silently: Chrome fires no `scroll` for it) — and one with no box kept as it is, for the
+// box it gets back (Chrome: a scroller hidden with `display: none` and shown again is where it was).
+fn reclamp_scrolls(arena: &mut RealmArena) {
+    let mut moved = false;
+    for id in arena.scrolled_nodes.clone() {
+        let Some(range) = scroll_range(arena, id) else { continue };
+        let Some(node) = arena.get_mut_quietly(id) else { continue };
+        for (axis, [min, max]) in range.into_iter().enumerate() {
+            let v = node.scroll[axis].clamp(min, max);
+            moved |= v != node.scroll[axis];
+            node.scroll[axis] = v;
+        }
+    }
+    let held = arena.scrolled_nodes.iter().copied().filter(|&id| arena.get(id).is_some_and(|n| n.scroll != [0.0; 2]));
+    arena.scrolled_nodes = held.collect();
+    if moved {
+        arena.scrolled();
+    }
+}
+// The range `id`'s scroll offsets may take in each axis, `[min, max]`: from 0 to how far its region reaches past its
+// scrollport — the viewport for the root, else its padding box — or to 0 from minus that where it scrolls from its far
+// edge. None for a node with no box.
+fn scroll_range(arena: &RealmArena, id: NodeId) -> Option<[[f64; 2]; 2]> {
+    let [w, h, from_left, from_top] = scroll_size(arena, id)?;
+    let [port_w, port_h] = if Some(id) == arena.layout_root {
+        arena.viewport
+    } else {
+        let b = laid(arena, arena.get(id)?)?;
+        let e = b.edges.unwrap_or([0.0; 12]);
+        [b.w - e[5] - e[7], b.h - e[4] - e[6]]
+    };
+    let span = |size: f64, port: f64, from_start: f64| {
+        let reach = (size - port).max(0.0);
+        if from_start == 1.0 { [0.0, reach] } else { [-reach, 0.0] }
+    };
+    Some([span(w, port_w, from_left), span(h, port_h, from_top)])
 }
 
 // The box the last layout placed `id` in, `[x, y, w, h]` in document coordinates: its record's border box, or the union
@@ -1128,12 +1168,19 @@ fn sticky_offset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     answer_into(scope, &args, rv, sticky_delta);
 }
 
-// __dom.scrollOffset(nid, axis) -> the scroll offset `nid` keeps in `axis` (0 x, 1 y).
+// __dom.scrollOffset(nid, axis, shown) -> the scroll offset `nid` keeps in `axis` (0 x, 1 y) — or, with `shown`, the
+// one it shows: 0 while the last layout gave it no box (CSSOM View: `scrollTop` of an element with no associated box
+// is zero — Chrome reads 0 under `display: none` and the kept offset again once it is shown).
 fn scroll_offset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let axis = (args.get(1).int32_value(scope).unwrap_or(0) as usize).min(1);
+    let shown = args.get(2).is_true();
     let offset = crate::dom::nid_arg(scope, &args, 0)
-        .and_then(|id| crate::dom::realm(scope, cid).get(id).map(|n| n.scroll[axis]))
+        .and_then(|id| {
+            let arena = crate::dom::realm(scope, cid);
+            let node = arena.get(id)?;
+            (!shown || Some(id) == arena.layout_root || laid(arena, node).is_some()).then_some(node.scroll[axis])
+        })
         .unwrap_or(0.0);
     rv.set(v8::Number::new(scope, offset).into());
 }
@@ -1146,12 +1193,14 @@ fn set_scroll_offset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     // (…quietly: a scroll offset is no input to the layout — only to the geometry's)
     let arena = crate::dom::realm(scope, cid);
     arena.scrolled();
-    if let Some(node) = arena.get_mut_quietly(id) {
-        for (axis, v) in to.into_iter().enumerate() {
-            if let Some(v) = v {
-                node.scroll[axis] = v;
-            }
+    let Some(node) = arena.get_mut_quietly(id) else { return };
+    for (axis, v) in to.into_iter().enumerate() {
+        if let Some(v) = v {
+            node.scroll[axis] = v;
         }
+    }
+    if node.scroll != [0.0; 2] && !arena.scrolled_nodes.contains(&id) {
+        arena.scrolled_nodes.push(id);
     }
 }
 

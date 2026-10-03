@@ -407,4 +407,30 @@ RSpec.describe 'the scrollable overflow region' do
     JS
     expect(got).to eq([[100, 80, 40], [123, 73], [50, 0], [100, 80, 40]])
   end
+  # A layout re-clamps every offset to the range its box has now, as a browser's does: a scroller whose content shrank
+  # reads at its new end at once, a textarea whose value got shorter at its top. A box that is only HIDDEN reads 0, as
+  # anything with no box does, and keeps its offset for when it is shown again; one taken out of the tree loses it.
+  # (Chrome: 50, 0, 0, 300, 0.)
+  it 'clamps the offsets again to what a layout leaves' do
+    html = %(<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0">
+             <div id="s" style="overflow:auto;width:100px;height:100px"><div id="c" style="height:500px"></div></div>
+             <textarea id="t" style="font:16px Arial;line-height:20px;height:40px;padding:0;border:0;overflow:hidden">a\nb\nc\nd\ne</textarea>
+             <div id="h" style="overflow:auto;width:100px;height:100px"><div style="height:500px"></div></div>
+             <div id="r" style="overflow:auto;width:100px;height:100px"><div style="height:500px"></div></div>
+             </body></html>)
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] })
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const s = document.getElementById('s'), t = document.getElementById('t'), h = document.getElementById('h'), r = document.getElementById('r');
+        s.scrollTop = 300; t.scrollTop = 60; h.scrollTop = 300; r.scrollTop = 300;
+        document.getElementById('c').style.height = '150px';
+        t.value = 'a';
+        h.style.display = 'none'; const hidden = h.scrollTop; h.style.display = '';
+        r.remove(); document.body.appendChild(r);
+        return [s.scrollTop, t.scrollTop, hidden, h.scrollTop, r.scrollTop];
+      })()
+    JS
+    expect(got).to eq([50, 0, 0, 300, 0])
+  end
 end

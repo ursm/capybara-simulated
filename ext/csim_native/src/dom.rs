@@ -483,6 +483,9 @@ pub(crate) struct RealmArena {
     pub(crate) geometry_epoch: std::cell::Cell<u64>,
     pub(crate) boxes_epoch: std::cell::Cell<u64>,
     pub(crate) geometry_memo: std::cell::RefCell<crate::geometry::Memo>,
+    // The nodes holding a scroll offset (`NodeData::scroll`), which every layout clamps to the range its box has then
+    // (`geometry::reclamp_scrolls`) and a removal from the tree drops (`detach`).
+    pub(crate) scrolled_nodes: Vec<NodeId>,
 }
 pub(crate) const RESTYLED_CAP: usize = 4096;
 
@@ -799,6 +802,29 @@ impl RealmArena {
         if let Some(c) = self.get_mut(child) {
             c.parent = None;
         }
+        // (…and the scroll offsets its subtree held go with its boxes: one put back in the tree starts at 0, Chrome's
+        // answer for a scroller removed and inserted again — where one only `display: none` keeps its offset)
+        if !self.scrolled_nodes.is_empty() {
+            let (gone, kept): (Vec<NodeId>, Vec<NodeId>) =
+                std::mem::take(&mut self.scrolled_nodes).into_iter().partition(|&n| self.under(n, child));
+            self.scrolled_nodes = kept;
+            for n in gone {
+                if let Some(node) = self.get_mut_quietly(n) {
+                    node.scroll = [0.0; 2];
+                }
+            }
+        }
+    }
+    // Is `node` `ancestor` or in its subtree, shadow trees included?
+    fn under(&self, node: NodeId, ancestor: NodeId) -> bool {
+        let mut at = Some(node);
+        while let Some(n) = at {
+            if n == ancestor {
+                return true;
+            }
+            at = self.get(n).and_then(|d| d.parent.or(d.host));
+        }
+        false
     }
 
     // Move `child` under `parent`, before `before` when that is one of its children, else last. Refused when it would
