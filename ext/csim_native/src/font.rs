@@ -29,6 +29,14 @@ pub(crate) struct FontMetrics {
     // The `size-adjust` its advances are scaled by (`register_scaled`), which a painter draws its glyphs at too — 1 for
     // a face as its file has it.
     scale: f64,
+    // Its `hhea` ascent, descent and line gap in ems — None where it has no positive ascent — and its x-height (OS/2's
+    // `sxHeight`, 0 where the table is older than version 2): what a line and an `ex` are laid out by. Scaled with the
+    // advances.
+    vertical: Option<VerticalMetrics>,
+    x_height: f64,
+    // Whether it maps any ASCII letter: a face with none (a colour emoji font maps the digits, `#` and `*` for its
+    // keycaps, and no letter) sets no text, which falls back to the next family.
+    letters: bool,
 }
 
 // One face of a `unicode-range` split: its registered handle, the ranges it covers (None: every code point), and its
@@ -126,7 +134,35 @@ impl FontMetrics {
         if count == 0 {
             return None;
         }
-        Some(FontMetrics { ascii, avg: total / count as f64, split: None, scale: 1.0 })
+        use skrifa::raw::TableProvider;
+        let vertical = font.hhea().ok().and_then(|hhea| {
+            let asc = f64::from(hhea.ascender().to_i16());
+            (asc > 0.0).then(|| VerticalMetrics {
+                asc: asc / upem,
+                desc: -f64::from(hhea.descender().to_i16()) / upem,
+                gap: f64::from(hhea.line_gap().to_i16()) / upem,
+            })
+        });
+        let x_height = font.os2().ok().filter(|os2| os2.version() >= 2).and_then(|os2| os2.sx_height()).map_or(0.0, |x| f64::from(x) / upem);
+        let letters = (b'A'..=b'Z').chain(b'a'..=b'z').any(|c| ascii[c as usize].is_some());
+        Some(FontMetrics { ascii, avg: total / count as f64, split: None, scale: 1.0, vertical, x_height, letters })
+    }
+
+    // The metrics a face's lines, its spaces and an `ex` of it are laid out by, per em: its vertical metrics — an
+    // `@font-face`'s `ascent-override` / `descent-override` / `line-gap-override` (`overrides`, of the unadjusted face)
+    // in its file's place, scaled by its `size-adjust` as the file's are — the advance of a space (its mean where it has
+    // none) and its x-height. None where it sets no text (`letters`) or has no ascent and descent to lay a line by.
+    pub(crate) fn face(&self, [asc, desc, gap]: [Option<f64>; 3]) -> Option<(VerticalMetrics, f64, f64)> {
+        if !self.letters {
+            return None;
+        }
+        let file = self.vertical;
+        let vertical = VerticalMetrics {
+            asc: asc.map(|a| a * self.scale).or(file.map(|v| v.asc))?,
+            desc: desc.map(|d| d * self.scale).or(file.map(|v| v.desc))?,
+            gap: gap.map(|g| g * self.scale).or(file.map(|v| v.gap)).unwrap_or(0.0),
+        };
+        Some((vertical, self.ascii[b' ' as usize].unwrap_or(self.avg), self.x_height))
     }
 
     // Width (px) of a UTF-16 run at `size` px with letter/word spacing.
@@ -354,6 +390,9 @@ pub(crate) fn register_scaled(handle: i32, scale: f64) -> i32 {
             avg: fm.avg * scale,
             split: None,
             scale: fm.scale * scale,
+            vertical: fm.vertical.map(|v| VerticalMetrics { asc: v.asc * scale, desc: v.desc * scale, gap: v.gap * scale }),
+            x_height: fm.x_height * scale,
+            letters: fm.letters,
         })
     });
     let h = match scaled {
@@ -381,7 +420,15 @@ pub(crate) fn register_stack(primary: i32, members: Vec<StackMember>) -> i32 {
         return h;
     }
     let stacked = FONTS.with(|f| {
-        f.borrow().get(primary as usize).and_then(Option::as_ref).map(|fm| FontMetrics { ascii: fm.ascii, avg: fm.avg, split: Some(members.clone()), scale: fm.scale })
+        f.borrow().get(primary as usize).and_then(Option::as_ref).map(|fm| FontMetrics {
+            ascii: fm.ascii,
+            avg: fm.avg,
+            split: Some(members.clone()),
+            scale: fm.scale,
+            vertical: fm.vertical,
+            x_height: fm.x_height,
+            letters: fm.letters,
+        })
     });
     let h = match stacked {
         Some(metrics) => FONTS.with(|f| {

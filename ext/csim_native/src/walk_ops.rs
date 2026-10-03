@@ -8,6 +8,7 @@ use crate::walk_reuse;
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "layoutBuild", layout_build, context_id);
     register(scope, ns, "walkFace", walk_face, context_id);
+    register(scope, ns, "fontMeasures", font_measures, context_id);
     register(scope, ns, "styleFaces", style_faces, context_id);
 }
 
@@ -184,8 +185,9 @@ fn style_faces(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
 }
 
-// __dom.walkFace(family, bucket, handle, asc, desc, gap, space, xh): the face the JS side resolved for a family and a bucket
-// — a handle below 0 (or no metrics) where it resolves to none the layout can measure with.
+// __dom.walkFace(family, bucket, handle, ascOverride, descOverride, gapOverride): the face the JS side resolved for a
+// family and a bucket, laid out by the metrics its file has (`FontMetrics::face`) or the `@font-face` overrides of
+// them given (NaN for none) — a handle below 0 where it resolves to none the layout can measure with.
 fn walk_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let family = args.get(0).to_rust_string_lossy(scope);
@@ -195,18 +197,14 @@ fn walk_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         "bold:italic" => "bold:italic",
         _ => "",
     };
-    let num = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).number_value(scope).unwrap_or(f64::NAN);
-    let handle = num(scope, 2);
-    let xh = num(scope, 7);
-    let face = Face {
-        handle: if handle.is_finite() { handle as i32 } else { -1 },
-        asc: num(scope, 3),
-        desc: num(scope, 4),
-        gap: num(scope, 5),
-        space: num(scope, 6),
-        xh: if xh > 0.0 { xh } else { 0.5 },
+    let handle = args.get(2).int32_value(scope).unwrap_or(-1);
+    let overrides = [3, 4, 5].map(|i| args.get(i).number_value(scope).filter(|v| v.is_finite()));
+    let metrics = crate::font::with_font(handle, |fm| fm.face(overrides)).flatten();
+    let face = match metrics {
+        Some((v, space, xh)) => Face { handle, asc: v.asc, desc: v.desc, gap: v.gap, space, xh: if xh > 0.0 { xh } else { 0.5 } },
+        None => Face { handle: -1, asc: f64::NAN, desc: f64::NAN, gap: f64::NAN, space: f64::NAN, xh: 0.5 },
     };
-    let usable = face.handle >= 0 && [face.asc, face.desc, face.gap, face.space].iter().all(|v| v.is_finite());
+    let usable = face.handle >= 0;
     // (…a face the style engine computed a font metric without: its styles are computed again, `ex` and `ch` from it)
     let d = dom(scope);
     let Some(arena) = d.realms.get(&cid) else { return };
@@ -219,6 +217,14 @@ fn walk_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
             reuse.forget();
         }
     }
+}
+
+// __dom.fontMeasures(handle, ascOverride, descOverride, gapOverride) -> whether the face has metrics to lay a line out
+// by (`FontMetrics::face`): a colour emoji font has none, and its text falls back to the next family that has.
+fn font_measures(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let handle = args.get(0).int32_value(scope).unwrap_or(-1);
+    let overrides = [1, 2, 3].map(|i| args.get(i).number_value(scope).filter(|v| v.is_finite()));
+    rv.set_bool(crate::font::with_font(handle, |fm| fm.face(overrides).is_some()).unwrap_or(false));
 }
 
 // Each text row (`layout::TextRow`) as the painter draws it — whether its owner's `::placeholder` is what it is drawn
