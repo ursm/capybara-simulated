@@ -55,8 +55,14 @@ RSpec.describe 'media queries' do
   it 'answers a touch session (`touch: true`, Playwright\'s hasTouch) as a touchscreen' do
     Capybara.register_driver(:simulated_touch) {|app| Capybara::Simulated::Driver.new(app, touch: true) }
     s = session(:simulated_touch)
-    expect(answers(s)).to eq('css' => [false, true, true, 'rgb(0, 0, 0)'], 'query' => [false, true, true, false],
-                             'any' => [false, false], 'img' => 'big.png')
+    touch = {'css' => [false, true, true, 'rgb(0, 0, 0)'], 'query' => [false, true, true, false], 'any' => [false, false],
+             'img' => 'big.png'}
+    expect(answers(s)).to eq(touch)
+    # (…the session's, in every window it opens)
+    s.within_window(s.open_new_window) do
+      s.visit '/'
+      expect(answers(s)).to eq(touch)
+    end
   end
 
   it 'serializes a MediaQueryList\'s media' do

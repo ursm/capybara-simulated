@@ -97,6 +97,8 @@ module Capybara
         # restores it. Every window (incl. aux windows opened later) inherits this so
         # cross-origin iframes eager-build consistently across the whole session.
         @all_hosts_local = ENV['CSIM_LOCAL_ALL_HOSTS'] == '1'
+        # …and whether its pointer is a touchscreen: the session's device, every window's.
+        @touch           = touch
         @browser         = build_window_browser
         @browser.window_handle = PRIMARY_HANDLE
         @aux_windows     = []  # [{handle:, browser:, name:, opener:}, …]
@@ -120,7 +122,6 @@ module Capybara
         @@live_lock.synchronize { @@live << WeakRef.new(self) }
         @browser.default_viewport   = viewport   if viewport
         @browser.default_user_agent = user_agent if user_agent
-        @browser.touch_input        = touch
       end
 
       private def build_window_browser
@@ -131,7 +132,7 @@ module Capybara
                     auth_cache:      @auth_cache,
                     local_storage:   @local_storage,
                     cache_storage:   @cache_storage,
-                    all_hosts_local: @all_hosts_local)
+                    all_hosts_local: @all_hosts_local).tap {|b| b.touch_input = @touch }
       end
 
       # Per-test trace recording. Mirrors capybara-playwright-driver's
