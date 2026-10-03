@@ -3492,8 +3492,6 @@ html/rendering/replaced-elements/attributes-for-embedded-content-and-images/pict
 - Make sure style gets invalidated correctly when the source gets removed.
 - Percentages on source should be ignored for aspect-ratio but used for width/height.
 - Source width/height should take precedence over img attributes.
-html/rendering/replaced-elements/attributes-for-embedded-content-and-images/textarea-placeholder-scroll.html:
-- Overflowing textarea placeholder should be scrollable
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/textarea-scrollheight-empty.html:
 - Textarea scrollHeight shouldn't collapse under a line height
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/video-aspect-ratio.html:
@@ -4012,8 +4010,6 @@ html/rendering/widgets/button-layout/display-other.html:
 - 'display: run-in'
 html/rendering/widgets/button-layout/inline-level.html:
 - "== html/rendering/widgets/button-layout/inline-level-ref.html"
-html/rendering/widgets/button-layout/input-type-button-clip.html:
-- "== html/rendering/widgets/button-layout/input-type-button-clip-ref.html"
 html/rendering/widgets/button-layout/propagate-text-decoration.html:
 - "== html/rendering/widgets/button-layout/propagate-text-decoration-ref.html"
 html/rendering/widgets/field-sizing-input-number.html:
@@ -4097,8 +4093,6 @@ html/rendering/widgets/input-radio-no-centering.html:
 - "== html/rendering/widgets/input-no-centering-ref.html"
 html/rendering/widgets/input-text-size.html:
 - The width depends on a size attribute
-html/rendering/widgets/placeholder-scroll.html:
-- Placeholder causes overflow on textarea
 html/rendering/widgets/placeholder-text-overflow-ellipsis.html:
 - "!= html/rendering/widgets/placeholder-text-overflow-ellipsis-notref.html"
 html/rendering/widgets/shadow-dom.html:

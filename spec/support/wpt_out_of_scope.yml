@@ -42895,11 +42895,6 @@ html/semantics/forms/the-select-element/show-picker-being-rendered.html:
 - name: select showPicker() throws when not being rendered
   reason: showPicker() gating on render state (being-rendered / content-visibility:hidden)
     — needs visibility/render state we do not model.
-html/semantics/forms/the-textarea-element/placeholder-white-space.tentative.html:
-- name: "!= html/semantics/forms/the-textarea-element/placeholder-white-space-notref.html"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 html/webappapis/scripting/events/event-handler-onmove-02.tentative.html:
 - name: Window move event
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

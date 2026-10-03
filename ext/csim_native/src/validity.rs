@@ -483,15 +483,57 @@ impl RealmArena {
             }
         }
     }
-    // An option's value: its `value` attribute, else its text with ASCII whitespace stripped and collapsed.
+    // An option's value: its `value` attribute, else its text.
     fn option_value(&self, id: NodeId) -> String {
-        let Some(n) = self.get(id) else { return String::new() };
-        if let Some(v) = n.plain_attr("value") {
-            return v.to_string();
+        match self.get(id).and_then(|n| n.plain_attr("value")) {
+            Some(v) => v.to_string(),
+            None => self.option_text(id),
         }
+    }
+    // …and its `text`: its descendant text but a script's, ASCII whitespace stripped and collapsed.
+    fn option_text(&self, id: NodeId) -> String {
         let mut text: Vec<u16> = Vec::new();
         self.collect_text(id, &mut text);
         String::from_utf16_lossy(&text).split(is_ascii_ws).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
+    }
+
+    // The text a form control SHOWS in its box (walk.rs `control_text`), and whether that is its placeholder: a
+    // textarea's value, a text field's as its `value` getter returns it — a password's as as many bullets — or, while
+    // either is empty, its `placeholder` (a field's with its line breaks stripped, a textarea's turned into LFs); a
+    // button input's label, its `value` or else the one its type names; a drop-down's selected option's label, its
+    // `label` unless that is empty, else its text. None for a control that shows no text of its own — a checkbox, a date
+    // field, a LIST box, whose options are boxes of their own.
+    pub(crate) fn shown_text(&self, id: NodeId) -> Option<(Vec<u16>, bool)> {
+        let n = self.get(id).filter(|n| n.is_html())?;
+        let (text, field) = match &*n.local_name {
+            "textarea" => (self.raw_value(n), true),
+            "input" => match n.input_type() {
+                ty @ ("text" | "search" | "url" | "tel" | "email" | "password" | "number") => {
+                    let value = self.sanitized_value(n, ty);
+                    (if ty == "password" { "\u{2022}".repeat(value.chars().count()) } else { value }, true)
+                }
+                "submit" => (n.plain_attr("value").unwrap_or("Submit").to_string(), false),
+                "reset" => (n.plain_attr("value").unwrap_or("Reset").to_string(), false),
+                "button" => (n.plain_attr("value").unwrap_or("").to_string(), false),
+                _ => return None,
+            },
+            "select" if !self.is_list_box(id) => {
+                let selected = self.list_of_options(id).into_iter().find(|&o| self.is_selected(o));
+                let label = selected.and_then(|o| self.get(o)?.plain_attr("label").filter(|l| !l.is_empty()).map(str::to_string));
+                (label.or_else(|| selected.map(|o| self.option_text(o))).unwrap_or_default(), false)
+            }
+            _ => return None,
+        };
+        if !text.is_empty() || !field {
+            return Some((text.encode_utf16().collect(), false));
+        }
+        let placeholder = n.plain_attr("placeholder")?;
+        let placeholder: String = if n.local_name == local_name!("input") {
+            placeholder.chars().filter(|&c| c != '\r' && c != '\n').collect()
+        } else {
+            placeholder.replace("\r\n", "\n").replace('\r', "\n")
+        };
+        Some((placeholder.encode_utf16().collect(), true))
     }
     fn collect_text(&self, id: NodeId, out: &mut Vec<u16>) {
         let Some(n) = self.get(id) else { return };

@@ -60,6 +60,7 @@ impl WalkDisplay for style::properties::style_structs::Box {
 }
 
 use crate::dom::{NodeId, NodeKind, RealmArena};
+use crate::style::StyleEngine;
 use crate::geometry::flat_children;
 use crate::layout::{MATH_LINE, MATH_MAX, MATH_MIN, MATH_NEG, MATH_SCALE, MATH_SUM};
 use crate::layout::{InlineBox, Input, Run, RunText, DISPLAY_BLOCK, DISPLAY_TEXT_BLOCK, RUN_ATOMIC, RUN_BR, RUN_CLOSE, RUN_FLOAT, RUN_OOF, RUN_OPEN, RUN_TEXT, RUN_WBR};
@@ -211,11 +212,12 @@ pub(crate) struct Built {
     pub(crate) paint: Vec<PaintMark>,
 }
 // A text run as a painter draws it: its run index, its baseline shift, and the element each part of it was written in
-// (`[(offset, nid)]`).
+// (`[(offset, nid)]`) — or whose `::placeholder` it is, for a control showing its placeholder (`control_text`).
 pub(crate) struct PaintMark {
     pub(crate) run: usize,
     pub(crate) shift: f64,
     pub(crate) owners: Vec<(u32, f64)>,
+    pub(crate) placeholder: bool,
 }
 
 // What the walk knows of a record beyond the record: where the run, grid and inline streams stood as it went in, and —
@@ -336,13 +338,14 @@ pub(crate) fn position_code(position: Position) -> u8 {
 }
 
 // (…`painting`: a pass a painter records, whose text runs keep what it draws them by — `PaintMark` — and none else does)
-pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut Faces, maths: &mut MathTable, prior: Option<&Prior>, painting: bool) -> Outcome {
+pub(crate) fn build(arena: &RealmArena, engine: Option<&StyleEngine>, root: NodeId, basis: Basis, faces: &mut Faces, maths: &mut MathTable, prior: Option<&Prior>, painting: bool) -> Outcome {
     faces.missing.clear();
     let walked = arena.begin_layout_walk();
     let texts = typed_arena::Arena::new();
     let generated = Generated { arena, texts: &texts, state: Default::default() };
     let mut walk = Walk {
         arena,
+        engine,
         generated: &generated,
         faces,
         basis,
@@ -516,6 +519,8 @@ fn generated_text(style: &ComputedValues, element: &crate::dom::NodeData) -> Opt
 
 struct Walk<'a> {
     arena: &'a RealmArena,
+    // (…its style engine, for the styles no traversal computed: a `::placeholder`'s)
+    engine: Option<&'a StyleEngine>,
     generated: &'a Generated<'a>,
     faces: &'a mut Faces,
     basis: Basis,
@@ -2467,6 +2472,51 @@ impl<'a> Walk<'a> {
             None if tag != "img" => r.control_baseline = 4,
             None => {}
         }
+        self.control_text(id, idx, style)
+    }
+
+    // The text a form control SHOWS (`RealmArena::shown_text`) as its record's runs, which the layout lays out as lines in
+    // its content box and its size never reads (layout.rs `control_lines`): a textarea's wrapped as its own `white-space`
+    // says — the UA's `pre-wrap` — and any other control's on a line of its own, preserved, as its inner editor holds
+    // it. In the control's font, or its `::placeholder`'s while that is what it shows.
+    fn control_text(&mut self, id: NodeId, idx: i32, style: &ComputedValues) -> Step {
+        // (…but a CUSTOMIZABLE select, `appearance: base-select`, which shows no drop-down face)
+        if style.get_box().clone_appearance() == style::values::computed::Appearance::BaseSelect {
+            return Ok(());
+        }
+        let Some((text, placeholder)) = self.arena.shown_text(id).filter(|(t, _)| !t.is_empty()) else { return Ok(()) };
+        let own;
+        let owner: &ComputedValues = if placeholder {
+            own = self.engine.and_then(|e| e.placeholder_style(self.arena, id)).ok_or("placeholder-unstyled")?;
+            &own
+        } else {
+            style
+        };
+        let font = self.font_info(owner, style)?;
+        let textarea = self.node(id).rendering_tag() == "textarea";
+        let ws_mode = if textarea { ws_mode_of(owner)? } else { WS_PRE };
+        let vmax = self.split_vmax(owner, &font, &text, ws_mode)?;
+        let owners = if self.painting { vec![(0, id.to_f64())] } else { Vec::new() };
+        let run = Pending::Text { font, text, wrap: wrap_mode(owner), ws: ws_mode, shift: 0.0, vmax, owners };
+        let g = Gather { block: style, idx, runs: vec![run], makes_line: true, floats: Vec::new(), rel: None };
+        let strut = self.font_info(style, style)?;
+        let (indent, indent_bits) = indent(style)?;
+        let indent_math = self.math(indent.prog.as_deref());
+        let r = &mut self.inputs[idx as usize];
+        r.strut_lh = strut.lh;
+        r.strut_asc = strut.asc;
+        r.ws_mode = ws_mode;
+        r.text_align = align_code(style.get_inherited_text().text_align, starts_at_right(style));
+        r.indent_px = indent.px;
+        r.indent_frac = indent.frac;
+        r.indent_math = indent_math;
+        r.indent_hanging = indent_bits & 256 != 0;
+        r.indent_each_line = indent_bits & 512 != 0;
+        r.text_overflows = textarea || !placeholder;
+        self.commit(idx, g);
+        if let Some(mark) = self.paint.last_mut().filter(|_| self.painting && placeholder) {
+            mark.placeholder = true;
+        }
         Ok(())
     }
 
@@ -3716,7 +3766,7 @@ impl<'a> Walk<'a> {
             let run = match r {
                 Pending::Text { font, text, wrap, ws, shift, vmax, owners } => {
                     if self.painting {
-                        self.paint.push(PaintMark { run: self.runs.len(), shift, owners });
+                        self.paint.push(PaintMark { run: self.runs.len(), shift, owners, placeholder: false });
                     }
                     self.run_texts.push(Some(text.into()));
                     // The run's place on its line: its ascent, `vertical-align` included, and its line-height below
@@ -4586,6 +4636,7 @@ pub(crate) fn fresh_record() -> Input {
         control_baseline: 0,
         control_font_box: 0.0,
         control_font_asc: 0.0,
+        text_overflows: false,
         intrinsic_w: 0.0,
         intrinsic_h: 0.0,
         cb_index: -1,

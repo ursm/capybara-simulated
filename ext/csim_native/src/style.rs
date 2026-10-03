@@ -1766,6 +1766,12 @@ impl StyleEngine {
         })
     }
 
+    // `id`'s `::placeholder` as the walk lays its text out (walk.rs `control_text`), the style its originating element has
+    // now.
+    pub(crate) fn placeholder_style(&self, arena: &RealmArena, id: NodeId) -> Option<Arc<ComputedValues>> {
+        self.pseudo_style(arena, id, "placeholder", &*primary_style(arena, id)?)
+    }
+
     // What `id`'s `::before` (0) or `::after` (1) renders as the document is styled now — the answer the walk lays out
     // (`walk::generated_text_of`): its text, or None where it generates no box.
     pub(crate) fn generated(&mut self, arena: &RealmArena, id: NodeId, which: usize, now_ms: f64) -> Option<Vec<u16>> {

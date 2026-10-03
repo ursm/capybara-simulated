@@ -381,4 +381,30 @@ RSpec.describe 'the scrollable overflow region' do
     JS
     expect(got).to eq([175, -175, 0])
   end
+  # A form control's SHOWN text is laid out in its box (walk.rs `control_text`), so it is the control's overflow as any
+  # line is: a textarea's lines past its height, a field's value past its width — and the offsets clamp to it. A FIELD's
+  # placeholder is the exception: the field clips it and scrolls to none of it, where a textarea's scrolls like its
+  # value. (Chrome: 100x80 / 40, 123 / 73, 50 / 0, 100x80 / 40. Heights are left out for the fields: their box does not
+  # follow their font yet, 15 where Chrome's 16px Arial is 18.)
+  it 'reaches as far as the text a control shows' do
+    html = %(<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+               .c { font: 16px Arial; padding: 0; border: 0; overflow: hidden }
+               textarea.c { width: 100px; height: 40px; line-height: 20px }
+               input.c { width: 50px }
+             </style></head><body style="margin:0">
+             <textarea id="t" class="c">a\nb\nc\nd</textarea>
+             <input id="i" class="c" value="a long value here"><input id="p" class="c" placeholder="a long placeholder here">
+             <textarea id="tp" class="c" placeholder="a\nb\rc\r\nd"></textarea>
+             </body></html>)
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] })
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      ['t', 'i', 'p', 'tp'].map((id) => {
+        const e = document.getElementById(id);
+        e.scrollTop = 999; e.scrollLeft = 999;
+        return id[0] === 't' ? [e.scrollWidth, e.scrollHeight, e.scrollTop] : [e.scrollWidth, e.scrollLeft];
+      })
+    JS
+    expect(got).to eq([[100, 80, 40], [123, 73], [50, 0], [100, 80, 40]])
+  end
 end

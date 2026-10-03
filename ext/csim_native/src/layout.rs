@@ -436,6 +436,10 @@ pub(crate) struct Input {
     pub(crate) control_baseline: u8,
     pub(crate) control_font_box: f64,
     pub(crate) control_font_asc: f64,
+    // Whether the text a control SHOWS (its runs, `control_lines`) is scrollable overflow of its box — all of it but a
+    // field's placeholder, which the field clips and never scrolls to (Chrome: an `<input>`'s scrollWidth is its
+    // clientWidth whatever placeholder it shows; a `<textarea>`'s grows with one).
+    pub(crate) text_overflows: bool,
     pub(crate) intrinsic_w: f64,
     pub(crate) intrinsic_h: f64,
     // An OUT-OF-FLOW box (`out_of_flow`), positioned by `place_out_of_flow`: the record index of its CONTAINING
@@ -544,7 +548,7 @@ impl InlineBox {
 }
 impl Input {
     pub(crate) fn same(&self, o: &Input) -> bool {
-        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, ws_mode, item_auto_height, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, clip, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect, fits_content } = self;
+        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, ws_mode, item_auto_height, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, clip, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, text_overflows, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect, fits_content } = self;
         nid.bit_eq(&o.nid)
             && parent.bit_eq(&o.parent)
             && display.bit_eq(&o.display)
@@ -668,6 +672,7 @@ impl Input {
             && control_baseline.bit_eq(&o.control_baseline)
             && control_font_box.bit_eq(&o.control_font_box)
             && control_font_asc.bit_eq(&o.control_font_asc)
+            && text_overflows.bit_eq(&o.text_overflows)
             && intrinsic_w.bit_eq(&o.intrinsic_w)
             && intrinsic_h.bit_eq(&o.intrinsic_h)
             && cb_index.bit_eq(&o.cb_index)
@@ -1381,6 +1386,32 @@ fn store_texts(i: usize, rows: Vec<TextRow>) {
             *slot = rows;
         }
     });
+}
+
+// The text a control SHOWS (walk.rs `control_text`) laid out as lines in its content box, which its size never reads: a
+// textarea's from the top of the box, as a block's lines are, and any other control's on the chrome's baseline — its
+// line centred in the content box, as the control's inner editor is (`control_baseline` 1). Its text pieces and the
+// rectangle its lines cover are the box's, as a text block's are: what of them overflows is the control's scrollable
+// overflow (geometry.rs `extent`).
+#[allow(clippy::too_many_arguments)]
+fn control_lines(i: usize, n: &Input, w: f64, chrome: Option<f64>, runs: &[Run], run_texts: &[RunText], boxes: &mut [Box], failed: &Cell<bool>) {
+    let (rs, re) = (n.run_start.max(0) as usize, (n.run_start + n.run_count).max(0) as usize);
+    let content_w = n.content_w(w);
+    let indent = (bounded(n.indent_px + n.indent_frac * content_w, n.indent_math, content_w), n.indent_hanging, n.indent_each_line, n.indent_spent);
+    let style = LineStyle { ws_mode: n.ws_mode, align: n.text_align, rtl: n.from_right(), indent, pct_h: f64::NAN };
+    let Some(ll) = line_layout(&runs[rs..re], &run_texts[rs..re], n.strut_lh, n.strut_asc, content_w, &mut Vec::new(), &[], 0.0, content_w, 0.0, style) else {
+        failed.set(true);
+        return;
+    };
+    let top = match (n.control_baseline, chrome, ll.first) {
+        (1, Some(baseline), Some((line_top, asc))) => baseline - line_top - asc,
+        _ => n.bt + n.pt,
+    };
+    let left = n.bl + n.pl;
+    store_texts(i, ll.texts.iter().map(|r| [r[0] + rs as f64, r[1], r[2], left + r[3], top + r[4], top + r[5], r[6], r[7]]).collect());
+    if n.text_overflows {
+        boxes[i].line_rect = ll.reach.map(|[l, r]| [left + l, top, left + r, top + ll.height]);
+    }
 }
 
 // Lay out `inputs` (the pass's records, parent-indexed, the root at index 0) starting from the root's
@@ -4293,6 +4324,10 @@ fn measure_uncached(
         // box-scan answer. The atomic's own contribution to its LINE is the other one, and only the
         // line site asks for it (see `line_layout`'s native-atomic loop).
         boxes[i].inline_block_baseline = chrome;
+        // …and the text the control SHOWS, as lines inside it.
+        if n.run_count > 0 {
+            control_lines(i, &n, w, chrome, runs, run_texts, boxes, failed);
+        }
         let top = CMargin::of(Input::m(n.mt));
         return MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false };
     }
@@ -8935,6 +8970,7 @@ mod tests {
             control_baseline: 0,
             control_font_box: 0.0,
             control_font_asc: 0.0,
+            text_overflows: false,
             intrinsic_w: 0.0,
             intrinsic_h: 0.0,
             cb_index: CB_NONE,

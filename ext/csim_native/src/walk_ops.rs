@@ -14,8 +14,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // __dom.layoutBuild(rootNid, fontGeneration, rootCbW, rootCbH, texts, check): a whole layout pass the Rust walk builds
 // from the arena and the style engine — its records, runs and tables — and lays out (the root placed natively), its
 // boxes kept in the arena for the geometry (geometry.rs `store_layout`): answered `true` — or where `texts` asks, for a
-// pass a painter records, each text piece as it draws it, `[rows, texts]`: `[x, y, baseline, width, justify, owner nid]`
-// and the texts (`paint_rows`). Or `[family, bucket, …]` — the faces the walk needs first, for the JS side to resolve
+// pass a painter records, each text piece as it draws it, `[rows, texts]`: `[x, y, baseline, width, justify, owner nid,
+// placeholder]` and the texts (`paint_rows`). Or `[family, bucket, …]` — the faces the walk needs first, for the JS side to resolve
 // (`walkFace`) and ask again — or `{boxes}`, the generated boxes it needs linked, or the walk's decline, a string.
 fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
@@ -28,6 +28,8 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let check = args.get(5).is_true();
     let d = dom(scope);
     let Some(arena) = d.realms.get(&cid) else { return };
+    // (…and its style engine, for a style the traversal leaves to whoever asks: a `::placeholder`'s)
+    let engine = d.styles.get(&cid);
     // (…the edge of the initial containing block the root sits at: `walk::principal_starts_right`)
     let root_rtl = walk::principal_starts_right(arena, root);
     // (…splicing back from the last kept pass what did not change since it: `Walk::splice`; under the check, the pass is
@@ -37,8 +39,8 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let prior = prior.filter(|_| !texts);
     let (built, whole) = arena.faces.with(|faces| {
         faces.at_generation(&generation);
-        let built = walk::build(arena, root, basis, faces, maths, prior, texts);
-        let whole = (check && prior.is_some()).then(|| walk::build(arena, root, basis, faces, maths, None, texts));
+        let built = walk::build(arena, engine, root, basis, faces, maths, prior, texts);
+        let whole = (check && prior.is_some()).then(|| walk::build(arena, engine, root, basis, faces, maths, None, texts));
         (built, whole)
     });
     // (…a whole walk that could not build what the spliced one built — it asked for a face, a box, or declined — is a
@@ -87,8 +89,8 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let cache = (!texts).then_some((&mut measure, roots, check));
     let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths.values, f64::NAN, f64::NAN, root_cb_w, root_rtl, cache, texts);
     // (…and a pass that paints answers each text piece as the painter draws it — beside the rows that index the runs, which
-    // only this side has: `[x, y, baseline, width, justify, owner nid]` and the text, the baseline's run shift taken back
-    // off and a hyphen's owner the character's before it)
+    // only this side has: `[x, y, baseline, width, justify, owner nid, placeholder]` and the text, the baseline's run shift
+    // taken back off and a hyphen's owner the character's before it)
     let painted = match &out {
         crate::layout::Outcome::LaidOut(laid) if texts => Some(paint_rows(&laid.texts, &paint, &run_texts)),
         _ => None,
@@ -217,7 +219,8 @@ fn walk_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     }
 }
 
-// Each text row (`[run, start, end, x, y, baseline, width, justify]`) as the painter draws it.
+// Each text row (`[run, start, end, x, y, baseline, width, justify]`) as the painter draws it, and whether its owner's
+// `::placeholder` is what it is drawn in.
 fn paint_rows(rows: &[crate::layout::TextRow], paint: &[walk::PaintMark], run_texts: &[crate::layout::RunText]) -> (Vec<f64>, Vec<Vec<u16>>) {
     let mut out = Vec::new();
     let mut strings = Vec::new();
@@ -230,7 +233,7 @@ fn paint_rows(rows: &[crate::layout::TextRow], paint: &[walk::PaintMark], run_te
         strings.push(if hyphen { vec![u16::from(b'-')] } else { text.get(start..end).unwrap_or(&[]).to_vec() });
         let at = if hyphen { start.saturating_sub(1) } else { start } as u32;
         let owner = mark.and_then(|m| m.owners.iter().rev().find(|&&(o, _)| o <= at)).map_or(-1.0, |&(_, nid)| nid);
-        out.extend([r[3], r[4], r[5] - mark.map_or(0.0, |m| m.shift), r[6], r[7], owner]);
+        out.extend([r[3], r[4], r[5] - mark.map_or(0.0, |m| m.shift), r[6], r[7], owner, f64::from(u8::from(mark.is_some_and(|m| m.placeholder)))]);
     }
     (out, strings)
 }
