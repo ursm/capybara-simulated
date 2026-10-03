@@ -1072,7 +1072,8 @@ fn scroll_origin(arena: &RealmArena, id: NodeId, style: &ComputedValues) -> [boo
 // there is none to report and the computed value stands (no box; a static box's inset; a sticky box's `auto` one; a
 // property whose resolved value is its computed one, the borders among them): `width` / `height` as the box
 // `box-sizing` names (Chrome: `border-box; width: 300px; padding: 0 40px` is 300px, not the 220 of content),
-// `inline-size` / `block-size` by the writing mode, the paddings, a margin as the slack an `auto` one took where its
+// `inline-size` / `block-size` by the writing mode — as every flow-relative name is mapped, the margins', paddings' and
+// insets' (Chrome: an rtl `padding-inline-start: 5%` of 180px is 9px) — the paddings, a margin as the slack an `auto` one took where its
 // placer distributed some, else as its edge says, and a positioned box's insets (`used_insets`): a DECLARED one as
 // itself, an `auto` one from the box. One geometry: `getComputedStyle(el).width` and `getBoundingClientRect().width` are
 // two views of one box.
@@ -1088,14 +1089,23 @@ pub(crate) fn used_value(arena: &RealmArena, id: NodeId, property: &str) -> Opti
         Side::Left => 3,
     }];
     let horizontal = matches!(inline_start, Side::Left | Side::Right);
+    // (…a flow-relative name is the physical side the writing mode and direction make it)
+    let logical = |p: &str| -> Option<String> {
+        let (prefix, flow) = ["inset", "margin", "padding"].iter().find_map(|&pre| Some((pre, p.strip_prefix(pre)?.strip_prefix('-')?)))?;
+        let side = match flow {
+            "block-start" => block_start,
+            "block-end" => block_end,
+            "inline-start" => inline_start,
+            "inline-end" => inline_end,
+            _ => return None,
+        };
+        Some(if prefix == "inset" { physical(side).to_owned() } else { format!("{prefix}-{}", physical(side)) })
+    };
+    let mapped = logical(property);
     let property = match property {
-        "inset-block-start" => physical(block_start),
-        "inset-block-end" => physical(block_end),
-        "inset-inline-start" => physical(inline_start),
-        "inset-inline-end" => physical(inline_end),
         "inline-size" => if horizontal { "width" } else { "height" },
         "block-size" => if horizontal { "height" } else { "width" },
-        p => p,
+        p => mapped.as_deref().unwrap_or(p),
     };
     let side = ["top", "right", "bottom", "left"].iter().position(|&s| s == property);
     if let Some(k) = side {

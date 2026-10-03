@@ -719,16 +719,6 @@ css/css-font-loading/fontface-font-variation-settings-persisted-js-api.html:
 - Test FontFace variationSettings property
 css/css-font-loading/fontface-from-arraybuffer.html:
 - "== css/css-font-loading/fontface-from-arraybuffer-ref.html"
-css/css-logical/parsing/margin-block-inline-computed.html:
-- Property margin-block-end value '10%'
-- Property margin-block-start value 'calc(10% + 40px)'
-- Property margin-inline-end value 'calc(10% + 40px)'
-css/css-logical/parsing/padding-block-inline-computed.html:
-- Property padding-block-end value '10%'
-- Property padding-block-end value 'calc(10% - 40px)'
-- Property padding-block-start value 'calc(10% + 40px)'
-- Property padding-inline-end value 'calc(10% + 40px)'
-- Property padding-inline-start value 'calc(10% - 40px)'
 css/css-shadow/part/exportparts-layered.html:
 - "== css/css-shadow/part/exportparts-layered.ref.html"
 css/css-shadow/part/interaction-with-pseudo-elements.html:
