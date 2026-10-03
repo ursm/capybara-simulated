@@ -1194,9 +1194,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "declReplace", decl_replace, context_id);
     register(scope, ns, "declSupports", decl_supports, context_id);
     register(scope, ns, "declSupportsCondition", decl_supports_condition, context_id);
-    register(scope, ns, "styleShown", style_shown, context_id);
     register(scope, ns, "styleGenerated", style_generated, context_id);
-    register(scope, ns, "styleSkips", style_skips, context_id);
     register(scope, ns, "styleTransformMatrix", style_transform_matrix, context_id);
     register(scope, ns, "styleRestyled", style_restyled, context_id);
     register(scope, ns, "styleFlush", style_flush, context_id);
@@ -1207,6 +1205,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::geometry::install(scope, ns, context_id);
     crate::hit_test::install(scope, ns, context_id);
     crate::scroll_into_view::install(scope, ns, context_id);
+    crate::rendered::install(scope, ns, context_id);
     crate::html_parse::install(scope, ns, context_id);
     crate::url_ops::install(scope, ns, context_id);
     crate::text_codec::install(scope, ns, context_id);
@@ -2683,27 +2682,6 @@ fn decl_supports_condition(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     rv.set_bool(crate::cssom_decl::supports_condition(&text));
 }
 
-// __dom.styleShown(nid, now) -> 0 | 1 | 2: whether the element is shown as the style engine styled it
-// (`StyleEngine::shown`): no box, displayed and visible, displayed with its visibility hiding it. Undefined where the
-// realm has no engine.
-fn style_shown(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let cid = realm_id(scope, &args);
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
-    let now = clock_arg(scope, &args, 1);
-    style_op(scope, cid, |scope| {
-        let d = dom(scope);
-        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
-        let shown = engine.shown(arena, id, now);
-        let failures = engine.take_verify_failures();
-        if !threw_verify_failures(scope, failures) {
-            rv.set_int32(shown as i32);
-        }
-    });
-}
 
 // __dom.styleTransformMatrix(nid, width, height, now) -> Float64Array(16) | null: the element's `transform` composed
 // about a `width` x `height` reference box (`StyleEngine::transform_matrix`), null for `none`. Undefined where the
@@ -2734,26 +2712,6 @@ fn style_transform_matrix(
     });
 }
 
-// __dom.styleSkips(nid, now) -> bool: whether the element skips its contents as the style engine styled it
-// (`StyleEngine::skips`) — shown itself, nothing under it. Undefined where the realm has no engine.
-fn style_skips(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let cid = realm_id(scope, &args);
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
-    let now = clock_arg(scope, &args, 1);
-    style_op(scope, cid, |scope| {
-        let d = dom(scope);
-        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
-        let skips = engine.skips(arena, id, now);
-        let failures = engine.take_verify_failures();
-        if !threw_verify_failures(scope, failures) {
-            rv.set_bool(skips);
-        }
-    });
-}
 
 // __dom.styleGenerated(nid, which, now) -> string | null: what the element's `::before` (0) or `::after` (1) renders as
 // the style engine styled it (`StyleEngine::generated`) — its text, empty for a box holding none — or null where it

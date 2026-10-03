@@ -241,7 +241,7 @@ fn valid_email(s: &str) -> bool {
 impl RealmArena {
     // A control's value as its `value` getter reads it before sanitization: the live value once dirty, else the
     // `value` attribute — a `<textarea>`'s child text, newlines normalized.
-    fn raw_value(&self, n: &NodeData) -> String {
+    pub(crate) fn raw_value(&self, n: &NodeData) -> String {
         if let Some(v) = &n.value {
             return String::from_utf16_lossy(v);
         }
