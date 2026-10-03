@@ -848,6 +848,41 @@ pub(crate) fn paint_quad(arena: &RealmArena, id: NodeId) -> Option<[f64; 8]> {
     let [p0, p1, p2, p3] = [p0?, p1?, p2?, p3?];
     Some([p0[0], p0[1], p1[0], p1[1], p2[0], p2[1], p3[0], p3[1]])
 }
+// The clips the painter lays `id` down under, innermost first — `id`'s own too where `own` (what it draws is its
+// CONTENT, which its own overflow clips) — each `[x, y, w, h, affine…]`: a clipping ancestor's padding box in the
+// UNTRANSFORMED space the painter draws in, open (±1e7) along an axis it does not clip (`clip` beside `visible` stays
+// so), and the affine THAT clipper is drawn under — a scrollport holds still while its child translates out of it, so
+// drawn under the child's own matrix the clip travelled with the child (Chrome: no red at x 220 where it painted some)
+// — `[1, 0, 0, 1, 0, 0]` for none, or for a map the painter cannot express. Up the CONTAINING-BLOCK chain, as the hit
+// test's clip is (`hit_test::clipped_at`): an out-of-flow box escapes every clipper between it and its containing
+// block, and a fixed one against the viewport escapes them all (Chrome paints a fixed child of an `overflow: hidden`
+// box whole; it was not painted at all).
+pub(crate) fn clip_boxes(arena: &RealmArena, id: NodeId, own: bool) -> Vec<[f64; 10]> {
+    use crate::layout::{CLIP_X, CLIP_Y};
+    const OPEN: f64 = 1e7;
+    let clip_parent = |at: NodeId| {
+        let node = arena.get(at)?;
+        match laid(arena, node) {
+            Some(b) if b.out_of_flow != 0 => node.containing_block,
+            _ => crate::hit_test::box_parent(arena, at),
+        }
+    };
+    let mut out = Vec::new();
+    let mut at = if own { Some(id) } else { clip_parent(id) };
+    while let Some(p) = at {
+        let b = arena.get(p).and_then(|n| laid(arena, n)).copied();
+        if let (Some(b), Some([x, y, w, h])) = (b.filter(|b| b.clip & (CLIP_X | CLIP_Y) != 0), laid_out_box(arena, p)) {
+            let e = edges(arena, p).map_or([0.0; 12], |e| e.e);
+            let [px, py, pw, ph] = [x + e[7], y + e[4], (w - e[5] - e[7]).max(0.0), (h - e[4] - e[6]).max(0.0)];
+            let [cx, cw] = if b.clip & CLIP_X != 0 { [px, pw] } else { [-OPEN, 2.0 * OPEN] };
+            let [cy, ch] = if b.clip & CLIP_Y != 0 { [py, ph] } else { [-OPEN, 2.0 * OPEN] };
+            let m = paint_transform(arena, p).flatten().unwrap_or([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+            out.push([cx, cy, cw, ch, m[0], m[1], m[2], m[3], m[4], m[5]]);
+        }
+        at = clip_parent(p);
+    }
+    out
+}
 
 // ── the scrollable overflow region ─────────────────────────────────────────────────────────────────────────────
 // `scrollWidth` / `scrollHeight` (css-overflow-3 §3): how far the box's content reaches from the edge it scrolls FROM.
@@ -1185,6 +1220,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "offsets", offsets_op, context_id);
     register(scope, ns, "paintTransform", paint_transform_op, context_id);
     register(scope, ns, "paintQuad", paint_quad_op, context_id);
+    register(scope, ns, "clipBoxes", clip_boxes_op, context_id);
     register(scope, ns, "scrollOffset", scroll_offset, context_id);
     register(scope, ns, "setScrollOffset", set_scroll_offset, context_id);
     register(scope, ns, "clipFlags", clip_flags, context_id);
@@ -1387,6 +1423,16 @@ fn paint_transform_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         Some(None) => 2,
     };
     rv.set(v8::Integer::new(scope, kind).into());
+}
+// __dom.clipBoxes(nid, own) -> Float64Array: the clips the painter lays `nid` down under, `[x, y, w, h, a, b, c, d, e,
+// f]` each, innermost first (`clip_boxes`).
+fn clip_boxes_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let own = args.get(1).is_true();
+    let flat: Vec<f64> = crate::dom::nid_arg(scope, &args, 0)
+        .map(|id| clip_boxes(crate::dom::realm(scope, cid), id, own).into_iter().flatten().collect())
+        .unwrap_or_default();
+    rv.set(crate::dom::f64_array(scope, &flat).into());
 }
 // __dom.paintQuad(nid, out) -> whether `nid`'s box projects to a quad the painter clips to, its corners written to `out`
 // (`paint_quad`).

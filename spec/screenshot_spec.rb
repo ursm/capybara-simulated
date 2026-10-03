@@ -71,6 +71,29 @@ RSpec.describe 'save_screenshot' do
     end
   end
 
+  # An overflow clip is the PADDING box: a child pulled out over the border is clipped where the border begins, and
+  # the border stays drawn (Chrome) — where the clip was the border box, the child painted over it.
+  it 'clips overflowing content at the padding edge, leaving the border' do
+    s = page_with('<div class="c"><div class="k"></div></div>',
+                  css: '.c{width:100px;height:60px;border:10px solid rgb(0,0,255);overflow:hidden}' \
+                       '.k{margin:-20px;width:200px;height:200px;background:rgb(255,0,0)}')
+    shot(s) do |_img, px, _path|
+      expect(px.call(5, 40)).to eq([0, 0, 255])     # the border, not the child under it
+      expect(px.call(60, 40)).to eq([255, 0, 0])    # the child, inside the padding box
+    end
+  end
+
+  # …and a clip reaches only what its box CONTAINS: an out-of-flow child escapes every clipper between it and its
+  # containing block — a fixed one, the viewport's, escapes them all (Chrome paints it whole).
+  it 'leaves a fixed child of a clipping box unclipped' do
+    s = page_with('<div class="c"><div class="f"></div></div>',
+                  css: '.c{margin:20px;width:100px;height:60px;overflow:hidden}' \
+                       '.f{position:fixed;right:5px;top:5px;width:60px;height:200px;background:rgb(0,160,0)}')
+    shot(s) do |_img, px, _path|
+      expect(px.call(290, 150)).to eq([0, 160, 0])
+    end
+  end
+
   it 'paints text in its own colour, on the line the flow put it on' do
     # The run positions come from the flow itself (`recordingRuns`), so the ink has to land inside
     # the paragraph's own box — which is what a painter that re-derived line breaking would miss.
