@@ -4,6 +4,7 @@
 
 use crate::dom::{NodeData, NodeId, NodeKind, RealmArena};
 use crate::style::{primary_style, StyleEngine};
+use crate::walk::WalkDisplay;
 use style::properties::ComputedValues;
 use style::values::computed::text::TextTransform;
 use style::values::specified::box_::{DisplayInside, DisplayOutside};
@@ -558,6 +559,25 @@ pub(crate) fn visible_text(engine: &mut StyleEngine, arena: &RealmArena, id: Nod
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "rendered", rendered_op, context_id);
     crate::dom::register(scope, ns, "visibleText", visible_text_op, context_id);
+    crate::dom::register(scope, ns, "boxKind", box_kind_op, context_id);
+}
+
+// What box `id` generates by its own computed style, which says so before anything is laid out: `BOX_NONE` none — a
+// `display: none` or `display: contents` element, or one with no style — `BOX_INLINE` a non-replaced inline box, which
+// has no client box, and `BOX_OTHER` any other.
+const BOX_NONE: i32 = 0;
+const BOX_INLINE: i32 = 1;
+const BOX_OTHER: i32 = 2;
+fn box_kind(arena: &RealmArena, id: NodeId) -> i32 {
+    let (Some(style), Some(n)) = (crate::geometry::box_style(arena, id), arena.get(id)) else { return BOX_NONE };
+    let d = style.get_box().walk_display(n.rendering_tag());
+    if d.is_none() || d.is_contents() {
+        BOX_NONE
+    } else if crate::geometry::inline_by_display(arena, id, &style) {
+        BOX_INLINE
+    } else {
+        BOX_OTHER
+    }
 }
 
 // One question asked of the realm's arena and its style engine at the page's clock `now`: what it answers, or nothing
@@ -594,5 +614,17 @@ fn visible_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     if let Some(text) = with_engine(scope, &args, 1, |engine, arena, now| visible_text(engine, arena, id, now)) {
         let s = v8::String::new_from_two_byte(scope, &text, v8::NewStringType::Normal).unwrap();
         rv.set(s.into());
+    }
+}
+
+// __dom.boxKind(nid, now) -> what box the element generates by its own style (`box_kind`); undefined where the realm has
+// no engine.
+fn box_kind_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    if let Some(kind) = with_engine(scope, &args, 1, |engine, arena, now| {
+        engine.flush(arena, now);
+        box_kind(arena, id)
+    }) {
+        rv.set_int32(kind);
     }
 }

@@ -429,7 +429,7 @@ pub(crate) fn offsets(arena: &RealmArena, id: NodeId) -> Option<[f64; 5]> {
             // (…and a NON-ATOMIC inline offsetParent's BORDER edge: a positioned `<span style="border: 5px">` puts a child
             // at its own border edge 5 from it, where an `inline-block` in the same shape says 0)
             let inline = box_style(arena, p).is_some_and(|s| non_replaced_inline(arena, p, &s));
-            let e = if inline { [0.0; 12] } else { edges(arena, p).map_or([0.0; 12], |e| e.e) };
+            let e = if inline { [0.0; 12] } else { edges(arena, p).unwrap_or([0.0; 12]) };
             [bx + e[7], by + e[4]]
         }
         _ => [0.0, 0.0],
@@ -727,18 +727,18 @@ fn is_boxless(arena: &RealmArena, node: NodeId, style: &ComputedValues) -> bool 
 // …or is it a non-replaced INLINE box: one the lines broke into fragments, or one laid out as a BLOCK for the block it
 // holds among them (a used display, no computed one — a rendered `<legend>` is a block whatever it declares).
 pub(crate) fn non_replaced_inline(arena: &RealmArena, node: NodeId, style: &ComputedValues) -> bool {
+    arena.get(node).is_some_and(|n| laid_frags(arena, n).is_some() && !atomic(arena, node, n)) || inline_by_display(arena, node, style)
+}
+// …or one by its computed display alone, which says so before anything is laid out.
+pub(crate) fn inline_by_display(arena: &RealmArena, node: NodeId, style: &ComputedValues) -> bool {
     let Some(n) = arena.get(node) else { return false };
-    let tag = n.rendering_tag();
-    // (…a widget's inline-level box is an inline-block whatever the lines made of it — HTML's button layout — a
-    // replaced element's is atomic, and a fieldset's rendered legend is a block whatever it declares)
-    if crate::walk::replaced_or_control(arena, node, n) || crate::walk::widget_tag(tag) || rendered_legend(arena, node) {
-        return false;
-    }
-    if laid_frags(arena, n).is_some() {
-        return true;
-    }
-    let d = style.get_box().walk_display(tag);
-    matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow)
+    let d = style.get_box().walk_display(n.rendering_tag());
+    matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && !atomic(arena, node, n)
+}
+// A widget's inline-level box is an inline-block whatever the lines made of it — HTML's button layout — a replaced
+// element's is atomic, and a fieldset's rendered legend is a block whatever it declares.
+fn atomic(arena: &RealmArena, node: NodeId, n: &crate::dom::NodeData) -> bool {
+    crate::walk::replaced_or_control(arena, node, n) || crate::walk::widget_tag(n.rendering_tag()) || rendered_legend(arena, node)
 }
 
 // A rect's image under `m`: the axis-aligned box its transformed quad occupies, which both rect APIs report. A corner
@@ -792,6 +792,34 @@ pub(crate) fn rendered_box(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
         Some(m) => transformed_rect(&m, b),
         None => b,
     })
+}
+
+// `id`'s CLIENT box as CSSOM reports it, `[clientLeft, clientTop, clientWidth, clientHeight]`, each rounded: its padding
+// box — the scrollport — as the layout sized it, with the top and left borders it lies inside. What a `transform` draws
+// it as is no part of it (Chrome: a 100px scroller under `scale(0.5)` keeps a clientHeight of 100), and a TABLE box's is
+// its whole BORDER box in Blink, its border (and, separate-mode, its padding) not subtracted. None where it has none: no
+// box, a box-less one, a non-replaced inline one. (A scrollbar on the left in RTL would add to `clientLeft`: none is
+// modelled.)
+pub(crate) fn client_box(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
+    let style = box_style(arena, id)?;
+    if is_boxless(arena, id, &style) || non_replaced_inline(arena, id, &style) {
+        return None;
+    }
+    let [_, _, w, h] = placed_box(arena, id)?;
+    let e = edges(arena, id).unwrap_or([0.0; 12]);
+    let round = crate::walk::js_round;
+    let [w, h] = if is_table_box(arena, id, &style) { [w, h] } else { [w - e[5] - e[7], h - e[4] - e[6]] };
+    Some([round(e[7]), round(e[4]), round(w.max(0.0)), round(h.max(0.0))])
+}
+
+// The VIEWPORT a frame element gives the document inside it, `[x, y, w, h]` in this one's viewport: its rendered box
+// less its borders and padding — HTML draws a 2px frame round an `<iframe>`, and the document inside a `width: 200px`
+// one sees a viewport 200 wide, not the 204 its border box measures (Chrome). None where it has no box.
+pub(crate) fn frame_viewport(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
+    let [x, y, w, h] = rendered_box(arena, id)?;
+    let e = edges(arena, id).unwrap_or([0.0; 12]);
+    let [top, right, bottom, left] = [e[0] + e[4], e[1] + e[5], e[2] + e[6], e[3] + e[7]];
+    Some([x + left, y + top, (w - left - right).max(0.0), (h - top - bottom).max(0.0)])
 }
 
 // `id`'s CLIENT RECTS as `getClientRects` answers them: one per line an inline box broke over, else its border box —
@@ -872,7 +900,7 @@ pub(crate) fn clip_boxes(arena: &RealmArena, id: NodeId, own: bool) -> Vec<[f64;
     while let Some(p) = at {
         let b = arena.get(p).and_then(|n| laid(arena, n)).copied();
         if let (Some(b), Some([x, y, w, h])) = (b.filter(|b| b.clip & (CLIP_X | CLIP_Y) != 0), laid_out_box(arena, p)) {
-            let e = edges(arena, p).map_or([0.0; 12], |e| e.e);
+            let e = edges(arena, p).unwrap_or([0.0; 12]);
             let [px, py, pw, ph] = [x + e[7], y + e[4], (w - e[5] - e[7]).max(0.0), (h - e[4] - e[6]).max(0.0)];
             let [cx, cw] = if b.clip & CLIP_X != 0 { [px, pw] } else { [-OPEN, 2.0 * OPEN] };
             let [cy, ch] = if b.clip & CLIP_Y != 0 { [py, ph] } else { [-OPEN, 2.0 * OPEN] };
@@ -1123,7 +1151,7 @@ pub(crate) fn used_value(arena: &RealmArena, id: NodeId, property: &str) -> Opti
         };
     }
     let [_, _, w, h] = placed_box(arena, id)?;
-    let e = edges(arena, id)?.e;
+    let e = edges(arena, id)?;
     let border_box = style.get_position().box_sizing == style::computed_values::box_sizing::T::BorderBox;
     let margin = |k: usize| {
         let used = arena.get(id).and_then(|n| laid(arena, n)).and_then(|b| b.used_margins).map(|m| m[k]).filter(|m| !m.is_nan());
@@ -1168,7 +1196,7 @@ pub(crate) fn used_insets(arena: &RealmArena, id: NodeId) -> Option<[f64; 8]> {
     let mut declared = [resolve(&pos.top, ch), resolve(&pos.right, cw), resolve(&pos.bottom, ch), resolve(&pos.left, cw)];
     let mut used: [Option<f64>; 4];
     if matches!(position, Position::Absolute | Position::Fixed) {
-        let e = edges(arena, id).map_or([0.0; 12], |e| e.e);
+        let e = edges(arena, id).unwrap_or([0.0; 12]);
         let [mt, mr, mb, ml] = [e[8], e[9], e[10], e[11]];
         used = [Some(y - mt - cy), Some(cx + cw - (x + w + mr)), Some(cy + ch - (y + h + mb)), Some(x - ml - cx)];
     } else {
@@ -1231,12 +1259,12 @@ fn inset_containing_block(arena: &RealmArena, id: NodeId, position: style::compu
 // its last one ends (a dropdown hung off a wrapping link opens under where the link STARTS: Chrome).
 fn padding_rect(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
     let [x, y, w, h] = containing_extent(arena, id)?;
-    let e = edges(arena, id).map_or([0.0; 12], |e| e.e);
+    let e = edges(arena, id).unwrap_or([0.0; 12]);
     Some([x + e[7], y + e[4], (w - e[7] - e[5]).max(0.0), (h - e[4] - e[6]).max(0.0)])
 }
 fn content_rect(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
     let [x, y, w, h] = containing_extent(arena, id)?;
-    let e = edges(arena, id).map_or([0.0; 12], |e| e.e);
+    let e = edges(arena, id).unwrap_or([0.0; 12]);
     let [top, right, bottom, left] = [e[0] + e[4], e[1] + e[5], e[2] + e[6], e[3] + e[7]];
     Some([x + left, y + top, (w - left - right).max(0.0), (h - top - bottom).max(0.0)])
 }
@@ -1290,7 +1318,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "renderedBox", rendered_box_op, context_id);
     register(scope, ns, "scrollSize", scroll_size_op, context_id);
     register(scope, ns, "scrollRange", scroll_range_op, context_id);
-    register(scope, ns, "boxInfo", box_info_op, context_id);
+    register(scope, ns, "clientBox", client_box_op, context_id);
+    register(scope, ns, "frameViewport", frame_viewport_op, context_id);
     register(scope, ns, "usedInsets", used_insets_op, context_id);
     register(scope, ns, "renderedLegend", rendered_legend_op, context_id);
     register(scope, ns, "clientRects", client_rects_op, context_id);
@@ -1347,49 +1376,6 @@ fn answer_into<const N: usize>(
     rv.set(v8::Boolean::new(scope, answer.is_some()).into());
 }
 
-// __dom.boxInfo(nid, out) -> whether the current layout gave `nid` a box: what it gave it, written to the Float64Array
-// `out` as `BOX_INFO` numbers — the box `[x, y, w, h]` in document coordinates (an inline box's the union of its
-// fragments), how many fragments it broke into (0 for a record's box), the basis its percentages resolved against, the
-// margins its placement used (top, right, bottom, left), its own relative shift `[x, y]`, its edges as the pass used
-// them (padding, border, margin, each top / right / bottom / left), which margins are `auto` (1 top, 2 right, 4 bottom,
-// 8 left, with 16 where an edge resolved a percentage), whether it is out of flow (1, 2 `fixed`) and placed against the
-// viewport, whether its height is `auto`, its `position`, how it clips, and whether it is a non-replaced inline box and
-// a table box (`put_kind`) — NaN for what it has none of.
-pub(crate) const BOX_INFO: usize = 32;
-fn box_info(arena: &RealmArena, id: NodeId) -> Option<[f64; BOX_INFO]> {
-    let node = arena.get(id)?;
-    let mut out = [f64::NAN; BOX_INFO];
-    if let Some(b) = laid(arena, node) {
-        out[..4].copy_from_slice(&[b.x, b.y, b.w, b.h]);
-        out[4] = 0.0;
-        out[5] = b.cb_w.unwrap_or(f64::NAN);
-        out[6..10].copy_from_slice(&b.used_margins.unwrap_or([f64::NAN; 4]));
-        out[10..12].copy_from_slice(&b.rel);
-        put_edges(arena, id, &mut out);
-        out[25] = f64::from(b.out_of_flow);
-        out[26] = if b.cb == CB_RECT { 1.0 } else { 0.0 };
-        out[27] = if b.auto_height { 1.0 } else { 0.0 };
-        out[28] = f64::from(b.position);
-        out[29] = f64::from(b.clip);
-        put_kind(arena, id, &mut out);
-        return Some(out);
-    }
-    let frags = laid_frags(arena, node)?;
-    out[..4].copy_from_slice(&placed_box(arena, id)?);
-    out[4] = frags.len() as f64;
-    out[10..12].copy_from_slice(&[0.0; 2]);
-    out[25..30].copy_from_slice(&[0.0, 0.0, 1.0, 0.0, 0.0]);
-    put_edges(arena, id, &mut out);
-    put_kind(arena, id, &mut out);
-    Some(out)
-}
-// …what kind of box it is: a non-replaced INLINE box, one laid out as a block for the block it holds included (no
-// client box, no transform, an offset origin at its border box), and a TABLE box (its client box its border box).
-fn put_kind(arena: &RealmArena, id: NodeId, out: &mut [f64; BOX_INFO]) {
-    let Some(style) = box_style(arena, id) else { return };
-    out[30] = if non_replaced_inline(arena, id, &style) { 1.0 } else { 0.0 };
-    out[31] = if is_table_box(arena, id, &style) { 1.0 } else { 0.0 };
-}
 // Is `id` a TABLE box as the walk lays it out — whose client box is its border box, its borders in its grid? A widget's
 // table display is HTML's flow-root block (`<button style="display: table">`, `button-layout/display-other`), and a
 // replaced element's an inline-block.
@@ -1400,31 +1386,15 @@ pub(crate) fn is_table_box(arena: &RealmArena, id: NodeId, style: &ComputedValue
         && !crate::walk::widget_tag(tag)
         && !crate::walk::replaced_or_control(arena, id, n)
 }
-fn put_edges(arena: &RealmArena, id: NodeId, out: &mut [f64; BOX_INFO]) {
-    if let Some(Edges { e, auto, percent }) = edges(arena, id) {
-        out[12..24].copy_from_slice(&e);
-        out[24] = f64::from(auto | if percent { 16 } else { 0 });
-    }
-}
-// A box's EDGES — padding, border and margin, each top / right / bottom / left, an `auto` margin as 0 — with which
-// margins are `auto` (`box_info`'s mask: 1 top, 2 right, 4 bottom, 8 left) and whether any resolved a percentage: the
-// ones the pass laid it out with, or for a box the pass gave none of its own — a table row or row group, whose margins
-// and padding do not apply and whose border is its cells' to draw (CSS 2.1 §17.5), an inline box, which the lines lay
-// out by halves — as its style declares them, a percentage against its containing block's content width: what CSSOM
-// reports of them.
-pub(crate) struct Edges {
-    pub(crate) e: [f64; 12],
-    pub(crate) auto: u8,
-    pub(crate) percent: bool,
-}
-pub(crate) fn edges(arena: &RealmArena, id: NodeId) -> Option<Edges> {
+// A box's EDGES — padding, border and margin, each top / right / bottom / left, an `auto` margin as 0: the ones the pass
+// laid it out with, or for a box the pass gave none of its own — a table row or row group, whose margins and padding do
+// not apply and whose border is its cells' to draw (CSS 2.1 §17.5), an inline box, which the lines lay out by halves —
+// as its style declares them, a percentage against its containing block's content width: what CSSOM reports of them.
+pub(crate) fn edges(arena: &RealmArena, id: NodeId) -> Option<[f64; 12]> {
     let node = arena.get(id)?;
     let b = laid(arena, node);
     if let Some(e) = b.and_then(|b| b.edges) {
-        let b = b?;
-        let am = b.auto_margins;
-        let auto = [(4, 1), (2, 2), (8, 4), (1, 8)].iter().fold(0, |m, &(from, to)| if am & from != 0 { m | to } else { m });
-        return Some(Edges { e, auto, percent: b.percent_edges });
+        return Some(e);
     }
     if b.is_none() && laid_frags(arena, node).is_none() {
         return None;
@@ -1434,16 +1404,13 @@ pub(crate) fn edges(arena: &RealmArena, id: NodeId) -> Option<Edges> {
         let p = crate::hit_test::box_parent(arena, id)?;
         Some(content_box(laid(arena, arena.get(p)?)?)[2])
     }).unwrap_or(0.0);
-    let (lps, walk_auto) = crate::walk::edge_lps(&style).ok()?;
+    let (lps, _) = crate::walk::edge_lps(&style).ok()?;
     let px = |lp: Option<&style::values::computed::LengthPercentage>| {
         lp.map_or(0.0, |lp| f64::from(lp.resolve(Length::new(basis as f32)).px()))
     };
     let [bt, br, bb, bl] = crate::walk::used_borders(&style);
     let pad = |k: usize| px(lps[k]).max(0.0);
-    let e = [pad(4), pad(5), pad(6), pad(7), bt, br, bb, bl, px(lps[0]), px(lps[1]), px(lps[2]), px(lps[3])];
-    // (…the `auto` margins in `box_info`'s mask, from the walk's: 4 top, 2 right, 8 bottom, 1 left)
-    let auto = [(4, 1), (2, 2), (8, 4), (1, 8)].iter().fold(0, |m, &(from, to)| if walk_auto & from != 0 { m | to } else { m });
-    Some(Edges { e, auto, percent: lps.iter().flatten().any(|lp| lp.has_percentage()) })
+    Some([pad(4), pad(5), pad(6), pad(7), bt, br, bb, bl, px(lps[0]), px(lps[1]), px(lps[2]), px(lps[3])])
 }
 // __dom.usedInsets(nid, out) -> whether `nid` is a positioned box with one: its insets as `getComputedStyle` reports
 // them (`used_insets`), written to the Float64Array `out`.
@@ -1456,8 +1423,13 @@ fn rendered_legend_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let legend = crate::dom::nid_arg(scope, &args, 0).is_some_and(|id| rendered_legend(crate::dom::realm(scope, cid), id));
     rv.set(v8::Boolean::new(scope, legend).into());
 }
-fn box_info_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    answer_into(scope, &args, rv, box_info);
+// __dom.clientBox(nid, out) / frameViewport(nid, out) -> whether `nid` has one: its client box (`client_box`), and the
+// viewport a frame element gives the document inside it (`frame_viewport`) — written to the Float64Array `out`.
+fn client_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, client_box);
+}
+fn frame_viewport_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, frame_viewport);
 }
 
 

@@ -1024,7 +1024,6 @@ pub(crate) struct Box {
     pub(crate) y: f64,
     pub(crate) w: f64,
     pub(crate) h: f64,
-    pub(crate) auto_height: bool,
     // The box's FIRST and LAST baselines as offsets from its border-box top:
     // a text block's first / last line baseline (the line's top + its ascent — strut and runs); a block, grid
     // or flex container's from the first / last in-flow child that has one (flex items in flex order); None
@@ -1059,15 +1058,11 @@ pub(crate) struct Box {
     // apply to it (CSS 2.1 §17.5), and a border it declares is its cells' to draw, so what it declares is not what the
     // pass used, and it is what a read of it asks.
     pub(crate) edges: Option<[f64; 12]>,
-    // …which of its margins are `auto` (`Input::auto_margins`: 1 left, 2 right, 4 top, 8 bottom), whether any of them
-    // resolved a PERCENTAGE (`Input::has_percent_edges` — edges that hold for one basis only), and whether it is OUT
-    // OF FLOW (`Input::out_of_flow`, `OOF_FIXED` for `position: fixed`) — and where it is, what placed it: its
-    // containing block (`Input::cb_index`: a record, `CB_RECT` the viewport, `CB_INLINE` the inline entry `cb_inline`
+    // …whether it is OUT OF FLOW (`Input::out_of_flow`, `OOF_FIXED` for `position: fixed`) — and where it is, what
+    // placed it: its containing block (`Input::cb_index`: a record, `CB_RECT` the viewport, `CB_INLINE` the inline entry `cb_inline`
     // names, `CB_NONE` none) and the axes it takes its static position in
     // (`STATIC_BLOCK` / `STATIC_INLINE`: no inset on either side). `cb_inline` is −1 where there is none: no field of
     // a box may be NaN, which compares unequal to itself and makes every box of the pass a changed one.
-    pub(crate) auto_margins: u8,
-    pub(crate) percent_edges: bool,
     pub(crate) out_of_flow: u8,
     pub(crate) cb: i32,
     pub(crate) cb_inline: i32,
@@ -1084,7 +1079,7 @@ pub(crate) struct Box {
 impl Box {
     // The box of node `nid` at `[x, y, w, h]`, and nothing else about it.
     pub(crate) fn at(nid: f64, [x, y, w, h]: [f64; 4]) -> Box {
-        Box { nid, x, y, w, h, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None, rel: [0.0; 2], edges: None, auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0, line_rect: None }
+        Box { nid, x, y, w, h, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None, rel: [0.0; 2], edges: None, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0, line_rect: None }
     }
 }
 pub(crate) const CLIP_X: u8 = 1;
@@ -1594,8 +1589,6 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
         b.cb_w = if n.basis_w.is_nan() { None } else { Some(n.basis_w) };
         b.edges = (!matches!(n.display, DISPLAY_TABLE_ROW | DISPLAY_TABLE_ROW_GROUP))
             .then(|| [n.pt, n.pr, n.pb, n.pl, n.bt, n.br, n.bb, n.bl, Input::m(n.mt), Input::m(n.mr), Input::m(n.mb), Input::m(n.ml)]);
-        b.auto_margins = n.auto_margins;
-        b.percent_edges = n.has_percent_edges();
         b.out_of_flow = n.out_of_flow;
         if n.out_of_flow != 0 {
             b.cb = n.cb_index;
@@ -4315,7 +4308,6 @@ fn measure_uncached(
         boxes[i].nid = n.nid;
         boxes[i].w = w;
         boxes[i].h = h;
-        boxes[i].auto_height = false;
         // A replaced box has TWO baselines that do not agree, so the two answers are kept apart. What a container's
         // baseline scan takes from it is the CHROME's baseline where the control draws text and NOTHING otherwise.
         // What it hands the line it sits on is its control baseline (`control_baseline`) for any replaced box,
@@ -4549,7 +4541,6 @@ fn measure_uncached(
         boxes[i].h = box_h;
         boxes[i].clamped_h = is_auto(n.height) && box_h != flowed;
         boxes[i].natural_h = Some(flow_h);
-        boxes[i].auto_height = is_auto(n.height);
         let top = CMargin::of(Input::m(n.mt));
         // A text block whose stream put NOTHING on a line — only markers, an out-of-flow box's or a float's — holds
         // a line of nothing, which is zero-height and separates no margins (§9.4.2): with no edges or height of
@@ -5030,7 +5021,6 @@ fn measure_uncached(
     boxes[i].w = w;
     boxes[i].h = box_h;
     boxes[i].clamped_h = is_auto(n.height) && box_h != flowed;
-    boxes[i].auto_height = is_auto(n.height);
     boxes[i].natural_h = if flow_h.is_nan() { None } else { Some(flow_h) };
 
     // §8.3.1: a block collapses THROUGH — its top and bottom margins are one adjoining set that passes
@@ -5993,7 +5983,6 @@ fn measure_flex(
     boxes[i].w = box_w;
     boxes[i].h = box_h.max(0.0);
     boxes[i].clamped_h = clamped;
-    boxes[i].auto_height = is_auto(n.height);
     let top = CMargin::of(Input::m(n.mt));
     MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false }
 }
@@ -6776,7 +6765,6 @@ fn measure_table(
     boxes[i].nid = n.nid;
     boxes[i].w = table_w;
     boxes[i].h = grid_h + caption_h + n.edges_y();
-    boxes[i].auto_height = false;
 
     // Place the caption's MARGIN box at the table WRAPPER's border box (§17.4) — OUTSIDE the table's own
     // border+padding: a top caption at the wrapper's top edge (the grid is offset DOWN past it, via content_top),
@@ -6824,7 +6812,6 @@ fn measure_table(
         boxes[ch].nid = inputs[ch].get().nid;
         boxes[ch].x = row_x;
         boxes[ch].w = row_w;
-        boxes[ch].auto_height = false;
         if let Some(f) = first {
             boxes[ch].y = row_top[f];
             boxes[ch].h = row_top[last] + row_h[last] - row_top[f];
@@ -6885,7 +6872,6 @@ fn measure_table(
         boxes[r].y = row_top[ri] - gy;
         boxes[r].w = row_w;
         boxes[r].h = row_h[ri];
-        boxes[r].auto_height = false;
         let (mut row_first_base, mut row_last_base, mut row_atomic_base): (Option<f64>, Option<f64>, Option<f64>) = (None, None, None);
         for &c in &children[r] {
             let k = inputs[c].get();
@@ -8276,7 +8262,6 @@ fn measure_grid(
     let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_y() };
     boxes[i].h = clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0);
     boxes[i].clamped_h = is_auto(n.height) && boxes[i].h != box_h;
-    boxes[i].auto_height = is_auto(n.height);
     // A grid establishes an independent formatting context: its margins do not collapse with its items'.
     let top = CMargin::of(Input::m(n.mt));
     MInfo { top, top_only: top, bottom: CMargin::of(Input::m(n.mb)), collapse_through: false }
@@ -9017,10 +9002,9 @@ mod tests {
         b.height = 30.0;
         let inputs = vec![blk(0.0, -1), a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
-        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0, line_rect: None });
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0, line_rect: None });
+        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0, line_rect: None });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0, line_rect: None });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
-        assert!(bx[0].auto_height);
     }
 
     #[test]
@@ -9192,7 +9176,7 @@ mod tests {
         let inputs = vec![blk(0.0, -1), owner, f];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!(bx[1].h, 120.0); // owner contains the float
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0, line_rect: None });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0, line_rect: None });
     }
 
     #[test]
@@ -9652,7 +9636,6 @@ mod tests {
         let inputs = vec![flex(0.0, -1, 600.0), item(1.0, 0, 100.0, 30.0), item(2.0, 0, 100.0, 50.0)];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!(bx[0].h, 50.0); // auto height = tallest item outer
-        assert!(bx[0].auto_height);
     }
 
     fn tbl(nid: f64, parent: i32, sx: f64, sy: f64) -> Input {

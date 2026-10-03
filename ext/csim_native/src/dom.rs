@@ -468,10 +468,9 @@ pub(crate) struct RealmArena {
     // The layout walks' clock: a walk moves it on as it begins, and a change is stamped with where it stands
     // (`NodeData::stamp`), so a stamp past the epoch a walk began at is a change since that walk.
     pub(crate) layout_epoch: std::cell::Cell<u64>,
-    // The elements whose style a restyle REPLACED since this side last took them (`note_restyled`, `styleRestyled`):
-    // what the JS side's layout memos and its early return have to hear of, since the engine decides what a change
-    // restyles. Past `RESTYLED_CAP` only that it overflowed is kept: then everything is.
-    pub(crate) restyled: std::cell::RefCell<(Vec<NodeId>, bool)>,
+    // How many elements a restyle REPLACED the style of since this side last took them (`note_restyled`,
+    // `styleRestyled`): what the JS side's layout gate has to hear of, since the engine decides what a change restyles.
+    pub(crate) restyled: std::cell::Cell<u32>,
     // The root element the last layout laid out and the viewport it laid it out against, `[width, height]`: what the
     // geometry (geometry.rs) reads every box of that layout in.
     pub(crate) layout_root: Option<NodeId>,
@@ -487,7 +486,6 @@ pub(crate) struct RealmArena {
     // (`geometry::reclamp_scrolls`) and a removal from the tree drops (`detach`).
     pub(crate) scrolled_nodes: Vec<NodeId>,
 }
-pub(crate) const RESTYLED_CAP: usize = 4096;
 
 impl RealmArena {
     // `id` changed in a way a layout walk reads: it and every node its flat subtree is part of — its parent, a shadow
@@ -511,16 +509,7 @@ impl RealmArena {
     // …and one the style engine RESTYLED: stamped, as a write is, and kept for this side to take.
     pub(crate) fn note_restyled(&self, id: NodeId) {
         self.stamp_change(id);
-        let mut restyled = self.restyled.borrow_mut();
-        if restyled.1 {
-            return;
-        }
-        if restyled.0.len() == RESTYLED_CAP {
-            restyled.0.clear();
-            restyled.1 = true;
-        } else {
-            restyled.0.push(id);
-        }
+        self.restyled.set(self.restyled.get().saturating_add(1));
     }
     // Something a geometry read reads moved: its memo is no longer the page's — `boxes_moved` where it may have moved a
     // box, `scrolled` where it moved a scroll offset alone.
@@ -2740,8 +2729,8 @@ fn style_generated(
     });
 }
 
-// __dom.styleRestyled() -> Float64Array: the elements whose style a restyle replaced since the last call
-// (`RealmArena::note_restyled`), taken — or [-1] where more were than it keeps, and every element has to be taken for one.
+// __dom.styleRestyled() -> how many elements a restyle replaced the style of since the last call
+// (`RealmArena::note_restyled`), taken.
 fn style_restyled(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2749,9 +2738,7 @@ fn style_restyled(
 ) {
     let cid = realm_id(scope, &args);
     let Some(arena) = dom(scope).realms.get(&cid) else { return };
-    let (ids, overflowed) = std::mem::take(&mut *arena.restyled.borrow_mut());
-    let nids: Vec<f64> = if overflowed { vec![-1.0] } else { ids.iter().map(|id| id.to_f64()).collect() };
-    rv.set(f64_array(scope, &nids).into());
+    rv.set_uint32(arena.restyled.take());
 }
 
 // The page's clock (ms) an op is given at `index`: 0 when it is not a finite number (an undefined argument reads NaN).

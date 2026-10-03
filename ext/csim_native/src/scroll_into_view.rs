@@ -115,7 +115,7 @@ fn scrollport(arena: &RealmArena, p: NodeId, is_root: bool) -> Option<[f64; 4]> 
         return Some([0.0, 0.0, w, h]);
     }
     let [x, y, w, h] = laid_out_box(arena, p)?;
-    let e = edges(arena, p).map_or([0.0; 12], |e| e.e);
+    let e = edges(arena, p).unwrap_or([0.0; 12]);
     // (…the CLIENT box: a table's is its border box, its borders sitting in its grid)
     let table = box_style(arena, p).is_some_and(|s| is_table_box(arena, p, &s));
     let [cw, ch] = if table { [w, h] } else { [(w - e[5] - e[7]).max(0.0), (h - e[4] - e[6]).max(0.0)] };
