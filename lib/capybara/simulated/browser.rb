@@ -2055,6 +2055,8 @@ module Capybara
       # on every VM rebuild so JS-side UA branches (Discourse's
       # `viewport_based_mobile_mode = false` path) resolve correctly.
       attr_reader :default_viewport, :default_user_agent
+      # Whether the session's pointer is a touchscreen (the driver's `touch:`), told every document as it boots.
+      attr_accessor :touch_input
 
       def default_viewport=(vp)
         @default_viewport = vp
@@ -11706,6 +11708,7 @@ module Capybara
           opts['viewportH'] = @viewport_height
         end
         opts['userAgent'] = @default_user_agent if @default_user_agent
+        opts['touch'] = true if @touch_input
         @document_handle = @runtime.call('__csimBootContext', opts).to_i
         # Drain the app's deferred external-script (chunk) boot chain to quiescence.
         # A dynamically-inserted external <script> runs async (setTimeout 0; HTML

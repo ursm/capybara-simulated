@@ -986,6 +986,9 @@ pub(crate) struct Dom {
     // arena back (context ids are never reused, so each would have stayed an entry for good).
     dropped: std::collections::HashSet<i32>,
     graveyard: RealmArena,
+    // Whether the session's pointer is a touchscreen (`setTouchInput`): what every realm's device answers `pointer` /
+    // `hover` by (style.rs `Screen`).
+    touch_input: bool,
 }
 
 // Borrow the isolate's Dom, lazily creating the slot on first touch. rusty_v8
@@ -1184,6 +1187,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "declSupports", decl_supports, context_id);
     register(scope, ns, "declSupportsCondition", decl_supports_condition, context_id);
     register(scope, ns, "cssNumber", css_number, context_id);
+    register(scope, ns, "mediaMatches", media_matches, context_id);
+    register(scope, ns, "setTouchInput", set_touch_input, context_id);
     register(scope, ns, "styleGenerated", style_generated, context_id);
     register(scope, ns, "styleRestyled", style_restyled, context_id);
     register(scope, ns, "styleFlush", style_flush, context_id);
@@ -2357,8 +2362,9 @@ fn style_sheets_unguarded(
     if d.dropped.contains(&cid) {
         return;
     }
+    let screen = crate::style::Screen { viewport, touch: d.touch_input };
     let arena = d.realms.entry(cid).or_default();
-    let mut engine = crate::style::StyleEngine::for_document(d.styles.remove(&cid), arena, &base, quirks, html_document, viewport);
+    let mut engine = crate::style::StyleEngine::for_document(d.styles.remove(&cid), arena, &base, quirks, html_document, screen);
     let sheets: Vec<_> = ids.iter().filter_map(|&id| arena.sheets.get(id)).collect();
     engine.set_sheets(doc, &sheets);
     d.styles.insert(cid, engine);
@@ -2670,6 +2676,25 @@ fn decl_supports(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 fn css_number(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let text = args.get(0).to_rust_string_lossy(scope);
     rv.set_double(crate::cssom_decl::number(&text).unwrap_or(f64::NAN));
+}
+
+// __dom.mediaMatches(text, width, height) -> whether the media query list matches on a viewport of that size
+// (`style::media_matches`).
+fn media_matches(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    let viewport = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0) as f32);
+    let cid = realm_id(scope, &args);
+    let d = dom(scope);
+    let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
+    let Some(arena) = d.realms.get(&cid) else { return rv.set_bool(false) };
+    rv.set_bool(crate::style::media_matches(d.styles.get(&cid), arena, screen, &text));
+}
+
+// __dom.setTouchInput(touch): whether the session's pointer is a touchscreen — its documents' devices answer by it from
+// their next sheet update on.
+fn set_touch_input(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let touch = args.get(0).is_true();
+    dom(scope).touch_input = touch;
 }
 
 // __dom.declSupportsCondition(text) -> `CSS.supports(conditionText)`.

@@ -66,8 +66,11 @@ module Capybara
       # so `matchMedia` / mobile-breakpoint branches and server-side
       # UA-based mobile detection both resolve before any document
       # loads. The Browser tracks both as "defaults" so `reset!`
-      # (per-test teardown) restores them between specs.
-      def initialize(app, viewport: nil, user_agent: nil)
+      # (per-test teardown) restores them between specs. `touch: true` is a
+      # session whose pointer is a touchscreen, as Playwright's `hasTouch`
+      # emulates a phone's: `(pointer: coarse)` and nothing hovers, in the
+      # page's CSS and its `matchMedia` alike.
+      def initialize(app, viewport: nil, user_agent: nil, touch: false)
         # `Capybara.disable_animation` is delivered to the real drivers by a SERVER
         # middleware (session.rb adds AnimationDisabler to the Puma stack), which
         # injects `animation-duration: 0s !important` CSS into every HTML response.
@@ -117,6 +120,7 @@ module Capybara
         @@live_lock.synchronize { @@live << WeakRef.new(self) }
         @browser.default_viewport   = viewport   if viewport
         @browser.default_user_agent = user_agent if user_agent
+        @browser.touch_input        = touch
       end
 
       private def build_window_browser

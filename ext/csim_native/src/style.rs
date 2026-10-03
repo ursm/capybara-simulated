@@ -181,7 +181,7 @@ pub(crate) struct StyleEngine {
     quirks: QuirksMode,
     // An HTML document (else an XML one, where no type selector or attribute name folds ASCII case).
     html_document: bool,
-    viewport: (f32, f32),
+    screen: Screen,
     doc: Option<NodeId>,
     // The page's sheets as last set (the realm's `SheetStore` holds them; a set that keeps one keeps its parse).
     author: Vec<AuthorSheet>,
@@ -286,7 +286,18 @@ pub(crate) fn enable_properties() {
     });
 }
 
-fn device(faces: crate::walk::SharedFaces, quirks: QuirksMode, (width, height): (f32, f32)) -> Device {
+// What the page is shown on: its viewport, in CSS px, and whether its pointer is a touchscreen — a session emulating a
+// phone, as Playwright's `hasTouch` does (`(pointer: coarse)`, nothing hovers) — or a mouse (fine, and it hovers).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Screen {
+    pub(crate) viewport: (f32, f32),
+    pub(crate) touch: bool,
+}
+
+fn device(faces: crate::walk::SharedFaces, quirks: QuirksMode, screen: Screen) -> Device {
+    use style::servo::media_features::PointerCapabilities;
+    let (width, height) = screen.viewport;
+    let pointer = if screen.touch { PointerCapabilities::COARSE } else { PointerCapabilities::FINE | PointerCapabilities::HOVER };
     Device::new(
         MediaType::screen(),
         quirks,
@@ -296,22 +307,34 @@ fn device(faces: crate::walk::SharedFaces, quirks: QuirksMode, (width, height): 
         Box::new(crate::style_fonts::Metrics { faces }),
         ComputedValues::initial_values_with_font_override(style::properties::style_structs::Font::initial_values()),
         PrefersColorScheme::Light,
-        Default::default(),
-        Default::default(),
+        pointer,
+        pointer,
     )
 }
 
+// Whether the media query list `media` matches on `screen`: as the document's device answers it where the engine shows
+// the page on that screen, else as one made for it (a sheet list built before the engine was told of a resize).
+pub(crate) fn media_matches(engine: Option<&StyleEngine>, arena: &RealmArena, screen: Screen, media: &str) -> bool {
+    if let Some(engine) = engine.filter(|e| e.screen == screen) {
+        return engine.media_matches(media);
+    }
+    let quirks = engine.map_or(QuirksMode::NoQuirks, |e| e.quirks);
+    let url = crate::cssom_decl::url_data("about:blank");
+    let device = device(arena.faces.clone(), quirks, screen);
+    crate::sheets::media_list(media, &url, quirks).evaluate(&device, quirks, &mut style::stylesheets::CustomMediaEvaluator::none())
+}
+
 impl StyleEngine {
-    fn new(arena: &RealmArena, quirks: QuirksMode, html_document: bool, viewport: (f32, f32), url: UrlExtraData) -> StyleEngine {
+    fn new(arena: &RealmArena, quirks: QuirksMode, html_document: bool, screen: Screen, url: UrlExtraData) -> StyleEngine {
         enable_properties();
         let mut engine = StyleEngine {
             faces: arena.faces.clone(),
             lock: arena.style_lock.0.clone(),
-            stylist: Stylist::new(device(arena.faces.clone(), quirks, viewport), quirks),
+            stylist: Stylist::new(device(arena.faces.clone(), quirks, screen), quirks),
             url,
             quirks,
             html_document,
-            viewport,
+            screen,
             doc: None,
             author: Vec::new(),
             styled: None,
@@ -337,7 +360,7 @@ impl StyleEngine {
         engine
     }
 
-    // The engine of `arena`'s document at `base`, in `quirks` mode, an HTML document or not, with a `viewport` of CSS px:
+    // The engine of `arena`'s document at `base`, in `quirks` mode, an HTML document or not, shown on `screen`:
     // `current`, told what changed, or a new one. It is never REPLACED — the elements' styles hold its rule tree.
     pub(crate) fn for_document(
         current: Option<StyleEngine>,
@@ -345,24 +368,24 @@ impl StyleEngine {
         base: &str,
         quirks: bool,
         html_document: bool,
-        viewport: (f32, f32),
+        screen: Screen,
     ) -> StyleEngine {
         let quirks = if quirks { QuirksMode::Quirks } else { QuirksMode::NoQuirks };
         let url = UrlExtraData::from(url::Url::parse(base).unwrap_or_else(|_| url::Url::parse("about:blank").unwrap()));
-        let Some(mut engine) = current else { return StyleEngine::new(arena, quirks, html_document, viewport, url) };
+        let Some(mut engine) = current else { return StyleEngine::new(arena, quirks, html_document, screen, url) };
         engine.url = url;
         if engine.html_document != html_document {
             engine.html_document = html_document;
             engine.styled = None;
             engine.restyle_all = true;
         }
-        if engine.quirks != quirks || engine.viewport != viewport {
+        if engine.quirks != quirks || engine.screen != screen {
             engine.quirks = quirks;
-            engine.viewport = viewport;
+            engine.screen = screen;
             // …and the origins whose media queries now answer differently are rebuilt (the stylist says which).
             let guard = engine.lock.read();
             let changed =
-                engine.stylist.set_device(device(engine.faces.clone(), quirks, viewport), &StylesheetGuards::same(&guard));
+                engine.stylist.set_device(device(engine.faces.clone(), quirks, screen), &StylesheetGuards::same(&guard));
             drop(guard);
             engine.stylist.force_stylesheet_origins_dirty(changed);
             for shadow in engine.shadow_styles.values_mut() {
@@ -480,7 +503,7 @@ impl StyleEngine {
     }
 
     // Whether the media query list `media` matches the document's device now (a `<source media>`).
-    fn media_matches(&self, media: &str) -> bool {
+    pub(crate) fn media_matches(&self, media: &str) -> bool {
         let list = self.media_list(media, &self.url);
         list.evaluate(self.stylist.device(), self.stylist.quirks_mode(), &mut style::stylesheets::CustomMediaEvaluator::none())
     }
@@ -3145,11 +3168,11 @@ mod tests {
         ];
         // …and an attribute that is not one declaration of its property sets nothing at all.
         let arena_for_injection = RealmArena::default();
-        let injected = StyleEngine::new(&arena_for_injection, QuirksMode::NoQuirks, true, (800.0, 600.0), UrlExtraData::from(url::Url::parse("about:blank").unwrap()));
+        let injected = StyleEngine::new(&arena_for_injection, QuirksMode::NoQuirks, true, Screen { viewport: (800.0, 600.0), touch: false }, UrlExtraData::from(url::Url::parse("about:blank").unwrap()));
         let hints = vec![("font-family", "x; display: none".to_owned()), ("color", "red; display: none".to_owned())];
         assert!(injected.hint_block(&hints, false).is_none());
         let arena = RealmArena::default();
-        let engine = StyleEngine::new(&arena, QuirksMode::NoQuirks, true, (800.0, 600.0), UrlExtraData::from(url::Url::parse("about:blank").unwrap()));
+        let engine = StyleEngine::new(&arena, QuirksMode::NoQuirks, true, Screen { viewport: (800.0, 600.0), touch: false }, UrlExtraData::from(url::Url::parse("about:blank").unwrap()));
         for (tag, attrs) in cases {
             let mut node = NodeData::of_kind(NodeKind::Element, Vec::new());
             node.local_name = web_atoms::LocalName::from(*tag);
