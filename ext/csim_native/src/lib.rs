@@ -24,6 +24,7 @@ mod font;
 mod geometry;
 // HTML's presentational hints: the declarations an element's attributes add to the cascade.
 mod hints;
+mod hit_test;
 mod html_parse;
 // Layout: the records the walk builds (mod walk) laid out, driven by the `layoutBuild` op (mod walk_ops).
 mod layout;

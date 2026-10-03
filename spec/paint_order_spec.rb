@@ -233,4 +233,21 @@ RSpec.describe 'paint order' do
     expect(s.evaluate_script("(#{ids})(sr.elementsFromPoint(50, 125))")).to eq(%w[light wrap host c BODY HTML])
     expect(s.evaluate_script('document.elementFromPoint(2000, 110)')).to be_nil
   end
+
+  # An overflow CLIP is a clip of the point, not only of a box pushed wholly outside it: past the clipping box's edge,
+  # the content overflowing it is not there to hit (Chrome: BODY, where the overflowing child was answered).
+  it 'hits nothing a clip cuts off at the point' do
+    clip = '<div style="overflow:hidden;width:100px;height:50px"><div id="wide" style="width:300px;height:100px"></div></div>'
+    expect(hit(clip, x: 150, y: 25)).to eq('BODY')
+    expect(hit(clip, x: 50, y: 25)).to eq('wide')
+  end
+
+  # …and an out-of-flow box escapes every clip between it and the box it was placed against (CSS Overflow 3 §3.1): an
+  # absolute child of a static `overflow: hidden` box, placed against a positioned box around both, is hit where it is.
+  it 'lets an absolutely positioned box escape the clips inside its containing block' do
+    expect(hit(<<~HTML, x: 170, y: 25)).to eq('esc')
+      <div style="position:relative;height:60px"><div style="overflow:hidden;width:100px;height:50px"><div id="esc"
+        style="position:absolute;left:150px;top:0;width:50px;height:50px"></div></div></div>
+    HTML
+  end
 end

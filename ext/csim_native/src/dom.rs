@@ -146,11 +146,13 @@ pub(crate) struct NodeData {
     // a pass that lays it out no longer, which `laid_at` tells apart.
     pub(crate) layout_box: Option<crate::layout::Box>,
     // …or, for an INLINE box, which no record lays out, the FRAGMENTS the lines broke it into, `[x, y, w, h]` each
-    // (`geometry::store_fragments`); None for any other node. A node has one or the other, as the last pass laid it out.
+    // (`geometry::store_layout`); None for any other node. A node has one or the other, as the last pass laid it out.
     pub(crate) layout_frags: Option<Box<[[f64; 4]]>>,
     // The layout pass (`RealmArena::layout_pass`) that last laid it out: its box or fragments are the page's only while
     // this is the current one (`geometry::laid`).
     pub(crate) laid_at: u64,
+    // …and, for an OUT-OF-FLOW box, the element whose box it was placed against (None: the viewport, or a box in flow).
+    pub(crate) containing_block: Option<NodeId>,
     // Its SCROLL OFFSET, `[x, y]`: the scroll container's (the document scroller's on the root element), 0 on any other.
     pub(crate) scroll: [f64; 2],
     // An element's live STATE that no attribute carries (`state` bits, below): what a script or the user did to it.
@@ -230,6 +232,7 @@ impl NodeData {
             layout_box: None,
             layout_frags: None,
             laid_at: 0,
+            containing_block: None,
             scroll: [0.0; 2],
             state: 0,
             host: None,
@@ -1167,6 +1170,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::animation_ops::install(scope, ns, context_id);
     crate::walk_ops::install(scope, ns, context_id);
     crate::geometry::install(scope, ns, context_id);
+    crate::hit_test::install(scope, ns, context_id);
     crate::html_parse::install(scope, ns, context_id);
     crate::url_ops::install(scope, ns, context_id);
     crate::text_codec::install(scope, ns, context_id);
@@ -2995,7 +2999,7 @@ fn register_font_stack(
 // where the view is not aligned for f64 (a view at an odd byte offset, which no caller makes). The borrow is sound
 // because nothing between here and the op's answer runs JS or allocates on V8's heap, so nothing can move the data;
 // the answer is made after the last read.
-enum F64Arg<'a> {
+pub(crate) enum F64Arg<'a> {
     Borrowed(&'a [f64]),
     Owned(Vec<f64>),
 }
@@ -3008,7 +3012,7 @@ impl std::ops::Deref for F64Arg<'_> {
         }
     }
 }
-fn f64_arg<'a>(val: v8::Local<'a, v8::Value>) -> F64Arg<'a> {
+pub(crate) fn f64_arg<'a>(val: v8::Local<'a, v8::Value>) -> F64Arg<'a> {
     let Ok(arr) = v8::Local::<v8::Float64Array>::try_from(val) else {
         return F64Arg::Owned(Vec::new());
     };

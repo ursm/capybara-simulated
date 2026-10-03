@@ -1481,7 +1481,7 @@ const OWN_CONTEXT_TAGS: &[&str] = &[
 ];
 // Whether an element has an INTRINSIC size — a replaced element or a control, sized from data or UA rules — which is
 // what makes a box replaced: by its tag, but an `<object>` showing its fallback content is no replaced element at all.
-fn replaced_or_control(arena: &RealmArena, id: NodeId, node: &crate::dom::NodeData) -> bool {
+pub(crate) fn replaced_or_control(arena: &RealmArena, id: NodeId, node: &crate::dom::NodeData) -> bool {
     match node.rendering_tag() {
         "object" => !renders_object_fallback(arena, id, node),
         tag => matches!(
@@ -1501,7 +1501,7 @@ fn renders_object_fallback(arena: &RealmArena, id: NodeId, node: &crate::dom::No
 }
 // …and HTML's WIDGETS, whose box the UA decides however the page spells a block-level `display` (a
 // `<button style="display: table">` is a flow-root block).
-fn widget_tag(tag: &str) -> bool {
+pub(crate) fn widget_tag(tag: &str) -> bool {
     matches!(tag, "button" | "input" | "select" | "textarea" | "fieldset" | "meter" | "progress" | "marquee")
 }
 
@@ -4795,7 +4795,7 @@ pub(crate) fn inset_lp(v: &style::values::computed::position::Inset) -> Result<O
 // Does the box contain its out-of-flow descendants, fixed ones included (`containsOutOfFlow`): a filter, a transform
 // on a box it applies to, layout or paint containment, `content-visibility` other than visible, or a `will-change` that
 // promises one.
-fn contains_out_of_flow(style: &ComputedValues, arena: &RealmArena, id: NodeId, node: &crate::dom::NodeData) -> bool {
+pub(crate) fn contains_out_of_flow(style: &ComputedValues, arena: &RealmArena, id: NodeId, node: &crate::dom::NodeData) -> bool {
     use style::values::computed::Contain;
     let effects = style.get_effects();
     if !effects.filter.0.is_empty() || !effects.backdrop_filter.0.is_empty() {

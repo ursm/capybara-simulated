@@ -131,7 +131,7 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
                 .map_or(0, |s| walk::position_code(s.get_box().clone_position()));
         }
         arena.begin_layout(root, [basis.w, basis.h]);
-        crate::geometry::store_fragments(arena, &laid.frags, &inline_nids);
+        crate::geometry::store_layout(arena, &laid, &inline_nids);
     }
     // (…its text rows answered as the painter's pieces alone, below: nothing on that side reads the rows that index runs)
     let answer = laid_answer(scope, cid, laid);

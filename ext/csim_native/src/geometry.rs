@@ -54,7 +54,7 @@ pub(crate) fn box_style(arena: &RealmArena, id: NodeId) -> Option<Arc<ComputedVa
 pub(crate) fn laid<'a>(arena: &RealmArena, node: &'a crate::dom::NodeData) -> Option<&'a Box> {
     node.layout_box.as_ref().filter(|_| node.laid_at == arena.layout_pass)
 }
-fn laid_frags<'a>(arena: &RealmArena, node: &'a crate::dom::NodeData) -> Option<&'a [[f64; 4]]> {
+pub(crate) fn laid_frags<'a>(arena: &RealmArena, node: &'a crate::dom::NodeData) -> Option<&'a [[f64; 4]]> {
     node.layout_frags.as_deref().filter(|_| node.laid_at == arena.layout_pass)
 }
 
@@ -244,24 +244,38 @@ fn content_box(b: &Box) -> [f64; 4] {
     [b.x + left, b.y + top, (b.w - left - right).max(0.0), (b.h - top - bottom).max(0.0)]
 }
 
-// Each INLINE box's fragments, off a pass's fragment rows `[inline index, x, y, w, h]` and the node each inline entry
-// is (`inline_nids`): stored on the node in place of a box (`NodeData::layout_frags`).
-pub(crate) fn store_fragments(arena: &mut RealmArena, rows: &[crate::layout::FragRow], inline_nids: &[f64]) {
+// What a pass laid out BESIDES the records' boxes (`laid_answer` stores those): each INLINE box's fragments, off its
+// fragment rows `[inline index, x, y, w, h]` and the node each inline entry is (`inline_nids`), stored on the node in
+// place of a box (`NodeData::layout_frags`) — and each out-of-flow box's containing block, which its record names by
+// its own index (`NodeData::containing_block`).
+pub(crate) fn store_layout(arena: &mut RealmArena, laid: &crate::layout::Laid, inline_nids: &[f64]) {
     let pass = arena.layout_pass;
+    let nid = |v: f64| NodeId::from_i64(v as i64).filter(|_| v >= 0.0);
     let mut by_inline: Vec<Vec<[f64; 4]>> = vec![Vec::new(); inline_nids.len()];
-    for &[at, x, y, w, h] in rows {
+    for &[at, x, y, w, h] in &laid.frags {
         if let Some(list) = by_inline.get_mut(at as usize) {
             list.push([x, y, w, h]);
         }
     }
-    for (nid, frags) in inline_nids.iter().zip(by_inline) {
-        let Some(node) = NodeId::from_i64(*nid as i64).and_then(|id| arena.get_mut_quietly(id)) else { continue };
+    for (at, frags) in inline_nids.iter().zip(by_inline) {
+        let Some(node) = nid(*at).and_then(|id| arena.get_mut_quietly(id)) else { continue };
         if frags.is_empty() {
             continue;
         }
         node.layout_box = None;
         node.layout_frags = Some(frags.into_boxed_slice());
         node.laid_at = pass;
+    }
+    for b in &laid.boxes {
+        let cb = match b.cb {
+            _ if b.out_of_flow == 0 => None,
+            at if at >= 0 => laid.boxes.get(at as usize).and_then(|c| nid(c.nid)),
+            crate::layout::CB_INLINE => inline_nids.get(b.cb_inline as usize).and_then(|&v| nid(v)),
+            _ => None,
+        };
+        if let Some(node) = nid(b.nid).and_then(|id| arena.get_mut_quietly(id)) {
+            node.containing_block = cb;
+        }
     }
 }
 
@@ -482,18 +496,18 @@ fn is_boxless(arena: &RealmArena, node: NodeId, style: &ComputedValues) -> bool 
 }
 // …or is it a non-replaced INLINE box: one the lines broke into fragments, or one laid out as a BLOCK for the block it
 // holds among them (a used display, no computed one — a rendered `<legend>` is a block whatever it declares).
-fn non_replaced_inline(arena: &RealmArena, node: NodeId, style: &ComputedValues) -> bool {
-    const REPLACED: [&str; 16] = [
-        "img", "video", "audio", "canvas", "iframe", "embed", "object", "input", "select", "textarea", "button", "svg",
-        "fieldset", "meter", "progress", "marquee",
-    ];
+pub(crate) fn non_replaced_inline(arena: &RealmArena, node: NodeId, style: &ComputedValues) -> bool {
     let Some(n) = arena.get(node) else { return false };
     if laid_frags(arena, n).is_some() {
         return true;
     }
     let tag = n.rendering_tag();
     let d = style.get_box().walk_display(tag);
-    matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && !REPLACED.contains(&tag) && tag != "legend"
+    matches!(d.outside(), DisplayOutside::Inline)
+        && matches!(d.inside(), DisplayInside::Flow)
+        && !crate::walk::replaced_or_control(arena, node, n)
+        && !crate::walk::widget_tag(tag)
+        && tag != "legend"
 }
 
 // A rect's image under `m`: the axis-aligned box its transformed quad occupies, which both rect APIs report. A corner
