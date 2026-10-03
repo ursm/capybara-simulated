@@ -577,12 +577,10 @@ module Capybara
         # worker-reachable via OffscreenCanvas, like decode_image).
         @font_vmetrics_lock   = Mutex.new
         @font_vmetrics        = {}
-        # Per-family glyph ADVANCE tables (font_advance_table) — layout's text
-        # metric source. Misses cache as nil, so a box without fontconfig spawns
-        # `fc-match` once per family, not once per measurement.
+        # (family, weight/style) -> the fontconfig file native text metrics read. Misses cache as nil, so a box
+        # without fontconfig spawns `fc-match` once per family, not once per measurement.
         @font_table_lock      = Mutex.new
-        @font_advance_tables  = {}
-        @font_files           = {}   # (family, weight/style) -> fontconfig path, for native text metrics
+        @font_files           = {}
         @font_glyph_lock      = Mutex.new
         @font_glyph           = {}
         @fc_strong_lock       = Mutex.new
@@ -7661,30 +7659,9 @@ module Capybara
         nil
       end
 
-      # Per-character ADVANCE widths (CSS px at font-size 1) for a CSS font family,
-      # plus the mean advance for characters the table doesn't carry. This is what
-      # LAYOUT measures text with: the advances come from the font's own `hmtx`
-      # table, so no glyph is rasterised, the whole table is one host call per
-      # (family, weight/style), and a text run then costs a few lookups in JS
-      # (measured: 2 us/run against 350 us for the rasterising measure path).
-      #
-      # nil when fontconfig can't resolve the family (or isn't installed) — the
-      # caller keeps its own estimate. A nil result is CACHED too, or every miss
-      # would spawn another `fc-match`.
-      def font_advance_table(family, weight_style = nil)
-        key = "#{family} #{weight_style}"
-        @font_table_lock.synchronize do
-          return @font_advance_tables[key] if @font_advance_tables.key?(key)
-        end
-        table = build_font_advance_table(family.to_s, weight_style.to_s)
-        @font_table_lock.synchronize { @font_advance_tables[key] = table }
-        table
-      end
-
-      # The fontconfig file backing a CSS family + weight/style, for NATIVE text metrics: csim_native
-      # parses it with fontations (skrifa) so native layout measures runs in-process. Same fontconfig
-      # resolution the system advance table uses, so native's advances match the JS table's; nil when
-      # unresolved (JS keeps its estimate). Memoised (hit AND miss) so it costs no extra `fc-match`.
+      # The fontconfig file backing a CSS family + weight/style, for NATIVE text metrics: csim_native parses it with
+      # fontations (skrifa) — advances, line metrics, x-height. nil when unresolved. Memoised (hit AND miss) so it
+      # costs no extra `fc-match`.
       def font_file(family, weight_style = nil)
         key = "#{family} #{weight_style}"
         @font_table_lock.synchronize do
@@ -7693,75 +7670,6 @@ module Capybara
         path = font_file_for_family(family.to_s, weight_style.to_s)
         @font_table_lock.synchronize { @font_files[key] = path }
         path
-      end
-
-      # fontconfig resolves a CSS family (or a generic like sans-serif) to a real
-      # font FILE; the file's cmap + hmtx give the advances. Printable ASCII covers
-      # the overwhelming majority of what these pages measure; anything else falls
-      # back to the mean.
-      private def build_font_advance_table(family, weight_style)
-        file = font_file_for_family(family, weight_style) or return nil
-        font_table_from_file(file)
-      end
-      # The table `__csim_fontAdvances` hands the flow, from one font FILE: printable-ASCII
-      # advances as em fractions, their mean, the x-height and the hhea line metrics.
-      private def font_table_from_file(file)
-        g = font_glyph_data(file) or return nil
-        upm = g[:upm].to_f
-        return nil unless upm.positive?
-
-        # A character the font doesn't map is LEFT OUT rather than recorded as zero:
-        # absent means "no figure for this one", which the JS side answers with the
-        # table's mean, while a recorded zero would measure the character as taking
-        # no space at all. (A CI image's `monospace` mapped no digits, so a `ch` —
-        # defined as the advance of `0` — read as zero-wide while the same string
-        # measured 8px/char.)
-        adv   = {}
-        total = 0.0
-        count = 0
-        (32..126).each do |cp|
-          gid   = g[:cmap][cp] or next
-          units = g[:advances][gid] || 0
-          next unless units.positive?
-
-          px = units / upm
-          adv[cp.chr] = px
-          total += px
-          count += 1
-        end
-        # A file we could open but got nothing out of — an empty cmap, a `hmtx` of
-        # zeroes — is not a font table, it's a table that would measure every string
-        # as zero-wide. Answer nil so every caller takes the same estimate, rather
-        # than some measuring 0 and others (the `ch` unit) falling back to 0.5em.
-        return nil unless count.positive?
-        # The font's own vertical metrics (hhea), as per-em factors. A browser rounds
-        # each metric to whole px and then sums, which is why Liberation Sans at 16px
-        # gives an 18px line box (14 + 3 + 1) and a 17px inline content box (14 + 3)
-        # — a single combined factor rounds to the wrong answer for one or the other.
-        #
-        # `xh` is the font's x-height as a per-em factor — CSS's `ex` unit. Zero when
-        # the font doesn't carry one (OS/2 below version 2), and the JS side then
-        # falls back to the spec's 0.5em, as browsers do.
-        {'adv' => adv, 'avg' => total / count, 'xh' => g[:x_height].to_f / upm}
-          .merge(font_vmetric_factors(file, upm) || {})
-      end
-
-      # `hhea`'s ascender / descender / lineGap as per-em factors: the caller scales
-      # each by the font size, rounds it, and sums — ascent + descent is the inline
-      # content box, plus the gap is `line-height: normal`. nil when the table can't
-      # be read, and the caller falls back to its own constant.
-      private def font_vmetric_factors(fontfile, upm)
-        data = File.binread(fontfile)
-        n = data[4, 2].unpack1('n')
-        tabs = {}
-        12.step(12 + (n - 1) * 16, 16) {|o| tabs[data[o, 4]] = data[o + 8, 4].unpack1('N') }
-        hhea = tabs['hhea'] or return nil
-        asc, desc, gap = data[hhea + 4, 6].unpack('s>s>s>')   # ascender, descender, lineGap
-        return nil unless asc.to_i.positive?
-
-        {'asc' => asc.to_i / upm, 'desc' => -desc.to_i / upm, 'gap' => gap.to_i / upm}
-      rescue StandardError
-        nil
       end
 
       # `fc-match` maps a CSS family to a font file — one subprocess per family per
@@ -8435,46 +8343,39 @@ module Capybara
         nil
       end
 
-      # The advance table of a downloaded face (an `@font-face` src), fetched through the
-      # HTTP layer like any resource, with the fetch's facts for its Resource Timing entry.
-      # `table` is nil when the file is no SFNT the parser reads (WOFF2, a 404, a broken file).
-      def font_advance_table_from_url(url)
+      # A downloaded face (an `@font-face` src), fetched through the HTTP layer like any resource: its decoded SFNT
+      # file (nil when the bytes are no font the decoder reads — a 404, a broken file), with the fetch's facts for its
+      # Resource Timing entry and `ok`, whether bytes arrived (a data: face has no fetch facts; an unreadable
+      # container still loads, measured with the fallback family).
+      def web_font_fetch(url)
         file, meta = font_file_and_meta_for(url)
-        # `ok`: bytes arrived (a data: face has no fetch facts; an unreadable container no
-        # a face's `status` follows.
-        {'table' => file ? font_table_from_file(file) : nil, 'meta' => meta,
-         'ok'    => !file.nil? || (meta && meta['status'].to_i.between?(200, 399)) == true}
+        {'path' => file, 'meta' => meta, 'ok' => !file.nil? || (meta && meta['status'].to_i.between?(200, 399)) == true}
       end
 
-      # A `local(<name>)` `@font-face` source: the advance table of the font INSTALLED under that
-      # name, or `ok: false` when this machine has no such font (fontconfig SUBSTITUTES silently, so
-      # `resolved_family_file` — the same exact-match test the family stack uses — is what tells a
-      # real installed face from a fallback). A face whose every `local()` misses and that has no
-      # readable `url()` then fails, as a browser rejects a UA font load it cannot satisfy.
-      def local_font_table(name, weight_style = '')
+      # A `local(<name>)` `@font-face` source: the file of the font INSTALLED under that name, or nil when this machine
+      # has no such font (fontconfig SUBSTITUTES silently, so `resolved_family_file` — the same exact-match test the
+      # family stack uses — is what tells a real installed face from a fallback). A face whose every `local()` misses
+      # and that has no readable `url()` then fails, as a browser rejects a UA font load it cannot satisfy.
+      def local_font_file(name, weight_style = '')
         key = "#{name} #{weight_style}"
         @@font_file_lock.synchronize do
           return @@local_font_cache[key] if @@local_font_cache.key?(key)
         end
-        file   = resolved_family_file(name.to_s, weight_style.to_s)
-        # (…and the FILE beside its table, which native layout registers so it measures the very face the table describes.)
-        result = file ? {'table' => font_table_from_file(file), 'ok' => true, 'file' => file} : {'table' => nil, 'ok' => false}
-        @@font_file_lock.synchronize { @@local_font_cache[key] = result }
-        result
+        file = resolved_family_file(name.to_s, weight_style.to_s)
+        @@font_file_lock.synchronize { @@local_font_cache[key] = file }
+        file
       end
 
-      # A face's own bytes (a `FontFace` built from a buffer, a `blob:` src): parsed like a
-      # downloaded file. `ok` is whether the bytes are a recognised font container (an
-      # OpenType-CFF buffer loads even though the metrics parser reads no glyf/loca table from
-      # it, so it measures with the fallback family). Content-addressed so identical bytes reuse
-      # one temp file, not one per call.
+      # A face's own bytes (a `FontFace` built from a buffer, a `blob:` src): decoded like a downloaded file to an SFNT
+      # file. `ok` is whether the bytes are a recognised font container at all; `path` nil where it decodes to nothing.
+      # Content-addressed so identical bytes reuse one temp file, not one per call.
       FONT_MAGIC = ["\x00\x01\x00\x00".b, 'OTTO'.b, 'true'.b, 'ttcf'.b, 'wOFF'.b, 'wOF2'.b].freeze
-      def font_advance_table_from_bytes(bytes)
+      def font_file_from_bytes(bytes)
         bytes = bytes.to_s.b
         ok    = bytes.bytesize >= 4 && FONT_MAGIC.include?(bytes[0, 4])
-        return {'table' => nil, 'ok' => ok} unless ok
+        return {'path' => nil, 'ok' => ok} unless ok
         sfnt = woff_to_sfnt(bytes)
-        return {'table' => nil, 'ok' => true} if sfnt.nil? || sfnt.bytesize < 12
+        return {'path' => nil, 'ok' => true} if sfnt.nil? || sfnt.bytesize < 12
         key  = "bytes:#{Digest::SHA256.hexdigest(sfnt)}"
         path = @@font_file_lock.synchronize { @@font_file_cache[key]&.first }
         unless path
@@ -8486,7 +8387,7 @@ module Capybara
           @@font_file_lock.synchronize { @@font_files << file; @@font_file_cache[key] = [file.path, nil] }
           path = file.path
         end
-        {'table' => font_table_from_file(path), 'ok' => true, 'path' => path}
+        {'path' => path, 'ok' => true}
       end
 
       def reset_workers

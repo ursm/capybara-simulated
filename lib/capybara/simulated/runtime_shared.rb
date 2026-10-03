@@ -229,21 +229,16 @@ module Capybara
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
         '__csim_decodeImage'         => ->(b, *a) { b.decode_image(a[0], a[1], a[2]) },
         '__csim_renderText'          => ->(b, *a) { b.render_text(a[0], a[1], a[2], a[3], a[4]) },
-        '__csim_fontAdvances'        => ->(b, *a) { b.font_advance_table(a[0], a[1]) },
+        # The font FILES native text metrics read (font.rs): a family's system face, as fontconfig resolves it;
+        # an `@font-face` url's, fetched (WOFF-decoded, cached) with the fetch's facts for its Resource Timing
+        # entry; the face installed under a `local()` name; a FontFace's own bytes — nil where there is none.
         '__csim_fontFile'            => ->(b, *a) { b.font_file(a[0], a[1]) },
-        '__csim_fontAdvancesFromUrl' => ->(b, *a) { b.font_advance_table_from_url(a[0]) },
-        # The on-disk SFNT path for an @font-face url (fetched + WOFF-decoded + cached) — so native layout can
-        # registerFontPath the SAME file the advance table (`advanceTableFor`) is read from. nil when it can't be fetched/read.
-        '__csim_webFontFile'         => ->(b, *a) { b.font_file_for(a[0]) },
-        '__csim_localFontTable'      => ->(b, *a) { b.local_font_table(a[0], a[1] || '') },
-        # …and the installed file behind a `local()` source, the one that table was read from (nil when none).
-        # …the file only where `localFaceTable` TAKES that local — found AND tabled: a `.ttc` fontconfig finds has no
-        # table, so the face falls to the next source, and native layout must measure that one too.
-        '__csim_localFontFile'       => ->(b, *a) { r = b.local_font_table(a[0], a[1] || ''); r['ok'] && r['table'] ? r['file'] : nil },
+        '__csim_webFontFetch'        => ->(b, *a) { b.web_font_fetch(a[0]) },
+        '__csim_localFontFile'       => ->(b, *a) { b.local_font_file(a[0], a[1] || '') },
         '__csim_resourceTimingFetch' => ->(b, *a) { b.resource_timing_fetch(a[0], a[1] == true, a[2] || 'same-origin') },
         '__csim_takeModuleRt'        => ->(b, *a) { b.take_module_rt },
         '__csim_takeWorkerRt'        => ->(b, *a) { b.take_worker_rt },
-        '__csim_fontAdvancesFromBytes' => ->(b, *a) { b.font_advance_table_from_bytes(a[0]) },
+        '__csim_fontFileFromBytes'   => ->(b, *a) { b.font_file_from_bytes(a[0]) },
         '__csim_loadImage'           => ->(b, *a) { b.load_image(a[0], !!a[1], a[2] || 'same-origin') },
         '__csim_imageLoadStart'      => ->(b, *a) { b.image_load_start(a[0], !!a[1], a[2] || 'same-origin') },
         '__csim_blobRegister'        => ->(b, *a) { b.blob_register(a[0], a[1], a[2]); nil },
