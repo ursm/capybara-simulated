@@ -674,6 +674,61 @@ pub(crate) fn rendered_box(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
     })
 }
 
+// `id`'s CLIENT RECTS as `getClientRects` answers them: one per line an inline box broke over, else its border box —
+// where the page's scrolling carried each, under every transform on the way. None where it generates no box.
+pub(crate) fn client_rects(arena: &RealmArena, id: NodeId) -> Option<Vec<[f64; 4]>> {
+    let style = box_style(arena, id)?;
+    if is_boxless(arena, id, &style) {
+        return None;
+    }
+    let pieces = match arena.get(id).and_then(|n| laid_frags(arena, n)).filter(|f| f.len() > 1) {
+        Some(frags) => {
+            let [sx, sy] = scroll_shift(arena, id);
+            frags.iter().map(|&[x, y, w, h]| [x - sx, y - sy, w, h]).collect()
+        }
+        None => vec![laid_out_box(arena, id)?],
+    };
+    Some(match transform_chain(arena, id) {
+        Some(m) => pieces.into_iter().map(|r| transformed_rect(&m, r)).collect(),
+        None => pieces,
+    })
+}
+
+// The map the PAINTER draws `id` under, `[a, b, c, d, e, f]` — a 2D affine, all a canvas has — None where no transform
+// moves it, and `Some(None)` where one does that the painter cannot express at all, which it must not read as "none"
+// and draw at the layout position. A homography whose projective row is `0, 0, w` is no projection: it is a UNIFORM
+// scale by `1 / w`, which an affine holds exactly — the shape `perspective(d) translateZ(z)` and `matrix3d(…, w)` both
+// take. A genuine projection is the affine that carries three of the box's corners where the projection carries them:
+// the homography's LINEAR PART is not the same map at all — where a projection puts the box on a line (`rotateX(90deg)`
+// about a perspective origin the box is centred on) it is perfectly invertible, and the painter inked a band where the
+// box has no area. Three corners is all an affine has room for, so the fourth lands at `p1 + p2 - p0` — a parallelogram
+// where the truth is a trapezoid — and the painter clips to the true quad (`paint_quad`).
+pub(crate) fn paint_transform(arena: &RealmArena, id: NodeId) -> Option<Option<[f64; 6]>> {
+    let m = transform_chain(arena, id)?;
+    if m[3] == 0.0 && m[7] == 0.0 {
+        let w = if m[15] == 0.0 { 1.0 } else { 1.0 / m[15] };
+        return Some(Some([m[0] * w, m[1] * w, m[4] * w, m[5] * w, m[12] * w, m[13] * w]));
+    }
+    let Some([x, y, w, h]) = laid_out_box(arena, id).filter(|r| r[2] != 0.0 && r[3] != 0.0) else { return Some(None) };
+    let corners = (project(&m, x, y), project(&m, x + w, y), project(&m, x, y + h));
+    let (Some(p0), Some(p1), Some(p2)) = corners else { return Some(None) };
+    let [a, b] = [(p1[0] - p0[0]) / w, (p1[1] - p0[1]) / w];
+    let [c, d] = [(p2[0] - p0[0]) / h, (p2[1] - p0[1]) / h];
+    Some(Some([a, b, c, d, p0[0] - a * x - c * y, p0[1] - b * x - d * y]))
+}
+// …and the true QUAD a projected box covers, its corners clockwise from the top left — for the painter to clip that
+// parallelogram to. None where the map is affine (the quad is exactly what the matrix draws) or a corner has no image.
+pub(crate) fn paint_quad(arena: &RealmArena, id: NodeId) -> Option<[f64; 8]> {
+    let m = transform_chain(arena, id)?;
+    if m[3] == 0.0 && m[7] == 0.0 {
+        return None;
+    }
+    let [x, y, w, h] = laid_out_box(arena, id).filter(|r| r[2] != 0.0 && r[3] != 0.0)?;
+    let [p0, p1, p2, p3] = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]].map(|[cx, cy]| project(&m, cx, cy));
+    let [p0, p1, p2, p3] = [p0?, p1?, p2?, p3?];
+    Some([p0[0], p0[1], p1[0], p1[1], p2[0], p2[1], p3[0], p3[1]])
+}
+
 // ── the scrollable overflow region ─────────────────────────────────────────────────────────────────────────────
 // `scrollWidth` / `scrollHeight` (css-overflow-3 §3): how far the box's content reaches from the edge it scrolls FROM.
 // Each box's EXTENT — its own box unioned with what its children reach, a child that clips taken at its own box in the
@@ -1007,6 +1062,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "usedInsets", used_insets_op, context_id);
     register(scope, ns, "renderedLegend", rendered_legend_op, context_id);
     register(scope, ns, "boxFragments", box_fragments_op, context_id);
+    register(scope, ns, "clientRects", client_rects_op, context_id);
+    register(scope, ns, "paintTransform", paint_transform_op, context_id);
+    register(scope, ns, "paintQuad", paint_quad_op, context_id);
     register(scope, ns, "scrollOffset", scroll_offset, context_id);
     register(scope, ns, "setScrollOffset", set_scroll_offset, context_id);
     register(scope, ns, "clipFlags", clip_flags, context_id);
@@ -1183,6 +1241,36 @@ fn box_fragments_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         })
         .unwrap_or_default();
     rv.set(crate::dom::f64_array(scope, &flat).into());
+}
+
+// __dom.clientRects(nid) -> Float64Array: `nid`'s client rects, `[x, y, w, h]` each (`client_rects`), none for no box.
+fn client_rects_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let flat: Vec<f64> = crate::dom::nid_arg(scope, &args, 0)
+        .and_then(|id| client_rects(crate::dom::realm(scope, cid), id))
+        .map(|rects| rects.into_iter().flatten().collect())
+        .unwrap_or_default();
+    rv.set(crate::dom::f64_array(scope, &flat).into());
+}
+// __dom.paintTransform(nid, out) -> 0 where no transform moves `nid`'s box, 1 with the affine the painter draws it under
+// written to `out` (`paint_transform`), 2 where it has one the painter cannot express.
+fn paint_transform_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let answer = crate::dom::nid_arg(scope, &args, 0).and_then(|id| paint_transform(crate::dom::realm(scope, cid), id));
+    let kind = match answer {
+        None => 0,
+        Some(Some(affine)) => {
+            crate::dom::write_f64s(args.get(1), &affine);
+            1
+        }
+        Some(None) => 2,
+    };
+    rv.set(v8::Integer::new(scope, kind).into());
+}
+// __dom.paintQuad(nid, out) -> whether `nid`'s box projects to a quad the painter clips to, its corners written to `out`
+// (`paint_quad`).
+fn paint_quad_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, paint_quad);
 }
 
 // __dom.stickyOffset(nid, out) -> whether `nid`'s box is a sticky one that has STUCK (`sticky_delta`), how far written
