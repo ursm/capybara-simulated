@@ -340,6 +340,10 @@ pub(crate) struct Input {
     pub(crate) flex_basis_kw: u8,
     pub(crate) scrolls_x: bool,
     pub(crate) scrolls_y: bool,
+    // Whether the box CLIPS its content, per axis, and whether it is a SCROLL CONTAINER (`CLIP_X` / `CLIP_Y` /
+    // `CLIP_SCROLLS`) — its overflow once the viewport has taken the root's, and the body's where the root has none
+    // (`Walk::clip_flags`). No layout reads it: it rides to the box, for the geometry (geometry.rs).
+    pub(crate) clip: u8,
     // A `<button>`: as wide as its CONTENT wants, whatever display it has and however much room it is given
     // (HTML's button layout IS shrink-to-fit — `block_child_width` routes an auto-width one through the
     // content-sized path), and its baseline is its content's however it scrolls (`child_baselines`).
@@ -541,7 +545,7 @@ impl InlineBox {
 }
 impl Input {
     pub(crate) fn same(&self, o: &Input) -> bool {
-        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, ws_mode, item_auto_height, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect, fits_content } = self;
+        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, ws_mode, item_auto_height, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, clip, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect, fits_content } = self;
         nid.bit_eq(&o.nid)
             && parent.bit_eq(&o.parent)
             && display.bit_eq(&o.display)
@@ -635,6 +639,7 @@ impl Input {
             && flex_basis_kw.bit_eq(&o.flex_basis_kw)
             && scrolls_x.bit_eq(&o.scrolls_x)
             && scrolls_y.bit_eq(&o.scrolls_y)
+            && clip.bit_eq(&o.clip)
             && is_button.bit_eq(&o.is_button)
             && self_sizes.bit_eq(&o.self_sizes)
             && block_axis_is_x.bit_eq(&o.block_axis_is_x)
@@ -1068,7 +1073,18 @@ pub(crate) struct Box {
     // Its computed `position` (`POSITION_*`), stamped by the walk's build (`walk_ops::layout_build`); 0 where the pass
     // that built it set none.
     pub(crate) position: u8,
+    // …and how it clips its content (`Input::clip`).
+    pub(crate) clip: u8,
 }
+impl Box {
+    // The box of node `nid` at `[x, y, w, h]`, and nothing else about it.
+    pub(crate) fn at(nid: f64, [x, y, w, h]: [f64; 4]) -> Box {
+        Box { nid, x, y, w, h, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None, rel: [0.0; 2], edges: None, auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0 }
+    }
+}
+pub(crate) const CLIP_X: u8 = 1;
+pub(crate) const CLIP_Y: u8 = 2;
+pub(crate) const CLIP_SCROLLS: u8 = 4;
 pub(crate) const ROOT_FLOAT_LEFT: u8 = 1;
 pub(crate) const ROOT_FLOAT_RIGHT: u8 = 2;
 pub(crate) const ROOT_POSITIONED: u8 = 3;
@@ -1415,7 +1431,7 @@ pub(crate) fn layout_block_in_place(inputs: &mut [Input], runs: &[Run], run_text
     }
     let mut boxes: Vec<Box> = inputs
         .iter()
-        .map(|n| Box { nid: n.nid, x: 0.0, y: 0.0, w: 0.0, h: 0.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None, rel: [0.0; 2], edges: None, auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0 })
+        .map(|n| Box { clip: n.clip, ..Box::at(n.nid, [0.0; 4]) })
         .collect();
     // Two phases: MEASURE lays the subtree out relative to each node's own border-box origin (so
     // collapse-through margins can propagate UP through returns without knowing final positions), then
@@ -8879,6 +8895,7 @@ mod tests {
             flex_basis_kw: 0,
             scrolls_x: false,
             scrolls_y: false,
+            clip: 0,
             is_button: false,
             self_sizes: false,
             block_axis_is_x: false,
@@ -8943,8 +8960,8 @@ mod tests {
         b.height = 30.0;
         let inputs = vec![blk(0.0, -1), a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
-        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0 });
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0 });
+        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0 });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0 });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
         assert!(bx[0].auto_height);
     }
@@ -9118,7 +9135,7 @@ mod tests {
         let inputs = vec![blk(0.0, -1), owner, f];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!(bx[1].h, 120.0); // owner contains the float
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0 });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0 });
     }
 
     #[test]

@@ -123,13 +123,15 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         return;
     };
     // (…and each box's `position`, which the walk read off the same style: the writer's own question of it, answered
-    // by the style engine here)
-    if let Some(arena) = dom(scope).realms.get(&cid) {
+    // by the style engine here — and the root and the viewport the geometry reads the boxes against)
+    if let Some(arena) = dom(scope).realms.get_mut(&cid) {
         for b in laid.boxes.iter_mut().filter(|b| b.nid >= 0.0) {
             b.position = NodeId::from_i64(b.nid as i64)
-                .and_then(|id| crate::style::primary_style(arena, id))
+                .and_then(|id| crate::geometry::box_style(arena, id))
                 .map_or(0, |s| walk::position_code(s.get_box().clone_position()));
         }
+        arena.layout_root = Some(root);
+        arena.viewport = [basis.w, basis.h];
     }
     // (…its text rows answered as the painter's pieces alone, below: nothing on that side reads the rows that index runs)
     let answer = laid_answer(scope, cid, laid);

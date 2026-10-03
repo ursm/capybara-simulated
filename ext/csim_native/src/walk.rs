@@ -38,7 +38,7 @@ use style::values::specified::box_::{Display, DisplayInside, DisplayOutside};
 // …except on a `<button>`, laid out by HTML's button layout: an inline-level display is an inline-block there and any
 // other a flow-root, and an internal ruby display is no inline-level one — a flow-root block, as Chrome lays it out
 // (`button-layout/display-other`). `tag` is the element's `rendering_tag`.
-trait WalkDisplay {
+pub(crate) trait WalkDisplay {
     fn walk_display(&self, tag: &str) -> Display;
 }
 impl WalkDisplay for style::properties::style_structs::Box {
@@ -60,6 +60,7 @@ impl WalkDisplay for style::properties::style_structs::Box {
 }
 
 use crate::dom::{NodeId, NodeKind, RealmArena};
+use crate::geometry::flat_children;
 use crate::layout::{MATH_LINE, MATH_MAX, MATH_MIN, MATH_NEG, MATH_SCALE, MATH_SUM};
 use crate::layout::{InlineBox, Input, Run, RunText, DISPLAY_BLOCK, DISPLAY_TEXT_BLOCK, RUN_ATOMIC, RUN_BR, RUN_CLOSE, RUN_FLOAT, RUN_OOF, RUN_OPEN, RUN_TEXT, RUN_WBR};
 
@@ -408,16 +409,6 @@ pub(crate) fn build(arena: &RealmArena, root: NodeId, basis: Basis, faces: &mut 
 
 type Step = Result<(), &'static str>;
 
-// A node's children in the FLAT tree (the style engine's `traversal_children`): a host's are its shadow root's, a slot
-// its assigned nodes where it has any, anything else its own.
-fn flat_children<'a>(arena: &'a RealmArena, node: &'a crate::dom::NodeData) -> &'a [NodeId] {
-    match node.shadow_root.and_then(|r| arena.get(r)) {
-        Some(root) => &root.children,
-        None if !node.assigned.is_empty() => &node.assigned,
-        None => &node.children,
-    }
-}
-
 // A pass's GENERATED CONTENT (`pseudoNodeFor`): each `::before` / `::after` box that renders, the element it is of, and
 // the text its `content` makes of the style engine's value. The box is the node the JS side registered for it
 // (`linkPseudoBox`), so the record names a node the JS side holds; its text is the one node the walk makes itself,
@@ -444,7 +435,7 @@ struct GeneratedState<'a> {
     unlinked: Vec<f64>,
 }
 const GENERATED_TEXT: u32 = u32::MAX;
-const PSEUDOS: [style::selector_parser::PseudoElement; 2] =
+pub(crate) const PSEUDOS: [style::selector_parser::PseudoElement; 2] =
     [style::selector_parser::PseudoElement::Before, style::selector_parser::PseudoElement::After];
 // The elements that generate no content whatever they declare (`NO_GENERATED_CONTENT`): the replaced ones, the
 // controls, and the breaks — and a `<progress>` / `<meter>`, which the walk lays out as a leaf of its own size, so no
@@ -1600,15 +1591,11 @@ impl<'a> Walk<'a> {
         if let Some((origin, ..)) = self.generated.box_info(id) {
             return Some(origin);
         }
-        let p = self.node(id).parent?;
-        let pn = self.get(p)?;
-        if pn.shadow_root.is_some() {
-            return self.node(id).assigned_slot.filter(|&s| self.arena.get(s).is_some());
+        // (…a generated box's text, which the arena does not hold, is its box's)
+        if id.generation == GENERATED_TEXT {
+            return self.node(id).parent;
         }
-        match pn.host {
-            Some(host) if pn.kind != NodeKind::Element => Some(host),
-            _ => Some(p),
-        }
+        crate::geometry::flat_parent(self.arena, id)
     }
 
     // The element's children the flow lays out, in order (`layoutChildren`) — its FLAT tree's: a host's shadow tree, a
@@ -1956,6 +1943,7 @@ impl<'a> Walk<'a> {
         rec.block_axis_is_x = !style.writing_mode.is_horizontal();
         rec.scrolls_x = scrolls(b.overflow_x);
         rec.scrolls_y = scrolls(b.overflow_y);
+        rec.clip = self.clip_flags(id, &style);
         rec.legacy_align = self.legacy_align(id);
         rec.legend_align = self.legend_align(id, &style);
         // `position: relative` is a shift applied after the flow (§9.4.3) — not the pass root's, which is folded into
@@ -4403,7 +4391,7 @@ impl<'a> Walk<'a> {
         if b.clone_float() != Float::None || matches!(b.clone_position(), Position::Absolute | Position::Fixed) {
             return true;
         }
-        if self.clips_content(id, style) {
+        if self.clip_flags(id, style) != 0 {
             return true;
         }
         if let Some(p) = self.layout_parent(id) {
@@ -4421,27 +4409,42 @@ impl<'a> Walk<'a> {
         !col.column_count.is_auto() || !col.column_width.is_auto()
     }
 
-    // Does the box clip its content — its overflow not `visible` once the viewport has taken the root's, and the body's
-    // where the root has none of its own (`clipsContent` / `propagatedOverflow`)?
-    fn clips_content(&self, id: NodeId, style: &ComputedValues) -> bool {
+    // How the box clips its content (`Input::clip`): per axis, where its overflow is not `visible` once the viewport has
+    // taken the root's, and the body's where the root has none of its own (CSS Overflow 3 §3.3) — and whether it is a
+    // SCROLL CONTAINER, which is not the same question: `clip` clips and forbids all scrolling, script included, so it is
+    // neither the scrollport a sticky box sticks within nor one a script can scroll. The axes are kept apart because
+    // `clip` beside `visible` stays so, and a child hanging off the SIDE of an `overflow-y: clip` box is visible.
+    fn clip_flags(&self, id: NodeId, style: &ComputedValues) -> u8 {
+        use crate::layout::{CLIP_SCROLLS, CLIP_X, CLIP_Y};
         let node = self.node(id);
         // (…`overflow` applies to no inline box — one laid out as a block for the block it holds among them)
         let d = self.laid_display(id, style.get_box());
         if matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) {
-            return false;
+            return 0;
         }
         let visible = |s: &ComputedValues| s.get_box().overflow_x == Overflow::Visible && s.get_box().overflow_y == Overflow::Visible;
         let parent = self.parent_of(id).and_then(|p| self.get(p).map(|n| (p, n)));
         match parent {
-            Some((_, pn)) if pn.kind == NodeKind::Document => return false,
+            Some((_, pn)) if pn.kind == NodeKind::Document => return 0,
             Some((p, pn)) if node.rendering_tag() == "body" && pn.is_html_named("html") && self.parent_of(p).and_then(|d| self.get(d)).is_some_and(|d| d.kind == NodeKind::Document) => {
                 if self.style(p).is_ok_and(|ps| visible(&ps)) {
-                    return false;
+                    return 0;
                 }
             }
             _ => {}
         }
-        !visible(style)
+        let b = style.get_box();
+        let mut flags = 0;
+        if b.overflow_x != Overflow::Visible {
+            flags |= CLIP_X;
+        }
+        if b.overflow_y != Overflow::Visible {
+            flags |= CLIP_Y;
+        }
+        if scrolls(b.overflow_x) || scrolls(b.overflow_y) {
+            flags |= CLIP_SCROLLS;
+        }
+        flags
     }
 
     // HTML's LEGACY alignment for this block's block-level descendants: `<center>`, or an `align` on a `div` / `p` /
@@ -4571,6 +4574,7 @@ pub(crate) fn fresh_record() -> Input {
         flex_basis_kw: 0,
         scrolls_x: false,
         scrolls_y: false,
+        clip: 0,
         is_button: false,
         self_sizes: false,
         block_axis_is_x: false,
@@ -4768,7 +4772,7 @@ fn inline_rel_spec(style: &ComputedValues, rtl: bool) -> Result<Option<Rel>, &'s
 }
 
 // An inset's length-percentage, None for `auto`.
-fn inset_lp(v: &style::values::computed::position::Inset) -> Result<Option<&LengthPercentage>, &'static str> {
+pub(crate) fn inset_lp(v: &style::values::computed::position::Inset) -> Result<Option<&LengthPercentage>, &'static str> {
     use style::values::generics::position::GenericInset as Inset;
     use style::values::generics::Optional;
     match v {

@@ -144,6 +144,8 @@ pub(crate) struct NodeData {
     // The box the last layout pass gave this node (`laid_answer`): what a pass's `changed` is decided against,
     // so the JS side rewrites only a box that moved. None until a pass lays it out; overwritten each pass.
     pub(crate) layout_box: Option<crate::layout::Box>,
+    // Its SCROLL OFFSET, `[x, y]`: the scroll container's (the document scroller's on the root element), 0 on any other.
+    pub(crate) scroll: [f64; 2],
     // An element's live STATE that no attribute carries (`state` bits, below): what a script or the user did to it.
     pub(crate) state: u32,
     // A shadow root's host (None for every other node): the shadow-including ancestor chain `:focus` walks…
@@ -162,6 +164,8 @@ pub(crate) struct NodeData {
     // An element's generated-content boxes, `::before` and `::after` — the nodes the JS side registered for them, which
     // no tree holds (`linkPseudoBox`) — for the walk to lay out as its first and last children.
     pub(crate) pseudo_boxes: [Option<NodeId>; 2],
+    // …and such a box's element and which of the two it is: its parent in the flat tree, and whose style it has.
+    pub(crate) generated_of: Option<(NodeId, u8)>,
     // What the style engine keeps on a node (an element's id atom, parsed `style` attribute and computed style; a
     // parent's selector flags): made the first time the engine asks, so a realm with no style engine pays a pointer.
     pub(crate) style: std::cell::OnceCell<Box<crate::style::StyleSlot>>,
@@ -217,6 +221,7 @@ impl NodeData {
             children: Vec::new(),
             child_index: 0,
             layout_box: None,
+            scroll: [0.0; 2],
             state: 0,
             host: None,
             shadow_root: None,
@@ -225,6 +230,7 @@ impl NodeData {
             value: None,
             natural_size: None,
             pseudo_boxes: [None; 2],
+            generated_of: None,
             style: std::cell::OnceCell::new(),
             written_style: None,
             stamp: std::cell::Cell::new(0),
@@ -451,6 +457,10 @@ pub(crate) struct RealmArena {
     // what the JS side's layout memos and its early return have to hear of, since the engine decides what a change
     // restyles. Past `RESTYLED_CAP` only that it overflowed is kept: then everything is.
     pub(crate) restyled: std::cell::RefCell<(Vec<NodeId>, bool)>,
+    // The root element the last layout laid out and the viewport it laid it out against, `[width, height]`: what the
+    // geometry (geometry.rs) reads every box of that layout in.
+    pub(crate) layout_root: Option<NodeId>,
+    pub(crate) viewport: [f64; 2],
 }
 pub(crate) const RESTYLED_CAP: usize = 4096;
 
@@ -511,12 +521,19 @@ impl RealmArena {
     }
     // …and one that does not — a layout pass writing its boxes: a box is no input to any of those memos, and a pass
     // writing one per node would throw them all away every time.
-    fn get_mut_quietly(&mut self, id: NodeId) -> Option<&mut NodeData> {
+    pub(crate) fn get_mut_quietly(&mut self, id: NodeId) -> Option<&mut NodeData> {
         let slot = self.slots.get_mut(id.idx as usize)?;
         if slot.generation == id.generation {
             slot.data.as_mut()
         } else {
             None
+        }
+    }
+    // …and the layout written off every node (quietly, as a pass writes it): what a page laid out as its root box alone
+    // leaves of the layout before.
+    pub(crate) fn clear_layout(&mut self) {
+        for node in self.slots.iter_mut().filter_map(|s| s.data.as_mut()) {
+            node.layout_box = None;
         }
     }
 
@@ -949,7 +966,7 @@ pub(crate) fn realm_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCall
 
 // The arena for realm `cid` (created empty on first touch). The node ops resolve this from their
 // function data instead of touching a single shared arena.
-fn realm<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> &'s mut RealmArena {
+pub(crate) fn realm<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> &'s mut RealmArena {
     let d = dom(scope);
     if d.dropped.contains(&cid) {
         return &mut d.graveyard;
@@ -1129,6 +1146,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleTakeAnimationEvents", style_take_animation_events, context_id);
     crate::animation_ops::install(scope, ns, context_id);
     crate::walk_ops::install(scope, ns, context_id);
+    crate::geometry::install(scope, ns, context_id);
     crate::html_parse::install(scope, ns, context_id);
     crate::url_ops::install(scope, ns, context_id);
     crate::text_codec::install(scope, ns, context_id);
@@ -1431,10 +1449,14 @@ fn link_pseudo_box(
     let (Some(id), Some(pseudo)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2)) else {
         return;
     };
-    let which = args.get(1).number_value(scope).unwrap_or(0.0) as usize;
+    let which = (args.get(1).number_value(scope).unwrap_or(0.0) as usize).min(1);
     let cid = realm_id(scope, &args);
-    if let Some(node) = realm(scope, cid).get_mut(id) {
-        node.pseudo_boxes[which.min(1)] = Some(pseudo);
+    let arena = realm(scope, cid);
+    if let Some(node) = arena.get_mut(id) {
+        node.pseudo_boxes[which] = Some(pseudo);
+    }
+    if let Some(node) = arena.get_mut_quietly(pseudo) {
+        node.generated_of = Some((id, which as u8));
     }
 }
 
@@ -2985,6 +3007,19 @@ fn f64_arg<'a>(val: v8::Local<'a, v8::Value>) -> F64Arg<'a> {
     F64Arg::Owned(bytes.chunks_exact(8).map(|c| f64::from_ne_bytes(c.try_into().unwrap())).collect())
 }
 
+// Write `vals` into the Float64Array `val` (as many as it holds) — how an op answers a few numbers without making an
+// array for them on every call.
+pub(crate) fn write_f64s(val: v8::Local<'_, v8::Value>, vals: &[f64]) {
+    let Ok(arr) = v8::Local::<v8::Float64Array>::try_from(val) else { return };
+    let n = arr.length().min(vals.len());
+    let ptr = arr.data() as *mut f64;
+    if n == 0 || ptr.is_null() || (ptr as usize) % std::mem::align_of::<f64>() != 0 {
+        return;
+    }
+    // SAFETY: the view's own data past its byte offset, `n` f64s of it, aligned, and no Rust reference to it is held.
+    unsafe { std::ptr::copy_nonoverlapping(vals.as_ptr(), ptr, n) };
+}
+
 // __dom.layoutMeasureCounts() -> [put back, kept, records held, records spliced, records walked]: the Rust walk's kept
 // measures (`layout::MeasureCache` in `walk_reuse`), and the records it spliced back from its last pass rather than built
 // (`Walk::splice`) and those it built, for a spec and the perf gate.
@@ -3056,8 +3091,8 @@ pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v
 // none), which `auto` margins it has in the JS side's mask (1 top, 2 right, 4 bottom, 8 left — `AUTO_MARGIN_BIT`)
 // with 16 beside them where an edge resolved a percentage, and where it is out of flow what placed it:
 // `Box::out_of_flow`, `cb` (the record, or −1 the viewport, −2 the inline entry after it; −3 on a box in flow), `cb_inline` and
-// `static_axes` — and its `position` (`Box::position`).
-pub(crate) const BOX_ROW: usize = 30;
+// `static_axes` — and its `position` (`Box::position`) and how it clips its content (`Box::clip`).
+pub(crate) const BOX_ROW: usize = 31;
 fn box_row(b: &crate::layout::Box) -> [f64; BOX_ROW] {
     let [mt, mr, mb, ml] = b.used_margins.unwrap_or([f64::NAN; 4]);
     let am = b.auto_margins;
@@ -3076,6 +3111,7 @@ fn box_row(b: &crate::layout::Box) -> [f64; BOX_ROW] {
     row[27] = b.cb_inline as f64;
     row[28] = b.static_axes as f64;
     row[29] = b.position as f64;
+    row[30] = b.clip as f64;
     row
 }
 
