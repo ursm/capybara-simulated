@@ -93,12 +93,8 @@ fn is_fixed(b: &Box) -> bool {
 }
 
 // The total scroll shift the page has carried `id`'s box by, `[x, y]`: the document's scroll, and every scroll
-// container's around it, compounding up — less the distance a STICKY box among them (it included) has stuck. With
-// `below`, the shift of a box `id` holds rather than of `id`'s own: an anonymous box, which no node names.
-pub(crate) fn scroll_shift(arena: &RealmArena, id: NodeId, below: bool) -> [f64; 2] {
-    if below {
-        return shift_below(arena, id);
-    }
+// container's around it, compounding up — less the distance a STICKY box among them (it included) has stuck.
+pub(crate) fn scroll_shift(arena: &RealmArena, id: NodeId) -> [f64; 2] {
     let Some(node) = arena.get(id) else { return [0.0; 2] };
     // A `position: fixed` box is laid out against the VIEWPORT, so no scrolling moves it — that is what fixed means, and
     // how a pinned header stays put while the page scrolls under it.
@@ -253,10 +249,11 @@ fn content_box(b: &Box) -> [f64; 4] {
     [b.x + left, b.y + top, (b.w - left - right).max(0.0), (b.h - top - bottom).max(0.0)]
 }
 
-// What a pass laid out BESIDES the records' boxes (`laid_answer` stores those): each INLINE box's fragments, off its
-// fragment rows `[inline index, x, y, w, h]` and the node each inline entry is (`inline_nids`), stored on the node in
-// place of a box (`NodeData::layout_frags`) — and each out-of-flow box's containing block, which its record names by
-// its own index (`NodeData::containing_block`).
+// What a pass laid out, kept on the nodes for the geometry: each record's box (`NodeData::layout_box`), each INLINE
+// box's fragments in place of one, off its fragment rows `[inline index, x, y, w, h]` and the node each inline entry is
+// (`inline_nids`, `NodeData::layout_frags`), each out-of-flow box's containing block, which its record names by its own
+// index (`NodeData::containing_block`), and each container's anonymous boxes, named in `anon` as `[record, kind,
+// container nid, ordinal]` (`NodeData::anon_boxes`) — all of it the current layout's (`laid_at`).
 pub(crate) fn store_layout(arena: &mut RealmArena, laid: &crate::layout::Laid, inline_nids: &[f64], anon: &[[f64; 4]]) {
     let pass = arena.layout_pass;
     let nid = |v: f64| NodeId::from_i64(v as i64).filter(|_| v >= 0.0);
@@ -283,6 +280,9 @@ pub(crate) fn store_layout(arena: &mut RealmArena, laid: &crate::layout::Laid, i
             _ => None,
         };
         if let Some(node) = nid(b.nid).and_then(|id| arena.get_mut_quietly(id)) {
+            node.layout_box = Some(*b);
+            node.layout_frags = None;
+            node.laid_at = pass;
             node.containing_block = cb;
             node.anon_boxes = None;
         }
@@ -321,7 +321,7 @@ pub(crate) fn placed_box(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
 // …and where the page's scrolling has carried it to (`laidOutBox`): in VIEWPORT coordinates, untransformed.
 pub(crate) fn laid_out_box(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
     let [x, y, w, h] = placed_box(arena, id)?;
-    let [sx, sy] = scroll_shift(arena, id, false);
+    let [sx, sy] = scroll_shift(arena, id);
     Some([x - sx, y - sy, w, h])
 }
 
@@ -720,7 +720,10 @@ pub(crate) fn scroll_size(arena: &RealmArena, id: NodeId) -> Option<[f64; 2]> {
 // The edges a box scrolls FROM, `[left, top]` (each true for that edge, false for the far one): a flex SCROLL container
 // from its main-start corner (Chrome: a `row-reverse` row overflowing 200px leftwards reports 100 while visible, 300 once
 // it scrolls), the root from where the initial containing block starts, any other box from its inline-start edge in a
-// horizontal flow.
+// horizontal flow. It describes where THIS layout puts the content, not where the spec would — an origin that disagreed
+// with the boxes would call geometry the hit test can see unreachable: block flow honours `direction: rtl` (a 300px
+// child in a 100px box lands at -200..100, as in Chrome) but places a VERTICAL writing mode physically (0..300, where
+// Chrome has -200..100), so the origin stays physical there until that placement moves.
 fn scroll_origin(arena: &RealmArena, id: NodeId, style: &ComputedValues) -> [bool; 2] {
     use crate::walk::Side;
     let d = style.get_box().clone_display();
@@ -748,22 +751,24 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "renderedBox", rendered_box_op, context_id);
     register(scope, ns, "transformChain", transform_chain_op, context_id);
     register(scope, ns, "scrollSize", scroll_size_op, context_id);
+    register(scope, ns, "boxInfo", box_info_op, context_id);
+    register(scope, ns, "boxFragments", box_fragments_op, context_id);
+    register(scope, ns, "containingBlock", containing_block_op, context_id);
     register(scope, ns, "scrollOffset", scroll_offset, context_id);
     register(scope, ns, "setScrollOffset", set_scroll_offset, context_id);
     register(scope, ns, "clipFlags", clip_flags, context_id);
     register(scope, ns, "layoutRootAlone", layout_root_alone, context_id);
 }
 
-// __dom.scrollShift(nid, below, out): the scroll shift of `nid`'s box (`scroll_shift`) — of a box it holds where `below`
-// — written to the Float64Array `out` as `[x, y]`.
+// __dom.scrollShift(nid, out): the scroll shift of `nid`'s box (`scroll_shift`), written to the Float64Array `out` as
+// `[x, y]`.
 fn scroll_shift_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
-    let below = args.get(1).is_true();
     let shift = match crate::dom::nid_arg(scope, &args, 0) {
-        Some(id) => scroll_shift(crate::dom::realm(scope, cid), id, below),
+        Some(id) => scroll_shift(crate::dom::realm(scope, cid), id),
         None => [0.0; 2],
     };
-    crate::dom::write_f64s(args.get(2), &shift);
+    crate::dom::write_f64s(args.get(1), &shift);
 }
 
 // __dom.laidOutBox(nid, out) / renderedBox(nid, out) / transformChain(nid, out) / scrollSize(nid, out) -> whether `nid`
@@ -794,6 +799,73 @@ fn answer_into<const N: usize>(
         crate::dom::write_f64s(args.get(1), &vals);
     }
     rv.set(v8::Boolean::new(scope, answer.is_some()).into());
+}
+
+// __dom.boxInfo(nid, out) -> whether the current layout gave `nid` a box: what it gave it, written to the Float64Array
+// `out` as `BOX_INFO` numbers — the box `[x, y, w, h]` in document coordinates (an inline box's the union of its
+// fragments), how many fragments it broke into (0 for a record's box), the basis its percentages resolved against, the
+// margins its placement used (top, right, bottom, left), its own relative shift `[x, y]`, its edges as the pass used
+// them (padding, border, margin, each top / right / bottom / left), which margins are `auto` (1 top, 2 right, 4 bottom,
+// 8 left, with 16 where an edge resolved a percentage), whether it is out of flow (1, 2 `fixed`) and placed against the
+// viewport, whether its height is `auto`, its `position` and how it clips — NaN for what it has none of.
+pub(crate) const BOX_INFO: usize = 32;
+fn box_info(arena: &RealmArena, id: NodeId) -> Option<[f64; BOX_INFO]> {
+    let node = arena.get(id)?;
+    let mut out = [f64::NAN; BOX_INFO];
+    if let Some(b) = laid(arena, node) {
+        out[..4].copy_from_slice(&[b.x, b.y, b.w, b.h]);
+        out[4] = 0.0;
+        out[5] = b.cb_w.unwrap_or(f64::NAN);
+        out[6..10].copy_from_slice(&b.used_margins.unwrap_or([f64::NAN; 4]));
+        out[10..12].copy_from_slice(&b.rel);
+        out[12..24].copy_from_slice(&b.edges.unwrap_or([f64::NAN; 12]));
+        let am = b.auto_margins;
+        let auto = [(4, 1), (2, 2), (8, 4), (1, 8)].iter().fold(0, |m, &(from, to)| if am & from != 0 { m | to } else { m });
+        out[24] = f64::from(auto | if b.percent_edges { 16 } else { 0 });
+        out[25] = f64::from(b.out_of_flow);
+        out[26] = if b.cb == CB_RECT { 1.0 } else { 0.0 };
+        out[27] = if b.auto_height { 1.0 } else { 0.0 };
+        out[28] = f64::from(b.position);
+        out[29] = f64::from(b.clip);
+        return Some(out);
+    }
+    let frags = laid_frags(arena, node)?;
+    out[..4].copy_from_slice(&placed_box(arena, id)?);
+    out[4] = frags.len() as f64;
+    out[10..12].copy_from_slice(&[0.0; 2]);
+    out[24..30].copy_from_slice(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    Some(out)
+}
+fn box_info_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, box_info);
+}
+
+// __dom.boxFragments(nid) -> Float64Array: an inline box's fragments, `[x, y, w, h]` each in document coordinates, in
+// the order the lines broke it; empty for any other node.
+fn box_fragments_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let flat: Vec<f64> = crate::dom::nid_arg(scope, &args, 0)
+        .and_then(|id| {
+            let arena = crate::dom::realm(scope, cid);
+            arena.get(id).and_then(|n| laid_frags(arena, n)).map(|f| f.iter().flatten().copied().collect())
+        })
+        .unwrap_or_default();
+    rv.set(crate::dom::f64_array(scope, &flat).into());
+}
+
+// __dom.containingBlock(nid) -> Float64Array: the element an out-of-flow box was placed against, as its path from the
+// document (`[length, nid, …]`, the hit test's form) — empty where it was placed against the viewport, or is in flow.
+fn containing_block_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let path = crate::dom::nid_arg(scope, &args, 0)
+        .and_then(|id| {
+            let arena = crate::dom::realm(scope, cid);
+            let cb = arena.get(id)?.containing_block?;
+            let path = crate::hit_test::dom_path(arena, cb);
+            Some([vec![path.len() as f64], path].concat())
+        })
+        .unwrap_or_default();
+    rv.set(crate::dom::f64_array(scope, &path).into());
 }
 
 // __dom.stickyOffset(nid, out) -> whether `nid`'s box is a sticky one that has STUCK (`sticky_delta`), how far written

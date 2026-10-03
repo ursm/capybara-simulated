@@ -418,7 +418,7 @@ fn contains_point(arena: &RealmArena, id: NodeId, x: f64, y: f64) -> bool {
     let covers = |[bx, by, bw, bh]: [f64; 4]| px >= bx && px < bx + bw && py >= by && py < by + bh;
     match laid_frags(arena, node) {
         Some(frags) => {
-            let [sx, sy] = crate::geometry::scroll_shift(arena, id, false);
+            let [sx, sy] = crate::geometry::scroll_shift(arena, id);
             frags.iter().any(|&[fx, fy, fw, fh]| covers([fx - sx, fy - sy, fw, fh]))
         }
         None => laid_out_box(arena, id).is_some_and(covers),
@@ -581,7 +581,7 @@ fn paint_order_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 }
 
 // `id`'s path from its document, top first: each node's parent, and a shadow root's host above it.
-fn dom_path(arena: &RealmArena, id: NodeId) -> Vec<f64> {
+pub(crate) fn dom_path(arena: &RealmArena, id: NodeId) -> Vec<f64> {
     let mut path = vec![id.to_f64()];
     let mut at = id;
     while let Some(up) = arena.get(at).and_then(|n| n.parent.or(n.host)) {

@@ -52,9 +52,6 @@ pub(crate) struct Pass {
     pub(crate) roots: HashMap<usize, ChunkRoot>,
     pub(crate) ends: Vec<usize>,
     pub(crate) ids: Vec<u32>,
-    // …and the records built as the last pass built them, as flat `[start, end)` pairs — which the JS side writes back
-    // only where the box the layout gave them moved (`nlWriteBoxes`'s kept ranges).
-    pub(crate) unchanged: Vec<f64>,
 }
 
 // A pass's streams, as the walk built them.
@@ -95,9 +92,7 @@ impl WalkReuse {
         (&mut self.maths, self.last.as_ref())
     }
 
-    // The chunks of this pass, by root record, for the layout to key its measures on — what `keep` needs of it — and
-    // the records built as the last pass built them, as `[start, end)` ranges: every record under a subtree root but
-    // the root, where the subtree is the same (`Pass::unchanged`).
+    // The chunks of this pass, by root record, for the layout to key its measures on — what `keep` needs of it.
     pub(crate) fn chunks(&mut self, s: &Streams) -> Pass {
         self.pass += 1;
         let Some(ends) = subtree_ends(s.inputs) else { return Pass::default() };
@@ -163,16 +158,7 @@ impl WalkReuse {
                 live
             });
         }
-        // (…the outermost same subtree's, each: one inside it is covered already)
-        let mut unchanged = Vec::new();
-        let mut covered = 0;
-        for i in 0..n {
-            if same[i] && i + 1 >= covered && ends[i] > i + 1 {
-                unchanged.extend([(i + 1) as f64, ends[i] as f64]);
-                covered = ends[i];
-            }
-        }
-        Pass { roots, ends, ids, unchanged }
+        Pass { roots, ends, ids }
     }
 
     // This pass, kept for the next to be held against — and spliced from (`Prior`).

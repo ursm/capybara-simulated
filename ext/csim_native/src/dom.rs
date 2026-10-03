@@ -141,9 +141,8 @@ pub(crate) struct NodeData {
     // the JS matcher it replaced; O(1) flips it). It counts ALL entries (a stale edge included), so the
     // sibling walks step from it and skip any stale neighbour they land on.
     pub(crate) child_index: usize,
-    // The box the last layout pass gave this node (`laid_answer`): what a pass's `changed` is decided against,
-    // so the JS side rewrites only a box that moved. None until a pass lays it out; overwritten each pass — and KEPT by
-    // a pass that lays it out no longer, which `laid_at` tells apart.
+    // The box the last layout pass that laid this node out gave it (`geometry::store_layout`) — KEPT by a pass that lays
+    // it out no longer, which `laid_at` tells apart. None until a pass lays it out.
     pub(crate) layout_box: Option<crate::layout::Box>,
     // …or, for an INLINE box, which no record lays out, the FRAGMENTS the lines broke it into, `[x, y, w, h]` each
     // (`geometry::store_layout`); None for any other node. A node has one or the other, as the last pass laid it out.
@@ -3081,41 +3080,6 @@ fn layout_measure_counts(
 }
 
 
-// A laid-out pass as the JS side takes it: `[fragRows, boxRows, changed]` — each box stored on its node as
-// well (`layout_box`), and `changed` naming the records whose box moved from the one stored.
-pub(crate) fn laid_answer<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, laid: crate::layout::Laid) -> v8::Local<'s, v8::Array> {
-    let st = realm(scope, cid);
-    let mut rows: Vec<f64> = Vec::with_capacity(laid.boxes.len() * BOX_ROW);
-    let mut changed: Vec<f64> = Vec::new();
-    for (i, b) in laid.boxes.into_iter().enumerate() {
-        rows.extend(box_row(&b));
-        let pass = st.layout_pass;
-        let mut node = if b.nid >= 0.0 { NodeId::from_i64(b.nid as i64).and_then(|id| st.get_mut_quietly(id)) } else { None };
-        if let Some(node) = node.as_deref_mut() {
-            node.laid_at = pass;
-        }
-        match node {
-            Some(node) if node.layout_box == Some(b) => {}
-            Some(node) => {
-                node.layout_box = Some(b);
-                node.layout_frags = None;
-                changed.push(i as f64);
-            }
-            None => changed.push(i as f64),
-        }
-    }
-    let flat: Vec<f64> = laid.frags.iter().flatten().copied().collect();
-    let answer = v8::Array::new(scope, 4);
-    let frag_rows: v8::Local<v8::Value> = f64_array(scope, &flat).into();
-    let box_rows: v8::Local<v8::Value> = f64_array(scope, &rows).into();
-    let changed: v8::Local<v8::Value> = f64_array(scope, &changed).into();
-    answer.set_index(scope, 0, frag_rows);
-    answer.set_index(scope, 1, box_rows);
-    answer.set_index(scope, 2, changed);
-    answer
-}
-
-
 // A Float64Array holding `vals` — how a pass hands a flat table back to JS in one crossing.
 pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v8::Local<'s, v8::Float64Array> {
     let bytes: Vec<u8> = vals.iter().flat_map(|v| v.to_ne_bytes()).collect();
@@ -3124,35 +3088,6 @@ pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v
     v8::Float64Array::new(scope, buf, 0, vals.len()).expect("a Float64Array over its own backing store")
 }
 
-// One box as the JS side reads it (`nlWriteBoxes`' box rows): `BOX_ROW` numbers — its border box `[x, y, w, h]`,
-// whether its height is `auto`, the basis its percentages resolved against, its used margins (top, right, bottom,
-// left) and its relative shift `[x, y]`, then its edges as the pass used them (`layout::Box::edges`, NaN where it has
-// none), which `auto` margins it has in the JS side's mask (1 top, 2 right, 4 bottom, 8 left — `AUTO_MARGIN_BIT`)
-// with 16 beside them where an edge resolved a percentage, and where it is out of flow what placed it:
-// `Box::out_of_flow`, `cb` (the record, or −1 the viewport, −2 the inline entry after it; −3 on a box in flow), `cb_inline` and
-// `static_axes` — and its `position` (`Box::position`) and how it clips its content (`Box::clip`).
-pub(crate) const BOX_ROW: usize = 31;
-fn box_row(b: &crate::layout::Box) -> [f64; BOX_ROW] {
-    let [mt, mr, mb, ml] = b.used_margins.unwrap_or([f64::NAN; 4]);
-    let am = b.auto_margins;
-    let auto = [(4, 1), (2, 2), (8, 4), (1, 8)].iter().fold(0, |m, &(from, to)| if am & from != 0 { m | to } else { m });
-    let mut row = [0.0; BOX_ROW];
-    row[..12].copy_from_slice(&[b.x, b.y, b.w, b.h, if b.auto_height { 1.0 } else { 0.0 }, b.cb_w.unwrap_or(f64::NAN), mt, mr, mb, ml, b.rel[0], b.rel[1]]);
-    row[12..24].copy_from_slice(&b.edges.unwrap_or([f64::NAN; 12]));
-    row[24] = (auto | if b.percent_edges { 16 } else { 0 }) as f64;
-    row[25] = b.out_of_flow as f64;
-    row[26] = match b.cb {
-        at if at >= 0 => at as f64,
-        crate::layout::CB_RECT => -1.0,
-        crate::layout::CB_INLINE => -2.0,
-        _ => -3.0,
-    };
-    row[27] = b.cb_inline as f64;
-    row[28] = b.static_axes as f64;
-    row[29] = b.position as f64;
-    row[30] = b.clip as f64;
-    row
-}
 
 
 // __dom.nowNanos() -> a process-monotonic wall time in nanoseconds (as a Number). csim's own clock (Date.now /

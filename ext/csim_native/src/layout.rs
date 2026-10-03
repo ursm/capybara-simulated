@@ -5,9 +5,9 @@
 // box in DOCUMENT coordinates, sub-pixel (no rounding — the read boundary rounds the integer CSSOM properties). Two
 // phases: `measure` lays each subtree out relative to its own border-box origin, so a margin collapsing through a box
 // propagates up without a final position, then `place` walks once top-down adding the absolute offsets. The boxes
-// (`Box`), the inline boxes' fragments (`FragRow`) and, for a paint, the text pieces (`TextRow`) are written back as
-// `el._lb` / `el._lbFrags` for the geometry readers (getBoundingClientRect / offset* / client* / scroll*, hit testing,
-// the painter).
+// (`Box`) and the inline boxes' fragments (`FragRow`) are kept on the nodes for the geometry (geometry.rs:
+// getBoundingClientRect / offset* / client* / scroll*, hit testing, the painter), and for a paint the text pieces
+// (`TextRow`) are handed to the painter.
 //
 // What it models: block flow — used widths and heights, min / max, box-sizing, percentages and `calc()` resolved against
 // the box a child is laid out in, `auto` fill, shrink-to-fit and the intrinsic keywords, full margin collapsing,
@@ -319,8 +319,7 @@ pub(crate) struct Input {
     // 3rem)`), as the sizes carry theirs (`pct_math`) — a padding's floored at 0, as a padding is never negative.
     pub(crate) edge_math: [u32; 8],
     // The containing-block width this box's percentages were last resolved against (`with_percent_sizes`) — the
-    // box's `cb_w`, written back as `_lbCbW`, which the geometry reads resolve a percentage padding / margin / inset
-    // against again.
+    // box's `cb_w`, which the geometry reads resolve a percentage padding / margin / inset against again.
     // NaN for a box whose percentages nothing resolved, as for one that has none: any basis answers alike there.
     pub(crate) basis_w: f64,
     // An out-of-flow box's inset percentages (top / right / bottom / left) as fractions of its containing block's
@@ -1012,7 +1011,7 @@ impl Input {
     }
 }
 
-// The border-box a pass writes per node, in document coordinates — what layout.js writes back as `el._lb`.
+// The border-box a pass writes per node, in document coordinates — what the geometry reads it at (geometry.rs).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Box {
     pub(crate) nid: f64,
@@ -1042,12 +1041,10 @@ pub(crate) struct Box {
     // The basis its percentages resolved against (`Input::basis_w`), None where nothing resolved one.
     pub(crate) cb_w: Option<f64>,
     // The margins its placement USED (top / right / bottom / left) where they are not what the record declared —
-    // an `auto` one given the slack, an over-constrained one the remainder — written back as `_lbMargins` for
-    // `getComputedStyle` to report. None where every side is the declared one.
+    // an `auto` one given the slack, an over-constrained one the remainder — which `getComputedStyle` reports. None where every side is the declared one.
     pub(crate) used_margins: Option<[f64; 4]>,
     // Its OWN relative shift (x, y), already in `x` / `y` — the whole less the relative inline chain's around it
-    // (`Input::chain_shift`), which belongs to those inlines: written back as `_lbRel`, which the scrollable overflow
-    // region reads (a shifted child extends its scroller from where it SITS, the end padding from where it was laid
+    // (`Input::chain_shift`), which belongs to those inlines: what the scrollable overflow region reads (a shifted child extends its scroller from where it SITS, the end padding from where it was laid
     // out). (0, 0) for a box that did not move itself.
     pub(crate) rel: [f64; 2],
     // Its EDGES as the pass used them, the percentages resolved against `cb_w`: padding, border and margin, each top /

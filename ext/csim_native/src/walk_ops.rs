@@ -1,7 +1,7 @@
 // The Rust walk's ops: `layoutBuild`, the layout pass the Rust walk builds from the style engine's values, and the faces
 // it asks the JS side for (`styleFaces`, `walkFace`), which only that side resolves today.
 
-use crate::dom::{dom, f64_array, laid_answer, realm_id, register, NodeId};
+use crate::dom::{dom, f64_array, realm_id, register, NodeId};
 use crate::walk::{self, Basis, Face, Outcome};
 use crate::walk_reuse;
 
@@ -12,13 +12,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // __dom.layoutBuild(rootNid, fontGeneration, rootCbW, rootCbH, texts, check): a whole layout pass the Rust walk builds
-// from the arena and the style engine — its records, runs and tables — and lays out (the root placed natively), answered
-// as `[fragRows, boxRows, changed]` with what names its boxes to the JS side beside it: `[…, , recordNids, anonymous,
-// inlineNids, unchanged]` (an anonymous cell or item as `[record, kind, container nid, ordinal]`, flat; `unchanged` the
-// records built as the last pass built them) — and where `texts` asks, for a pass a painter records, each text piece as
-// it draws it at 8 and 9: `[x, y, baseline, width, justify, owner nid]` and the texts (`paint_rows`). Or `[family,
-// bucket, …]` — the faces the walk needs first, for the JS side to resolve (`walkFace`) and ask again — or the walk's
-// decline, a string.
+// from the arena and the style engine — its records, runs and tables — and lays out (the root placed natively), its
+// boxes kept in the arena for the geometry (geometry.rs `store_layout`): answered `true` — or where `texts` asks, for a
+// pass a painter records, each text piece as it draws it, `[rows, texts]`: `[x, y, baseline, width, justify, owner nid]`
+// and the texts (`paint_rows`). Or `[family, bucket, …]` — the faces the walk needs first, for the JS side to resolve
+// (`walkFace`) and ask again — or `{boxes}`, the generated boxes it needs linked, or the walk's decline, a string.
 fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let Some(root) = NodeId::from_i64(args.get(0).number_value(scope).unwrap_or(-1.0) as i64) else { return };
@@ -78,12 +76,11 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         }
     };
     let walk::Built { mut inputs, runs, run_texts, inlines, grids, anon, inline_nids, extents, spliced, walked, paint } = built;
-    let nids: Vec<f64> = inputs.iter().map(|r| r.nid).collect();
     // The layout of every subtree built as the last pass built it is the measure cache's to put back (`walk_reuse`) —
     // except for a pass that answers its text pieces, which a put-back measure does not hold.
     let reuse = dom(scope).walk_reuse.entry(cid).or_default();
     let streams = walk_reuse::Streams { inputs: &inputs, runs: &runs, run_texts: &run_texts, grids: &grids, inlines: &inlines, extents: &extents, spliced: &spliced };
-    let walk_reuse::Pass { roots, ends, ids, unchanged } = reuse.chunks(&streams);
+    let walk_reuse::Pass { roots, ends, ids } = reuse.chunks(&streams);
     let built_inputs = inputs.clone();
     let mut measure = std::mem::take(&mut reuse.measure);
     let maths = std::mem::take(&mut reuse.maths);
@@ -133,24 +130,21 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         arena.begin_layout(root, [basis.w, basis.h]);
         crate::geometry::store_layout(arena, &laid, &inline_nids, &anon);
     }
-    // (…its text rows answered as the painter's pieces alone, below: nothing on that side reads the rows that index runs)
-    let answer = laid_answer(scope, cid, laid);
-    if let Some((rows, strings)) = painted {
-        let rows: v8::Local<v8::Value> = f64_array(scope, &rows).into();
-        answer.set_index(scope, 8, rows);
-        let list = v8::Array::new(scope, strings.len() as i32);
-        for (k, t) in strings.iter().enumerate() {
-            let v = v8::String::new_from_two_byte(scope, t, v8::NewStringType::Normal).unwrap();
-            list.set_index(scope, k as u32, v.into());
+    // (…answered `true` — the boxes are the arena's now — or, for a pass that paints, as the painter's text pieces:
+    // `[rows, texts]`)
+    match painted {
+        Some((rows, strings)) => {
+            let rows: v8::Local<v8::Value> = f64_array(scope, &rows).into();
+            let list = v8::Array::new(scope, strings.len() as i32);
+            for (k, t) in strings.iter().enumerate() {
+                let v = v8::String::new_from_two_byte(scope, t, v8::NewStringType::Normal).unwrap();
+                list.set_index(scope, k as u32, v.into());
+            }
+            let items: [v8::Local<v8::Value>; 2] = [rows, list.into()];
+            rv.set(v8::Array::new_with_elements(scope, &items).into());
         }
-        answer.set_index(scope, 9, list.into());
+        None => rv.set(v8::Boolean::new(scope, true).into()),
     }
-    let anon: Vec<f64> = anon.iter().flatten().copied().collect();
-    for (at, list) in [(4, &nids), (5, &anon), (6, &inline_nids), (7, &unchanged)] {
-        let v: v8::Local<v8::Value> = f64_array(scope, list).into();
-        answer.set_index(scope, at, v);
-    }
-    rv.set(answer.into());
 }
 
 // The faces a walk needs, `[family, bucket, …]`, for the JS side to resolve.
