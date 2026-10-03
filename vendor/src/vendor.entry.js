@@ -10,15 +10,6 @@
 // The output (`vendor/js/vendor.bundle.js`) is checked in and shipped
 // in the gem; consumers never need npm.
 
-// whatwg-mimetype: the WHATWG MIME-type parser + serializer (npm, MIT — the jsdom
-// reference impl). Backs XHR send()'s "fix the charset to UTF-8" step, which needs a
-// real parser (quoted strings, backslash escapes, duplicate-parameter dedup) and the
-// canonical serializer (lowercases type/subtype + parameter names). Pure regex
-// parse/serialize — no WebIDL / ArrayBuffer descriptors — so it's safe in the V8
-// snapshot build.
-import { MIMEType } from 'whatwg-mimetype';
-const mimeType = { MIMEType };
-
 // web-streams-polyfill: spec-compliant pure-JS WHATWG Streams (ReadableStream /
 // WritableStream / TransformStream + queuing strategies), defined entirely over
 // promises + microtask queuing — which our event loop models. The ponyfill entry
@@ -32,4 +23,4 @@ import * as streams from 'web-streams-polyfill';
 // bridge decides where and whether to expose it, like every other vendor piece).
 // First consumer: the ServiceWorker Static Routing API's `urlPattern` conditions.
 import { URLPattern } from 'urlpattern-polyfill/urlpattern';
-export { mimeType, streams, URLPattern };
+export { streams, URLPattern };

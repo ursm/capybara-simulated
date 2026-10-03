@@ -28,6 +28,7 @@ mod hit_test;
 mod html_parse;
 // Layout: the records the walk builds (mod walk) laid out, driven by the `layoutBuild` op (mod walk_ops).
 mod layout;
+mod mime;
 // Bringing a box into view: the scroll boxes that move, and to where (`scrollIntoView`, a driver's scroll-if-needed).
 // What is rendered, and the text it renders (`innerText`, the visible text a driver reads).
 mod rendered;
