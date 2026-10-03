@@ -88,6 +88,26 @@ RSpec.describe 'transform geometry' do
     expect(rect(s, 'a')).to eq([25, 0, 50, 50])
   end
 
+  # A box turns about its origin WHERE THE SCROLLS CARRIED IT: the map is read off the box as the page shows it, so
+  # it moves with every scroll above the box — not only with the next layout (Chrome 153).
+  it 'measures a rotated box as it is scrolled' do
+    s = page_with('<div id=sc style="overflow:auto;width:300px;height:150px"><div style="height:100px"></div>' \
+                  '<div id=r style="width:100px;height:50px;transform:rotate(30deg)"></div>' \
+                  '<div style="height:400px"></div></div><div style="height:3000px"></div>')
+    expect(rect(s, 'r')).to eq([-5.8, 78.35, 111.6, 93.3])
+    s.execute_script("document.getElementById('sc').scrollTop = 60")
+    expect(rect(s, 'r')).to eq([-5.8, 18.35, 111.6, 93.3])
+    s.execute_script('window.scrollTo(0, 25)')
+    expect(rect(s, 'r')).to eq([-5.8, -6.65, 111.6, 93.3])
+  end
+
+  # A transform takes a transformed ancestor's map over its own, about its OWN origin — `rotate` included (Chrome 153).
+  it 'composes an individual rotation under a scaled ancestor' do
+    s = page_with('<div style="transform:scale(2);transform-origin:0 0;width:100px;height:30px;font:16px Arial">' \
+                  '<span>inline</span><div id=k style="width:20px;height:5px;transform-origin:100% 0;rotate:90deg"></div></div>')
+    expect(rect(s, 'k')).to eq([30, -4, 10, 40])
+  end
+
   # A hit test asks whether the point is inside the transformed QUAD, not inside its bounds: a
   # point in the corner of a rotated square's bounding box is over whatever is behind it.
   it 'hit-tests through the transform' do

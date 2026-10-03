@@ -824,9 +824,6 @@ css/css-transforms/3d-point-mapping-origins.html:
 css/css-transforms/3d-point-mapping-preserve-3d.html:
 - Point mapping through 3D transform hierarchies, hittesting bottom-right-light-yellow
 css/css-transforms/3d-rendering-context-behavior.html:
-- Direct DOM parent is root of rendering context (absolute)
-- Direct DOM parent is root of rendering context (fixed)
-- Direct DOM parent is root of rendering context (normal flow)
 - Intermediate DOM nodes cause rendering context to end (absolute)
 - Intermediate DOM nodes cause rendering context to end (fixed)
 - Intermediate DOM nodes cause rendering context to end (normal flow)
@@ -1185,14 +1182,6 @@ css/css-transforms/hittest-preserve-3d-2.html:
 - Hit test preserve-3d descendant
 css/css-transforms/hittest-preserve-3d.html:
 - Hit test preserve-3d descendant
-css/css-transforms/individual-transform/animation/individual-transform-ordering.html:
-- "== css/css-transforms/individual-transform/animation/individual-transform-ordering-ref.html"
-css/css-transforms/individual-transform/individual-transform-2a.html:
-- "== css/css-transforms/individual-transform/individual-transform-2-ref.html"
-css/css-transforms/individual-transform/individual-transform-2b.html:
-- "== css/css-transforms/individual-transform/individual-transform-2-ref.html"
-css/css-transforms/individual-transform/individual-transform-2c.html:
-- "== css/css-transforms/individual-transform/individual-transform-2-ref.html"
 css/css-transforms/individual-transform/individual-transform-3.html:
 - "== css/reference/ref-filled-green-200px-square.html"
 css/css-transforms/individual-transform/translate-fill-box.html:
@@ -1229,8 +1218,6 @@ css/css-transforms/preserve3d-and-filter-no-perspective.html:
 - "== css/css-transforms/preserve3d-and-filter-no-perspective-ref.html"
 css/css-transforms/preserve3d-and-filter-with-perspective.html:
 - "== css/css-transforms/preserve3d-and-filter-with-perspective-ref.html"
-css/css-transforms/preserve3d-and-flattening-001.html:
-- "== css/css-transforms/preserve3d-and-flattening-001-ref.html"
 css/css-transforms/preserve3d-and-flattening-002.html:
 - "== css/css-transforms/preserve3d-and-flattening-002-ref.html"
 css/css-transforms/preserve3d-and-flattening-003.html:

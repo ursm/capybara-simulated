@@ -142,8 +142,15 @@ pub(crate) struct NodeData {
     // sibling walks step from it and skip any stale neighbour they land on.
     pub(crate) child_index: usize,
     // The box the last layout pass gave this node (`laid_answer`): what a pass's `changed` is decided against,
-    // so the JS side rewrites only a box that moved. None until a pass lays it out; overwritten each pass.
+    // so the JS side rewrites only a box that moved. None until a pass lays it out; overwritten each pass — and KEPT by
+    // a pass that lays it out no longer, which `laid_at` tells apart.
     pub(crate) layout_box: Option<crate::layout::Box>,
+    // …or, for an INLINE box, which no record lays out, the FRAGMENTS the lines broke it into, `[x, y, w, h]` each
+    // (`geometry::store_fragments`); None for any other node. A node has one or the other, as the last pass laid it out.
+    pub(crate) layout_frags: Option<Box<[[f64; 4]]>>,
+    // The layout pass (`RealmArena::layout_pass`) that last laid it out: its box or fragments are the page's only while
+    // this is the current one (`geometry::laid`).
+    pub(crate) laid_at: u64,
     // Its SCROLL OFFSET, `[x, y]`: the scroll container's (the document scroller's on the root element), 0 on any other.
     pub(crate) scroll: [f64; 2],
     // An element's live STATE that no attribute carries (`state` bits, below): what a script or the user did to it.
@@ -221,6 +228,8 @@ impl NodeData {
             children: Vec::new(),
             child_index: 0,
             layout_box: None,
+            layout_frags: None,
+            laid_at: 0,
             scroll: [0.0; 2],
             state: 0,
             host: None,
@@ -461,6 +470,11 @@ pub(crate) struct RealmArena {
     // geometry (geometry.rs) reads every box of that layout in.
     pub(crate) layout_root: Option<NodeId>,
     pub(crate) viewport: [f64; 2],
+    // …and which layout that is, counted from 1: a node laid out by an earlier one has no box in this one.
+    pub(crate) layout_pass: u64,
+    // Moves with anything a geometry read reads (`geometry_moved`): what its memo is kept against (`geometry::Memo`).
+    pub(crate) geometry_epoch: std::cell::Cell<u64>,
+    pub(crate) geometry_memo: std::cell::RefCell<crate::geometry::Memo>,
 }
 pub(crate) const RESTYLED_CAP: usize = 4096;
 
@@ -469,6 +483,7 @@ impl RealmArena {
     // root's host, a slotted node's slot, and theirs — are stamped with the current layout epoch, up to the first
     // stamped already, whose own ancestors are too.
     pub(crate) fn stamp_change(&self, id: NodeId) {
+        self.geometry_moved();
         let epoch = self.layout_epoch.get();
         let mut stack = vec![id];
         while let Some(n) = stack.pop() {
@@ -485,6 +500,7 @@ impl RealmArena {
     // …and one the style engine RESTYLED: stamped, as a write is, and kept for this side to take.
     pub(crate) fn note_restyled(&self, id: NodeId) {
         self.stamp_change(id);
+        self.geometry_moved();
         let mut restyled = self.restyled.borrow_mut();
         if restyled.1 {
             return;
@@ -495,6 +511,17 @@ impl RealmArena {
         } else {
             restyled.0.push(id);
         }
+    }
+    // Something a geometry read reads moved: its memo is no longer the page's.
+    pub(crate) fn geometry_moved(&self) {
+        self.geometry_epoch.set(self.geometry_epoch.get() + 1);
+    }
+    // A layout of `root` against `viewport` begins: the boxes it writes are the page's from now on, and no earlier one's.
+    pub(crate) fn begin_layout(&mut self, root: NodeId, viewport: [f64; 2]) {
+        self.layout_root = Some(root);
+        self.viewport = viewport;
+        self.layout_pass += 1;
+        self.geometry_moved();
     }
     // The start of a layout walk: the epoch it walks at, the clock moved on past it.
     pub(crate) fn begin_layout_walk(&self) -> u64 {
@@ -527,13 +554,6 @@ impl RealmArena {
             slot.data.as_mut()
         } else {
             None
-        }
-    }
-    // …and the layout written off every node (quietly, as a pass writes it): what a page laid out as its root box alone
-    // leaves of the layout before.
-    pub(crate) fn clear_layout(&mut self) {
-        for node in self.slots.iter_mut().filter_map(|s| s.data.as_mut()) {
-            node.layout_box = None;
         }
     }
 
@@ -3055,11 +3075,16 @@ pub(crate) fn laid_answer<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, laid: 
     let mut changed: Vec<f64> = Vec::new();
     for (i, b) in laid.boxes.into_iter().enumerate() {
         rows.extend(box_row(&b));
-        let node = if b.nid >= 0.0 { NodeId::from_i64(b.nid as i64).and_then(|id| st.get_mut_quietly(id)) } else { None };
+        let pass = st.layout_pass;
+        let mut node = if b.nid >= 0.0 { NodeId::from_i64(b.nid as i64).and_then(|id| st.get_mut_quietly(id)) } else { None };
+        if let Some(node) = node.as_deref_mut() {
+            node.laid_at = pass;
+        }
         match node {
             Some(node) if node.layout_box == Some(b) => {}
             Some(node) => {
                 node.layout_box = Some(b);
+                node.layout_frags = None;
                 changed.push(i as f64);
             }
             None => changed.push(i as f64),

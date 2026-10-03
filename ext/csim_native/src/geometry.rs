@@ -50,6 +50,34 @@ pub(crate) fn box_style(arena: &RealmArena, id: NodeId) -> Option<Arc<ComputedVa
     }
 }
 
+// The box `node` holds from the CURRENT layout — what an earlier one left is no box of this one — and the fragments.
+pub(crate) fn laid<'a>(arena: &RealmArena, node: &'a crate::dom::NodeData) -> Option<&'a Box> {
+    node.layout_box.as_ref().filter(|_| node.laid_at == arena.layout_pass)
+}
+fn laid_frags<'a>(arena: &RealmArena, node: &'a crate::dom::NodeData) -> Option<&'a [[f64; 4]]> {
+    node.layout_frags.as_deref().filter(|_| node.laid_at == arena.layout_pass)
+}
+
+// What the geometry reads keep between two changes to anything they read (`RealmArena::geometry_epoch`: a layout pass,
+// a scroll, a restyle, a tree change): each node's transform chain and the scroll shift of the boxes it holds. A rect
+// read and every candidate of a hit test ask them, and each walks every ancestor's style without one.
+#[derive(Default)]
+pub(crate) struct Memo {
+    epoch: u64,
+    chains: std::collections::HashMap<NodeId, Option<M4>>,
+    below: std::collections::HashMap<NodeId, [f64; 2]>,
+}
+fn memo(arena: &RealmArena) -> std::cell::RefMut<'_, Memo> {
+    let mut memo = arena.geometry_memo.borrow_mut();
+    let epoch = arena.geometry_epoch.get();
+    if memo.epoch != epoch {
+        memo.epoch = epoch;
+        memo.chains.clear();
+        memo.below.clear();
+    }
+    memo
+}
+
 // Is this the box of a `position: fixed` element laid out against the VIEWPORT — which no scrolling moves?
 fn is_fixed(b: &Box) -> bool {
     b.out_of_flow == OOF_FIXED && b.cb == CB_RECT
@@ -59,39 +87,39 @@ fn is_fixed(b: &Box) -> bool {
 // container's around it, compounding up — less the distance a STICKY box among them (it included) has stuck. With
 // `below`, the shift of a box `id` holds rather than of `id`'s own: an anonymous box, which no node names.
 pub(crate) fn scroll_shift(arena: &RealmArena, id: NodeId, below: bool) -> [f64; 2] {
-    let mut shift = [0.0; 2];
-    let Some(node) = arena.get(id) else { return shift };
-    let root = arena.layout_root;
-    if !below {
-        // A `position: fixed` box is laid out against the VIEWPORT, so no scrolling moves it — that is what fixed means,
-        // and how a pinned header stays put while the page scrolls under it.
-        if node.layout_box.as_ref().is_some_and(is_fixed) {
-            return shift;
-        }
-        // The document's scroll moves the ROOT ELEMENT's own box, not just its descendants': `html`'s client rect sits
-        // at `(-scrollX, -scrollY)` in every browser (Floating UI reads its scrollbar offset as `left + scrollLeft`).
-        if Some(id) == root {
-            return node.scroll;
-        }
+    if below {
+        return shift_below(arena, id);
     }
-    let mut at = if below { Some(id) } else { flat_parent(arena, id) };
-    if !below {
-        unstick(&mut shift, sticky_delta(arena, id));
+    let Some(node) = arena.get(id) else { return [0.0; 2] };
+    // A `position: fixed` box is laid out against the VIEWPORT, so no scrolling moves it — that is what fixed means, and
+    // how a pinned header stays put while the page scrolls under it.
+    if laid(arena, node).is_some_and(is_fixed) {
+        return [0.0; 2];
     }
-    while let Some(p) = at {
-        let Some(pn) = arena.get(p) else { break };
-        if Some(p) == root || pn.layout_box.as_ref().is_some_and(|b| b.clip & CLIP_SCROLLS != 0) {
-            shift[0] += pn.scroll[0];
-            shift[1] += pn.scroll[1];
-        }
-        // …a STICKY ancestor carries the box with it, as it carries its own; and a FIXED one ends the walk, after its
-        // own scroll, which does move its content.
-        unstick(&mut shift, sticky_delta(arena, p));
-        if pn.layout_box.as_ref().is_some_and(is_fixed) {
-            break;
-        }
-        at = flat_parent(arena, p);
+    // The document's scroll moves the ROOT ELEMENT's own box, not just its descendants': `html`'s client rect sits at
+    // `(-scrollX, -scrollY)` in every browser (Floating UI reads its scrollbar offset as `left + scrollLeft`).
+    if Some(id) == arena.layout_root {
+        return node.scroll;
     }
+    let mut shift = flat_parent(arena, id).map_or([0.0; 2], |p| shift_below(arena, p));
+    unstick(&mut shift, sticky_delta(arena, id));
+    shift
+}
+// …the shift of the boxes `p` holds: its own scroll where it is the root or a scroll container, less what it has stuck
+// if it is sticky, and its ancestors' — none past a FIXED one, whose own scroll still moves its content.
+fn shift_below(arena: &RealmArena, p: NodeId) -> [f64; 2] {
+    if let Some(&shift) = memo(arena).below.get(&p) {
+        return shift;
+    }
+    let Some(pn) = arena.get(p) else { return [0.0; 2] };
+    let b = laid(arena, pn);
+    let mut shift = if b.is_some_and(is_fixed) { [0.0; 2] } else { flat_parent(arena, p).map_or([0.0; 2], |up| shift_below(arena, up)) };
+    if Some(p) == arena.layout_root || b.is_some_and(|b| b.clip & CLIP_SCROLLS != 0) {
+        shift[0] += pn.scroll[0];
+        shift[1] += pn.scroll[1];
+    }
+    unstick(&mut shift, sticky_delta(arena, p));
+    memo(arena).below.insert(p, shift);
     shift
 }
 fn unstick(shift: &mut [f64; 2], delta: Option<[f64; 2]>) {
@@ -107,7 +135,7 @@ fn unstick(shift: &mut [f64; 2], delta: Option<[f64; 2]>) {
 // block, which pushes it back out (css-position-3 §3.4). Without it a sticky sidebar scrolled off the top of the
 // viewport with the page, and a sticky header stopped covering what it covers.
 fn sticky_delta(arena: &RealmArena, id: NodeId) -> Option<[f64; 2]> {
-    let b = arena.get(id)?.layout_box.as_ref().filter(|b| b.position == POSITION_STICKY)?;
+    let b = laid(arena, arena.get(id)?).filter(|b| b.position == POSITION_STICKY)?;
     let cb = containing_rect(arena, sticky_containing_block(arena, id)?)?;
     let port = scrollport(arena, id)?;
     let style = box_style(arena, id)?;
@@ -172,12 +200,12 @@ fn sticky_containing_block(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
 // (Chrome and Firefox: stuck 5px into a 200px scroller scrolled 250px down, where the content box alone let it go).
 fn containing_rect(arena: &RealmArena, cb: NodeId) -> Option<[f64; 4]> {
     let node = arena.get(cb)?;
-    let b = node.layout_box.as_ref()?;
+    let b = laid(arena, node)?;
     let mut rect = content_box(b);
     if b.clip & CLIP_SCROLLS != 0 {
         let [mut right, mut bottom] = [rect[0] + rect[2], rect[1] + rect[3]];
         for c in flat_children(arena, node).iter().chain(node.pseudo_boxes.iter().flatten()) {
-            let Some(cb) = arena.get(*c).and_then(|n| n.layout_box.as_ref()) else { continue };
+            let Some(cb) = arena.get(*c).and_then(|n| laid(arena, n)) else { continue };
             let m = cb.edges.map_or([0.0; 4], |e| [e[8], e[9], e[10], e[11]]);
             right = right.max(cb.x + cb.w + m[1]);
             bottom = bottom.max(cb.y + cb.h + m[2]);
@@ -200,7 +228,7 @@ fn scrollport(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
             let [w, h] = arena.viewport;
             return Some([pn.scroll[0], pn.scroll[1], w, h]);
         }
-        if let Some(b) = pn.layout_box.as_ref().filter(|b| b.clip & CLIP_SCROLLS != 0) {
+        if let Some(b) = laid(arena, pn).filter(|b| b.clip & CLIP_SCROLLS != 0) {
             let [x, y, w, h] = content_box(b);
             return Some([x + pn.scroll[0], y + pn.scroll[1], w, h]);
         }
@@ -216,10 +244,304 @@ fn content_box(b: &Box) -> [f64; 4] {
     [b.x + left, b.y + top, (b.w - left - right).max(0.0), (b.h - top - bottom).max(0.0)]
 }
 
+// Each INLINE box's fragments, off a pass's fragment rows `[inline index, x, y, w, h]` and the node each inline entry
+// is (`inline_nids`): stored on the node in place of a box (`NodeData::layout_frags`).
+pub(crate) fn store_fragments(arena: &mut RealmArena, rows: &[crate::layout::FragRow], inline_nids: &[f64]) {
+    let pass = arena.layout_pass;
+    let mut by_inline: Vec<Vec<[f64; 4]>> = vec![Vec::new(); inline_nids.len()];
+    for &[at, x, y, w, h] in rows {
+        if let Some(list) = by_inline.get_mut(at as usize) {
+            list.push([x, y, w, h]);
+        }
+    }
+    for (nid, frags) in inline_nids.iter().zip(by_inline) {
+        let Some(node) = NodeId::from_i64(*nid as i64).and_then(|id| arena.get_mut_quietly(id)) else { continue };
+        if frags.is_empty() {
+            continue;
+        }
+        node.layout_box = None;
+        node.layout_frags = Some(frags.into_boxed_slice());
+        node.laid_at = pass;
+    }
+}
+
+// The box the last layout placed `id` in, `[x, y, w, h]` in document coordinates: its record's border box, or the union
+// of an inline box's fragments.
+pub(crate) fn placed_box(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
+    let node = arena.get(id)?;
+    if let Some(b) = laid(arena, node) {
+        return Some([b.x, b.y, b.w, b.h]);
+    }
+    let frags = laid_frags(arena, node)?;
+    let [mut x0, mut y0, mut x1, mut y1] = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for &[x, y, w, h] in frags {
+        x0 = x0.min(x);
+        y0 = y0.min(y);
+        x1 = x1.max(x + w);
+        y1 = y1.max(y + h);
+    }
+    Some([x0, y0, x1 - x0, y1 - y0])
+}
+
+// …and where the page's scrolling has carried it to (`laidOutBox`): in VIEWPORT coordinates, untransformed.
+pub(crate) fn laid_out_box(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
+    let [x, y, w, h] = placed_box(arena, id)?;
+    let [sx, sy] = scroll_shift(arena, id, false);
+    Some([x - sx, y - sy, w, h])
+}
+
+// ── transforms ─────────────────────────────────────────────────────────────────────────────────────────────────
+// A transform does not move the element in FLOW, but it moves the box the page can MEASURE: a client rect and a hit
+// test see the transformed quad. The map from an element's own coordinates to the viewport is its transform taken
+// ABOUT ITS ORIGIN, then every transformed ancestor's, outermost last — crossing into each parent as css-transforms-2
+// orders it: the parent's `perspective`, then a FLATTEN unless the parent shares its 3D rendering context. 4x4s in
+// CSS `matrix3d()` order (column-major), as the style engine composes them.
+pub(crate) type M4 = [f64; 16];
+
+pub(crate) fn multiply(a: &M4, b: &M4) -> M4 {
+    let mut out = [0.0; 16];
+    for c in 0..4 {
+        for r in 0..4 {
+            out[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+        }
+    }
+    out
+}
+fn translate([x, y, z]: [f64; 3]) -> M4 {
+    [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, x, y, z, 1.0]
+}
+// `m` taken about `origin`: `translate(origin) · m · translate(-origin)`.
+fn about(origin: [f64; 3], m: &M4) -> M4 {
+    multiply(&translate(origin), &multiply(m, &translate(origin.map(|v| -v))))
+}
+// A 3D map FLATTENED onto the plane it lands in (css-transforms-2 §6): no z in, none out.
+fn flatten(m: &M4) -> M4 {
+    let mut out = *m;
+    for i in [2, 6, 8, 9, 11, 14] {
+        out[i] = 0.0;
+    }
+    out[10] = 1.0;
+    out
+}
+
+// The map from `id`'s box to the viewport (`transformChain`), None where nothing on the way transforms it: its own step,
+// then each ancestor's after crossing into it — and the chain an ancestor maps ITS box by, taken whole, from the first
+// crossing that FLATTENS (or that carries no map at all): `flatten(A · B)` is `flatten(A) · B` only where B is flat,
+// so across a `preserve-3d` boundary the steps are composed one by one.
+pub(crate) fn transform_chain(arena: &RealmArena, id: NodeId) -> Option<M4> {
+    if let Some(&chain) = memo(arena).chains.get(&id) {
+        return chain;
+    }
+    let mut m = transform_step(arena, id);
+    let mut at = id;
+    let chain = loop {
+        let Some(up) = flat_parent(arena, at).filter(|&n| arena.get(n).is_some_and(|n| n.kind == NodeKind::Element)) else { break m };
+        if m.is_none() || !shares_context(arena, up) {
+            let crossed = cross_into(arena, up, m);
+            break match (transform_chain(arena, up), crossed) {
+                (Some(outer), Some(inner)) => Some(multiply(&outer, &inner)),
+                (outer, inner) => outer.or(inner),
+            };
+        }
+        let crossed = cross_into(arena, up, m);
+        m = match (transform_step(arena, up), crossed) {
+            (Some(t), Some(inner)) => Some(multiply(&t, &inner)),
+            (t, inner) => t.or(inner),
+        };
+        at = up;
+    };
+    memo(arena).chains.insert(id, chain);
+    chain
+}
+fn cross_into(arena: &RealmArena, node: NodeId, m: Option<M4>) -> Option<M4> {
+    let mut m = m?;
+    if let Some(p) = perspective_step(arena, node) {
+        m = multiply(&p, &m);
+    }
+    Some(if shares_context(arena, node) { m } else { flatten(&m) })
+}
+
+// Whether `node`'s children share its 3D rendering context: `transform-style: preserve-3d`, which a GROUPING property
+// makes `flat` all the same (css-transforms-2 §6.1 — Chrome: an overflow other than visible, a filter, an opacity
+// below 1, isolation, a blend mode, a clip path, a mask, a `will-change` naming one of them; not `contain: paint`).
+fn shares_context(arena: &RealmArena, node: NodeId) -> bool {
+    use style::computed_values::transform_style::T as TransformStyle;
+    let Some(style) = box_style(arena, node) else { return false };
+    let b = style.get_box();
+    if b.transform_style != TransformStyle::Preserve3d {
+        return false;
+    }
+    !groups(&style)
+}
+fn groups(style: &ComputedValues) -> bool {
+    use style::computed_values::isolation::T as Isolation;
+    use style::computed_values::mix_blend_mode::T as MixBlendMode;
+    use style::computed_values::overflow_x::T as Overflow;
+    let b = style.get_box();
+    let effects = style.get_effects();
+    b.overflow_x != Overflow::Visible
+        || b.overflow_y != Overflow::Visible
+        || effects.opacity < 1.0
+        || b.isolation == Isolation::Isolate
+        || effects.mix_blend_mode != MixBlendMode::Normal
+        || !effects.filter.0.is_empty()
+        || !effects.backdrop_filter.0.is_empty()
+        || style.get_svg().mask_image.0.iter().any(|i| !matches!(i, style::values::computed::Image::None))
+        || !matches!(style.get_svg().clip_path, style::values::generics::basic_shape::GenericClipPath::None)
+        || will_change_groups(b)
+}
+// …a `will-change` naming one of them — asked only of a `preserve-3d` box, so its names are read off its text.
+fn will_change_groups(b: &style::properties::style_structs::Box) -> bool {
+    use style_traits::ToCss;
+    const GROUPING: [&str; 8] = ["opacity", "filter", "backdrop-filter", "clip-path", "mask", "mask-image", "isolation", "mix-blend-mode"];
+    let names = b.will_change.to_css_string();
+    names.split(", ").any(|n| GROUPING.contains(&n))
+}
+
+// The parent's `perspective`, about its `perspective-origin`, in viewport coordinates — None for `none` (a negative depth
+// is no value; zero is one, floored at a pixel as the function is).
+fn perspective_step(arena: &RealmArena, node: NodeId) -> Option<M4> {
+    use style::values::generics::box_::Perspective;
+    let style = box_style(arena, node)?;
+    let b = style.get_box();
+    let Perspective::Length(d) = &b.perspective else { return None };
+    if is_boxless(arena, node, &style) {
+        return None;
+    }
+    let [x, y, w, h] = laid_out_box(arena, node)?;
+    let origin = &b.perspective_origin;
+    let ox = resolve(&origin.horizontal, w);
+    let oy = resolve(&origin.vertical, h);
+    let mut p = translate([0.0; 3]);
+    p[11] = -1.0 / f64::from(d.px()).max(1.0);
+    Some(about([x + ox, y + oy, 0.0], &p))
+}
+
+// One element's own map (`transformStepOf`): its `translate`, `rotate`, `scale` and `transform`, composed in that order
+// as one 4x4 (css-transforms-2 §8 — Chrome: `translate: 10px; transform: translateX(20px)` moves the box 30px), taken
+// about its `transform-origin`. None for an element a transform does not apply to: a non-replaced INLINE box (Chrome
+// leaves `a:hover { transform: translateY(-1px) }` measuring where the link is), or one that generates no box.
+fn transform_step(arena: &RealmArena, node: NodeId) -> Option<M4> {
+    let style = box_style(arena, node)?;
+    let b = style.get_box();
+    let ops = individual_transforms(b);
+    if ops.is_empty() && b.transform.0.is_empty() {
+        return None;
+    }
+    if is_boxless(arena, node, &style) || non_replaced_inline(arena, node, &style) {
+        return None;
+    }
+    let [x, y, w, h] = laid_out_box(arena, node)?;
+    let reference = euclid::default::Rect::new(
+        euclid::default::Point2D::origin(),
+        euclid::default::Size2D::new(Length::new(w as f32), Length::new(h as f32)),
+    );
+    let mut m = translate([0.0; 3]);
+    for op in ops.iter().chain(b.transform.0.iter()) {
+        use style::values::generics::transform::ToMatrix;
+        m = multiply(&m, &exact(op.to_3d_matrix(Some(&reference)).ok()?.to_array()));
+    }
+    if m == translate([0.0; 3]) {
+        return None;
+    }
+    let origin = &b.transform_origin;
+    let o = [x + resolve(&origin.horizontal, w), y + resolve(&origin.vertical, h), f64::from(origin.depth.px())];
+    Some(about(o, &m))
+}
+// A function's matrix with what is only floating-point noise around a whole number taken as that number: an exact
+// quarter turn has EXACT components — `cos(90deg)` is 6.1e-17 through the library, and a browser reports a clean 0 —
+// so a `rotateX(90deg)` puts a box exactly edge-on, and `rotateY(360deg)` is exactly no turn at all.
+fn exact(m: [f64; 16]) -> M4 {
+    m.map(|v| if (v - v.round()).abs() < 1e-12 { v.round() } else { v })
+}
+// `translate`, `rotate` and `scale`, as the transform functions they are.
+fn individual_transforms(b: &style::properties::style_structs::Box) -> Vec<style::values::computed::TransformOperation> {
+    use style::values::computed::transform::{Rotate, Scale, Translate};
+    use style::values::computed::TransformOperation as Op;
+    let mut ops = Vec::new();
+    if let Translate::Translate(x, y, z) = &b.translate {
+        ops.push(Op::Translate3D(x.clone(), y.clone(), *z));
+    }
+    match &b.rotate {
+        Rotate::None => {}
+        Rotate::Rotate(a) => ops.push(Op::Rotate(*a)),
+        Rotate::Rotate3D(x, y, z, a) => ops.push(Op::Rotate3D(*x, *y, *z, *a)),
+    }
+    if let Scale::Scale(x, y, z) = &b.scale {
+        ops.push(Op::Scale3D(*x, *y, *z));
+    }
+    ops
+}
+fn resolve(lp: &style::values::computed::LengthPercentage, basis: f64) -> f64 {
+    f64::from(lp.resolve(Length::new(basis as f32)).px())
+}
+
+// Does `node` generate no box of its own — `display: contents`?
+fn is_boxless(arena: &RealmArena, node: NodeId, style: &ComputedValues) -> bool {
+    arena.get(node).is_some_and(|n| style.get_box().walk_display(n.rendering_tag()).is_contents())
+}
+// …or is it a non-replaced INLINE box: one the lines broke into fragments, or one laid out as a BLOCK for the block it
+// holds among them (a used display, no computed one — a rendered `<legend>` is a block whatever it declares).
+fn non_replaced_inline(arena: &RealmArena, node: NodeId, style: &ComputedValues) -> bool {
+    const REPLACED: [&str; 16] = [
+        "img", "video", "audio", "canvas", "iframe", "embed", "object", "input", "select", "textarea", "button", "svg",
+        "fieldset", "meter", "progress", "marquee",
+    ];
+    let Some(n) = arena.get(node) else { return false };
+    if laid_frags(arena, n).is_some() {
+        return true;
+    }
+    let tag = n.rendering_tag();
+    let d = style.get_box().walk_display(tag);
+    matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && !REPLACED.contains(&tag) && tag != "legend"
+}
+
+// A rect's image under `m`: the axis-aligned box its transformed quad occupies, which both rect APIs report. A corner
+// ON the horizon has no image; the corners that do project decide it, and a quad with none left is nowhere.
+pub(crate) fn transformed_rect(m: &M4, [x, y, w, h]: [f64; 4]) -> [f64; 4] {
+    let corners = [[x, y], [x + w, y], [x, y + h], [x + w, y + h]];
+    let mut ext = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    let mut any = false;
+    for [cx, cy] in corners {
+        let Some([px, py]) = project(m, cx, cy) else { continue };
+        any = true;
+        ext = [ext[0].min(px), ext[1].min(py), ext[2].max(px), ext[3].max(py)];
+    }
+    if !any {
+        return [0.0; 4];
+    }
+    [ext[0], ext[1], ext[2] - ext[0], ext[3] - ext[1]]
+}
+// A point of the plane z = 0 under `m` (its homography: columns 1, 2 and 4, rows 1, 2 and 4), None on the horizon.
+pub(crate) fn project(m: &M4, x: f64, y: f64) -> Option<[f64; 2]> {
+    let w = m[3] * x + m[7] * y + m[15];
+    if w == 0.0 {
+        return None;
+    }
+    Some([(m[0] * x + m[4] * y + m[12]) / w, (m[1] * x + m[5] * y + m[13]) / w])
+}
+
+// `id`'s BORDER BOX as the page measures it (`renderedBox`): where its scrolls carried it, under every transform on the
+// way — None where it generates no box.
+pub(crate) fn rendered_box(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
+    let style = box_style(arena, id)?;
+    if is_boxless(arena, id, &style) {
+        return None;
+    }
+    let b = laid_out_box(arena, id)?;
+    Some(match transform_chain(arena, id) {
+        Some(m) => transformed_rect(&m, b),
+        None => b,
+    })
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     use crate::dom::register;
     register(scope, ns, "scrollShift", scroll_shift_op, context_id);
     register(scope, ns, "stickyOffset", sticky_offset, context_id);
+    register(scope, ns, "laidOutBox", laid_out_box_op, context_id);
+    register(scope, ns, "renderedBox", rendered_box_op, context_id);
+    register(scope, ns, "transformChain", transform_chain_op, context_id);
     register(scope, ns, "scrollOffset", scroll_offset, context_id);
     register(scope, ns, "setScrollOffset", set_scroll_offset, context_id);
     register(scope, ns, "clipFlags", clip_flags, context_id);
@@ -238,15 +560,36 @@ fn scroll_shift_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     crate::dom::write_f64s(args.get(2), &shift);
 }
 
+// __dom.laidOutBox(nid, out) / renderedBox(nid, out) / transformChain(nid, out) -> whether `nid` has one: its box where
+// the page's scrolling carried it (`laid_out_box`), that box as the page measures it (`rendered_box`), and the 4x4 that
+// maps it to the viewport (`transform_chain`) — written to the Float64Array `out`.
+fn laid_out_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, laid_out_box);
+}
+fn rendered_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, rendered_box);
+}
+fn transform_chain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, transform_chain);
+}
+fn answer_into<const N: usize>(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: &v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+    read: fn(&RealmArena, NodeId) -> Option<[f64; N]>,
+) {
+    let cid = crate::dom::realm_id(scope, args);
+    let answer = crate::dom::nid_arg(scope, args, 0).and_then(|id| read(crate::dom::realm(scope, cid), id));
+    if let Some(vals) = answer {
+        crate::dom::write_f64s(args.get(1), &vals);
+    }
+    rv.set(v8::Boolean::new(scope, answer.is_some()).into());
+}
+
 // __dom.stickyOffset(nid, out) -> whether `nid`'s box is a sticky one that has STUCK (`sticky_delta`), how far written
 // to the Float64Array `out` as `[x, y]`.
-fn sticky_offset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let delta = crate::dom::nid_arg(scope, &args, 0).and_then(|id| sticky_delta(crate::dom::realm(scope, cid), id));
-    if let Some(delta) = delta {
-        crate::dom::write_f64s(args.get(1), &delta);
-    }
-    rv.set(v8::Boolean::new(scope, delta.is_some()).into());
+fn sticky_offset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, sticky_delta);
 }
 
 // __dom.scrollOffset(nid, axis) -> the scroll offset `nid` keeps in `axis` (0 x, 1 y).
@@ -264,8 +607,10 @@ fn set_scroll_offset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let cid = crate::dom::realm_id(scope, &args);
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let to = [1, 2].map(|i| args.get(i).is_number().then(|| args.get(i).number_value(scope)).flatten());
-    // (…quietly: a scroll offset is no input to the layout, nor to any memo a write would throw away)
-    if let Some(node) = crate::dom::realm(scope, cid).get_mut_quietly(id) {
+    // (…quietly: a scroll offset is no input to the layout — only to the geometry's)
+    let arena = crate::dom::realm(scope, cid);
+    arena.geometry_moved();
+    if let Some(node) = arena.get_mut_quietly(id) {
         for (axis, v) in to.into_iter().enumerate() {
             if let Some(v) = v {
                 node.scroll[axis] = v;
@@ -278,7 +623,10 @@ fn set_scroll_offset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 fn clip_flags(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let flags = crate::dom::nid_arg(scope, &args, 0)
-        .and_then(|id| crate::dom::realm(scope, cid).get(id).and_then(|n| n.layout_box.as_ref()).map(|b| b.clip))
+        .and_then(|id| {
+            let arena = crate::dom::realm(scope, cid);
+            arena.get(id).and_then(|n| laid(arena, n)).map(|b| b.clip)
+        })
         .unwrap_or(0);
     rv.set(v8::Integer::new(scope, i32::from(flags)).into());
 }
@@ -290,10 +638,11 @@ fn layout_root_alone(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let Some(root) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let [w, h, vw, vh] = [1, 2, 3, 4].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
     let arena = crate::dom::realm(scope, cid);
-    arena.clear_layout();
-    arena.layout_root = Some(root);
-    arena.viewport = [vw, vh];
+    arena.begin_layout(root, [vw, vh]);
+    let pass = arena.layout_pass;
     if let Some(node) = arena.get_mut_quietly(root) {
         node.layout_box = Some(Box::at(root.to_f64(), [0.0, 0.0, w, h]));
+        node.layout_frags = None;
+        node.laid_at = pass;
     }
 }
