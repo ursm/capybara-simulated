@@ -1207,7 +1207,6 @@ fn inline_percentage_axis(
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     use crate::dom::register;
     register(scope, ns, "scrollShift", scroll_shift_op, context_id);
-    register(scope, ns, "stickyOffset", sticky_offset, context_id);
     register(scope, ns, "laidOutBox", laid_out_box_op, context_id);
     register(scope, ns, "renderedBox", rendered_box_op, context_id);
     register(scope, ns, "scrollSize", scroll_size_op, context_id);
@@ -1215,7 +1214,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "boxInfo", box_info_op, context_id);
     register(scope, ns, "usedInsets", used_insets_op, context_id);
     register(scope, ns, "renderedLegend", rendered_legend_op, context_id);
-    register(scope, ns, "boxFragments", box_fragments_op, context_id);
     register(scope, ns, "clientRects", client_rects_op, context_id);
     register(scope, ns, "offsets", offsets_op, context_id);
     register(scope, ns, "paintTransform", paint_transform_op, context_id);
@@ -1382,18 +1380,6 @@ fn box_info_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     answer_into(scope, &args, rv, box_info);
 }
 
-// __dom.boxFragments(nid) -> Float64Array: an inline box's fragments, `[x, y, w, h]` each in document coordinates, in
-// the order the lines broke it; empty for any other node.
-fn box_fragments_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let flat: Vec<f64> = crate::dom::nid_arg(scope, &args, 0)
-        .and_then(|id| {
-            let arena = crate::dom::realm(scope, cid);
-            arena.get(id).and_then(|n| laid_frags(arena, n)).map(|f| f.iter().flatten().copied().collect())
-        })
-        .unwrap_or_default();
-    rv.set(crate::dom::f64_array(scope, &flat).into());
-}
 
 // __dom.offsets(nid, out) -> whether `nid` has a box, and `[offsetParent nid, left, top, width, height]` written to `out`
 // (`offsets`).
@@ -1440,11 +1426,6 @@ fn paint_quad_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     answer_into(scope, &args, rv, paint_quad);
 }
 
-// __dom.stickyOffset(nid, out) -> whether `nid`'s box is a sticky one that has STUCK (`sticky_delta`), how far written
-// to the Float64Array `out` as `[x, y]`.
-fn sticky_offset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    answer_into(scope, &args, rv, sticky_delta);
-}
 
 // __dom.scrollOffset(nid, axis, shown) -> the scroll offset `nid` keeps in `axis` (0 x, 1 y) — or, with `shown`, the
 // one it shows: 0 while the last layout gave it no box (CSSOM View: `scrollTop` of an element with no associated box
