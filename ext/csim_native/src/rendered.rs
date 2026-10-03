@@ -560,6 +560,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "rendered", rendered_op, context_id);
     crate::dom::register(scope, ns, "visibleText", visible_text_op, context_id);
     crate::dom::register(scope, ns, "boxKind", box_kind_op, context_id);
+    crate::dom::register(scope, ns, "cssImageUrls", css_image_urls_op, context_id);
 }
 
 // What box `id` generates by its own computed style, which says so before anything is laid out: `BOX_NONE` none — a
@@ -578,6 +579,66 @@ fn box_kind(arena: &RealmArena, id: NodeId) -> i32 {
     } else {
         BOX_OTHER
     }
+}
+
+// The images a rendered page USES, which a browser fetches at the rendering update: every `url()` image of each element's
+// computed `background-image`, `cursor` and `list-style-image` — a `cross-fade()`'s inputs, an `image-set()`'s selected
+// candidate, no `data:` URL — and, before them, a `<body background>` attribute, its own Resource Timing initiator (the
+// style engine folds it into `background-image` as a presentational hint, which would otherwise file it as `css`).
+// Tree order from `root`, a shadow tree before its host's children; a `display: none` subtree is not rendered.
+// `(initiator, url)` each.
+fn css_image_urls(arena: &RealmArena, root: NodeId) -> Vec<(&'static str, String)> {
+    use style::values::computed::Image;
+    fn image_urls(image: &Image, out: &mut Vec<(&'static str, String)>) {
+        match image {
+            Image::Url(u) => {
+                if let Some(url) = u.url().filter(|u| u.scheme() != "data") {
+                    out.push(("css", url.as_str().to_owned()));
+                }
+            }
+            Image::CrossFade(fade) => {
+                for e in fade.elements.iter() {
+                    if let style::values::generics::image::CrossFadeImage::Image(i) = &e.image {
+                        image_urls(i, out);
+                    }
+                }
+            }
+            Image::ImageSet(set) => {
+                if let Some(item) = set.items.get(set.selected_index) {
+                    image_urls(&item.image, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        let Some(n) = arena.get(id).filter(|n| n.kind == NodeKind::Element) else { continue };
+        let style = primary_style(arena, id);
+        if style.as_ref().is_some_and(|s| s.get_box().clone_display().is_none()) {
+            continue;
+        }
+        if n.is_html_named("body") {
+            if let Some(bg) = n.plain_attr("background") {
+                out.push(("body", bg.to_owned()));
+            }
+        }
+        if let Some(style) = style {
+            for image in style.get_background().background_image.0.iter() {
+                image_urls(image, &mut out);
+            }
+            for cursor in style.get_inherited_ui().cursor.images.iter() {
+                image_urls(&cursor.image, &mut out);
+            }
+            image_urls(&style.get_list().list_style_image, &mut out);
+        }
+        stack.extend(n.children.iter().rev());
+        if let Some(root) = n.shadow_root.and_then(|r| arena.get(r)) {
+            stack.extend(root.children.iter().rev());
+        }
+    }
+    out
 }
 
 // One question asked of the realm's arena and its style engine at the page's clock `now`: what it answers, or nothing
@@ -627,4 +688,21 @@ fn box_kind_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }) {
         rv.set_int32(kind);
     }
+}
+
+// __dom.cssImageUrls(rootNid, now) -> `[initiator, url, …]`: the images the rendered page uses (`css_image_urls`);
+// undefined where the realm has no engine.
+fn css_image_urls_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let Some(urls) = with_engine(scope, &args, 1, |engine, arena, now| {
+        engine.flush(arena, now);
+        css_image_urls(arena, id)
+    }) else { return };
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(urls.len() * 2);
+    for (initiator, url) in &urls {
+        let (Some(i), Some(u)) = (v8::String::new(scope, initiator), v8::String::new(scope, url)) else { continue };
+        items.push(i.into());
+        items.push(u.into());
+    }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }

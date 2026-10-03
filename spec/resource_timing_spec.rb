@@ -343,6 +343,37 @@ RSpec.describe 'resource timing' do
     expect(names).to include('css.png?id=bg', 'css.png?id=cursor', 'css.png?id=list')
   end
 
+  it 'fetches the images the RENDERED tree uses: a shadow tree\'s, an image-set\'s chosen candidate, no hidden one' do
+    # What a rendered element USES is fetched (rendered.rs `css_image_urls`): an element in a shadow tree is rendered, a
+    # `display: none` subtree is not, an `image-set()` fetches the candidate it selected (1x here) and nothing else,
+    # and a `data:` image has nothing to fetch.
+    png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
+    doc = <<~HTML
+      <!DOCTYPE html><html><head><style>
+        #set { background-image: image-set(url("/css.png?id=set1") 1x, url("/css.png?id=set2") 2x); height: 5px }
+        #gone { background-image: url("/css.png?id=gone") }
+        #data { background-image: url("data:image/png;base64,iVBORw0KGgo="); height: 5px }
+      </style></head><body>
+        <div id="set"></div>
+        <div style="display: none"><div id="gone"></div></div>
+        <div id="data"></div>
+        <div id="host"></div>
+        <script>
+          document.getElementById('host').attachShadow({mode: 'open'}).innerHTML =
+            '<style>p { background-image: url("/css.png?id=shadow") }</style><p>in shadow</p>';
+        </script>
+      </body></html>
+    HTML
+    a = ->(env) { env['PATH_INFO'].start_with?('/css.png') ? [200, {'content-type' => 'image/png'}, [png]] : [200, {'content-type' => 'text/html'}, [doc]] }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    names = poll_until do
+      ns = s.evaluate_script("performance.getEntriesByType('resource').filter(function (e) { return e.initiatorType === 'css'; }).map(function (e) { return e.name.split('/').pop(); })")
+      ns.length >= 2 ? ns : nil
+    end
+    expect(names.sort).to eq(['css.png?id=set1', 'css.png?id=shadow'])
+  end
+
   it 'fetches an image an @import-ed sheet declares on every page that links it' do
     # The second page keeps the first one's parse of the linked sheet, @import included — the
     # imported sheet never arrives again, and its image is the page's all the same.
