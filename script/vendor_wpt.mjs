@@ -200,6 +200,9 @@ const TREES = [
                                        // half is reftests, which this gate renders (see the reftest
                                        // painter), so a transform that lands in the wrong place is visible
                                        // rather than merely un-asserted.
+  'css/geometry',                      // DOMMatrix / DOMPoint / DOMRect / DOMQuad — the geometry interfaces
+                                       // canvas transforms, Path2D.addPath and app code build on, and the
+                                       // CSS transform list `new DOMMatrix(string)` parses.
 ];
 
 // Trees vendored HARNESS-ONLY: everything under `support/` plus the `.html` tests that actually
