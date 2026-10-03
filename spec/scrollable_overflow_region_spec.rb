@@ -433,4 +433,17 @@ RSpec.describe 'the scrollable overflow region' do
     JS
     expect(got).to eq([50, 0, 0, 300, 0])
   end
+  # What a `transform` draws a scroller as is no part of its client box or of the range it scrolls: a 100px scroller
+  # under `scale(0.5)` still scrolls 300 - 100. (Chrome: 200, 300, 100; the range was 250 against the drawn 50.)
+  it 'leaves a transformed scroller its client box and range as laid out' do
+    html = %(<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0">
+             <div id="s" style="overflow:auto;width:100px;height:100px;transform:scale(0.5);transform-origin:0 0">
+             <div style="height:300px"></div></div></body></html>)
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] })
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => { const s = document.getElementById('s'); s.scrollTop = 9999; return [s.scrollTop, s.scrollHeight, s.clientHeight]; })()
+    JS
+    expect(got).to eq([200, 300, 100])
+  end
 end

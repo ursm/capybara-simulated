@@ -125,7 +125,7 @@ fn memo(arena: &RealmArena) -> std::cell::RefMut<'_, Memo> {
 }
 
 // Is this the box of a `position: fixed` element laid out against the VIEWPORT — which no scrolling moves?
-fn is_fixed(b: &Box) -> bool {
+pub(crate) fn is_fixed(b: &Box) -> bool {
     b.out_of_flow == OOF_FIXED && b.cb == CB_RECT
 }
 
@@ -373,7 +373,7 @@ fn reclamp_scrolls(arena: &mut RealmArena) {
 // The range `id`'s scroll offsets may take in each axis, `[min, max]`: from 0 to how far its region reaches past its
 // scrollport — the viewport for the root, else its padding box — or to 0 from minus that where it scrolls from its far
 // edge. None for a node with no box.
-fn scroll_range(arena: &RealmArena, id: NodeId) -> Option<[[f64; 2]; 2]> {
+pub(crate) fn scroll_range(arena: &RealmArena, id: NodeId) -> Option<[[f64; 2]; 2]> {
     let [w, h, from_left, from_top] = scroll_size(arena, id)?;
     let [port_w, port_h] = if Some(id) == arena.layout_root {
         arena.viewport
@@ -636,6 +636,20 @@ pub(crate) fn transformed_rect(m: &M4, [x, y, w, h]: [f64; 4]) -> [f64; 4] {
         return [0.0; 4];
     }
     [ext[0], ext[1], ext[2] - ext[0], ext[3] - ext[1]]
+}
+// The map back: `m`'s homography inverted, as a matrix `project` reads — what takes a point of the viewport to the
+// plane `m` maps from. None where `m` flattens that plane onto a line, which nothing maps back from.
+pub(crate) fn inverse_homography(m: &M4) -> Option<M4> {
+    let [a, b, c, d, e, f, g, h, i] = [m[0], m[4], m[12], m[1], m[5], m[13], m[3], m[7], m[15]];
+    let det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    if det == 0.0 || !det.is_finite() {
+        return None;
+    }
+    let mut inv = [0.0; 16];
+    [inv[0], inv[4], inv[12]] = [(e * i - f * h) / det, (c * h - b * i) / det, (b * f - c * e) / det];
+    [inv[1], inv[5], inv[13]] = [(f * g - d * i) / det, (a * i - c * g) / det, (c * d - a * f) / det];
+    [inv[3], inv[7], inv[15]] = [(d * h - e * g) / det, (b * g - a * h) / det, (a * e - b * d) / det];
+    Some(inv)
 }
 // A point of the plane z = 0 under `m` (its homography: columns 1, 2 and 4, rows 1, 2 and 4), None on the horizon.
 pub(crate) fn project(m: &M4, x: f64, y: f64) -> Option<[f64; 2]> {
@@ -988,6 +1002,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "renderedBox", rendered_box_op, context_id);
     register(scope, ns, "transformChain", transform_chain_op, context_id);
     register(scope, ns, "scrollSize", scroll_size_op, context_id);
+    register(scope, ns, "scrollRange", scroll_range_op, context_id);
     register(scope, ns, "boxInfo", box_info_op, context_id);
     register(scope, ns, "usedInsets", used_insets_op, context_id);
     register(scope, ns, "renderedLegend", rendered_legend_op, context_id);
@@ -1012,7 +1027,7 @@ fn scroll_shift_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 // __dom.laidOutBox(nid, out) / renderedBox(nid, out) / transformChain(nid, out) / scrollSize(nid, out) -> whether `nid`
 // has one: its box where the page's scrolling carried it (`laid_out_box`), that box as the page measures it
 // (`rendered_box`), the 4x4 that maps it to the viewport (`transform_chain`), and its scrollable overflow region's size
-// and the edges it scrolls from (`scroll_size`) — written to the Float64Array `out`.
+// (`scroll_size`) — written to the Float64Array `out`.
 fn laid_out_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, laid_out_box);
 }
@@ -1020,7 +1035,12 @@ fn rendered_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     answer_into(scope, &args, rv, rendered_box);
 }
 fn scroll_size_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    answer_into(scope, &args, rv, scroll_size);
+    answer_into(scope, &args, rv, |arena, id| scroll_size(arena, id).map(|[w, h, ..]| [w, h]));
+}
+// __dom.scrollRange(nid, out) -> whether `nid` has a box, and the range its offsets may take written to `out` as `[min x,
+// max x, min y, max y]` (`scroll_range`): what a scroll offset written to it is clamped to.
+fn scroll_range_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, |arena, id| scroll_range(arena, id).map(|[[x0, x1], [y0, y1]]| [x0, x1, y0, y1]));
 }
 fn transform_chain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, transform_chain);
@@ -1080,14 +1100,17 @@ fn box_info(arena: &RealmArena, id: NodeId) -> Option<[f64; BOX_INFO]> {
 fn put_kind(arena: &RealmArena, id: NodeId, out: &mut [f64; BOX_INFO]) {
     let Some(style) = box_style(arena, id) else { return };
     out[30] = if non_replaced_inline(arena, id, &style) { 1.0 } else { 0.0 };
-    // (…a table display as the walk lays it out: a widget's is HTML's flow-root block — `<button style="display:
-    // table">`, `button-layout/display-other` — and a replaced element's an inline-block)
-    let Some(n) = arena.get(id) else { return };
+    out[31] = if is_table_box(arena, id, &style) { 1.0 } else { 0.0 };
+}
+// Is `id` a TABLE box as the walk lays it out — whose client box is its border box, its borders in its grid? A widget's
+// table display is HTML's flow-root block (`<button style="display: table">`, `button-layout/display-other`), and a
+// replaced element's an inline-block.
+pub(crate) fn is_table_box(arena: &RealmArena, id: NodeId, style: &ComputedValues) -> bool {
+    let Some(n) = arena.get(id) else { return false };
     let tag = n.rendering_tag();
-    let table = matches!(style.get_box().walk_display(tag).inside(), DisplayInside::Table)
+    matches!(style.get_box().walk_display(tag).inside(), DisplayInside::Table)
         && !crate::walk::widget_tag(tag)
-        && !crate::walk::replaced_or_control(arena, id, n);
-    out[31] = if table { 1.0 } else { 0.0 };
+        && !crate::walk::replaced_or_control(arena, id, n)
 }
 fn put_edges(arena: &RealmArena, id: NodeId, out: &mut [f64; BOX_INFO]) {
     if let Some(Edges { e, auto, percent }) = edges(arena, id) {

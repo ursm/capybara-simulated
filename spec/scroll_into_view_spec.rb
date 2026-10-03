@@ -112,6 +112,33 @@ RSpec.describe 'scroll into view' do
   # this the driver remembered whatever it was handed, on any element at all, so an
   # `overflow: clip` box reported an offset while its content (correctly) never moved.
   # Every figure is Chrome 137-measured on the same page.
+  # Each scroll box aligns the target in its OWN frame: one under `scale(0.5)` scrolls to the target's offset in its
+  # content, not to where the halved box is drawn — and its alignments follow its writing mode, so an rtl box's
+  # inline `start` is its right edge. (Chrome: 400, and -400 / -350.)
+  it "aligns in each scroll box's own frame and writing mode" do
+    s = session_with(<<~HTML)
+      <!doctype html><html><body style="margin:0">
+        <div id="tr" style="overflow:auto;width:150px;height:100px;border:3px solid;transform:scale(0.5);transform-origin:0 0">
+          <div style="height:400px"></div><div id="t" style="width:40px;height:20px"></div><div style="height:400px"></div>
+        </div>
+        <div id="rt" dir="rtl" style="overflow:auto;width:100px;height:60px">
+          <div style="width:600px;height:20px;position:relative"><i id="r" style="position:absolute;right:400px;width:50px;height:10px"></i></div>
+        </div>
+      </body></html>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const tr = document.getElementById('tr'), rt = document.getElementById('rt'), r = document.getElementById('r');
+        document.getElementById('t').scrollIntoView();
+        const out = [tr.scrollTop];
+        r.scrollIntoView({inline: 'start', block: 'nearest'}); out.push(rt.scrollLeft);
+        rt.scrollLeft = 0; r.scrollIntoView({inline: 'end', block: 'nearest'}); out.push(rt.scrollLeft);
+        return out;
+      })()
+    JS
+    expect(got).to eq([400, -400, -350])
+  end
+
   describe 'where a scroll offset can live' do
     def body_page(head, body)
       session_with("<!DOCTYPE html><html><head><style>body{margin:0}#{head}</style></head><body>#{body}</body></html>")

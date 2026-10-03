@@ -176,7 +176,11 @@ RSpec.describe 'Rust walk coverage' do
 
   # …and the viewport scrolls from where the root sits: a `vertical-rl` page wider than the viewport, or an rtl one, is
   # reached by NEGATIVE offsets (CSSOM View §6), where the left of it was out of reach — Chrome: scrollWidth 2016,
-  # `scrollTo(-500, 0)` at -500, `scrollIntoView` of a box at the far left at -984 (the box then at 0); rtl 2008 / -500.
+  # `scrollTo(-500, 0)` at -500; rtl 2008 / -500. `scrollIntoView` of the box at the far left goes as far as the range
+  # lets it, -992 (the box then at 8): its `block: start` is the block-start edge OF THE SCROLLING BOX (CSSOM View §6.1,
+  # "the beginning edge in the block flow direction of scrolling box") — the viewport's right edge in a `vertical-rl`
+  # page. Chrome and Firefox both read it in the TARGET's writing mode instead (a horizontal-tb box's block start is its
+  # top, and its inline `nearest` leaves it at 0, -984), which the spec says explicitly it is not.
   it 'scrolls a page that starts at the right with negative offsets', :aggregate_failures do
     probe = lambda {|html_attrs|
       s = page(
@@ -193,7 +197,7 @@ RSpec.describe 'Rust walk coverage' do
         })()
       JS
     }
-    expect(probe.call('style="writing-mode: vertical-rl; font: 16px monospace"')).to eq([2016, -500, -984, 0])
+    expect(probe.call('style="writing-mode: vertical-rl; font: 16px monospace"')).to eq([2016, -500, -992, 8])
     expect(probe.call('dir="rtl" style="font: 16px monospace"')).to eq([2008, -500, 0, 1006])
   end
 

@@ -1206,6 +1206,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::walk_ops::install(scope, ns, context_id);
     crate::geometry::install(scope, ns, context_id);
     crate::hit_test::install(scope, ns, context_id);
+    crate::scroll_into_view::install(scope, ns, context_id);
     crate::html_parse::install(scope, ns, context_id);
     crate::url_ops::install(scope, ns, context_id);
     crate::text_codec::install(scope, ns, context_id);
