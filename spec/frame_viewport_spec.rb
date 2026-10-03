@@ -114,6 +114,20 @@ RSpec.describe 'frame viewport' do
     expect(s.evaluate_script('top.__log')).to eq(['top 800', 'frame 400'])
   end
 
+  # A page loaded into a window already resized gets no `resize` for it (Chrome): the size it loads at is no change.
+  it 'fires no resize at a page loaded into a resized window' do
+    app = lambda {|env|
+      body = env['PATH_INFO'] == '/child' ? "<script>addEventListener('resize', () => top.__log.push('frame'))</script>" :
+        %(<script>window.__log = []; addEventListener('resize', () => __log.push('top'))</script><iframe src="/child" style="width:50%"></iframe>)
+      [200, {'content-type' => 'text/html'}, [body]]
+    }
+    s = simulated_session(app)
+    s.current_window.resize_to(900, 600)
+    s.visit '/'
+    3.times { s.evaluate_script('__runLoopStep(50, 50, false)') }
+    expect(s.evaluate_script('window.__log')).to eq([])
+  end
+
   # A transform draws the frame elsewhere and sizes no viewport (Chrome: a 200x80 frame under `scale(0.5)` keeps an
   # `innerWidth` of 200).
   it 'is not resized by a transform on its container' do

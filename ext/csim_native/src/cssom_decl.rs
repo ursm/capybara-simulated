@@ -448,7 +448,10 @@ pub(crate) fn supports(name: &str, value: &str) -> bool {
 }
 
 // A `<number>` as CSS reads it — a math function of numbers reduced (`calc(0.5)`, `min(1, 2 / 4)`) — or None where it
-// is none, or one that needs a style to resolve.
+// is none, or one that needs a style to resolve. The engine reduces in f32, so the answer is the shortest decimal that
+// f32 rounds back to, read as a double: `calc(0.1 + 0.1)` is 0.2, as script has it, not 0.20000000298023224. (A value
+// f32 cannot hold to a double's digits stays an f32's: `calc(1 / 3)` is 0.33333334 where Chrome, reducing in double,
+// says 0.3333333333333333.)
 pub(crate) fn number(text: &str) -> Option<f64> {
     use style::parser::Parse;
     let url = url_data("about:blank");
@@ -456,7 +459,7 @@ pub(crate) fn number(text: &str) -> Option<f64> {
     let mut input = ParserInput::new(text);
     let mut parser = Parser::new(&mut input);
     let n = parser.parse_entirely(|p| style::values::specified::Number::parse(&context, p)).ok()?;
-    n.resolve().map(f64::from)
+    n.resolve()?.to_string().parse().ok()
 }
 
 // `CSS.supports(conditionText)`: a `<supports-condition>`, or a bare declaration (`display: grid`), as the engine

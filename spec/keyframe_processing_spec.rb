@@ -100,6 +100,14 @@ RSpec.describe 'processing a keyframes argument' do
       )).to eq(%w[0.5 0.5 0.5])
     end
 
+    # …reduced to the number script would write for it, not to the f32 the style engine reduces in (Chrome: 0.2, where
+    # an f32 of it reads 0.20000000298023224).
+    it 'reduces a calc() to the number script would write' do
+      expect(results(
+        "new KeyframeEffect(el, [{left: '0px', offset: 'calc(0.1 + 0.1)'}, {left: '1px'}]).getKeyframes()[0].offset"
+      )).to eq(%w[0.2])
+    end
+
     # A NULL in a property-indexed offset list means "space this one evenly", not zero.
     it 'spaces a null offset evenly' do
       expect(results(
