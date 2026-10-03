@@ -557,7 +557,7 @@ pub(crate) fn canvas_font(text: &str, em: f64, rem: f64, lh: f64, rlh: f64) -> O
         FontWeight::Absolute(AbsoluteFontWeight::Weight(n)) => {
             let n = f64::from(n.resolve()?);
             if n != 400.0 {
-                parts.push(js_number(n));
+                parts.push(crate::numbers::to_js_string(n));
             }
             n
         }
@@ -593,7 +593,7 @@ pub(crate) fn canvas_font(text: &str, em: f64, rem: f64, lh: f64, rlh: f64) -> O
         return None;
     }
     let px = (px * 1e6).round() / 1e6;
-    parts.push(format!("{}px", js_number(px)));
+    parts.push(format!("{}px", crate::numbers::to_js_string(px)));
     parts.push(font.family.iter().map(|f| f.to_css_string()).collect::<Vec<_>>().join(", "));
     let family = font.family.iter().next().map_or_else(String::new, family_name);
     Some(CanvasFont { css: parts.join(" "), px, weight, slant, small_caps, family })
@@ -641,11 +641,6 @@ pub(crate) fn canvas_spacing(text: &str, em: f64, rem: f64) -> Option<(String, f
 // …and the families it names, as names (`document.fonts.check()` / `load()`): None where it is no `font` value.
 pub(crate) fn font_shorthand_families(text: &str) -> Option<Vec<String>> {
     Some(font_shorthand(text)?.family.iter().map(family_name).collect())
-}
-
-// A number as script prints it: no exponent below 1e21, and no `-0`.
-fn js_number(n: f64) -> String {
-    if n == 0.0 { "0".to_owned() } else { format!("{n}") }
 }
 
 // `CSS.supports(conditionText)`: a `<supports-condition>`, or a bare declaration (`display: grid`), as the engine
