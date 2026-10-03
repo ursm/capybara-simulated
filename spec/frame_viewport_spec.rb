@@ -83,6 +83,32 @@ RSpec.describe 'frame viewport' do
     end
   end
 
+  # A container a SCRIPT resizes gives its frame the new viewport at the next rendering update (HTML's resize steps), and
+  # the frame's window fires `resize`: its media queries and its layout follow (Chrome: 300, and `(min-width: 250px)`
+  # matching, after a 200px frame is made 300px).
+  it 'follows its container when a script resizes it' do
+    s = framed('width:200px;height:80px;border:10px solid')
+    s.within_frame(0) do
+      expect(s.evaluate_script('innerWidth')).to eq(200)
+      s.execute_script("window.__resized = 0; addEventListener('resize', () => window.__resized++)")
+    end
+    s.execute_script("document.querySelector('iframe').style.width = '300px'")
+    s.evaluate_script('__runLoopStep(50, 50, false)')   # (…the rendering update)
+    s.within_frame(0) do
+      expect(s.evaluate_script('[innerWidth, document.documentElement.clientWidth]')).to eq([300, 300])
+      expect(s.evaluate_script("matchMedia('(min-width: 250px)').matches")).to be(true)
+      expect(s.evaluate_script("document.getElementById('r').getBoundingClientRect().width")).to eq(300)
+      expect(s.evaluate_script('window.__resized')).to eq(1)
+    end
+  end
+
+  # A transform draws the frame elsewhere and sizes no viewport (Chrome: a 200x80 frame under `scale(0.5)` keeps an
+  # `innerWidth` of 200).
+  it 'is not resized by a transform on its container' do
+    s = framed('width:200px;height:80px;border:0;transform:scale(0.5)')
+    s.within_frame(0) { expect(s.evaluate_script('[innerWidth, innerHeight]')).to eq([200, 80]) }
+  end
+
   # A frame that navigates gets a NEW realm, and the container's box has to be seeded into it as into the first: the
   # rebuild passed nothing, so after `click_link` inside a frame its window was 0x0 and a block in it 0 wide — and its
   # `frameElement` null. Which is the container from the document's first script on, in either build (Chrome).

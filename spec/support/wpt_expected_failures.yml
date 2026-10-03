@@ -132,8 +132,6 @@ css/css-animations/parsing/keyframe-selectors.html:
 - "'exit calc(60%)' should be a valid keyframe selector"
 css/css-animations/parsing/keyframes-allowed-properties.html:
 - "@keyframes allows all non-animation properties and animation-timing-function"
-css/css-animations/responsive/fill-forwards-viewport-units.html:
-- 'fill: forwards with viewport units updates on viewport resize'
 css/css-animations/revert-rule-keyframes-dynamic.html:
 - revert-rule in keyframes, reverted-to value changing (standard property)
 css/css-animations/revert-rule-keyframes.html:
@@ -5337,8 +5335,6 @@ web-animations/responsive/animation-on-pseudo-to-display-none.html:
 - display:none via a CSS animation on a pseudo-element does not cancel the animation.
 web-animations/responsive/background-color-animation-plus-opacity.html:
 - "== web-animations/responsive/background-color-animation-plus-opacity-ref.html"
-web-animations/responsive/fill-forwards-viewport-units.html:
-- 'fill: forwards with viewport units updates on viewport resize'
 web-animations/responsive/fontSize.html:
 - Font size initial responsive to style changes
 web-animations/responsive/shapeOutside.html:

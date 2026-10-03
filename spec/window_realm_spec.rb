@@ -107,4 +107,25 @@ RSpec.describe 'same-isolate window realms' do
       expect(rx('b')).to eq(['fromA'])
     end
   end
+
+  describe 'layout across realms' do
+    # A node is laid out by the realm whose document holds it, and a change to it is one that realm's layout has to
+    # hear of whichever realm's setter made it: the frame's text node, adopted into the parent's document and written by
+    # the frame's `data` setter, was still measured at its old length.
+    it 'lays out again an adopted node another realm changes' do
+      html = <<~HTML
+        <!DOCTYPE html><body><div id=dst></div><iframe id=f srcdoc="<b id=b style='display:inline-block;font:10px/10px monospace'>a</b>"></iframe>
+        <script>window.addEventListener('load', () => { setTimeout(() => {
+          const b = document.getElementById('f').contentDocument.getElementById('b');
+          document.getElementById('dst').append(b);
+          const widths = [b.offsetWidth];
+          b.firstChild.data = 'aaaaa';
+          widths.push(b.offsetWidth);
+          window.__widths = widths; }, 10); });</script>
+      HTML
+      s = session(html)
+      sleep 0.2
+      expect(s.evaluate_script('window.__widths')).to eq([6, 30])
+    end
+  end
 end

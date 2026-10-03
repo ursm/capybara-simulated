@@ -812,11 +812,13 @@ pub(crate) fn client_box(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
     Some([round(e[7]), round(e[4]), round(w.max(0.0)), round(h.max(0.0))])
 }
 
-// The VIEWPORT a frame element gives the document inside it, `[x, y, w, h]` in this one's viewport: its rendered box
-// less its borders and padding — HTML draws a 2px frame round an `<iframe>`, and the document inside a `width: 200px`
-// one sees a viewport 200 wide, not the 204 its border box measures (Chrome). None where it has no box.
+// The VIEWPORT a frame element gives the document inside it, `[x, y, w, h]` in this one's viewport: its box less its
+// borders and padding — HTML draws a 2px frame round an `<iframe>`, and the document inside a `width: 200px` one sees a
+// viewport 200 wide, not the 204 its border box measures — as the layout sized it: a `transform` draws the frame
+// elsewhere and resizes no viewport (Chrome: a 200x80 frame under `scale(0.5)` keeps an `innerWidth` of 200). None
+// where it has no box.
 pub(crate) fn frame_viewport(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
-    let [x, y, w, h] = rendered_box(arena, id)?;
+    let [x, y, w, h] = laid_out_box(arena, id)?;
     let e = edges(arena, id).unwrap_or([0.0; 12]);
     let [top, right, bottom, left] = [e[0] + e[4], e[1] + e[5], e[2] + e[6], e[3] + e[7]];
     Some([x + left, y + top, (w - left - right).max(0.0), (h - top - bottom).max(0.0)])
