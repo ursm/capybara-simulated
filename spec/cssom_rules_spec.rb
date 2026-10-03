@@ -193,4 +193,30 @@ RSpec.describe 'CSSOM rules' do
     JS
     expect(got).to eq(['rgb(3, 0, 0)', false, 'rgb(4, 0, 0)', nil, 1, 2, 'rgb(6, 0, 0)'])
   end
+
+  # A `<link>` disabled and enabled again obtains its sheet again: a new one, without the edit a script made of the old,
+  # which has no owner from the moment it was disabled. (Chrome: the same, each value.)
+  it 'obtains a new sheet for a link enabled again' do
+    app = lambda do |env|
+      if env['PATH_INFO'] == '/a.css'
+        [200, {'content-type' => 'text/css'}, ['p { color: rgb(1, 0, 0) }']]
+      else
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><link rel="stylesheet" href="/a.css"><p>x</p>']]
+      end
+    end
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const l = document.querySelector('link'), p = document.querySelector('p'), out = [];
+        const old = l.sheet;
+        old.cssRules[0].style.color = 'rgb(2, 0, 0)';
+        out.push(getComputedStyle(p).color);
+        l.disabled = true;
+        out.push(l.sheet, old.ownerNode, getComputedStyle(p).color);
+        l.disabled = false;
+        return out.concat(l.sheet === old, l.sheet.cssRules[0].cssText, getComputedStyle(p).color);
+      })()
+    JS
+    expect(got).to eq(['rgb(2, 0, 0)', nil, nil, 'rgb(0, 0, 0)', false, 'p { color: rgb(1, 0, 0); }', 'rgb(1, 0, 0)'])
+  end
 end
