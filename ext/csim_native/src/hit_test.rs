@@ -500,7 +500,7 @@ pub(crate) fn clipped_away(arena: &RealmArena, id: NodeId) -> bool {
 }
 
 // The nearest flat-tree ancestor that holds a box of the current layout.
-fn box_parent(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
+pub(crate) fn box_parent(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
     let mut p = flat_parent(arena, id);
     while let Some(at) = p {
         let n = arena.get(at)?;

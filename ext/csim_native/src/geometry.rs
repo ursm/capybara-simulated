@@ -818,10 +818,15 @@ fn box_info(arena: &RealmArena, id: NodeId) -> Option<[f64; BOX_INFO]> {
         out[5] = b.cb_w.unwrap_or(f64::NAN);
         out[6..10].copy_from_slice(&b.used_margins.unwrap_or([f64::NAN; 4]));
         out[10..12].copy_from_slice(&b.rel);
-        out[12..24].copy_from_slice(&b.edges.unwrap_or([f64::NAN; 12]));
-        let am = b.auto_margins;
-        let auto = [(4, 1), (2, 2), (8, 4), (1, 8)].iter().fold(0, |m, &(from, to)| if am & from != 0 { m | to } else { m });
-        out[24] = f64::from(auto | if b.percent_edges { 16 } else { 0 });
+        match b.edges {
+            Some(edges) => {
+                out[12..24].copy_from_slice(&edges);
+                let am = b.auto_margins;
+                let auto = [(4, 1), (2, 2), (8, 4), (1, 8)].iter().fold(0, |m, &(from, to)| if am & from != 0 { m | to } else { m });
+                out[24] = f64::from(auto | if b.percent_edges { 16 } else { 0 });
+            }
+            None => declared_edges(arena, id, b.cb_w, &mut out),
+        }
         out[25] = f64::from(b.out_of_flow);
         out[26] = if b.cb == CB_RECT { 1.0 } else { 0.0 };
         out[27] = if b.auto_height { 1.0 } else { 0.0 };
@@ -833,8 +838,34 @@ fn box_info(arena: &RealmArena, id: NodeId) -> Option<[f64; BOX_INFO]> {
     out[..4].copy_from_slice(&placed_box(arena, id)?);
     out[4] = frags.len() as f64;
     out[10..12].copy_from_slice(&[0.0; 2]);
-    out[24..30].copy_from_slice(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    out[25..30].copy_from_slice(&[0.0, 0.0, 1.0, 0.0, 0.0]);
+    declared_edges(arena, id, None, &mut out);
     Some(out)
+}
+// The edges of a box the pass gave none of its own — a table row or row group, whose margins and padding do not apply
+// and whose border is its cells' to draw (CSS 2.1 §17.5), an inline box, which the lines lay out by halves — as its
+// style declares them, a percentage resolved against `basis` (else its containing block's content width), into
+// `out[12..25]` in `box_info`'s form: what CSSOM reports of them.
+fn declared_edges(arena: &RealmArena, id: NodeId, basis: Option<f64>, out: &mut [f64; BOX_INFO]) {
+    let Some(style) = box_style(arena, id) else { return };
+    let basis = basis.or_else(|| {
+        let p = crate::hit_test::box_parent(arena, id)?;
+        let pb = laid(arena, arena.get(p)?)?;
+        Some(content_box(pb)[2])
+    }).unwrap_or(0.0);
+    let Ok((lps, auto)) = crate::walk::edge_lps(&style) else { return };
+    let percent = lps.iter().flatten().any(|lp| lp.has_percentage());
+    let px = |lp: Option<&style::values::computed::LengthPercentage>| {
+        lp.map_or(0.0, |lp| f64::from(lp.resolve(Length::new(basis as f32)).px()))
+    };
+    let margins = [px(lps[0]), px(lps[1]), px(lps[2]), px(lps[3])];
+    let padding = [px(lps[4]), px(lps[5]), px(lps[6]), px(lps[7])].map(|p| p.max(0.0));
+    // (…the `auto` margins in `box_info`'s mask, from the walk's: 4 top, 2 right, 8 bottom, 1 left)
+    let auto = [(4, 1), (2, 2), (8, 4), (1, 8)].iter().fold(0, |m, &(from, to)| if auto & from != 0 { m | to } else { m });
+    out[12..16].copy_from_slice(&padding);
+    out[16..20].copy_from_slice(&crate::walk::used_borders(&style));
+    out[20..24].copy_from_slice(&margins);
+    out[24] = f64::from(auto | if percent { 16 } else { 0 });
 }
 fn box_info_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, box_info);

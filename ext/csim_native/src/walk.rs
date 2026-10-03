@@ -4628,7 +4628,7 @@ pub(crate) fn fresh_record() -> Input {
 
 // A box's four margins then four paddings as length-percentages (None for an `auto` margin), and which margins are
 // `auto` (`Input::auto_margins`: 1 left, 2 right, 4 top, 8 bottom).
-fn edge_lps(style: &ComputedValues) -> Result<([Option<&LengthPercentage>; 8], u8), &'static str> {
+pub(crate) fn edge_lps(style: &ComputedValues) -> Result<([Option<&LengthPercentage>; 8], u8), &'static str> {
     use style::values::generics::length::GenericMargin as Margin;
     let m = style.get_margin();
     let p = style.get_padding();
@@ -4656,7 +4656,7 @@ fn edge_lps(style: &ComputedValues) -> Result<([Option<&LengthPercentage>; 8], u
 }
 // The USED border widths, top right bottom left: the computed one is a length whatever the style (css-backgrounds-3),
 // and a `none` / `hidden` side draws none.
-fn used_borders(style: &ComputedValues) -> [f64; 4] {
+pub(crate) fn used_borders(style: &ComputedValues) -> [f64; 4] {
     let bd = style.get_border();
     let used = |w: &style::values::computed::BorderSideWidth, s: style::values::specified::BorderStyle| {
         if s.none_or_hidden() { 0.0 } else { w.0.to_f64_px() }
