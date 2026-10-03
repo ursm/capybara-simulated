@@ -1188,6 +1188,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "declSupportsCondition", decl_supports_condition, context_id);
     register(scope, ns, "cssNumber", css_number, context_id);
     register(scope, ns, "mediaMatches", media_matches, context_id);
+    register(scope, ns, "cssColor", css_color, context_id);
+    register(scope, ns, "canvasFont", canvas_font, context_id);
+    register(scope, ns, "fontShorthandFamilies", font_shorthand_families, context_id);
     register(scope, ns, "setTouchInput", set_touch_input, context_id);
     register(scope, ns, "styleGenerated", style_generated, context_id);
     register(scope, ns, "styleRestyled", style_restyled, context_id);
@@ -2688,6 +2691,50 @@ fn media_matches(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
     let Some(arena) = d.realms.get(&cid) else { return rv.set_bool(false) };
     rv.set_bool(crate::style::media_matches(d.styles.get(&cid), arena, screen, &text));
+}
+
+// __dom.cssColor(text, currentColor) -> `[r, g, b, alpha, legacy, css]` — the colour `text` is (`style::parse_color`):
+// its red, green and blue in sRGB, 0 to 1 and outside that where it lies outside the sRGB gamut, its alpha, whether it
+// was written in a legacy sRGB form (a keyword, a hex, `rgb()`, `hsl()`, `hwb()`) and its serialization as a computed
+// colour — or null where it is no colour.
+fn css_color(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    use style_traits::ToCss;
+    let text = args.get(0).to_rust_string_lossy(scope);
+    let current = args.get(1).to_rust_string_lossy(scope);
+    let cid = realm_id(scope, &args);
+    let d = dom(scope);
+    let arena = d.realms.entry(cid).or_default();
+    let Some(color) = crate::style::parse_color(d.styles.get(&cid), arena, &text, &current) else { return rv.set_null() };
+    let srgb = color.to_color_space(style::color::ColorSpace::Srgb);
+    let [r, g, b, _] = *srgb.raw_components();
+    let css = color.to_css_string();
+    let mut items: Vec<v8::Local<v8::Value>> = [r, g, b, color.alpha]
+        .iter()
+        .map(|&c| v8::Number::new(scope, f64::from(c)).into())
+        .collect();
+    items.push(v8::Boolean::new(scope, color.is_legacy_syntax()).into());
+    let Some(css) = v8::String::new(scope, &css) else { return rv.set_null() };
+    items.push(css.into());
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// __dom.canvasFont(text, em, rem, lh, rlh) -> a canvas's `font` of `text` (`cssom_decl::canvas_font`), or null.
+fn canvas_font(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    let [em, rem, lh, rlh] = [1, 2, 3, 4].map(|i| args.get(i).number_value(scope).unwrap_or(f64::NAN));
+    match crate::cssom_decl::canvas_font(&text, em, rem, lh, rlh) {
+        Some(font) => set_str(scope, &mut rv, &font),
+        None => rv.set_null(),
+    }
+}
+
+// __dom.fontShorthandFamilies(text) -> the families a `font` value names (`cssom_decl::font_shorthand_families`), or
+// null.
+fn font_shorthand_families(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    let Some(families) = crate::cssom_decl::font_shorthand_families(&text) else { return rv.set_null() };
+    let items: Vec<v8::Local<v8::Value>> = families.iter().filter_map(|f| v8::String::new(scope, f)).map(Into::into).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // __dom.setTouchInput(touch): whether the session's pointer is a touchscreen — its documents' devices answer by it from

@@ -5,6 +5,3 @@ allowBuilds:
   # binary, which pnpm's `.bin` wrapper then feeds to node — the shim resolves
   # @esbuild/linux-x64 (a normal optional dependency) by itself.
   esbuild: false
-patchedDependencies:
-  css-tree@3.2.1: patches/css-tree@3.2.1.patch
-  css-what@8.0.0: patches/css-what@8.0.0.patch

@@ -15,9 +15,6 @@
     "vendor:wpt": "node script/vendor_wpt.mjs"
   },
   "dependencies": {
-    "css-tree": "^3.2.1",
-    "css-what": "^8.0.0",
-    "culori": "^4.0.2",
     "urlpattern-polyfill": "^10.1.0",
     "web-streams-polyfill": "^4.3.0",
     "whatwg-mimetype": "^5.0.0"

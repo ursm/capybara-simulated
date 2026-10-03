@@ -139,6 +139,19 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(seen['stroke']).to eq('#00ff00')
   end
 
+  # A colour in a CSS Color 4 space reads back in it, as its computed value serializes (Chrome: `lab(50 40 59.5)`,
+  # `oklch(0.7 0.1 30)`, `color(display-p3 1 0 0)`), where it once came back as the sRGB hex it is drawn with; a
+  # system colour is Chrome's light theme's.
+  it 'serializes a colour of another space in it' do
+    session = simulated_session(app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+      ['lab(50% 40 59.5)', 'oklch(0.7 0.1 30)', 'color(display-p3 1 0 0)', 'ButtonFace'].map((c) => { ctx.fillStyle = c; return ctx.fillStyle; })
+    JS
+    expect(out).to eq(['lab(50 40 59.5)', 'oklch(0.7 0.1 30)', 'color(display-p3 1 0 0)', '#efefef'])
+  end
+
   # The canvas keeps an alpha BYTE, and a colour reads back from it: opaque is what rounds to 255, the rest is that
   # byte's shortest decimal (Chrome and Firefox alike).
   it 'serializes a colour from the alpha byte it keeps' do

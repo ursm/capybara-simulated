@@ -462,6 +462,137 @@ pub(crate) fn number(text: &str) -> Option<f64> {
     n.resolve()?.to_string().parse().ok()
 }
 
+// The longhands a `font` shorthand sets: its style, small-caps, weight, stretch, size and family, specified — None
+// where it is no `font` value (a CSS-wide keyword, a `var()`, a system font, nothing that parses).
+struct FontShorthand {
+    style: String,
+    variant_caps: String,
+    weight: style::values::specified::FontWeight,
+    stretch: String,
+    size: style::values::specified::FontSize,
+    family: style::values::computed::font::FontFamilyList,
+}
+fn font_shorthand(text: &str) -> Option<FontShorthand> {
+    use style::properties::ShorthandId;
+    use style::values::specified::FontFamily;
+    let mut source = SourcePropertyDeclaration::default();
+    parse_one_declaration_into(
+        &mut source,
+        PropertyId::NonCustom(ShorthandId::Font.into()),
+        text,
+        Origin::Author,
+        &url_data("about:blank"),
+        None,
+        ParsingMode::DEFAULT,
+        QuirksMode::NoQuirks,
+        CssRuleType::Style,
+    )
+    .ok()?;
+    let (mut style, mut variant_caps, mut weight, mut stretch, mut size, mut family) = (None, None, None, None, None, None);
+    for declaration in source.drain().declarations {
+        match declaration {
+            PropertyDeclaration::FontStyle(v) => style = Some(v.to_css_string()),
+            PropertyDeclaration::FontVariantCaps(v) => variant_caps = Some(v.to_css_string()),
+            PropertyDeclaration::FontWeight(v) => weight = Some(v),
+            PropertyDeclaration::FontStretch(v) => stretch = Some(v.to_css_string()),
+            PropertyDeclaration::FontSize(v) => size = Some(v),
+            PropertyDeclaration::FontFamily(FontFamily::Values(list)) => family = Some(list),
+            _ => {}
+        }
+    }
+    // (…a CSS-wide keyword is no family name written bare, `revert-layer` included, which the engine takes for one: CSS
+    // Fonts 4 §4.2)
+    let family = family?;
+    let keyword = |f: &style::values::computed::font::SingleFontFamily| match f {
+        style::values::computed::font::SingleFontFamily::FamilyName(name) => {
+            name.syntax == style::values::computed::font::FontFamilyNameSyntax::Identifiers
+                && ["initial", "inherit", "unset", "default", "revert", "revert-layer"].iter().any(|k| name.name.to_string().eq_ignore_ascii_case(k))
+        }
+        _ => false,
+    };
+    if family.iter().any(keyword) {
+        return None;
+    }
+    Some(FontShorthand { style: style?, variant_caps: variant_caps?, weight: weight?, stretch: stretch?, size: size?, family })
+}
+
+// A canvas's `font` (HTML §4.12.5.1.11): the `font` shorthand `text` computed — its size in px, `em` and `%` of `em`,
+// `rem` of `rem`, `lh` / `rlh` of the line heights (NaN where there is none to resolve against) — and serialized as a
+// computed `font` is, its line height left out: style, small-caps, weight, stretch, size, family, each omitted at its
+// initial value. None where it is no `font` value, or its size cannot be resolved.
+pub(crate) fn canvas_font(text: &str, em: f64, rem: f64, lh: f64, rlh: f64) -> Option<String> {
+    use style::values::specified::font::{AbsoluteFontWeight, FontSizeKeyword};
+    use style::values::specified::length::LengthUnit;
+    use style::values::specified::{FontSize, FontWeight, LengthPercentage};
+    let font = font_shorthand(text)?;
+    let mut parts: Vec<String> = [font.style, font.variant_caps].into_iter().filter(|p| p != "normal").collect();
+    match font.weight {
+        FontWeight::Absolute(AbsoluteFontWeight::Normal) => {}
+        FontWeight::Absolute(AbsoluteFontWeight::Bold) | FontWeight::Bolder => parts.push("bold".to_owned()),
+        // (…relative to the initial weight, 400)
+        FontWeight::Lighter => parts.push("100".to_owned()),
+        FontWeight::Absolute(AbsoluteFontWeight::Weight(n)) => {
+            let n = f64::from(n.resolve()?);
+            if n != 400.0 {
+                parts.push(js_number(n));
+            }
+        }
+        FontWeight::System(_) => return None,
+    }
+    if font.stretch != "normal" {
+        parts.push(font.stretch);
+    }
+    let px = match font.size {
+        // (…the fixed table browsers size the absolute keywords by, `medium` 16px)
+        FontSize::Keyword(info) => match info.kw {
+            FontSizeKeyword::XXSmall => 9.0,
+            FontSizeKeyword::XSmall => 10.0,
+            FontSizeKeyword::Small => 13.0,
+            FontSizeKeyword::Medium => 16.0,
+            FontSizeKeyword::Large => 18.0,
+            FontSizeKeyword::XLarge => 24.0,
+            FontSizeKeyword::XXLarge => 32.0,
+            FontSizeKeyword::XXXLarge => 48.0,
+            _ => return None,
+        },
+        FontSize::Length(LengthPercentage::Percentage(p)) => f64::from(p.get()) * em,
+        FontSize::Length(LengthPercentage::Length(l)) => match l.length_unit() {
+            LengthUnit::Em => f64::from(l.unitless_value()) * em,
+            LengthUnit::Rem => f64::from(l.unitless_value()) * rem,
+            LengthUnit::Lh => f64::from(l.unitless_value()) * lh,
+            LengthUnit::Rlh => f64::from(l.unitless_value()) * rlh,
+            _ => f64::from(l.to_px_if_absolute()?),
+        },
+        _ => return None,
+    };
+    if !(px > 0.0 && px.is_finite()) {
+        return None;
+    }
+    parts.push(format!("{}px", js_number((px * 1e6).round() / 1e6)));
+    parts.push(font.family.iter().map(|f| f.to_css_string()).collect::<Vec<_>>().join(", "));
+    Some(parts.join(" "))
+}
+
+// …and the families it names, as names (`document.fonts.check()` / `load()`): None where it is no `font` value.
+pub(crate) fn font_shorthand_families(text: &str) -> Option<Vec<String>> {
+    use style::values::computed::font::SingleFontFamily;
+    let font = font_shorthand(text)?;
+    Some(
+        font.family
+            .iter()
+            .map(|f| match f {
+                SingleFontFamily::FamilyName(name) => name.name.to_string(),
+                SingleFontFamily::Generic(generic) => generic.to_css_string(),
+            })
+            .collect(),
+    )
+}
+
+// A number as script prints it: no exponent below 1e21, and no `-0`.
+fn js_number(n: f64) -> String {
+    if n == 0.0 { "0".to_owned() } else { format!("{n}") }
+}
+
 // `CSS.supports(conditionText)`: a `<supports-condition>`, or a bare declaration (`display: grid`), as the engine
 // evaluates one in an `@supports` rule.
 pub(crate) fn supports_condition(text: &str) -> bool {

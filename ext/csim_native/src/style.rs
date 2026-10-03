@@ -312,6 +312,68 @@ fn device(faces: crate::walk::SharedFaces, quirks: QuirksMode, screen: Screen) -
     )
 }
 
+// `text` as a CSS `<color>`, resolved: `currentcolor` — the one it names, or one a `color-mix()` or a relative colour
+// names — as `current` is (black where that is none), a system colour as the document's device has it. None where it
+// is no colour.
+pub(crate) fn parse_color(engine: Option<&StyleEngine>, arena: &RealmArena, text: &str, current: &str) -> Option<style::color::AbsoluteColor> {
+    use style::color::AbsoluteColor;
+    use style::values::specified::Color as SpecifiedColor;
+    let url = crate::cssom_decl::url_data("about:blank");
+    let context = crate::cssom_decl::rule_context(&url, CssRuleType::Style, false);
+    let made;
+    let device = match engine {
+        Some(engine) => engine.stylist.device(),
+        None => {
+            made = device(arena.faces.clone(), QuirksMode::NoQuirks, Screen { viewport: (1024.0, 768.0), touch: false });
+            &made
+        }
+    };
+    let compute = |text: &str| {
+        let mut input = ParserInput::new(text);
+        SpecifiedColor::parse_and_compute(&context, &mut Parser::new(&mut input), Some(device)).ok()
+    };
+    if let Some(system) = system_color(text) {
+        return Some(system);
+    }
+    let black = AbsoluteColor::BLACK;
+    let current = compute(current).map_or(black, |c| c.resolve_to_absolute(&black));
+    Some(compute(text)?.resolve_to_absolute(&current))
+}
+// A CSS system colour named alone, as Chrome's light theme has it — the values a canvas and an `<input type=color>`
+// read. (BACKLOG: the engine's own device answers Servo's table, `ButtonFace` #dcdcdc where Chrome says #efefef, which
+// is what the cascade computes; the fork's `Device::system_color` should give these, and this table go.)
+fn system_color(text: &str) -> Option<style::color::AbsoluteColor> {
+    let hex = match text.trim().to_ascii_lowercase().as_str() {
+        "canvas" | "field" | "appworkspace" | "threedhighlight" | "window" => 0xffffff,
+        "canvastext" | "buttontext" | "fieldtext" | "highlighttext" | "selecteditemtext" | "marktext" | "captiontext" | "inactivecaptiontext"
+        | "infotext" | "menutext" | "windowtext" => 0x000000,
+        "linktext" => 0x0000ee,
+        "visitedtext" => 0x551a8b,
+        "activetext" => 0xff0000,
+        "buttonface" | "threedface" => 0xefefef,
+        "buttonborder" => 0x767676,
+        "highlight" | "selecteditem" => 0xb3d7ff,
+        "mark" => 0xffff00,
+        "graytext" => 0x808080,
+        "accentcolor" => 0x0078d4,
+        "accentcolortext" => 0xffffff,
+        "activeborder" => 0xb4b4b4,
+        "activecaption" => 0xcccccc,
+        "background" => 0x6363ce,
+        "buttonhighlight" => 0xdddddd,
+        "buttonshadow" => 0x888888,
+        "inactiveborder" | "inactivecaption" => 0xf4f7fc,
+        "infobackground" => 0xfbfcc5,
+        "menu" | "scrollbar" => 0xf0f0f0,
+        "threeddarkshadow" => 0x696969,
+        "threedlightshadow" => 0xe3e3e3,
+        "threedshadow" => 0xa0a0a0,
+        "windowframe" => 0x646464,
+        _ => return None,
+    };
+    Some(style::color::AbsoluteColor::srgb_legacy((hex >> 16) as u8, (hex >> 8) as u8, hex as u8, 1.0))
+}
+
 // Whether the media query list `media` matches on `screen`: as the document's device answers it where the engine shows
 // the page on that screen, else as one made for it (a sheet list built before the engine was told of a resize).
 pub(crate) fn media_matches(engine: Option<&StyleEngine>, arena: &RealmArena, screen: Screen, media: &str) -> bool {
