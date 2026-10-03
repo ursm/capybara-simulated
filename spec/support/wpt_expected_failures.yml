@@ -2566,8 +2566,6 @@ html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance-wi
 - "== html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance-with-clipping.ctx-filter-expected.html"
 html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance.ctx-filter.html:
 - "== html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance.ctx-filter-expected.html"
-html/canvas/element/manual/compositing/colr-glyph-composition.html:
-- "== html/canvas/element/manual/compositing/colr-glyph-composition-ref.html"
 html/canvas/element/manual/context-attributes/clearRect_alpha_false.html:
 - "== html/canvas/element/manual/context-attributes/clearRect_alpha_false-ref.html"
 html/canvas/element/manual/context-attributes/drawImage_alpha_false.html:

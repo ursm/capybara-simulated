@@ -1208,6 +1208,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::resolved::install(scope, ns, context_id);
     crate::mime::install(scope, ns, context_id);
     crate::font_faces::install(scope, ns, context_id);
+    crate::canvas::install(scope, ns, context_id);
+    crate::canvas_path::install(scope, ns, context_id);
     crate::html_parse::install(scope, ns, context_id);
     crate::url_ops::install(scope, ns, context_id);
     crate::text_codec::install(scope, ns, context_id);
