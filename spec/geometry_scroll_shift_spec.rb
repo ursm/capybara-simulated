@@ -60,6 +60,20 @@ RSpec.describe 'the scroll shift' do
     expect(rect(s, 'dc')).to eq([0, 0, 20])
   end
 
+  # A scroller moves only what it CONTAINS, which an absolutely positioned box placed against a block outside it is not
+  # — the scroll carries it up its containing-block chain, past the scroller, as the clip does. (Chrome: 4 and 4, the
+  # positioned control's 4 - 150; the document's scroll moves them all.)
+  it 'leaves an absolute box whose containing block is outside the scroller where it is' do
+    s = page('<div id="sc" style="overflow:auto;height:100px"><div style="height:1000px">' \
+             '<i id="abs" style="position:absolute;top:4px;width:40px;height:40px"></i></div></div>' \
+             '<div id="sc2" style="overflow:auto;height:100px;position:relative"><div style="height:1000px">' \
+             '<i id="abs2" style="position:absolute;top:4px;width:40px;height:40px"></i></div></div>')
+    s.execute_script("document.getElementById('sc').scrollTop = 150; document.getElementById('sc2').scrollTop = 150")
+    expect([rect(s, 'abs')[1], rect(s, 'abs2')[1]]).to eq([4, 100 + 4 - 150])
+    s.execute_script('window.scrollTo(0, 40)')
+    expect(rect(s, 'abs')[1]).to eq(-36)
+  end
+
   # `overflow` applies to no inline box: a shifted child of an `overflow: hidden` span is still there to hit.
   it 'clips nothing at an inline box' do
     s = page('<span style="overflow:hidden">abc<b id="inner" style="position:relative;left:300px">far</b></span>')

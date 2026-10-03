@@ -2075,8 +2075,6 @@ dom/events/scrolling/iframe-chains.html:
 - Wheel scroll in iframe chains to containing element.
 dom/events/scrolling/scroll-cross-origin-iframes.html:
 - Verify sibling cross-origin iframes can wheel-scroll.
-dom/events/scrolling/scroll-event-fired-to-element.html:
-- scrollTop and scrollLeft when scrolling above maximum offset.
 dom/events/scrolling/scrollend-event-fired-after-snap.html:
 - Tests that scrollend is fired after fling snap animation completion.
 - Tests that scrollend is fired after scroll snap animation completion.
@@ -2085,8 +2083,6 @@ dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.h
 dom/events/scrolling/scrollend-event-fired-to-document.html:
 - testing, horizontal
 - testing, vertical
-dom/events/scrolling/scrollend-event-fired-to-element-with-overscroll-behavior.html:
-- Tests that the scroll is not propagated beyond div with non-auto overscroll-behavior.
 dom/events/scrolling/scrollend-event-fired-to-window.html:
 - testing, vertical
 dom/events/scrolling/scrollend-event-fires-for-repeat-key-ending-after-scroll-container-end-is-reached.html:
@@ -3365,9 +3361,6 @@ html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/min-inline
 - 'horizontal-tb '
 - 'vertical-lr '
 - 'vertical-rl '
-html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/sticky-content.html:
-- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/sticky-content-ref.html
-  (both renderings blank)"
 html/rendering/non-replaced-elements/the-frameset-and-frame-elements/different-writing-modes.html:
 - "== html/rendering/non-replaced-elements/the-frameset-and-frame-elements/reference/different-writing-modes-ref.html
   (both renderings blank)"
@@ -4557,8 +4550,6 @@ html/semantics/forms/the-select-element/list-box-important-colors.html:
 html/semantics/forms/the-select-element/reset-algorithm-rendering.html:
 - "== html/semantics/forms/the-select-element/reset-algorithm-rendering-ref.html (never
   ready to capture)"
-html/semantics/forms/the-select-element/select-listbox-selected-hscroll.html:
-- "!= css/reference/blank.html"
 html/semantics/forms/the-select-element/select-listbox-touch.optional.html:
 - Using touch inputs should not deselect other options in a listbox <select multiple>.
 html/semantics/forms/the-select-element/select-multiple-resize-does-not-autoscroll.html:

@@ -335,4 +335,50 @@ RSpec.describe 'the scrollable overflow region' do
     JS
     expect(got).to eq([100, 0, 0, 0, 0])
   end
+  # The LINE BOXES are scrollable overflow too (§2.2: the content a box lays out includes its text), each line to the
+  # far end of what it holds — a `nowrap` line past its scroller, a long word past an `overflow: hidden` box, wherever
+  # `text-align` put the line — and nothing behind the scroll origin, which `direction: rtl` moves to the right.
+  # (Chrome / Firefox: 275 / 275 / 188 wide; `f` 227x36 in Chrome; an `overflow: visible` box reports the plain
+  # union, 306x30. The heights here are the client box: neither browser's horizontal scrollbar is drawn here.)
+  it 'reaches as far as the lines of text in it' do
+    html = %(<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+               body { margin: 0; font: 16px Arial } .s { overflow: auto; width: 100px; height: 50px; white-space: nowrap }
+             </style></head><body>
+             <div id="b" class="s">lorem ipsum dolor sit amet consectetur</div>
+             <div id="c" class="s" style="direction:rtl">lorem ipsum dolor sit amet consectetur</div>
+             <div id="e" class="s" style="text-align:center">lorem ipsum dolor sit amet</div>
+             <div id="f" style="overflow:hidden;width:100px;height:30px">supercalifragilisticexpialidocious word</div>
+             <div id="g" style="width:100px;height:30px;white-space:nowrap">visible overflow is not scrollable for this box</div>
+             </body></html>)
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] })
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      ['b', 'c', 'e', 'f', 'g'].map((id) => { const e = document.getElementById(id); return [e.scrollWidth, e.scrollHeight]; })
+    JS
+    expect(got).to eq([[275, 50], [275, 50], [188, 50], [227, 36], [306, 30]])
+  end
+
+  # …and an element's scroll offsets are clamped to the region, as the document's are: `scrollLeft = 99999` lands at
+  # `scrollWidth - clientWidth`, and an rtl scroller, scrolling from its right, takes offsets from `-max` to 0 (CSSOM
+  # View §6). (Firefox: 175, -175, 0. Chrome: 175, -174, 1 — fractional advances under its rounding.)
+  it 'clamps an element scroller to its region, from whichever edge it scrolls from' do
+    html = %(<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+               body { margin: 0; font: 16px Arial } .s { overflow: auto; width: 100px; height: 50px; white-space: nowrap }
+             </style></head><body>
+             <div id="b" class="s">lorem ipsum dolor sit amet consectetur</div>
+             <div id="c" class="s" style="direction:rtl">lorem ipsum dolor sit amet consectetur</div>
+             </body></html>)
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] })
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const b = document.getElementById('b'), c = document.getElementById('c'), out = [];
+        b.scrollLeft = 99999; out.push(b.scrollLeft);
+        c.scrollLeft = -99999; out.push(c.scrollLeft);
+        c.scrollLeft = 50; out.push(c.scrollLeft);
+        return out;
+      })()
+    JS
+    expect(got).to eq([175, -175, 0])
+  end
 end

@@ -11,8 +11,8 @@ RSpec.describe 'scrollend event' do
   def session
     app = lambda do |_env|
       [200, {'content-type' => 'text/html'},
-       ['<!DOCTYPE html><html><head></head><body><div id="s" style="overflow:scroll">' \
-        '<div style="height:4000px"></div></div></body></html>']]
+       ['<!DOCTYPE html><html><head></head><body><div id="s" style="overflow:scroll;height:100px">' \
+        '<div style="height:4000px"></div></div><div style="height:4000px"></div></body></html>']]
     end
     s = simulated_session(app)
     s.visit '/'

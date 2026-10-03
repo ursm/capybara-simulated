@@ -169,7 +169,8 @@ RSpec.describe 'scroll into view' do
 
     it 'keeps one on a LISTBOX select, not on a dropdown' do
       # Chrome computes `overflow-x: hidden; overflow-y: scroll` on a `size`d / `multiple` select
-      # and honours `select.scrollTop = 40`. A DROPDOWN scrolls nowhere — its options are not
+      # and honours `select.scrollTop = 40` as far as its rows reach: 17 of four 17px rows in a
+      # three-row box, and 0 of two in four. A DROPDOWN scrolls nowhere — its options are not
       # rendered in the control at all — and Chrome computes `clip` on it, which is not a scroll
       # container: the offset stays 0.
       body = '<select id="list" size="3"><option>1</option><option>2</option><option>3</option><option>4</option></select>' \
@@ -182,7 +183,7 @@ RSpec.describe 'scroll into view' do
           return [e.scrollTop, getComputedStyle(e).overflowY];
         }))()
       JS
-      expect(got).to eq([[40, 'scroll'], [40, 'scroll'], [0, 'clip']])
+      expect(got).to eq([[17, 'scroll'], [0, 'scroll'], [0, 'clip']])
     end
 
     it 'takes a write to a box made scrollable in the same tick' do

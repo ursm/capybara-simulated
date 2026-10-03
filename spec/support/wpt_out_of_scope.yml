@@ -32446,21 +32446,6 @@ dom/events/scrolling/scrollend-event-fired-after-sequence-of-scrolls.tentative.h
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-dom/events/scrolling/scrollend-event-fired-for-scrollIntoView.html:
-- name: Tests scrollend event for nested scrollIntoView.
-  reason: Asserts the exact CLAMPED offsets of an overflow:scroll ELEMENT scroller
-    (max_element_x/y read back from a scrollTo(10000,10000) probe). Element-scroller
-    offsets are deliberately unclamped here — their content extents are the coarse
-    ones, and clamping against an under-measured extent turns real scrolls into silent
-    no-ops (see the scrollTop setter) — so the read-back can never equal the probe's
-    clamped value. The root-scroller variants of this file pass.
-- name: Tests scrollend event for scrollIntoView with behavior 'auto' on subframe.
-  reason: Asserts the exact CLAMPED offsets of an overflow:scroll ELEMENT scroller
-    (max_element_x/y read back from a scrollTo(10000,10000) probe). Element-scroller
-    offsets are deliberately unclamped here — their content extents are the coarse
-    ones, and clamping against an under-measured extent turns real scrolls into silent
-    no-ops (see the scrollTop setter) — so the read-back can never equal the probe's
-    clamped value. The root-scroller variants of this file pass.
 dom/events/scrolling/scrollend-event-not-fired-after-removing-scroller.tentative.html:
 - name: No scrollend is received after removing parent div
   reason: 'The scroller is removed MID-ANIMATION: the test scrolls with smooth behavior
@@ -42579,11 +42564,43 @@ html/rendering/widgets/the-select-element/select-as-listbox-default-styles.tenta
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: <option>1 (in <select multiple="">) - padding-bottom
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: <option>1 (in <select multiple="">) - padding-left
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: <option>1 (in <select multiple="">) - padding-right
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: <option>1 (in <select multiple="">) - white-space
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: <option>3 (in <select multiple=""><optgroup label="2">) - cursor
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: <option>3 (in <select multiple=""><optgroup label="2">) - font-size
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: <option>3 (in <select multiple=""><optgroup label="2">) - padding-bottom
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: <option>3 (in <select multiple=""><optgroup label="2">) - padding-left
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: <option>3 (in <select multiple=""><optgroup label="2">) - padding-right
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: <option>3 (in <select multiple=""><optgroup label="2">) - white-space
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

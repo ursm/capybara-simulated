@@ -1072,11 +1072,14 @@ pub(crate) struct Box {
     pub(crate) position: u8,
     // …and how it clips its content (`Input::clip`).
     pub(crate) clip: u8,
+    // The rectangle its LINES' content covers, `[left, top, right, bottom]` from its border box's origin — what of it
+    // overflows the box is scrollable overflow (geometry.rs `extent`) — none for a box that lays out no lines.
+    pub(crate) line_rect: Option<[f64; 4]>,
 }
 impl Box {
     // The box of node `nid` at `[x, y, w, h]`, and nothing else about it.
     pub(crate) fn at(nid: f64, [x, y, w, h]: [f64; 4]) -> Box {
-        Box { nid, x, y, w, h, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None, rel: [0.0; 2], edges: None, auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0 }
+        Box { nid, x, y, w, h, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: None, used_margins: None, rel: [0.0; 2], edges: None, auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0, line_rect: None }
     }
 }
 pub(crate) const CLIP_X: u8 = 1;
@@ -1919,6 +1922,10 @@ fn line_layout(
     // The first / last line CLOSED, as (top, ascent) — a line a `<br>` left empty is a line too (its bare strut).
     let mut first_line: Option<(f64, f64)> = None;
     let mut last_line: Option<(f64, f64)> = None;
+    // How far the lines' content reaches across, `[left, right]` from the content box's left edge: what of it overflows
+    // the box is scrollable overflow (css-overflow-3 §2.2 — the line boxes), which a `nowrap` line or an unbreakable
+    // word past the box's edge makes, and an rtl line overflowing the start side does to the LEFT.
+    let mut reach = [f64::INFINITY, f64::NEG_INFINITY];
     // The atomic runs placed on the current line (run index, x from the content edge), settled against the
     // line's top + ascent — and moved by the line's alignment — at close.
     // Where each JUSTIFICATION gap sits on the current line — the origin of every space the line placed (a
@@ -2121,6 +2128,10 @@ fn line_layout(
             // horizontal margin and its `position: relative` offset both carry its x across gap boundaries
             // while leaving the gaps before it exactly as they were. (Chrome puts a `margin-left: -12px`
             // atomic that OPENS a justified line at −12; counting by x gave it a gap it comes before.)
+            if line_placed {
+                let left = band_l(total) + dx;
+                reach = [reach[0].min(left), reach[1].max(left + end + gaps.len() as f64 * extra)];
+            }
             let shift_box = |before: usize| if extra > 0.0 { before.min(gaps.len()) as f64 * extra } else { dx };
             // An out-of-flow MARKER is not a box on the line — it records a static position, which may sit
             // after a space the line has not placed yet (`pending_w`), so its gap count is not the one taken
@@ -3412,7 +3423,8 @@ fn line_layout(
             piece.1[1] += ib.rel_y;
         }
     }
-    Some(LineLayout { height: total, first: first_line, last: last_line, atomics, oofs, floats: placed_floats, frags: inline_frags, texts })
+    let reach = (reach[0] <= reach[1]).then_some(reach);
+    Some(LineLayout { height: total, first: first_line, last: last_line, reach, atomics, oofs, floats: placed_floats, frags: inline_frags, texts })
 }
 // Where one ATOMIC run landed on its line, in the frame the text arm places boxes in. `x` is its margin box
 // from the content edge, with its float band and the line's alignment already applied. The three line figures
@@ -3432,6 +3444,8 @@ struct LineLayout {
     height: f64,
     first: Option<(f64, f64)>,
     last: Option<(f64, f64)>,
+    // How far the lines' content reaches across, `[left, right]` from the content box's origin — none for no line.
+    reach: Option<[f64; 2]>,
     // Where each ATOMIC run landed — the text arm drops a natively laid-out atomic onto its line from these.
     atomics: Vec<PlacedAtomic>,
     // Where each OUT-OF-FLOW marker's flow position fell: (record index, x from the content edge, line top).
@@ -4417,6 +4431,7 @@ fn measure_uncached(
                     store_frags(i, ll.frags.iter().map(|&(idx, r)| [idx as f64, n.bl + n.pl + r[0], content_top_rel + r[1], r[2], r[3]]).collect());
                     // …and the text pieces, their runs numbered in the pass's stream.
                     store_texts(i, ll.texts.iter().map(|r| [r[0] + rs as f64, r[1], r[2], n.bl + n.pl + r[3], content_top_rel + r[4], content_top_rel + r[5], r[6], r[7]]).collect());
+                    boxes[i].line_rect = ll.reach.map(|[l, r]| [n.bl + n.pl + l, content_top_rel, n.bl + n.pl + r, content_top_rel + ll.height]);
                     boxes[i].first_baseline = ll.first.map(|(top, asc)| content_top_rel + top + asc);
                     boxes[i].last_baseline = ll.last.map(|(top, asc)| content_top_rel + top + asc);
                     boxes[i].inline_block_baseline = boxes[i].last_baseline;
@@ -8957,8 +8972,8 @@ mod tests {
         b.height = 30.0;
         let inputs = vec![blk(0.0, -1), a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
-        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0 });
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0 });
+        assert_eq!(bx[1], Box { nid: 1.0, x: 0.0, y: 0.0, w: 800.0, h: 50.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0, line_rect: None });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 50.0, w: 800.0, h: 30.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0, line_rect: None });
         assert_eq!(bx[0].h, 80.0); // root auto height = 50 + 30
         assert!(bx[0].auto_height);
     }
@@ -9132,7 +9147,7 @@ mod tests {
         let inputs = vec![blk(0.0, -1), owner, f];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!(bx[1].h, 120.0); // owner contains the float
-        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0 });
+        assert_eq!(bx[2], Box { nid: 2.0, x: 0.0, y: 0.0, w: 80.0, h: 120.0, auto_height: false, first_baseline: None, last_baseline: None, inline_block_baseline: None, natural_h: None, clamped_h: false, cb_w: Some(800.0), used_margins: None, rel: [0.0; 2], edges: Some([0.0; 12]), auto_margins: 0, percent_edges: false, out_of_flow: 0, cb: CB_NONE, cb_inline: -1, static_axes: 0, position: 0, clip: 0, line_rect: None });
     }
 
     #[test]

@@ -130,7 +130,8 @@ fn is_fixed(b: &Box) -> bool {
 }
 
 // The total scroll shift the page has carried `id`'s box by, `[x, y]`: the document's scroll, and every scroll
-// container's around it, compounding up — less the distance a STICKY box among them (it included) has stuck.
+// container's around it, compounding up its containing-block chain — less the distance a STICKY box among them (it
+// included) has stuck.
 pub(crate) fn scroll_shift(arena: &RealmArena, id: NodeId) -> [f64; 2] {
     let Some(node) = arena.get(id) else { return [0.0; 2] };
     // A `position: fixed` box is laid out against the VIEWPORT, so no scrolling moves it — that is what fixed means, and
@@ -143,9 +144,20 @@ pub(crate) fn scroll_shift(arena: &RealmArena, id: NodeId) -> [f64; 2] {
     if Some(id) == arena.layout_root {
         return node.scroll;
     }
-    let mut shift = flat_parent(arena, id).map_or([0.0; 2], |p| shift_below(arena, p));
+    let mut shift = scrolled_by(arena, id).map_or([0.0; 2], |p| shift_below(arena, p));
     unstick(&mut shift, sticky_delta(arena, id));
     shift
+}
+// …the box whose scrolling carries `id`'s: its parent, or an out-of-flow box's CONTAINING BLOCK — the initial one, the
+// root's, where it names none — so a scroll container between an absolutely positioned box and the block it is placed
+// in moves it no more than it clips it (Chrome: an `absolute` box at `top: 4px` inside an unpositioned scroller stays
+// at 4 however far that scroller scrolls).
+fn scrolled_by(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
+    let node = arena.get(id)?;
+    match laid(arena, node) {
+        Some(b) if b.out_of_flow != 0 => node.containing_block.or(arena.layout_root),
+        _ => flat_parent(arena, id),
+    }
 }
 // …the shift of the boxes `p` holds: its own scroll where it is the root or a scroll container, less what it has stuck
 // if it is sticky, and its ancestors' — none past a FIXED one, whose own scroll still moves its content.
@@ -155,7 +167,7 @@ fn shift_below(arena: &RealmArena, p: NodeId) -> [f64; 2] {
     }
     let Some(pn) = arena.get(p) else { return [0.0; 2] };
     let b = laid(arena, pn);
-    let mut shift = if b.is_some_and(is_fixed) { [0.0; 2] } else { flat_parent(arena, p).map_or([0.0; 2], |up| shift_below(arena, up)) };
+    let mut shift = if b.is_some_and(is_fixed) { [0.0; 2] } else { scrolled_by(arena, p).map_or([0.0; 2], |up| shift_below(arena, up)) };
     if Some(p) == arena.layout_root || b.is_some_and(|b| b.clip & CLIP_SCROLLS != 0) {
         shift[0] += pn.scroll[0];
         shift[1] += pn.scroll[1];
@@ -635,6 +647,14 @@ fn extent(arena: &RealmArena, id: NodeId) -> Option<Extent> {
     let [x, y, w, h] = if Some(id) == arena.layout_root { root_scroll_seed(arena, id)? } else { placed_box(arena, id)? };
     let mut e = Extent { outer: [x, y, x + w, y + h], inflow: NO_REACH, kids: NO_REACH };
     let node = arena.get(id)?;
+    // (…its LINE BOXES' content, which the scrollable overflow holds as it holds boxes — a `nowrap` line, an unbreakable
+    // word — and which the end padding follows as an in-flow child's margin box does)
+    if let Some((bx, [l, t, r, b])) = laid(arena, node).and_then(|b| Some(((b.x, b.y), b.line_rect?))) {
+        let reach = [bx.0 + l, bx.1 + t, bx.0 + r, bx.1 + b];
+        union(&mut e.outer, reach);
+        union(&mut e.kids, reach);
+        union(&mut e.inflow, reach);
+    }
     for c in box_children(arena, id) {
         let Some(cn) = arena.get(c) else { continue };
         let b = laid(arena, cn);
@@ -712,11 +732,13 @@ fn root_scroll_seed(arena: &RealmArena, root: NodeId) -> Option<[f64; 4]> {
 }
 
 // The scrollable overflow region of `id` as `[width, height]` (`contentExtent`): from the edge it scrolls FROM to the
-// far end of what is reachable — at least its padding box, and nothing behind the scroll origin. A scroll container's
-// in-flow children's margin boxes take its end padding after them (§3.2: a `padding: 10px` scroller over a 110px child
-// is 130); an `overflow: visible` (or `clip`) box reports the plain union. The root's is the viewport's, from the
-// initial containing block. None for a box that has no scrolling area: none at all, or a non-replaced inline.
-pub(crate) fn scroll_size(arena: &RealmArena, id: NodeId) -> Option<[f64; 2]> {
+// far end of what is reachable — at least its padding box, and nothing behind the scroll origin — and then whether it
+// scrolls from its left and its top edge (1) or the far one (0), where its offsets run negative (CSSOM View §6). A
+// scroll container's in-flow children's margin boxes take its end padding after them (§3.2: a `padding: 10px` scroller
+// over a 110px child is 130); an `overflow: visible` (or `clip`) box reports the plain union. The root's is the
+// viewport's, from the initial containing block. None for a box that has no scrolling area: none at all, or a
+// non-replaced inline.
+pub(crate) fn scroll_size(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
     let node = arena.get(id)?;
     let style = box_style(arena, id)?;
     if is_boxless(arena, id, &style) || non_replaced_inline(arena, id, &style) {
@@ -728,7 +750,7 @@ pub(crate) fn scroll_size(arena: &RealmArena, id: NodeId) -> Option<[f64; 2]> {
         let [vw, vh] = arena.viewport;
         let w = if from_left { ext.outer[2].max(ext.kids[2]) } else { vw - ext.outer[0].min(ext.kids[0]) };
         let h = if from_top { ext.outer[3].max(ext.kids[3]) } else { vh - ext.outer[1].min(ext.kids[1]) };
-        return Some([w.round(), h.round()]);
+        return Some([w.round(), h.round(), f64::from(u8::from(from_left)), f64::from(u8::from(from_top))]);
     }
     let b = laid(arena, node)?;
     let e = b.edges.unwrap_or([0.0; 12]);
@@ -753,7 +775,7 @@ pub(crate) fn scroll_size(arena: &RealmArena, id: NodeId) -> Option<[f64; 2]> {
     };
     let w = axis(from_left, pad[0], pad[2], kid[0], kid[2], inflow[0], inflow[2]);
     let h = axis(from_top, pad[1], pad[3], kid[1], kid[3], inflow[1], inflow[3]);
-    Some([w.round(), h.round()])
+    Some([w.round(), h.round(), f64::from(u8::from(from_left)), f64::from(u8::from(from_top))])
 }
 // The edges a box scrolls FROM, `[left, top]` (each true for that edge, false for the far one): a flex SCROLL container
 // from its main-start corner (Chrome: a `row-reverse` row overflowing 200px leftwards reports 100 while visible, 300 once
@@ -950,7 +972,7 @@ fn scroll_shift_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 // __dom.laidOutBox(nid, out) / renderedBox(nid, out) / transformChain(nid, out) / scrollSize(nid, out) -> whether `nid`
 // has one: its box where the page's scrolling carried it (`laid_out_box`), that box as the page measures it
 // (`rendered_box`), the 4x4 that maps it to the viewport (`transform_chain`), and its scrollable overflow region's size
-// (`scroll_size`) — written to the Float64Array `out`.
+// and the edges it scrolls from (`scroll_size`) — written to the Float64Array `out`.
 fn laid_out_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, laid_out_box);
 }
