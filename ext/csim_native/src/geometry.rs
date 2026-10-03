@@ -743,6 +743,143 @@ fn scroll_origin(arena: &RealmArena, id: NodeId, style: &ComputedValues) -> [boo
     [inline_start != Side::Right, true]
 }
 
+// ── the used insets ────────────────────────────────────────────────────────────────────────────────────────────
+// What `getComputedStyle` reports of a POSITIONED box's `top` / `right` / `bottom` / `left`, `[declared…, used…]` each
+// top / right / bottom / left (NaN for none), from the box the pass placed and the containing block it placed it in:
+// an inset the page DECLARED is reported as itself, resolved against that block (Chrome: `left: 0; right: 0; width:
+// 40px; margin: auto` answers `left: 0px` though the box sits 180px in), and only an `auto` one is derived from the
+// box — an absolutely positioned box's distance to its containing block's padding edge past its margin, a relatively
+// positioned (or sticky) box's SHIFT. None for a static box or one with no box; and an axis of an INLINE box whose
+// inset is a percentage reports none at all, its computed value standing, as a browser does.
+pub(crate) fn used_insets(arena: &RealmArena, id: NodeId) -> Option<[f64; 8]> {
+    use style::computed_values::position::T as Position;
+    let style = box_style(arena, id)?;
+    let position = style.get_box().clone_position();
+    if position == Position::Static || is_boxless(arena, id, &style) {
+        return None;
+    }
+    let [x, y, w, h] = placed_box(arena, id)?;
+    let [cx, cy, cw, ch] = inset_containing_block(arena, id, position)?;
+    let pos = style.get_position();
+    let resolve = |v, basis: f64| crate::walk::inset_lp(v).ok().flatten().map(|lp| f64::from(lp.resolve(Length::new(basis as f32)).px()));
+    let mut declared = [resolve(&pos.top, ch), resolve(&pos.right, cw), resolve(&pos.bottom, ch), resolve(&pos.left, cw)];
+    let mut used: [Option<f64>; 4];
+    if matches!(position, Position::Absolute | Position::Fixed) {
+        let e = edges(arena, id).map_or([0.0; 12], |e| e.e);
+        let [mt, mr, mb, ml] = [e[8], e[9], e[10], e[11]];
+        used = [Some(y - mt - cy), Some(cx + cw - (x + w + mr)), Some(cy + ch - (y + h + mb)), Some(x - ml - cx)];
+    } else {
+        // (…a relative SHIFT: the declared inset where there is one, else the opposite one's negation — and with both
+        // `left` and `right` given, over-constrained, the containing block's `direction` drops one, §9.4.3)
+        let [top, right, bottom, left] = declared;
+        let dx = match (left, right) {
+            (Some(l), Some(r)) => if flow_relative_rtl(arena, id) { -r } else { l },
+            (Some(l), None) => l,
+            (None, r) => -r.unwrap_or(0.0),
+        };
+        let dy = top.unwrap_or_else(|| -bottom.unwrap_or(0.0));
+        used = [Some(dy), Some(-dx), Some(-dy), Some(dx)];
+        for (axis, [start, end]) in [(0, [&pos.top, &pos.bottom]), (1, [&pos.left, &pos.right])] {
+            if inline_percentage_axis(arena, id, &style, start, end) {
+                let sides = if axis == 0 { [0, 2] } else { [3, 1] };
+                for k in sides {
+                    used[k] = None;
+                    declared[k] = None;
+                }
+            }
+        }
+    }
+    let mut out = [f64::NAN; 8];
+    for k in 0..4 {
+        out[k] = declared[k].unwrap_or(f64::NAN);
+        out[4 + k] = used[k].unwrap_or(f64::NAN);
+    }
+    Some(out)
+}
+// The block an inset resolves against, `[x, y, w, h]` in document coordinates — the one the placement used: an
+// absolutely positioned box's containing block's PADDING box (the viewport where it was placed against that), a sticky
+// one's nearest scroller's content box (the viewport's, with none — css-position §sticky-pos: Chrome resolves `top:
+// 10%` in a 100px block in a 200px `overflow: hidden` scroller to 20px), and a relative one's parent box's content box.
+fn inset_containing_block(arena: &RealmArena, id: NodeId, position: style::computed_values::position::T) -> Option<[f64; 4]> {
+    use style::computed_values::position::T as Position;
+    let [vw, vh] = arena.viewport;
+    match position {
+        Position::Absolute | Position::Fixed => {
+            let cb = arena.get(id)?.containing_block;
+            Some(match cb {
+                Some(cb) => padding_rect(arena, cb)?,
+                None => [0.0, 0.0, vw, vh],
+            })
+        }
+        Position::Sticky => {
+            let mut at = flat_parent(arena, id);
+            while let Some(p) = at {
+                if arena.get(p).and_then(|n| laid(arena, n)).is_some_and(|b| b.clip & CLIP_SCROLLS != 0) {
+                    return content_rect(arena, p);
+                }
+                at = flat_parent(arena, p);
+            }
+            Some([0.0, 0.0, vw, vh])
+        }
+        _ => content_rect(arena, crate::hit_test::box_parent_or_inline(arena, id)?),
+    }
+}
+// A box's padding box and content box, `[x, y, w, h]` — an inline box's from where its first fragment starts to where
+// its last one ends (a dropdown hung off a wrapping link opens under where the link STARTS: Chrome).
+fn padding_rect(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
+    let [x, y, w, h] = containing_extent(arena, id)?;
+    let e = edges(arena, id).map_or([0.0; 12], |e| e.e);
+    Some([x + e[7], y + e[4], (w - e[7] - e[5]).max(0.0), (h - e[4] - e[6]).max(0.0)])
+}
+fn content_rect(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
+    let [x, y, w, h] = containing_extent(arena, id)?;
+    let e = edges(arena, id).map_or([0.0; 12], |e| e.e);
+    let [top, right, bottom, left] = [e[0] + e[4], e[1] + e[5], e[2] + e[6], e[3] + e[7]];
+    Some([x + left, y + top, (w - left - right).max(0.0), (h - top - bottom).max(0.0)])
+}
+fn containing_extent(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
+    let node = arena.get(id)?;
+    if let Some(frags) = laid_frags(arena, node).filter(|f| f.len() > 1) {
+        let (first, last) = (frags[0], frags[frags.len() - 1]);
+        return Some([first[0], first[1], last[0] + last[2] - first[0], last[1] + last[3] - first[1]]);
+    }
+    placed_box(arena, id)
+}
+// Does `id`'s containing block run right to left — the nearest block around it, an inline box being no containing
+// block (and one laid out as a block for the block it holds still an inline box here)?
+fn flow_relative_rtl(arena: &RealmArena, id: NodeId) -> bool {
+    use style::computed_values::direction::T as Direction;
+    let mut at = flat_parent(arena, id);
+    while let Some(p) = at.filter(|&p| arena.get(p).is_some_and(|n| n.kind == NodeKind::Element)) {
+        let Some(style) = box_style(arena, p) else { return false };
+        let d = style.get_box().walk_display(arena.get(p).map_or("", |n| n.rendering_tag()));
+        if !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow)) {
+            return style.get_inherited_box().direction == Direction::Rtl;
+        }
+        at = flat_parent(arena, p);
+    }
+    false
+}
+// Is this axis of an INLINE box's insets — its start side's where that is given, else its end side's — a percentage?
+fn inline_percentage_axis(
+    arena: &RealmArena,
+    id: NodeId,
+    style: &ComputedValues,
+    start: &style::values::computed::position::Inset,
+    end: &style::values::computed::position::Inset,
+) -> bool {
+    let tag = arena.get(id).map_or("", |n| n.rendering_tag());
+    let d = style.get_box().walk_display(tag);
+    if !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow)) {
+        return false;
+    }
+    let side = match crate::walk::inset_lp(start) {
+        Ok(Some(lp)) => Some(lp),
+        _ => crate::walk::inset_lp(end).ok().flatten(),
+    };
+    side.is_some_and(|lp| lp.has_percentage())
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     use crate::dom::register;
     register(scope, ns, "scrollShift", scroll_shift_op, context_id);
@@ -752,8 +889,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "transformChain", transform_chain_op, context_id);
     register(scope, ns, "scrollSize", scroll_size_op, context_id);
     register(scope, ns, "boxInfo", box_info_op, context_id);
+    register(scope, ns, "usedInsets", used_insets_op, context_id);
     register(scope, ns, "boxFragments", box_fragments_op, context_id);
-    register(scope, ns, "containingBlock", containing_block_op, context_id);
     register(scope, ns, "scrollOffset", scroll_offset, context_id);
     register(scope, ns, "setScrollOffset", set_scroll_offset, context_id);
     register(scope, ns, "clipFlags", clip_flags, context_id);
@@ -818,15 +955,7 @@ fn box_info(arena: &RealmArena, id: NodeId) -> Option<[f64; BOX_INFO]> {
         out[5] = b.cb_w.unwrap_or(f64::NAN);
         out[6..10].copy_from_slice(&b.used_margins.unwrap_or([f64::NAN; 4]));
         out[10..12].copy_from_slice(&b.rel);
-        match b.edges {
-            Some(edges) => {
-                out[12..24].copy_from_slice(&edges);
-                let am = b.auto_margins;
-                let auto = [(4, 1), (2, 2), (8, 4), (1, 8)].iter().fold(0, |m, &(from, to)| if am & from != 0 { m | to } else { m });
-                out[24] = f64::from(auto | if b.percent_edges { 16 } else { 0 });
-            }
-            None => declared_edges(arena, id, b.cb_w, &mut out),
-        }
+        put_edges(arena, id, &mut out);
         out[25] = f64::from(b.out_of_flow);
         out[26] = if b.cb == CB_RECT { 1.0 } else { 0.0 };
         out[27] = if b.auto_height { 1.0 } else { 0.0 };
@@ -839,33 +968,58 @@ fn box_info(arena: &RealmArena, id: NodeId) -> Option<[f64; BOX_INFO]> {
     out[4] = frags.len() as f64;
     out[10..12].copy_from_slice(&[0.0; 2]);
     out[25..30].copy_from_slice(&[0.0, 0.0, 1.0, 0.0, 0.0]);
-    declared_edges(arena, id, None, &mut out);
+    put_edges(arena, id, &mut out);
     Some(out)
 }
-// The edges of a box the pass gave none of its own — a table row or row group, whose margins and padding do not apply
-// and whose border is its cells' to draw (CSS 2.1 §17.5), an inline box, which the lines lay out by halves — as its
-// style declares them, a percentage resolved against `basis` (else its containing block's content width), into
-// `out[12..25]` in `box_info`'s form: what CSSOM reports of them.
-fn declared_edges(arena: &RealmArena, id: NodeId, basis: Option<f64>, out: &mut [f64; BOX_INFO]) {
-    let Some(style) = box_style(arena, id) else { return };
-    let basis = basis.or_else(|| {
+fn put_edges(arena: &RealmArena, id: NodeId, out: &mut [f64; BOX_INFO]) {
+    if let Some(Edges { e, auto, percent }) = edges(arena, id) {
+        out[12..24].copy_from_slice(&e);
+        out[24] = f64::from(auto | if percent { 16 } else { 0 });
+    }
+}
+// A box's EDGES — padding, border and margin, each top / right / bottom / left, an `auto` margin as 0 — with which
+// margins are `auto` (`box_info`'s mask: 1 top, 2 right, 4 bottom, 8 left) and whether any resolved a percentage: the
+// ones the pass laid it out with, or for a box the pass gave none of its own — a table row or row group, whose margins
+// and padding do not apply and whose border is its cells' to draw (CSS 2.1 §17.5), an inline box, which the lines lay
+// out by halves — as its style declares them, a percentage against its containing block's content width: what CSSOM
+// reports of them.
+pub(crate) struct Edges {
+    pub(crate) e: [f64; 12],
+    pub(crate) auto: u8,
+    pub(crate) percent: bool,
+}
+pub(crate) fn edges(arena: &RealmArena, id: NodeId) -> Option<Edges> {
+    let node = arena.get(id)?;
+    let b = laid(arena, node);
+    if let Some(e) = b.and_then(|b| b.edges) {
+        let b = b?;
+        let am = b.auto_margins;
+        let auto = [(4, 1), (2, 2), (8, 4), (1, 8)].iter().fold(0, |m, &(from, to)| if am & from != 0 { m | to } else { m });
+        return Some(Edges { e, auto, percent: b.percent_edges });
+    }
+    if b.is_none() && laid_frags(arena, node).is_none() {
+        return None;
+    }
+    let style = box_style(arena, id)?;
+    let basis = b.and_then(|b| b.cb_w).or_else(|| {
         let p = crate::hit_test::box_parent(arena, id)?;
-        let pb = laid(arena, arena.get(p)?)?;
-        Some(content_box(pb)[2])
+        Some(content_box(laid(arena, arena.get(p)?)?)[2])
     }).unwrap_or(0.0);
-    let Ok((lps, auto)) = crate::walk::edge_lps(&style) else { return };
-    let percent = lps.iter().flatten().any(|lp| lp.has_percentage());
+    let (lps, walk_auto) = crate::walk::edge_lps(&style).ok()?;
     let px = |lp: Option<&style::values::computed::LengthPercentage>| {
         lp.map_or(0.0, |lp| f64::from(lp.resolve(Length::new(basis as f32)).px()))
     };
-    let margins = [px(lps[0]), px(lps[1]), px(lps[2]), px(lps[3])];
-    let padding = [px(lps[4]), px(lps[5]), px(lps[6]), px(lps[7])].map(|p| p.max(0.0));
+    let [bt, br, bb, bl] = crate::walk::used_borders(&style);
+    let pad = |k: usize| px(lps[k]).max(0.0);
+    let e = [pad(4), pad(5), pad(6), pad(7), bt, br, bb, bl, px(lps[0]), px(lps[1]), px(lps[2]), px(lps[3])];
     // (…the `auto` margins in `box_info`'s mask, from the walk's: 4 top, 2 right, 8 bottom, 1 left)
-    let auto = [(4, 1), (2, 2), (8, 4), (1, 8)].iter().fold(0, |m, &(from, to)| if auto & from != 0 { m | to } else { m });
-    out[12..16].copy_from_slice(&padding);
-    out[16..20].copy_from_slice(&crate::walk::used_borders(&style));
-    out[20..24].copy_from_slice(&margins);
-    out[24] = f64::from(auto | if percent { 16 } else { 0 });
+    let auto = [(4, 1), (2, 2), (8, 4), (1, 8)].iter().fold(0, |m, &(from, to)| if walk_auto & from != 0 { m | to } else { m });
+    Some(Edges { e, auto, percent: lps.iter().flatten().any(|lp| lp.has_percentage()) })
+}
+// __dom.usedInsets(nid, out) -> whether `nid` is a positioned box with one: its insets as `getComputedStyle` reports
+// them (`used_insets`), written to the Float64Array `out`.
+fn used_insets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, used_insets);
 }
 fn box_info_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, box_info);
@@ -882,21 +1036,6 @@ fn box_fragments_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         })
         .unwrap_or_default();
     rv.set(crate::dom::f64_array(scope, &flat).into());
-}
-
-// __dom.containingBlock(nid) -> Float64Array: the element an out-of-flow box was placed against, as its path from the
-// document (`[length, nid, …]`, the hit test's form) — empty where it was placed against the viewport, or is in flow.
-fn containing_block_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let path = crate::dom::nid_arg(scope, &args, 0)
-        .and_then(|id| {
-            let arena = crate::dom::realm(scope, cid);
-            let cb = arena.get(id)?.containing_block?;
-            let path = crate::hit_test::dom_path(arena, cb);
-            Some([vec![path.len() as f64], path].concat())
-        })
-        .unwrap_or_default();
-    rv.set(crate::dom::f64_array(scope, &path).into());
 }
 
 // __dom.stickyOffset(nid, out) -> whether `nid`'s box is a sticky one that has STUCK (`sticky_delta`), how far written

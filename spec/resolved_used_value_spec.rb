@@ -100,8 +100,9 @@ RSpec.describe 'CSSOM resolved values' do
 
   # Auto-margin distribution is only for a box CSS distributes for — an in-flow block (§10.3.3) or
   # an abspos stretched between both insets (§10.3.7). A float's `auto` margin is zero (§10.3.5),
-  # an inline's stays the keyword, and an over-constrained block balances on the trailing side.
-  # Every figure here is Chrome 151's on the same page.
+  # so is an inline's, and an over-constrained block balances on the trailing side.
+  # Every figure here is Chrome 151's on the same page — but the inline's, which is Firefox's: a margin applies to an
+  # inline box, so CSSOM's resolved value is the used one, where Chrome reports the keyword as written.
   it 'distributes an auto margin only where CSS distributes it' do
     s = session_for(<<~HTML)
       <div style="width:500px; position:relative; height:300px">
@@ -126,7 +127,22 @@ RSpec.describe 'CSSOM resolved values' do
     expect(out['one']).to    eq([0, '0px', '0px'])       # one inset: nothing to distribute
     expect(out['both']).to   eq([200, '200px', '200px']) # §10.3.7
     expect(out['over'][1..]).to eq(['0px', '-100px'])    # over-constrained: the remainder is real
-    expect(out['inline'][1..]).to eq(['auto', '0px'])    # an inline margin has no used value
+    expect(out['inline'][1..]).to eq(['0px', '0px'])
+  end
+
+  # …and an inline box's percentage and `calc()` margins and padding are the used values the line laid it out with,
+  # resolved against its containing block (Firefox; Chrome reports `10%` / `calc(5% + 3px)` as written).
+  it "reports an inline box's margins and padding as used values" do
+    s = session_for(<<~HTML)
+      <div style="width:400px">aa <span id="s" style="margin:0 10%;padding:0 calc(5% + 3px)">bb</span>
+        cc <span id="t" style="margin-left:calc(5% + 3px);margin-right:auto">dd</span></div>
+    HTML
+    expect(s.evaluate_script(<<~JS)).to eq(%w[40px 23px 23px 0px])
+      (() => {
+        const s = getComputedStyle(document.getElementById('s')), t = getComputedStyle(document.getElementById('t'));
+        return [s.marginLeft, s.paddingLeft, t.marginLeft, t.marginRight];
+      })()
+    JS
   end
 
   # A CUSTOM property computes to the token stream that was written — Chrome hands `--gap: 2em`

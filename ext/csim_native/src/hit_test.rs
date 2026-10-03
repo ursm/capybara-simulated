@@ -499,6 +499,22 @@ pub(crate) fn clipped_away(arena: &RealmArena, id: NodeId) -> bool {
     }
 }
 
+// The nearest flat-tree ancestor that holds a box of the current layout — an inline box's fragments included where
+// `box_parent_or_inline` asks.
+pub(crate) fn box_parent_or_inline(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
+    let mut p = flat_parent(arena, id);
+    while let Some(at) = p {
+        let n = arena.get(at)?;
+        if n.kind != NodeKind::Element {
+            return None;
+        }
+        if laid(arena, n).is_some() || laid_frags(arena, n).is_some() {
+            return Some(at);
+        }
+        p = flat_parent(arena, at);
+    }
+    None
+}
 // The nearest flat-tree ancestor that holds a box of the current layout.
 pub(crate) fn box_parent(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
     let mut p = flat_parent(arena, id);
