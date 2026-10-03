@@ -46,6 +46,25 @@ RSpec.describe 'web fonts' do
       when '/ahem.woff' then [200, {'content-type' => 'font/woff'}, [woff_of(AHEM)]]
       when '/ahem.woff2' then [200, {'content-type' => 'font/woff2'}, [AHEM_WOFF2]]
       when '/missing.ttf' then [404, {'content-type' => 'text/plain'}, ['no']]
+      when '/broken.ttf'  then [200, {'content-type' => 'font/ttf'}, ['not a font']]
+      when '/chain.html'
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><html><head><style>
+            body { margin: 0; font: 20px monospace }
+            @font-face { font-family: Chain; src: url("/missing.ttf"), url("/broken.ttf"), url("/ahem.ttf"); }
+            @font-face { font-family: Broken; src: url("/broken.ttf"); }
+            @font-face { font-family: Styled; src: url("/ahem.ttf"); font-style: italic; font-weight: 100; }
+            @font-face { font-family: Styled; src: url("/missing.ttf"); font-style: normal; font-weight: 900; }
+            @font-face { font-family: Later; src: url("/missing.ttf"); }
+            @font-face { font-family: Later; src: url("/ahem.ttf"); }
+          </style></head><body>
+            <span id="chain" style="font-family: Chain">abcd</span>
+            <span id="broken" style="font-family: Broken">abcd</span>
+            <span id="italic" style="font-family: Styled; font-style: italic; font-weight: 900">abcd</span>
+            <span id="upright" style="font-family: Styled; font-weight: 100">abcd</span>
+            <span id="later" style="font-family: Later">abcd</span>
+          </body></html>
+        HTML
       when '/css/rel.css' then [200, {'content-type' => 'text/css'}, ['@font-face { font-family: Rel; src: url(ahem.ttf); }']]
       when '/css/ahem.ttf' then [200, {'content-type' => 'font/ttf'}, [AHEM]]
       when '/css/imp.css' then [200, {'content-type' => 'text/css'}, ['@font-face { font-family: Imp; src: url("ahem.ttf"); }']]
@@ -223,6 +242,25 @@ RSpec.describe 'web fonts' do
     s = session('/nested.html')
     expect(width(s, 'bold')).to eq(80)
     expect(width(s, 'regular')).not_to eq(80)                                 # the normal-weight face 404s
+  end
+
+  it 'falls through a src list past a missing and a broken file to the first that loads' do
+    s = session('/chain.html')
+    expect(width(s, 'chain')).to eq(80)
+    expect(s.evaluate_script("Array.from(document.fonts).filter(function (f) { return f.family === 'Chain'; })[0].status")).to eq('loaded')
+  end
+
+  it 'errors a face whose only file is not a font' do
+    s = session('/chain.html')
+    expect(width(s, 'broken')).not_to eq(80)
+    expect(s.evaluate_script("Array.from(document.fonts).filter(function (f) { return f.family === 'Broken'; })[0].status")).to eq('error')
+  end
+
+  it 'matches font-style before font-weight, and takes the later of two equal rules' do
+    s = session('/chain.html')
+    expect(width(s, 'italic')).to eq(80)                                      # the italic face, though its weight is far off
+    expect(width(s, 'upright')).not_to eq(80)                                 # the upright face (404) beats the italic one
+    expect(width(s, 'later')).to eq(80)                                       # the later rule wins the tie
   end
 
   it 'does not loop on an @import cycle' do

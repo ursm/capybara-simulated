@@ -21,6 +21,7 @@ mod element_state;
 // Native text metrics (fontations) — used IN-PROCESS by inline layout (mod layout); the JS side
 // registers a font (registerFontPath) to a handle it names the face by (`walkFace`).
 mod font;
+mod font_faces;
 mod geometry;
 // HTML's presentational hints: the declarations an element's attributes add to the cascade.
 mod hints;

@@ -4635,8 +4635,6 @@ resource-timing/entries-for-network-errors.sub.https.html:
 - A ResourceTiming entry should be created for network error of type too many redirects
 resource-timing/event-source-timing.html:
 - ResourceTiming for EventSource should reflect number of re-connections to source
-resource-timing/font-timestamps.html:
-- Test a font's timestamps with delays
 resource-timing/iframe-failed-commit.html:
 - Same-origin empty iframe with a 200 status gets reported
 - Same-origin empty iframe with a 204 status gets reported

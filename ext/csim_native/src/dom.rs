@@ -485,6 +485,8 @@ pub(crate) struct RealmArena {
     // The nodes holding a scroll offset (`NodeData::scroll`), which every layout clamps to the range its box has then
     // (`geometry::reclamp_scrolls`) and a removal from the tree drops (`detach`).
     pub(crate) scrolled_nodes: Vec<NodeId>,
+    // The document's `@font-face`s, as the page side last listed them (font_faces.rs).
+    pub(crate) font_faces: Vec<crate::font_faces::FaceRecord>,
 }
 
 impl RealmArena {
@@ -1205,6 +1207,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::rendered::install(scope, ns, context_id);
     crate::resolved::install(scope, ns, context_id);
     crate::mime::install(scope, ns, context_id);
+    crate::font_faces::install(scope, ns, context_id);
     crate::html_parse::install(scope, ns, context_id);
     crate::url_ops::install(scope, ns, context_id);
     crate::text_codec::install(scope, ns, context_id);
