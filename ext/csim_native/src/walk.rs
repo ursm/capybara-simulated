@@ -2344,7 +2344,7 @@ impl<'a> Walk<'a> {
         }
         Ok(sized(width, lines.len() as f64 * font.lh))
     }
-    // A run of text's advance in a font (`measureRun`).
+    // A run of text's advance in a font (`FontMetrics::measure_run`).
     fn measure(&self, font: &FontInfo, text: &[u16]) -> f64 {
         crate::font::with_font(font.face, |fm| fm.measure_run(text, font.size, font.ls, font.ws, 0.0, font.tab_px, font.tab_min)).unwrap_or(f64::NAN)
     }
@@ -4133,7 +4133,7 @@ impl<'a> Walk<'a> {
         };
         let asc = ((lh - (js_round(face.asc * size) + js_round(face.desc * size))) / 2.0).floor() + js_round(face.asc * size);
         // The tab stops: the BLOCK's font counts the spaces and gives the half-space minimum, the owner's `tab-size`
-        // says how many (`tabStopOf`).
+        // says how many.
         let block_face = self.face(block)?;
         let bls = spacing(&block.get_inherited_text().letter_spacing.0, block);
         let bws = spacing(&block.get_inherited_text().word_spacing, block);

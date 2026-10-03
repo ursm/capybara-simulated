@@ -14,9 +14,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // __dom.layoutBuild(rootNid, fontGeneration, rootCbW, rootCbH, texts, check): a whole layout pass the Rust walk builds
 // from the arena and the style engine — its records, runs and tables — and lays out (the root placed natively), its
 // boxes kept in the arena for the geometry (geometry.rs `store_layout`): answered `true` — or where `texts` asks, for a
-// pass a painter records, each text piece as it draws it, `[rows, texts]`: `[x, y, baseline, width, justify, owner nid,
-// placeholder]` and the texts (`paint_rows`). Or `[family, bucket, …]` — the faces the walk needs first, for the JS side to resolve
-// (`walkFace`) and ask again — or `{boxes}`, the generated boxes it needs linked, or the walk's decline, a string.
+// pass a painter records, each text piece as it draws it, `[rows, texts, steps]`: `[x, y, baseline, width, justify, owner
+// nid, placeholder, steps at, steps]`, the texts, and the pen steps of the pieces drawn a character at a time
+// (`paint_rows`). Or `[family, bucket, …]` — the faces the walk needs first, for the JS side to resolve (`walkFace`) and
+// ask again — or `{boxes}`, the generated boxes it needs linked, or the walk's decline, a string.
 fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let Some(root) = NodeId::from_i64(args.get(0).number_value(scope).unwrap_or(-1.0) as i64) else { return };
@@ -89,10 +90,10 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let cache = (!texts).then_some((&mut measure, roots, check));
     let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths.values, f64::NAN, f64::NAN, root_cb_w, root_rtl, cache, texts);
     // (…and a pass that paints answers each text piece as the painter draws it — beside the rows that index the runs, which
-    // only this side has: `[x, y, baseline, width, justify, owner nid, placeholder]` and the text, the baseline's run shift
-    // taken back off and a hyphen's owner the character's before it)
+    // only this side has: its row, its text and its pen steps, the baseline's run shift taken back off and a hyphen's owner
+    // the character's before it)
     let painted = match &out {
-        crate::layout::Outcome::LaidOut(laid) if texts => Some(paint_rows(&laid.texts, &paint, &run_texts)),
+        crate::layout::Outcome::LaidOut(laid) if texts => Some(paint_rows(&laid.texts, &paint, &runs, &run_texts)),
         _ => None,
     };
     let mismatch = measure.mismatch.take();
@@ -133,16 +134,17 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         crate::geometry::store_layout(arena, &laid, &inline_nids, &anon);
     }
     // (…answered `true` — the boxes are the arena's now — or, for a pass that paints, as the painter's text pieces:
-    // `[rows, texts]`)
+    // `[rows, texts, steps]`)
     match painted {
-        Some((rows, strings)) => {
+        Some((rows, strings, steps)) => {
             let rows: v8::Local<v8::Value> = f64_array(scope, &rows).into();
             let list = v8::Array::new(scope, strings.len() as i32);
             for (k, t) in strings.iter().enumerate() {
                 let v = v8::String::new_from_two_byte(scope, t, v8::NewStringType::Normal).unwrap();
                 list.set_index(scope, k as u32, v.into());
             }
-            let items: [v8::Local<v8::Value>; 2] = [rows, list.into()];
+            let steps: v8::Local<v8::Value> = f64_array(scope, &steps).into();
+            let items: [v8::Local<v8::Value>; 3] = [rows, list.into(), steps];
             rv.set(v8::Array::new_with_elements(scope, &items).into());
         }
         None => rv.set(v8::Boolean::new(scope, true).into()),
@@ -219,21 +221,32 @@ fn walk_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     }
 }
 
-// Each text row (`[run, start, end, x, y, baseline, width, justify]`) as the painter draws it, and whether its owner's
-// `::placeholder` is what it is drawn in.
-fn paint_rows(rows: &[crate::layout::TextRow], paint: &[walk::PaintMark], run_texts: &[crate::layout::RunText]) -> (Vec<f64>, Vec<Vec<u16>>) {
+// Each text row (`layout::TextRow`) as the painter draws it — whether its owner's `::placeholder` is what it is drawn
+// in, and where its characters' pen steps start in the third list and how many there are, for a piece it cannot draw
+// whole (`FontMetrics::pen_steps`): a spaced, justified or tabbed one, or one a split face draws.
+fn paint_rows(rows: &[crate::layout::TextRow], paint: &[walk::PaintMark], runs: &[crate::layout::Run], run_texts: &[crate::layout::RunText]) -> (Vec<f64>, Vec<Vec<u16>>, Vec<f64>) {
     let mut out = Vec::new();
     let mut strings = Vec::new();
+    let mut steps = Vec::new();
     for r in rows {
         let (run, start, end) = (r[0] as usize, r[1] as usize, r[2] as usize);
         let hyphen = start == end;
         // (…the marks in run order, as the walk committed them)
         let mark = paint.binary_search_by_key(&run, |m| m.run).ok().map(|k| &paint[k]);
         let text = run_texts.get(run).and_then(|t| t.as_deref()).unwrap_or(&[]);
-        strings.push(if hyphen { vec![u16::from(b'-')] } else { text.get(start..end).unwrap_or(&[]).to_vec() });
+        let piece = if hyphen { vec![u16::from(b'-')] } else { text.get(start..end).unwrap_or(&[]).to_vec() };
         let at = if hyphen { start.saturating_sub(1) } else { start } as u32;
         let owner = mark.and_then(|m| m.owners.iter().rev().find(|&&(o, _)| o <= at)).map_or(-1.0, |&(_, nid)| nid);
-        out.extend([r[3], r[4], r[5] - mark.map_or(0.0, |m| m.shift), r[6], r[7], owner, f64::from(u8::from(mark.is_some_and(|m| m.placeholder)))]);
+        let from = steps.len();
+        if let Some(run) = runs.get(run) {
+            let by_char = run.ls != 0.0 || run.ws != 0.0 || r[7] != 0.0 || piece.contains(&0x09);
+            if let Some(per) = crate::font::with_font(run.font, |fm| (by_char || fm.is_split()).then(|| fm.pen_steps(&piece, run.size, run.ls, run.ws, r[7], r[8], run.tab_px, run.tab_min))).flatten() {
+                steps.extend(per);
+            }
+        }
+        let placeholder = f64::from(u8::from(mark.is_some_and(|m| m.placeholder)));
+        out.extend([r[3], r[4], r[5] - mark.map_or(0.0, |m| m.shift), r[6], r[7], owner, placeholder, from as f64, ((steps.len() - from) / 3) as f64]);
+        strings.push(piece);
     }
-    (out, strings)
+    (out, strings, steps)
 }

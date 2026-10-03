@@ -262,7 +262,7 @@ RSpec.describe 'vertical-align' do
 
   # A `line-height` SMALLER than the font's own box is a real declaration, not a floor (§10.8: the line
   # box is the declared leading). The half-leading around the font goes NEGATIVE there and a browser
-  # keeps it negative — the same LayoutUnit arithmetic `baselineWithin` floors — so the line is exactly
+  # keeps it negative — the same LayoutUnit arithmetic the walk's half-leading floors — so the line is exactly
   # as tall as it was told and the text hangs out of both its edges.
   #
   # The RULER cannot be used here, and that is the example's other half: a zero-height `inline-block` is

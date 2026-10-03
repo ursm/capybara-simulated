@@ -4,12 +4,11 @@
 // inline layout (mod layout) measures a run's width IN-PROCESS — no per-run V8 crossing (the granularity
 // that made a per-call __dom.measureRun op a wash; see perf_dead_ends).
 //
-// `measure_run` reproduces layout.js `measureRun`/`unitOf` exactly, in f64 (JS Numbers are f64) — the
-// ASCII table, NBSP-as-space, the CJK/fullwidth full-em fallback, the zero-width classes, ZWJ joining,
-// astral full-em, and letter/word spacing — since the JS side still measures a control's own text with
-// them (a button's label, a `<select>`'s widest option) and the two have to agree. Every character is
-// decidable, the combining marks (`\p{M}`) through `unicode.rs`. Line HEIGHT is not computed here: the walk
-// takes it from the style engine and the face's vertical metrics (`walk::Face`).
+// `measure_run` is the ONE measure of a run: the ASCII table, NBSP-as-space, the CJK/fullwidth full-em fallback, the
+// zero-width classes, ZWJ joining, astral full-em, and letter/word spacing — what the walk sizes a control's label by,
+// the lines break by, and the painter places a character at a time by (`pen_steps`). Every character is decidable,
+// the combining marks (`\p{M}`) through `unicode.rs`. Line HEIGHT is not computed here: the walk takes it from the
+// style engine and the face's vertical metrics (`walk::Face`).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -25,9 +24,11 @@ pub(crate) struct FontMetrics {
     ascii: [Option<f64>; 128],
     avg: f64,
     // A `unicode-range` SPLIT (`registerFontStack`): the faces a run's characters pick from, in order — the first that
-    // covers a character measures it, and one none covers is this face's own (layout.js `pickCharCand`). None for a
-    // single face.
+    // covers a character measures it, and one none covers is this face's own (`member_for`). None for a single face.
     split: Option<Vec<StackMember>>,
+    // The `size-adjust` its advances are scaled by (`register_scaled`), which a painter draws its glyphs at too — 1 for
+    // a face as its file has it.
+    scale: f64,
 }
 
 // One face of a `unicode-range` split: its registered handle, the ranges it covers (None: every code point), and its
@@ -125,16 +126,16 @@ impl FontMetrics {
         if count == 0 {
             return None;
         }
-        Some(FontMetrics { ascii, avg: total / count as f64, split: None })
+        Some(FontMetrics { ascii, avg: total / count as f64, split: None, scale: 1.0 })
     }
 
-    // Width (px) of a UTF-16 run at `size` px with letter/word spacing, exactly as layout.js measureRun does.
+    // Width (px) of a UTF-16 run at `size` px with letter/word spacing.
     // Every character is measurable — the TAB was the last one that was not, and it is measured here now that
     // the pen reaches it. So this never answers None itself; it stays an `Option` because its one caller
     // (`measure_at`) reaches it through `with_font`, which answers None for a font handle that is not
     // registered, and the two Nones are indistinguishable to the caller anyway.
-    // Bit-parity vs JS measureRun was validated over ~667k calls (perf log 2026-09-09) on ASCII-and-Latin
-    // input; the other classes (wide characters, combining marks, tabs) are not covered by that measurement.
+    // Bit-parity with the JS measure it replaced was validated over ~667k calls (perf log 2026-09-09) on
+    // ASCII-and-Latin input; the other classes (wide characters, combining marks, tabs) were not covered by that.
     // `from` is the pen's distance from the block's content edge and `tab_px` / `tab_min` the stop pair a TAB
     // advances to (see `Run::tab_px`); every other character ignores all three.
     pub(crate) fn measure_run(&self, text: &[u16], size: f64, ls: f64, ws: f64, from: f64, tab_px: f64, tab_min: f64) -> f64 {
@@ -144,24 +145,15 @@ impl FontMetrics {
         let mut prev: i64 = -1;
         for cp in code_points(text) {
             if cp == 0x09 {
-                // A tab's advance (layout.js `tabAdvance`), on the pen this measure has reached: the distance to the
+                // A tab's advance (`tab_advance`), on the pen this measure has reached: the distance to the
                 // next stop, or to the one AFTER it where that is nearer than half a space (Blink's `Font::TabWidth`
                 // — `tab-size: 20px` after 19.2px of text lands at 40, after 9.6px at 20). Stops are counted
                 // from the block's content edge, which `from` is measured from, and `text-indent` does not
                 // move them. It joins `spacing` rather than `units` because it is already a px advance.
                 // …and `tab_px` is already final: a `tab-size` that resolved to zero took the BLOCK's
-                // letter-spacing as its stop spacing back in `tabStopOf`, so nothing here asks this RUN
+                // letter-spacing as its stop spacing back in the walk (`Walk::font_info`), so nothing here asks this RUN
                 // anything. Zero means there is no stop to reach and a tab advances nothing.
-                spacing += if tab_px > 0.0 {
-                    let pen = from + units * size + spacing;
-                    let into = pen - (pen / tab_px + 1e-9).floor() * tab_px;
-                    let dist = tab_px - into;
-                    // `<` against a half-open epsilon, as `tabAdvance` writes it: Blink compares in float32, so
-                    // a stop exactly `tab_min` away counts as too near.
-                    if dist < tab_min + 1e-6 { dist + tab_px } else { dist }
-                } else {
-                    0.0
-                };
+                spacing += tab_advance(from + units * size + spacing, tab_px, tab_min);
                 prev = cp as i64;
                 continue;
             }
@@ -176,11 +168,52 @@ impl FontMetrics {
         }
         units * size + spacing
     }
+
+    // Each CHARACTER of `text` as a painter places it, one at a time — a run it cannot draw whole, because a spacing or a
+    // justified line's share moves its glyphs apart, a tab stops one, or a split draws them in different faces: per code
+    // point `[advance, step, size]`, its glyph's own advance, how far the pen moves past it — the advance and the
+    // letter-spacing it takes, the word-spacing and `justify` (a justified line's share) a space takes — and the size
+    // its glyph is drawn at, a split face's `size-adjust` on it. The pen `measure_run` walks, from `from` to each tab's
+    // stop.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn pen_steps(&self, text: &[u16], size: f64, ls: f64, ws: f64, justify: f64, from: f64, tab_px: f64, tab_min: f64) -> Vec<f64> {
+        let mut out = Vec::new();
+        let mut pen = from;
+        let mut prev: i64 = -1;
+        for cp in code_points(text) {
+            let space = cp == 0x20 || cp == 0x00A0;
+            let (advance, glyph) = if cp == 0x09 {
+                (tab_advance(pen, tab_px, tab_min), size)
+            } else {
+                match self.member_for(cp).and_then(|m| with_font(m.handle, |fm| (unit_of(cp, prev, fm), fm.scale))) {
+                    Some((units, scale)) => (units * size, size * scale),
+                    None => (unit_of(cp, prev, self) * size, size),
+                }
+            };
+            let spacing = if cp != 0x09 && takes_spacing(cp, prev) { ls + if space { ws } else { 0.0 } } else { 0.0 };
+            pen += advance + spacing;
+            out.extend([advance, advance + spacing + if space || cp == 0x09 { justify } else { 0.0 }, glyph]);
+            prev = cp as i64;
+        }
+        out
+    }
 }
 
-// layout.js isWideChar: CJK / fullwidth / Hangul are full-em in every font that has them — and, since the
-// break units follow the same classifier (`break_unit_len`), the ONE definition both read. BMP only, as
-// layout.js's is: an astral code point is full-em there but never its own break unit.
+// How far a tab at `pen` advances: to the next stop `tab_px` apart, or to the one AFTER it where that is nearer than
+// `tab_min`; nothing where there is no stop to reach (`tab_px` 0).
+fn tab_advance(pen: f64, tab_px: f64, tab_min: f64) -> f64 {
+    if tab_px <= 0.0 {
+        return 0.0;
+    }
+    let into = pen - (pen / tab_px + 1e-9).floor() * tab_px;
+    let dist = tab_px - into;
+    // `<` against a half-open epsilon: Blink compares in float32, so a stop exactly `tab_min` away counts as too near.
+    if dist < tab_min + 1e-6 { dist + tab_px } else { dist }
+}
+
+// Is `cp` a FULL-WIDTH character — CJK / fullwidth / Hangul, full-em in every font that has them? The break units
+// follow the same classifier (`break_unit_len`), the ONE definition both read. BMP only: an astral code point is
+// full-em (`unit_of`) but never its own break unit.
 pub(crate) fn is_wide_char(cp: u32) -> bool {
     // A gate first (`u >= 0x1100`): every ASCII character answers on one compare instead of walking seven ranges,
     // and this is asked per WORD of every line layout, not per run.
@@ -196,7 +229,8 @@ pub(crate) fn is_wide_char(cp: u32) -> bool {
         || (0xFFE0..=0xFFE6).contains(&cp)
 }
 
-// layout.js zeroWidth. Every code point is decidable: the ranges below from structure, and the rest from
+// Does `cp` draw with no advance of its own — a control, a soft hyphen, a joiner, a bidi control, a variation selector, a
+// combining mark? Every code point is decidable: the ranges below from structure, and the rest from
 // `\p{M}` (see the last arm).
 fn zero_width(cp: u32) -> bool {
     if cp < 0x20 {
@@ -233,11 +267,11 @@ fn zero_width(cp: u32) -> bool {
         return true;
     }
     // …and the one question structure cannot answer — is this a COMBINING MARK? — is answered by `\p{M}`, the
-    // regex layout.js `zeroWidth` writes, parsed (`unicode.rs`).
+    // property parsed from V8's own tables (`unicode.rs`).
     crate::unicode::is_combining_mark(cp)
 }
 
-// layout.js unitOf: one character's advance in em-fractions — none for a pictograph a ZWJ joins to the one before it
+// One character's advance in em-fractions — none for a pictograph a ZWJ joins to the one before it
 // (an emoji ZWJ sequence draws as one glyph: UAX #29 GB11), where a letter after one keeps its own (Chrome: `abc‍def`
 // is 57.6 in 16px monospace).
 fn unit_of(cp: u32, prev: i64, fm: &FontMetrics) -> f64 {
@@ -258,7 +292,7 @@ fn unit_of(cp: u32, prev: i64, fm: &FontMetrics) -> f64 {
     1.0
 }
 
-// layout.js takesSpacing: once per grapheme, never on a pictograph a ZWJ joins, never on a zero-width character.
+// Does `cp` take a letter-spacing: once per grapheme, never on a pictograph a ZWJ joins, never on a zero-width character.
 fn takes_spacing(cp: u32, prev: i64) -> bool {
     !joined(cp, prev) && !zero_width(cp)
 }
@@ -319,6 +353,7 @@ pub(crate) fn register_scaled(handle: i32, scale: f64) -> i32 {
             ascii: fm.ascii.map(|a| a.map(|a| a * scale)),
             avg: fm.avg * scale,
             split: None,
+            scale: fm.scale * scale,
         })
     });
     let h = match scaled {
@@ -346,7 +381,7 @@ pub(crate) fn register_stack(primary: i32, members: Vec<StackMember>) -> i32 {
         return h;
     }
     let stacked = FONTS.with(|f| {
-        f.borrow().get(primary as usize).and_then(Option::as_ref).map(|fm| FontMetrics { ascii: fm.ascii, avg: fm.avg, split: Some(members.clone()) })
+        f.borrow().get(primary as usize).and_then(Option::as_ref).map(|fm| FontMetrics { ascii: fm.ascii, avg: fm.avg, split: Some(members.clone()), scale: fm.scale })
     });
     let h = match stacked {
         Some(metrics) => FONTS.with(|f| {
