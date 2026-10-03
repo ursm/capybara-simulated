@@ -1067,6 +1067,75 @@ fn scroll_origin(arena: &RealmArena, id: NodeId, style: &ComputedValues) -> [boo
     [inline_start != Side::Right, true]
 }
 
+// ── the used values ────────────────────────────────────────────────────────────────────────────────────────────
+// The RESOLVED value `getComputedStyle` reports of `property` where CSSOM makes it the USED one, in px — None where
+// there is none to report and the computed value stands (no box; a static box's inset; a sticky box's `auto` one; a
+// property whose resolved value is its computed one, the borders among them): `width` / `height` as the box
+// `box-sizing` names (Chrome: `border-box; width: 300px; padding: 0 40px` is 300px, not the 220 of content),
+// `inline-size` / `block-size` by the writing mode, the paddings, a margin as the slack an `auto` one took where its
+// placer distributed some, else as its edge says, and a positioned box's insets (`used_insets`): a DECLARED one as
+// itself, an `auto` one from the box. One geometry: `getComputedStyle(el).width` and `getBoundingClientRect().width` are
+// two views of one box.
+pub(crate) fn used_value(arena: &RealmArena, id: NodeId, property: &str) -> Option<f64> {
+    use crate::walk::Side;
+    use style::computed_values::position::T as Position;
+    let style = box_style(arena, id)?;
+    let [block_start, block_end, inline_start, inline_end] = crate::walk::flow_sides(&style);
+    let physical = |side: Side| ["top", "right", "bottom", "left"][match side {
+        Side::Top => 0,
+        Side::Right => 1,
+        Side::Bottom => 2,
+        Side::Left => 3,
+    }];
+    let horizontal = matches!(inline_start, Side::Left | Side::Right);
+    let property = match property {
+        "inset-block-start" => physical(block_start),
+        "inset-block-end" => physical(block_end),
+        "inset-inline-start" => physical(inline_start),
+        "inset-inline-end" => physical(inline_end),
+        "inline-size" => if horizontal { "width" } else { "height" },
+        "block-size" => if horizontal { "height" } else { "width" },
+        p => p,
+    };
+    let side = ["top", "right", "bottom", "left"].iter().position(|&s| s == property);
+    if let Some(k) = side {
+        let position = style.get_box().clone_position();
+        if position == Position::Static {
+            return None;
+        }
+        let insets = used_insets(arena, id)?;
+        return if !insets[k].is_nan() {
+            Some(insets[k])
+        } else if position == Position::Sticky || insets[4 + k].is_nan() {
+            None
+        } else {
+            Some(insets[4 + k])
+        };
+    }
+    let [_, _, w, h] = placed_box(arena, id)?;
+    let e = edges(arena, id)?.e;
+    let border_box = style.get_position().box_sizing == style::computed_values::box_sizing::T::BorderBox;
+    let margin = |k: usize| {
+        let used = arena.get(id).and_then(|n| laid(arena, n)).and_then(|b| b.used_margins).map(|m| m[k]).filter(|m| !m.is_nan());
+        used.unwrap_or(e[8 + k])
+    };
+    Some(match property {
+        "width" if border_box => w,
+        "width" => (w - e[3] - e[7] - e[1] - e[5]).max(0.0),
+        "height" if border_box => h,
+        "height" => (h - e[0] - e[4] - e[2] - e[6]).max(0.0),
+        "padding-top" => e[0],
+        "padding-right" => e[1],
+        "padding-bottom" => e[2],
+        "padding-left" => e[3],
+        "margin-top" => margin(0),
+        "margin-right" => margin(1),
+        "margin-bottom" => margin(2),
+        "margin-left" => margin(3),
+        _ => return None,
+    })
+}
+
 // ── the used insets ────────────────────────────────────────────────────────────────────────────────────────────
 // What `getComputedStyle` reports of a POSITIONED box's `top` / `right` / `bottom` / `left`, `[declared…, used…]` each
 // top / right / bottom / left (NaN for none), from the box the pass placed and the containing block it placed it in:
@@ -1216,6 +1285,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "renderedLegend", rendered_legend_op, context_id);
     register(scope, ns, "clientRects", client_rects_op, context_id);
     register(scope, ns, "offsets", offsets_op, context_id);
+    register(scope, ns, "usedValue", used_value_op, context_id);
     register(scope, ns, "paintTransform", paint_transform_op, context_id);
     register(scope, ns, "paintQuad", paint_quad_op, context_id);
     register(scope, ns, "clipBoxes", clip_boxes_op, context_id);
@@ -1381,6 +1451,17 @@ fn box_info_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 }
 
 
+// __dom.usedValue(nid, property) -> the px `getComputedStyle` reports of `property` as a used value (`used_value`), or
+// null where the computed value stands.
+fn used_value_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let property = args.get(1).to_rust_string_lossy(scope);
+    let used = crate::dom::nid_arg(scope, &args, 0).and_then(|id| used_value(crate::dom::realm(scope, cid), id, &property));
+    match used {
+        Some(px) => rv.set(v8::Number::new(scope, px).into()),
+        None => rv.set_null(),
+    }
+}
 // __dom.offsets(nid, out) -> whether `nid` has a box, and `[offsetParent nid, left, top, width, height]` written to `out`
 // (`offsets`).
 fn offsets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
