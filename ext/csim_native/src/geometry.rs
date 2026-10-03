@@ -1330,7 +1330,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "clipBoxes", clip_boxes_op, context_id);
     register(scope, ns, "scrollOffset", scroll_offset, context_id);
     register(scope, ns, "setScrollOffset", set_scroll_offset, context_id);
-    register(scope, ns, "clipFlags", clip_flags, context_id);
     register(scope, ns, "layoutRootAlone", layout_root_alone, context_id);
 }
 
@@ -1509,25 +1508,21 @@ fn set_scroll_offset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     }
 }
 
-// __dom.clipFlags(nid) -> how the last layout's box of `nid` clips its content (`layout::CLIP_*`), 0 for none.
-fn clip_flags(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let flags = crate::dom::nid_arg(scope, &args, 0)
-        .and_then(|id| {
-            let arena = crate::dom::realm(scope, cid);
-            arena.get(id).and_then(|n| laid(arena, n)).map(|b| b.clip)
-        })
-        .unwrap_or(0);
-    rv.set(v8::Integer::new(scope, i32::from(flags)).into());
-}
-
-// __dom.layoutRootAlone(rootNid, width, height, viewportWidth, viewportHeight): a page laid out as its root box alone
-// (`layoutRootAlone`) — that box at the origin, and no other box of an earlier layout left standing.
+// __dom.layoutRootAlone(rootNid, viewportWidth, viewportHeight): a page laid out as its root box alone (`layoutRootAlone`)
+// — that box at the origin, as wide as the viewport or its declared width, its declared height else none, and no other
+// box of an earlier layout left standing.
 fn layout_root_alone(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(root) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let [w, h, vw, vh] = [1, 2, 3, 4].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
+    let [vw, vh] = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
     let arena = crate::dom::realm(scope, cid);
+    let declared = |size: Option<&style::values::computed::Size>, basis: f64| {
+        size.and_then(crate::walk::size_lp).map(|lp| f64::from(lp.resolve(Length::new(basis as f32)).px()))
+    };
+    let style = crate::style::primary_style(arena, root);
+    let position = style.as_ref().map(|s| s.get_position());
+    let w = declared(position.map(|p| &p.width), vw).unwrap_or(vw);
+    let h = declared(position.map(|p| &p.height), vh).unwrap_or(0.0);
     arena.begin_layout(root, [vw, vh]);
     let pass = arena.layout_pass;
     if let Some(node) = arena.get_mut_quietly(root) {

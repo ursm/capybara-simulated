@@ -447,6 +447,18 @@ pub(crate) fn supports(name: &str, value: &str) -> bool {
     .is_ok()
 }
 
+// A `<number>` as CSS reads it — a math function of numbers reduced (`calc(0.5)`, `min(1, 2 / 4)`) — or None where it
+// is none, or one that needs a style to resolve.
+pub(crate) fn number(text: &str) -> Option<f64> {
+    use style::parser::Parse;
+    let url = url_data("about:blank");
+    let context = context(&url, Kind::Style, false);
+    let mut input = ParserInput::new(text);
+    let mut parser = Parser::new(&mut input);
+    let n = parser.parse_entirely(|p| style::values::specified::Number::parse(&context, p)).ok()?;
+    n.resolve().map(f64::from)
+}
+
 // `CSS.supports(conditionText)`: a `<supports-condition>`, or a bare declaration (`display: grid`), as the engine
 // evaluates one in an `@supports` rule.
 pub(crate) fn supports_condition(text: &str) -> bool {

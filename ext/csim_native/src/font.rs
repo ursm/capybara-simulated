@@ -60,7 +60,7 @@ pub(crate) fn code_points(text: &[u16]) -> impl Iterator<Item = u32> + '_ {
 }
 
 impl FontMetrics {
-    // The advance of its `0`, in ems — what a `ch` is — else its mean advance, as font-metrics.js `chFactor` falls back.
+    // The advance of its `0`, in ems — what a `ch` is — else its mean advance, as a run's measure falls back (`unit_of`).
     pub(crate) fn zero_advance(&self) -> f64 {
         self.ascii[b'0' as usize].filter(|&a| a > 0.0).unwrap_or(self.avg)
     }

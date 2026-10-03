@@ -127,7 +127,7 @@ impl SharedFaces {
     }
 }
 
-// A style's face key (`fontKeyOf`): its family list as it serializes, and the bucket its weight and style fall in.
+// A style's face key: its family list as it serializes, and the bucket its weight and style fall in.
 pub(crate) fn face_key(f: &style::properties::style_structs::Font) -> FaceKey {
     use style_traits::ToCss;
     let bold = f.font_weight.value() >= 600.0;
@@ -1674,7 +1674,7 @@ impl<'a> Walk<'a> {
         }
     }
 
-    // Whether `id` is a fieldset's RENDERED LEGEND (HTML §15.3.13, `renderedLegend`): the first child BOX of the
+    // Whether `id` is a fieldset's RENDERED LEGEND (HTML §15.3.13, geometry.rs `rendered_legend`): the first child BOX of the
     // fieldset's box that is a `<legend>`, neither floated nor absolutely positioned — so one that generates no box is
     // passed over, one reached through a `display: contents` wrapper or a slot counts, and a box-less fieldset has none.
     fn rendered_legend(&self, id: NodeId) -> bool {
@@ -4866,7 +4866,7 @@ pub(crate) fn contains_out_of_flow(style: &ComputedValues, arena: &RealmArena, i
 // A size's length-percentage, None for `auto` / `none` / a keyword — and for an `anchor-size()`, which takes the size of
 // an anchor the layout does not model (CSS Anchor Positioning): such a declaration is read as no size at all (a gap —
 // the fallback a function carries, and a real anchor's size, are backlog).
-fn size_lp(v: &style::values::computed::Size) -> Option<&LengthPercentage> {
+pub(crate) fn size_lp(v: &style::values::computed::Size) -> Option<&LengthPercentage> {
     use style::values::generics::length::GenericSize as Size;
     match v {
         Size::LengthPercentage(lp) => Some(&lp.0),

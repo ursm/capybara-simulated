@@ -1183,6 +1183,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "declReplace", decl_replace, context_id);
     register(scope, ns, "declSupports", decl_supports, context_id);
     register(scope, ns, "declSupportsCondition", decl_supports_condition, context_id);
+    register(scope, ns, "cssNumber", css_number, context_id);
     register(scope, ns, "styleGenerated", style_generated, context_id);
     register(scope, ns, "styleRestyled", style_restyled, context_id);
     register(scope, ns, "styleFlush", style_flush, context_id);
@@ -2663,6 +2664,12 @@ fn decl_supports(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let name = args.get(0).to_rust_string_lossy(scope);
     let value = args.get(1).to_rust_string_lossy(scope);
     rv.set_bool(crate::cssom_decl::supports(&name, &value));
+}
+
+// __dom.cssNumber(text) -> the `<number>` the text is (`cssom_decl::number`), NaN where it is none.
+fn css_number(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    rv.set_double(crate::cssom_decl::number(&text).unwrap_or(f64::NAN));
 }
 
 // __dom.declSupportsCondition(text) -> `CSS.supports(conditionText)`.
