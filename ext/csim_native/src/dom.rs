@@ -1192,6 +1192,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "mediaMatches", media_matches, context_id);
     register(scope, ns, "cssColor", css_color, context_id);
     register(scope, ns, "canvasFont", canvas_font, context_id);
+    register(scope, ns, "canvasSpacing", canvas_spacing, context_id);
     register(scope, ns, "fontShorthandFamilies", font_shorthand_families, context_id);
     register(scope, ns, "setTouchInput", set_touch_input, context_id);
     register(scope, ns, "styleGenerated", style_generated, context_id);
@@ -2724,14 +2725,33 @@ fn css_color(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.canvasFont(text, em, rem, lh, rlh) -> a canvas's `font` of `text` (`cssom_decl::canvas_font`), or null.
+// __dom.canvasFont(text, em, rem, lh, rlh) -> a canvas's `font` of `text` (`cssom_decl::canvas_font`) — `[css, px,
+// weight, slant, smallCaps, family]` — or null.
 fn canvas_font(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let text = args.get(0).to_rust_string_lossy(scope);
     let [em, rem, lh, rlh] = [1, 2, 3, 4].map(|i| args.get(i).number_value(scope).unwrap_or(f64::NAN));
-    match crate::cssom_decl::canvas_font(&text, em, rem, lh, rlh) {
-        Some(font) => set_str(scope, &mut rv, &font),
-        None => rv.set_null(),
-    }
+    let Some(font) = crate::cssom_decl::canvas_font(&text, em, rem, lh, rlh) else { return rv.set_null() };
+    let (Some(css), Some(family)) = (v8::String::new(scope, &font.css), v8::String::new(scope, &font.family)) else { return };
+    let items: [v8::Local<v8::Value>; 6] = [
+        css.into(),
+        v8::Number::new(scope, font.px).into(),
+        v8::Number::new(scope, font.weight).into(),
+        v8::Number::new(scope, f64::from(font.slant)).into(),
+        v8::Boolean::new(scope, font.small_caps).into(),
+        family.into(),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// __dom.canvasSpacing(text, em, rem) -> a canvas's letter / word spacing of `text` (`cssom_decl::canvas_spacing`) —
+// `[css, px]` — or null.
+fn canvas_spacing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    let [em, rem] = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(f64::NAN));
+    let Some((css, px)) = crate::cssom_decl::canvas_spacing(&text, em, rem) else { return rv.set_null() };
+    let Some(css) = v8::String::new(scope, &css) else { return };
+    let items: [v8::Local<v8::Value>; 2] = [css.into(), v8::Number::new(scope, px).into()];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // __dom.fontShorthandFamilies(text) -> the families a `font` value names (`cssom_decl::font_shorthand_families`), or

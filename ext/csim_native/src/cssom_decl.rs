@@ -517,28 +517,52 @@ fn font_shorthand(text: &str) -> Option<FontShorthand> {
 }
 
 // A canvas's `font` (HTML §4.12.5.1.11): the `font` shorthand `text` computed — its size in px, `em` and `%` of `em`,
-// `rem` of `rem`, `lh` / `rlh` of the line heights (NaN where there is none to resolve against) — and serialized as a
-// computed `font` is, its line height left out: style, small-caps, weight, stretch, size, family, each omitted at its
-// initial value. None where it is no `font` value, or its size cannot be resolved.
-pub(crate) fn canvas_font(text: &str, em: f64, rem: f64, lh: f64, rlh: f64) -> Option<String> {
+// `rem` of `rem`, `lh` / `rlh` of the line heights (NaN where there is none to resolve against) — serialized as a
+// computed `font` is, its line height left out (style, small-caps, weight, stretch, size, family, each omitted at its
+// initial value), and the parts its text is drawn with. None where it is no `font` value, or its size cannot be
+// resolved.
+pub(crate) struct CanvasFont {
+    pub(crate) css: String,
+    pub(crate) px: f64,
+    pub(crate) weight: f64,
+    // 0 upright, 1 italic, 2 oblique.
+    pub(crate) slant: u8,
+    pub(crate) small_caps: bool,
+    // The first family: a name as written, or a generic family's keyword.
+    pub(crate) family: String,
+}
+pub(crate) fn canvas_font(text: &str, em: f64, rem: f64, lh: f64, rlh: f64) -> Option<CanvasFont> {
     use style::values::specified::font::{AbsoluteFontWeight, FontSizeKeyword};
     use style::values::specified::length::LengthUnit;
     use style::values::specified::{FontSize, FontWeight, LengthPercentage};
     let font = font_shorthand(text)?;
+    let slant = match font.style.as_str() {
+        "normal" => 0,
+        "italic" => 1,
+        _ => 2,
+    };
+    let small_caps = font.variant_caps == "small-caps";
     let mut parts: Vec<String> = [font.style, font.variant_caps].into_iter().filter(|p| p != "normal").collect();
-    match font.weight {
-        FontWeight::Absolute(AbsoluteFontWeight::Normal) => {}
-        FontWeight::Absolute(AbsoluteFontWeight::Bold) | FontWeight::Bolder => parts.push("bold".to_owned()),
+    let weight = match font.weight {
+        FontWeight::Absolute(AbsoluteFontWeight::Normal) => 400.0,
+        FontWeight::Absolute(AbsoluteFontWeight::Bold) | FontWeight::Bolder => {
+            parts.push("bold".to_owned());
+            700.0
+        }
         // (…relative to the initial weight, 400)
-        FontWeight::Lighter => parts.push("100".to_owned()),
+        FontWeight::Lighter => {
+            parts.push("100".to_owned());
+            100.0
+        }
         FontWeight::Absolute(AbsoluteFontWeight::Weight(n)) => {
             let n = f64::from(n.resolve()?);
             if n != 400.0 {
                 parts.push(js_number(n));
             }
+            n
         }
         FontWeight::System(_) => return None,
-    }
+    };
     if font.stretch != "normal" {
         parts.push(font.stretch);
     }
@@ -568,24 +592,55 @@ pub(crate) fn canvas_font(text: &str, em: f64, rem: f64, lh: f64, rlh: f64) -> O
     if !(px > 0.0 && px.is_finite()) {
         return None;
     }
-    parts.push(format!("{}px", js_number((px * 1e6).round() / 1e6)));
+    let px = (px * 1e6).round() / 1e6;
+    parts.push(format!("{}px", js_number(px)));
     parts.push(font.family.iter().map(|f| f.to_css_string()).collect::<Vec<_>>().join(", "));
-    Some(parts.join(" "))
+    let family = font.family.iter().next().map_or_else(String::new, family_name);
+    Some(CanvasFont { css: parts.join(" "), px, weight, slant, small_caps, family })
+}
+// A family as a name: a family name as written, a generic family's keyword.
+fn family_name(f: &style::values::computed::font::SingleFontFamily) -> String {
+    use style::values::computed::font::SingleFontFamily;
+    match f {
+        SingleFontFamily::FamilyName(name) => name.name.to_string(),
+        SingleFontFamily::Generic(generic) => generic.to_css_string(),
+    }
+}
+
+// A canvas's `letterSpacing` / `wordSpacing` (HTML §4.12.5.1.11): the CSS `<length>` `text`, serialized, and in px —
+// a font-relative one of the current font's size `em` (`ex` and `ch` half of it, `ic` all of it, absent the glyphs
+// that would say), `rem` of the root's; one that needs what a canvas has not (a viewport, a container, a line height)
+// 0. None where it is no length.
+pub(crate) fn canvas_spacing(text: &str, em: f64, rem: f64) -> Option<(String, f64)> {
+    use style::parser::Parse;
+    use style::values::specified::length::LengthUnit;
+    use style::values::specified::{Length, LengthPercentage};
+    let url = url_data("about:blank");
+    let context = context(&url, Kind::Style, false);
+    let mut input = ParserInput::new(text.trim());
+    let mut parser = Parser::new(&mut input);
+    let length = parser.parse_entirely(|p| Length::parse(&context, p)).ok()?;
+    let css = length.to_css_string();
+    let px = match LengthPercentage::from(length) {
+        LengthPercentage::Length(l) => {
+            let v = f64::from(l.unitless_value());
+            match l.length_unit() {
+                LengthUnit::Em | LengthUnit::Ic => v * em,
+                LengthUnit::Ex | LengthUnit::Ch => v * 0.5 * em,
+                LengthUnit::Rem => v * rem,
+                _ => l.to_px_if_absolute().map_or(0.0, f64::from),
+            }
+        }
+        // (…a `calc()` of absolute lengths only)
+        LengthPercentage::Calc(c) => c.to_computed_pixel_length_without_context().map_or(0.0, f64::from),
+        LengthPercentage::Percentage(_) => return None,
+    };
+    Some((css, px))
 }
 
 // …and the families it names, as names (`document.fonts.check()` / `load()`): None where it is no `font` value.
 pub(crate) fn font_shorthand_families(text: &str) -> Option<Vec<String>> {
-    use style::values::computed::font::SingleFontFamily;
-    let font = font_shorthand(text)?;
-    Some(
-        font.family
-            .iter()
-            .map(|f| match f {
-                SingleFontFamily::FamilyName(name) => name.name.to_string(),
-                SingleFontFamily::Generic(generic) => generic.to_css_string(),
-            })
-            .collect(),
-    )
+    Some(font_shorthand(text)?.family.iter().map(family_name).collect())
 }
 
 // A number as script prints it: no exponent below 1e21, and no `-0`.
