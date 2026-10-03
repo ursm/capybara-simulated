@@ -8,7 +8,7 @@
 // paints in the inline phase of whatever the box paints inside.
 
 use crate::dom::{NodeId, NodeKind, RealmArena};
-use crate::geometry::{box_style, flat_children, flat_parent, laid, laid_frags, laid_out_box, transform_chain, M4};
+use crate::geometry::{box_style, flat_parent, laid, laid_frags, laid_out_box, transform_chain, M4};
 use crate::walk::WalkDisplay;
 use std::collections::HashMap;
 use style::properties::ComputedValues;
@@ -73,8 +73,7 @@ impl<'a> Painting<'a> {
     // replaced by its own — and its `::after`; a flex or grid container's in ORDER-MODIFIED document order (Flexbox §4.3,
     // Grid §9).
     fn box_children(&self, id: NodeId) -> Vec<NodeId> {
-        let mut out = Vec::new();
-        self.push_box_children(id, &mut out);
+        let mut out = crate::geometry::box_children(self.arena, id);
         let ordered = box_style(self.arena, id).is_some_and(|s| {
             let d = s.get_box().clone_display();
             matches!(d.inside(), DisplayInside::Flex | DisplayInside::Grid)
@@ -83,21 +82,6 @@ impl<'a> Painting<'a> {
             out.sort_by_key(|&c| box_style(self.arena, c).map_or(0, |s| s.get_position().order));
         }
         out
-    }
-    fn push_box_children(&self, id: NodeId, out: &mut Vec<NodeId>) {
-        let Some(node) = self.arena.get(id) else { return };
-        let [before, after] = node.pseudo_boxes;
-        for c in before.into_iter().chain(flat_children(self.arena, node).iter().copied()).chain(after) {
-            let Some(cn) = self.arena.get(c) else { continue };
-            if cn.kind != NodeKind::Element {
-                continue;
-            }
-            if self.has_box(c) {
-                out.push(c);
-            } else if box_style(self.arena, c).is_some_and(|s| s.get_box().walk_display(cn.rendering_tag()).is_contents()) {
-                self.push_box_children(c, out);
-            }
-        }
     }
 
     fn style(&self, id: NodeId) -> Option<style::servo_arc::Arc<ComputedValues>> {

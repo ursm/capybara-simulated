@@ -61,11 +61,15 @@ pub(crate) fn laid_frags<'a>(arena: &RealmArena, node: &'a crate::dom::NodeData)
 // What the geometry reads keep between two changes to anything they read (`RealmArena::geometry_epoch`: a layout pass,
 // a scroll, a restyle, a tree change): each node's transform chain and the scroll shift of the boxes it holds. A rect
 // read and every candidate of a hit test ask them, and each walks every ancestor's style without one.
+// (…the extents, which no scroll offset enters, against `boxes_epoch`: a virtual list reading its scroll height after
+// every scroll would walk its whole subtree again for each.)
 #[derive(Default)]
 pub(crate) struct Memo {
     epoch: u64,
     chains: std::collections::HashMap<NodeId, Option<M4>>,
     below: std::collections::HashMap<NodeId, [f64; 2]>,
+    boxes_epoch: u64,
+    extents: std::collections::HashMap<NodeId, Extent>,
 }
 fn memo(arena: &RealmArena) -> std::cell::RefMut<'_, Memo> {
     let mut memo = arena.geometry_memo.borrow_mut();
@@ -74,6 +78,11 @@ fn memo(arena: &RealmArena) -> std::cell::RefMut<'_, Memo> {
         memo.epoch = epoch;
         memo.chains.clear();
         memo.below.clear();
+    }
+    let boxes_epoch = arena.boxes_epoch.get();
+    if memo.boxes_epoch != boxes_epoch {
+        memo.boxes_epoch = boxes_epoch;
+        memo.extents.clear();
     }
     memo
 }
@@ -248,7 +257,7 @@ fn content_box(b: &Box) -> [f64; 4] {
 // fragment rows `[inline index, x, y, w, h]` and the node each inline entry is (`inline_nids`), stored on the node in
 // place of a box (`NodeData::layout_frags`) — and each out-of-flow box's containing block, which its record names by
 // its own index (`NodeData::containing_block`).
-pub(crate) fn store_layout(arena: &mut RealmArena, laid: &crate::layout::Laid, inline_nids: &[f64]) {
+pub(crate) fn store_layout(arena: &mut RealmArena, laid: &crate::layout::Laid, inline_nids: &[f64], anon: &[[f64; 4]]) {
     let pass = arena.layout_pass;
     let nid = |v: f64| NodeId::from_i64(v as i64).filter(|_| v >= 0.0);
     let mut by_inline: Vec<Vec<[f64; 4]>> = vec![Vec::new(); inline_nids.len()];
@@ -275,6 +284,18 @@ pub(crate) fn store_layout(arena: &mut RealmArena, laid: &crate::layout::Laid, i
         };
         if let Some(node) = nid(b.nid).and_then(|id| arena.get_mut_quietly(id)) {
             node.containing_block = cb;
+            node.anon_boxes = None;
+        }
+    }
+    let mut anon_of: std::collections::HashMap<NodeId, Vec<[f64; 4]>> = std::collections::HashMap::new();
+    for &[record, _, container, _] in anon {
+        if let (Some(b), Some(container)) = (laid.boxes.get(record as usize), nid(container)) {
+            anon_of.entry(container).or_default().push([b.x, b.y, b.w, b.h]);
+        }
+    }
+    for (container, boxes) in anon_of {
+        if let Some(node) = arena.get_mut_quietly(container) {
+            node.anon_boxes = Some(boxes.into_boxed_slice());
         }
     }
 }
@@ -549,6 +570,176 @@ pub(crate) fn rendered_box(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
     })
 }
 
+// ── the scrollable overflow region ─────────────────────────────────────────────────────────────────────────────
+// `scrollWidth` / `scrollHeight` (css-overflow-3 §3): how far the box's content reaches from the edge it scrolls FROM.
+// Each box's EXTENT — its own box unioned with what its children reach, a child that clips taken at its own box in the
+// axes it clips, a fixed one not at all — is kept in the memo, so a read is no walk of the subtree it measures.
+#[derive(Clone, Copy)]
+pub(crate) struct Extent {
+    // The union with the box's own border box as its seed, `[left, top, right, bottom]`…
+    outer: [f64; 4],
+    // …the union of its IN-FLOW children's MARGIN boxes, at the place the flow gave them — the half of the region the
+    // box's own end padding extends (§3.2)…
+    inflow: [f64; 4],
+    // …and the children's reach without the seed, which sees a box in the BORDER region (a table caption, a negative
+    // margin) as overflow past the padding box rather than lost behind the seed.
+    kids: [f64; 4],
+}
+const NO_REACH: [f64; 4] = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+fn union(a: &mut [f64; 4], [l, t, r, b]: [f64; 4]) {
+    *a = [a[0].min(l), a[1].min(t), a[2].max(r), a[3].max(b)];
+}
+
+fn extent(arena: &RealmArena, id: NodeId) -> Option<Extent> {
+    if let Some(&e) = memo(arena).extents.get(&id) {
+        return Some(e);
+    }
+    let [x, y, w, h] = if Some(id) == arena.layout_root { root_scroll_seed(arena, id)? } else { placed_box(arena, id)? };
+    let mut e = Extent { outer: [x, y, x + w, y + h], inflow: NO_REACH, kids: NO_REACH };
+    let node = arena.get(id)?;
+    for c in box_children(arena, id) {
+        let Some(cn) = arena.get(c) else { continue };
+        let b = laid(arena, cn);
+        // (…a FIXED box is anchored to the viewport, no scrollable content of anything: Chrome reports a page holding
+        // one at `top: 900px` exactly one viewport tall)
+        if b.is_some_and(is_fixed) {
+            continue;
+        }
+        let Some(mut reach) = extent(arena, c).map(|ce| ce.outer) else { continue };
+        // (…content that overflows a CLIPPING box is scrollable within it, in the axes it clips, and no content of what
+        // is around it: Chrome, a 200px `overflow: auto` box over 2400px of rows gives html / body / box 681 / 200 / 2400)
+        if let Some(b) = b.filter(|b| b.clip & (crate::layout::CLIP_X | crate::layout::CLIP_Y) != 0) {
+            if b.clip & crate::layout::CLIP_X != 0 {
+                [reach[0], reach[2]] = [b.x, b.x + b.w];
+            }
+            if b.clip & crate::layout::CLIP_Y != 0 {
+                [reach[1], reach[3]] = [b.y, b.y + b.h];
+            }
+        }
+        union(&mut e.outer, reach);
+        union(&mut e.kids, reach);
+        let Some(b) = b.filter(|b| b.out_of_flow == 0) else { continue };
+        // (…by its MARGIN box where it has one — not a table's internal box, CSS 2.1 §17.5, nor a `<br>` — at the
+        // place the flow gave it, its own relative shift taken back off)
+        let m = if margin_box_applies(arena, c) { b.edges.map_or([0.0; 4], |e| [e[8], e[9], e[10], e[11]]) } else { [0.0; 4] };
+        let [fx, fy] = [b.x - b.rel[0], b.y - b.rel[1]];
+        union(&mut e.inflow, [fx - m[3], fy - m[0], fx + b.w + m[1], fy + b.h + m[2]]);
+    }
+    // (…and the anonymous boxes the pass made of its content, which reach as far as their boxes)
+    for &[ax, ay, aw, ah] in node.anon_boxes.as_deref().unwrap_or(&[]) {
+        let reach = [ax, ay, ax + aw, ay + ah];
+        union(&mut e.outer, reach);
+        union(&mut e.kids, reach);
+        union(&mut e.inflow, reach);
+    }
+    memo(arena).extents.insert(id, e);
+    Some(e)
+}
+// The boxes an element's box holds: its `::before`, its flat-tree children — a box-less one replaced by its own — and
+// its `::after`, each one the current layout gave a box or fragments.
+pub(crate) fn box_children(arena: &RealmArena, id: NodeId) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    push_box_children(arena, id, &mut out);
+    out
+}
+fn push_box_children(arena: &RealmArena, id: NodeId, out: &mut Vec<NodeId>) {
+    let Some(node) = arena.get(id) else { return };
+    let [before, after] = node.pseudo_boxes;
+    for c in before.into_iter().chain(flat_children(arena, node).iter().copied()).chain(after) {
+        let Some(cn) = arena.get(c) else { continue };
+        if cn.kind != NodeKind::Element {
+            continue;
+        }
+        if laid(arena, cn).is_some() || laid_frags(arena, cn).is_some() {
+            out.push(c);
+        } else if box_style(arena, c).is_some_and(|s| s.get_box().walk_display(cn.rendering_tag()).is_contents()) {
+            push_box_children(arena, c, out);
+        }
+    }
+}
+fn margin_box_applies(arena: &RealmArena, id: NodeId) -> bool {
+    let Some(n) = arena.get(id) else { return false };
+    let Some(s) = box_style(arena, id) else { return false };
+    let d = s.get_box().walk_display(n.rendering_tag());
+    !(n.rendering_tag() == "br" && matches!(d.outside(), DisplayOutside::Inline)) && !matches!(d.outside(), DisplayOutside::InternalTable)
+}
+// The seed of the ROOT's extent: the viewport's scrolling area — the initial containing block, and the root's MARGIN box
+// where that reaches further (Chrome: `html { margin-top: 32px }` over a 2000px body scrolls 2048).
+fn root_scroll_seed(arena: &RealmArena, root: NodeId) -> Option<[f64; 4]> {
+    let b = laid(arena, arena.get(root)?)?;
+    let [vw, vh] = arena.viewport;
+    let [mt, mr, mb, ml] = b.edges.map_or([0.0; 4], |e| [e[8], e[9], e[10], e[11]]);
+    let [x, y] = [(b.x - ml).min(0.0), (b.y - mt).min(0.0)];
+    Some([x, y, vw.max(b.x + b.w + mr) - x, vh.max(b.y + b.h + mb) - y])
+}
+
+// The scrollable overflow region of `id` as `[width, height]` (`contentExtent`): from the edge it scrolls FROM to the
+// far end of what is reachable — at least its padding box, and nothing behind the scroll origin. A scroll container's
+// in-flow children's margin boxes take its end padding after them (§3.2: a `padding: 10px` scroller over a 110px child
+// is 130); an `overflow: visible` (or `clip`) box reports the plain union. The root's is the viewport's, from the
+// initial containing block. None for a box that has no scrolling area: none at all, or a non-replaced inline.
+pub(crate) fn scroll_size(arena: &RealmArena, id: NodeId) -> Option<[f64; 2]> {
+    let node = arena.get(id)?;
+    let style = box_style(arena, id)?;
+    if is_boxless(arena, id, &style) || non_replaced_inline(arena, id, &style) {
+        return None;
+    }
+    let ext = extent(arena, id)?;
+    let [from_left, from_top] = scroll_origin(arena, id, &style);
+    if Some(id) == arena.layout_root {
+        let [vw, vh] = arena.viewport;
+        let w = if from_left { ext.outer[2].max(ext.kids[2]) } else { vw - ext.outer[0].min(ext.kids[0]) };
+        let h = if from_top { ext.outer[3].max(ext.kids[3]) } else { vh - ext.outer[1].min(ext.kids[1]) };
+        return Some([w.round(), h.round()]);
+    }
+    let b = laid(arena, node)?;
+    let e = b.edges.unwrap_or([0.0; 12]);
+    let [pt, pr, pb, pl, bt, br, bb, bl] = [e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7]];
+    // (…a border-collapse TABLE's region runs to its BORDER box's far corner: Chrome counts the far outer-half border in)
+    let to_border = {
+        use style::computed_values::border_collapse::T as BorderCollapse;
+        matches!(style.get_box().clone_display().inside(), DisplayInside::Table)
+            && style.get_inherited_table().border_collapse == BorderCollapse::Collapse
+    };
+    let pad = [b.x + bl, b.y + bt, b.x + b.w - if to_border { 0.0 } else { br }, b.y + b.h - if to_border { 0.0 } else { bb }];
+    let kid = [
+        (if ext.outer[0] < b.x { ext.outer[0] } else { pad[0] }).min(ext.kids[0]),
+        (if ext.outer[1] < b.y { ext.outer[1] } else { pad[1] }).min(ext.kids[1]),
+        (if ext.outer[2] > b.x + b.w { ext.outer[2] } else { pad[2] }).max(ext.kids[2]),
+        (if ext.outer[3] > b.y + b.h { ext.outer[3] } else { pad[3] }).max(ext.kids[3]),
+    ];
+    let scrolls = b.clip & CLIP_SCROLLS != 0;
+    let inflow = if scrolls { [ext.inflow[0] - pl, ext.inflow[1] - pt, ext.inflow[2] + pr, ext.inflow[3] + pb] } else { NO_REACH };
+    let axis = |from_start: bool, start: f64, end: f64, kid_start: f64, kid_end: f64, in_start: f64, in_end: f64| {
+        if from_start { end.max(kid_end).max(in_end) - start } else { end - start.min(kid_start).min(in_start) }
+    };
+    let w = axis(from_left, pad[0], pad[2], kid[0], kid[2], inflow[0], inflow[2]);
+    let h = axis(from_top, pad[1], pad[3], kid[1], kid[3], inflow[1], inflow[3]);
+    Some([w.round(), h.round()])
+}
+// The edges a box scrolls FROM, `[left, top]` (each true for that edge, false for the far one): a flex SCROLL container
+// from its main-start corner (Chrome: a `row-reverse` row overflowing 200px leftwards reports 100 while visible, 300 once
+// it scrolls), the root from where the initial containing block starts, any other box from its inline-start edge in a
+// horizontal flow.
+fn scroll_origin(arena: &RealmArena, id: NodeId, style: &ComputedValues) -> [bool; 2] {
+    use crate::walk::Side;
+    let d = style.get_box().clone_display();
+    let scrolls = arena.get(id).and_then(|n| laid(arena, n)).is_some_and(|b| b.clip & CLIP_SCROLLS != 0);
+    if matches!(d.inside(), DisplayInside::Flex) && scrolls {
+        let plan = crate::walk::FlexPlan::of(style);
+        return if plan.main_is_x {
+            [plan.main_start != Side::Right, !plan.cross_far]
+        } else {
+            [!plan.cross_far, plan.main_start != Side::Bottom]
+        };
+    }
+    if Some(id) == arena.layout_root {
+        return [!crate::walk::principal_starts_right(arena, id), true];
+    }
+    let [_, _, inline_start, _] = crate::walk::flow_sides(style);
+    [inline_start != Side::Right, true]
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     use crate::dom::register;
     register(scope, ns, "scrollShift", scroll_shift_op, context_id);
@@ -556,6 +747,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "laidOutBox", laid_out_box_op, context_id);
     register(scope, ns, "renderedBox", rendered_box_op, context_id);
     register(scope, ns, "transformChain", transform_chain_op, context_id);
+    register(scope, ns, "scrollSize", scroll_size_op, context_id);
     register(scope, ns, "scrollOffset", scroll_offset, context_id);
     register(scope, ns, "setScrollOffset", set_scroll_offset, context_id);
     register(scope, ns, "clipFlags", clip_flags, context_id);
@@ -574,14 +766,18 @@ fn scroll_shift_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     crate::dom::write_f64s(args.get(2), &shift);
 }
 
-// __dom.laidOutBox(nid, out) / renderedBox(nid, out) / transformChain(nid, out) -> whether `nid` has one: its box where
-// the page's scrolling carried it (`laid_out_box`), that box as the page measures it (`rendered_box`), and the 4x4 that
-// maps it to the viewport (`transform_chain`) — written to the Float64Array `out`.
+// __dom.laidOutBox(nid, out) / renderedBox(nid, out) / transformChain(nid, out) / scrollSize(nid, out) -> whether `nid`
+// has one: its box where the page's scrolling carried it (`laid_out_box`), that box as the page measures it
+// (`rendered_box`), the 4x4 that maps it to the viewport (`transform_chain`), and its scrollable overflow region's size
+// (`scroll_size`) — written to the Float64Array `out`.
 fn laid_out_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, laid_out_box);
 }
 fn rendered_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, rendered_box);
+}
+fn scroll_size_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, scroll_size);
 }
 fn transform_chain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, transform_chain);
@@ -623,7 +819,7 @@ fn set_scroll_offset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let to = [1, 2].map(|i| args.get(i).is_number().then(|| args.get(i).number_value(scope)).flatten());
     // (…quietly: a scroll offset is no input to the layout — only to the geometry's)
     let arena = crate::dom::realm(scope, cid);
-    arena.geometry_moved();
+    arena.scrolled();
     if let Some(node) = arena.get_mut_quietly(id) {
         for (axis, v) in to.into_iter().enumerate() {
             if let Some(v) = v {

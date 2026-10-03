@@ -625,7 +625,7 @@ fn align_content_code(flags: style::values::specified::align::AlignFlags) -> u8 
 
 // A physical side.
 #[derive(Clone, Copy, PartialEq)]
-enum Side {
+pub(crate) enum Side {
     Left,
     Right,
     Top,
@@ -633,7 +633,7 @@ enum Side {
 }
 // An element's flow as the physical sides it runs between (`flowSides` / `FLOW_SIDES`): block-start, block-end,
 // inline-start, inline-end — the inline pair turned round by `direction: rtl`.
-fn flow_sides(style: &ComputedValues) -> [Side; 4] {
+pub(crate) fn flow_sides(style: &ComputedValues) -> [Side; 4] {
     use style::computed_values::writing_mode::T as WritingMode;
     let [bs, be, is, ie] = match style.get_inherited_box().writing_mode {
         WritingMode::HorizontalTb => [Side::Top, Side::Bottom, Side::Left, Side::Right],
@@ -665,14 +665,14 @@ impl BaselineMode {
 
 // A flex container's axes, in a horizontal writing mode: where the main axis starts, the
 // cross axis starts, whether that is the far edge, and how the lines wrap (0 nowrap, 1 wrap, 2 wrap-reverse).
-struct FlexPlan {
+pub(crate) struct FlexPlan {
     column: bool,
     flex_reverse: bool,
-    main_start: Side,
+    pub(crate) main_start: Side,
     cross_start: Side,
-    main_is_x: bool,
+    pub(crate) main_is_x: bool,
     main_reverse: bool,
-    cross_far: bool,
+    pub(crate) cross_far: bool,
     cross_flip: bool,
     wrap: u8,
     // …and the side a line's LEFT is on in a vertical writing mode — the top, but `sideways-lr`'s bottom — which a
@@ -680,7 +680,7 @@ struct FlexPlan {
     line_left: Side,
 }
 impl FlexPlan {
-    fn of(style: &ComputedValues) -> FlexPlan {
+    pub(crate) fn of(style: &ComputedValues) -> FlexPlan {
         use style::computed_values::flex_direction::T as Dir;
         use style::computed_values::flex_wrap::T as Wrap;
         let pos = style.get_position();

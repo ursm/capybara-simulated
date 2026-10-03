@@ -153,6 +153,9 @@ pub(crate) struct NodeData {
     pub(crate) laid_at: u64,
     // …and, for an OUT-OF-FLOW box, the element whose box it was placed against (None: the viewport, or a box in flow).
     pub(crate) containing_block: Option<NodeId>,
+    // …and the ANONYMOUS boxes the pass made of its content — a flex or grid container's anonymous items, a table's
+    // anonymous cells — which no node is, `[x, y, w, h]` each: what the scrollable overflow region of it reaches.
+    pub(crate) anon_boxes: Option<Box<[[f64; 4]]>>,
     // Its SCROLL OFFSET, `[x, y]`: the scroll container's (the document scroller's on the root element), 0 on any other.
     pub(crate) scroll: [f64; 2],
     // An element's live STATE that no attribute carries (`state` bits, below): what a script or the user did to it.
@@ -233,6 +236,7 @@ impl NodeData {
             layout_frags: None,
             laid_at: 0,
             containing_block: None,
+            anon_boxes: None,
             scroll: [0.0; 2],
             state: 0,
             host: None,
@@ -475,8 +479,10 @@ pub(crate) struct RealmArena {
     pub(crate) viewport: [f64; 2],
     // …and which layout that is, counted from 1: a node laid out by an earlier one has no box in this one.
     pub(crate) layout_pass: u64,
-    // Moves with anything a geometry read reads (`geometry_moved`): what its memo is kept against (`geometry::Memo`).
+    // Moves with anything a geometry read reads (`boxes_moved`, `scrolled`): what its memo is kept against (`geometry::Memo`) —
+    // and `boxes_epoch` with all of it but a scroll, which moves no box: what the parts of it no scroll offset enters are.
     pub(crate) geometry_epoch: std::cell::Cell<u64>,
+    pub(crate) boxes_epoch: std::cell::Cell<u64>,
     pub(crate) geometry_memo: std::cell::RefCell<crate::geometry::Memo>,
 }
 pub(crate) const RESTYLED_CAP: usize = 4096;
@@ -486,7 +492,7 @@ impl RealmArena {
     // root's host, a slotted node's slot, and theirs — are stamped with the current layout epoch, up to the first
     // stamped already, whose own ancestors are too.
     pub(crate) fn stamp_change(&self, id: NodeId) {
-        self.geometry_moved();
+        self.boxes_moved();
         let epoch = self.layout_epoch.get();
         let mut stack = vec![id];
         while let Some(n) = stack.pop() {
@@ -503,7 +509,6 @@ impl RealmArena {
     // …and one the style engine RESTYLED: stamped, as a write is, and kept for this side to take.
     pub(crate) fn note_restyled(&self, id: NodeId) {
         self.stamp_change(id);
-        self.geometry_moved();
         let mut restyled = self.restyled.borrow_mut();
         if restyled.1 {
             return;
@@ -515,8 +520,13 @@ impl RealmArena {
             restyled.0.push(id);
         }
     }
-    // Something a geometry read reads moved: its memo is no longer the page's.
-    pub(crate) fn geometry_moved(&self) {
+    // Something a geometry read reads moved: its memo is no longer the page's — `boxes_moved` where it may have moved a
+    // box, `scrolled` where it moved a scroll offset alone.
+    pub(crate) fn boxes_moved(&self) {
+        self.boxes_epoch.set(self.boxes_epoch.get() + 1);
+        self.scrolled();
+    }
+    pub(crate) fn scrolled(&self) {
         self.geometry_epoch.set(self.geometry_epoch.get() + 1);
     }
     // A layout of `root` against `viewport` begins: the boxes it writes are the page's from now on, and no earlier one's.
@@ -524,7 +534,7 @@ impl RealmArena {
         self.layout_root = Some(root);
         self.viewport = viewport;
         self.layout_pass += 1;
-        self.geometry_moved();
+        self.boxes_moved();
     }
     // The start of a layout walk: the epoch it walks at, the clock moved on past it.
     pub(crate) fn begin_layout_walk(&self) -> u64 {
