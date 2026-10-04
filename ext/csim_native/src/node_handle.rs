@@ -36,6 +36,9 @@ pub(crate) struct NodeHandle {
     parent: Edge,
     first: Edge,
     next: Edge,
+    // The tree it owns outside its children: a host's shadow root, a `<template>`'s contents — whose root's `parent` is
+    // its owner, the other way.
+    owned: Edge,
     // The object the node is handed out as: the one that wraps the handle, or the Proxy a `<form>` or a document is seen
     // through (`rewrap`). Written on the main thread only.
     wrapper: UnsafeCell<v8::TracedReference<v8::Object>>,
@@ -46,6 +49,7 @@ unsafe impl GarbageCollected for NodeHandle {
         self.parent.trace(visitor);
         self.first.trace(visitor);
         self.next.trace(visitor);
+        self.owned.trace(visitor);
         // SAFETY: the collector reads the reference as TracedReference's barriers allow; nothing here hands one out.
         visitor.trace(unsafe { &*self.wrapper.get() });
     }
@@ -142,12 +146,24 @@ pub(crate) fn unlink(link: &Link) {
         h.next.set(None);
     }
 }
-// What a node's handle says of the tree, for verify mode: its parent's, first child's and next sibling's slots, each with
-// its realm (a slot is a realm's); and the realm of the node's own.
-pub(crate) fn edges(link: &Link) -> Option<([Option<(i32, NodeId)>; 3], i32)> {
+// …and an owner's tree outside its children (the arena's side): `owner` owns `owned`, or nothing.
+pub(crate) fn own(owner: &Link, owned: Option<&Link>) {
+    if let Some(h) = owner.handle() {
+        h.owned.set(owned);
+    }
+}
+// …and that tree's root, owned by `owner`, or by nothing.
+pub(crate) fn owned_by(root: &Link, owner: Option<&Link>) {
+    if let Some(h) = root.handle() {
+        h.parent.set(owner);
+    }
+}
+// What a node's handle says of the tree, for verify mode: its parent's, first child's, next sibling's and owned tree's
+// slots, each with its realm (a slot is a realm's); and the realm of the node's own.
+pub(crate) fn edges(link: &Link) -> Option<([Option<(i32, NodeId)>; 4], i32)> {
     let h = link.handle()?;
     let slot = |e: &Edge| e.get().and_then(|t| Some((t.realm.get(), t.nid.get()?)));
-    Some(([slot(&h.parent), slot(&h.first), slot(&h.next)], h.realm.get()))
+    Some(([slot(&h.parent), slot(&h.first), slot(&h.next), slot(&h.owned)], h.realm.get()))
 }
 
 // An isolate's slots of collected nodes, waiting to be freed: (realm, slot). Owned by its `Dom`, which the handles only
@@ -188,6 +204,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         parent: Edge::new(),
         first: Edge::new(),
         next: Edge::new(),
+        owned: Edge::new(),
         wrapper: UnsafeCell::new(v8::TracedReference::empty()),
     };
     let heap = scope.get_cpp_heap().expect("NodeBase is installed only on an isolate with a C++ heap");

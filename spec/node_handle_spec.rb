@@ -66,6 +66,26 @@ RSpec.describe 'node handles' do
     expect(got).to eq([true, true, true, true, true, true, 'kept'])
   end
 
+  # The tree a node owns outside its children — a host's shadow root, a template's contents — is an edge of its handle,
+  # and the owned tree's root has its owner for a parent: what the handle edges say, the arena says (verify mode's check,
+  # asked here of each node directly), however the tree came to be owned — parsed, attached, given contents anew.
+  it "links a shadow root and a template's contents to their owners' handles" do
+    s = page('<template id=t><p>x</p></template><div id=h></div>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('t'), h = document.getElementById('h');
+        const sr = h.attachShadow({mode: 'open'});
+        sr.innerHTML = '<b>s</b>';
+        const made = document.createElement('template');
+        made.innerHTML = '<i>m</i>';
+        document.body.append(made);
+        const nodes = [t, t.content, t.content.firstChild, h, sr, sr.firstChild, made, made.content, made.content.firstChild];
+        return nodes.map((n) => __dom.handleEdgesMismatch(n._nid) ?? null);
+      })()
+    JS
+    expect(got).to eq([nil] * 9)
+  end
+
   # A `::before` is no node of its own: its box's slot belongs to its element, and goes with it.
   it "frees a generated box's slot with its element's" do
     s = page('<style>.g::before { content: "x" }</style><div id=g class=g>g</div>')

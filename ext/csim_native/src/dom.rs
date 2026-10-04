@@ -174,8 +174,10 @@ pub(crate) struct NodeData {
     pub(crate) cdata: bool,
     // A doctype's public and system identifiers (its name is its `data`) — which XML serializes.
     pub(crate) doctype_ids: Option<Box<(Vec<u16>, Vec<u16>)>>,
-    // A `<template>`'s contents (the fragment `content` is), which no child list holds — what serializing it writes.
+    // A `<template>`'s contents (the fragment `content` is), which no child list holds — what serializing it writes; and
+    // a contents fragment's template, the other way.
     pub(crate) template_content: Option<NodeId>,
+    pub(crate) template_host: Option<NodeId>,
     // The `is` value an element was made with (a customized built-in's) — serialized where it holds no `is` attribute.
     pub(crate) is_value: Option<Box<[u16]>>,
     // A form control's live value once dirty (a script's `.value`, typing), in UTF-16 code units; None while it is
@@ -259,6 +261,7 @@ impl NodeData {
             cdata: false,
             doctype_ids: None,
             template_content: None,
+            template_host: None,
             is_value: None,
             value: None,
             natural_size: None,
@@ -693,17 +696,18 @@ impl RealmArena {
         let Some(p) = self.get(parent) else { return };
         crate::node_handle::relink(Some(&p.link), &p.children, from, to, |k| self.get(k).map(|n| &n.link));
     }
-    // For verify mode: where `id`'s handle's edges disagree with the slot's tree — its parent, its first child and its
-    // next sibling, each the one the slot has where that one has a handle too — or None.
+    // For verify mode: where `id`'s handle's edges disagree with the slot's tree — its parent (a root's owner), its first
+    // child, its next sibling and the tree it owns, each the one the slot has where that one has a handle too — or None.
     pub(crate) fn edge_mismatch(&self, id: NodeId) -> Option<String> {
         let n = self.get(id)?;
         let (got, realm) = crate::node_handle::edges(&n.link)?;
         let handled = |k: NodeId| self.get(k).is_some_and(|d| crate::node_handle::edges(&d.link).is_some());
-        let parent = n.parent.filter(|&p| handled(p));
+        let parent = n.parent.or(n.host).or(n.template_host).filter(|&p| handled(p));
         let first = n.children.first().copied().filter(|&c| handled(c));
         let next = n.parent.and_then(|p| self.get(p)).and_then(|p| p.children.get(n.child_index + 1).copied()).filter(|&c| handled(c));
+        let owned = n.shadow_root.or(n.template_content).filter(|&c| handled(c));
         // (…each in this slot's realm, as the node's handle says it is)
-        let want = [parent, first, next].map(|k| k.map(|k| (realm, k)));
+        let want = [parent, first, next, owned].map(|k| k.map(|k| (realm, k)));
         (got != want).then(|| format!("handle edges {got:?}, tree {want:?}"))
     }
     // `id`'s handle is `link`: its edges written where it is — under its parent, and over its children.
@@ -717,6 +721,8 @@ impl RealmArena {
             None => crate::node_handle::unlink(&self.get(id).expect("the node just linked").link),
         }
         self.relink(id, 0, usize::MAX);
+        // …and the trees it owns, or is owned by
+        self.reown(id);
     }
 
     // A new node, appended to `parent` when that is live (a stale parent nid leaves it a detached root).
@@ -805,6 +811,37 @@ impl RealmArena {
         }
         if let Some(node) = self.get_mut(host) {
             node.shadow_root = Some(root);
+        }
+        self.reown(host);
+    }
+
+    // `template`'s contents are `content` (or none) — and the handles' edges between them.
+    pub(crate) fn set_template_content(&mut self, template: NodeId, content: Option<NodeId>) {
+        let content = content.filter(|&c| self.get(c).is_some());
+        let Some(old) = self.get_mut_quietly(template).map(|t| std::mem::replace(&mut t.template_content, content)) else { return };
+        if let Some(old) = old.filter(|&o| Some(o) != content) {
+            if let Some(o) = self.get_mut_quietly(old) {
+                o.template_host = None;
+            }
+            self.reown(old);
+        }
+        if let Some(c) = content.and_then(|c| self.get_mut_quietly(c)) {
+            c.template_host = Some(template);
+        }
+        self.reown(template);
+    }
+    // The handles' edges between `id` and the tree it owns outside its children (a shadow root, a template's contents)
+    // and between `id` and its owner where it is such a tree's root — written from the slots' (`node_handle::own`).
+    fn reown(&self, id: NodeId) {
+        let Some(n) = self.get(id) else { return };
+        let link = |k: Option<NodeId>| k.and_then(|k| self.get(k)).map(|d| &d.link);
+        let owned = link(n.shadow_root.or(n.template_content));
+        crate::node_handle::own(&n.link, owned);
+        if let Some(owned) = owned {
+            crate::node_handle::owned_by(owned, Some(&n.link));
+        }
+        if n.parent.is_none() {
+            crate::node_handle::owned_by(&n.link, link(n.host.or(n.template_host)));
         }
     }
 
@@ -1556,9 +1593,7 @@ fn set_template_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let Some(id) = nid_arg(scope, &args, 0) else { return };
     let content = nid_arg(scope, &args, 1);
     let cid = realm_id(scope, &args);
-    if let Some(node) = realm(scope, cid).get_mut_quietly(id) {
-        node.template_content = content;
-    }
+    realm(scope, cid).set_template_content(id, content);
 }
 
 // __dom.setIsValue(nid, value): the `is` value an element was made with (null for none).
