@@ -9,43 +9,67 @@ use std::cmp::Ordering;
 
 use web_atoms::ns;
 
-use crate::dom::{NodeData, NodeId, NodeKind, RealmArena, STATE_DELEGATES_FOCUS};
+use std::collections::HashMap;
+
+use crate::dom::{NodeData, NodeId, NodeKind, RealmArena};
 use crate::style::StyleEngine;
 
-// The elements focusable by what they are (an `<input type=hidden>` excepted), whatever their namespace.
-const FOCUSABLE_TAGS: [&str; 11] = ["input", "textarea", "select", "button", "iframe", "embed", "object", "audio", "video", "details", "summary"];
+// The HTML elements focusable by what they are (an `<input type=hidden>` excepted; a `<summary>` only as its details'
+// summary, below).
+const FOCUSABLE_TAGS: [&str; 9] = ["input", "textarea", "select", "button", "iframe", "embed", "object", "audio", "video"];
 const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
 
-// Is `id` a focusable area: an element not actually disabled, with a valid integer `tabindex` — else focusable by its
-// kind, a hyperlink, or editable — in no `inert` subtree, and being rendered (layout, so `visibility: hidden` does not
-// count) or the fallback content of a rendered `<canvas>`, which generates no box of its own yet stays focusable.
+// Is `id` a focusable area: an element not actually disabled, with a valid `tabindex` — else focusable by its kind, a
+// hyperlink, or editable — in no `inert` subtree, and being rendered or the fallback content of a rendered `<canvas>`,
+// which generates no box of its own yet stays focusable. Rendered as a box that can take focus: not skipped (a closed
+// `<details>`'s content) and not `visibility: hidden`, whose boxes "cannot receive focus" (CSS Display 3 §4; Chrome and
+// Firefox, measured).
 pub(crate) fn focusable(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, now: f64) -> bool {
     let Some(n) = arena.get(id).filter(|n| n.kind == NodeKind::Element) else { return false };
-    if arena.is_actually_disabled(id) || !candidate(n) || inert(arena, id) {
+    if arena.is_actually_disabled(id) || !candidate(arena, id, n) || inert(arena, id) {
         return false;
     }
-    let rendered = |engine: &mut StyleEngine, id| crate::rendered::rendered(engine, arena, id, true, false, None, now);
-    rendered(engine, id) || element_ancestors(arena, id).find(|&p| &*arena.get(p).expect("an ancestor").local_name == "canvas").is_some_and(|c| rendered(engine, c))
+    let rendered = |engine: &mut StyleEngine, id| crate::rendered::rendered(engine, arena, id, false, true, None, now);
+    rendered(engine, id) || element_ancestors(arena, id).find(|&p| arena.get(p).is_some_and(|p| p.is_html_named("canvas"))).is_some_and(|c| rendered(engine, c))
 }
-fn candidate(n: &NodeData) -> bool {
-    if n.plain_attr("tabindex").is_some_and(|t| crate::validity::parse_html_integer(t).is_some()) {
+fn candidate(arena: &RealmArena, id: NodeId, n: &NodeData) -> bool {
+    if tabindex(n).is_some() {
         return true;
     }
-    let tag = &*n.local_name;
-    if FOCUSABLE_TAGS.contains(&tag) {
-        return !(tag == "input" && n.plain_attr("type").is_some_and(|t| t.eq_ignore_ascii_case("hidden")));
-    }
-    if matches!(tag, "a" | "area") {
-        return n.plain_attr("href").is_some() || (n.ns == ns!(svg) && n.ns_attr(XLINK_NS, "href").is_some());
+    if n.is_html() {
+        let tag = &*n.local_name;
+        if FOCUSABLE_TAGS.contains(&tag) {
+            return !(tag == "input" && n.plain_attr("type").is_some_and(|t| t.eq_ignore_ascii_case("hidden")));
+        }
+        if matches!(tag, "a" | "area") && n.plain_attr("href").is_some() {
+            return true;
+        }
+        if tag == "summary" && details_summary(arena, id) {
+            return true;
+        }
+    } else if n.ns == ns!(svg) && &*n.local_name == "a" && (n.plain_attr("href").is_some() || n.ns_attr(XLINK_NS, "href").is_some()) {
+        return true;
     }
     editable_host(n)
+}
+// A valid `tabindex`: an integer by the HTML rules, in the range of the IDL attribute's `long` (Chrome and Firefox,
+// measured, ignore one past it).
+fn tabindex(n: &NodeData) -> Option<i64> {
+    n.plain_attr("tabindex").and_then(crate::validity::parse_html_integer).filter(|t| i32::try_from(*t).is_ok())
+}
+// Whether `id` is the summary for its parent `<details>`: the first `<summary>` child of one.
+fn details_summary(arena: &RealmArena, id: NodeId) -> bool {
+    let Some(parent) = arena.parent_of(id).and_then(|p| arena.get(p)).filter(|p| p.is_html_named("details")) else { return false };
+    parent.children.iter().find(|&&c| arena.get(c).is_some_and(|c| c.is_html_named("summary"))) == Some(&id)
 }
 // A `contenteditable` that is not "false".
 fn editable_host(n: &NodeData) -> bool {
     n.plain_attr("contenteditable").is_some_and(|v| !v.eq_ignore_ascii_case("false"))
 }
+// Inert: the element or an element it is a shadow-including descendant of carries `inert` (a host's shadow tree is
+// inert with it).
 fn inert(arena: &RealmArena, id: NodeId) -> bool {
-    std::iter::once(id).chain(element_ancestors(arena, id)).any(|e| arena.get(e).is_some_and(|n| n.plain_attr("inert").is_some()))
+    std::iter::successors(Some(id), |&c| arena.get(c).and_then(|n| n.parent.or(n.host))).any(|e| arena.get(e).is_some_and(|n| n.kind == NodeKind::Element && n.plain_attr("inert").is_some()))
 }
 // The element ancestors of `id`, nearest first, up to the first node that is none (a shadow root, a document).
 fn element_ancestors(arena: &RealmArena, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
@@ -98,6 +122,8 @@ struct Navigator<'a> {
     engine: &'a mut StyleEngine,
     arena: &'a RealmArena,
     now: f64,
+    // Each radio button group's stop, by its tree, name and form owner, found once a navigation.
+    radio_stops: HashMap<(NodeId, String, Option<NodeId>), Option<NodeId>>,
 }
 
 impl Navigator<'_> {
@@ -107,7 +133,7 @@ impl Navigator<'_> {
 
     fn classify(&mut self, el: NodeId) -> Option<Item> {
         let n = self.arena.get(el)?;
-        let tabindex = n.plain_attr("tabindex").and_then(crate::validity::parse_html_integer);
+        let tabindex = tabindex(n);
         let negative = tabindex.is_some_and(|t| t < 0);
         let group = if negative { 0 } else { tabindex.unwrap_or(0) };
         let owner = |kind, sub| Some(Item { el, kind, sub: Some(sub), included: !negative, group, tree_pos: 0 });
@@ -116,7 +142,7 @@ impl Navigator<'_> {
             return owner(Kind::Owner, sub);
         }
         if let Some(root) = n.shadow_root {
-            let delegates = self.arena.get(root).is_some_and(|r| r.state & STATE_DELEGATES_FOCUS != 0);
+            let delegates = self.arena.get(root).is_some_and(|r| r.delegates_focus);
             let children = self.arena.get(root).map(|r| r.children.clone()).unwrap_or_default();
             let sub = self.scope(Some(el), &children);
             let stop = !delegates && !negative && self.focusable(el);
@@ -134,26 +160,32 @@ impl Navigator<'_> {
         let arena = self.arena;
         let Some(n) = arena.get(el) else { return false };
         let Some(name) = n.plain_attr("name").filter(|s| !s.is_empty() && n.is_html_named("input") && n.input_type() == "radio") else { return false };
-        let owner = arena.form_owner(el);
+        let key = (arena.root_of(el), name.to_owned(), arena.form_owner(el));
+        if let Some(&stop) = self.radio_stops.get(&key) {
+            return stop.is_some_and(|s| s != el);
+        }
         let mut first = None;
-        let mut stack = vec![arena.root_of(el)];
+        let mut checked = None;
+        let mut stack = vec![key.0];
         while let Some(c) = stack.pop() {
             let Some(o) = arena.get(c) else { continue };
             stack.extend(o.children.iter().rev().copied());
-            let member = o.kind == NodeKind::Element
-                && &*o.local_name == "input"
-                && o.plain_attr("type").is_some_and(|t| t.eq_ignore_ascii_case("radio"))
+            let member = o.is_html_named("input")
+                && o.input_type() == "radio"
                 && o.plain_attr("name") == Some(name)
-                && arena.form_owner(c) == owner;
+                && arena.form_owner(c) == key.2;
             if !member || !self.focusable(c) {
                 continue;
             }
             first.get_or_insert(c);
             if arena.is_checked(c) {
-                return c != el;
+                checked = Some(c);
+                break;
             }
         }
-        first.is_some_and(|f| f != el)
+        let stop = checked.or(first);
+        self.radio_stops.insert(key, stop);
+        stop.is_some_and(|s| s != el)
     }
 
     // The scope of `nodes` (a shadow root's children, a slot's assigned nodes, the document's): its candidates, an
@@ -273,7 +305,7 @@ impl Scope {
 // the order goes on while that order IS tree order. At either end it wraps round. None where nothing is focusable.
 pub(crate) fn next(engine: &mut StyleEngine, arena: &RealmArena, doc: NodeId, current: Option<NodeId>, reverse: bool, now: f64) -> Option<NodeId> {
     let children = arena.get(doc)?.children.clone();
-    let root = Navigator { engine, arena, now }.scope(None, &children);
+    let root = Navigator { engine, arena, now, radio_stops: HashMap::new() }.scope(None, &children);
     let stepped = current.and_then(|cur| {
         let mut chain = Vec::new();
         match root.locate(cur, &mut chain) {
@@ -356,9 +388,9 @@ fn focusable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     }
 }
 
-// __dom.nextFocus(docNid, currentNid, reverse, now) -> the path from the document to the element Tab (Shift-Tab, with
-// `reverse`) moves focus to from `currentNid` (-1: nothing focused) — each step a child's index, or -1 into the shadow
-// root of the element before it — or null where nothing is focusable.
+// __dom.nextFocus(docNid, currentNid, reverse, now) -> the element Tab (Shift-Tab, with `reverse`) moves focus to from
+// `currentNid` (-1: nothing focused), as its nid and then the path to it from the document — each step a child's index
+// among the live ones, or -1 into the shadow root of the element before it — or null where nothing is focusable.
 fn next_focus_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_null() };
     let current = crate::dom::nid_arg(scope, &args, 1);
@@ -371,7 +403,8 @@ fn next_focus_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
             let n = arena.get(cur)?;
             match (n.parent, n.host) {
                 (Some(p), _) => {
-                    path.push(n.child_index as f64);
+                    let live = arena.get(p)?.children.iter().filter(|&&c| arena.get(c).is_some());
+                    path.push(live.take_while(|&&c| c != cur).count() as f64);
                     cur = p;
                 }
                 (None, Some(host)) => {
@@ -381,6 +414,7 @@ fn next_focus_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
                 (None, None) => return None,
             }
         }
+        path.push(next.to_f64());
         path.reverse();
         Some(path)
     });

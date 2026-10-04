@@ -161,8 +161,10 @@ pub(crate) struct NodeData {
     pub(crate) state: u32,
     // A shadow root's host (None for every other node): the shadow-including ancestor chain `:focus` walks…
     pub(crate) host: Option<NodeId>,
-    // …and a host's shadow root, the other way.
+    // …and a host's shadow root, the other way; and whether a shadow root delegates focus (`attachShadow`'s
+    // `delegatesFocus`).
     pub(crate) shadow_root: Option<NodeId>,
+    pub(crate) delegates_focus: bool,
     // A slot's assigned nodes, in tree order, and a slotted node's slot: the flat tree the style engine walks.
     pub(crate) assigned: Vec<NodeId>,
     pub(crate) assigned_slot: Option<NodeId>,
@@ -222,8 +224,6 @@ pub(crate) const STATE_DIRTY_BY_USER: u32 = 1 << 12;
 pub(crate) const STATE_CUSTOM_ERROR: u32 = 1 << 13;
 pub(crate) const STATE_USER_INTERACTED: u32 = 1 << 14;
 pub(crate) const STATE_HAS_FILES: u32 = 1 << 15;
-// …and, on a shadow root, that it delegates focus (`attachShadow`'s `delegatesFocus`).
-pub(crate) const STATE_DELEGATES_FOCUS: u32 = 1 << 16;
 
 
 impl NodeData {
@@ -250,6 +250,7 @@ impl NodeData {
             state: 0,
             host: None,
             shadow_root: None,
+            delegates_focus: false,
             assigned: Vec::new(),
             assigned_slot: None,
             cdata: false,
@@ -759,7 +760,7 @@ impl RealmArena {
         }
         if let Some(node) = self.get_mut(root) {
             node.host = Some(host);
-            node.state = if delegates_focus { node.state | STATE_DELEGATES_FOCUS } else { node.state & !STATE_DELEGATES_FOCUS };
+            node.delegates_focus = delegates_focus;
             self.has_shadow_hosts = true;
         }
         if let Some(node) = self.get_mut(host) {

@@ -3550,8 +3550,6 @@ html/rendering/the-details-element/details-content-pseudo-attr.html:
 - "== html/rendering/the-details-element/details-content-pseudo-attr-ref.html"
 html/rendering/the-details-element/details-display-type-001.html:
 - "== html/rendering/the-details-element/details-display-type-001-ref.html"
-html/rendering/the-details-element/details-focus-steps.html:
-- Focus flows into third when details is closed
 html/rendering/the-details-element/details-pseudo-elements-001.html:
 - "== html/rendering/the-details-element/details-pseudo-elements-001-ref.html"
 html/rendering/the-details-element/details-pseudo-elements-002.html:
