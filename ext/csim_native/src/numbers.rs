@@ -15,8 +15,13 @@ pub(crate) fn to_precision(x: f64, p: usize) -> f64 {
     if !x.is_finite() || x == 0.0 || p == 0 {
         return x;
     }
-    // (…every double's exact expansion fits in 800 significant digits, so this one is exact)
-    let exact = format!("{:.800e}", x.abs());
+    // (…from 17 significant digits, correctly rounded, where they settle it — where the digits past the `p`th are
+    // not a 5 and zeros, the exact expansion lies on the same side of the halfway point; else from the exact expansion
+    // itself, which every double's fits in 800 significant digits)
+    let near = format!("{:.16e}", x.abs());
+    let tail: Vec<u8> = near.split('e').next().unwrap_or("").bytes().filter(u8::is_ascii_digit).skip(p).collect();
+    let tie = tail.first() == Some(&b'5') && tail[1..].iter().all(|&d| d == b'0');
+    let exact = if p < 17 && !tie { near } else { format!("{:.800e}", x.abs()) };
     let (mantissa, exp) = exact.split_once('e').unwrap_or((&exact, "0"));
     let digits: Vec<u8> = mantissa.bytes().filter(u8::is_ascii_digit).map(|d| d - b'0').collect();
     let mut exp: i32 = exp.parse().unwrap_or(0);
@@ -79,5 +84,7 @@ mod tests {
         assert_eq!(to_precision(100000000000000.5, 15), 100000000000001.0);
         assert_eq!(to_precision(-2.5, 1), -3.0);
         assert_eq!(to_precision(9.99, 2), 10.0);
+        assert_eq!(to_precision(0.30000000000000004, 15), 0.3);
+        assert_eq!(to_precision(1.0000000000000002, 16), 1.0);
     }
 }

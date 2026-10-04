@@ -17,7 +17,8 @@ pub(crate) fn picture_source(arena: &RealmArena, img: NodeId, media_matches: &dy
         if source.plain_attr("media").is_some_and(|m| !media_matches(m)) {
             continue;
         }
-        if source.plain_attr("type").is_some_and(|t| !decodable_image_type(t.trim())) {
+        // (…an empty `type` names no format to refuse: the source is taken, as Chrome and Firefox take it)
+        if source.plain_attr("type").map(str::trim).is_some_and(|t| !t.is_empty() && !decodable_image_type(t)) {
             continue;
         }
         if !parse_srcset(source.plain_attr("srcset").unwrap_or("")).is_empty() {
