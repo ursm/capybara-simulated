@@ -66,10 +66,12 @@ fn details_summary(arena: &RealmArena, id: NodeId) -> bool {
 fn editable_host(n: &NodeData) -> bool {
     n.plain_attr("contenteditable").is_some_and(|v| !v.eq_ignore_ascii_case("false"))
 }
-// Inert: the element or an element it is a shadow-including descendant of carries `inert` (a host's shadow tree is
-// inert with it).
+// Inert: the element or an element it is a flat-tree descendant of carries `inert` — up through the slot a node is
+// assigned to, and from a shadow root to its host (Chrome and Firefox, measured: an `inert` around the slot makes its
+// assigned content inert).
 fn inert(arena: &RealmArena, id: NodeId) -> bool {
-    std::iter::successors(Some(id), |&c| arena.get(c).and_then(|n| n.parent.or(n.host))).any(|e| arena.get(e).is_some_and(|n| n.kind == NodeKind::Element && n.plain_attr("inert").is_some()))
+    std::iter::successors(Some(id), |&c| arena.get(c).and_then(|n| n.assigned_slot.or(n.parent).or(n.host)))
+        .any(|e| arena.get(e).is_some_and(|n| n.kind == NodeKind::Element && n.plain_attr("inert").is_some()))
 }
 // The element ancestors of `id`, nearest first, up to the first node that is none (a shadow root, a document).
 fn element_ancestors(arena: &RealmArena, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {

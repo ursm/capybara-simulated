@@ -6,7 +6,8 @@ require_relative 'support/session_teardown'
 # Which elements take focus (HTML "focusable area", focus.rs) and where Tab takes it. Each figure is Chrome's on this
 # machine (measured), and Firefox agrees: a `<details>` is no focus stop and its summary is (only the first summary of
 # a details); a control in a closed `<details>`, a `visibility: hidden` one and one in an inert host's shadow tree take
-# no focus; an `<input>` in the SVG namespace is no control; a `tabindex` past the IDL `long` is no tabindex at all.
+# no focus, nor content assigned to a slot inside an inert element; an `<input>` in the SVG namespace is no control; a
+# `tabindex` past the IDL `long` is no tabindex at all.
 RSpec.describe 'focus' do
   def session_with(html)
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><body>#{html}"]] })
@@ -22,6 +23,7 @@ RSpec.describe 'focus' do
       <input id=vh style="visibility:hidden">
       <div id=big tabindex="99999999999">big</div>
       <div id=inerthost inert></div>
+      <div id=slothost><input id=slotted></div>
     HTML
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -29,11 +31,12 @@ RSpec.describe 'focus' do
         const svgInput = document.body.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'input'));
         const sr = document.getElementById('inerthost').attachShadow({mode: 'open'});
         sr.innerHTML = '<button>b</button>';
-        const ids = ['d1', 's1', 'inclosed', 'd2', 's2', 's3', 's4', 'vh', 'big'];
+        document.getElementById('slothost').attachShadow({mode: 'open'}).innerHTML = '<div inert><slot></slot></div>';
+        const ids = ['d1', 's1', 'inclosed', 'd2', 's2', 's3', 's4', 'vh', 'big', 'slotted'];
         return ids.map((id) => takes(document.getElementById(id))).concat([takes(svgInput), takes(sr.firstChild), big.tabIndex]);
       })()
     JS
-    expect(got).to eq([false, true, false, false, true, false, false, false, false, false, false, -1])
+    expect(got).to eq([false, true, false, false, true, false, false, false, false, false, false, false, -1])
   end
 
   # An element made in a frame's document and adopted into this one is focused in this one, and a host adopted so keeps
@@ -57,5 +60,22 @@ RSpec.describe 'focus' do
     s.find(:css, '#before').click
     s.send_keys(:tab)
     expect(s.evaluate_script("document.activeElement.shadowRoot && document.activeElement.shadowRoot.activeElement.id")).to eq('inner')
+  end
+
+  # `tabIndex` with no `tabindex`: 0 for the elements HTML lists — an SVG `<a>`, and a `<summary>` only as its details'
+  # summary, included — and -1 for the rest. Chrome and Firefox agree on every one (measured) but `<audio>` and
+  # `<video>`, which both answer 0 for, against the spec's list.
+  it 'defaults tabIndex by the HTML list' do
+    s = session_with(<<~HTML)
+      <a id=a1 href="#">a</a><a id=a2>a</a><button id=b>b</button><iframe id=f></iframe><object id=o></object>
+      <details id=d><summary id=s1>x</summary><summary id=s2>y</summary></details><summary id=s3>z</summary>
+      <embed id=e src="x"><video id=v controls></video><div id=ce contenteditable>ce</div>
+      <svg><a id=sa><text>t</text></a></svg>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      ['a1', 'a2', 'b', 'f', 'o', 'd', 's1', 's2', 's3', 'e', 'v', 'ce', 'sa'].map((id) => document.getElementById(id).tabIndex)
+        .concat([document.createElementNS('http://www.w3.org/2000/svg', 'input').tabIndex])
+    JS
+    expect(got).to eq([0, 0, 0, 0, 0, -1, 0, -1, -1, -1, -1, -1, 0, -1])
   end
 end
