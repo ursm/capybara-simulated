@@ -62,6 +62,18 @@ module SimulatedSessionTeardown
     nil
   end
 
+  # The differences CSIM_ARENA_VERIFY=1 found between a session's trees and their arena copies, in every realm — or nil.
+  # Asked at the end because a verify throw inside a rendering step or an event handler is swallowed where it happens.
+  def arena_verify_failures(session)
+    return unless ENV['CSIM_ARENA_VERIFY'] == '1' && session.instance_variable_defined?(:@driver)
+
+    failures = session.driver.browser.evaluate_script('globalThis.__csimArenaVerifyFailures ? globalThis.__csimArenaVerifyFailures() : []')
+    failures.empty? ? nil : failures.uniq.join('; ')
+  rescue StandardError => e
+    warn "[spec] asking a session for its arena verify failures failed: #{e.class}: #{e.message}" unless e.message.include?('disposed')
+    nil
+  end
+
   def rust_decline_message(declines)
     "the Rust walk declined a page, which is then laid out as its root alone: #{declines.join('; ')}"
   end
@@ -99,6 +111,7 @@ RSpec.configure do |config|
     @__simulated_sessions = nil
     @__simulated_drivers  = nil
     declines = sessions.filter_map {|session| rust_declines(session) }
+    verify   = sessions.filter_map {|session| arena_verify_failures(session) }
     sessions.each do |session|
       dispose_simulated_session(session)
     end
@@ -107,6 +120,7 @@ RSpec.configure do |config|
     rescue StandardError => e
       warn "[spec] disposing a simulated driver failed: #{e.class}: #{e.message}"
     end
+    raise "the arena's copy of a tree fell out of step with it: #{verify.join('; ')}" unless verify.empty?
     raise rust_decline_message(declines) unless declines.empty? || RSpec.current_example.metadata[:rust_declines]
   end
 end

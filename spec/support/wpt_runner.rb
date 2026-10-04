@@ -1066,6 +1066,22 @@ module WptRunner
   # `run_reftest`) and reports its reference comparisons in the same shape — which
   # is what lets the gate, the allowlists and wpt_diag treat it like any other file.
   def run(rel)
+    result = run_variants(rel)
+    failures = arena_verify_failures
+    failures ? {completed: false, error: "arena verify: #{failures}"} : result
+  end
+
+  # Under CSIM_ARENA_VERIFY=1, the differences the file's pages left between a tree and its arena copy — or nil.
+  def arena_verify_failures
+    return unless ENV['CSIM_ARENA_VERIFY'] == '1' && @session
+
+    failures = @session.driver.browser.evaluate_script('globalThis.__csimArenaVerifyFailures ? globalThis.__csimArenaVerifyFailures() : []')
+    failures.empty? ? nil : failures.uniq.join('; ')
+  rescue StandardError
+    nil
+  end
+
+  def run_variants(rel)
     return run_reftest(rel) if reftest?(rel)
     variants = variant_queries(rel)
     return run_one(rel) if variants.empty?
