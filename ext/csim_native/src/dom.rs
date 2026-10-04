@@ -605,7 +605,7 @@ impl RealmArena {
     // handed out with a gen that would collide with an outstanding reference; a no-op if `id` is
     // already stale (double-free / a FinalizationRegistry callback for a slot resetArena already
     // recycled). Idempotent and safe against any wire id.
-    fn free_node(&mut self, id: NodeId) {
+    pub(crate) fn free_node(&mut self, id: NodeId) {
         let Some(slot) = self.slots.get_mut(id.idx as usize) else {
             return;
         };
@@ -990,12 +990,16 @@ impl RealmArena {
 // each realm's `__dom` function data (see `realm_id` / `realm` / `install`). Templates serve every realm.
 #[derive(Default)]
 pub(crate) struct Dom {
+    // This Dom's key among every isolate's (`node_handle::reclaim` frees only its own collected nodes' slots).
+    pub(crate) key: u64,
     pub(crate) realms: std::collections::HashMap<i32, RealmArena>,
     // The store-flip's native-backed `_attrs`: a full named-interceptor view over a node's
     // attributes Vec (get/set/query/delete/enumerate/descriptor), so `el._attrs.foo`, `for..in`,
     // `hasOwnProperty`, `Object.keys`, `delete` all work against the arena in C++ — faster than a
     // JS Proxy and a faithful stand-in for the native-backed endgame.
     attrs_view_template: Option<v8::Global<v8::ObjectTemplate>>,
+    // The template every node's object is made from (`node_handle`, `__dom.NodeBase`).
+    pub(crate) node_template: Option<v8::Global<v8::FunctionTemplate>>,
     // Each realm's style engine (made by `styleSheets`).
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
     // Each realm's Rust walk's last pass and the measures kept of it (`walk_reuse`).
@@ -1017,7 +1021,7 @@ pub(crate) struct Dom {
 // it: get_slot_mut borrows the scope, which every V8 call also needs.
 pub(crate) fn dom<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Dom {
     if scope.get_slot::<Dom>().is_none() {
-        scope.set_slot(Dom::default());
+        scope.set_slot(Dom { key: crate::node_handle::next_dom_key(), ..Dom::default() });
     }
     scope
         .get_slot_mut::<Dom>()
@@ -1135,6 +1139,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // rather than accumulating. Each op below carries `context_id` as its function data so it routes to
     // THIS realm's arena.
     let ns = v8::Object::new(scope);
+    // The constructor every node's object is made through (node_handle.rs).
+    if let Some(base) = crate::node_handle::base_function(scope) {
+        let key = v8::String::new(scope, "NodeBase").expect("a short string");
+        ns.set(scope, key.into(), base.into());
+    }
     // Bulk import + id-level query: build the arena from an already-parsed page (importNode /
     // syncChildren) and match over it natively (queryIds / matchesId).
     register(scope, ns, "importNode", import_node, context_id);
@@ -1294,9 +1303,10 @@ pub(crate) fn register(
     }
 }
 
-// __dom.importNode(localName, ns, parentNid, attrsFlat, prefix) -> nid. Adds an ELEMENT to the arena — the eager
+// __dom.importNode(localName, ns, parentNid, attrsFlat, prefix, node) -> nid. Adds an ELEMENT to the arena — the eager
 // create at construction, and a spec's bulk build. `attrsFlat` is a flat [name, value, name, value, …] array;
-// `parentNid` < 0 makes a root, else the node is appended to that (live) parent; `prefix` a string, or none.
+// `parentNid` < 0 makes a root, else the node is appended to that (live) parent; `prefix` a string, or none; `node`
+// the element's object, whose handle holds the slot from now on (`node_handle::bind`).
 fn import_node(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1308,6 +1318,7 @@ fn import_node(
     let (attributes, attr_u16) = read_attrs_flat(scope, args.get(3));
     let prefix = args.get(4).is_string().then(|| args.get(4).to_rust_string_lossy(scope).into_boxed_str());
     let cid = realm_id(scope, &args);
+    crate::node_handle::reclaim(dom(scope));
     let (arena, engine) = arena_and_engine(scope, cid);
     let id = arena.create(
         NodeData { local_name, ns, prefix, attributes, attr_u16, ..NodeData::of_kind(NodeKind::Element, Vec::new()) },
@@ -1316,12 +1327,14 @@ fn import_node(
     if let (Some(engine), Some(p)) = (engine, parent) {
         engine.children_changed(arena, p);
     }
+    crate::node_handle::bind(scope, args.get(5), cid, id);
     set_nid(scope, &mut rv, id);
 }
 
-// __dom.createNode(nodeType, data, parentNid, target, systemId) -> nid. Adds any other node — a Text / CDATA / Comment /
-// PI with its data (and a PI its target), a Document, a DocumentFragment or ShadowRoot, a DocumentType (its name the
-// data, its public identifier the target) — appended to `parentNid` when that is live.
+// __dom.createNode(nodeType, data, parentNid, target, systemId, node) -> nid. Adds any other node — a Text / CDATA /
+// Comment / PI with its data (and a PI its target), a Document, a DocumentFragment or ShadowRoot, a DocumentType (its
+// name the data, its public identifier the target) — appended to `parentNid` when that is live; `node` its object, as
+// importNode's.
 fn create_node(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1339,11 +1352,13 @@ fn create_node(
         LocalName::default()
     };
     let cid = realm_id(scope, &args);
+    crate::node_handle::reclaim(dom(scope));
     let (arena, engine) = arena_and_engine(scope, cid);
     let id = arena.create(NodeData { local_name, cdata: node_type == 4, doctype_ids, ..NodeData::of_kind(kind, data) }, parent);
     if let (Some(engine), Some(p)) = (engine, parent) {
         engine.children_changed(arena, p);
     }
+    crate::node_handle::bind(scope, args.get(5), cid, id);
     set_nid(scope, &mut rv, id);
 }
 
