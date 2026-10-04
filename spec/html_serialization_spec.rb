@@ -3,46 +3,31 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
-# An element serializes under its LOCAL name when it is an HTML, SVG or MathML element and under its qualified name
-# otherwise (HTML "serializing HTML fragments") — `foreignObject` keeps its case, as `localName` does — and only an
-# HTML element whose local name is a void element serializes as void: `createElementNS(HTML, 'BR')` is `<BR></BR>`.
-# The serializer had written the lowercased matching key for all of them. Chrome-measured.
+# HTML serialization is the arena's (serialize.rs): `innerHTML` of a processing instruction, a CDATA section, the
+# namespaced attributes of a foreign element, a template's contents and an `is` value — as HTML §13.3 writes each.
+# Chrome agrees on all but the processing instruction, which it closes `?>`; the spec's `>` is written.
 RSpec.describe 'HTML serialization' do
-  it 'serializes each element under the name the spec gives it' do
-    html = <<~HTML
-      <!DOCTYPE html><div id="d"><svg viewBox="0 0 1 1"><foreignObject><p>x</p></foreignObject><clipPath></clipPath></svg><math><mi>x</mi></math></div>
-    HTML
-    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+  let(:app) { ->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>x</body>']] } }
+
+  it 'writes each kind of node as HTML says' do
+    s = simulated_session(app)
     s.visit '/'
     got = s.evaluate_script(<<~JS)
-      (() => {
-        const d = document.getElementById('d');
-        d.appendChild(document.createElementNS('urn:x', 'p:Foo'));
-        d.appendChild(document.createElementNS('http://www.w3.org/1999/xhtml', 'BR'));
+      (function () {
+        var d = document.createElement('div');
+        d.appendChild(document.createProcessingInstruction('x', 'y z'));
+        var xml = new DOMParser().parseFromString('<r><![CDATA[a<b&c]]></r>', 'application/xml');
+        d.appendChild(document.importNode(xml.documentElement.firstChild, true));
+        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttributeNS('http://www.w3.org/1999/xlink', 'foo:href', '#a');
+        svg.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:lang', 'en');
+        svg.setAttributeNS('urn:x', 'p:q', '1');
+        d.appendChild(svg);
+        var t = document.createElement('template'); t.innerHTML = '<b>t</b>'; d.appendChild(t);
+        d.appendChild(document.createElement('div', {is: 'x-y'}));
         return d.innerHTML;
       })()
     JS
-    expect(got).to eq('<svg viewBox="0 0 1 1"><foreignObject><p>x</p></foreignObject><clipPath></clipPath></svg>' \
-                      '<math><mi>x</mi></math><p:Foo></p:Foo><BR></BR>')
-  end
-
-  # A `<template>` serializes its CONTENTS (its own child list is empty — it had serialized as `<template></template>`,
-  # `page.html` included); the obsolete void elements are void too; an element in no namespace is never void; and
-  # `&`, U+00A0, `<` and `>` are escaped in text and attribute values alike, `"` in an attribute. Chrome-measured.
-  it 'serializes template contents, void elements and escapes as a browser does' do
-    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><div id="d"></div>']] })
-    s.visit '/'
-    got = s.evaluate_script(<<~JS)
-      (() => {
-        const t = document.createElement('template');
-        t.innerHTML = '<p>x</p><keygen>';
-        const d = document.getElementById('d');
-        d.setAttribute('title', 'a<b>c&d"e\u00A0f\\'');
-        d.textContent = 'x<y>z&w\u00A0v"q\\'';
-        return [t.outerHTML, t.innerHTML, document.createElementNS(null, 'br').outerHTML, d.outerHTML];
-      })()
-    JS
-    expect(got).to eq(['<template><p>x</p><keygen></template>', '<p>x</p><keygen>', '<br></br>',
-                       %q(<div id="d" title="a&lt;b&gt;c&amp;d&quot;e&nbsp;f'">x&lt;y&gt;z&amp;w&nbsp;v"q'</div>)])
+    expect(got).to eq('<?x y z>a&lt;b&amp;c<svg xlink:href="#a" xml:lang="en" p:q="1"></svg><template><b>t</b></template><div is="x-y"></div>')
   end
 end

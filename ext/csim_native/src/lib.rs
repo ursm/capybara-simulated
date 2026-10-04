@@ -42,6 +42,7 @@ mod rendered;
 mod resolved;
 mod scroll_into_view;
 mod selector;
+mod serialize;
 mod sheets;
 // The style engine: stylo over the arena.
 mod style;

@@ -166,6 +166,10 @@ pub(crate) struct NodeData {
     // A slot's assigned nodes, in tree order, and a slotted node's slot: the flat tree the style engine walks.
     pub(crate) assigned: Vec<NodeId>,
     pub(crate) assigned_slot: Option<NodeId>,
+    // A `<template>`'s contents (the fragment `content` is), which no child list holds — what serializing it writes.
+    pub(crate) template_content: Option<NodeId>,
+    // The `is` value an element was made with (a customized built-in's) — serialized where it holds no `is` attribute.
+    pub(crate) is_value: Option<Box<str>>,
     // A form control's live value once dirty (a script's `.value`, typing), in UTF-16 code units; None while it is
     // its default — the `value` attribute, or a `<textarea>`'s text.
     pub(crate) value: Option<Box<[u16]>>,
@@ -242,6 +246,8 @@ impl NodeData {
             shadow_root: None,
             assigned: Vec::new(),
             assigned_slot: None,
+            template_content: None,
+            is_value: None,
             value: None,
             natural_size: None,
             pseudo_boxes: [None; 2],
@@ -1134,6 +1140,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setNaturalSize", set_natural_size, context_id);
     register(scope, ns, "linkPseudoBox", link_pseudo_box, context_id);
     register(scope, ns, "directionality", directionality, context_id);
+    register(scope, ns, "setTemplateContent", set_template_content, context_id);
+    register(scope, ns, "setIsValue", set_is_value, context_id);
     register(scope, ns, "setContainerMargins", set_container_margins, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
     register(scope, ns, "setAssignedNodes", set_assigned_nodes, context_id);
@@ -1215,6 +1223,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::validity::install(scope, ns, context_id);
     crate::input_value::install(scope, ns, context_id);
     crate::image_source::install(scope, ns, context_id);
+    crate::serialize::install(scope, ns, context_id);
     crate::html_parse::install(scope, ns, context_id);
     crate::url_ops::install(scope, ns, context_id);
     crate::text_codec::install(scope, ns, context_id);
@@ -1440,6 +1449,27 @@ fn set_value(
     arena.state_epoch += 1;
     if let Some(node) = arena.get_mut(id) {
         node.value = value;
+    }
+}
+
+// __dom.setTemplateContent(nid, contentNid): a `<template>`'s contents, the fragment `contentNid` (-1 for none).
+fn set_template_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let content = nid_arg(scope, &args, 1);
+    let cid = realm_id(scope, &args);
+    if let Some(node) = realm(scope, cid).get_mut_quietly(id) {
+        node.template_content = content;
+    }
+}
+
+// __dom.setIsValue(nid, value): the `is` value an element was made with (null for none).
+fn set_is_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let v = args.get(1);
+    let value = (!v.is_null_or_undefined()).then(|| v.to_rust_string_lossy(scope).into_boxed_str());
+    let cid = realm_id(scope, &args);
+    if let Some(node) = realm(scope, cid).get_mut_quietly(id) {
+        node.is_value = value;
     }
 }
 
