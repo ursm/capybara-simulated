@@ -38244,12 +38244,12 @@ fetch/api/response/response-consume.html:
 - name: 'Consume response''s body: from FormData to blob'
   reason: 'Asserts the blob''s type is the raw Content-Type lowercased (`multipart/form-data;
     boundary=…`, its space kept), which is Chrome''s. The Fetch Standard says otherwise:
-    "return a Blob whose contents are bytes and whose type attribute is the result of get
-    the MIME type with this", and "get the MIME type" is "the result of extracting a MIME
-    type from headers" — a MIME type record, serialized `multipart/form-data;boundary=…`
+    "return a Blob whose contents are bytes and whose type attribute is the result
+    of get the MIME type with this", and "get the MIME type" is "the result of extracting
+    a MIME type from headers" — a MIME type record, serialized `multipart/form-data;boundary=…`
     (mimesniff parsing.any.js asserts that serialization). Firefox extracts and serializes
-    as the spec says (lowercasing the result, as both engines'' blob types are) and fails
-    this subtest too.'
+    as the spec says (lowercasing the result, as both engines'' blob types are) and
+    fails this subtest too.'
 fetch/h1-parsing/h1-parsing.tentative.html:
 - name: COLON at <after-colon> should result in Network Error (fetch)
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -39127,6 +39127,26 @@ html/canvas/element/filters/2d.filter.value.html:
     …), a filter/rendering-effect subsystem we don't model (rule 1).
 html/canvas/element/layers/2d.layer.beginLayer-options.tentative.html:
 - name: Checks beginLayer works for different option parameter values
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.blur-from-outside-canvas.no-clipping.ctx-filter.html:
+- name: "== html/canvas/element/layers/2d.layer.blur-from-outside-canvas.no-clipping.ctx-filter-expected.html"
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.blur-from-outside-canvas.no-clipping.layer-filter.tentative.html:
+- name: "== html/canvas/element/layers/2d.layer.blur-from-outside-canvas.no-clipping.layer-filter.tentative-expected.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/canvas/element/layers/2d.layer.blur-from-outside-canvas.with-clipping.ctx-filter.html:
+- name: "== html/canvas/element/layers/2d.layer.blur-from-outside-canvas.with-clipping.ctx-filter-expected.html"
+  reason: Canvas Layers (beginLayer/endLayer) — an unshipped WICG proposal and a nested
+    compositing-layer subsystem (layer-scoped filter/shadow/alpha) we don't model
+    (rule 1). No shipping library or app uses it.
+html/canvas/element/layers/2d.layer.blur-from-outside-canvas.with-clipping.layer-filter.tentative.html:
+- name: "== html/canvas/element/layers/2d.layer.blur-from-outside-canvas.with-clipping.layer-filter.tentative-expected.html"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

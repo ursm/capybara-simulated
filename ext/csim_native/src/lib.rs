@@ -9,6 +9,7 @@
 // The Web Animations model: the timeline, animations and their effects' timing; and the ops a JS handle asks it with.
 mod animation_ops;
 mod animations;
+mod av1;
 mod canvas;
 mod canvas_path;
 mod css;
@@ -31,6 +32,7 @@ mod hints;
 mod hit_test;
 mod input_value;
 mod html_parse;
+mod image_decode;
 mod image_encode;
 mod image_source;
 // Layout: the records the walk builds (mod walk) laid out, driven by the `layoutBuild` op (mod walk_ops).
@@ -81,5 +83,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("unicode_class_ranges", magnus::function!(unicode::class_ranges, 1))?;
     // HTML's "encode" for a form the host submits in its legacy submission encoding.
     native.define_module_function("form_encode", magnus::function!(text_codec::form_encode, 2))?;
+    // An image resource's bytes decoded to RGBA, on whichever thread fetched them.
+    native.define_module_function("decode_image", magnus::function!(image_decode::decode_for_ruby, 3))?;
     Ok(())
 }

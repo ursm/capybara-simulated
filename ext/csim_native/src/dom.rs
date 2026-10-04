@@ -177,9 +177,9 @@ pub(crate) struct NodeData {
     // A form control's live value once dirty (a script's `.value`, typing), in UTF-16 code units; None while it is
     // its default — the `value` attribute, or a `<textarea>`'s text.
     pub(crate) value: Option<Box<[u16]>>,
-    // An `<img>`'s natural size once its image has decoded (`naturalWidth` / `naturalHeight`); None while it has not —
+    // An `<img>`'s natural size once its image has decoded, which the layout sizes it from; None while it has not —
     // no source, still loading, broken.
-    pub(crate) natural_size: Option<(f64, f64)>,
+    pub(crate) natural_size: Option<NaturalSize>,
     // An element's generated-content boxes, `::before` and `::after` — the nodes the JS side registered for them, which
     // no tree holds (`linkPseudoBox`) — for the walk to lay out as its first and last children.
     pub(crate) pseudo_boxes: [Option<NodeId>; 2],
@@ -1230,6 +1230,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::validity::install(scope, ns, context_id);
     crate::input_value::install(scope, ns, context_id);
     crate::image_source::install(scope, ns, context_id);
+    crate::image_decode::install(scope, ns, context_id);
     crate::image_encode::install(scope, ns, context_id);
     crate::serialize::install(scope, ns, context_id);
     crate::html_parse::install(scope, ns, context_id);
@@ -1497,7 +1498,37 @@ fn set_is_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     }
 }
 
-// __dom.setNaturalSize(nid, width, height): an `<img>`'s decoded size — or none (a width or height of 0: nothing decoded).
+// An image's natural dimensions and ratio (CSS Images 3 §4.1): a raster image's width and height; an SVG image's from
+// its root's `width` and `height` (absolute lengths) and `viewBox` — any of which it may not have.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct NaturalSize {
+    pub(crate) width: Option<f64>,
+    pub(crate) height: Option<f64>,
+    pub(crate) view_box: Option<(f64, f64)>,
+}
+
+impl NaturalSize {
+    // A raster image's.
+    pub(crate) fn sized(width: f64, height: f64) -> NaturalSize {
+        NaturalSize { width: Some(width), height: Some(height), view_box: None }
+    }
+    // The concrete size it is drawn at where nothing else sizes it (CSS Images 3 §5.2, the default sizing algorithm
+    // with no specified size): its own dimensions, a missing one from the other through the view box's ratio, else the
+    // default object size (300 × 150) — contained, keeping the ratio, where only a ratio is known.
+    pub(crate) fn concrete(self) -> (f64, f64) {
+        let ratio = self.view_box.map(|(w, h)| w / h);
+        match (self.width, self.height, ratio) {
+            (Some(w), Some(h), _) => (w, h),
+            (Some(w), None, r) => (w, r.map_or(150.0, |r| w / r)),
+            (None, Some(h), r) => (r.map_or(300.0, |r| h * r), h),
+            (None, None, Some(r)) => if r >= 2.0 { (300.0, 300.0 / r) } else { (150.0 * r, 150.0) },
+            (None, None, None) => (300.0, 150.0),
+        }
+    }
+}
+
+// __dom.setNaturalSize(nid[, width, height, viewBoxWidth, viewBoxHeight]): an `<img>`'s decoded image's natural size
+// (`NaturalSize`; NaN for one it has not) — or, with nothing after the nid, none: nothing decoded.
 fn set_natural_size(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1506,11 +1537,15 @@ fn set_natural_size(
     let Some(id) = nid_arg(scope, &args, 0) else {
         return;
     };
-    let w = args.get(1).number_value(scope).unwrap_or(0.0);
-    let h = args.get(2).number_value(scope).unwrap_or(0.0);
+    let [w, h, vw, vh] = [1, 2, 3, 4].map(|k| args.get(k).number_value(scope).filter(|v| v.is_finite() && *v >= 0.0));
+    let natural = (args.length() > 1).then(|| NaturalSize {
+        width: w,
+        height: h,
+        view_box: vw.zip(vh).filter(|&(vw, vh)| vw > 0.0 && vh > 0.0),
+    });
     let cid = realm_id(scope, &args);
     if let Some(node) = realm(scope, cid).get_mut(id) {
-        node.natural_size = (w > 0.0 && h > 0.0).then_some((w, h));
+        node.natural_size = natural;
     }
 }
 
@@ -3182,6 +3217,13 @@ pub(crate) fn u8_array<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> 
     let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
     let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
     v8::Uint8Array::new(scope, buffer, 0, len).map_or_else(|| v8::undefined(scope).into(), Into::into)
+}
+// …and a Uint8ClampedArray: pixels.
+pub(crate) fn u8_clamped_array<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> v8::Local<'s, v8::Value> {
+    let len = bytes.len();
+    let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
+    let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
+    v8::Uint8ClampedArray::new(scope, buffer, 0, len).map_or_else(|| v8::undefined(scope).into(), Into::into)
 }
 pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v8::Local<'s, v8::Float64Array> {
     let mut bytes = Vec::with_capacity(vals.len() * 8);

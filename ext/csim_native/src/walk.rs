@@ -59,7 +59,7 @@ impl WalkDisplay for style::properties::style_structs::Box {
     }
 }
 
-use crate::dom::{NodeId, NodeKind, RealmArena};
+use crate::dom::{NaturalSize, NodeId, NodeKind, RealmArena};
 use crate::style::StyleEngine;
 use crate::geometry::flat_children;
 use crate::layout::{MATH_LINE, MATH_MAX, MATH_MIN, MATH_NEG, MATH_SCALE, MATH_SUM};
@@ -889,6 +889,20 @@ struct Intrinsic {
     ratio: bool,
     ratio_only: bool,
 }
+
+impl Intrinsic {
+    // An image's — an `<img>`'s decoded one, an inline `<svg>` — from its natural size: its dimensions, a missing one
+    // through the view box's ratio else the default object size's; with no dimension, the view box as a ratio only.
+    fn of(n: NaturalSize) -> Intrinsic {
+        let i = |w: f64, h: f64, ratio: bool, ratio_only: bool| Intrinsic { w, h, ratio, ratio_only };
+        let (w, h) = n.concrete();
+        match (n.width, n.height, n.view_box) {
+            (Some(_), Some(_), _) => i(w, h, true, false),
+            (None, None, Some((vw, vh))) => i(vw, vh, true, true),
+            (_, _, vb) => i(w, h, vb.is_some(), false),
+        }
+    }
+}
 // A label's lines, at each line break it holds (CR LF, CR or LF: `LABEL_BREAK_RE`).
 fn split_label_lines(label: &[u16]) -> Vec<&[u16]> {
     let mut lines = Vec::new();
@@ -927,7 +941,7 @@ fn collapse_run(text: &[u16], mode: u8) -> Vec<u16> {
     out
 }
 // An svg `width` / `height` attribute: a number of px, `em` or `rem` (`svgAttrLength`).
-fn svg_length(v: &str, em: f64, rem: f64) -> Option<f64> {
+pub(crate) fn svg_length(v: &str, em: f64, rem: f64) -> Option<f64> {
     let t = v.trim();
     let (num, unit) = match t.find(|c: char| c.is_ascii_alphabetic()) {
         Some(i) => (&t[..i], t[i..].to_ascii_lowercase()),
@@ -945,7 +959,7 @@ fn svg_length(v: &str, em: f64, rem: f64) -> Option<f64> {
     }
 }
 // An svg `viewBox`: its width and height, where all four numbers are and both are positive (`parseViewBox`).
-fn view_box(v: &str) -> Option<(f64, f64)> {
+pub(crate) fn view_box(v: &str) -> Option<(f64, f64)> {
     let n: Vec<f64> = v.trim().split(|c: char| c.is_whitespace() || c == ',').filter(|p| !p.is_empty()).map(|p| p.parse::<f64>()).collect::<Result<_, _>>().ok()?;
     (n.len() == 4 && n.iter().all(|v| v.is_finite()) && n[2] > 0.0 && n[3] > 0.0).then_some((n[2], n[3]))
 }
@@ -2283,7 +2297,7 @@ impl<'a> Walk<'a> {
                 Intrinsic { ratio: true, ..sized(dim("width", 300.0), dim("height", 150.0)) }
             }
             "img" => match node.natural_size {
-                Some((w, h)) => Intrinsic { ratio: true, ..sized(w, h) },
+                Some(natural) => Intrinsic::of(natural),
                 None => sized(16.0, 16.0),
             },
             "input" => {
@@ -2393,18 +2407,7 @@ impl<'a> Walk<'a> {
         let em = font_size(&*self.style(id)?);
         let root = self.root_font_size()?;
         let length = |name: &str| node.get_attr(name).and_then(|v| svg_length(v, em, root));
-        let vb = node.get_attr("viewBox").and_then(view_box);
-        let (w, h) = (length("width"), length("height"));
-        let i = |w: f64, h: f64, ratio: bool, ratio_only: bool| Intrinsic { w, h, ratio, ratio_only };
-        Ok(match (w, h) {
-            (Some(w), Some(h)) => i(w, h, true, false),
-            (Some(w), None) => i(w, vb.map_or(150.0, |(vw, vh)| w * vh / vw), vb.is_some(), false),
-            (None, Some(h)) => i(vb.map_or(300.0, |(vw, vh)| h * vw / vh), h, vb.is_some(), false),
-            (None, None) => match vb {
-                Some((vw, vh)) => i(vw, vh, true, true),
-                None => i(300.0, 150.0, false, false),
-            },
-        })
+        Ok(Intrinsic::of(NaturalSize { width: length("width"), height: length("height"), view_box: node.get_attr("viewBox").and_then(view_box) }))
     }
     // The root element's font size, which an `rem` resolves against.
     fn root_font_size(&self) -> Result<f64, &'static str> {

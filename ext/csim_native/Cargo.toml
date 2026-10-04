@@ -80,12 +80,23 @@ ryu-js = "1"
 # held inline — a path is built one call per point, and a heap allocation each costs more than the op.
 smallvec = "1"
 # A canvas serialised as a file (image_encode.rs: toDataURL / toBlob / the screenshot): PNG, JPEG and lossless WebP,
-# pure Rust, so no system image library is needed at run time; and the Display P3 profile a P3 canvas's file carries
-# (moxcms, ICC colour management).
+# pure Rust, so no system image library is needed at run time; and ICC colour management (moxcms) — the Display P3
+# profile a P3 canvas's file carries, and (image_decode.rs) a profiled image's colours.
 moxcms = "0.9"
 png = "0.18"
 jpeg-encoder = "0.7"
 image-webp = "0.2"
+# An image's bytes decoded to RGBA (image_decode.rs: an `<img>`, a pattern / drawImage source, createImageBitmap), pure
+# Rust: the raster formats, SVG (resvg), AVIF (its container read by avif-parse, its AV1 by rav1d, without the
+# assembly so no assembler is needed to build it).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
+resvg = "0.48"
+avif-parse = "2"
+rav1d = { version = "1.1", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+# …a CMYK JPEG's raw inks (the `image` crate hands back RGB), an SVG's root size attributes, and dav1d's EAGAIN.
+zune-jpeg = "0.5"
+roxmltree = "0.21"
+libc = "0.2"
 
 # The HTML parser: Servo's html5ever — tokenizer and tree builder, the select parser relaxation and `selectedcontent`
 # included — run natively, the page side taking the tree it builds as steps (html_parse.rs).

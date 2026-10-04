@@ -3584,7 +3584,7 @@ module Capybara
       ASSET_SRC_MAX    = 4096
 
       # Decoded-image cache: SHA-256 of the encoded bytes => {'width'=>, 'height'=>,
-      # 'bytes'=> packed RGBA String}. Decoding an image (libvips) is the expensive
+      # 'bytes'=> packed RGBA String}. Decoding an image is the expensive
       # step, so — like the V8 bytecode cache and the parsed-stylesheet cache — we keep
       # the decoded pixels content-addressed and reuse them for every `<img>` whose
       # bytes match, across elements AND visits. The bytes themselves come through
@@ -7272,32 +7272,14 @@ module Capybara
         n
       end
 
-      # ── Image decode (libvips) ─────────────────────────────────────
+      # ── Image loads ─────────────────────────────────────────────────
       #
-      # Called by the JS bridge whenever a Canvas / OffscreenCanvas
-      # path needs raw RGBA pixels — `drawImage(image, …)` whose
-      # source is an HTMLImageElement / Blob / ImageBitmap with
-      # encoded bytes still on the wire. ruby-vips decodes any format
-      # libvips supports (PNG, JPEG, WebP, GIF, …) into a contiguous
-      # row-major RGBA buffer. Returns `{width, height, refId}` — the
-      # raw bytes land in the transfer-buffer registry so the JS side
-      # fetches them as a `Uint8Array` (tag-driven binary marshalling) rather
-      # than building a 423 MB latin-1 + base64 intermediate for the
-      # 8900×8900 frames Discourse uploads exercise. Optional
-      # `max_w`/`max_h` lets the caller pre-shrink for cheap OCR-style
-      # "downscale before pixel-touch" flows.
-      # Load an image resource for an `<img>` (or a pattern/drawImage source):
-      # resolve the URL against the current document, fetch the bytes, and decode
-      # them to an RGBA buffer via libvips. Returns `{width, height, refId}` (the
-      # raw pixels ride the transfer registry, like decode_image) or nil when the
-      # fetch or decode fails (a broken image → the `<img>` fires `error`).
-      # Fetch + decode an `<img>` resource to an RGBA bitmap for the drawImage /
-      # createPattern surface, the decode memoized by content (see `@@image_cache`). Returns
-      # {'width','height','refId'} — a FRESH transfer stash per call, since
-      # `fetchTransfer` consumes the registry entry — or nil when the resource can't be
-      # fetched or decoded (the caller fires `error`). A scheme with no host-side reader
-      # yet (blob:, whose bytes live in the VM) returns {'unsupported' => true} so the
-      # caller stays inert rather than reporting a spuriously-broken image.
+      # Fetch + decode an `<img>` resource to an RGBA bitmap for the drawImage / createPattern surface (the decode is
+      # csim_native's, memoized by content: see `@@image_cache`). Returns {'width','height','refId'} — the pixels ride
+      # the transfer registry, a FRESH stash per call, since `fetchTransfer` consumes the entry — or nil when the
+      # resource can't be fetched or decoded (the caller fires `error`). A scheme with no host-side reader yet (blob:,
+      # whose bytes live in the VM) returns {'unsupported' => true} so the caller stays inert rather than reporting a
+      # spuriously-broken image.
       # `cors` (a `crossorigin` <img>) fetches under CORS: a cross-origin response without a
       # matching Access-Control-Allow-Origin fails the load. `credentials` is 'include' for
       # crossorigin="use-credentials", 'same-origin' (uncredentialed cross-origin) otherwise.
@@ -7307,17 +7289,8 @@ module Capybara
         Thread.current[:csim_image_meta] = nil
         entry = cached_image(key, cors, credentials)
         return {'unsupported' => true} if entry == :unsupported
-        # A valid zero-area image: complete + not broken, but no pixels. rsvg throws
-        # before dimensions can be read, so the intrinsic size collapses to 0×0 (a
-        # browser would keep the non-zero axis, e.g. 0×100 → naturalHeight 100) — a minor
-        # divergence, immaterial to createPattern / drawImage, which both need a
-        # non-zero area.
-        tainted = image_tainted?(key, cors)
-        return {'zeroSize' => true, 'width' => 0, 'height' => 0, 'tainted' => tainted} if entry == :zero_size
         return undecodable_image_result unless entry
-        r = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace'], 'tainted' => tainted, 'encoded' => entry['encoded'], 'meta' => Thread.current[:csim_image_meta]}
-        r['refIdP3'] = transfer_buffer_stash(entry['bytesP3']) if entry['bytesP3']
-        r
+        image_payload(entry, image_tainted?(key, cors), Thread.current[:csim_image_meta])
       end
 
       # Start an async <img> load: resolve + capture the requesting document identity on THIS
@@ -7382,10 +7355,8 @@ module Capybara
         Thread.current[:csim_image_meta] = nil
         entry = cached_image(key, cors, credentials, origin_base: origin_base)
         return {'unsupported' => true} if entry == :unsupported
-        tainted = origin_tainted?(key, cors, client_url: origin_base)
-        return {'zeroSize' => true, 'width' => 0, 'height' => 0, 'tainted' => tainted} if entry == :zero_size
         return undecodable_image_result unless entry
-        { entry: entry, tainted: tainted, meta: Thread.current[:csim_image_meta] }
+        { entry: entry, tainted: origin_tainted?(key, cors, client_url: origin_base), meta: Thread.current[:csim_image_meta] }
       end
       # A response that arrived but is no image: the element is broken, the resource was still
       # fetched — its Resource Timing entry carries the real status and size.
@@ -7446,9 +7417,18 @@ module Capybara
       private def image_result_payload(r)
         return nil if r.nil?
         return r unless r.is_a?(Hash) && r.key?(:entry)
-        entry = r[:entry]
-        out = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace'], 'tainted' => r[:tainted], 'encoded' => entry['encoded'], 'meta' => r[:meta]}
-        out['refIdP3'] = transfer_buffer_stash(entry['bytesP3']) if entry['bytesP3']
+        image_payload(r[:entry], r[:tainted], r[:meta])
+      end
+
+      # What an `<img>` applies of a decoded entry (`_applyImageResult`): its size, natural size and colour space, its
+      # bitmaps stashed for transfer — none for an image with no pixels, which loads with nothing to draw — and its
+      # taint verdict and Resource Timing figures.
+      private def image_payload(entry, tainted, meta)
+        out = {'width' => entry['width'], 'height' => entry['height'], 'natural' => entry['natural'], 'tainted' => tainted, 'encoded' => entry['encoded'], 'meta' => meta}
+        return out.merge('noPixels' => true) if entry['noPixels']
+        out['colorSpace'] = entry['colorSpace']
+        out['refId']      = transfer_buffer_stash(entry['bytes'])
+        out['refIdP3']    = transfer_buffer_stash(entry['bytesP3']) if entry['bytesP3']
         out
       end
 
@@ -7490,9 +7470,15 @@ module Capybara
         cache_key = Digest::SHA256.digest(bytes)
         cached = @@image_cache_lock.synchronize { @@image_cache[cache_key] }
         return cached if cached
-        entry = decode_or_nil(bytes)
-        # nil (broken) and :zero_size (valid but zero-area) both carry no bitmap to cache.
-        return entry unless entry.is_a?(Hash)
+        # The decode (csim_native's image_decode.rs, off the GVL): {'width', 'height', 'natural', 'colorSpace',
+        # 'bytes'[, 'bytesP3']} — `natural` the natural size the layout sizes an `<img>` from ([width, height, view box
+        # width, view box height], NaN where it has none), `colorSpace` ('srgb' | 'display-p3') the space the bytes are
+        # in, for drawImage to convert from, `bytesP3` a wide-gamut (CMYK / Adobe RGB) source's Display P3 rendering
+        # beside the sRGB one — with 'noPixels' and no bytes for an image that loads with nothing to draw (one with no
+        # area, an SVG `width="0"`; one corrupt past the header that gave its size); or nil for no image (the caller
+        # fires `error`).
+        entry = Native.decode_image(bytes, 0, 0)
+        return nil unless entry
         entry['encoded'] = bytes.bytesize   # the resource's size for its Resource Timing entry
         @@image_cache_lock.synchronize do
           @@image_cache.clear if @@image_cache.size >= IMAGE_CACHE_MAX
@@ -7536,119 +7522,6 @@ module Capybara
         else
           :unsupported
         end
-      end
-
-      # Decode an encoded image's bytes (createImageBitmap's blob path, a service
-      # worker's image response), optionally downscaled to fit within (max_w, max_h)
-      # via its resize options.
-      def decode_image(bytes, max_w = nil, max_h = nil)
-        entry = decode_or_nil(bytes.to_s.b, max_w, max_h)
-        # nil (broken) or :zero_size — createImageBitmap of either rejects (a zero-area
-        # source is an InvalidStateError), so surface nil for the caller to reject on.
-        return nil unless entry.is_a?(Hash)
-        r = {'width' => entry['width'], 'height' => entry['height'], 'refId' => transfer_buffer_stash(entry['bytes']), 'colorSpace' => entry['colorSpace']}
-        r['refIdP3'] = transfer_buffer_stash(entry['bytesP3']) if entry['bytesP3']
-        r
-      end
-
-      # Decode an encoded image (PNG/JPEG/GIF/WEBP/SVG/…) to a packed RGBA bitmap via
-      # libvips, optionally downscaled to fit within (max_w, max_h). `access:
-      # :sequential` keeps libvips from applying the source ICC profile mid-stream (it
-      # shifts RGBA by ±2 vs a raw decode). Returns {'width','height','bytes','colorSpace'};
-      # `colorSpace` ('srgb' | 'display-p3') tells drawImage which space the bytes are in
-      # so it can convert into the destination canvas's colour space.
-      #
-      # Detection is by the profile's description text (both Display-P3 and the sRGB /
-      # Adobe profiles carry a readable name). A plain (unprofiled) OR sRGB-profiled RGB
-      # image is trusted as sRGB verbatim — the common case (incl. photos exported as
-      # sRGB) stays byte-identical. A Display-P3 image keeps its raw bytes: a Display-P3
-      # PNG already stores P3-encoded values, so we only TAG it and let drawImage do the
-      # gamut conversion. Adobe-RGB and CMYK aren't among the two predefined canvas colour
-      # spaces, so they're ICC-transformed to sRGB (their wide gamut is lost — a documented
-      # gap). Any other profiled non-RGB source (grayscale / Lab) is colour-converted to
-      # sRGB so it lands as packed RGB, never kept raw.
-      private def decode_rgba(bytes, max_w = nil, max_h = nil)
-        img = Vips::Image.new_from_buffer(bytes, '', access: :sequential)
-        # RGB (incl. 16-bit `rgb16`); a non-RGB profiled source is colour-converted below.
-        rgb = %i[srgb rgb rgb16].include?(img.interpretation)
-        color_space = 'srgb'
-        p3_img = nil   # a second, Display-P3 rendering for a wide-gamut source (see below)
-        if img.get_fields.include?('icc-profile-data')
-          icc = img.get('icc-profile-data')
-          if rgb && (icc.include?('Display P3') || icc.include?('DCI-P3'))
-            color_space = 'display-p3'   # wide-gamut RGB: raw bytes are already P3-encoded
-          elsif img.interpretation == :cmyk || icc.include?('Adobe')
-            # A wide-gamut (Adobe-RGB / CMYK) profile can't be represented by a single
-            # buffer: an sRGB canvas needs the colour CLIPPED to sRGB, a Display-P3 canvas
-            # needs it PRESERVED in P3 (and those differ — ICC gamut-mapping to sRGB isn't a
-            # matrix clip of the P3 value). So decode BOTH renderings via libvips' built-in
-            # profiles; drawImage picks by the destination canvas's colour space. icc_transform
-            # needs random access, so re-decode without `access: :sequential`.
-            base = Vips::Image.new_from_buffer(bytes, '')
-            begin
-              img    = base.icc_transform('srgb', embedded: true)
-              p3_img = base.icc_transform('p3',   embedded: true)
-            rescue StandardError
-              img = img.colourspace('srgb'); p3_img = nil
-            end
-          elsif !rgb
-            img = img.colourspace('srgb')   # profiled grayscale / Lab → packed sRGB RGB
-          end
-          # else: an sRGB-profiled (or other) RGB image → trust the raw bytes as sRGB.
-        elsif !rgb
-          img = img.colourspace('srgb')
-        end
-        pack = lambda do |i|
-          i = i.cast('uchar', shift: true) if i.format == :ushort   # 16-bit source → 8-bit, scaled
-          i = i.bandjoin(255) if i.bands < 4
-          i
-        end
-        img    = pack.call(img)
-        p3_img = pack.call(p3_img) if p3_img
-        if max_w && max_h && max_w.to_i > 0 && max_h.to_i > 0 &&
-           (img.width > max_w.to_i || img.height > max_h.to_i)
-          shrink = [img.width.to_f / max_w.to_i, img.height.to_f / max_h.to_i].max
-          if shrink > 1
-            img    = img.resize(1.0 / shrink)
-            p3_img = p3_img.resize(1.0 / shrink) if p3_img
-          end
-        end
-        out = {'width' => img.width, 'height' => img.height, 'bytes' => img.write_to_memory, 'colorSpace' => color_space}
-        # The P3 rendering is best-effort: libvips is lazy, so an ICC fault surfaces only
-        # here at sink evaluation — it must not break the already-rendered sRGB image, just
-        # drop the wide-gamut variant (that image then won't preserve wide colours in a P3 canvas).
-        if p3_img
-          begin
-            out['bytesP3'] = p3_img.write_to_memory
-          rescue StandardError
-            nil
-          end
-        end
-        out
-      end
-
-      # `decode_rgba` guarded. Outcomes:
-      #   Hash       — a decoded {'width','height','bytes'} bitmap
-      #   :zero_size — a VALID image with a non-positive intrinsic dimension (rsvg refuses
-      #                to rasterize an SVG whose width|height is 0). Browsers still load it,
-      #                reporting a zero-area bitmap, so this is "available but empty"
-      #                (bad usability → createPattern null / drawImage no-op), NOT broken.
-      #   nil        — an undecodable / corrupt body: a normal "broken image" outcome
-      #                (the caller fires `error` / rejects the ImageBitmap promise)
-      # A Vips::Error is a quiet outcome, not stderr noise; genuine host faults (missing
-      # libvips, OOM) still warn via `host_image_op`. The `bad dimensions` signal is the
-      # rsvg loader's own diagnostic for a non-positive canvas (libvips-version-coupled
-      # text; a corrupt raster / malformed SVG raises a different, non-matching message);
-      # it also covers a fully DIMENSIONLESS SVG that a browser would instead render at
-      # the 300×150 CSS default — a bounded, documented divergence, still a net
-      # improvement over the old nil→broken→InvalidStateError.
-      private def decode_or_nil(bytes, max_w = nil, max_h = nil)
-        decode_rgba(bytes, max_w, max_h)
-      rescue Vips::Error => e
-        e.message.include?('bad dimensions') ? :zero_size : nil
-      rescue LoadError, StandardError => e
-        warn "[capybara-simulated] image decode failed: #{e.class}: #{e.message[0, 200]}"
-        nil
       end
 
       private def host_image_op(name)
