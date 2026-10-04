@@ -71,12 +71,11 @@ impl Edge {
     }
     // Point it at `to`'s handle — none where `to` has none, or none any more.
     fn set(&self, to: Option<&Link>) {
-        let empty = Member::empty();
         // SAFETY: the main thread, which alone writes edges; the assignment runs Member's write barrier.
         unsafe {
             match to.and_then(|l| l.0.as_ref()) {
                 Some(w) => (*self.0.get()).set(w),
-                None => (*self.0.get()).set(&empty),
+                None => NO_EDGE.with(|empty| (*self.0.get()).set(empty)),
             }
         }
     }
@@ -84,6 +83,11 @@ impl Edge {
         // SAFETY: an edge points at a handle the collector keeps alive while this handle is.
         unsafe { (*self.0.get()).get() }
     }
+}
+
+thread_local! {
+    // The empty member an edge is cleared to, made once a thread rather than per clear.
+    static NO_EDGE: Member<NodeHandle> = Member::empty();
 }
 
 // A node's handle as its arena slot holds it: weakly — the slot is freed when the handle is collected, never the other
@@ -99,16 +103,21 @@ impl Link {
 
 // The arena's side: `parent`'s children are `kids`; from `from` on, each one's parent and next-sibling edges are
 // rewritten, and the parent's first-child edge where `from` is 0. `link_of` finds a node's link.
-pub(crate) fn relink<'a>(parent: Option<&'a Link>, kids: &[NodeId], from: usize, link_of: impl Fn(NodeId) -> Option<&'a Link>) {
+pub(crate) fn relink<'a>(parent: Option<&'a Link>, kids: &[NodeId], from: usize, to: usize, link_of: impl Fn(NodeId) -> Option<&'a Link>) {
+    let end = kids.len().min(to);
+    let mut here = kids.get(from).and_then(|&k| link_of(k));
     if from == 0 {
         if let Some(p) = parent.and_then(Link::handle) {
-            p.first.set(kids.first().and_then(|&k| link_of(k)));
+            p.first.set(here);
         }
     }
-    for i in from..kids.len() {
-        let Some(h) = link_of(kids[i]).and_then(Link::handle) else { continue };
-        h.parent.set(parent);
-        h.next.set(kids.get(i + 1).and_then(|&k| link_of(k)));
+    for i in from..end {
+        let next = kids.get(i + 1).and_then(|&k| link_of(k));
+        if let Some(h) = here.and_then(Link::handle) {
+            h.parent.set(parent);
+            h.next.set(next);
+        }
+        here = next;
     }
 }
 // …and a node out of its parent: no parent, no next sibling.
@@ -118,11 +127,12 @@ pub(crate) fn unlink(link: &Link) {
         h.next.set(None);
     }
 }
-// What a node's handle says of the tree, for verify mode: its parent's, first child's and next sibling's slots.
-pub(crate) fn edges(link: &Link) -> Option<[Option<NodeId>; 3]> {
+// What a node's handle says of the tree, for verify mode: its parent's, first child's and next sibling's slots, each with
+// its realm (a slot is a realm's); and the realm of the node's own.
+pub(crate) fn edges(link: &Link) -> Option<([Option<(i32, NodeId)>; 3], i32)> {
     let h = link.handle()?;
-    let nid = |e: &Edge| e.get().and_then(|t| t.nid.get());
-    Some([nid(&h.parent), nid(&h.first), nid(&h.next)])
+    let slot = |e: &Edge| e.get().and_then(|t| Some((t.realm.get(), t.nid.get()?)));
+    Some(([slot(&h.parent), slot(&h.first), slot(&h.next)], h.realm.get()))
 }
 
 // An isolate's slots of collected nodes, waiting to be freed: (realm, slot). Owned by its `Dom`, which the handles only

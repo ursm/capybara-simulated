@@ -680,24 +680,25 @@ impl RealmArena {
         if let Some(c) = self.get_mut(child) {
             c.child_index = pos;
         }
-        self.relink(parent, pos.saturating_sub(1));
+        self.relink(parent, pos.saturating_sub(1), usize::MAX);
     }
 
     // The handles' tree edges for `parent`'s children from `from` on (`node_handle::relink`).
-    fn relink(&self, parent: NodeId, from: usize) {
+    fn relink(&self, parent: NodeId, from: usize, to: usize) {
         let Some(p) = self.get(parent) else { return };
-        crate::node_handle::relink(Some(&p.link), &p.children, from, |k| self.get(k).map(|n| &n.link));
+        crate::node_handle::relink(Some(&p.link), &p.children, from, to, |k| self.get(k).map(|n| &n.link));
     }
     // For verify mode: where `id`'s handle's edges disagree with the slot's tree — its parent, its first child and its
     // next sibling, each the one the slot has where that one has a handle too — or None.
     pub(crate) fn edge_mismatch(&self, id: NodeId) -> Option<String> {
         let n = self.get(id)?;
-        let got = crate::node_handle::edges(&n.link)?;
+        let (got, realm) = crate::node_handle::edges(&n.link)?;
         let handled = |k: NodeId| self.get(k).is_some_and(|d| crate::node_handle::edges(&d.link).is_some());
         let parent = n.parent.filter(|&p| handled(p));
         let first = n.children.first().copied().filter(|&c| handled(c));
         let next = n.parent.and_then(|p| self.get(p)).and_then(|p| p.children.get(n.child_index + 1).copied()).filter(|&c| handled(c));
-        let want = [parent, first, next];
+        // (…each in this slot's realm, as the node's handle says it is)
+        let want = [parent, first, next].map(|k| k.map(|k| (realm, k)));
         (got != want).then(|| format!("handle edges {got:?}, tree {want:?}"))
     }
     // `id`'s handle is `link`: its edges written where it is — under its parent, and over its children.
@@ -705,10 +706,12 @@ impl RealmArena {
         let Some(node) = self.get_mut_quietly(id) else { return };
         node.link = link;
         let (parent, at) = (node.parent, node.child_index);
-        if let Some(p) = parent {
-            self.relink(p, at.saturating_sub(1));
+        match parent {
+            Some(p) => self.relink(p, at.saturating_sub(1), usize::MAX),
+            // (…a root here: whatever tree the handle was in before is no edge of it now)
+            None => crate::node_handle::unlink(&self.get(id).expect("the node just linked").link),
         }
-        self.relink(id, 0);
+        self.relink(id, 0, usize::MAX);
     }
 
     // A new node, appended to `parent` when that is live (a stale parent nid leaves it a detached root).
@@ -825,7 +828,7 @@ impl RealmArena {
     pub(crate) fn detach(&mut self, child: NodeId) {
         self.state_epoch += 1;
         let Some((old, at)) = self.get(child).and_then(|n| Some((n.parent?, n.child_index))) else { return };
-        let mut from = at;
+        let (mut from, mut one) = (at, true);
         if let Some(o) = self.get_mut(old) {
             match o.children.get(at) {
                 Some(&c) if c == child => {
@@ -833,11 +836,11 @@ impl RealmArena {
                 }
                 _ => {
                     o.children.retain(|&c| c != child);
-                    from = 0;
+                    (from, one) = (0, false);
                 }
             }
         }
-        self.reindex_children(old, from);
+        self.reindex_children(old, from, one);
         if let Some(c) = self.get_mut(child) {
             c.parent = None;
             crate::node_handle::unlink(&c.link);
@@ -898,7 +901,7 @@ impl RealmArena {
                 if let Some(c) = self.get_mut(child) {
                     c.parent = Some(parent);
                 }
-                self.reindex_children(parent, i);
+                self.reindex_children(parent, i, true);
             }
             None => {
                 if let Some(c) = self.get_mut(child) {
@@ -914,7 +917,7 @@ impl RealmArena {
     // by nothing a layout walk or a memo keys on — the change itself is the parent's, which `get_mut` stamped. Stamped
     // as a change of each, every sibling after a removed child was walked again rather than spliced back (a 400-item
     // list, `remove()` of the 200th: 203 records walked, 3 once it is not).
-    fn reindex_children(&mut self, parent: NodeId, from: usize) {
+    fn reindex_children(&mut self, parent: NodeId, from: usize, one: bool) {
         let len = self.get(parent).map_or(0, |p| p.children.len());
         for i in from..len {
             let Some(c) = self.get(parent).and_then(|p| p.children.get(i).copied()) else { break };
@@ -923,7 +926,7 @@ impl RealmArena {
             }
         }
         // (…and the handles' edges, from the child before the first that moved: its next sibling did)
-        self.relink(parent, from.saturating_sub(1));
+        self.relink(parent, from.saturating_sub(1), if one { from + 1 } else { usize::MAX });
     }
 
     // ── element-tree navigation (all gen-checked: a stale edge is skipped, never followed) ──
@@ -1929,7 +1932,7 @@ fn sync_children(
         if let Some(o) = st.get_mut(op) {
             o.children = kept;
         }
-        st.reindex_children(op, 0);
+        st.reindex_children(op, 0, false);
     }
     // Null the .parent of children DROPPED from this parent (were here, gone now, still pointing
     // here). Otherwise a detached subtree keeps a phantom upward chain and an element-rooted query
@@ -1952,7 +1955,7 @@ fn sync_children(
     if let Some(p) = st.get_mut(parent) {
         p.children = kids;
     }
-    st.reindex_children(parent, 0);
+    st.reindex_children(parent, 0, false);
     if let Some(engine) = engine {
         for &n in arrived.iter().chain(&left) {
             engine.node_left(st, n);
