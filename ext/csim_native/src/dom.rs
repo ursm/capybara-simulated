@@ -990,8 +990,8 @@ impl RealmArena {
 // each realm's `__dom` function data (see `realm_id` / `realm` / `install`). Templates serve every realm.
 #[derive(Default)]
 pub(crate) struct Dom {
-    // This Dom's key among every isolate's (`node_handle::reclaim` frees only its own collected nodes' slots).
-    pub(crate) key: u64,
+    // The slots of the nodes V8 collected, to be freed (`node_handle::reclaim`).
+    pub(crate) reclaim: std::sync::Arc<crate::node_handle::Reclaim>,
     pub(crate) realms: std::collections::HashMap<i32, RealmArena>,
     // The store-flip's native-backed `_attrs`: a full named-interceptor view over a node's
     // attributes Vec (get/set/query/delete/enumerate/descriptor), so `el._attrs.foo`, `for..in`,
@@ -1021,7 +1021,7 @@ pub(crate) struct Dom {
 // it: get_slot_mut borrows the scope, which every V8 call also needs.
 pub(crate) fn dom<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Dom {
     if scope.get_slot::<Dom>().is_none() {
-        scope.set_slot(Dom { key: crate::node_handle::next_dom_key(), ..Dom::default() });
+        scope.set_slot(Dom::default());
     }
     scope
         .get_slot_mut::<Dom>()
@@ -1144,6 +1144,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
         let key = v8::String::new(scope, "NodeBase").expect("a short string");
         ns.set(scope, key.into(), base.into());
     }
+    // …and the realm's id, which spaces its nodes' handle ids apart from every other realm's (dom-nodes.js `Node`).
+    let key = v8::String::new(scope, "realmId").expect("a short string");
+    let id = v8::Integer::new(scope, context_id);
+    ns.set(scope, key.into(), id.into());
     // Bulk import + id-level query: build the arena from an already-parsed page (importNode /
     // syncChildren) and match over it natively (queryIds / matchesId).
     register(scope, ns, "importNode", import_node, context_id);
