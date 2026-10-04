@@ -222,6 +222,8 @@ pub(crate) const STATE_DIRTY_BY_USER: u32 = 1 << 12;
 pub(crate) const STATE_CUSTOM_ERROR: u32 = 1 << 13;
 pub(crate) const STATE_USER_INTERACTED: u32 = 1 << 14;
 pub(crate) const STATE_HAS_FILES: u32 = 1 << 15;
+// …and, on a shadow root, that it delegates focus (`attachShadow`'s `delegatesFocus`).
+pub(crate) const STATE_DELEGATES_FOCUS: u32 = 1 << 16;
 
 
 impl NodeData {
@@ -750,13 +752,14 @@ impl RealmArena {
         }
     }
 
-    // `root` is the shadow root of `host`.
-    pub(crate) fn set_shadow_host(&mut self, root: NodeId, host: NodeId) {
+    // `root` is the shadow root of `host`, delegating focus or not.
+    pub(crate) fn set_shadow_host(&mut self, root: NodeId, host: NodeId, delegates_focus: bool) {
         if self.get(host).is_none() {
             return;
         }
         if let Some(node) = self.get_mut(root) {
             node.host = Some(host);
+            node.state = if delegates_focus { node.state | STATE_DELEGATES_FOCUS } else { node.state & !STATE_DELEGATES_FOCUS };
             self.has_shadow_hosts = true;
         }
         if let Some(node) = self.get_mut(host) {
@@ -1221,6 +1224,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::hit_test::install(scope, ns, context_id);
     crate::scroll_into_view::install(scope, ns, context_id);
     crate::rendered::install(scope, ns, context_id);
+    crate::focus::install(scope, ns, context_id);
     crate::resolved::install(scope, ns, context_id);
     crate::mime::install(scope, ns, context_id);
     crate::font_faces::install(scope, ns, context_id);
@@ -1670,7 +1674,7 @@ fn set_target(
     realm(scope, cid).set_target(doc, fragments);
 }
 
-// __dom.setShadowHost(rootNid, hostNid): the shadow root `rootNid` is attached to `hostNid`.
+// __dom.setShadowHost(rootNid, hostNid, delegatesFocus): the shadow root `rootNid` is attached to `hostNid`.
 fn set_shadow_host(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -1681,7 +1685,7 @@ fn set_shadow_host(
     };
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
-    arena.set_shadow_host(root, host);
+    arena.set_shadow_host(root, host, args.get(2).is_true());
     if let Some(engine) = engine {
         engine.shadow_attached(arena, host);
     }

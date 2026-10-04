@@ -22,6 +22,7 @@ mod document_encoding;
 mod dom;
 mod dom_matrix;
 mod element_state;
+mod focus;
 // Native text metrics (fontations) — used IN-PROCESS by inline layout (mod layout); the JS side
 // registers a font (registerFontPath) to a handle it names the face by (`walkFace`).
 mod font;

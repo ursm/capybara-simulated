@@ -643,7 +643,7 @@ fn css_image_urls(arena: &RealmArena, root: NodeId) -> Vec<(&'static str, String
 
 // One question asked of the realm's arena and its style engine at the page's clock `now`: what it answers, or nothing
 // where the realm has no engine or the engine failed a verification (thrown here).
-fn with_engine<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, now_at: i32, ask: impl FnOnce(&mut StyleEngine, &RealmArena, f64) -> R) -> Option<R> {
+pub(crate) fn with_engine<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, now_at: i32, ask: impl FnOnce(&mut StyleEngine, &RealmArena, f64) -> R) -> Option<R> {
     let cid = crate::dom::realm_id(scope, args);
     let now = crate::dom::clock_arg(scope, args, now_at);
     let mut answer = None;

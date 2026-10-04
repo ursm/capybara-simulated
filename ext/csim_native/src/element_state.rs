@@ -284,7 +284,7 @@ impl RealmArena {
     }
 
     // The root of `id`'s tree: a document, a fragment or shadow root, or a detached subtree's top.
-    fn root_of(&self, id: NodeId) -> NodeId {
+    pub(crate) fn root_of(&self, id: NodeId) -> NodeId {
         let mut cur = id;
         while let Some(p) = self.parent_of(cur) {
             cur = p;
@@ -306,7 +306,7 @@ impl RealmArena {
     // A control's form owner (form-helpers.js `formForControl`): the form its `form` attribute names in its tree
     // when it is connected (none for an empty or unmatched one, or a non-form), else its nearest ancestor form, else
     // the form the parser gave it while it still shares that form's tree.
-    fn form_owner(&self, id: NodeId) -> Option<NodeId> {
+    pub(crate) fn form_owner(&self, id: NodeId) -> Option<NodeId> {
         let n = self.get(id)?;
         if let Some(form_id) = n.plain_attr("form").filter(|_| self.is_connected(id)) {
             if form_id.is_empty() {
