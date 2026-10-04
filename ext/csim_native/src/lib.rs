@@ -55,10 +55,12 @@ mod text_codec;
 mod unicode;
 mod url_ops;
 mod validity;
+mod video;
 mod walk;
 mod walk_ops;
 mod walk_reuse;
 mod xpath;
+mod yuv;
 
 use magnus::{Error, Module, Ruby};
 

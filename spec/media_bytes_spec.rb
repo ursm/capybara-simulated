@@ -2,7 +2,7 @@ require_relative 'spec_helper'
 require 'zlib'
 require_relative 'support/session_teardown'
 
-# A `<video src>` served over http reaches the ffmpeg decoder as its raw bytes: the host fetch
+# A `<video src>` served over http reaches the decoder as its raw bytes: the host fetch
 # (`__csim_videoBytes`) hands JS a BINARY String, which crosses as a Uint8Array. The fetched
 # body is not always BINARY-tagged on the Ruby side — undoing a Content-Encoding tags it UTF-8,
 # and so may an app — and a UTF-8-tagged String crosses as TEXT, where bytes that are not

@@ -1,16 +1,12 @@
 // AV1 decoded to RGBA: an AVIF image (its container read by avif-parse, its colour and alpha items each an AV1 key
-// frame) — and the frame a video shows first. rav1d, the Rust port of dav1d, decodes; its YUV is converted here by the
-// sequence header's matrix coefficients and range (BT.601 where it names none, as libavif reads it), chroma upsampled
-// to the nearest sample.
+// frame) — and the frame a video shows first. rav1d, the Rust port of dav1d, decodes; its YUV converts (yuv.rs) by the
+// sequence header's matrix coefficients and range.
 
 use std::ptr::NonNull;
 
 use rav1d::include::dav1d::data::Dav1dData;
 use rav1d::include::dav1d::dav1d::{Dav1dContext, Dav1dSettings};
-use rav1d::include::dav1d::headers::{
-    DAV1D_COLOR_PRI_SMPTE432, DAV1D_MC_BT2020_NCL, DAV1D_MC_BT709, DAV1D_MC_IDENTITY, DAV1D_PIXEL_LAYOUT_I400,
-    DAV1D_PIXEL_LAYOUT_I420, DAV1D_PIXEL_LAYOUT_I422,
-};
+use rav1d::include::dav1d::headers::{DAV1D_COLOR_PRI_SMPTE432, DAV1D_PIXEL_LAYOUT_I400, DAV1D_PIXEL_LAYOUT_I420, DAV1D_PIXEL_LAYOUT_I422};
 use rav1d::include::dav1d::picture::Dav1dPicture;
 use rav1d::src::lib::{
     dav1d_close, dav1d_data_create, dav1d_default_settings, dav1d_get_picture, dav1d_open, dav1d_picture_unref,
@@ -46,7 +42,7 @@ pub(crate) struct Frame {
 
 // The first frame an AV1 bitstream (OBUs) decodes to, opaque RGBA.
 pub(crate) fn frame(obus: &[u8]) -> Option<Frame> {
-    Decoder::open()?.first_picture(obus).map(|p| p.rgba())
+    Decoder::open()?.first_picture(obus)?.rgba()
 }
 
 // A dav1d context, closed when dropped.
@@ -115,62 +111,27 @@ impl Drop for Picture {
 }
 
 impl Picture {
-    fn rgba(&self) -> Frame {
+    fn rgba(&self) -> Option<Frame> {
         let p = &self.0;
-        let (w, h, bpc) = (p.p.w.max(0) as usize, p.p.h.max(0) as usize, p.p.bpc);
+        let (w, h) = (p.p.w.max(0) as usize, p.p.h.max(0) as usize);
         // SAFETY: a picture `dav1d_get_picture` returned carries its sequence header.
         let seq = p.seq_hdr.map(|s| unsafe { s.as_ref() });
-        let (mtrx, full, p3) = seq.map_or((0, false, false), |s| (s.mtrx, s.color_range != 0, s.pri == DAV1D_COLOR_PRI_SMPTE432));
-        let (ssx, ssy) = match p.p.layout {
+        let color = seq.map_or_else(Default::default, |s| crate::yuv::Color { matrix: s.mtrx, full_range: s.color_range != 0 });
+        let ss = match p.p.layout {
             DAV1D_PIXEL_LAYOUT_I420 => (1, 1),
             DAV1D_PIXEL_LAYOUT_I422 => (1, 0),
             _ => (0, 0),
         };
-        let mono = p.p.layout == DAV1D_PIXEL_LAYOUT_I400;
-        let max = f64::from((1u32 << bpc) - 1);
-        // A sample of plane `k` at (x, y), as 0..=max.
-        let sample = |k: usize, x: usize, y: usize| -> f64 {
-            let Some(base) = p.data[k] else { return max / 2.0 };
-            let stride = p.stride[usize::from(k > 0)];
-            // SAFETY: (x, y) lies in plane `k`'s rows, `stride` bytes apart, of one byte a sample at 8 bits, two above.
-            unsafe {
-                let row = base.as_ptr().cast::<u8>().offset(y as isize * stride);
-                if bpc > 8 { f64::from(*row.cast::<u16>().add(x)) } else { f64::from(*row.add(x)) }
-            }
+        // A plane's rows, `stride` bytes apart.
+        let plane = |k: usize, rows: usize| -> Option<(&[u8], usize)> {
+            let stride = usize::try_from(p.stride[usize::from(k > 0)]).ok()?;
+            // SAFETY: dav1d allocates each plane `stride` bytes a row for its rows, alive while the picture is referenced.
+            Some((unsafe { std::slice::from_raw_parts(p.data[k]?.as_ptr().cast::<u8>(), stride * rows) }, stride))
         };
-        let (kr, kb) = match mtrx {
-            DAV1D_MC_BT709 => (0.2126, 0.0722),
-            DAV1D_MC_BT2020_NCL => (0.2627, 0.0593),
-            _ => (0.299, 0.114),
-        };
-        let unit = |v: f64, luma: bool| -> f64 {
-            let s = max / 255.0;
-            match (full, luma) {
-                (true, true) => v / max,
-                (true, false) => (v - (max + 1.0) / 2.0) / max,
-                (false, true) => (v - 16.0 * s) / (219.0 * s),
-                (false, false) => (v - 128.0 * s) / (224.0 * s),
-            }
-        };
-        let byte = |v: f64| (v * 255.0).round().clamp(0.0, 255.0) as u8;
-        let mut rgba = Vec::with_capacity(w * h * 4);
-        for y in 0..h {
-            for x in 0..w {
-                let (cx, cy) = (x >> ssx, y >> ssy);
-                let luma = unit(sample(0, x, y), true);
-                let [r, g, b] = if mtrx == DAV1D_MC_IDENTITY {
-                    // (…GBR: the planes are the channels)
-                    [unit(sample(2, cx, cy), true), luma, unit(sample(1, cx, cy), true)]
-                } else {
-                    let (cb, cr) = if mono { (0.0, 0.0) } else { (unit(sample(1, cx, cy), false), unit(sample(2, cx, cy), false)) };
-                    let kg = 1.0 - kr - kb;
-                    let r = luma + 2.0 * (1.0 - kr) * cr;
-                    let b = luma + 2.0 * (1.0 - kb) * cb;
-                    [r, (luma - kr * r - kb * b) / kg, b]
-                };
-                rgba.extend([byte(r), byte(g), byte(b), 255]);
-            }
-        }
-        Frame { width: w as u32, height: h as u32, rgba, display_p3: p3 }
+        let ch = (h + (1 << ss.1) - 1) >> ss.1;
+        let uv = if p.p.layout == DAV1D_PIXEL_LAYOUT_I400 { None } else { Some([plane(1, ch)?, plane(2, ch)?]) };
+        let planes = crate::yuv::Planes { width: w, height: h, bit_depth: p.p.bpc.max(8) as u32, ss, y: plane(0, h)?, uv };
+        let display_p3 = seq.is_some_and(|s| s.pri == DAV1D_COLOR_PRI_SMPTE432);
+        Some(Frame { width: w as u32, height: h as u32, rgba: planes.rgba(color)?, display_p3 })
     }
 }

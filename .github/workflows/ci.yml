@@ -29,19 +29,11 @@ jobs:
       - uses: actions/checkout@v7
 
       # ruby-vips `dlopen`s `libvips.so.42` at load, and the gem requires it at load,
-      # so WITHOUT this step nothing runs — not just the canvas specs. (It backs
-      # image decoding, and an image's intrinsic size is what LAYOUT sizes an `<img>`
-      # box from, which is why it stopped being optional.) The `<video>` /
-      # createImageBitmap-from-video path shells out to `ffprobe` + `ffmpeg` for
-      # first-frame decode (the WPT imagebitmap video subtests need it, else their
-      # factory rejects). Install both before the spec run — and keep this step
-      # failing loudly: made best-effort, every job would fail later and less clearly.
-      - name: Install libvips + ffmpeg
-        # `--no-install-recommends` because most of the 102 MB apt otherwise fetches
-        # is ffmpeg's recommends — a pocketsphinx speech model, OpenAL, JACK, the
-        # Intel VA drivers — and none of it is what the specs decode with: the video
-        # fixtures are h264 and vp9, both out of libavcodec60, which ffmpeg DEPENDS
-        # on. It halves this step on a good day.
+      # so WITHOUT this step nothing runs — not just the canvas specs. (It renders
+      # canvas text; images and videos decode natively.) Keep this step failing
+      # loudly: made best-effort, every job would fail later and less clearly.
+      - name: Install libvips
+        # `--no-install-recommends`: libvips's recommends are nothing the specs use.
         #
         # The bounds are for a bad one. `azure.archive.ubuntu.com` — the mirror the
         # runner image points at — stalled for hours around GitHub's 2026-08-17
@@ -64,7 +56,7 @@ jobs:
           apt_try() {
             sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 update &&
             sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 \
-                             install -y --no-install-recommends libvips42t64 ffmpeg
+                             install -y --no-install-recommends libvips42t64
           }
           apt_try || { echo 'apt failed; retrying once' >&2; sleep 10; apt_try; }
 

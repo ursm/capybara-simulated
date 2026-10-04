@@ -97,6 +97,13 @@ rav1d = { version = "1.1", default-features = false, features = ["bitdepth_8", "
 zune-jpeg = "0.5"
 roxmltree = "0.21"
 libc = "0.2"
+# A video's first frame (video.rs: what `drawImage(video)` draws, its size and duration): MP4 and WebM demuxed in Rust,
+# H.264 by OpenH264 (its C built from source by cargo, so nothing is needed at run time), VP8 by image-webp's decoder,
+# VP9 by rusty_vp9, AV1 by rav1d (above).
+mp4 = "0.14"
+matroska-demuxer = "0.8"
+openh264 = "0.9"
+rusty_vp9 = "0.1"
 
 # The HTML parser: Servo's html5ever — tokenizer and tree builder, the select parser relaxation and `selectedcontent`
 # included — run natively, the page side taking the tree it builds as steps (html_parse.rs).

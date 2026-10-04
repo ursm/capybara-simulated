@@ -8519,35 +8519,6 @@ module Capybara
         @runtime.call('__csimTransferDropAll', toks) rescue nil
       end
 
-      # ── Video decode (ffprobe + ffmpeg) ────────────────────────────
-      #
-      # Called from the JS bridge when a `<video>` element's `src` is
-      # assigned a `blob:` URL. ffprobe extracts dimensions + duration,
-      # ffmpeg extracts the first frame as raw RGBA. JS caches both so
-      # `canvas.drawImage(video, …)` blits like any ImageBitmap. A `<video src>` that
-      # points at a served file (http / relative) or a `data:` URL resolves its bytes
-      # the same way — see `video_bytes` below.
-      def decode_video_frame(bytes)
-        host_image_op('decode_video_frame') {
-          next nil if bytes.nil? || bytes.empty?
-          require 'tempfile'
-          require 'json'
-          Tempfile.create(['csim-video', '.bin'], binmode: true) do |f|
-            f.write(bytes)
-            f.flush
-            info   = ffprobe_stream(f.path) or break nil
-            width  = info['width'].to_i
-            height = info['height'].to_i
-            break nil if width <= 0 || height <= 0
-            raw = ffmpeg_first_frame_rgba(f.path)
-            duration = (info['duration'] || info.dig('format_duration')).to_f
-            result   = {'width' => width, 'height' => height, 'duration' => duration}
-            result['refId'] = transfer_buffer_stash(raw) if raw && !raw.empty?
-            result
-          end
-        }
-      end
-
       # Fetch a media resource (http / relative URL) and return its bytes, so a `<video
       # src>` pointing at a served file decodes the same way a blob: / data: source does.
       # Returns {'bytes', 'tainted'}, or nil when the fetch fails.
@@ -8562,31 +8533,6 @@ module Capybara
         bytes = result['body_raw'].to_s
         return nil if bytes.empty?
         {'bytes' => bytes, 'tainted' => origin_tainted?(url, cors, client_url: client_url)}
-      end
-
-      private def ffprobe_stream(path)
-        json = IO.popen(
-          ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
-           '-show_entries', 'stream=width,height,duration:format=duration',
-           '-of', 'json', path],
-          'r', err: File::NULL,
-          &:read
-        )
-        return nil unless $?.success?
-        parsed = JSON.parse(json) rescue {}
-        info   = parsed.dig('streams', 0) || {}
-        info['format_duration'] = parsed.dig('format', 'duration')
-        info
-      end
-
-      private def ffmpeg_first_frame_rgba(path)
-        raw = IO.popen(
-          ['ffmpeg', '-loglevel', 'error', '-i', path,
-           '-frames:v', '1', '-f', 'image2pipe',
-           '-vcodec', 'rawvideo', '-pix_fmt', 'rgba', '-'],
-          'rb', &:read
-        )
-        $?.success? ? raw : nil
       end
 
       def webauthn = (@webauthn ||= WebauthnState.new)

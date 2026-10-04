@@ -1232,6 +1232,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::image_source::install(scope, ns, context_id);
     crate::image_decode::install(scope, ns, context_id);
     crate::image_encode::install(scope, ns, context_id);
+    crate::video::install(scope, ns, context_id);
     crate::serialize::install(scope, ns, context_id);
     crate::html_parse::install(scope, ns, context_id);
     crate::url_ops::install(scope, ns, context_id);
