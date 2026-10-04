@@ -1528,8 +1528,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 [[package]]
 name = "rav1d"
 version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1932f060d5e7bd49dc9f8b272c1dc5e9ce0ffe141c28be900265d3989b36c9ed"
+source = "git+https://github.com/ursm/rav1d?branch=csim#bfda754f58fcaf66a85569b2a092e17d093cab6a"
 dependencies = [
  "assert_matches",
  "atomig",

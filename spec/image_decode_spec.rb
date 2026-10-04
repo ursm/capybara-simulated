@@ -105,4 +105,24 @@ RSpec.describe 'image decode' do
     JS
     expect(got[1]).to eq(got[0])
   end
+
+  # A corrupt AVIF — one a mutation made the AV1 decoder panic on — is a broken image, the process alive; and
+  # createImageBitmap's imageOrientation is the spec's enum, "none" no member of it (HTML: "There used to be a none
+  # enum value. It was renamed to from-image.").
+  it 'breaks on an AVIF the decoder panics on, and refuses an imageOrientation that is no member' do
+    crash = File.binread(File.join(__dir__, 'fixtures/media/crash.avif'))
+    s = simulated_session(->(env) {
+      next [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] if env['PATH_INFO'] == '/'
+      [200, {'content-type' => 'image/avif'}, [crash]]
+    })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const img = new Image();
+      img.onerror = () => createImageBitmap(new ImageData(1, 1), {imageOrientation: 'none'}).then(() => done(['error', 'resolved']), e => done(['error', e.name]));
+      img.onload = () => done(['load']);
+      img.src = '/crash.avif';
+    JS
+    expect(got).to eq(%w[error TypeError])
+  end
 end

@@ -11,7 +11,10 @@ resolver = "2"
 # stylo and the selector matcher share ONE selectors / cssparser, as they must.
 # The HTML parser is html5ever from a fork (github.com/ursm/html5ever, branch `csim`): 0.40.1, its tree builder
 # telling the sink of EVERY element it pops off the stack of open elements, as `TreeSink::pop` is documented to.
+# The AV1 decoder is rav1d from a fork (github.com/ursm/rav1d, branch `csim`): 1.1.0, its `dav1d_*` entry points
+# `extern "C-unwind"`, so a panic on a corrupt stream unwinds to av1.rs's catch_unwind instead of aborting the process.
 [patch.crates-io]
+rav1d                = {git = "https://github.com/ursm/rav1d", branch = "csim"}
 html5ever            = {git = "https://github.com/ursm/html5ever", branch = "csim"}
 stylo                = {git = "https://github.com/ursm/stylo", branch = "csim"}
 stylo_derive         = {git = "https://github.com/ursm/stylo", branch = "csim"}

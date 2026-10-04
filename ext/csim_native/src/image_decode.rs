@@ -35,7 +35,7 @@ pub(crate) struct Bitmap {
     pub(crate) rgba_p3: Option<Vec<u8>>,
     // Whether `rgba` holds Display P3 values (a P3-profiled image, kept as it is).
     pub(crate) display_p3: bool,
-    // The EXIF orientation it was turned by (1: none), which createImageBitmap's `imageOrientation: "none"` undoes.
+    // The EXIF orientation it was turned by (1: none), which createImageBitmap's `imageOrientation: "flipY"` undoes.
     pub(crate) orientation: u8,
 }
 
@@ -240,8 +240,9 @@ fn svg(bytes: &[u8]) -> Result<Bitmap, Decoded> {
     if root.tag_name().name() != "svg" {
         return Err(Decoded::Broken);
     }
-    // (…em and rem against the initial font size: an image's document has no other; a negative length is none)
-    let length = |name: &str| root.attribute(name).and_then(|v| crate::walk::svg_length(v, 16.0, 16.0)).map(|v| v.max(0.0));
+    // (…em and rem against the initial font size: an image's document has no other; a negative length is none; one past
+    // Chrome's largest layout unit, 33554428px, is that)
+    let length = |name: &str| root.attribute(name).and_then(|v| crate::walk::svg_length(v, 16.0, 16.0)).map(|v| v.clamp(0.0, 33_554_428.0));
     let natural = NaturalSize { width: length("width"), height: length("height"), view_box: root.attribute("viewBox").and_then(crate::walk::view_box) };
     let (width, height) = natural.concrete();
     let (w, h) = (width.round() as u32, height.round() as u32);
@@ -390,7 +391,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 
 // __dom.unorientImage(pixels, width, height, orientation) -> `{width, height, pixels}`: a decoded image (RGBA, a
 // Uint8ClampedArray) as it was before the EXIF `orientation` turned it (createImageBitmap's `imageOrientation:
-// "none"`) — the inverse turn, which is the same one but for the two quarter turns (6 and 8, each the other's).
+// "flipY"`, which disregards it) — the inverse turn, which is the same one but for the two quarter turns (6 and 8, each the other's).
 fn unorient_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let [w, h, exif] = [1, 2, 3].map(|k| args.get(k).uint32_value(scope).unwrap_or(0));
     let inverse = match exif {

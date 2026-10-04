@@ -37,9 +37,14 @@ unsafe impl Sync for Fc {}
 
 impl Fc {
     fn open() -> Result<Fc, String> {
-        let name = if cfg!(target_vendor = "apple") { "libfontconfig.1.dylib" } else { "libfontconfig.so.1" };
+        // (…on macOS, where Homebrew's prefix is on no loader path: its two prefixes, then MacPorts')
+        let names: &[&str] = if cfg!(target_vendor = "apple") {
+            &["libfontconfig.1.dylib", "/opt/homebrew/lib/libfontconfig.1.dylib", "/usr/local/lib/libfontconfig.1.dylib", "/opt/local/lib/libfontconfig.1.dylib"]
+        } else {
+            &["libfontconfig.so.1"]
+        };
         // SAFETY: loading fontconfig runs its constructors, which do nothing but set up the library.
-        let lib = unsafe { libloading::Library::new(name) }.map_err(|e| format!("{name}: {e}"))?;
+        let lib = names.iter().find_map(|name| unsafe { libloading::Library::new(name) }.ok()).ok_or_else(|| format!("{} not found", names[0]))?;
         // SAFETY: each symbol is fontconfig's, with the signature fontconfig.h gives it.
         unsafe {
             macro_rules! sym {

@@ -29,7 +29,9 @@ enum Codec {
     Other,
 }
 
-// The first video track: what codes it, its size and duration, its first sample, and the colour the container tags.
+// The first video track: what codes it, its size and duration, its first sample, the colour the container tags, the
+// size it is displayed at where its pixels are not square (`pasp`, WebM's DisplayWidth / DisplayHeight), and the
+// quarter turns clockwise it is displayed turned by (`tkhd`'s matrix).
 struct Track {
     codec: Codec,
     width: u32,
@@ -37,6 +39,8 @@ struct Track {
     duration: f64,
     sample: Vec<u8>,
     color: Option<Color>,
+    display: Option<(u32, u32)>,
+    turns: u8,
 }
 
 // `bytes` decoded to its first frame — None where it is no video we can play, or one larger than an image may be
@@ -46,12 +50,33 @@ pub(crate) fn decode(bytes: &[u8]) -> Option<Video> {
     if !crate::image_decode::fits(track.width, track.height) {
         return None;
     }
-    let (width, height, rgba) = first_frame(&track)?;
+    let (width, height, rgba, sar) = first_frame(&track)?;
+    // (…displayed at its display size — the container's, else the bitstream's pixel aspect ratio — then turned)
+    let display = track.display.or_else(|| sar.map(|(h, v)| (((u64::from(width) * u64::from(h) + u64::from(v) / 2) / u64::from(v)) as u32, height)));
+    let (mut width, mut height, mut rgba) = (width, height, rgba);
+    if let Some((dw, dh)) = display.filter(|&(dw, dh)| (dw, dh) != (width, height) && dw > 0 && dh > 0 && crate::image_decode::fits(dw, dh)) {
+        let img = image::RgbaImage::from_raw(width, height, rgba)?;
+        rgba = image::imageops::resize(&img, dw, dh, image::imageops::FilterType::Triangle).into_raw();
+        (width, height) = (dw, dh);
+    }
+    if track.turns % 4 != 0 {
+        let img = image::RgbaImage::from_raw(width, height, rgba)?;
+        let turned = match track.turns % 4 {
+            1 => image::imageops::rotate90(&img),
+            2 => image::imageops::rotate180(&img),
+            _ => image::imageops::rotate270(&img),
+        };
+        (width, height, rgba) = (turned.width(), turned.height(), turned.into_raw());
+    }
     Some(Video { width, height, duration: track.duration, rgba })
 }
 
-fn first_frame(t: &Track) -> Option<(u32, u32, Vec<u8>)> {
-    let color = |bitstream: Option<Color>| t.color.or(bitstream).unwrap_or_default();
+// The first frame, RGBA: its coded size, its pixels, and the pixel aspect ratio its bitstream gives (H.264's VUI).
+// Its colour: the container's tag, else the bitstream's, else what an untagged stream is taken for — BT.709 at 720
+// lines or more, BT.601 below (Chrome's choice, measured), limited range.
+fn first_frame(t: &Track) -> Option<(u32, u32, Vec<u8>, Option<(u32, u32)>)> {
+    let untagged = |height: usize| Color { matrix: if height >= 720 { 1 } else { 6 }, full_range: false };
+    let color = |bitstream: Option<Color>, height: usize| t.color.or(bitstream).unwrap_or(untagged(height));
     match &t.codec {
         Codec::H264(avcc) => {
             let mut decoder = openh264::decoder::Decoder::new().ok()?;
@@ -62,14 +87,19 @@ fn first_frame(t: &Track) -> Option<(u32, u32, Vec<u8>)> {
                 None => decoder.flush_remaining().ok()?.into_iter().next()?,
             };
             let (w, h) = frame.dimensions();
+            if !crate::image_decode::fits(w as u32, h as u32) {
+                return None;
+            }
+            let vui = avcc_sps(avcc).and_then(|sps| sps_vui(&sps)).unwrap_or_default();
+            let tagged = vui.full_range.map(|full_range| Color { matrix: vui.matrix.unwrap_or(untagged(h).matrix), full_range });
             let (ys, us, vs) = frame.strides();
             let planes = Planes { width: w, height: h, bit_depth: 8, ss: (1, 1), y: (frame.y(), ys), uv: Some([(frame.u(), us), (frame.v(), vs)]) };
-            Some((w as u32, h as u32, planes.rgba(color(None))?))
+            Some((w as u32, h as u32, planes.rgba(color(tagged, h))?, vui.sar))
         }
         Codec::Av1(config) => {
             let obus = [config.as_slice(), &t.sample].concat();
             let frame = crate::av1::frame(&obus)?;
-            Some((frame.width, frame.height, frame.rgba))
+            Some((frame.width, frame.height, frame.rgba, None))
         }
         Codec::Vp8 => {
             // (…a key frame's size, 14 bits each, after its start code)
@@ -82,7 +112,7 @@ fn first_frame(t: &Track) -> Option<(u32, u32, Vec<u8>)> {
             // (…its planes are as wide as its macroblocks: the width rounded up to 16)
             let stride = w.next_multiple_of(16);
             let planes = Planes { width: w, height: h, bit_depth: 8, ss: (1, 1), y: (&frame.ybuf, stride), uv: Some([(&frame.ubuf, stride / 2), (&frame.vbuf, stride / 2)]) };
-            Some((w as u32, h as u32, planes.rgba(color(None))?))
+            Some((w as u32, h as u32, planes.rgba(color(None, h))?, None))
         }
         Codec::Vp9 => {
             let mut r = rusty_vp9::BitReader::new(&t.sample);
@@ -100,7 +130,7 @@ fn first_frame(t: &Track) -> Option<(u32, u32, Vec<u8>)> {
             let (w, h) = (frame.width as usize, frame.height as usize);
             let uv = [(frame.planes.get(1)?.as_slice(), *frame.strides.get(1)?), (frame.planes.get(2)?.as_slice(), *frame.strides.get(2)?)];
             let planes = Planes { width: w, height: h, bit_depth: frame.bit_depth, ss: (frame.subsampling_x as usize, frame.subsampling_y as usize), y: (frame.planes.first()?, *frame.strides.first()?), uv: Some(uv) };
-            Some((w as u32, h as u32, planes.rgba(color(vp9_color(&header)))?))
+            Some((w as u32, h as u32, planes.rgba(color(vp9_color(&header), h))?, None))
         }
         Codec::Other => None,
     }
@@ -131,6 +161,146 @@ fn annex_b(avcc: &[u8], sample: &[u8]) -> Option<Vec<u8>> {
         j += length_size + len;
     }
     Some(out)
+}
+
+// The first sequence parameter set of an `avcC`.
+fn avcc_sps(avcc: &[u8]) -> Option<Vec<u8>> {
+    if avcc.get(5)? & 0x1F == 0 {
+        return None;
+    }
+    let len = usize::from(u16::from_be_bytes([*avcc.get(6)?, *avcc.get(7)?]));
+    Some(avcc.get(8..8 + len)?.to_vec())
+}
+
+// What an H.264 SPS's VUI says of the picture (ITU-T H.264 §E.1.1): its range, its matrix coefficients, its sample
+// aspect ratio.
+#[derive(Default)]
+struct Vui {
+    full_range: Option<bool>,
+    matrix: Option<u32>,
+    sar: Option<(u32, u32)>,
+}
+
+// An SPS NAL unit (with its header byte) read up to its VUI (§7.3.2.1.1): None where it has none, or is cut short.
+fn sps_vui(nal: &[u8]) -> Option<Vui> {
+    // (…the RBSP: the emulation-prevention 3 of each 00 00 03 dropped)
+    let mut rbsp = Vec::with_capacity(nal.len());
+    for &b in nal.get(1..)? {
+        if b == 3 && rbsp.ends_with(&[0, 0]) {
+            continue;
+        }
+        rbsp.push(b);
+    }
+    let mut r = Bits { data: &rbsp, at: 0 };
+    let profile = r.bits(8)?;
+    r.bits(16)?; // (…constraint flags, level)
+    r.ue()?; // seq_parameter_set_id
+    if matches!(profile, 100 | 110 | 122 | 244 | 44 | 83 | 86 | 118 | 128 | 138 | 139 | 134 | 135) {
+        if r.ue()? == 3 {
+            r.bits(1)?; // separate_colour_plane_flag
+        }
+        r.ue()?;
+        r.ue()?; // bit depths
+        r.bits(1)?; // qpprime_y_zero_transform_bypass_flag
+        if r.bits(1)? == 1 {
+            // (…scaling lists: each present one's deltas skipped)
+            for i in 0..8 {
+                if r.bits(1)? == 1 {
+                    let size = if i < 6 { 16 } else { 64 };
+                    let (mut last, mut next) = (8i64, 8i64);
+                    for _ in 0..size {
+                        if next != 0 {
+                            next = (last + r.se()? + 256) % 256;
+                        }
+                        last = if next == 0 { last } else { next };
+                    }
+                }
+            }
+        }
+    }
+    r.ue()?; // log2_max_frame_num_minus4
+    match r.ue()? {
+        0 => {
+            r.ue()?;
+        }
+        1 => {
+            r.bits(1)?;
+            r.se()?;
+            r.se()?;
+            for _ in 0..r.ue()? {
+                r.se()?;
+            }
+        }
+        _ => {}
+    }
+    r.ue()?;
+    r.bits(1)?; // max_num_ref_frames, gaps_in_frame_num_value_allowed_flag
+    r.ue()?;
+    r.ue()?; // pic_width_in_mbs_minus1, pic_height_in_map_units_minus1
+    if r.bits(1)? == 0 {
+        r.bits(1)?; // mb_adaptive_frame_field_flag
+    }
+    r.bits(1)?; // direct_8x8_inference_flag
+    if r.bits(1)? == 1 {
+        for _ in 0..4 {
+            r.ue()?;
+        }
+    }
+    if r.bits(1)? == 0 {
+        return None;
+    }
+    let mut vui = Vui::default();
+    if r.bits(1)? == 1 {
+        vui.sar = match r.bits(8)? {
+            255 => Some((r.bits(16)?, r.bits(16)?)),
+            idc => [(1, 1), (12, 11), (10, 11), (16, 11), (40, 33), (24, 11), (20, 11), (32, 11), (80, 33), (18, 11), (15, 11), (64, 33), (160, 99), (4, 3), (3, 2), (2, 1)].get(idc.checked_sub(1)? as usize).copied(),
+        }
+        .filter(|&(h, v)| h > 0 && v > 0);
+    }
+    if r.bits(1)? == 1 {
+        r.bits(1)?; // overscan_appropriate_flag
+    }
+    if r.bits(1)? == 1 {
+        r.bits(3)?; // video_format
+        vui.full_range = Some(r.bits(1)? == 1);
+        if r.bits(1)? == 1 {
+            r.bits(16)?; // colour_primaries, transfer_characteristics
+            vui.matrix = Some(r.bits(8)?).filter(|&m| m != 2);
+        }
+    }
+    Some(vui)
+}
+
+// A big-endian bit reader, with H.264's Exp-Golomb codes.
+struct Bits<'a> {
+    data: &'a [u8],
+    at: usize,
+}
+
+impl Bits<'_> {
+    fn bits(&mut self, n: u32) -> Option<u32> {
+        let mut v = 0u32;
+        for _ in 0..n {
+            let byte = *self.data.get(self.at / 8)?;
+            v = v << 1 | u32::from(byte >> (7 - self.at % 8) & 1);
+            self.at += 1;
+        }
+        Some(v)
+    }
+    fn ue(&mut self) -> Option<u32> {
+        let mut zeros = 0;
+        while self.bits(1)? == 0 {
+            zeros += 1;
+            if zeros > 31 {
+                return None;
+            }
+        }
+        Some((1u32 << zeros) - 1 + self.bits(zeros)?)
+    }
+    fn se(&mut self) -> Option<i64> {
+        let k = i64::from(self.ue()?);
+        Some(if k % 2 == 1 { (k + 1) / 2 } else { -k / 2 })
+    }
 }
 
 // A VP9 key frame's colour (its uncompressed header's color_space): BT.601, BT.709, BT.2020 or sRGB (GBR, full range);
@@ -166,6 +336,11 @@ fn boxes(data: &[u8]) -> impl Iterator<Item = ([u8; 4], &[u8])> {
         Some((kind, payload))
     })
 }
+// …each with where its payload starts in `data`.
+fn boxes_at(data: &[u8]) -> impl Iterator<Item = ([u8; 4], &[u8], usize)> {
+    let base = data.as_ptr() as usize;
+    boxes(data).map(move |(kind, payload)| (kind, payload, payload.as_ptr() as usize - base))
+}
 fn child<'a>(data: &'a [u8], kind: &[u8; 4]) -> Option<&'a [u8]> {
     boxes(data).find(|(k, _)| k == kind).map(|(_, p)| p)
 }
@@ -179,6 +354,18 @@ fn mp4(bytes: &[u8]) -> Option<Track> {
         let hdlr = child(trak, b"mdia").and_then(|m| child(m, b"hdlr"));
         hdlr.and_then(|h| h.get(8..12)) == Some(b"vide")
     })?;
+    // `tkhd`: the track's id, and its matrix's turn (a, b of the 16.16 matrix: 0, 1 is a quarter turn clockwise)
+    let tkhd = child(trak, b"tkhd")?;
+    let wide = tkhd.first() == Some(&1);
+    let track_id = be32(tkhd, if wide { 20 } else { 12 })?;
+    let at = if wide { 52 } else { 40 };
+    let (a, b) = (be32(tkhd, at)? as i32, be32(tkhd, at + 4)? as i32);
+    let turns = match (a.signum(), b.signum()) {
+        (0, 1) => 1,
+        (-1, 0) => 2,
+        (0, -1) => 3,
+        _ => 0,
+    };
     let mdia = child(trak, b"mdia")?;
     let mdhd = child(mdia, b"mdhd")?;
     // (…version 1 is 64-bit times)
@@ -204,19 +391,111 @@ fn mp4(bytes: &[u8]) -> Option<Track> {
     let color = child(inner, b"colr").filter(|c| c.get(..4) == Some(b"nclx")).and_then(|c| {
         Some(Color { matrix: u32::from(u16::from_be_bytes(c.get(8..10)?.try_into().ok()?)), full_range: c.get(10)? & 0x80 != 0 })
     });
-    // The first sample: at its chunk's offset, its size the table's first (or the one size every sample has).
+    // `pasp`: the pixel aspect ratio, hSpacing : vSpacing.
+    let display = child(inner, b"pasp").and_then(|p| {
+        let (h, v) = (u64::from(be32(p, 0)?), u64::from(be32(p, 4)?));
+        (h > 0 && v > 0 && h != v).then(|| (((u64::from(width) * h + v / 2) / v) as u32, height))
+    });
+    // The first sample: at its chunk's offset, its size the table's first (or the one size every sample has) — or, in
+    // a fragmented file whose sample table is empty, the first fragment's.
     let stsz = child(stbl, b"stsz")?;
-    let size = match be32(stsz, 4)? {
-        0 => be32(stsz, 12)?,
-        n => n,
-    } as usize;
-    let offset = match child(stbl, b"stco") {
-        Some(stco) => u64::from(be32(stco, 8)?),
-        None => u64::from_be_bytes(child(stbl, b"co64")?.get(8..16)?.try_into().ok()?),
-    } as usize;
-    let sample = bytes.get(offset..offset.checked_add(size)?)?.to_vec();
+    let mut fragmented_ticks = None;
+    let sample = if be32(stsz, 8)? == 0 {
+        let (sample, ticks) = fragments(bytes, moov, track_id)?;
+        fragmented_ticks = Some(ticks);
+        sample
+    } else {
+        let size = match be32(stsz, 4)? {
+            0 => be32(stsz, 12)?,
+            n => n,
+        } as usize;
+        let offset = match child(stbl, b"stco") {
+            Some(stco) => u64::from(be32(stco, 8)?),
+            None => u64::from_be_bytes(child(stbl, b"co64")?.get(8..16)?.try_into().ok()?),
+        } as usize;
+        bytes.get(offset..offset.checked_add(size)?)?.to_vec()
+    };
+    // (…a fragmented file's duration is where its last fragment ends, where its `mdhd` gives none)
+    let duration = match (duration, fragmented_ticks) {
+        (0, Some(ticks)) => ticks,
+        (d, _) => d,
+    };
     let duration = if timescale > 0 { duration as f64 / f64::from(timescale) } else { 0.0 };
-    Some(Track { codec, width, height, duration, sample, color })
+    Some(Track { codec, width, height, duration, sample, color, display, turns })
+}
+
+// A fragmented MP4's track `track_id` (ISO/IEC 14496-12 §8.8): its first sample — the first `moof` with a `traf` for
+// it, its `trun`'s first sample, at the base the `tfhd` gives (an explicit offset, else the `moof`'s start) plus the
+// `trun`'s data offset, its size the `trun`'s, else the `tfhd`'s default, else the movie's `trex` — and where its last
+// fragment ends, in its timescale (each fragment's `tfdt` start plus its samples' durations, defaulted the same way).
+fn fragments(bytes: &[u8], moov: &[u8], track_id: u32) -> Option<(Vec<u8>, u64)> {
+    let trex = child(moov, b"mvex").and_then(|m| boxes(m).filter(|(k, _)| k == b"trex").map(|(_, p)| p).find(|t| be32(t, 4) == Some(track_id)));
+    let (trex_duration, trex_size) = (trex.and_then(|t| be32(t, 12)), trex.and_then(|t| be32(t, 16)));
+    let mut first: Option<Vec<u8>> = None;
+    let mut end = 0u64;
+    for (kind, moof, at) in boxes_at(bytes) {
+        if kind != *b"moof" {
+            continue;
+        }
+        let moof_start = at - 8;
+        for traf in boxes(moof).filter(|(k, _)| k == b"traf").map(|(_, p)| p) {
+            let tfhd = child(traf, b"tfhd")?;
+            let flags = be32(tfhd, 0)? & 0xFF_FFFF;
+            if be32(tfhd, 4)? != track_id {
+                continue;
+            }
+            let mut i = 8;
+            let base = if flags & 0x01 != 0 {
+                let b = u64::from_be_bytes(tfhd.get(i..i + 8)?.try_into().ok()?) as usize;
+                i += 8;
+                b
+            } else {
+                moof_start
+            };
+            if flags & 0x02 != 0 {
+                i += 4;
+            }
+            let default_duration = if flags & 0x08 != 0 {
+                let d = be32(tfhd, i);
+                i += 4;
+                d
+            } else {
+                trex_duration
+            };
+            let default_size = if flags & 0x10 != 0 { be32(tfhd, i) } else { trex_size };
+            let start_ticks = child(traf, b"tfdt").and_then(|t| if t.first() == Some(&1) { Some(u64::from_be_bytes(t.get(4..12)?.try_into().ok()?)) } else { be32(t, 4).map(u64::from) }).unwrap_or(end);
+            let trun = child(traf, b"trun")?;
+            let tflags = be32(trun, 0)? & 0xFF_FFFF;
+            let count = be32(trun, 4)?;
+            let mut j = 8;
+            let offset = if tflags & 0x01 != 0 {
+                let o = be32(trun, j)? as i32;
+                j += 4;
+                o
+            } else {
+                0
+            };
+            if tflags & 0x04 != 0 {
+                j += 4;
+            }
+            // (…each sample's record: duration, size, flags, composition offset, those its flags say it has)
+            let record = [0x100, 0x200, 0x400, 0x800].iter().filter(|&&f| tflags & f != 0).count() * 4;
+            let mut ticks = 0u64;
+            for k in 0..count as usize {
+                let at = j + k * record;
+                let duration = if tflags & 0x100 != 0 { be32(trun, at) } else { default_duration };
+                ticks += u64::from(duration.unwrap_or(0));
+                if first.is_none() && k == 0 {
+                    let size_at = at + if tflags & 0x100 != 0 { 4 } else { 0 };
+                    let size = if tflags & 0x200 != 0 { be32(trun, size_at) } else { default_size }? as usize;
+                    let start = usize::try_from(base as i64 + i64::from(offset)).ok()?;
+                    first = Some(bytes.get(start..start.checked_add(size)?)?.to_vec());
+                }
+            }
+            end = end.max(start_ticks + ticks);
+        }
+    }
+    Some((first?, end))
 }
 
 // ── WebM / Matroska ──
@@ -245,12 +524,14 @@ fn webm(bytes: &[u8]) -> Option<Track> {
         };
         Some(Color { matrix, full_range: c.range() == Some(Range::Full) })
     });
+    // (…a display size other than the coded one: pixels that are not square)
+    let display = video.display_width().zip(video.display_height()).map(|(w, h)| (w.get() as u32, h.get() as u32)).filter(|&d| d != (width, height));
     let scale = file.info().timestamp_scale().get() as f64;
     let duration = file.info().duration().map_or(0.0, |d| d * scale / 1e9);
     let mut frame = Frame::default();
     while file.next_frame(&mut frame).ok()? {
         if frame.track == number {
-            return Some(Track { codec, width, height, duration, sample: std::mem::take(&mut frame.data), color });
+            return Some(Track { codec, width, height, duration, sample: std::mem::take(&mut frame.data), color, display, turns: 0 });
         }
     }
     None

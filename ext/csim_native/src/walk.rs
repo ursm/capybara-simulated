@@ -969,7 +969,7 @@ pub(crate) fn svg_length(v: &str, em: f64, rem: f64) -> Option<f64> {
         }
     }
     let n: f64 = t[..i].parse().ok().filter(|n: &f64| n.is_finite())?;
-    let px = match t[i..].to_ascii_lowercase().as_str() {
+    let px: f64 = match t[i..].to_ascii_lowercase().as_str() {
         "" | "px" => 1.0,
         "em" => em,
         "rem" => rem,
@@ -981,7 +981,7 @@ pub(crate) fn svg_length(v: &str, em: f64, rem: f64) -> Option<f64> {
         "pc" => 16.0,
         _ => return None,
     };
-    Some(n * px)
+    Some(n * px).filter(|v| v.is_finite())
 }
 // An svg `viewBox`: its width and height, where all four numbers are and both are positive (`parseViewBox`).
 pub(crate) fn view_box(v: &str) -> Option<(f64, f64)> {

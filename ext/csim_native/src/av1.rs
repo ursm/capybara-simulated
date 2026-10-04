@@ -48,9 +48,18 @@ pub(crate) struct Frame {
     pub(crate) display_p3: bool,
 }
 
-// The first frame an AV1 bitstream (OBUs) decodes to, opaque RGBA.
+// The first frame an AV1 bitstream (OBUs) decodes to, opaque RGBA. A corrupt stream can panic inside the decoder (its
+// entry points unwind: the rav1d fork's `extern "C-unwind"`), which is no frame — and a context that panicked is not
+// closed, as closing it would touch the state the panic left behind: it is leaked.
 pub(crate) fn frame(obus: &[u8]) -> Option<Frame> {
-    Decoder::open()?.first_picture(obus)?.rgba()
+    let decoder = Decoder::open()?;
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| decoder.first_picture(obus)?.rgba())) {
+        Ok(frame) => frame,
+        Err(_) => {
+            std::mem::forget(decoder);
+            None
+        }
+    }
 }
 
 // A dav1d context, closed when dropped.
