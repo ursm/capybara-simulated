@@ -1075,7 +1075,7 @@ module WptRunner
   def arena_verify_failures
     return unless ENV['CSIM_ARENA_VERIFY'] == '1' && @session
 
-    failures = @session.driver.browser.evaluate_script('globalThis.__csimArenaVerifyFailures ? globalThis.__csimArenaVerifyFailures() : []')
+    failures = @session.driver.browser.take_arena_verify_failures
     failures.empty? ? nil : failures.uniq.join('; ')
   rescue StandardError
     nil

@@ -801,8 +801,6 @@ module Capybara
         attach_native_module_loader(c)
         attach_frame_realm_loader(c)
         seed_layout(c)
-        # The check on the arena: the whole JS tree held against it at every layout and cascade entry.
-        c.eval_void('globalThis.__csimArenaVerify = true;') if ENV['CSIM_ARENA_VERIFY'] == '1'
       end
 
       # The style engine and the layout, in the main realm and in every frame realm alike: a frame's document is a page
@@ -813,6 +811,19 @@ module Capybara
         c.eval_void('__csimEnableStylo();')
         # …and the check on the Rust walk's subtree reuse: every pass walked again without it, and any difference thrown.
         c.eval_void('globalThis.__csimNativeLayoutVerifyReuse = true;') if ENV['CSIM_NL_REUSE_VERIFY'] == '1'
+        # …and the check on the arena: the whole JS tree held against it at every layout and cascade entry, what it finds
+        # kept here — a page navigated away or a frame removed takes no record with it — for the harness to take.
+        return unless ENV['CSIM_ARENA_VERIFY'] == '1'
+
+        c.eval_void('globalThis.__csimArenaVerify = true;')
+        c.attach('__csim_arenaVerifyFailed', ->(message) { (@arena_verify_failures ||= []) << message.to_s; nil })
+      end
+
+      # The differences CSIM_ARENA_VERIFY=1 found since the last call, in every realm this runtime ran.
+      def take_arena_verify_failures
+        failures = @arena_verify_failures || []
+        @arena_verify_failures = []
+        failures
       end
 
       # The bridge calls `__csim_createFrameRealm(url, body, contentType, parentId)`

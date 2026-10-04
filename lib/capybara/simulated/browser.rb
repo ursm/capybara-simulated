@@ -1979,6 +1979,10 @@ module Capybara
         @runtime.call('__csimDocumentTitle').to_s
       end
 
+      # The differences CSIM_ARENA_VERIFY=1 found between this browser's trees and their arena copies since the last
+      # call (the spec harness asks at a session's end).
+      def take_arena_verify_failures = @runtime.take_arena_verify_failures
+
       # `page.html` inside a `within_frame` block returns the frame document's
       # source (Selenium parity), so route through the active realm.
       def html

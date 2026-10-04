@@ -62,12 +62,13 @@ module SimulatedSessionTeardown
     nil
   end
 
-  # The differences CSIM_ARENA_VERIFY=1 found between a session's trees and their arena copies, in every realm — or nil.
-  # Asked at the end because a verify throw inside a rendering step or an event handler is swallowed where it happens.
+  # The differences CSIM_ARENA_VERIFY=1 found between a session's trees and their arena copies, in every realm it ran —
+  # or nil. Asked at the end because a verify throw inside a rendering step or an event handler is swallowed where it
+  # happens.
   def arena_verify_failures(session)
     return unless ENV['CSIM_ARENA_VERIFY'] == '1' && session.instance_variable_defined?(:@driver)
 
-    failures = session.driver.browser.evaluate_script('globalThis.__csimArenaVerifyFailures ? globalThis.__csimArenaVerifyFailures() : []')
+    failures = session.driver.browser.take_arena_verify_failures
     failures.empty? ? nil : failures.uniq.join('; ')
   rescue StandardError => e
     warn "[spec] asking a session for its arena verify failures failed: #{e.class}: #{e.message}" unless e.message.include?('disposed')
