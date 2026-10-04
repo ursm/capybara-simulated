@@ -229,7 +229,8 @@ fn font_measures(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 
 // Each text row (`layout::TextRow`) as the painter draws it — whether its owner's `::placeholder` is what it is drawn
 // in, and where its characters' pen steps start in the third list and how many there are, for a piece it cannot draw
-// whole (`FontMetrics::pen_steps`): a spaced, justified or tabbed one, or one a split face draws.
+// whole (`FontMetrics::pen_steps`): a spaced, justified or tabbed one, or one whose characters a split face spreads
+// over several faces.
 fn paint_rows(rows: &[crate::layout::TextRow], paint: &[walk::PaintMark], runs: &[crate::layout::Run], run_texts: &[crate::layout::RunText]) -> (Vec<f64>, Vec<Vec<u16>>, Vec<f64>) {
     let mut out = Vec::new();
     let mut strings = Vec::new();
@@ -246,7 +247,7 @@ fn paint_rows(rows: &[crate::layout::TextRow], paint: &[walk::PaintMark], runs: 
         let from = steps.len();
         if let Some(run) = runs.get(run) {
             let by_char = run.ls != 0.0 || run.ws != 0.0 || r[7] != 0.0 || piece.contains(&0x09);
-            if let Some(per) = crate::font::with_font(run.font, |fm| (by_char || fm.is_split()).then(|| fm.pen_steps(&piece, run.size, run.ls, run.ws, r[7], r[8], run.tab_px, run.tab_min))).flatten() {
+            if let Some(per) = crate::font::with_font(run.font, |fm| (by_char || fm.splits(&piece)).then(|| fm.pen_steps(&piece, run.size, run.ls, run.ws, r[7], r[8], run.tab_px, run.tab_min))).flatten() {
                 steps.extend(per);
             }
         }

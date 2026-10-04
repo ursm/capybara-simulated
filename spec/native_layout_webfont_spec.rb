@@ -43,7 +43,7 @@ RSpec.describe 'native layout web-font' do
   it 'matches a WRAPPING text block in a TTF web font (advances drive the wrap)' do
     expect_layout('<div style="width:120px;font:20px AhemTest">XX xx word wrap onto more lines here now ok</div>')
   end
-  it 'matches a text block in a WOFF2 web font (host Brotli-decodes it to the same SFNT)' do
+  it 'matches a text block in a WOFF2 web font (decoded natively to the same SFNT)' do
     expect_layout('<div style="width:120px;font:20px AhemTest">XX xx word wrap onto more lines here now ok</div>', font: FONT_WOFF2, ct: 'font/woff2', ext: 'woff2')
   end
   it 'matches a web font alongside inline spans in the same family' do

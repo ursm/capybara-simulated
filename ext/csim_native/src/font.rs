@@ -88,6 +88,12 @@ impl FontMetrics {
     pub(crate) fn is_split(&self) -> bool {
         self.split.is_some()
     }
+    // Whether the characters of `text` actually select more than one face of the split — a piece the painter then
+    // draws a character at a time, each in its own face; one that keeps to one face is drawn whole, kerned as it is.
+    pub(crate) fn splits(&self, text: &[u16]) -> bool {
+        let mut faces = code_points(text).map(|cp| self.member_handle(cp));
+        faces.next().is_some_and(|first| faces.any(|f| f != first))
+    }
     // The line box a run of `text` needs in a split face, as the ascent and descent around its baseline: the deepest of
     // each among the faces its characters select, every one laid out as a face of its own would be — its box centred in
     // `fixed_lh` (a `line-height` that is not `normal`), else in its own box and line gap. A
@@ -112,7 +118,7 @@ impl FontMetrics {
         }
         most
     }
-    // Build from font file bytes (SFNT: TTF/OTF; WOFF/WOFF2 decoded host-side). None when the file can't
+    // Build from font file bytes (SFNT: TTF/OTF; a WOFF / WOFF2 one is unwrapped first, `sfnt`). None when the file can't
     // be parsed, has no units-per-em, or maps no printable ASCII with a positive advance.
     fn from_bytes(bytes: &[u8]) -> Option<FontMetrics> {
         let font = FontRef::new(bytes).ok()?;
@@ -354,6 +360,25 @@ thread_local! {
     static FONT_IDX: RefCell<HashMap<String, i32>> = RefCell::new(HashMap::new());
 }
 
+// The SFNT a font file holds: a WOFF 1.0 container's tables inflated, a WOFF 2.0 one's Brotli stream decompressed
+// and its transformed glyf / loca (and hmtx) rebuilt, anything else as it is. None for a container that does not
+// decode, which a face then treats as no font at all.
+pub(crate) fn sfnt(bytes: &[u8]) -> Option<std::borrow::Cow<'_, [u8]>> {
+    let unwrapped = match bytes.get(..4) {
+        Some(b"wOFF") => wuff::decompress_woff1(bytes),
+        Some(b"wOF2") => wuff::decompress_woff2(bytes),
+        _ => return Some(bytes.into()),
+    };
+    unwrapped.ok().map(Into::into)
+}
+// Capybara::Simulated::Native.font_sfnt(bytes) -> the SFNT `bytes` holds (`sfnt`), or nil.
+pub(crate) fn sfnt_for_ruby(ruby: &magnus::Ruby, bytes: magnus::RString) -> Option<magnus::RString> {
+    // SAFETY: the bytes are copied out before the GVL is released, and nothing else reads the string meanwhile.
+    let bytes = unsafe { bytes.as_slice() }.to_vec();
+    let out = crate::image_decode::without_gvl(|| std::panic::catch_unwind(|| sfnt(&bytes).map(|s| s.into_owned())).ok().flatten());
+    out.map(|s| ruby.str_from_slice(&s))
+}
+
 // Register a font from a fontconfig path (the host resolved it); reads + parses the file. `-1` when it
 // can't be read/parsed. Idempotent per path (parsed once, handle reused, a `-1` cached too).
 pub(crate) fn register_path(path: &str) -> i32 {
@@ -468,4 +493,24 @@ pub(crate) fn with_font<R>(handle: i32, f: impl FnOnce(&FontMetrics) -> R) -> Op
         let fm = v.get(handle as usize)?.as_ref()?;
         Some(f(fm))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unwraps_a_woff2_with_its_outlines() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spec");
+        let woff2 = std::fs::read(dir.join("fixtures/fonts/Ahem.woff2")).unwrap();
+        let ttf = std::fs::read(dir.join("wpt/fonts/Ahem.ttf")).unwrap();
+        let out = sfnt(&woff2).expect("a decoded WOFF2");
+        let (font, original) = (FontRef::new(&out).unwrap(), FontRef::new(&ttf).unwrap());
+        let gid = font.charmap().map('X').unwrap();
+        assert_eq!(gid, original.charmap().map('X').unwrap());
+        // (…the transformed glyf / loca rebuilt: the glyph has its outline, not just its advance)
+        assert!(font.outline_glyphs().get(gid).is_some_and(|g| g.draw(Size::new(10.0), &mut skrifa::outline::pen::NullPen).is_ok()));
+        assert_eq!(sfnt(&ttf).as_deref(), Some(&ttf[..]));
+        assert!(sfnt(b"wOF2 broken").is_none());
+    }
 }

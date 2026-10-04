@@ -62,6 +62,8 @@ skrifa = "0.44"
 harfrust = "0.12"
 # …in visual order by the Unicode bidirectional algorithm.
 unicode-bidi = "0.3"
+# A web font's WOFF / WOFF2 container unwrapped to the SFNT it holds (Brotli, and the glyf / loca transform undone).
+wuff = "0.2"
 
 # The Unicode general categories the ORACLE asks a regex for (`\p{L}` / `\p{N}` / `\p{M}`) — the classes
 # `layout::hyphen_breaks_after` and `font::zero_width` have to agree with it about. regex-syntax bakes in a

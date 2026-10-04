@@ -91,6 +91,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("form_encode", magnus::function!(text_codec::form_encode, 2))?;
     // An image resource's bytes decoded to RGBA, on whichever thread fetched them.
     native.define_module_function("decode_image", magnus::function!(image_decode::decode_for_ruby, 3))?;
+    // A web font's file unwrapped from its WOFF / WOFF2 container.
+    native.define_module_function("font_sfnt", magnus::function!(font::sfnt_for_ruby, 1))?;
     // A font pattern matched, and the families it is substituted through, by this machine's fontconfig.
     native.define_module_function("font_match", magnus::function!(fontconfig::font_match_for_ruby, 1))?;
     native.define_module_function("font_strong_families", magnus::function!(fontconfig::strong_families_for_ruby, 1))?;

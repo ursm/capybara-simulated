@@ -48,8 +48,6 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency 'capybara', '>= 3.37'
   spec.add_dependency 'rack',     '>= 2.2'
-  # Brotli, to decode WOFF2 web fonts to their real text metrics.
-  spec.add_dependency 'brotli', '~> 0.5'
   # rb-sys drives the native extension's build (ext/csim_native/extconf.rb). Needed
   # only when compiling from source; a prebuilt (fat) gem carries the compiled extension already.
   spec.add_dependency 'rb_sys', '~> 0.9'

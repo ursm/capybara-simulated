@@ -11,7 +11,7 @@ require_relative 'support/poll_until'
 # fontconfig would substitute. The fetch is a `css` Resource Timing entry, and `document.fonts`
 # is the CSS Font Loading set: one `FontFace` per `@font-face` rule with its status, `ready`,
 # `check()` / `load()`, and a loading cycle's `loadingdone` / `loadingerror` events. A WOFF file
-# is unwrapped on the host, a WOFF2 one Brotli-decoded, and either measures with the face's own
+# is unwrapped natively, a WOFF2 one Brotli-decoded, and either measures with the face's own
 # advances.
 RSpec.describe 'web fonts' do
   AHEM = File.binread(File.expand_path('wpt/fonts/Ahem.ttf', __dir__))
@@ -457,21 +457,26 @@ RSpec.describe 'web fonts' do
     expect(s.evaluate_script("Array.from(document.fonts).filter(function (f) { return f.family === 'Xo'; })[0].status")).to eq('error')
   end
 
-  it 'measures with a WOFF2 face, Brotli-decoded on the host' do
+  it 'measures with a WOFF2 face' do
     s = session
     s.execute_script("var el = document.createElement('span'); el.id = 'w2'; el.style.fontFamily = 'OnlyWoff2'; el.textContent = 'abcd'; document.body.appendChild(el);")
     expect(width(s, 'w2')).to eq(80)                                       # four one-em Ahem glyphs at 20px
     expect(s.evaluate_script("Array.from(document.fonts).filter(function (f) { return f.family === 'OnlyWoff2'; })[0].status")).to eq('loaded')
   end
 
-  it 'decodes a WOFF2 body regardless of its string encoding' do
-    # The container is parsed with a byte cursor but sliced with String#[] (character-based), so a
-    # font body that reached the host tagged UTF-8 would misalign without a binary coercion.
-    browser = Capybara::Simulated::Browser.allocate
-    binary  = browser.woff_to_sfnt(AHEM_WOFF2)
-    tagged  = browser.woff_to_sfnt(AHEM_WOFF2.dup.force_encoding('UTF-8'))
-    expect(binary).to be_a(String)
-    expect(tagged).to eq(binary)
+  it 'draws a WOFF2 face with its own outlines' do
+    # The container's glyf / loca are stored transformed; drawing needs them rebuilt, not just the metrics tables.
+    s = session
+    s.execute_script(<<~JS)
+      window.__px = null;
+      document.fonts.load('20px OnlyWoff2').then(function () {
+        var ctx = document.createElement('canvas').getContext('2d');
+        ctx.font = '20px OnlyWoff2';
+        ctx.fillText('X', 0, 20);
+        __px = [ctx.getImageData(10, 10, 1, 1).data[3], ctx.getImageData(30, 10, 1, 1).data[3]];
+      });
+    JS
+    expect(s.evaluate_script('__px')).to eq([255, 0])                      # Ahem's X is its whole em box
   end
 
   it 'rejects a font shorthand it cannot parse' do

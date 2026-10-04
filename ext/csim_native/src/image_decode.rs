@@ -485,7 +485,7 @@ pub(crate) fn decode_for_ruby(ruby: &magnus::Ruby, bytes: magnus::RString, max_w
     Ok(hash.into_value_with(ruby))
 }
 // `f` run with the GVL released, so other Ruby threads go on meanwhile.
-fn without_gvl<F: FnOnce() -> R, R>(f: F) -> R {
+pub(crate) fn without_gvl<F: FnOnce() -> R, R>(f: F) -> R {
     struct Job<F, R> {
         f: Option<F>,
         r: Option<R>,
