@@ -577,8 +577,8 @@ module Capybara
         # worker-reachable via OffscreenCanvas, like decode_image).
         @font_vmetrics_lock   = Mutex.new
         @font_vmetrics        = {}
-        # (family, weight/style) -> the fontconfig file native text metrics read. Misses cache as nil, so a box
-        # without fontconfig spawns `fc-match` once per family, not once per measurement.
+        # (family, weight/style) -> the fontconfig file native text metrics read. Misses cache as nil, so an
+        # unresolved family asks fontconfig once, not once per measurement.
         @font_table_lock      = Mutex.new
         @font_files           = {}
         @font_glyph_lock      = Mutex.new
@@ -7533,7 +7533,7 @@ module Capybara
 
       # The fontconfig file backing a CSS family + weight/style, for NATIVE text metrics: csim_native parses it with
       # fontations (skrifa) — advances, line metrics, x-height. nil when unresolved. Memoised (hit AND miss) so it
-      # costs no extra `fc-match`.
+      # asks fontconfig once.
       def font_file(family, weight_style = nil)
         key = "#{family} #{weight_style}"
         @font_table_lock.synchronize do
@@ -7544,7 +7544,7 @@ module Capybara
         path
       end
 
-      # `fc-match` maps a CSS family to a font file — one subprocess per family per
+      # fontconfig maps a CSS family to a font file (`fc_match`) — once per family per
       # session (the caller memoises hits AND misses).
       # A browser's default for the proportional generics, NOT fontconfig's: Chrome
       # asks for Arial / Times New Roman (which fontconfig substitutes with the
@@ -7615,7 +7615,7 @@ module Capybara
       # The face fontconfig resolves `family` to — or nil when it has no rule for that
       # name and merely answered with its fallback.
       #
-      # The distinction is the whole problem: `fc-match` NEVER fails, so a name it
+      # The distinction is the whole problem: a fontconfig match NEVER fails, so a name it
       # SUBSTITUTED looks exactly like a name it ignored. Chrome tells them apart the
       # way Skia does — it expands the request through `FcConfigSubstitute`, drops the
       # WEAKLY bound families (the generic fallback chain every request ends with), and
@@ -7625,7 +7625,7 @@ module Capybara
       # `Inter` expand to nothing but themselves — so a substituted family is accepted
       # and an unknown one is not, which is what Chrome measures in each case.
       #
-      # fontconfig prefers a strong family over a weak one, so the single `fc-match`
+      # fontconfig prefers a strong family over a weak one, so the single match
       # already answers a strong family whenever one is installed: no iteration needed.
       private def resolved_family_file(family, weight_style)
         return nil if family.nil?
@@ -7638,23 +7638,13 @@ module Capybara
         strong&.any? {|fam| font_family_matches?(fam, matched) } ? file : nil
       end
 
-      # The families `family` expands to under this machine's fontconfig rules, keeping
-      # only the STRONG bindings: `fc-pattern -c` prints the substituted pattern and
-      # marks those `(s)`. nil when the tool isn't there to ask — then nothing counts as
-      # substituted, which is the conservative answer (the stack falls through to its
-      # generic) rather than a wrong one.
-      STRONG_FAMILY_RE = /"((?:[^"\\]|\\.)*)"\(s\)/
+      # The families `family` expands to under this machine's fontconfig rules, keeping only the STRONG bindings (what
+      # `fc-pattern -c` marks `(s)`; csim_native's fontconfig.rs asks the library). Memoised.
       private def fc_strong_families(family)
         @fc_strong_lock.synchronize do
           return @fc_strong_families[family] if @fc_strong_families.key?(family)
         end
-        out = begin
-          IO.popen(['fc-pattern', '-c', fc_escape(family)], err: File::NULL, &:read)
-        rescue StandardError
-          nil
-        end
-        line = out && out[/^\s*family:.*$/]
-        list = line&.scan(STRONG_FAMILY_RE)&.flatten
+        list = Native.font_strong_families(fc_escape(family))
         @fc_strong_lock.synchronize { @fc_strong_families[family] = list }
         list
       end
@@ -7670,30 +7660,24 @@ module Capybara
         pattern.gsub(/([-:,\\])/) { "\\#{Regexp.last_match(1)}" }
       end
 
+      # The face fontconfig matches `pattern` (at `weight_style`) to, as fc-match answers it: [file, the face's family
+      # names], [nil, nil] for none.
       private def fc_match(pattern, weight_style)
         escaped = fc_escape(pattern)
         escaped += ":#{weight_style}" unless weight_style.to_s.empty?
-        out = begin
-          IO.popen(['fc-match', escaped, '-f', '%{file}\t%{family}'], &:read)
-        rescue StandardError
-          nil
-        end
-        return [nil, nil] if out.nil? || out.strip.empty?
+        file, families = Native.font_match(escaped)
+        return [nil, nil] unless file
 
-        file, matched = out.split("\t", 2)
-        file = file.to_s.strip
-        [File.exist?(file) ? file : nil, matched.to_s]
+        [File.exist?(file) ? file : nil, families]
       end
 
-      # `%{family}` is the matched face's own family list, which for a face that
-      # declares aliases holds more than one name ("Noto Sans,Noto Sans Regular") —
-      # so a match is "the requested name is one of them", case-insensitively. It
-      # does NOT carry the names fontconfig substituted THROUGH to get here (asking
-      # for Arial answers "Liberation Sans", never "Arial"); that case is the
-      # substitution test in `font_file_for_family`.
+      # The matched face's own family list holds more than one name for a face that declares aliases ("Noto Sans",
+      # "Noto Sans Regular") — so a match is "the requested name is one of them", case-insensitively. It does NOT carry
+      # the names fontconfig substituted THROUGH to get here (asking for Arial answers "Liberation Sans", never
+      # "Arial"); that case is the substitution test in `font_file_for_family`.
       private def font_family_matches?(want, matched)
         w = want.to_s.downcase
-        matched.to_s.downcase.split(',').any? {|m| m.strip == w }
+        Array(matched).any? {|m| m.strip.downcase == w }
       end
 
       # Render a line of text to a coverage mask via libvips (pango / fontconfig),

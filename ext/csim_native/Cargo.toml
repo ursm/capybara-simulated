@@ -104,6 +104,10 @@ mp4 = "0.14"
 matroska-demuxer = "0.8"
 openh264 = "0.9"
 rusty_vp9 = "0.1"
+# A CSS family resolved to a font file (fontconfig.rs) as Chrome resolves it on this machine: fontconfig's own match
+# and substitution, the library opened at load (the fc-match / fc-pattern tools are not needed, nor its headers to
+# build) — a machine without it fails `require`, loudly, rather than resolving no family.
+libloading = "0.8"
 
 # The HTML parser: Servo's html5ever — tokenizer and tree builder, the select parser relaxation and `selectedcontent`
 # included — run natively, the page side taking the tree it builds as steps (html_parse.rs).

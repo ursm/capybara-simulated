@@ -301,6 +301,7 @@ dependencies = [
  "image-webp",
  "jpeg-encoder",
  "libc",
+ "libloading",
  "magnus",
  "matroska-demuxer",
  "moxcms 0.9.1",

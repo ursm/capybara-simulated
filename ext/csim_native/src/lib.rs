@@ -26,6 +26,7 @@ mod element_state;
 // registers a font (registerFontPath) to a handle it names the face by (`walkFace`).
 mod font;
 mod font_faces;
+mod fontconfig;
 mod geometry;
 // HTML's presentational hints: the declarations an element's attributes add to the cascade.
 mod hints;
@@ -78,6 +79,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     unicode::init();
     // …and expose them: the suite checks them against what the JS engine (V8) answers for the same
     // regex, which is the invariant `unicode.rs` rests on. Nothing in the driver itself calls this.
+    // fontconfig resolves every font family: a machine without it fails here, saying so, not on the first page.
+    fontconfig::require().map_err(|e| Error::new(ruby.exception_load_error(), e))?;
     let native = ruby
         .define_module("Capybara")?
         .define_module("Simulated")?
@@ -87,5 +90,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("form_encode", magnus::function!(text_codec::form_encode, 2))?;
     // An image resource's bytes decoded to RGBA, on whichever thread fetched them.
     native.define_module_function("decode_image", magnus::function!(image_decode::decode_for_ruby, 3))?;
+    // A font pattern matched, and the families it is substituted through, by this machine's fontconfig.
+    native.define_module_function("font_match", magnus::function!(fontconfig::font_match_for_ruby, 1))?;
+    native.define_module_function("font_strong_families", magnus::function!(fontconfig::strong_families_for_ruby, 1))?;
     Ok(())
 }
