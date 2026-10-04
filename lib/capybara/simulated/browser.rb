@@ -1901,17 +1901,18 @@ module Capybara
           sleep 0.005 if image_loads_pending? && !@timers_active && !@runtime.has_ready_timer?
           prev_gen = @runtime.settle_gen
         end
-        # Reclaim arena slots for any DOM nodes the settle's churn left unreachable: pump the foreground
-        # message loop so V8's FinalizationRegistry cleanup callbacks run (native-query-shadow.js frees
-        # each collected node's slot via __dom.dropNode). A no-op when nothing was collected.
+        # Free the native state of what the settle's churn left unreachable — a CSSOM rule's or sheet's, a
+        # TextDecoder's: pump the foreground message loop so V8's FinalizationRegistry cleanup callbacks
+        # run (cssom.js, cascade.js, encoding.js). A no-op when nothing was collected. (A DOM node's slot
+        # is freed by its handle, at the next node made — node_handle.rs.)
         #
         # INVARIANT this relies on: the pump drains ALL pending foreground platform tasks (and runs a
         # microtask checkpoint) — safe to do here, AFTER settle has quiesced, only because this driver
         # models timers/promises on its own virtual-clock queues, NOT V8's platform queue, so the only
-        # foreground tasks are FR cleanup callbacks; and our FR callback is pure-arena (dropNode +
-        # Map.delete — no DOM mutation, no queued microtask, no app code). If either stops holding (a
-        # cleanup callback with DOM/microtask side effects, or app work posted as a foreground task), its
-        # effect would land post-settle and go un-settled — revisit this placement then.
+        # foreground tasks are FR cleanup callbacks; and our FR callbacks are pure native frees (ruleDrop,
+        # sheetDrop, textDecoderClose — no DOM mutation, no queued microtask, no app code). If either
+        # stops holding (a cleanup callback with DOM/microtask side effects, or app work posted as a
+        # foreground task), its effect would land post-settle and go un-settled — revisit this placement then.
         @runtime.pump_message_loop
         @find_cache_dirty = true
       end

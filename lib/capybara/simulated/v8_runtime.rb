@@ -177,9 +177,10 @@ module Capybara
         def heap_statistics                  = @iso.heap_statistics
         def low_memory_notification          = @iso.low_memory_notification
         # Run pending foreground platform tasks — chiefly the FinalizationRegistry cleanup callbacks
-        # V8 posts when it collects a wrapper. The native arena's per-node reclamation
-        # (native-query-shadow.js finRegistry -> __dom.dropNode) fires only when these run, so the
-        # browser pumps once per settle. Watchdog-bracketed inside rusty_racer.
+        # V8 posts when it collects an object one holds (a CSSOM rule's or sheet's, a TextDecoder's:
+        # cssom.js, cascade.js, encoding.js), whose native state is freed only when these run, so the
+        # browser pumps once per settle. Watchdog-bracketed inside rusty_racer. (A node's slot is not
+        # among them: its handle frees it, at the next node made — node_handle.rs.)
         def pump_message_loop                = @iso.pump_message_loop
 
         def dynamic_import_resolver=(prc)
@@ -559,8 +560,8 @@ module Capybara
       end
 
       # Run pending foreground platform tasks (FinalizationRegistry cleanup callbacks) so the native
-      # arena reclaims collected nodes' slots. The browser calls this once per settle; a no-op when the
-      # queue is empty (the common case).
+      # state of collected CSSOM rules and sheets and TextDecoders is freed. The browser calls this once
+      # per settle; a no-op when the queue is empty (the common case).
       def pump_message_loop
         @ctx&.pump_message_loop
       end

@@ -1397,10 +1397,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // The store-flip's native-backed `_attrs`: __dom.attrsView(nid) -> an interceptor object over
     // that node's attributes (the Element constructor installs it in place of the JS `{}`).
     register(scope, ns, "attrsView", attrs_view, context_id);
-    // Reclamation: free ONE node's slot when its JS wrapper is garbage-collected (the
-    // FinalizationRegistry callback in native-query-shadow.js calls this), so a long no-navigation
-    // session's transient/detached nodes don't accumulate. Safe by construction — the generational
-    // slot bumps its gen, so any surviving reference reads absent.
+    // Free ONE node's slot: the one a node registered afresh left (a collected node's is freed by its handle,
+    // node_handle.rs). Safe by construction — the generational slot bumps its gen, so any surviving reference
+    // reads absent.
     register(scope, ns, "dropNode", drop_node, context_id);
     register(scope, ns, "handleEdgesMismatch", handle_edges_mismatch, context_id);
     // Free a disposed realm's arena — csim calls this before tearing down a frame realm (main reuses

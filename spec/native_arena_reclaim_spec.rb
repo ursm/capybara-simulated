@@ -3,15 +3,15 @@
 # Generational arena — per-node slot RECLAMATION. Every element eager-creates an arena node at
 # construction (the store flip), so without reclamation a long no-navigation session's transient /
 # detached nodes accumulate for the whole page. The generational arena frees a node's slot when its
-# JS wrapper is garbage-collected (native-query-shadow.js registers each element with a
-# FinalizationRegistry whose callback calls `__dom.dropNode`), and hands the recycled slot a fresh
+# JS object is garbage-collected (the object wraps a handle on V8's C++ heap, whose collection queues
+# the slot, freed at the next node made: node_handle.rs), and hands the recycled slot a fresh
 # GENERATION so any surviving reference — a stale `children` edge left by an unsynced splice, a nid
 # still held somewhere — reads absent instead of aliasing the reoccupant. That generation is what
 # makes reuse safe (naive index reuse corrupted the tree — proven on Avo before this landed).
 #
 # The app suites (Avo especially) are the safety oracle for reuse under real churn; they can't show
-# that reclamation actually FIRES, so this does: it forces a GC + message-loop pump (what the browser
-# does at settle) and checks that a fresh element REUSES a freed slot rather than growing the arena,
+# that reclamation actually FIRES, so this does: it forces a GC and checks that a fresh element REUSES a
+# freed slot rather than growing the arena,
 # and that the cascade still matches correctly over the churned + reclaimed arena.
 
 require 'capybara/simulated'
@@ -33,9 +33,9 @@ RSpec.describe 'native arena reclamation (generational)' do
 
   let(:session) { simulated_session(app) }
 
-  # Force a full GC (with weak processing) then pump the foreground message loop, so the
-  # FinalizationRegistry cleanup callbacks run and free the collected nodes' slots — the browser does
-  # exactly this at settle; here we drive it directly (twice, GC being best-effort) for determinism.
+  # Force a full GC (with weak processing), which queues the collected nodes' slots to be freed at the
+  # next node made (twice, GC being best-effort), then pump the foreground message loop as the browser
+  # does at settle.
   def gc_and_pump
     runtime = session.driver.browser.instance_variable_get(:@runtime)
     ctx     = runtime.instance_variable_get(:@ctx)
