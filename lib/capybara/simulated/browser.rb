@@ -7646,15 +7646,13 @@ module Capybara
         pattern.gsub(/([-:,\\])/) { "\\#{Regexp.last_match(1)}" }
       end
 
-      # The face fontconfig matches `pattern` (at `weight_style`) to, as fc-match answers it: [file, the face's family
-      # names], [nil, nil] for none.
+      # The face fontconfig matches `pattern` (at `weight_style`) to, as fc-match answers it: [the face — its file, and
+      # its index where the file is a collection (csim_native's `font::face_name`) — the face's family names], [nil, nil]
+      # for none.
       private def fc_match(pattern, weight_style)
         escaped = fc_escape(pattern)
         escaped += ":#{weight_style}" unless weight_style.to_s.empty?
-        file, families = Native.font_match(escaped)
-        return [nil, nil] unless file
-
-        [File.exist?(file) ? file : nil, families]
+        Native.font_match(escaped) || [nil, nil]
       end
 
       # The matched face's own family list holds more than one name for a face that declares aliases ("Noto Sans",

@@ -16,18 +16,59 @@ use skrifa::{FontRef, MetadataProvider};
 
 use crate::canvas_path::Ring;
 
-// A face's file, read once per process: what a canvas's text is shaped and drawn from.
-fn file(path: &str) -> Option<Arc<[u8]>> {
-    static FILES: OnceLock<Mutex<HashMap<String, Option<Arc<[u8]>>>>> = OnceLock::new();
-    let mut files = FILES.get_or_init(Default::default).lock().ok()?;
-    files.entry(path.to_owned()).or_insert_with(|| std::fs::read(path).ok().map(Arc::from)).clone()
+// A face text is shaped and drawn in: its file's bytes, the index of the face in them (a collection — a `.ttc` — holds
+// several), and its shaping tables, parsed once. Read once per process (`face`).
+struct Face {
+    data: Arc<[u8]>,
+    index: u32,
+    shaper: ShaperData,
 }
 
-// A run of the line in one face at one size: its text, the face's file, and its size as a multiple of the font's (its
-// face's `size-adjust`, and a synthesized small capital's 0.7).
+impl Face {
+    fn font(&self) -> FontRef<'_> {
+        FontRef::from_index(&self.data, self.index).expect("a face `face` parsed")
+    }
+    fn maps(&self, c: char) -> bool {
+        self.font().charmap().map(c).is_some()
+    }
+    fn upem(&self) -> f64 {
+        f64::from(self.font().metrics(Size::unscaled(), LocationRef::default()).units_per_em)
+    }
+}
+
+// The face fontconfig named (`font::face_name`), read the first time it is asked for — None where it is none skrifa
+// parses.
+fn face(name: &str) -> Option<Arc<Face>> {
+    static FACES: OnceLock<Mutex<HashMap<String, Option<Arc<Face>>>>> = OnceLock::new();
+    let mut faces = FACES.get_or_init(Default::default).lock().ok()?;
+    faces
+        .entry(name.to_owned())
+        .or_insert_with(|| {
+            let (path, index) = crate::font::face_file(name);
+            let data: Arc<[u8]> = std::fs::read(path).ok()?.into();
+            let shaper = ShaperData::new(&FontRef::from_index(&data, index).ok()?);
+            Some(Arc::new(Face { data, index, shaper }))
+        })
+        .clone()
+}
+
+// The face fontconfig finds for `pattern` (a character's `:charset=`, its presentation), asked once per process: the
+// faces installed do not change under a running process.
+fn fallback(pattern: String) -> Option<Arc<Face>> {
+    static FALLBACKS: OnceLock<Mutex<HashMap<String, Option<Arc<Face>>>>> = OnceLock::new();
+    let cached = FALLBACKS.get_or_init(Default::default).lock().ok()?.get(&pattern).cloned();
+    cached.unwrap_or_else(|| {
+        let found = crate::fontconfig::font_match(&pattern).and_then(|(name, _)| face(&name));
+        FALLBACKS.get_or_init(Default::default).lock().ok()?.insert(pattern, found.clone());
+        found
+    })
+}
+
+// A run of the line in one face at one size: its text, the face, and its size as a multiple of the font's (its face's
+// `size-adjust`, and a synthesized small capital's 0.7).
 struct Run {
     text: String,
-    data: Arc<[u8]>,
+    face: Arc<Face>,
     size: f64,
 }
 
@@ -36,11 +77,11 @@ struct Run {
 const SMALL_CAPS_SIZE: f64 = 0.7;
 
 // The line's own face: the one `handle` (font.rs) names, or — where its `@font-face`s split by `unicode-range` — the
-// member a character's code point picks; its file and its `size-adjust`.
-fn face_of_handle(handle: i32, c: char) -> Option<(Arc<[u8]>, f64)> {
+// member a character's code point picks; and its `size-adjust`.
+fn face_of_handle(handle: i32, c: char) -> Option<(Arc<Face>, f64)> {
     let handle = crate::font::with_font(handle, |fm| fm.member_handle(u32::from(c)))?.unwrap_or(handle);
-    let (path, scale, _) = crate::font::with_font(handle, |fm| fm.source())?;
-    Some((file(&path)?, scale))
+    let (name, scale, _) = crate::font::with_font(handle, |fm| fm.source())?;
+    Some((face(&name)?, scale))
 }
 
 // The line split into runs by the face each character is set in: the line's own (`face_of_handle`), else — for a
@@ -48,14 +89,8 @@ fn face_of_handle(handle: i32, c: char) -> Option<(Arc<[u8]>, f64)> {
 // fontconfig), else the line's own still (its `.notdef`). With `small_caps` and a face without `smcp`, a lowercase
 // letter becomes its capital, at `SMALL_CAPS_SIZE`.
 fn runs(text: &str, handle: i32, small_caps: bool) -> Vec<Run> {
-    let maps = |data: &[u8], c: char| FontRef::new(data).ok().is_some_and(|f| f.charmap().map(c).is_some());
-    let mut fallbacks: HashMap<String, Option<Arc<[u8]>>> = HashMap::new();
     let mut out: Vec<Run> = Vec::new();
     let mut chars = text.chars().peekable();
-    let mut face_for = |pattern: String, c: char| -> Option<Arc<[u8]>> {
-        let path = crate::fontconfig::font_match(&pattern)?.0;
-        fallbacks.entry(path.clone()).or_insert_with(|| file(&path)).clone().filter(|d| maps(d, c))
-    };
     while let Some(c) = chars.next() {
         let Some((own, scale)) = face_of_handle(handle, c) else { continue };
         let lower = small_caps && c.is_lowercase() && c.to_uppercase().next() != Some(c) && !has_feature(&own, b"smcp");
@@ -69,10 +104,10 @@ fn runs(text: &str, handle: i32, small_caps: bool) -> Vec<Run> {
         };
         // (…the line's own face where it maps the character — its variation sequences picking the presentation, as the
         // shaper reads them — else whichever face has it: a colour emoji one for VS16, one that is not for VS15)
-        let (data, scale) = if maps(&own, c) || c.is_whitespace() || c.is_control() || ignorable(c) {
+        let (face, scale) = if own.maps(c) || c.is_whitespace() || c.is_control() || ignorable(c) {
             (own, scale)
         } else {
-            face_for(format!("{presentation}:charset={:x}", u32::from(c)), c).map_or((own, scale), |d| (d, 1.0))
+            fallback(format!("{presentation}:charset={:x}", u32::from(c))).filter(|f| f.maps(c)).map_or((own, scale), |f| (f, 1.0))
         };
         let size = scale * if lower { SMALL_CAPS_SIZE } else { 1.0 };
         let mut set: String = if lower { c.to_uppercase().collect() } else { c.to_string() };
@@ -81,8 +116,8 @@ fn runs(text: &str, handle: i32, small_caps: bool) -> Vec<Run> {
             chars.next();
         }
         match out.last_mut() {
-            Some(run) if Arc::ptr_eq(&run.data, &data) && run.size == size => run.text.push_str(&set),
-            _ => out.push(Run { text: set, data, size }),
+            Some(run) if Arc::ptr_eq(&run.face, &face) && run.size == size => run.text.push_str(&set),
+            _ => out.push(Run { text: set, face, size }),
         }
     }
     out
@@ -93,16 +128,15 @@ fn ignorable(c: char) -> bool {
     matches!(u32::from(c), 0xAD | 0x34F | 0x61C | 0x115F | 0x1160 | 0x17B4 | 0x17B5 | 0x180B..=0x180F | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x206F | 0x3164 | 0xFE00..=0xFE0F | 0xFEFF | 0xFFA0 | 0xFFF0..=0xFFF8 | 0x1BCA0..=0x1BCA3 | 0x1D173..=0x1D17A | 0xE0000..=0xE0FFF)
 }
 // Whether a face's GSUB has the feature `tag` (a feature record of any script).
-fn has_feature(data: &[u8], tag: &[u8; 4]) -> bool {
+fn has_feature(face: &Face, tag: &[u8; 4]) -> bool {
     use skrifa::raw::TableProvider;
-    let Ok(font) = FontRef::new(data) else { return false };
-    font.gsub().ok().and_then(|g| g.feature_list().ok()).is_some_and(|list| list.feature_records().iter().any(|r| r.feature_tag() == skrifa::raw::types::Tag::new(tag)))
+    face.font().gsub().ok().and_then(|g| g.feature_list().ok()).is_some_and(|list| list.feature_records().iter().any(|r| r.feature_tag() == skrifa::raw::types::Tag::new(tag)))
 }
 
 // A glyph placed on the line: its face, its id, and where its origin lies (px, the pen's x and the baseline's y-up
 // offset), at the scale its face's units are drawn at.
 struct Placed {
-    data: Arc<[u8]>,
+    face: Arc<Face>,
     glyph: u32,
     x: f64,
     y: f64,
@@ -138,18 +172,16 @@ fn shape(text: &str, handle: i32, size: f64, kerning: bool, small_caps: bool, rt
         }
     }
     for (run, rtl_run) in ordered {
-        let Ok(font) = harfrust::FontRef::new(&run.data) else { continue };
-        let upem = f64::from(FontRef::new(&run.data).map_or(1000, |f| f.metrics(Size::unscaled(), LocationRef::default()).units_per_em));
-        let scale = size * run.size / upem;
-        let data = ShaperData::new(&font);
-        let shaper = data.shaper(&font).build();
+        let font = run.face.font();
+        let scale = size * run.size / run.face.upem();
+        let shaper = run.face.shaper.shaper(&font).build();
         let mut buffer = UnicodeBuffer::new();
         buffer.push_str(&run.text);
         buffer.set_direction(if rtl_run { Direction::RightToLeft } else { Direction::LeftToRight });
         buffer.guess_segment_properties();
         let glyphs = shaper.shape(buffer, ShapeOptions::new().features(&features));
         for (info, pos) in glyphs.glyph_infos().iter().zip(glyphs.glyph_positions()) {
-            placed.push(Placed { data: run.data.clone(), glyph: info.glyph_id, x: pen + f64::from(pos.x_offset) * scale, y: f64::from(pos.y_offset) * scale, scale });
+            placed.push(Placed { face: run.face.clone(), glyph: info.glyph_id, x: pen + f64::from(pos.x_offset) * scale, y: f64::from(pos.y_offset) * scale, scale });
             pen += f64::from(pos.x_advance) * scale;
         }
     }
@@ -257,8 +289,7 @@ fn outlines(placed: &[Placed]) -> (Vec<Ring>, Vec<Sprite>, Option<(f64, f64)>) {
     let mut edges: Option<(f64, f64)> = None;
     let mut widen = |edges: &mut Option<(f64, f64)>, l: f64, r: f64| *edges = Some(edges.map_or((l, r), |(el, er)| (el.min(l), er.max(r))));
     for g in placed {
-        let Ok(font) = FontRef::new(&g.data) else { continue };
-        let upem = f64::from(font.metrics(Size::unscaled(), LocationRef::default()).units_per_em);
+        let (font, upem) = (g.face.font(), g.face.upem());
         let Some(outline) = font.outline_glyphs().get(skrifa::GlyphId::new(g.glyph)) else {
             if let Some(s) = sprite(&font, g, upem) {
                 widen(&mut edges, g.x + (s.left - g.x).floor(), g.x + (s.left + s.width - g.x).ceil());
@@ -293,17 +324,58 @@ pub(crate) struct Line {
     pub(crate) em: (f64, f64),
     // The `BASE` table's hanging and ideographic baselines, px above the alphabetic one — None without one.
     pub(crate) baselines: Option<(f64, f64)>,
-    // The coverage mask of the ink, cropped to whole pixels around it: its left and top (px from the pen's start, the
-    // baseline), its size, and its bytes — none where it was only measured, or has no ink.
-    pub(crate) mask: Option<(i64, i64, usize, usize, Vec<u8>)>,
+    // Where it was drawn (`Placement`), what of its ink reaches the canvas — none where nothing does.
+    pub(crate) mask: Option<Mask>,
 }
 
-// `text` in the face `handle` (font.rs) at `size` px: shaped, measured, and — unless `measure_only` — drawn.
-pub(crate) fn line(text: &str, handle: i32, size: f64, kerning: bool, small_caps: bool, rtl: bool, measure_only: bool) -> Option<Line> {
+// A drawn line's coverage on the canvas: its left and top in device pixels, its size, and a byte of coverage a pixel —
+// condensed already where `maxWidth` squeezes the line.
+pub(crate) struct Mask {
+    pub(crate) x: i64,
+    pub(crate) y: i64,
+    pub(crate) width: usize,
+    pub(crate) height: usize,
+    pub(crate) bytes: Vec<u8>,
+}
+
+// Where a line is drawn (HTML §4.12.5.1.4, the text preparation algorithm's anchor point), in device pixels: its anchor
+// (fillText's x, y through the CTM), the fraction of its advance `textAlign` puts left of that (0, ½ or 1), its
+// `textBaseline`, the width `maxWidth` condenses it to (0: none), and the window of device pixels that can reach the
+// canvas (left, top, right, bottom) — the canvas's own, and where the shadow's offset brings the rest from.
+pub(crate) struct Placement {
+    pub(crate) anchor: (f64, f64),
+    pub(crate) align: f64,
+    pub(crate) baseline: Baseline,
+    pub(crate) max_width: f64,
+    pub(crate) window: [f64; 4],
+}
+
+// `textBaseline`, in the IDL enumeration's order.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Baseline {
+    Top,
+    Hanging,
+    Middle,
+    Alphabetic,
+    Ideographic,
+    Bottom,
+}
+
+impl Baseline {
+    fn from_index(i: i32) -> Baseline {
+        [Baseline::Top, Baseline::Hanging, Baseline::Middle, Baseline::Alphabetic, Baseline::Ideographic, Baseline::Bottom]
+            .get(i as usize)
+            .copied()
+            .unwrap_or(Baseline::Alphabetic)
+    }
+}
+
+// `text` in the face `handle` (font.rs) at `size` px: shaped, measured, and — where it is `place`d — drawn.
+pub(crate) fn line(text: &str, handle: i32, size: f64, kerning: bool, small_caps: bool, rtl: bool, place: Option<&Placement>) -> Option<Line> {
     // (…a NUL takes up no space, as Chrome sets it)
     let text = text.replace('\0', "");
-    let (path, face_scale, vertical) = crate::font::with_font(handle, |fm| fm.source())?;
-    let primary = file(&path)?;
+    let (name, face_scale, vertical) = crate::font::with_font(handle, |fm| fm.source())?;
+    let primary = face(&name)?;
     let (placed, advance) = shape(&text, handle, size, kerning, small_caps, rtl);
     let (rings, sprites, edges) = outlines(&placed);
     let (mut l, mut t, mut r, mut b) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
@@ -311,29 +383,74 @@ pub(crate) fn line(text: &str, handle: i32, size: f64, kerning: bool, small_caps
     for (x, y) in rings.iter().flatten().copied().chain(corners) {
         (l, t, r, b) = (l.min(x), t.min(y), r.max(x), b.max(y));
     }
-    let inked = l.is_finite();
     // (…its ascent and descent to the nearest pixel: Chrome's come off hinted outlines, which these are not)
     let ink = edges.map_or([0.0; 4], |(el, er)| [el, er, (-t).round(), b.round()]);
     // (…the face's vertical metrics carry its `size-adjust` already; its em square and baselines are at the size it
     // draws at)
     let (asc, desc) = vertical.map_or((0.8 * face_scale, 0.2 * face_scale), |v| (v.asc, v.desc));
     let face_size = size * face_scale;
-    let mask = (inked && !measure_only).then(|| {
-        let (x0, y0) = (l.floor() as i64, t.floor() as i64);
-        let (w, h) = ((r.ceil() as i64 - x0).max(1) as usize, (b.ceil() as i64 - y0).max(1) as usize);
-        let mut bytes = vec![0u8; w * h];
-        let shift = (-(x0 as f64), -(y0 as f64));
-        let _ = crate::canvas::cover_rings(&rings, false, w, h, shift, &mut |x, y, c| bytes[y * w + x] = (c * 255.0).round() as u8);
+    let em = em_split(&primary).map_or((face_size, 0.0), |r| ((face_size * r).round(), (face_size * (1.0 - r)).round()));
+    let mut line = Line {
+        advance,
+        ink,
+        // (…`+ 0.0`: a descent that rounds to zero is 0, not -0)
+        ascent: (asc * size).round() + 0.0,
+        descent: (desc * size).round() + 0.0,
+        em,
+        baselines: base_baselines(&primary, face_size),
+        mask: None,
+    };
+    if let Some(place) = place.filter(|_| l.is_finite()) {
+        line.mask = line.draw(place, (l, t, r, b), &rings, &sprites);
+    }
+    Some(line)
+}
+
+impl Line {
+    // The coverage of the line's ink — `rings` and `sprites`, inside `bounds` (left, top, right, bottom: px from the pen's
+    // start and the baseline) — placed where `place` puts it, of which only what lies in its window is rasterized: a
+    // line at 30000px, or far off the canvas, costs the pixels it shows.
+    fn draw(&self, place: &Placement, bounds: (f64, f64, f64, f64), rings: &[Ring], sprites: &[Sprite]) -> Option<Mask> {
+        let (l, t, r, b) = bounds;
+        // (…maxWidth condenses the line horizontally, never wraps; alignment goes by its advance as condensed)
+        let squeeze = if place.max_width > 0.0 && self.advance > place.max_width { place.max_width / self.advance } else { 1.0 };
+        let above = match place.baseline {
+            Baseline::Top => self.em.0,
+            Baseline::Hanging => self.baselines.map_or(self.ascent * 0.8, |(hang, _)| hang),
+            Baseline::Middle => (self.em.0 - self.em.1) / 2.0,
+            Baseline::Alphabetic => 0.0,
+            Baseline::Ideographic if self.baselines.is_some() => self.baselines.map_or(0.0, |(_, ideo)| ideo),
+            Baseline::Ideographic | Baseline::Bottom => -self.em.1,
+        };
+        let origin = (place.anchor.0 - self.advance * squeeze * place.align, place.anchor.1 + above);
+        // (…the ink in whole pixels, its left edge squeezed with the line, then what of it falls in the window: output
+        // columns and rows, and the source columns those sample)
+        let (x0, y0) = (l.floor(), t.floor());
+        let (w, h) = ((r.ceil() - x0).max(1.0) as usize, (b.ceil() - y0).max(1.0) as usize);
+        let out_w = if squeeze == 1.0 { w } else { ((w as f64 * squeeze).round() as usize).max(1) };
+        let (ink_x, ink_y) = ((origin.0 + x0 * squeeze).round(), (origin.1 + y0).round());
+        let span = |lo: f64, hi: f64, at: f64, n: usize| ((lo.floor() - at).clamp(0.0, n as f64) as usize, (hi.ceil() - at).clamp(0.0, n as f64) as usize);
+        let [wl, wt, wr, wb] = place.window;
+        let ((j0, j1), (i0, i1)) = (span(wl, wr, ink_x, out_w), span(wt, wb, ink_y, h));
+        if j0 >= j1 || i0 >= i1 {
+            return None;
+        }
+        let source = |j: usize| if squeeze == 1.0 { j } else { ((j as f64 / squeeze).floor() as usize).min(w - 1) };
+        let (s0, s1) = (source(j0), source(j1 - 1) + 1);
+        let (sw, rows) = (s1 - s0, i1 - i0);
+        let (left, top) = (x0 + s0 as f64, y0 + i0 as f64);
+        let mut bytes = vec![0u8; sw * rows];
+        let _ = crate::canvas::cover_rings(rings, false, sw, rows, (-left, -top), &mut |x, y, c| bytes[y * sw + x] = (c * 255.0).round() as u8);
         // (…a bitmap glyph's alpha, sampled at each pixel's centre, where it covers more)
-        for s in &sprites {
+        for s in sprites {
             let (iw, ih) = (s.image.width(), s.image.height());
-            for (py, row) in bytes.chunks_exact_mut(w).enumerate() {
-                let v = (y0 as f64 + py as f64 + 0.5 - s.top) / s.height;
+            for (py, row) in bytes.chunks_exact_mut(sw).enumerate() {
+                let v = (top + py as f64 + 0.5 - s.top) / s.height;
                 if !(0.0..1.0).contains(&v) {
                     continue;
                 }
                 for (px, cell) in row.iter_mut().enumerate() {
-                    let u = (x0 as f64 + px as f64 + 0.5 - s.left) / s.width;
+                    let u = (left + px as f64 + 0.5 - s.left) / s.width;
                     if (0.0..1.0).contains(&u) {
                         let a = s.image.get_pixel((u * f64::from(iw)) as u32, (v * f64::from(ih)) as u32)[0];
                         *cell = (*cell).max(a);
@@ -341,17 +458,19 @@ pub(crate) fn line(text: &str, handle: i32, size: f64, kerning: bool, small_caps
                 }
             }
         }
-        (x0, y0, w, h, bytes)
-    });
-    let em = em_split(&primary).map_or((face_size, 0.0), |r| ((face_size * r).round(), (face_size * (1.0 - r)).round()));
-    // (…`+ 0.0`: a descent that rounds to zero is 0, not -0)
-    Some(Line { advance, ink, ascent: (asc * size).round() + 0.0, descent: (desc * size).round() + 0.0, em, baselines: base_baselines(&primary, face_size), mask })
+        // (…condensed: each output column samples the source column it falls in, so a device pixel composites once)
+        if squeeze != 1.0 {
+            bytes = (0..rows).flat_map(|y| (j0..j1).map(move |j| (y, j))).map(|(y, j)| bytes[y * sw + source(j) - s0]).collect();
+        }
+        Some(Mask { x: ink_x as i64 + j0 as i64, y: ink_y as i64 + i0 as i64, width: j1 - j0, height: rows, bytes })
+    }
 }
+
 // The fraction of the em square above the baseline: the face's typographic ascender over its ascender and descender
 // (OS/2, else hhea) — None where they span nothing.
-fn em_split(data: &[u8]) -> Option<f64> {
+fn em_split(face: &Face) -> Option<f64> {
     use skrifa::raw::TableProvider;
-    let font = FontRef::new(data).ok()?;
+    let font = face.font();
     let (asc, desc) = match font.os2() {
         Ok(os2) => (f64::from(os2.s_typo_ascender()), f64::from(os2.s_typo_descender())),
         Err(_) => font.hhea().ok().map(|h| (f64::from(h.ascender().to_i16()), f64::from(h.descender().to_i16())))?,
@@ -361,9 +480,8 @@ fn em_split(data: &[u8]) -> Option<f64> {
 
 // The hanging and ideographic baselines a face's `BASE` table gives (its horizontal axis, the DFLT or latn script, else
 // its first), px above the alphabetic one at `size` — None where it has no table, or no coordinates.
-fn base_baselines(data: &[u8], size: f64) -> Option<(f64, f64)> {
-    let font = FontRef::new(data).ok()?;
-    let upem = f64::from(font.metrics(Size::unscaled(), LocationRef::default()).units_per_em);
+fn base_baselines(face: &Face, size: f64) -> Option<(f64, f64)> {
+    let (font, upem) = (face.font(), face.upem());
     let base = font.table_data(skrifa::raw::types::Tag::new(b"BASE"))?;
     let b = base.as_bytes();
     let u16_at = |at: usize| Some(u16::from_be_bytes(b.get(at..at + 2)?.try_into().ok()?) as usize);
@@ -413,17 +531,25 @@ fn first_strong_direction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     }
 }
 
-// __dom.canvasText(text, handle, size, kerning, smallCaps, rtl, measureOnly) -> the line `text` makes in the face
-// `handle` at `size` px, on a right-to-left base direction where `rtl` (`line`): `{advance, inkLeft, inkRight, inkAscent, inkDescent, ascent, descent, emAscent, emDescent
-// [, hangingBaseline,
-// ideographicBaseline][, maskX, maskY, maskWidth, maskHeight, mask]}` — the mask's left and top px from the pen's start
-// and the baseline, its bytes a Uint8Array of coverage — or null where the face is none native reads.
+// __dom.canvasText(text, handle, size, kerning, smallCaps, rtl[, place]) -> the line `text` makes in the face `handle` at
+// `size` px, on a right-to-left base direction where `rtl` (`line`): `{advance, inkLeft, inkRight, inkAscent,
+// inkDescent, ascent, descent, emAscent, emDescent[, hangingBaseline, ideographicBaseline][, maskX, maskY, maskWidth,
+// maskHeight, mask]}` — or null where the face is none native reads. `place`, a Float64Array `[anchorX, anchorY, align,
+// baseline, maxWidth, windowLeft, windowTop, windowRight, windowBottom]` (`Placement`; the baseline its
+// `textBaseline`'s index), draws it too: the mask is what of it reaches the canvas, its left and top in device pixels,
+// its bytes a Uint8Array of coverage.
 fn canvas_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let text = args.get(0).to_rust_string_lossy(scope);
     let handle = args.get(1).int32_value(scope).unwrap_or(-1);
     let size = args.get(2).number_value(scope).unwrap_or(10.0);
-    let [kerning, small_caps, rtl, measure_only] = [3, 4, 5, 6].map(|k| args.get(k).boolean_value(scope));
-    let Some(line) = std::panic::catch_unwind(|| line(&text, handle, size, kerning, small_caps, rtl, measure_only)).ok().flatten() else { return rv.set_null() };
+    let [kerning, small_caps, rtl] = [3, 4, 5].map(|k| args.get(k).boolean_value(scope));
+    let place = match *crate::dom::f64_arg(args.get(6)) {
+        [ax, ay, align, baseline, max_width, wl, wt, wr, wb] => {
+            Some(Placement { anchor: (ax, ay), align, baseline: Baseline::from_index(baseline as i32), max_width, window: [wl, wt, wr, wb] })
+        }
+        _ => None,
+    };
+    let Some(line) = std::panic::catch_unwind(|| line(&text, handle, size, kerning, small_caps, rtl, place.as_ref())).ok().flatten() else { return rv.set_null() };
     let obj = v8::Object::new(scope);
     let mut set = |scope: &mut v8::PinScope<'_, '_>, key: &str, value: v8::Local<'_, v8::Value>| {
         let key = v8::String::new(scope, key).expect("a short string");
@@ -444,15 +570,15 @@ fn canvas_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     if let Some((hang, ideo)) = line.baselines {
         numbers.extend([("hangingBaseline", hang), ("ideographicBaseline", ideo)]);
     }
-    if let Some((x, y, w, h, _)) = &line.mask {
-        numbers.extend([("maskX", *x as f64), ("maskY", *y as f64), ("maskWidth", *w as f64), ("maskHeight", *h as f64)]);
+    if let Some(m) = &line.mask {
+        numbers.extend([("maskX", m.x as f64), ("maskY", m.y as f64), ("maskWidth", m.width as f64), ("maskHeight", m.height as f64)]);
     }
     for (key, n) in numbers {
         let value = v8::Number::new(scope, n).into();
         set(scope, key, value);
     }
-    if let Some((.., bytes)) = line.mask {
-        let mask = crate::dom::u8_array(scope, bytes);
+    if let Some(m) = line.mask {
+        let mask = crate::dom::u8_array(scope, m.bytes);
         set(scope, "mask", mask);
     }
     rv.set(obj.into());

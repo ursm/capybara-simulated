@@ -38,7 +38,7 @@ pub(crate) struct FontMetrics {
     // Whether it maps any ASCII letter: a face with none (a colour emoji font maps the digits, `#` and `*` for its
     // keycaps, and no letter) sets no text, which falls back to the next family.
     letters: bool,
-    // The file it was read from, which a canvas's text is shaped and drawn from (text.rs).
+    // The face it was read from (`face_name`), which a canvas's text is shaped and drawn in too (text.rs).
     path: std::sync::Arc<str>,
 }
 
@@ -120,8 +120,8 @@ impl FontMetrics {
     }
     // Build from font file bytes (SFNT: TTF/OTF; a WOFF / WOFF2 one is unwrapped first, `sfnt`). None when the file can't
     // be parsed, has no units-per-em, or maps no printable ASCII with a positive advance.
-    fn from_bytes(bytes: &[u8]) -> Option<FontMetrics> {
-        let font = FontRef::new(bytes).ok()?;
+    fn from_bytes(bytes: &[u8], index: u32) -> Option<FontMetrics> {
+        let font = FontRef::from_index(bytes, index).ok()?;
         let upem = font.metrics(Size::unscaled(), LocationRef::default()).units_per_em as f64;
         if upem <= 0.0 {
             return None;
@@ -379,16 +379,31 @@ pub(crate) fn sfnt_for_ruby(ruby: &magnus::Ruby, bytes: magnus::RString) -> Opti
     out.map(|s| ruby.str_from_slice(&s))
 }
 
-// Register a font from a fontconfig path (the host resolved it); reads + parses the file. `-1` when it
-// can't be read/parsed. Idempotent per path (parsed once, handle reused, a `-1` cached too).
-pub(crate) fn register_path(path: &str) -> i32 {
-    let key = format!("p:{path}");
+// A face as the host names it — fontconfig.rs answers it, `registerFontPath` takes it: its file's path, then, for a
+// member of a collection (`.ttc`) other than its first, a NUL and the member's index — NUL being the one character no
+// path holds.
+pub(crate) fn face_name(path: &str, index: u32) -> String {
+    if index == 0 { path.to_owned() } else { format!("{path}\0{index}") }
+}
+// …and back: the file, and the index of the face in it.
+pub(crate) fn face_file(name: &str) -> (&str, u32) {
+    match name.split_once('\0') {
+        Some((path, index)) => (path, index.parse().unwrap_or(0)),
+        None => (name, 0),
+    }
+}
+
+// Register a face the host resolved through fontconfig (`face_name`); reads + parses its file. `-1` when it can't be
+// read/parsed. Idempotent per face (parsed once, handle reused, a `-1` cached too).
+pub(crate) fn register_path(name: &str) -> i32 {
+    let key = format!("p:{name}");
     if let Some(h) = FONT_IDX.with(|m| m.borrow().get(&key).copied()) {
         return h;
     }
+    let (path, index) = face_file(name);
     let h = match std::fs::read(path) {
         Ok(bytes) => {
-            let metrics = FontMetrics::from_bytes(&bytes).map(|fm| FontMetrics { path: path.into(), ..fm });
+            let metrics = FontMetrics::from_bytes(&bytes, index).map(|fm| FontMetrics { path: name.into(), ..fm });
             let ok = metrics.is_some();
             let handle = FONTS.with(|f| {
                 let mut v = f.borrow_mut();
@@ -476,7 +491,7 @@ pub(crate) fn register_stack(primary: i32, members: Vec<StackMember>) -> i32 {
 }
 
 impl FontMetrics {
-    // The file it was read from, the `size-adjust` it is drawn at, and its vertical metrics in ems.
+    // The face it was read from (`face_name`), the `size-adjust` it is drawn at, and its vertical metrics in ems.
     pub(crate) fn source(&self) -> (std::sync::Arc<str>, f64, Option<VerticalMetrics>) {
         (self.path.clone(), self.scale, self.vertical)
     }

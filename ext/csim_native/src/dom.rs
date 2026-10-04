@@ -3082,8 +3082,8 @@ fn drop_realm(
     }
 }
 
-// __dom.registerFontPath(path) -> handle (>=0), or -1 when the file can't be read/parsed. The host
-// resolved `path` via fontconfig; native parses it (skrifa) into an advance table, cached.
+// __dom.registerFontPath(face) -> handle (>=0), or -1 when the face can't be read/parsed. The host resolved the face
+// (`font::face_name`) via fontconfig; native parses it (skrifa) into an advance table, cached.
 fn register_font_path(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,

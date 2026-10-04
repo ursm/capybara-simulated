@@ -311,24 +311,25 @@ impl TextFonts {
                     usvg::FontFamily::Monospace => ("monospace".to_owned(), true),
                     usvg::FontFamily::Named(s) => (s.clone(), false),
                 });
-                let file = names.chain([("Times New Roman".to_owned(), true)]).find_map(|(name, generic)| {
-                    let (file, families) = crate::fontconfig::font_match(&pattern(&name))?;
+                let face = names.chain([("Times New Roman".to_owned(), true)]).find_map(|(name, generic)| {
+                    let (face, families) = crate::fontconfig::font_match(&pattern(&name))?;
                     let has = |n: &str| families.iter().any(|f| f.eq_ignore_ascii_case(n));
-                    (generic || has(&name) || crate::fontconfig::strong_families(&fc_escape(&name)).iter().any(|s| has(s))).then_some(file)
+                    (generic || has(&name) || crate::fontconfig::strong_families(&fc_escape(&name)).iter().any(|s| has(s))).then_some(face)
                 })?;
-                face_of(db, &file)
+                face_of(db, &face)
             }),
             select_fallback: Box::new(|c, used, db| {
-                let (file, _) = crate::fontconfig::font_match(&format!(":charset={:x}", u32::from(c)))?;
-                face_of(db, &file).filter(|id| !used.contains(id))
+                let (face, _) = crate::fontconfig::font_match(&format!(":charset={:x}", u32::from(c)))?;
+                face_of(db, &face).filter(|id| !used.contains(id))
             }),
         }
     }
 }
-// The face of `file` in `db`, read into it the first time.
-fn face_of(db: &mut Arc<usvg::fontdb::Database>, file: &str) -> Option<usvg::fontdb::ID> {
+// The face fontconfig named (`font::face_name`) in `db`, its file read into it the first time.
+fn face_of(db: &mut Arc<usvg::fontdb::Database>, name: &str) -> Option<usvg::fontdb::ID> {
+    let (file, index) = crate::font::face_file(name);
     let path = std::path::Path::new(file);
-    let find = |db: &usvg::fontdb::Database| db.faces().find(|f| matches!(&f.source, usvg::fontdb::Source::File(p) if p == path)).map(|f| f.id);
+    let find = |db: &usvg::fontdb::Database| db.faces().find(|f| f.index == index && matches!(&f.source, usvg::fontdb::Source::File(p) if p == path)).map(|f| f.id);
     if let Some(id) = find(db) {
         return Some(id);
     }

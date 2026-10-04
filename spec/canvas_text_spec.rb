@@ -50,4 +50,66 @@ RSpec.describe 'canvas text' do
     JS
     expect(got).to eq([true, false])
   end
+
+  # A face in a collection (`.ttc`, as the Noto CJK faces ship): read at the index fontconfig names, so each family is
+  # its own member — 直 differs between the Japanese and the Simplified Chinese one — and a character the line's face
+  # lacks falls back to one, not to a `.notdef` box. Chrome: 71.99977 wide, a 28 / 7 font box (22 / 5 for
+  # sans-serif, whose primary face is Liberation Sans), 46951 and 50558 of ink.
+  it 'sets text in a face of a font collection' do
+    face, = Capybara::Simulated::Native.font_match('Noto Sans CJK SC')
+    skip 'no Noto Sans CJK collection installed' unless face&.include?("\0")
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const c = document.createElement('canvas').getContext('2d');
+        const metrics = ['24px "Noto Sans CJK JP"', '24px sans-serif'].map((f) => {
+          c.font = f;
+          const m = c.measureText('日本直');
+          return [m.width, m.fontBoundingBoxAscent, m.fontBoundingBoxDescent];
+        });
+        const ink = (f) => {
+          const x = Object.assign(document.createElement('canvas'), {width: 40, height: 40}).getContext('2d');
+          x.font = f;
+          x.fillText('直', 4, 30);
+          return x.getImageData(0, 0, 40, 40).data.filter((_, i) => i % 4 === 3).reduce((a, b) => a + b, 0);
+        };
+        return [metrics, ink('24px "Noto Sans CJK JP"'), ink('24px "Noto Sans CJK SC"')];
+      })()
+    JS
+    expect(got[0]).to eq([[72, 28, 7], [72, 22, 5]])
+    # (…the outlines unhinted, the ink a little off Chrome's; the two members' glyphs apart all the same)
+    expect(got[1]).to be_within(2000).of(46_951)
+    expect(got[2]).to be_within(2000).of(50_558)
+    expect(got[2] - got[1]).to be > 2000
+  end
+
+  # Only what can reach the canvas is rasterized: a line half off it draws the pixels the same line draws on a canvas
+  # wide enough to hold it — condensed by maxWidth, aligned, and through a shadow that brings off-canvas ink on — and a
+  # glyph at 100000px costs the canvas it covers, not the gigabytes its whole mask would.
+  it 'draws only the part of a line that reaches the canvas' do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const draw = (width, dx) => {
+          const c = Object.assign(document.createElement('canvas'), {width, height: 60}).getContext('2d');
+          c.font = '30px serif';
+          c.fillText('Condensed text', dx - 40, 25, 90);
+          c.textAlign = 'center';
+          c.shadowColor = 'red';
+          c.shadowOffsetX = 120;
+          c.fillText('Hg', dx - 100, 55);
+          return Array.from(c.getImageData(width - 100, 0, 100, 60).data);
+        };
+        const big = Object.assign(document.createElement('canvas'), {width: 50, height: 50}).getContext('2d');
+        big.font = '100000px serif';
+        big.fillText('I', -20000, 50000);
+        const ink = big.getImageData(0, 0, 50, 50).data.filter((_, i) => i % 4 === 3).reduce((a, b) => a + b, 0);
+        return [draw(100, 0).join() === draw(300, 200).join(), draw(100, 0).some((v) => v > 0), ink];
+      })()
+    JS
+    expect(got[0..1]).to eq([true, true])
+    expect(got[2]).to eq(50 * 50 * 255)                                   # inside the stem of the I
+  end
 end

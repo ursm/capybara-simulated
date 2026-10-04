@@ -26,6 +26,7 @@ struct Fc {
     default_substitute: unsafe extern "C" fn(*mut Pattern),
     font_match: unsafe extern "C" fn(*mut c_void, *mut Pattern, *mut c_int) -> *mut Pattern,
     get_string: unsafe extern "C" fn(*const Pattern, *const c_char, c_int, *mut *const c_char) -> c_int,
+    get_integer: unsafe extern "C" fn(*const Pattern, *const c_char, c_int, *mut c_int) -> c_int,
     // (…fontconfig 2.13.1 and later; without it no family counts as substituted)
     get_with_binding: Option<unsafe extern "C" fn(*const Pattern, *const c_char, c_int, *mut Value, *mut c_int) -> c_int>,
     destroy: unsafe extern "C" fn(*mut Pattern),
@@ -62,6 +63,7 @@ impl Fc {
                 default_substitute: sym!("FcDefaultSubstitute"),
                 font_match: sym!("FcFontMatch"),
                 get_string: sym!("FcPatternGetString"),
+                get_integer: sym!("FcPatternGetInteger"),
                 get_with_binding: lib.get(b"FcPatternGetWithBinding\0").ok().map(|s| *s),
                 destroy: sym!("FcPatternDestroy"),
                 _lib: lib,
@@ -117,7 +119,8 @@ fn strings(fc: &Fc, p: *const Pattern, object: &CStr) -> Vec<String> {
     out
 }
 
-// The font `pattern` matches, as fc-match answers it: its file, and its family names (a face may declare several).
+// The face `pattern` matches, as fc-match answers it: the face (`font::face_name`: its file, and its index there where
+// the file is a collection), and its family names (a face may declare several). None where the file is not there.
 pub(crate) fn font_match(pattern: &str) -> Option<(String, Vec<String>)> {
     let fc = fc().ok()?;
     let p = substituted(fc, pattern)?;
@@ -130,8 +133,13 @@ pub(crate) fn font_match(pattern: &str) -> Option<(String, Vec<String>)> {
     if matched.0.is_null() || result != RESULT_MATCH {
         return None;
     }
-    let file = strings(fc, matched.0, c"file").into_iter().next()?;
-    Some((file, strings(fc, matched.0, c"family")))
+    let file = strings(fc, matched.0, c"file").into_iter().next().filter(|f| std::path::Path::new(f).exists())?;
+    let mut index = 0;
+    // SAFETY: a live pattern; the integer is written where it holds one.
+    if unsafe { (fc.get_integer)(matched.0, c"index".as_ptr(), 0, &mut index) } != RESULT_MATCH {
+        index = 0;
+    }
+    Some((crate::font::face_name(&file, index.max(0) as u32), strings(fc, matched.0, c"family")))
 }
 
 // The families `pattern` expands to under this machine's rules that are strongly bound.
@@ -153,7 +161,7 @@ pub(crate) fn strong_families(pattern: &str) -> Vec<String> {
     out
 }
 
-// Capybara::Simulated::Native.font_match(pattern) -> `[file, families]`, or nil where fontconfig matches nothing.
+// Capybara::Simulated::Native.font_match(pattern) -> `[face, families]`, or nil where fontconfig matches nothing.
 pub(crate) fn font_match_for_ruby(pattern: String) -> Option<(String, Vec<String>)> {
     font_match(&pattern)
 }
@@ -168,8 +176,8 @@ mod tests {
 
     #[test]
     fn matches_as_fc_match_does() {
-        let (file, families) = font_match("sans-serif").expect("a sans-serif face");
-        assert!(std::path::Path::new(&file).exists() && !families.is_empty());
+        let (face, families) = font_match("sans-serif").expect("a sans-serif face");
+        assert!(std::path::Path::new(crate::font::face_file(&face).0).exists() && !families.is_empty());
         // (…a family fontconfig has no rule for is not strongly bound to anything but itself)
         assert_eq!(strong_families("No Such Family Anywhere"), vec!["No Such Family Anywhere".to_owned()]);
     }

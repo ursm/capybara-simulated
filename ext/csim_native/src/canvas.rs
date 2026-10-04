@@ -268,8 +268,8 @@ enum Shape<'a> {
     Box([f64; 4]),
     // Polygon rings, under nonzero or (`even_odd`) the even-odd rule.
     Rings { rings: Vec<Ring>, even_odd: bool },
-    // A glyph mask (`w` × `h` coverage bytes) placed at (`x`, `y`), squeezed horizontally to `out_w` columns.
-    Mask { mask: &'a [u8], w: usize, h: usize, x: i64, y: i64, x_scale: f64, out_w: usize },
+    // A glyph mask (`w` × `h` coverage bytes) placed at (`x`, `y`).
+    Mask { mask: &'a [u8], w: usize, h: usize, x: i64, y: i64 },
 }
 
 impl Shape<'_> {
@@ -282,20 +282,19 @@ impl Shape<'_> {
         match self {
             Shape::Box(b) => cover_box(*b, cw, ch, shift, emit),
             Shape::Rings { rings, even_odd } => return cover_rings(rings, *even_odd, cw, ch, shift, emit),
-            &Shape::Mask { mask, w, h, x, y, x_scale, out_w } => {
+            &Shape::Mask { mask, w, h, x, y } => {
                 let (sx, sy) = (shift.0 as i64, shift.1 as i64);
                 for my in 0..h {
                     let dy = y + my as i64 + sy;
                     if dy < 0 || dy >= ch as i64 {
                         continue;
                     }
-                    for ox in 0..out_w {
-                        let mx = if x_scale == 1.0 { ox } else { ((ox as f64 / x_scale).floor() as usize).min(w - 1) };
+                    for mx in 0..w {
                         let cov = mask[my * w + mx];
                         if cov == 0 {
                             continue;
                         }
-                        let dx = x + ox as i64 + sx;
+                        let dx = x + mx as i64 + sx;
                         if dx < 0 || dx >= cw as i64 {
                             continue;
                         }
@@ -852,7 +851,7 @@ fn stops_of(flat: &[f64]) -> Vec<Stop> {
 // __dom.canvasDraw(bitmap, clip, shape, mask, paint, pixels, state, op): one drawing operation on a `w` × `h` bitmap
 // (`Draw::run`).
 //   shape: `[0, x0, y0, x1, y1]` a device box; `[1, evenOdd, …path]` a path filled, `[3, …pen, …path]` a path
-//          stroked (`rings_of`); `[2, w, h, x, y, xScale, outW]` the glyph mask `mask`.
+//          stroked (`rings_of`); `[2, w, h, x, y]` the glyph mask `mask`.
 //   paint: `[0, r, g, b, a]` a solid sRGB colour; `[1]` clearRect; `[2, x0, y0, x1, y1, …stops]` linear,
 //          `[3, x0, y0, r0, x1, y1, r1, …stops]` radial, `[4, angle, x, y, …stops]` conic, stops `[count, offset, r, g,
 //          b, a, …]` sRGB; `[5, w, h, repeatX, repeatY, p3, …matrix]` the pattern tile `pixels` in its colour space
@@ -881,12 +880,12 @@ fn canvas_draw(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let clip = bytes_read(args.get(1), written);
     let shape = match shape[0] as i32 {
         0 if shape.len() >= 5 => Shape::Box([shape[1], shape[2], shape[3], shape[4]]),
-        2 if shape.len() >= 7 => {
+        2 if shape.len() >= 5 => {
             let (w, h) = (shape[1] as usize, shape[2] as usize);
-            if w == 0 || h == 0 || mask.len() < w * h || !shape[3..7].iter().all(|v| v.is_finite()) {
+            if w == 0 || h == 0 || mask.len() < w * h || !shape[3..5].iter().all(|v| v.is_finite()) {
                 return;
             }
-            Shape::Mask { mask: &mask, w, h, x: shape[3] as i64, y: shape[4] as i64, x_scale: shape[5], out_w: shape[6] as usize }
+            Shape::Mask { mask: &mask, w, h, x: shape[3] as i64, y: shape[4] as i64 }
         }
         _ => match rings_of(&shape) {
             Some((rings, even_odd)) => Shape::Rings { rings, even_odd },

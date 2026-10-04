@@ -49,14 +49,18 @@ pub(crate) struct Frame {
 }
 
 // The first frame an AV1 bitstream (OBUs) decodes to, opaque RGBA. A corrupt stream can panic inside the decoder (its
-// entry points unwind: the rav1d fork's `extern "C-unwind"`), which is no frame — and a context that panicked is not
-// closed, as closing it would touch the state the panic left behind: it is leaked.
+// entry points unwind: the rav1d fork's `extern "C-unwind"`), which is no frame — and nothing a panic interrupted is
+// released: neither the context, as closing it would touch the state the panic left behind, nor the data and the
+// picture, whose references the decoder may have taken (and dropped, unwinding) half-way through a call. They live
+// out here, borrowed by the call, so the unwind drops none of them; on a panic all three are leaked.
 pub(crate) fn frame(obus: &[u8]) -> Option<Frame> {
     let decoder = Decoder::open()?;
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| decoder.first_picture(obus)?.rgba())) {
+    let mut data = Data::of(obus)?;
+    let mut picture = Picture(Dav1dPicture::default());
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| decoder.first_picture(&mut data, &mut picture).then(|| picture.rgba()).flatten())) {
         Ok(frame) => frame,
         Err(_) => {
-            std::mem::forget(decoder);
+            std::mem::forget((decoder, data, picture));
             None
         }
     }
@@ -85,29 +89,21 @@ impl Decoder {
         Some(Decoder(ctx))
     }
 
-    // Feed `obus` until a picture comes out.
-    fn first_picture(&self, obus: &[u8]) -> Option<Picture> {
-        let mut data = Data(Dav1dData::default());
-        let mut picture = Picture(Dav1dPicture::default());
-        // SAFETY: `data` owns the buffer `dav1d_data_create` allocates, `obus.len()` bytes, filled before it is sent,
-        // and unreferenced when dropped; the context is open; `picture` is written by `dav1d_get_picture` and
-        // unreferenced when dropped.
+    // Feed `data` until a picture comes out, into `picture`; whether one did.
+    fn first_picture(&self, data: &mut Data, picture: &mut Picture) -> bool {
+        let again = -libc::EAGAIN;
+        // SAFETY: the context is open; `data` holds what `Data::of` filled, emptied by the decoder as it takes it;
+        // `picture` is written by `dav1d_get_picture`.
         unsafe {
-            let buf = dav1d_data_create(NonNull::new(&mut data.0), obus.len());
-            if buf.is_null() {
-                return None;
-            }
-            std::ptr::copy_nonoverlapping(obus.as_ptr(), buf, obus.len());
-            let again = -libc::EAGAIN;
             loop {
                 let sent = if data.0.sz > 0 { dav1d_send_data(self.0.clone(), NonNull::new(&mut data.0)).0 } else { 0 };
                 if sent != 0 && sent != again {
-                    return None;
+                    return false;
                 }
                 match dav1d_get_picture(self.0.clone(), NonNull::new(&mut picture.0)).0 {
-                    0 => return Some(picture),
+                    0 => return true,
                     r if r == again && data.0.sz > 0 => continue,
-                    _ => return None,
+                    _ => return false,
                 }
             }
         }
@@ -123,6 +119,21 @@ impl Drop for Decoder {
 // Data handed to the decoder, unreferenced when dropped (what it has not taken yet: what it took, it emptied).
 struct Data(Dav1dData);
 
+impl Data {
+    // A buffer the decoder references, holding a copy of `obus`.
+    fn of(obus: &[u8]) -> Option<Data> {
+        let mut data = Data(Dav1dData::default());
+        // SAFETY: `dav1d_data_create` allocates `obus.len()` bytes, which are filled before anything reads them.
+        unsafe {
+            let buf = dav1d_data_create(NonNull::new(&mut data.0), obus.len());
+            if buf.is_null() {
+                return None;
+            }
+            std::ptr::copy_nonoverlapping(obus.as_ptr(), buf, obus.len());
+        }
+        Some(data)
+    }
+}
 impl Drop for Data {
     fn drop(&mut self) {
         // SAFETY: data `dav1d_data_create` filled (or empty, which unref accepts), unreferenced once, here.
