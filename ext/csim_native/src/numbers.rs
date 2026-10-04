@@ -1,44 +1,47 @@
-// A number as script writes it (ECMAScript Number::toString, radix 10): the shortest digits that read back as it,
-// placed by its exponent — `0.000001`, `1e-7`, `123456789012345680000`, `1e+21`, `-0` as `0`, `NaN`, `Infinity`.
+// A number as script writes it (ECMAScript Number::toString, radix 10): the shortest digits that read back as it — the
+// nearest such where several are — placed by its exponent: `0.000001`, `1e-7`, `123456789012345680000`, `1e+21`, `-0`
+// as `0`, `NaN`, `Infinity`. ryu-js is Ryu with these rules.
 pub(crate) fn to_js_string(n: f64) -> String {
-    if n.is_nan() {
-        return "NaN".into();
-    }
-    if n.is_infinite() {
-        return if n > 0.0 { "Infinity".into() } else { "-Infinity".into() };
-    }
     if n == 0.0 {
         return "0".into();
     }
-    let sign = if n < 0.0 { "-" } else { "" };
-    // (…Rust's `{:e}` is the shortest round-trip digits too: `d.ddde±x`)
-    let sci = format!("{:e}", n.abs());
-    let (mantissa, exp) = sci.split_once('e').unwrap_or((&sci, "0"));
-    let digits: String = mantissa.chars().filter(|c| c.is_ascii_digit()).collect();
-    let k = digits.len() as i32;
-    // The decimal point's place: the value is 0.digits × 10^n.
-    let n_exp = exp.parse::<i32>().unwrap_or(0) + 1;
-    let body = if k <= n_exp && n_exp <= 21 {
-        format!("{digits}{}", "0".repeat((n_exp - k) as usize))
-    } else if 0 < n_exp && n_exp <= 21 {
-        format!("{}.{}", &digits[..n_exp as usize], &digits[n_exp as usize..])
-    } else if -6 < n_exp && n_exp <= 0 {
-        format!("0.{}{digits}", "0".repeat((-n_exp) as usize))
-    } else {
-        let e = n_exp - 1;
-        let e = if e >= 0 { format!("+{e}") } else { e.to_string() };
-        if k == 1 { format!("{digits}e{e}") } else { format!("{}.{}e{e}", &digits[..1], &digits[1..]) }
-    };
-    format!("{sign}{body}")
+    ryu_js::Buffer::new().format(n).to_string()
 }
 
 // A number rounded to `p` significant digits and read back (script's `Number(x.toPrecision(p))`): binary noise
-// trimmed off a computed value — `0 + 3 × 0.1` is 0.3.
+// trimmed off a computed value — `0 + 3 × 0.1` is 0.3. Rounded as toPrecision rounds, from the number's EXACT
+// decimal expansion, a tie away from zero.
 pub(crate) fn to_precision(x: f64, p: usize) -> f64 {
-    if !x.is_finite() || x == 0.0 {
+    if !x.is_finite() || x == 0.0 || p == 0 {
         return x;
     }
-    format!("{:.*e}", p.saturating_sub(1), x).parse().unwrap_or(x)
+    // (…every double's exact expansion fits in 800 significant digits, so this one is exact)
+    let exact = format!("{:.800e}", x.abs());
+    let (mantissa, exp) = exact.split_once('e').unwrap_or((&exact, "0"));
+    let digits: Vec<u8> = mantissa.bytes().filter(u8::is_ascii_digit).map(|d| d - b'0').collect();
+    let mut exp: i32 = exp.parse().unwrap_or(0);
+    let mut kept = digits[..p.min(digits.len())].to_vec();
+    if digits.get(p).is_some_and(|&d| d >= 5) {
+        let mut i = kept.len();
+        loop {
+            if i == 0 {
+                kept.insert(0, 1);
+                kept.pop();
+                exp += 1;
+                break;
+            }
+            i -= 1;
+            if kept[i] == 9 {
+                kept[i] = 0;
+            } else {
+                kept[i] += 1;
+                break;
+            }
+        }
+    }
+    let text: String = kept.iter().map(|d| char::from(b'0' + d)).collect();
+    let v: f64 = format!("{}.{}e{exp}", &text[..1], &text[1..]).parse().unwrap_or(x.abs());
+    v.copysign(x)
 }
 
 #[cfg(test)]
@@ -60,12 +63,21 @@ mod tests {
             (1e21, "1e+21"),
             (1.25e22, "1.25e+22"),
             (100.0, "100"),
+            (212684238611834.62, "212684238611834.62"),
             (f64::NAN, "NaN"),
             (f64::NEG_INFINITY, "-Infinity"),
         ];
         for (n, want) in cases {
             assert_eq!(to_js_string(n), want, "{n}");
         }
+    }
+
+    #[test]
+    fn rounds_as_to_precision_does() {
         assert_eq!(to_precision(0.1 * 3.0, 15), 0.3);
+        // (…a tie away from zero, where half-to-even would go down)
+        assert_eq!(to_precision(100000000000000.5, 15), 100000000000001.0);
+        assert_eq!(to_precision(-2.5, 1), -3.0);
+        assert_eq!(to_precision(9.99, 2), 10.0);
     }
 }

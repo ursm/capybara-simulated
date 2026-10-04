@@ -318,70 +318,37 @@ pub(crate) fn cell_hints(arena: &RealmArena, id: NodeId, out: &mut Vec<Hint>) {
     }
 }
 
-// …and an `<img>` in a `<picture>` maps the DIMENSION attributes of the `<source>` it selected (HTML "update the image
-// data": the picture's children up to the img, a source whose `media` does not match or whose `type` names nothing
-// decodable skipped, the first with a candidate in its `srcset` taken) — how a responsive picture reserves the right
-// box before its image decodes. All or nothing per ELEMENT, not per axis (Chrome-measured): a source naming either
+// …and an `<img>` in a `<picture>` maps the DIMENSION attributes of the `<source>` it selected
+// (`image_source::picture_source`) — how a responsive picture reserves the right box before its image decodes. All or nothing per ELEMENT, not per axis (Chrome-measured): a source naming either
 // takes over both, so an axis it does not name is `auto`, where one it names INVALIDLY falls back to the img's own.
 // After `own_hints`, so what it maps is what counts; `media_matches` evaluates a `media` against the document's device.
 pub(crate) fn picture_hints(arena: &RealmArena, id: NodeId, media_matches: &dyn Fn(&str) -> bool, out: &mut Vec<Hint>) {
-    let Some(node) = arena.get(id) else { return };
-    if !node.is_html_named("img") {
+    if !arena.get(id).is_some_and(|n| n.is_html_named("img")) {
         return;
     }
-    let Some(picture) = arena.parent_of(id).and_then(|p| arena.get(p)).filter(|p| p.is_html_named("picture")) else { return };
-    for &c in &picture.children {
-        if c == id {
-            return;
-        }
-        let Some(source) = arena.get(c).filter(|n| n.is_html_named("source")) else { continue };
-        if source.plain_attr("media").is_some_and(|m| !media_matches(m)) {
-            continue;
-        }
-        if source.plain_attr("type").is_some_and(|t| !decodable_image_type(t.trim())) {
-            continue;
-        }
-        let srcset = source.plain_attr("srcset").unwrap_or("");
-        if srcset.split(',').next().and_then(|first| first.split_ascii_whitespace().next()).is_none() {
-            continue;
-        }
-        let (width, height) = (source.plain_attr("width"), source.plain_attr("height"));
-        if width.is_none() && height.is_none() {
-            return;
-        }
-        for (prop, value) in [("width", width), ("height", height)] {
-            match value {
-                None => out.push((prop, "auto".to_owned())),
-                Some(v) => {
-                    if let Some(d) = dimension(v, true) {
-                        out.push((prop, d));
-                    }
+    let Some(source) = crate::image_source::picture_source(arena, id, media_matches).and_then(|s| arena.get(s)) else { return };
+    let (width, height) = (source.plain_attr("width"), source.plain_attr("height"));
+    if width.is_none() && height.is_none() {
+        return;
+    }
+    for (prop, value) in [("width", width), ("height", height)] {
+        match value {
+            None => out.push((prop, "auto".to_owned())),
+            Some(v) => {
+                if let Some(d) = dimension(v, true) {
+                    out.push((prop, d));
                 }
             }
         }
-        // (…and the aspect ratio is the source's as well, the img's own pair set aside: its width and height where it
-        // has both, none where it has one — over the img's own `aspect-ratio` hint, which this block follows)
-        let ratio = match (width.and_then(number_dimension), height.and_then(number_dimension)) {
-            (Some(w), Some(h)) => format!("auto {w} / {h}"),
-            _ => "auto".to_owned(),
-        };
-        out.push(("aspect-ratio", ratio));
-        return;
     }
+    // (…and the aspect ratio is the source's as well, the img's own pair set aside: its width and height where it has
+    // both, none where it has one — over the img's own `aspect-ratio` hint, which this block follows)
+    let ratio = match (width.and_then(number_dimension), height.and_then(number_dimension)) {
+        (Some(w), Some(h)) => format!("auto {w} / {h}"),
+        _ => "auto".to_owned(),
+    };
+    out.push(("aspect-ratio", ratio));
 }
-// …a `type` naming an image format — what libvips decodes, told apart from the `image/bogus` a page uses to force the
-// fallback (walk.js `DECODABLE_IMAGE_TYPE`).
-fn decodable_image_type(t: &str) -> bool {
-    let t = t.to_ascii_lowercase();
-    matches!(
-        t.strip_prefix("image/").unwrap_or(""),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "svg+xml" | "bmp" | "x-icon" | "vnd.microsoft.icon" | "tiff" | "heic" | "heif"
-    )
-}
-
-// SVG 2 § 6.6's presentation attributes: an SVG element's attribute named for a property is a declaration of it, in
-// the property's own grammar (the engine parses it in SVG's mode, where a length can be a bare number). The geometry
-// properties are presentation attributes only on the elements they size.
 fn svg_presentation_attributes(node: &NodeData, out: &mut Vec<Hint>) {
     const PROPERTIES: &[&str] = &[
         "alignment-baseline", "baseline-shift", "clip-path", "clip-rule", "color", "color-interpolation",

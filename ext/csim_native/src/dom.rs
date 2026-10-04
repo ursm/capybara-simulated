@@ -990,7 +990,7 @@ pub(crate) struct Dom {
     graveyard: RealmArena,
     // Whether the session's pointer is a touchscreen (`setTouchInput`): what every realm's device answers `pointer` /
     // `hover` by (style.rs `Screen`).
-    touch_input: bool,
+    pub(crate) touch_input: bool,
 }
 
 // Borrow the isolate's Dom, lazily creating the slot on first touch. rusty_v8
@@ -1133,7 +1133,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setState", set_state, context_id);
     register(scope, ns, "setNaturalSize", set_natural_size, context_id);
     register(scope, ns, "linkPseudoBox", link_pseudo_box, context_id);
-    register(scope, ns, "firstStrongDirection", first_strong_direction, context_id);
     register(scope, ns, "directionality", directionality, context_id);
     register(scope, ns, "setContainerMargins", set_container_margins, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
@@ -1215,6 +1214,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::dom_matrix::install(scope, ns, context_id);
     crate::validity::install(scope, ns, context_id);
     crate::input_value::install(scope, ns, context_id);
+    crate::image_source::install(scope, ns, context_id);
     crate::html_parse::install(scope, ns, context_id);
     crate::url_ops::install(scope, ns, context_id);
     crate::text_codec::install(scope, ns, context_id);
@@ -1466,24 +1466,6 @@ fn directionality(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let cid = realm_id(scope, &args);
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     rv.set_bool(realm(scope, cid).is_rtl(id));
-}
-
-// __dom.firstStrongDirection(text) -> 'rtl' | 'ltr' | null: the direction of the text's first STRONG character, by its
-// Bidi_Class (`unicode::first_strong_direction`) — what `dir=auto` asks, answered for this side and the style engine's
-// `:dir()` in one place.
-fn first_strong_direction(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let text = utf16_arg(scope, args.get(0));
-    match crate::unicode::first_strong_direction(&text) {
-        Some(rtl) => {
-            let s = v8::String::new(scope, if rtl { "rtl" } else { "ltr" }).unwrap();
-            rv.set(s.into());
-        }
-        None => rv.set_null(),
-    }
 }
 
 // __dom.setContainerMargins(bodyNid, marginwidth, marginheight): the frame's two attributes as they stand (`null` for

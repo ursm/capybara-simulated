@@ -227,22 +227,26 @@ pub(crate) fn parse(text: &str) -> Option<(M, bool)> {
     let mut input = cssparser::ParserInput::new(text);
     let mut parser = cssparser::Parser::new(&mut input);
     let list = parser.parse_entirely(|p| Transform::parse(&context, p)).ok()?;
-    // (…an f32 the engine holds a value in, as the decimal it was written as)
-    let decimal = |x: f32| x.to_string().parse::<f64>().unwrap_or(f64::from(x));
-    let num = |n: &Number| n.get().map(decimal);
-    let deg = |a: &Angle| a.degrees().map(decimal);
-    let len = |l: &Length| l.to_computed_pixel_length_without_context().ok().map(decimal);
+    // (…the engine holds a value in an f32, widened as it is, as Chrome has it — but a `matrix()` / `matrix3d()` is
+    // read at double precision, as Chrome reads it: it is what getComputedStyle hands back)
+    let num = |n: &Number| n.get().map(f64::from);
+    let deg = |a: &Angle| a.degrees().map(f64::from);
+    let len = |l: &Length| l.to_computed_pixel_length_without_context().ok().map(f64::from);
     let lp = |l: &LengthPercentage| match l {
-        LengthPercentage::Length(l) => l.to_px_if_absolute().map(decimal),
-        LengthPercentage::Calc(c) => c.to_computed_pixel_length_without_context().ok().map(decimal),
+        LengthPercentage::Length(l) => l.to_px_if_absolute().map(f64::from),
+        LengthPercentage::Calc(c) => c.to_computed_pixel_length_without_context().ok().map(f64::from),
         LengthPercentage::Percentage(_) => None,
     };
+    let mut matrices = matrix_arguments(text).into_iter();
     let (mut m, mut is_2d) = (IDENTITY, true);
     for op in list.0.iter() {
         let (step, three_d) = match op {
             Op::Matrix(x) => {
                 let mut s = IDENTITY;
-                (s[0], s[1], s[4], s[5], s[12], s[13]) = (num(&x.a)?, num(&x.b)?, num(&x.c)?, num(&x.d)?, num(&x.e)?, num(&x.f)?);
+                (s[0], s[1], s[4], s[5], s[12], s[13]) = match matrices.next().flatten().filter(|a| a.len() == 6) {
+                    Some(a) => (a[0], a[1], a[2], a[3], a[4], a[5]),
+                    None => (num(&x.a)?, num(&x.b)?, num(&x.c)?, num(&x.d)?, num(&x.e)?, num(&x.f)?),
+                };
                 (s, false)
             }
             Op::Matrix3D(x) => {
@@ -251,8 +255,13 @@ pub(crate) fn parse(text: &str) -> Option<(M, bool)> {
                     &x.m42, &x.m43, &x.m44,
                 ];
                 let mut out = [0.0; 16];
-                for (o, n) in out.iter_mut().zip(s) {
-                    *o = num(n)?;
+                match matrices.next().flatten().filter(|a| a.len() == 16) {
+                    Some(a) => out.copy_from_slice(&a),
+                    None => {
+                        for (o, n) in out.iter_mut().zip(s) {
+                            *o = num(n)?;
+                        }
+                    }
                 }
                 (out, true)
             }
@@ -281,6 +290,42 @@ pub(crate) fn parse(text: &str) -> Option<(M, bool)> {
         is_2d &= !three_d;
     }
     Some((m, is_2d))
+}
+
+// The arguments of each `matrix()` / `matrix3d()` of a transform list, in order, read at double precision — None for
+// one with an argument that is no plain number (a `calc()`), which the engine's f32 reading answers instead.
+fn matrix_arguments(text: &str) -> Vec<Option<Vec<f64>>> {
+    use cssparser::Token;
+    let mut input = cssparser::ParserInput::new(text);
+    let mut parser = cssparser::Parser::new(&mut input);
+    let mut out = Vec::new();
+    while let Ok(token) = parser.next() {
+        let Token::Function(name) = token else { continue };
+        if !name.eq_ignore_ascii_case("matrix") && !name.eq_ignore_ascii_case("matrix3d") {
+            let _ = parser.parse_nested_block(|p| -> Result<(), cssparser::ParseError<'_, ()>> {
+                while p.next().is_ok() {}
+                Ok(())
+            });
+            continue;
+        }
+        let args = parser.parse_nested_block(|p| -> Result<Option<Vec<f64>>, cssparser::ParseError<'_, ()>> {
+            let mut args = Vec::new();
+            loop {
+                let start = p.position();
+                match p.next() {
+                    Ok(Token::Number { .. }) => match p.slice_from(start).trim().parse::<f64>() {
+                        Ok(v) => args.push(v),
+                        Err(_) => return Ok(None),
+                    },
+                    Ok(Token::Comma) => {}
+                    Ok(_) => return Ok(None),
+                    Err(_) => return Ok(Some(args)),
+                }
+            }
+        });
+        out.push(args.ok().flatten());
+    }
+    out
 }
 
 // ── the ops ──
@@ -344,9 +389,9 @@ mod tests {
         let (m, is_2d) = parse("translate(10px, 5px) scale(2)").unwrap();
         assert!(is_2d);
         assert_eq!((m[0], m[5], m[12], m[13]), (2.0, 2.0, 10.0, 5.0));
-        let (m, is_2d) = parse("matrix(1.1, 0, 0, 1, 0.3, 0) translateZ(2px)").unwrap();
+        let (m, is_2d) = parse("matrix(1.23456789012, 0, 0, 1, 123456789, 1e-50) translateZ(2px)").unwrap();
         assert!(!is_2d);
-        assert_eq!((m[0], m[12], m[14]), (1.1, 0.3, 2.0));
+        assert_eq!((m[0], m[12], m[13], m[14]), (1.23456789012, 123456789.0, 1e-50, 2.0));
         assert_eq!(parse("none"), Some((IDENTITY, true)));
         assert_eq!(parse(""), Some((IDENTITY, true)));
         assert!(parse(" ").is_none());

@@ -35,4 +35,26 @@ RSpec.describe 'geometry interfaces' do
     expect(got[0].values_at('width', 'height', 'right')).to eq([30, 20, 30])
     expect(got[1]['rect']['width']).to eq(30)
   end
+
+  it 'reads a matrix() at double precision, another function as the f32 the engine holds' do
+    got = session.evaluate_script("[new DOMMatrix('matrix(1.23456789012,0,0,1,123456789,0)').a, new DOMMatrix('matrix(1e-50,0,0,1,0,0)').a, new DOMMatrix('translate(0.1px)').e]")
+    expect(got).to eq([1.23456789012, 1e-50, 0.10000000149011612])                # as Chrome reads each
+  end
+
+  it "keeps its state out of the page's reach, and brand-checks its members" do
+    got = session.evaluate_script(<<~JS)
+      (function () {
+        var m = Object.freeze(new DOMMatrix()); m.translateSelf(5);
+        var brand; try { Object.create(new DOMPoint(1)).x; brand = 'no throw'; } catch (e) { brand = e.name; }
+        return [m.e, Reflect.ownKeys(new DOMRect(1, 2, 3, 4)).length, brand];
+      })()
+    JS
+    expect(got).to eq([5, 0, 'TypeError'])
+  end
+
+  it "marshals a DOMRect handed to an async script's callback, and a DOMRectList as its rects" do
+    s = session
+    expect(s.evaluate_async_script("arguments[0](document.getElementById('d').getBoundingClientRect())")['width']).to eq(30)
+    expect(s.evaluate_script("document.getElementById('d').getClientRects()").map {|r| r['width'] }).to eq([30])
+  end
 end

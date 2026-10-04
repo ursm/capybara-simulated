@@ -558,6 +558,8 @@ fn signed_area(ring: &[(f64, f64)]) -> f64 {
     (0..n).map(|i| ring[i].0 * ring[(i + 1) % n].1 - ring[(i + 1) % n].0 * ring[i].1).sum()
 }
 
+const MAX_DASHES: f64 = 1_000_000.0;
+
 // A polyline cut into the "on" pieces of a dash pattern (`dashes`, on / off lengths, shifted by `offset`), each with
 // whether it is closed. A closed polyline includes its closing edge, and a dash across its start is one piece (a join
 // there, not two caps) — the whole loop, closed, where it is one "on" run. A zero-length "on" run is dropped.
@@ -567,7 +569,10 @@ fn dash_polyline(pts: &[(f64, f64)], closed: bool, dashes: &[f64], offset: f64) 
     if closed {
         verts.push(pts[0]);
     }
-    if pattern <= 0.0 {
+    // (…and a pattern so fine the path would break into more than a million dashes is stroked whole, as Skia
+    // refuses one too — rather than grow the pieces until the process runs out of memory)
+    let length: f64 = verts.windows(2).map(|w| (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1)).sum();
+    if pattern <= 0.0 || !(length / pattern * dashes.len() as f64 <= MAX_DASHES) {
         return vec![(verts, closed)];
     }
     let mut phase = (offset % pattern + pattern) % pattern;

@@ -47,6 +47,14 @@ RSpec.describe 'web fonts' do
       when '/ahem.woff2' then [200, {'content-type' => 'font/woff2'}, [AHEM_WOFF2]]
       when '/missing.ttf' then [404, {'content-type' => 'text/plain'}, ['no']]
       when '/broken.ttf'  then [200, {'content-type' => 'font/ttf'}, ['not a font']]
+      when '/weights.html'
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><html><head><style>
+            body { margin: 0; font: 20px monospace }
+            @font-face { font-family: A; src: url("/ahem.ttf"); }
+            @font-face { font-family: A; src: url("/ahem.ttf"); font-weight: bold; }
+          </style></head><body><span id="s" style="font-family: A">abcd</span></body></html>
+        HTML
       when '/chain.html'
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
           <!DOCTYPE html><html><head><style>
@@ -261,6 +269,25 @@ RSpec.describe 'web fonts' do
     expect(width(s, 'italic')).to eq(80)                                      # the italic face, though its weight is far off
     expect(width(s, 'upright')).not_to eq(80)                                 # the upright face (404) beats the italic one
     expect(width(s, 'later')).to eq(80)                                       # the later rule wins the tie
+  end
+
+  it "keeps the page's faces when another document's are asked for" do
+    s = session('/weights.html')
+    got = s.evaluate_script(<<~JS)
+      (function () {
+        document.getElementById('s').getBoundingClientRect();                   // (…the page's faces indexed first)
+        var other = document.implementation.createHTMLDocument('');
+        other.head.innerHTML = '<style>@font-face { font-family: Zed; src: url(/missing.ttf); }</style>';
+        other.fonts.size;                                                       // (…then another document's)
+        return ['bold', 'italic'].map(function (v) {
+          var e = document.createElement('span'); e.style.fontFamily = 'A'; e.textContent = 'abcd';
+          if (v === 'bold') e.style.fontWeight = 'bold'; else e.style.fontStyle = 'italic';
+          document.body.appendChild(e);
+          return e.getBoundingClientRect().width;
+        });
+      })()
+    JS
+    expect(got).to eq([80, 80])                                                 # still Ahem, both
   end
 
   it 'does not loop on an @import cycle' do

@@ -52,4 +52,33 @@ RSpec.describe 'canvas rasterizer' do
     JS
     expect(corner).to eq([0, 0, 0, 0])                                          # `copy` leaves nothing it did not draw
   end
+
+  it 'throws a RangeError where a clip mask cannot be had, rather than abort' do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (function () {
+        var c = document.createElement('canvas'); c.width = c.height = 2147483647;
+        var x = c.getContext('2d'); x.rect(0, 0, 1, 1);
+        try { x.clip(); return 'no throw'; } catch (e) { return e.name; }
+      })()
+    JS
+    expect(got).to eq('RangeError')
+  end
+
+  it 'draws nothing under a transform past what a double holds, and strokes a too-fine dash pattern whole' do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (function () {
+        var x = new OffscreenCanvas(10, 10).getContext('2d');
+        x.scale(1e200, 1); x.scale(1e200, 1); x.fillRect(0, 0, 1, 1);
+        var painted = Array.from(x.getImageData(0, 0, 10, 10).data).some(function (v) { return v !== 0; });
+        var y = new OffscreenCanvas(100, 10).getContext('2d');
+        y.setLineDash([1e-9, 1e-9]); y.beginPath(); y.moveTo(0, 5); y.lineTo(100, 5); y.stroke();
+        return [painted, y.getImageData(50, 5, 1, 1).data[3] > 0];
+      })()
+    JS
+    expect(got).to eq([false, true])
+  end
 end

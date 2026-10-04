@@ -6,6 +6,8 @@ use crate::dom::NodeData;
 use crate::numbers::{to_js_string, to_precision};
 
 pub(crate) const MS_PER_DAY: f64 = 86_400_000.0;
+// The largest time value a Date holds.
+const MAX_TIME: f64 = 8.64e15;
 const MS_PER_WEEK: f64 = 7.0 * MS_PER_DAY;
 
 fn is_ascii_ws(c: char) -> bool {
@@ -38,28 +40,34 @@ fn temporal_number(ty: &str, s: &str) -> Option<f64> {
         return None;
     }
     let year = digits(0, year_end)?;
-    if year < 1 {
+    // (…a year from 1 to the last a Date holds: 8.64e15 ms past the epoch is 275760-09-13)
+    if !(1..=275_760).contains(&year) {
         return None;
     }
     let rest = &s[year_end + 1..];
+    let within = |ms: f64| (ms <= MAX_TIME).then_some(ms);
     match ty {
         "month" => {
             let m = (rest.len() == 2).then(|| digits(year_end + 1, s.len())).flatten()?;
-            (1..=12).contains(&m).then(|| ((year - 1970) * 12 + (m - 1)) as f64)
+            if !(1..=12).contains(&m) {
+                return None;
+            }
+            within(days_from_civil(year, m, 1) as f64 * MS_PER_DAY)?;
+            Some(((year - 1970) * 12 + (m - 1)) as f64)
         }
         "week" => {
             let w = (rest.len() == 3 && rest.starts_with('W')).then(|| digits(year_end + 2, s.len())).flatten()?;
             if w < 1 || w > iso_weeks_in_year(year) {
                 return None;
             }
-            Some((week1_monday(year) + (w - 1) * 7) as f64 * MS_PER_DAY)
+            within((week1_monday(year) + (w - 1) * 7) as f64 * MS_PER_DAY)
         }
         "date" => {
             if rest.len() != 5 || rest.as_bytes()[2] != b'-' {
                 return None;
             }
             let (m, d) = (digits(year_end + 1, year_end + 3)?, digits(year_end + 4, s.len())?);
-            valid_day(year, m, d).then(|| days_from_civil(year, m, d) as f64 * MS_PER_DAY)
+            valid_day(year, m, d).then(|| days_from_civil(year, m, d) as f64 * MS_PER_DAY).and_then(within)
         }
         "datetime-local" => {
             if rest.len() < 11 || rest.as_bytes()[2] != b'-' || !matches!(rest.as_bytes()[5], b'T' | b' ') {
@@ -67,7 +75,7 @@ fn temporal_number(ty: &str, s: &str) -> Option<f64> {
             }
             let (m, d) = (digits(year_end + 1, year_end + 3)?, digits(year_end + 4, year_end + 6)?);
             let time = time_of_day(&rest[6..])?;
-            valid_day(year, m, d).then(|| days_from_civil(year, m, d) as f64 * MS_PER_DAY + time)
+            valid_day(year, m, d).then(|| days_from_civil(year, m, d) as f64 * MS_PER_DAY + time).and_then(within)
         }
         _ => None,
     }
@@ -190,9 +198,11 @@ pub(crate) fn value_of(ty: &str, n: f64) -> String {
                 "date" => year(y).map(|y| format!("{y}-{m:02}-{d:02}")),
                 "datetime-local" => year(y).map(|y| format!("{y}-{m:02}-{d:02}T{}", time_value(t - day * MS_PER_DAY))),
                 "week" => {
-                    // (…the ISO year is the one its Thursday is in)
-                    let (iso_year, _, _) = civil_from_days(day as i64 + 3);
-                    let w = ((day - week1_monday(iso_year) as f64) / 7.0 + 0.5).floor() as i64 + 1;
+                    // (…the week the day is in, Monday to Sunday, of the ISO year its Thursday is in)
+                    let day = day as i64;
+                    let monday = day - (day + 3).rem_euclid(7);
+                    let (iso_year, _, _) = civil_from_days(monday + 3);
+                    let w = (monday - week1_monday(iso_year)) / 7 + 1;
                     year(iso_year).map(|y| format!("{y}-W{w:02}"))
                 }
                 _ => Some(to_js_string(n)),
@@ -204,7 +214,8 @@ pub(crate) fn value_of(ty: &str, n: f64) -> String {
 // A time of day of `ms` (ms past a midnight) as a time's value: seconds only where there are any, the fraction in as
 // few digits as it takes (.5, .04, .111).
 fn time_value(ms: f64) -> String {
-    let ms = ms.rem_euclid(MS_PER_DAY);
+    // (…to the whole ms a time's value can say: Chrome writes 1.5 ms as `00:00:00.001`)
+    let ms = ms.floor().rem_euclid(MS_PER_DAY);
     let (h, rest) = ((ms / 3_600_000.0).floor(), ms % 3_600_000.0);
     let (mi, rest) = ((rest / 60_000.0).floor(), rest % 60_000.0);
     let (s, frac) = ((rest / 1000.0).floor(), rest % 1000.0);
@@ -503,6 +514,13 @@ mod tests {
             assert_eq!(value_of(ty, number_of(ty, s).unwrap()), s, "{ty}");
         }
         assert_eq!(value_of("time", 43_200_000.0), "12:00");
+        assert_eq!(value_of("time", 1.5), "00:00:00.001");
+        assert_eq!(value_of("week", days_from_civil(2021, 1, 1) as f64 * MS_PER_DAY), "2020-W53");
+        assert_eq!(value_of("week", days_from_civil(2024, 1, 5) as f64 * MS_PER_DAY), "2024-W01");
+        assert_eq!(number_of("date", "275760-09-13"), Some(MAX_TIME));
+        assert_eq!(number_of("date", "275760-09-14"), None);
+        assert_eq!(number_of("month", "922337203685477580-01"), None);
+        assert_eq!(number_of("date", "922337203685477580-01-01"), None);
         assert_eq!(value_of("date", -1e17), "");
         assert_eq!(value_of("number", 1e21), "1e+21");
         assert_eq!(month_of_date(number_of("date", "2024-03-15").unwrap()), "2024-03");

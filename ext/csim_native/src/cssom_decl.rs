@@ -610,7 +610,7 @@ fn family_name(f: &style::values::computed::font::SingleFontFamily) -> String {
 // A canvas's `letterSpacing` / `wordSpacing` (HTML §4.12.5.1.11): the CSS `<length>` `text`, serialized, and in px —
 // a font-relative one of the current font's size `em` (`ex` and `ch` half of it, `ic` all of it, absent the glyphs
 // that would say), `rem` of the root's; one that needs what a canvas has not (a viewport, a container, a line height)
-// 0. None where it is no length.
+// 0. None where it is no length, or a `calc()` that is not of absolute lengths.
 pub(crate) fn canvas_spacing(text: &str, em: f64, rem: f64) -> Option<(String, f64)> {
     use style::parser::Parse;
     use style::values::specified::length::LengthUnit;
@@ -631,8 +631,9 @@ pub(crate) fn canvas_spacing(text: &str, em: f64, rem: f64) -> Option<(String, f
                 _ => l.to_px_if_absolute().map_or(0.0, f64::from),
             }
         }
-        // (…a `calc()` of absolute lengths only)
-        LengthPercentage::Calc(c) => c.to_computed_pixel_length_without_context().map_or(0.0, f64::from),
+        // (…a `calc()` of absolute lengths only: one of the font's is refused, as Chrome refuses every `calc()`, rather
+        // than measured as nothing)
+        LengthPercentage::Calc(c) => f64::from(c.to_computed_pixel_length_without_context().ok()?),
         LengthPercentage::Percentage(_) => return None,
     };
     Some((css, px))

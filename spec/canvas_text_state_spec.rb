@@ -19,11 +19,11 @@ RSpec.describe 'canvas text state' do
 
   it 'reads a spacing back serialized, and ignores what is no length' do
     got = run(<<~JS)
-      return ['1.50PX', '0', 'calc(1px + 2px)', '1E1px', '-2em', '10%', 'normal'].map(function (v) {
+      return ['1.50PX', '0', 'calc(1px + 2px)', '1E1px', '-2em', '10%', 'normal', 'calc(1em + 1px)'].map(function (v) {
         x.letterSpacing = '7px'; x.letterSpacing = v; return x.letterSpacing;
       });
     JS
-    expect(got).to eq(%w[1.5px 0px calc(3px) 10px -2em 7px 7px])
+    expect(got).to eq(%w[1.5px 0px calc(3px) 10px -2em 7px 7px 7px])               # (…a font-relative calc() refused)
   end
 
   it 'resolves a font-relative spacing against the current font' do

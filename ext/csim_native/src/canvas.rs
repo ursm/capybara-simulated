@@ -4,6 +4,8 @@
 // compositing operator lays that over what is there, inside the clip mask, a shadow cast first where one is set (§4.12.5.1.17,
 // the drawing model). And the colour spaces a bitmap can hold (sRGB / Display P3), converted between.
 //
+use std::borrow::Cow;
+
 use crate::canvas_path::{invert, Path, Pen, Ring};
 
 // The bitmap is the page's own `Uint8ClampedArray`, written in place; every value lands in it as that array stores one
@@ -249,6 +251,17 @@ fn apply(m: &Matrix, x: f64, y: f64) -> (f64, f64) {
     (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
 }
 
+// A buffer an operation needs that cannot be had — a page's own size asked for one it cannot get (a canvas
+// 2147483647 wide): the op throws a RangeError, as the typed array that held it used to, rather than abort.
+#[derive(Debug)]
+struct Oom;
+fn zeroed<T: Copy>(n: usize, v: T) -> Result<Vec<T>, Oom> {
+    let mut out = Vec::new();
+    out.try_reserve_exact(n).map_err(|_| Oom)?;
+    out.resize(n, v);
+    Ok(out)
+}
+
 // ── the shape: each covered pixel and its coverage ──
 enum Shape<'a> {
     // A device box, its edges anti-aliased by area.
@@ -262,13 +275,13 @@ enum Shape<'a> {
 impl Shape<'_> {
     // Call `emit(px, py, coverage)` for each pixel of a `cw` × `ch` bitmap the shape covers, coverage in (0, 1], the
     // shape moved by `shift` device pixels (a shadow's offset).
-    fn cover(&self, cw: usize, ch: usize, shift: (f64, f64), emit: &mut dyn FnMut(usize, usize, f64)) {
+    fn cover(&self, cw: usize, ch: usize, shift: (f64, f64), emit: &mut dyn FnMut(usize, usize, f64)) -> Result<(), Oom> {
         if cw == 0 || ch == 0 {
-            return;
+            return Ok(());
         }
         match self {
             Shape::Box(b) => cover_box(*b, cw, ch, shift, emit),
-            Shape::Rings { rings, even_odd } => cover_rings(rings, *even_odd, cw, ch, shift, emit),
+            Shape::Rings { rings, even_odd } => return cover_rings(rings, *even_odd, cw, ch, shift, emit),
             &Shape::Mask { mask, w, h, x, y, x_scale, out_w } => {
                 let (sx, sy) = (shift.0 as i64, shift.1 as i64);
                 for my in 0..h {
@@ -291,6 +304,7 @@ impl Shape<'_> {
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -298,6 +312,10 @@ impl Shape<'_> {
 // whole pixels.
 fn cover_box(b: [f64; 4], cw: usize, ch: usize, shift: (f64, f64), emit: &mut dyn FnMut(usize, usize, f64)) {
     let (mut x0, mut y0, mut x1, mut y1) = (b[0] + shift.0, b[1] + shift.1, b[2] + shift.0, b[3] + shift.1);
+    // (…a box with no finite edge covers nothing — `f64::max` would take a NaN edge for the canvas's)
+    if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+        return;
+    }
     if x1 < x0 {
         std::mem::swap(&mut x0, &mut x1);
     }
@@ -328,23 +346,23 @@ fn cover_box(b: [f64; 4], cw: usize, ch: usize, shift: (f64, f64), emit: &mut dy
 // Rings filled by scanline: each pixel row sampled at four sub-scanlines, each covered span adding its exact
 // horizontal overlap into the row's coverage. Nonzero merges each region of nonzero winding (overlapping pieces of a
 // stroke cover a pixel once); even-odd alternates.
-fn cover_rings(rings: &[Ring], even_odd: bool, cw: usize, ch: usize, shift: (f64, f64), emit: &mut dyn FnMut(usize, usize, f64)) {
+fn cover_rings(rings: &[Ring], even_odd: bool, cw: usize, ch: usize, shift: (f64, f64), emit: &mut dyn FnMut(usize, usize, f64)) -> Result<(), Oom> {
     let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
     for &(_, y) in rings.iter().flatten() {
         min_y = min_y.min(y);
         max_y = max_y.max(y);
     }
     if !min_y.is_finite() || !max_y.is_finite() {
-        return;
+        return Ok(());
     }
     let y_start = (min_y + shift.1).floor().max(0.0);
     let y_end = ((max_y + shift.1).ceil() - 1.0).min(ch as f64 - 1.0);
     if y_start > y_end {
-        return;
+        return Ok(());
     }
     const S: usize = 4;
     let inv_s = 1.0 / S as f64;
-    let mut cov = vec![0f32; cw];
+    let mut cov = zeroed(cw, 0f32)?;
     let mut xs: Vec<(f64, i32)> = Vec::new();
     for py in y_start as usize..=y_end as usize {
         let (mut lo, mut hi) = (cw, None::<usize>);
@@ -396,6 +414,7 @@ fn cover_rings(rings: &[Ring], even_odd: bool, cw: usize, ch: usize, shift: (f64
             }
         }
     }
+    Ok(())
 }
 // Add the span [xa, xb) at weight `w` into a coverage row: the pixels it touches, or None for none.
 fn add_span(cov: &mut [f32], xa: f64, xb: f64, w: f64, cw: usize) -> Option<(usize, usize)> {
@@ -431,7 +450,7 @@ enum Gradient {
     Conic { a0: f64, x: f64, y: f64 },
 }
 
-enum Paint {
+enum Paint<'a> {
     Solid { col: Rgb, a: f64 },
     // clearRect: what it covers cleared, an edge in proportion.
     Clear,
@@ -439,14 +458,14 @@ enum Paint {
     Gradient { kind: Gradient, stops: Vec<Stop>, to: Option<&'static [f64; 9]> },
     // A pattern's tile, in the bitmap's space already, tiled on the axes it repeats; sampled through `inv` (its own
     // transform, inverted).
-    Pattern { px: Vec<u8>, w: usize, h: usize, rep_x: bool, rep_y: bool, inv: Matrix },
+    Pattern { px: Cow<'a, [u8]>, w: usize, h: usize, rep_x: bool, rep_y: bool, inv: Matrix },
     // drawImage: the image's (sx, sy, sw, sh) drawn into the user-space rectangle (dx, dy, dw, dh) — nearest, or with
     // `smooth`, bilinear within the source rectangle (`clamp`: its pixel bounds).
-    Image(Image),
+    Image(Image<'a>),
 }
 
-struct Image {
-    px: Vec<u8>,
+struct Image<'a> {
+    px: Cow<'a, [u8]>,
     iw: usize,
     ih: usize,
     src: [f64; 4],
@@ -457,7 +476,7 @@ struct Image {
     clamp: [i64; 4],
 }
 
-impl Image {
+impl Image<'_> {
     // The source point a user-space point samples.
     fn source(&self, ux: f64, uy: f64) -> (f64, f64) {
         (self.src[0] + (ux - self.dst[0]) * self.scale.0, self.src[1] + (uy - self.dst[1]) * self.scale.1)
@@ -516,7 +535,7 @@ impl Image {
     }
 }
 
-impl Paint {
+impl Paint<'_> {
     // Whether the paint needs the user-space point of a pixel (the CTM inverted).
     fn sampled(&self) -> bool {
         !matches!(self, Paint::Solid { .. } | Paint::Clear)
@@ -640,7 +659,7 @@ impl Draw<'_> {
     }
 
     // Paint `shape` with `paint` into `buf`: its shadow first, then the shape itself, under the operator.
-    fn run(&self, buf: &mut [u8], shape: &Shape<'_>, paint: &Paint, shadow: Option<&Shadow>) {
+    fn run(&self, buf: &mut [u8], shape: &Shape<'_>, paint: &Paint<'_>, shadow: Option<&Shadow>) -> Result<(), Oom> {
         if let Paint::Clear = paint {
             shape.cover(self.cw, self.ch, (0.0, 0.0), &mut |px, py, cov| {
                 let idx = py * self.cw + px;
@@ -653,11 +672,11 @@ impl Draw<'_> {
                 } else {
                     buf[i + 3] = byte(f64::from(buf[i + 3]) * (1.0 - cov));
                 }
-            });
-            return;
+            })?;
+            return Ok(());
         }
         if let Some(shadow) = shadow {
-            self.cast(buf, shape, paint, shadow);
+            self.cast(buf, shape, paint, shadow)?;
         }
         let whole = self.op.whole_canvas();
         let paint_px = |buf: &mut [u8], idx: usize, px: usize, py: usize, cov: f64| {
@@ -672,18 +691,18 @@ impl Draw<'_> {
                 if !self.clipped(idx) {
                     paint_px(buf, idx, px, py, cov);
                 }
-            });
-            return;
+            })?;
+            return Ok(());
         }
         // A whole-canvas operator: every pixel inside the clip is the operator's — blended where covered, cleared
         // where not.
-        let mut plane = vec![0f32; self.cw * self.ch];
+        let mut plane = zeroed(self.cw * self.ch, 0f32)?;
         shape.cover(self.cw, self.ch, (0.0, 0.0), &mut |px, py, c| {
             let idx = py * self.cw + px;
             if c > f64::from(plane[idx]) {
                 plane[idx] = c as f32;
             }
-        });
+        })?;
         for (idx, &c) in plane.iter().enumerate() {
             if self.clipped(idx) {
                 continue;
@@ -694,14 +713,15 @@ impl Draw<'_> {
                 buf[idx * 4..idx * 4 + 4].fill(0);
             }
         }
+        Ok(())
     }
 
     // Cast the shadow (§4.12.5.1.17): the shape's coverage, moved by the offset and weighted by the alpha the paint
     // deposits, blurred, tinted with the shadow colour and composited under the operator — source-over for a
     // whole-canvas one, whose surface-wide shadow layer this does not model.
-    fn cast(&self, buf: &mut [u8], shape: &Shape<'_>, paint: &Paint, shadow: &Shadow) {
+    fn cast(&self, buf: &mut [u8], shape: &Shape<'_>, paint: &Paint<'_>, shadow: &Shadow) -> Result<(), Oom> {
         let (cw, ch) = (self.cw, self.ch);
-        let mut plane = vec![0f32; cw * ch];
+        let mut plane = zeroed(cw * ch, 0f32)?;
         let shift = shadow.offset;
         shape.cover(cw, ch, shift, &mut |px, py, cov| {
             let a = match paint {
@@ -718,8 +738,8 @@ impl Draw<'_> {
                     plane[idx] = c as f32;
                 }
             }
-        });
-        let plane = blur(plane, cw, ch, shadow.radius);
+        })?;
+        let plane = blur(plane, cw, ch, shadow.radius)?;
         let op = if self.op.whole_canvas() { Op::SourceOver } else { self.op };
         for (idx, &sc) in plane.iter().enumerate() {
             if sc <= 0.0 || self.clipped(idx) {
@@ -727,6 +747,7 @@ impl Draw<'_> {
             }
             composite(buf, idx * 4, shadow.col, clamp01(shadow.a * self.alpha * f64::from(sc)), op);
         }
+        Ok(())
     }
 }
 
@@ -738,18 +759,18 @@ struct Shadow {
 }
 
 // A Gaussian approximated by three separable box blurs of `radius`.
-fn blur(plane: Vec<f32>, w: usize, h: usize, radius: usize) -> Vec<f32> {
+fn blur(plane: Vec<f32>, w: usize, h: usize, radius: usize) -> Result<Vec<f32>, Oom> {
     if radius == 0 {
-        return plane;
+        return Ok(plane);
     }
-    let (mut a, mut b) = (plane, vec![0f32; w * h]);
+    let (mut a, mut b) = (plane, zeroed(w * h, 0f32)?);
     for _ in 0..3 {
         box_blur(&a, &mut b, w, h, radius, true);
         std::mem::swap(&mut a, &mut b);
         box_blur(&a, &mut b, w, h, radius, false);
         std::mem::swap(&mut a, &mut b);
     }
-    a
+    Ok(a)
 }
 // One box-blur pass along rows (`horiz`) or columns, a sliding window, edges clamped.
 fn box_blur(src: &[f32], dst: &mut [f32], w: usize, h: usize, radius: usize, horiz: bool) {
@@ -778,23 +799,35 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "canvasBlit", canvas_blit, context_id);
 }
 
-// The bytes of a `Uint8ClampedArray` / `Uint8Array`, to write in place.
-fn bytes_mut<'a>(val: v8::Local<'a, v8::Value>) -> Option<&'a mut [u8]> {
+// The bytes of a `Uint8ClampedArray` / `Uint8Array`: where they lie, and how many there are (none for a detached one).
+fn bytes_span(val: v8::Local<'_, v8::Value>) -> Option<(*mut u8, usize)> {
     let view = v8::Local::<v8::ArrayBufferView>::try_from(val).ok()?;
     let (ptr, n) = (view.data() as *mut u8, view.byte_length());
-    if n == 0 || ptr.is_null() {
-        return None;
-    }
-    // SAFETY: the view's own bytes past its offset, valid for the op (no JS runs while it holds them), and nothing
-    // else here borrows them: every other array an op reads is copied out first.
+    (n != 0 && !ptr.is_null()).then_some((ptr, n))
+}
+// …to write in place. An op takes at most ONE array so: every other it reads is `bytes_read`, which copies one that
+// shares its bytes.
+fn bytes_mut<'a>(val: v8::Local<'a, v8::Value>) -> Option<&'a mut [u8]> {
+    let (ptr, n) = bytes_span(val)?;
+    // SAFETY: the view's own bytes past its offset, valid for the op (no JS runs while it holds them), and borrowed by
+    // nothing else (`bytes_read` copies whatever overlaps them).
     Some(unsafe { std::slice::from_raw_parts_mut(ptr, n) })
 }
-// …copied out, for one that is read.
-fn bytes_copy(val: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
-    let view = v8::Local::<v8::ArrayBufferView>::try_from(val).ok()?;
-    let mut out = vec![0u8; view.byte_length()];
-    view.copy_contents(&mut out);
-    Some(out)
+// …to read: borrowed where they do not overlap `written` (the array the op writes, if any), copied where they do — a
+// canvas drawn onto itself reads its pixels from before the draw.
+fn bytes_read<'a>(val: v8::Local<'a, v8::Value>, written: Option<(*mut u8, usize)>) -> Option<Cow<'a, [u8]>> {
+    let (ptr, n) = bytes_span(val)?;
+    // SAFETY: as `bytes_mut`, read only while the op runs.
+    let bytes: &'a [u8] = unsafe { std::slice::from_raw_parts(ptr, n) };
+    let overlaps = written.is_some_and(|(w, wn)| (ptr as usize) < w as usize + wn && (w as usize) < ptr as usize + n);
+    Some(if overlaps { Cow::Owned(bytes.to_vec()) } else { Cow::Borrowed(bytes) })
+}
+// Throw a RangeError for a buffer an op could not have (`Oom`).
+fn throw_oom(scope: &mut v8::PinScope<'_, '_>) {
+    if let Some(msg) = v8::String::new(scope, "the canvas is too large to draw on") {
+        let e = v8::Exception::range_error(scope, msg);
+        scope.throw_exception(e);
+    }
 }
 
 // The rings of a path shape, and whether they fill even-odd: `[1, evenOdd, …path]` the path filled, `[3, …pen,
@@ -837,15 +870,20 @@ fn canvas_draw(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
     let (cw, ch) = (state[0] as usize, state[1] as usize);
     let ctm: Matrix = state[3..9].try_into().unwrap();
+    // (…a transform past what a double holds — `scale(1e200)` twice — maps everything off any canvas: nothing is drawn)
+    if !ctm.iter().all(|v| v.is_finite()) {
+        return;
+    }
     let p3 = state[9] != 0.0;
     let to = matrix(false, p3);
-    let mask = bytes_copy(args.get(3)).unwrap_or_default();
-    let clip = bytes_copy(args.get(1));
+    let written = bytes_span(args.get(0));
+    let mask = bytes_read(args.get(3), written).unwrap_or_default();
+    let clip = bytes_read(args.get(1), written);
     let shape = match shape[0] as i32 {
         0 if shape.len() >= 5 => Shape::Box([shape[1], shape[2], shape[3], shape[4]]),
         2 if shape.len() >= 7 => {
             let (w, h) = (shape[1] as usize, shape[2] as usize);
-            if w == 0 || h == 0 || mask.len() < w * h {
+            if w == 0 || h == 0 || mask.len() < w * h || !shape[3..7].iter().all(|v| v.is_finite()) {
                 return;
             }
             Shape::Mask { mask: &mask, w, h, x: shape[3] as i64, y: shape[4] as i64, x_scale: shape[5], out_w: shape[6] as usize }
@@ -855,7 +893,14 @@ fn canvas_draw(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             None => return,
         },
     };
-    let pixels = || bytes_copy(args.get(5)).unwrap_or_default();
+    // (…a pattern's or an image's pixels, copied where they share the bitmap's bytes or need converting)
+    let pixels = |convert: Option<&[f64; 9]>| {
+        let mut px = bytes_read(args.get(5), written).unwrap_or_default();
+        if let Some(m) = convert {
+            convert_buffer(m, px.to_mut());
+        }
+        px
+    };
     let p = &paint[1..];
     let paint = match paint[0] as i32 {
         0 if p.len() >= 4 => {
@@ -889,24 +934,21 @@ fn canvas_draw(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         }
         5 if p.len() >= 11 => {
             let (w, h) = (p[0] as usize, p[1] as usize);
-            let mut px = pixels();
+            let px = pixels(matrix(p[4] != 0.0, p3));
             if w == 0 || h == 0 || px.len() < w * h * 4 {
                 return;
-            }
-            if let Some(m) = matrix(p[4] != 0.0, p3) {
-                convert_buffer(m, &mut px);
             }
             let own: Matrix = p[5..11].try_into().unwrap();
             Paint::Pattern { px, w, h, rep_x: p[2] != 0.0, rep_y: p[3] != 0.0, inv: invert(&own).unwrap_or([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]) }
         }
         6 if p.len() >= 12 => {
             let (iw, ih) = (p[0] as usize, p[1] as usize);
-            let mut px = pixels();
-            if iw == 0 || ih == 0 || px.len() < iw * ih * 4 {
+            if iw == 0 || ih == 0 || !p[3..11].iter().all(|v| v.is_finite()) {
                 return;
             }
-            if let Some(m) = matrix(p[2] != 0.0, p3) {
-                convert_buffer(m, &mut px);
+            let px = pixels(matrix(p[2] != 0.0, p3));
+            if px.len() < iw * ih * 4 {
+                return;
             }
             let (src, dst) = ([p[3], p[4], p[5], p[6]], [p[7], p[8], p[9], p[10]]);
             // Bilinear only where smoothing is on AND the image is scaled or rotated on its way to the bitmap: an
@@ -945,31 +987,34 @@ fn canvas_draw(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         return;
     }
     let draw = Draw { cw, ch, clip: clip.as_deref(), alpha: state[2], op, inv };
-    draw.run(buf, &shape, &paint, shadow.as_ref());
+    if draw.run(buf, &shape, &paint, shadow.as_ref()).is_err() {
+        throw_oom(scope);
+    }
 }
 
-// __dom.canvasClip(w, h, shape, clip) -> the clip mask (a Uint8Array, 1 inside) a path shape (`rings_of`) makes of a
-// `w` × `h` bitmap, intersected with `clip`: a pixel is inside where it is at least half covered.
-fn canvas_clip(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cw = args.get(0).uint32_value(scope).unwrap_or(0) as usize;
-    let ch = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
-    let (rings, even_odd) = rings_of(&crate::dom::f64_arg(args.get(2))).unwrap_or_default();
-    let mut mask = vec![0u8; cw * ch];
-    Shape::Rings { rings, even_odd }.cover(cw, ch, (0.0, 0.0), &mut |px, py, cov| {
+// __dom.canvasClip(mask, w, h, shape, clip): the clip mask (1 inside) a path shape (`rings_of`) makes of a `w` × `h`
+// bitmap, intersected with `clip`, written into `mask` (the page side allocates it, a size too large for it a
+// RangeError there): a pixel is inside where it is at least half covered.
+fn canvas_clip(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cw = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
+    let ch = args.get(2).uint32_value(scope).unwrap_or(0) as usize;
+    let (rings, even_odd) = rings_of(&crate::dom::f64_arg(args.get(3))).unwrap_or_default();
+    let written = bytes_span(args.get(0));
+    let old = bytes_read(args.get(4), written);
+    let Some(mask) = bytes_mut(args.get(0)).filter(|m| m.len() >= cw * ch) else { return };
+    mask.fill(0);
+    let covered = Shape::Rings { rings, even_odd }.cover(cw, ch, (0.0, 0.0), &mut |px, py, cov| {
         if cov >= 0.5 {
             mask[py * cw + px] = 1;
         }
     });
-    if let Some(old) = bytes_copy(args.get(3)) {
-        for (m, o) in mask.iter_mut().zip(old) {
+    if covered.is_err() {
+        return throw_oom(scope);
+    }
+    if let Some(old) = old {
+        for (m, o) in mask.iter_mut().zip(old.iter()) {
             *m &= o;
         }
-    }
-    let len = mask.len();
-    let store = v8::ArrayBuffer::new_backing_store_from_vec(mask).make_shared();
-    let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
-    if let Some(out) = v8::Uint8Array::new(scope, buffer, 0, len) {
-        rv.set(out.into());
     }
 }
 
@@ -989,7 +1034,7 @@ fn canvas_blit(_scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     if g.len() < 12 {
         return;
     }
-    let Some(src) = bytes_copy(args.get(0)) else { return };
+    let Some(src) = bytes_read(args.get(0), bytes_span(args.get(1))) else { return };
     let Some(dst) = bytes_mut(args.get(1)) else { return };
     let [src_w, src_h, sx, sy, sw, sh, dst_w, dst_h, dx, dy, dw, dh] = g[..12].try_into().unwrap();
     if src.len() < (src_w * src_h * 4.0) as usize || dst.len() < (dst_w * dst_h * 4.0) as usize {
@@ -1031,7 +1076,7 @@ mod tests {
     #[test]
     fn covers_a_half_pixel_box_edge() {
         let mut got = Vec::new();
-        Shape::Box([0.5, 0.0, 2.0, 1.0]).cover(4, 1, (0.0, 0.0), &mut |x, y, c| got.push((x, y, c)));
+        Shape::Box([0.5, 0.0, 2.0, 1.0]).cover(4, 1, (0.0, 0.0), &mut |x, y, c| got.push((x, y, c))).unwrap();
         assert_eq!(got, vec![(0, 0, 0.5), (1, 0, 1.0)]);
     }
 
@@ -1039,10 +1084,10 @@ mod tests {
     fn fills_a_ring_by_winding() {
         let square = vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)];
         let mut n = 0;
-        Shape::Rings { rings: vec![square.clone(), square], even_odd: true }.cover(4, 4, (0.0, 0.0), &mut |_, _, _| n += 1);
+        Shape::Rings { rings: vec![square.clone(), square], even_odd: true }.cover(4, 4, (0.0, 0.0), &mut |_, _, _| n += 1).unwrap();
         assert_eq!(n, 0);
         let mut got = Vec::new();
-        Shape::Rings { rings: vec![vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]], even_odd: false }.cover(4, 4, (0.0, 0.0), &mut |x, y, c| got.push((x, y, c)));
+        Shape::Rings { rings: vec![vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]], even_odd: false }.cover(4, 4, (0.0, 0.0), &mut |x, y, c| got.push((x, y, c))).unwrap();
         assert_eq!(got.len(), 4);
         assert!(got.iter().all(|&(_, _, c)| c == 1.0));
     }

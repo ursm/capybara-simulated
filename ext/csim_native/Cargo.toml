@@ -73,6 +73,9 @@ icu_properties = "2"
 # The text of the generated boxes a walk meets, allocated as it meets them and read back for the rest of the walk
 # (`walk::Generated`): an arena hands out references from `&self`.
 typed-arena = "2"
+# A number as script writes it (ECMAScript Number::toString): Ryu with the JS formatting rules, V8's own shortest digits
+# (numbers.rs).
+ryu-js = "1"
 
 # The HTML parser: Servo's html5ever — tokenizer and tree builder, the select parser relaxation and `selectedcontent`
 # included — run natively, the page side taking the tree it builds as steps (html_parse.rs).
