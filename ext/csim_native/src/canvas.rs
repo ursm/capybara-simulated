@@ -276,7 +276,8 @@ impl Shape<'_> {
     // The device box the shape can cover (left, top, right, bottom) — None for one that covers nothing.
     fn bounds(&self) -> Option<[f64; 4]> {
         match self {
-            Shape::Box(b) => Some(*b),
+            // (…a box drawn with a negative width or height has its edges the other way round)
+            &Shape::Box([x0, y0, x1, y1]) => Some([x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)]),
             Shape::Rings { rings, .. } => {
                 let mut it = rings.iter().flatten();
                 let &(x, y) = it.next()?;

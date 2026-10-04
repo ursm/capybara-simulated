@@ -141,4 +141,26 @@ RSpec.describe 'canvas rasterizer' do
     JS
     expect(got).to eq([true, false, true, true, false, false, false, true, 'TypeError', 'alive'])
   end
+
+  # A rectangle drawn with a negative width or height has its edges the other way round, and casts the same shadow as
+  # the one drawn forwards.
+  it 'casts the shadow of a rectangle drawn backwards' do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const draw = (x, y, w, h) => {
+          const g = Object.assign(document.createElement('canvas'), {width: 60, height: 60}).getContext('2d');
+          g.shadowColor = 'rgba(0, 0, 0, 0.8)';
+          g.shadowBlur = 6;
+          g.shadowOffsetX = 4;
+          g.fillRect(x, y, w, h);
+          return Array.from(g.getImageData(0, 0, 60, 60).data).join();
+        };
+        const forwards = draw(10, 10, 30, 30);
+        return [draw(40, 10, -30, 30) === forwards, draw(10, 40, 30, -30) === forwards];
+      })()
+    JS
+    expect(got).to eq([true, true])
+  end
 end
