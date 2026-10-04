@@ -1820,33 +1820,6 @@ pub(crate) fn attribute_key(arena: &RealmArena, owner: NodeId, index: u32) -> Op
     arena.get(owner)?.attributes.get(index as usize).map(|(k, _)| k.as_str())
 }
 
-// The deepest node that is an ancestor-or-self of every node of `nodes` and of `context` — where a caller mapping the
-// result back onto its own tree can begin its walk.
-pub(crate) fn common_ancestor(arena: &RealmArena, context: NodeId, nodes: &[XNode]) -> NodeId {
-    let chain = |mut id: NodeId| {
-        let mut out = vec![id];
-        while let Some(p) = arena.parent_of(id) {
-            out.push(p);
-            id = p;
-        }
-        out.reverse();
-        out
-    };
-    let mut common = chain(context);
-    for x in nodes {
-        let id = match *x {
-            XNode::Node(id) | XNode::Attr(id, _) => id,
-        };
-        let other = chain(id);
-        let shared = common.iter().zip(&other).take_while(|(a, b)| a == b).count();
-        common.truncate(shared);
-        if common.len() <= 1 {
-            break;
-        }
-    }
-    common.last().copied().unwrap_or(context)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

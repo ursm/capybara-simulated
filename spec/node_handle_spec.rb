@@ -43,6 +43,29 @@ RSpec.describe 'node handles' do
     expect(got).to eq([{'text' => 10, 'element' => 10, 'appended' => 10, 'fragment' => 10}, true])
   end
 
+  # A query answers from the arena, and its nodes are the objects their handles hold: the very ones a script holds — a
+  # `<form>` and a document through their Proxies — whatever the query, wherever in the tree.
+  it "hands a query's nodes back as the objects a script holds" do
+    s = page('<form id=f><fieldset><input id=i></fieldset></form><div id=d></div>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const f = document.forms[0], i = document.getElementById('i');
+        i.expando = 'kept';
+        const one = (xp) => document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+        return [
+          document.querySelector('form') === f,
+          document.querySelectorAll('form, input')[0] === f,
+          i.closest('form') === f,
+          one('//form') === f,
+          one('/') === document,
+          one('//input/@id').ownerElement === i,
+          document.querySelector('#d ~ *, input').expando
+        ];
+      })()
+    JS
+    expect(got).to eq([true, true, true, true, true, true, 'kept'])
+  end
+
   # A `::before` is no node of its own: its box's slot belongs to its element, and goes with it.
   it "frees a generated box's slot with its element's" do
     s = page('<style>.g::before { content: "x" }</style><div id=g class=g>g</div>')

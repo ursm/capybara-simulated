@@ -1316,6 +1316,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // slot bumps its gen, so any surviving reference reads absent.
     register(scope, ns, "dropNode", drop_node, context_id);
     register(scope, ns, "handleEdgesMismatch", handle_edges_mismatch, context_id);
+    // A node's object by its slot, and a node handed out through a Proxy (node_handle.rs).
+    register(scope, ns, "nodeOf", node_of, context_id);
+    register(scope, ns, "nodesOf", nodes_of, context_id);
+    register(scope, ns, "rewrap", rewrap, context_id);
     // Free a disposed realm's arena — csim calls this before tearing down a frame realm (main reuses
     // slot 0). Takes an explicit id (the realm being dropped), not the caller's own.
     register(scope, ns, "dropRealm", drop_realm, context_id);
@@ -2346,8 +2350,8 @@ fn xpath_prefixes(
 }
 
 // __dom.xpathEvaluate(expression, contextNid, attrKey, html, namespaces, resultType) -> a number, string or boolean,
-// or for a node-set [walkRootNid, nid, key, nid, key, …] in document order (`key` an attribute's store key, null for
-// a node), the walk root the deepest common ancestor of the context and every result. The context is the node
+// or for a node-set [node, key, node, key, …] in document order (each node's object, `key` an attribute's store key, null
+// for the node itself). The context is the node
 // `contextNid`, or its attribute stored under `attrKey` (a string); `namespaces` a flat [prefix, uri, …] array.
 // Throws a TypeError for a value of the wrong type; `undefined` for a context the arena does not hold.
 fn xpath_evaluate(
@@ -2385,18 +2389,18 @@ fn xpath_evaluate(
         None => crate::xpath::XNode::Node(id),
     };
     let answer = crate::xpath::evaluate(arena, &text, context, html, &namespaces, result_type);
-    // (…the node-set as (nid, key) pairs, read while the arena is borrowed)
+    // (…the node-set as (handle, key) pairs, read while the arena is borrowed)
     let answer = answer.map(|a| match a {
         crate::xpath::Answer::Nodes(nodes) => {
-            let walk_root = crate::xpath::common_ancestor(arena, id, &nodes);
-            let pairs: Vec<(NodeId, Option<String>)> = nodes
+            let held = |n: NodeId| arena.get(n).and_then(|d| d.link.held());
+            let pairs: Vec<_> = nodes
                 .iter()
                 .map(|x| match *x {
-                    crate::xpath::XNode::Node(n) => (n, None),
-                    crate::xpath::XNode::Attr(n, i) => (n, crate::xpath::attribute_key(arena, n, i).map(str::to_owned)),
+                    crate::xpath::XNode::Node(n) => (held(n), None),
+                    crate::xpath::XNode::Attr(n, i) => (held(n), crate::xpath::attribute_key(arena, n, i).map(str::to_owned)),
                 })
                 .collect();
-            Err((walk_root, pairs))
+            Err(pairs)
         }
         other => Ok(other),
     });
@@ -2409,18 +2413,21 @@ fn xpath_evaluate(
             let error = v8::Exception::type_error(scope, message);
             scope.throw_exception(error);
         }
-        Ok(Err((walk_root, pairs))) => {
-            let array = v8::Array::new(scope, 1 + 2 * pairs.len() as i32);
-            let v: v8::Local<v8::Value> = v8::Number::new(scope, walk_root.to_f64()).into();
-            array.set_index(scope, 0, v);
-            for (i, (n, key)) in pairs.iter().enumerate() {
-                let v: v8::Local<v8::Value> = v8::Number::new(scope, n.to_f64()).into();
-                array.set_index(scope, 1 + 2 * i as u32, v);
+        Ok(Err(pairs)) => {
+            // (…each node's object made a handle of this scope before anything is allocated)
+            let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
+            let objects: Vec<v8::Local<v8::Value>> = pairs
+                .iter()
+                .map(|(h, _)| h.and_then(|h| crate::node_handle::object_of(scope, h)).map_or(undefined, |o| o.into()))
+                .collect();
+            let array = v8::Array::new(scope, 2 * pairs.len() as i32);
+            for (i, (object, (_, key))) in objects.into_iter().zip(&pairs).enumerate() {
+                array.set_index(scope, 2 * i as u32, object);
                 let k: v8::Local<v8::Value> = match key.as_deref().and_then(|k| v8::String::new(scope, k)) {
                     Some(k) => k.into(),
                     None => v8::null(scope).into(),
                 };
-                array.set_index(scope, 2 + 2 * i as u32, k);
+                array.set_index(scope, 2 * i as u32 + 1, k);
             }
             rv.set(array.into());
         }
@@ -3128,6 +3135,51 @@ fn drop_node(
     if let Some(arena) = dom(scope).realms.get_mut(&cid) {
         arena.free_node(id);
     }
+}
+
+// __dom.nodeOf(nid) -> the object of the node in slot `nid`, or undefined (no such node, or none V8 still has).
+fn node_of(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let Some(held) = realm(scope, cid).get(id).and_then(|n| n.link.held()) else { return };
+    if let Some(obj) = crate::node_handle::object_of(scope, held) {
+        rv.set(obj.into());
+    }
+}
+
+// __dom.nodesOf(nids) -> their objects, in order (undefined for one `nodeOf` has none for).
+fn nodes_of(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
+    let ids: Vec<Option<NodeId>> = (0..list.length())
+        .map(|i| list.get_index(scope, i).and_then(|v| v.integer_value(scope)).and_then(NodeId::from_i64))
+        .collect();
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let held: Vec<_> = ids.iter().map(|id| id.and_then(|id| arena.get(id)).and_then(|n| n.link.held())).collect();
+    // (…each one's object made a handle of this scope before the list is made, which allocates)
+    let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
+    let objects: Vec<v8::Local<v8::Value>> = held
+        .into_iter()
+        .map(|h| h.and_then(|h| crate::node_handle::object_of(scope, h)).map_or(undefined, |o| o.into()))
+        .collect();
+    rv.set(v8::Array::new_with_elements(scope, &objects).into());
+}
+
+// __dom.rewrap(object) — the node `object` is a Proxy over is handed out as it from here on.
+fn rewrap(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    crate::node_handle::rewrap(scope, args.get(0));
 }
 
 // __dom.handleEdgesMismatch(nid) -> where the node's handle's tree edges disagree with its slot's tree
