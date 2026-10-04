@@ -7424,7 +7424,7 @@ module Capybara
       # bitmaps stashed for transfer — none for an image with no pixels, which loads with nothing to draw — and its
       # taint verdict and Resource Timing figures.
       private def image_payload(entry, tainted, meta)
-        out = {'width' => entry['width'], 'height' => entry['height'], 'natural' => entry['natural'], 'tainted' => tainted, 'encoded' => entry['encoded'], 'meta' => meta}
+        out = {'width' => entry['width'], 'height' => entry['height'], 'natural' => entry['natural'], 'orientation' => entry['orientation'], 'tainted' => tainted, 'encoded' => entry['encoded'], 'meta' => meta}
         return out.merge('noPixels' => true) if entry['noPixels']
         out['colorSpace'] = entry['colorSpace']
         out['refId']      = transfer_buffer_stash(entry['bytes'])

@@ -2620,16 +2620,6 @@ html/canvas/element/manual/imagebitmap/canvas-createImageBitmap-resize.html:
 - createImageBitmap from an ImageData with resize option.
 html/canvas/element/manual/imagebitmap/createImageBitmap-drawImage-closed.html:
 - attempt to draw a closed ImageBitmap to a 2d canvas throws INVALID_STATE_ERR
-html/canvas/element/manual/imagebitmap/createImageBitmap-exif-orientation.html:
-- createImageBitmap with EXIF rotation, imageOrientation flipY, and cropping
-- createImageBitmap with EXIF rotation, imageOrientation flipY, and no cropping
-- createImageBitmap with EXIF rotation, imageOrientation flipY, cropping, and nonuniform
-  resize
-- createImageBitmap with EXIF rotation, imageOrientation flipY, cropping, and resize
-- createImageBitmap with EXIF rotation, imageOrientation from-image, and cropping
-- createImageBitmap with EXIF rotation, imageOrientation from-image, and no cropping
-- createImageBitmap with EXIF rotation, imageOrientation from-image, no cropping,
-  and resize
 html/canvas/element/manual/imagebitmap/createImageBitmap-origin.sub.html:
 - 'cross-origin HTMLImageElement: origin unclear bitmaprenderer.transferFromImageBitmap'
 - 'cross-origin HTMLVideoElement: origin unclear 2dContext.drawImage'
@@ -2677,17 +2667,10 @@ html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBit
 html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap.html:
 - "== html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap-expected.html"
 html/canvas/element/manual/imagebitmap/imagebitmap-replication-exif-orientation.html:
-- ImageBitmap from file with EXIF rotation, duplicated via createImageBitmap
-- ImageBitmap from file with EXIF rotation, duplicated via structuredClone
 - ImageBitmap from file with EXIF rotation, duplicated via worker serialization round-trip
 - ImageBitmap from file with EXIF rotation, duplicated via worker transfer round-trip
 - ImageBitmap from file with EXIF rotation, duplicated via worker transfer round-trip,
   while referenced by a CanvasPattern
-- ImageBitmap from file with EXIF rotation, loaded via <img>
-- ImageBitmap from file with EXIF rotation, loaded via <img> in DOM, imageOrientation
-  = none
-- ImageBitmap from file with EXIF rotation, loaded via <img> not in DOM, imageOrientation
-  = none
 html/canvas/element/manual/shadows/canvas_shadows_system_colors.html:
 - "== html/canvas/element/manual/shadows/canvas_shadows_system_colors-expected.html"
 html/canvas/element/manual/shadows/shadowBlur_gaussian_tolerance.1.html:

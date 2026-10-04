@@ -940,23 +940,48 @@ fn collapse_run(text: &[u16], mode: u8) -> Vec<u16> {
     }
     out
 }
-// An svg `width` / `height` attribute: a number of px, `em` or `rem` (`svgAttrLength`).
+// An svg `width` / `height` attribute: a CSS number of px, an absolute unit (in, cm, mm, Q, pt, pc) or `em` / `rem`
+// (`svgAttrLength`); a percentage is none.
 pub(crate) fn svg_length(v: &str, em: f64, rem: f64) -> Option<f64> {
     let t = v.trim();
-    let (num, unit) = match t.find(|c: char| c.is_ascii_alphabetic()) {
-        Some(i) => (&t[..i], t[i..].to_ascii_lowercase()),
-        None => (t, String::new()),
+    // (…a CSS number — a sign, digits and a fraction, an exponent — then its unit)
+    let b = t.as_bytes();
+    let mut i = usize::from(matches!(b.first(), Some(b'+' | b'-')));
+    let digits = |i: &mut usize| {
+        let from = *i;
+        while b.get(*i).is_some_and(u8::is_ascii_digit) {
+            *i += 1;
+        }
+        *i > from
     };
-    if num.is_empty() || !num.chars().all(|c| c.is_ascii_digit() || c == '.') || num.matches('.').count() > 1 || num.ends_with('.') {
+    let whole = digits(&mut i);
+    let frac = b.get(i) == Some(&b'.') && {
+        i += 1;
+        digits(&mut i)
+    };
+    if !whole && !frac {
         return None;
     }
-    let n: f64 = num.parse().ok()?;
-    match unit.as_str() {
-        "" | "px" => Some(n),
-        "em" => Some(n * em),
-        "rem" => Some(n * rem),
-        _ => None,
+    if matches!(b.get(i), Some(b'e' | b'E')) {
+        let mut j = i + 1 + usize::from(matches!(b.get(i + 1), Some(b'+' | b'-')));
+        if digits(&mut j) {
+            i = j;
+        }
     }
+    let n: f64 = t[..i].parse().ok().filter(|n: &f64| n.is_finite())?;
+    let px = match t[i..].to_ascii_lowercase().as_str() {
+        "" | "px" => 1.0,
+        "em" => em,
+        "rem" => rem,
+        "in" => 96.0,
+        "cm" => 96.0 / 2.54,
+        "mm" => 96.0 / 25.4,
+        "q" => 96.0 / 101.6,
+        "pt" => 96.0 / 72.0,
+        "pc" => 16.0,
+        _ => return None,
+    };
+    Some(n * px)
 }
 // An svg `viewBox`: its width and height, where all four numbers are and both are positive (`parseViewBox`).
 pub(crate) fn view_box(v: &str) -> Option<(f64, f64)> {
@@ -2406,7 +2431,8 @@ impl<'a> Walk<'a> {
         let node = self.node(id);
         let em = font_size(&*self.style(id)?);
         let root = self.root_font_size()?;
-        let length = |name: &str| node.get_attr(name).and_then(|v| svg_length(v, em, root));
+        // (…a negative length is an error: the attribute is as good as missing)
+        let length = |name: &str| node.get_attr(name).and_then(|v| svg_length(v, em, root)).filter(|v| *v >= 0.0);
         Ok(Intrinsic::of(NaturalSize { width: length("width"), height: length("height"), view_box: node.get_attr("viewBox").and_then(view_box) }))
     }
     // The root element's font size, which an `rem` resolves against.

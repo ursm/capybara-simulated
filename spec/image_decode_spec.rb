@@ -87,4 +87,22 @@ RSpec.describe 'image decode' do
     JS
     expect(got).to eq([20, 20, 5, 5])
   end
+
+  # A Display P3 image is told by its profile's primaries, not its name — the profile toDataURL writes names itself in
+  # UTF-16 (ICC v4) — so a P3 canvas's PNG draws back into a P3 canvas unchanged.
+  it 'reads a Display P3 profile by its primaries' do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const p3 = () => { const c = document.createElement('canvas'); c.width = c.height = 1; return c.getContext('2d', {colorSpace: 'display-p3'}); };
+      const src = p3();
+      src.fillStyle = 'red';
+      src.fillRect(0, 0, 1, 1);
+      const img = new Image();
+      img.onload = () => { const dst = p3(); dst.drawImage(img, 0, 0); done([Array.from(src.getImageData(0, 0, 1, 1).data), Array.from(dst.getImageData(0, 0, 1, 1).data)]); };
+      img.src = src.canvas.toDataURL();
+    JS
+    expect(got[1]).to eq(got[0])
+  end
 end

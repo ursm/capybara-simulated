@@ -94,8 +94,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // __dom.encodeImage(pixels, width, height, type, quality, colorSpace) -> `[mime, bytes]`: the bitmap (`pixels` RGBA,
-// a Uint8ClampedArray, in `colorSpace`: 'srgb' or 'display-p3') serialised as `type` asks (`encode`), the type it was written as, and its bytes; undefined where
-// it could not be (too few pixels for its size, or a size the format cannot hold).
+// a Uint8ClampedArray, in `colorSpace`: 'srgb' or 'display-p3') serialised as `type` asks (`encode`), the type it was
+// written as, and its bytes; undefined where it could not be (too few pixels for its size, or a size the format
+// cannot hold).
 fn encode_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let [w, h] = [1, 2].map(|k| args.get(k).uint32_value(scope).unwrap_or(0));
     let format = Format::of(&args.get(3).to_rust_string_lossy(scope));

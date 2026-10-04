@@ -39,9 +39,13 @@ struct Track {
     color: Option<Color>,
 }
 
-// `bytes` decoded to its first frame — None where it is no video we can play.
+// `bytes` decoded to its first frame — None where it is no video we can play, or one larger than an image may be
+// (`image_decode::MAX_AREA`, checked against the container's size and, before decoding, the bitstream's).
 pub(crate) fn decode(bytes: &[u8]) -> Option<Video> {
     let track = if bytes.get(4..8) == Some(b"ftyp") { mp4(bytes)? } else { webm(bytes)? };
+    if !crate::image_decode::fits(track.width, track.height) {
+        return None;
+    }
     let (width, height, rgba) = first_frame(&track)?;
     Some(Video { width, height, duration: track.duration, rgba })
 }
@@ -68,6 +72,11 @@ fn first_frame(t: &Track) -> Option<(u32, u32, Vec<u8>)> {
             Some((frame.width, frame.height, frame.rgba))
         }
         Codec::Vp8 => {
+            // (…a key frame's size, 14 bits each, after its start code)
+            let size = |at: usize| Some(u32::from(u16::from_le_bytes(t.sample.get(at..at + 2)?.try_into().ok()?) & 0x3FFF));
+            if t.sample.get(3..6) != Some(&[0x9D, 0x01, 0x2A]) || !crate::image_decode::fits(size(6)?, size(8)?) {
+                return None;
+            }
             let frame = image_webp::vp8::Vp8Decoder::decode_frame(Cursor::new(&t.sample)).ok()?;
             let (w, h) = (usize::from(frame.width), usize::from(frame.height));
             // (…its planes are as wide as its macroblocks: the width rounded up to 16)
@@ -76,6 +85,11 @@ fn first_frame(t: &Track) -> Option<(u32, u32, Vec<u8>)> {
             Some((w as u32, h as u32, planes.rgba(color(None))?))
         }
         Codec::Vp9 => {
+            let mut r = rusty_vp9::BitReader::new(&t.sample);
+            let header = rusty_vp9::parse_uncompressed_header(&mut r, &[(0, 0); 8]).ok()?;
+            if !crate::image_decode::fits(header.width, header.height) {
+                return None;
+            }
             let mut decoder = rusty_vp9::Vp9Decoder::new();
             decoder.push(&t.sample, None).ok()?;
             let frame = decoder.next_frame().or_else(|_| {
@@ -86,7 +100,7 @@ fn first_frame(t: &Track) -> Option<(u32, u32, Vec<u8>)> {
             let (w, h) = (frame.width as usize, frame.height as usize);
             let uv = [(frame.planes.get(1)?.as_slice(), *frame.strides.get(1)?), (frame.planes.get(2)?.as_slice(), *frame.strides.get(2)?)];
             let planes = Planes { width: w, height: h, bit_depth: frame.bit_depth, ss: (frame.subsampling_x as usize, frame.subsampling_y as usize), y: (frame.planes.first()?, *frame.strides.first()?), uv: Some(uv) };
-            Some((w as u32, h as u32, planes.rgba(color(vp9_color(&t.sample)))?))
+            Some((w as u32, h as u32, planes.rgba(color(vp9_color(&header)))?))
         }
         Codec::Other => None,
     }
@@ -122,9 +136,7 @@ fn annex_b(avcc: &[u8], sample: &[u8]) -> Option<Vec<u8>> {
 // A VP9 key frame's colour (its uncompressed header's color_space): BT.601, BT.709, BT.2020 or sRGB (GBR, full range);
 // None for one it leaves unknown. (rusty_vp9 does not hand over the range bit after it: limited range, as nearly every
 // VP9 stream is.)
-fn vp9_color(sample: &[u8]) -> Option<Color> {
-    let mut r = rusty_vp9::BitReader::new(sample);
-    let header = rusty_vp9::parse_uncompressed_header(&mut r, &[(0, 0); 8]).ok()?;
+fn vp9_color(header: &rusty_vp9::FrameHeader) -> Option<Color> {
     let matrix = match header.color_space {
         1 | 3 => 6,
         2 => 1,
