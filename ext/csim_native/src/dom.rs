@@ -1901,30 +1901,30 @@ fn set_manual_assigned(
     }
 }
 
-// __dom.assignedSlotOf(nid) -> the slot a slottable is assigned to (HTML "find a slot"), as its path from the node's
-// shadow-including root; undefined for none.
+// __dom.assignedSlotOf(nid, anchorNid) -> the slot a slottable is assigned to (HTML "find a slot"), as its path from
+// `anchorNid` (the slottable's host, where the caller walks it from); undefined for none.
 fn assigned_slot_of(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let (Some(id), Some(anchor)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
     let Some(slot) = arena.get(id).and_then(|n| n.assigned_slot).filter(|&s| arena.get(s).is_some()) else { return };
     let mut out = Vec::new();
-    arena.push_path(arena.shadow_including_root(id), slot, &mut out);
+    arena.push_path(anchor, slot, &mut out);
     rv.set(f64_array(scope, &out).into());
 }
 
-// __dom.assignedNodesOf(slotNid, flatten) -> a slot's assigned nodes ("find slottables"), or with `flatten` its flattened
-// ones ("find flattened slottables"), as their paths from the slot's shadow-including root.
+// __dom.assignedNodesOf(slotNid, flatten, anchorNid) -> a slot's assigned nodes ("find slottables"), or with `flatten`
+// its flattened ones ("find flattened slottables"), as their paths from `anchorNid`.
 fn assigned_nodes_of(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let Some(slot) = nid_arg(scope, &args, 0) else { return };
+    let (Some(slot), Some(anchor)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2)) else { return };
     let flatten = args.get(1).is_true();
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
@@ -1935,7 +1935,6 @@ fn assigned_nodes_of(
     } else {
         arena.get(slot).map_or(Vec::new(), |s| s.assigned.clone())
     };
-    let anchor = arena.shadow_including_root(slot);
     let mut out = Vec::new();
     for id in ids {
         arena.push_path(anchor, id, &mut out);

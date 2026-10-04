@@ -86,6 +86,35 @@ RSpec.describe 'node handles' do
     expect(got).to eq([nil] * 9)
   end
 
+  # The engine assigns slots (slots.rs), and a host moved into another realm's tree is registered afresh there, its
+  # children and its shadow tree with it: its slots are assigned there as they were, which no slotchange reports, and
+  # what is slotted is laid out — into a frame's document and back.
+  it 'keeps the slots of a shadow host moved into a frame and back' do
+    pages = {'/' => '<!DOCTYPE html><meta charset=utf-8><body><div id=h><span id=x slot=a>slotted</span></div><iframe id=f src="/f"></iframe>',
+             '/f' => '<!DOCTYPE html><meta charset=utf-8><body><div id=out></div>'}
+    s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [pages.fetch(env['PATH_INFO'], '')]] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const h = document.getElementById('h');
+        const sr = h.attachShadow({mode: 'open'});
+        sr.innerHTML = '<slot name=a></slot>';
+        const a = sr.firstChild, x = document.getElementById('x');
+        window.__changes = 0;
+        a.addEventListener('slotchange', () => __changes++);
+        const state = () => [x.assignedSlot === a, a.assignedNodes().length, x.getBoundingClientRect().width > 0];
+        const r = [state()];
+        document.getElementById('f').contentDocument.getElementById('out').appendChild(h);
+        r.push(state());
+        document.body.appendChild(h);
+        r.push(state());
+        return r;
+      })()
+    JS
+    expect(got).to eq([[true, 1, true]] * 3)
+    expect(s.evaluate_script('__changes')).to eq(1)   # (…the first assignment's, a microtask later: none for a move)
+  end
+
   # A `::before` is no node of its own: its box's slot belongs to its element, and goes with it.
   it "frees a generated box's slot with its element's" do
     s = page('<style>.g::before { content: "x" }</style><div id=g class=g>g</div>')
