@@ -99,8 +99,9 @@ RSpec.describe 'canvas encoding' do
   # Chrome's answers (measured), where the spec does not leave them open: toBlob serialises the bitmap as it is at the
   # call (a copy, §4.12.5.1 step 3) and calls back once, an exception it throws reported rather than answered with a
   # second, null, call; convertToBlob converts its ImageEncodeOptions first (quality, then type; a quality string is a
-  # number) and rejects a tainted bitmap before one with no pixels. And by the spec (§4.12.5.5): a Display P3 canvas's
-  # PNG carries its profile.
+  # number) and rejects a tainted bitmap before one with no pixels. And by the spec: convertToBlob's options are a
+  # dictionary (a number is a TypeError) and it settles in a task (§4.12.5.3), not a microtask later; a Display P3
+  # canvas's PNG carries its profile (§4.12.5.5).
   it 'serialises the bitmap at the call, calls back once, and converts convertToBlob options as WebIDL does' do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body></body>']] })
     s.visit '/'
@@ -124,19 +125,27 @@ RSpec.describe 'canvas encoding' do
           const o = new OffscreenCanvas(0, 0);
           o.convertToBlob(opts).catch(e => {
             r.push(read.join(','), e.name);
+            return new OffscreenCanvas(1, 1).convertToBlob(5);
+          }).catch(e => {
+            r.push(e.name);
+            let settled = false;
+            const blob = new OffscreenCanvas(1, 1).convertToBlob().then(() => { settled = true; });
+            return Promise.resolve().then(() => Promise.resolve()).then(() => r.push(settled)).then(() => blob);
+          }).then(() => {
             const p3 = document.createElement('canvas');
             p3.width = p3.height = 1;
             p3.getContext('2d', {colorSpace: 'display-p3'}).fillRect(0, 0, 1, 1);
-            p3.toBlob(b => b.arrayBuffer().then(buf => {
-              r.push(new TextDecoder('latin1').decode(buf).includes('iCCP'));
-              done(r);
-            }));
+            r.push(p3.toDataURL());
+            done(r);
           });
         });
         throw new Error('in the callback');
       });
       g.clearRect(0, 0, 1, 1);
     JS
-    expect(got).to eq(['reported', [255, 0, 0, 255], 1, 'quality,type', 'IndexSizeError', true])
+    expect(got[0..-2]).to eq(['reported', [255, 0, 0, 255], 1, 'quality,type', 'IndexSizeError', 'TypeError', false])
+    # (…a profile libpng keeps: one whose length is not a whole number of words it drops, with a warning)
+    png = Vips::Image.new_from_buffer(Base64.decode64(got.last.delete_prefix('data:image/png;base64,')), '')
+    expect(png.get_fields).to include('icc-profile-data')
   end
 end

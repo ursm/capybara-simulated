@@ -69,10 +69,24 @@ fn encode(rgba: &[u8], width: u32, height: u32, format: Format, quality: f64, p3
     }
     Some(out)
 }
-// The Display P3 ICC profile, written once.
+// The Display P3 ICC profile, written once, its header as ICC.1 has it — which libpng checks: the size a multiple of
+// four bytes ("including the pad bytes for the last tag"; a profile that is not one it drops), and the PCS illuminant
+// D50 to the bit (0.9642, 1, 0.8249 as s15Fixed16; moxcms rounds its own D50 differently, which libpng warns of).
 fn display_p3_profile() -> &'static [u8] {
     static PROFILE: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-    PROFILE.get_or_init(|| moxcms::ColorProfile::new_display_p3().encode().unwrap_or_default())
+    PROFILE.get_or_init(|| {
+        let mut icc = moxcms::ColorProfile::new_display_p3().encode().unwrap_or_default();
+        if icc.len() < 128 {
+            return Vec::new();
+        }
+        icc.resize(icc.len().next_multiple_of(4), 0);
+        let len = u32::try_from(icc.len()).unwrap_or(0);
+        icc[..4].copy_from_slice(&len.to_be_bytes());
+        for (k, v) in [0x0000_F6D6_u32, 0x0001_0000, 0x0000_D32D].into_iter().enumerate() {
+            icc[68 + 4 * k..72 + 4 * k].copy_from_slice(&v.to_be_bytes());
+        }
+        icc
+    })
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -97,13 +111,8 @@ fn encode_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
-
-    // `rgba` as a PNG file, for a decoder's test.
-    pub(crate) fn png(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
-        encode(rgba, width, height, Format::Png, f64::NAN, false).expect("a PNG")
-    }
 
     #[test]
     fn names_the_format_it_writes() {
@@ -118,7 +127,11 @@ pub(crate) mod tests {
         assert!(encode(&px, 2, 2, Format::Png, f64::NAN, false).unwrap().starts_with(b"\x89PNG"));
         assert!(encode(&px, 2, 2, Format::Jpeg, 2.0, false).unwrap().starts_with(&[0xFF, 0xD8]));
         assert_eq!(&encode(&px, 2, 2, Format::Webp, 0.5, false).unwrap()[8..12], b"WEBP");
-        // (…a Display P3 bitmap carries its profile: PNG's `iCCP` chunk, JPEG's APP2, WebP's `ICCP`)
+        // (…a Display P3 bitmap carries its profile: PNG's `iCCP` chunk, JPEG's APP2, WebP's `ICCP` — a whole number of
+        // four-byte words, its size field saying so)
+        let icc = display_p3_profile();
+        assert!(icc.len() % 4 == 0 && icc[..4] == u32::try_from(icc.len()).unwrap().to_be_bytes());
+        assert_eq!(&icc[68..80], &[0, 0, 0xF6, 0xD6, 0, 1, 0, 0, 0, 0, 0xD3, 0x2D]);
         for (format, mark) in [(Format::Png, &b"iCCP"[..]), (Format::Jpeg, b"ICC_PROFILE"), (Format::Webp, b"ICCP")] {
             let file = encode(&px, 2, 2, format, f64::NAN, true).unwrap();
             assert!(file.windows(mark.len()).any(|w| w == mark), "{format:?}");

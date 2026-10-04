@@ -144,10 +144,6 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
     (yoe + era * 400 + i64::from(m <= 2), m, d)
 }
 
-// The types with a value as a number (`valueAsNumber`, a step).
-pub(crate) fn numeric(ty: &str) -> bool {
-    step_scale(ty).is_some()
-}
 // A type's step scale (its step's unit in its number's) and default step.
 pub(crate) fn step_scale(ty: &str) -> Option<(f64, f64)> {
     Some(match ty {
