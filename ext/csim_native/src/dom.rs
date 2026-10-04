@@ -165,6 +165,8 @@ pub(crate) struct NodeData {
     // `delegatesFocus`).
     pub(crate) shadow_root: Option<NodeId>,
     pub(crate) delegates_focus: bool,
+    // The node's handle on the C++ heap (node_handle.rs), whose tree edges the slot's are written into.
+    pub(crate) link: crate::node_handle::Link,
     // A slot's assigned nodes, in tree order, and a slotted node's slot: the flat tree the style engine walks.
     pub(crate) assigned: Vec<NodeId>,
     pub(crate) assigned_slot: Option<NodeId>,
@@ -251,6 +253,7 @@ impl NodeData {
             host: None,
             shadow_root: None,
             delegates_focus: false,
+            link: crate::node_handle::Link::default(),
             assigned: Vec::new(),
             assigned_slot: None,
             cdata: false,
@@ -677,6 +680,35 @@ impl RealmArena {
         if let Some(c) = self.get_mut(child) {
             c.child_index = pos;
         }
+        self.relink(parent, pos.saturating_sub(1));
+    }
+
+    // The handles' tree edges for `parent`'s children from `from` on (`node_handle::relink`).
+    fn relink(&self, parent: NodeId, from: usize) {
+        let Some(p) = self.get(parent) else { return };
+        crate::node_handle::relink(Some(&p.link), &p.children, from, |k| self.get(k).map(|n| &n.link));
+    }
+    // For verify mode: where `id`'s handle's edges disagree with the slot's tree — its parent, its first child and its
+    // next sibling, each the one the slot has where that one has a handle too — or None.
+    pub(crate) fn edge_mismatch(&self, id: NodeId) -> Option<String> {
+        let n = self.get(id)?;
+        let got = crate::node_handle::edges(&n.link)?;
+        let handled = |k: NodeId| self.get(k).is_some_and(|d| crate::node_handle::edges(&d.link).is_some());
+        let parent = n.parent.filter(|&p| handled(p));
+        let first = n.children.first().copied().filter(|&c| handled(c));
+        let next = n.parent.and_then(|p| self.get(p)).and_then(|p| p.children.get(n.child_index + 1).copied()).filter(|&c| handled(c));
+        let want = [parent, first, next];
+        (got != want).then(|| format!("handle edges {got:?}, tree {want:?}"))
+    }
+    // `id`'s handle is `link`: its edges written where it is — under its parent, and over its children.
+    pub(crate) fn set_link(&mut self, id: NodeId, link: crate::node_handle::Link) {
+        let Some(node) = self.get_mut_quietly(id) else { return };
+        node.link = link;
+        let (parent, at) = (node.parent, node.child_index);
+        if let Some(p) = parent {
+            self.relink(p, at.saturating_sub(1));
+        }
+        self.relink(id, 0);
     }
 
     // A new node, appended to `parent` when that is live (a stale parent nid leaves it a detached root).
@@ -808,6 +840,7 @@ impl RealmArena {
         self.reindex_children(old, from);
         if let Some(c) = self.get_mut(child) {
             c.parent = None;
+            crate::node_handle::unlink(&c.link);
         }
         // (…and the scroll offsets its subtree held go with its boxes: one put back in the tree starts at 0, Chrome's
         // answer for a scroller removed and inserted again — where one only `display: none` keeps its offset)
@@ -889,6 +922,8 @@ impl RealmArena {
                 node.child_index = i;
             }
         }
+        // (…and the handles' edges, from the child before the first that moved: its next sibling did)
+        self.relink(parent, from.saturating_sub(1));
     }
 
     // ── element-tree navigation (all gen-checked: a stale edge is skipped, never followed) ──
@@ -1272,6 +1307,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // session's transient/detached nodes don't accumulate. Safe by construction — the generational
     // slot bumps its gen, so any surviving reference reads absent.
     register(scope, ns, "dropNode", drop_node, context_id);
+    register(scope, ns, "handleEdgesMismatch", handle_edges_mismatch, context_id);
     // Free a disposed realm's arena — csim calls this before tearing down a frame realm (main reuses
     // slot 0). Takes an explicit id (the realm being dropped), not the caller's own.
     register(scope, ns, "dropRealm", drop_realm, context_id);
@@ -1909,6 +1945,7 @@ fn sync_children(
         if st.get(d).and_then(|node| node.parent) == Some(parent) {
             if let Some(dn) = st.get_mut(d) {
                 dn.parent = None;
+                crate::node_handle::unlink(&dn.link);
             }
         }
     }
@@ -3083,6 +3120,21 @@ fn drop_node(
     // nothing from a dropped realm is exactly right, so skip when the realm is gone.
     if let Some(arena) = dom(scope).realms.get_mut(&cid) {
         arena.free_node(id);
+    }
+}
+
+// __dom.handleEdgesMismatch(nid) -> where the node's handle's tree edges disagree with its slot's tree
+// (`RealmArena::edge_mismatch`), or undefined — verify mode's check on what keeps the node alive.
+fn handle_edges_mismatch(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    if let Some(message) = realm(scope, cid).edge_mismatch(id) {
+        let s = v8::String::new(scope, &message).expect("a short string");
+        rv.set(s.into());
     }
 }
 

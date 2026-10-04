@@ -3,16 +3,18 @@
 // traces one through the other — so a node's handle lives exactly as long as V8 can reach its object, whatever the
 // reference cycles through it.
 //
-// What the handle carries today is the node's arena slot: when V8 collects the object it collects the handle, and the
-// slot is freed — the job a JS FinalizationRegistry did, without a registration per node. A handle is dropped inside a
-// collection, where the arena may be in use, so its slot is only queued (`Reclaim`, its isolate's) and freed at the
-// next op that creates a node, which is where a freed slot is wanted again.
+// What the handle carries is the node's arena slot — when V8 collects the object it collects the handle, and the slot is
+// freed: the job a JS FinalizationRegistry did, without a registration per node. A handle is dropped inside a
+// collection, where the arena may be in use, so its slot is only queued (`Reclaim`, its isolate's) and freed at the next
+// op that creates a node, which is where a freed slot is wanted again — and the TREE's edges, as the collector sees
+// them: its parent, its first child and its next sibling (Blink's layout), written by the arena as its children change
+// (`relink`), so a node is kept alive by the tree it is in the way its JS object's references once kept it.
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, RefCell, UnsafeCell};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
-use v8::cppgc::{GarbageCollected, Visitor};
+use v8::cppgc::{GarbageCollected, Member, Visitor, WeakPersistent};
 
 use crate::dom::NodeId;
 
@@ -29,10 +31,17 @@ pub(crate) struct NodeHandle {
     realm: Cell<i32>,
     nid: Cell<Option<NodeId>>,
     reclaim: RefCell<Weak<Reclaim>>,
+    parent: Edge,
+    first: Edge,
+    next: Edge,
 }
 
 unsafe impl GarbageCollected for NodeHandle {
-    fn trace(&self, _visitor: &mut Visitor) {}
+    fn trace(&self, visitor: &mut Visitor) {
+        self.parent.trace(visitor);
+        self.first.trace(visitor);
+        self.next.trace(visitor);
+    }
     fn get_name(&self) -> &'static std::ffi::CStr {
         c"NodeHandle"
     }
@@ -46,6 +55,74 @@ impl Drop for NodeHandle {
             queue.pending.store(true, Ordering::Release);
         }
     }
+}
+
+// One edge of the tree, on the C++ heap: written on the main thread only (the arena's), through Member's own assignment
+// — whose write barrier is what lets the collector mark concurrently while it changes.
+struct Edge(UnsafeCell<Member<NodeHandle>>);
+
+impl Edge {
+    fn new() -> Edge {
+        Edge(UnsafeCell::new(Member::empty()))
+    }
+    fn trace(&self, visitor: &mut Visitor) {
+        // SAFETY: the collector reads the member as Member's barriers allow; nothing here hands out a reference.
+        visitor.trace(unsafe { &*self.0.get() });
+    }
+    // Point it at `to`'s handle — none where `to` has none, or none any more.
+    fn set(&self, to: Option<&Link>) {
+        let empty = Member::empty();
+        // SAFETY: the main thread, which alone writes edges; the assignment runs Member's write barrier.
+        unsafe {
+            match to.and_then(|l| l.0.as_ref()) {
+                Some(w) => (*self.0.get()).set(w),
+                None => (*self.0.get()).set(&empty),
+            }
+        }
+    }
+    fn get(&self) -> Option<&NodeHandle> {
+        // SAFETY: an edge points at a handle the collector keeps alive while this handle is.
+        unsafe { (*self.0.get()).get() }
+    }
+}
+
+// A node's handle as its arena slot holds it: weakly — the slot is freed when the handle is collected, never the other
+// way round — cleared by the collector when it goes.
+#[derive(Default)]
+pub(crate) struct Link(Option<WeakPersistent<NodeHandle>>);
+
+impl Link {
+    fn handle(&self) -> Option<&NodeHandle> {
+        self.0.as_ref().and_then(|w| w.get())
+    }
+}
+
+// The arena's side: `parent`'s children are `kids`; from `from` on, each one's parent and next-sibling edges are
+// rewritten, and the parent's first-child edge where `from` is 0. `link_of` finds a node's link.
+pub(crate) fn relink<'a>(parent: Option<&'a Link>, kids: &[NodeId], from: usize, link_of: impl Fn(NodeId) -> Option<&'a Link>) {
+    if from == 0 {
+        if let Some(p) = parent.and_then(Link::handle) {
+            p.first.set(kids.first().and_then(|&k| link_of(k)));
+        }
+    }
+    for i in from..kids.len() {
+        let Some(h) = link_of(kids[i]).and_then(Link::handle) else { continue };
+        h.parent.set(parent);
+        h.next.set(kids.get(i + 1).and_then(|&k| link_of(k)));
+    }
+}
+// …and a node out of its parent: no parent, no next sibling.
+pub(crate) fn unlink(link: &Link) {
+    if let Some(h) = link.handle() {
+        h.parent.set(None);
+        h.next.set(None);
+    }
+}
+// What a node's handle says of the tree, for verify mode: its parent's, first child's and next sibling's slots.
+pub(crate) fn edges(link: &Link) -> Option<[Option<NodeId>; 3]> {
+    let h = link.handle()?;
+    let nid = |e: &Edge| e.get().and_then(|t| t.nid.get());
+    Some([nid(&h.parent), nid(&h.first), nid(&h.next)])
 }
 
 // An isolate's slots of collected nodes, waiting to be freed: (realm, slot). Owned by its `Dom`, which the handles only
@@ -79,7 +156,14 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let obj = args.this();
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
-    let handle = NodeHandle { realm: Cell::new(0), nid: Cell::new(None), reclaim: RefCell::new(Weak::new()) };
+    let handle = NodeHandle {
+        realm: Cell::new(0),
+        nid: Cell::new(None),
+        reclaim: RefCell::new(Weak::new()),
+        parent: Edge::new(),
+        first: Edge::new(),
+        next: Edge::new(),
+    };
     let heap = scope.get_cpp_heap().expect("NodeBase is installed only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
     unsafe {
@@ -90,7 +174,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 
 // The handle `value` wraps — through the Proxy a `<form>` is (its target is the node's object) — or None for anything
 // that is no node's object: the brand is checked first, as `unwrap` reads garbage from an object it never wrapped.
-fn handle_of<'a>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<&'a NodeHandle> {
+fn handle_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<v8::cppgc::UnsafePtr<NodeHandle>> {
     let value = match v8::Local::<v8::Proxy>::try_from(value) {
         Ok(proxy) => proxy.get_target(scope),
         Err(_) => value,
@@ -103,18 +187,21 @@ fn handle_of<'a>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Valu
     }
     // SAFETY: a branded object was made by `construct`, which wrapped a NodeHandle under TAG; the handle lives while its
     // object does, which the caller holds.
-    let ptr = unsafe { v8::Object::unwrap::<TAG, NodeHandle>(scope, obj) }?;
-    Some(unsafe { &*(ptr.as_ref() as *const NodeHandle) })
+    unsafe { v8::Object::unwrap::<TAG, NodeHandle>(scope, obj) }
 }
 
 // Bind the node `value` is the object of to slot `nid` of realm `realm` — a no-op for an object that is no node's (one
 // made before `__dom` existed, the snapshot's bootstrap).
 pub(crate) fn bind(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>, realm: i32, nid: NodeId) {
-    let Some(h) = handle_of(scope, value) else { return };
+    let Some(ptr) = handle_of(scope, value) else { return };
+    // SAFETY: the handle lives while its object does, which the caller holds.
+    let h = unsafe { ptr.as_ref() };
     let queue = Arc::downgrade(&crate::dom::dom(scope).reclaim);
     h.realm.set(realm);
     h.nid.set(Some(nid));
     *h.reclaim.borrow_mut() = queue;
+    // …and the slot holds the handle (weakly), its edges in the tree written as the slot's are
+    crate::dom::realm(scope, realm).set_link(nid, Link(Some(WeakPersistent::new(&ptr))));
 }
 
 // `__dom.NodeBase` for a realm: the constructor of the isolate's template, made once per isolate — none on an isolate
