@@ -1230,6 +1230,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::validity::install(scope, ns, context_id);
     crate::input_value::install(scope, ns, context_id);
     crate::image_source::install(scope, ns, context_id);
+    crate::image_encode::install(scope, ns, context_id);
     crate::serialize::install(scope, ns, context_id);
     crate::html_parse::install(scope, ns, context_id);
     crate::url_ops::install(scope, ns, context_id);
@@ -3175,6 +3176,13 @@ fn layout_measure_counts(
 
 
 // A Float64Array holding `vals` — how a pass hands a flat table back to JS in one crossing.
+// A Uint8Array of `bytes`, which it takes over.
+pub(crate) fn u8_array<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> v8::Local<'s, v8::Value> {
+    let len = bytes.len();
+    let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
+    let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
+    v8::Uint8Array::new(scope, buffer, 0, len).map_or_else(|| v8::undefined(scope).into(), Into::into)
+}
 pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v8::Local<'s, v8::Float64Array> {
     let bytes: Vec<u8> = vals.iter().flat_map(|v| v.to_ne_bytes()).collect();
     let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();

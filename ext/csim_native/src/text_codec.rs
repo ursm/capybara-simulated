@@ -199,17 +199,10 @@ fn utf8(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> St
     value.to_rust_string_lossy(scope)
 }
 
-fn uint8_array<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> v8::Local<'s, v8::Value> {
-    let len = bytes.len();
-    let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
-    let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
-    v8::Uint8Array::new(scope, buffer, 0, len).map_or_else(|| v8::undefined(scope).into(), Into::into)
-}
-
 // __dom.utf8Encode(string) -> a Uint8Array of its UTF-8 (`TextEncoder.encode`).
 fn utf8_encode(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let text = utf8(scope, args.get(0));
-    let array = uint8_array(scope, text.into_bytes());
+    let array = crate::dom::u8_array(scope, text.into_bytes());
     rv.set(array);
 }
 

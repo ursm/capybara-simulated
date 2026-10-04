@@ -31,6 +31,7 @@ mod hints;
 mod hit_test;
 mod input_value;
 mod html_parse;
+mod image_encode;
 mod image_source;
 // Layout: the records the walk builds (mod walk) laid out, driven by the `layoutBuild` op (mod walk_ops).
 mod layout;

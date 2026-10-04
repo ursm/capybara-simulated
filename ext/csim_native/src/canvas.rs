@@ -815,7 +815,7 @@ fn bytes_mut<'a>(val: v8::Local<'a, v8::Value>) -> Option<&'a mut [u8]> {
 }
 // …to read: borrowed where they do not overlap `written` (the array the op writes, if any), copied where they do — a
 // canvas drawn onto itself reads its pixels from before the draw.
-fn bytes_read<'a>(val: v8::Local<'a, v8::Value>, written: Option<(*mut u8, usize)>) -> Option<Cow<'a, [u8]>> {
+pub(crate) fn bytes_read<'a>(val: v8::Local<'a, v8::Value>, written: Option<(*mut u8, usize)>) -> Option<Cow<'a, [u8]>> {
     let (ptr, n) = bytes_span(val)?;
     // SAFETY: as `bytes_mut`, read only while the op runs.
     let bytes: &'a [u8] = unsafe { std::slice::from_raw_parts(ptr, n) };

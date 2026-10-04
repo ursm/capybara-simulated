@@ -61,4 +61,38 @@ RSpec.describe 'canvas encoding' do
       File.delete(path) if path && File.exist?(path)
     end
   end
+
+  # Chrome's answers (measured): `image/jpg` names no format, so it is PNG; the type is matched case-insensitively; a
+  # JPEG has no alpha, so a half-transparent red is composited onto black. A bitmap with no pixels serialises to
+  # nothing: toBlob calls back with null, convertToBlob rejects with an IndexSizeError (HTML §4.12.5.1, §4.12.5.3).
+  it 'writes the format the type names, a JPEG onto black, and nothing for a bitmap with no pixels' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body></body>']] })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const c = document.createElement('canvas');
+      c.width = c.height = 1;
+      const g = c.getContext('2d');
+      g.fillStyle = 'rgba(255, 0, 0, 0.5)';
+      g.fillRect(0, 0, 1, 1);
+      const r = ['image/jpg', 'IMAGE/JPEG', 'image/webp', 'image/bmp'].map(t => c.toDataURL(t).slice(5, 15));
+      const img = new Image();
+      img.onload = () => {
+        const d = document.createElement('canvas').getContext('2d');
+        d.drawImage(img, 0, 0);
+        r.push(Array.from(d.getImageData(0, 0, 1, 1).data));
+        const empty = document.createElement('canvas');
+        empty.width = 0;
+        empty.toBlob(b => {
+          r.push(b);
+          new OffscreenCanvas(0, 1).convertToBlob().then(() => done(r), e => done(r.concat(e.name)));
+        });
+      };
+      img.src = c.toDataURL('image/jpeg', 1);
+    JS
+    expect(got[0, 4]).to eq(%w[image/png; image/jpeg image/webp image/png;])
+    expect(got[4][0]).to be_within(2).of(128)
+    expect(got[4][1..]).to eq([0, 0, 255])
+    expect(got[5..]).to eq([nil, 'IndexSizeError'])
+  end
 end
