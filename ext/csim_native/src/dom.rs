@@ -3184,7 +3184,8 @@ pub(crate) fn u8_array<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> 
     v8::Uint8Array::new(scope, buffer, 0, len).map_or_else(|| v8::undefined(scope).into(), Into::into)
 }
 pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v8::Local<'s, v8::Float64Array> {
-    let bytes: Vec<u8> = vals.iter().flat_map(|v| v.to_ne_bytes()).collect();
+    let mut bytes = Vec::with_capacity(vals.len() * 8);
+    vals.iter().for_each(|v| bytes.extend_from_slice(&v.to_ne_bytes()));
     let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
     let buf = v8::ArrayBuffer::with_backing_store(scope, &store);
     v8::Float64Array::new(scope, buf, 0, vals.len()).expect("a Float64Array over its own backing store")

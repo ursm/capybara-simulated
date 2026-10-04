@@ -108,4 +108,28 @@ RSpec.describe 'canvas rasterizer' do
     JS
     expect(got).to eq([true, false, true, true, 'nothing', 'RangeError'])
   end
+
+  # Chrome's answers (measured): SVG path data short of a number draws up to the segment in error and no further, and
+  # the current point stays the last one drawn; a radii object whose `@@iterator` is not a method is a TypeError. A
+  # Path2D's array is the page's to replace — a lying one is no current point, not a crash.
+  it 'stops SVG path data at a segment short of a number, and trusts nothing in a path array the page hands over' do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (function () {
+        var ctx = new OffscreenCanvas(100, 100).getContext('2d'), r = [];
+        var p = new Path2D('M0 0 L100 0 L100 100 L0');
+        r.push(ctx.isPointInPath(p, 60, 20), ctx.isPointInPath(p, 20, 60), ctx.isPointInPath(p, 99, 98));
+        var q = new Path2D('M0 0 L100 0 L50'); q.lineTo(100, 100);
+        r.push(ctx.isPointInStroke(q, 100, 50));
+        try { new Path2D().roundRect(0, 0, 10, 10, {[Symbol.iterator]: 1, x: 1}); r.push('nothing'); } catch (e) { r.push(e.name); }
+        var h = new Path2D(); h.moveTo(0, 0);
+        h._buf = new Float64Array([8, 0, 0, 100, 0, 0, 0, 0]);
+        h.lineTo(1, 1); h.closePath();
+        r.push('alive');
+        return r;
+      })()
+    JS
+    expect(got).to eq([true, false, true, true, 'TypeError', 'alive'])
+  end
 end

@@ -115,9 +115,9 @@ fn arc_to(p: [f64; 7]) -> Vec<f64> {
 
 // ── SVG path data ──
 // The calls a path data string makes (SVG 2 §9.3: M L H V C S Q T A Z, absolute and relative; a smooth curve reflects
-// the last control point; an arc in endpoint form converted to its centre), flat: `0 x y` moveTo, `1 x y` lineTo,
-// `2 c1x c1y c2x c2y x y` bezierCurveTo, `3 cx cy x y` quadraticCurveTo, `4 cx cy rx ry rotation a0 a1 ccw` ellipse,
-// `5` closePath. It stops at the first token that makes no sense.
+// the last control point; an arc in endpoint form converted to its centre), flat: each a building op (`OP_MOVE_TO`,
+// `OP_LINE_TO`, `OP_CUBIC`, `OP_QUADRATIC`, `OP_ELLIPSE`, `OP_CLOSE`) and its numbers. It stops at the first token that
+// makes no sense, and before a segment short of a number (SVG 2 §9.5.4: rendering stops before the segment in error).
 fn svg_path(d: &str) -> Vec<f64> {
     let toks = svg_tokens(d);
     let mut out = Vec::new();
@@ -137,13 +137,16 @@ fn svg_path(d: &str) -> Vec<f64> {
                 None => break,
             },
         };
-        let mut num = || {
-            let v = match toks.get(i) {
-                Some(&Tok::Num(v)) => v,
-                _ => f64::NAN,
-            };
-            i += 1;
-            v
+        let (mark, mut short) = (out.len(), false);
+        let mut num = || match toks.get(i) {
+            Some(&Tok::Num(v)) => {
+                i += 1;
+                v
+            }
+            _ => {
+                short = true;
+                f64::NAN
+            }
         };
         let (ox, oy) = if cmd.is_ascii_lowercase() { (px, py) } else { (0.0, 0.0) };
         let smooth = |kinds: &str| last.is_some_and(|c| kinds.contains(c.to_ascii_lowercase()));
@@ -151,21 +154,21 @@ fn svg_path(d: &str) -> Vec<f64> {
             'M' => {
                 px = ox + num();
                 py = oy + num();
-                out.extend([0.0, px, py]);
+                out.extend([OP_MOVE_TO as f64, px, py]);
                 (sx, sy) = (px, py);
             }
             'L' => {
                 px = ox + num();
                 py = oy + num();
-                out.extend([1.0, px, py]);
+                out.extend([OP_LINE_TO as f64, px, py]);
             }
             'H' => {
                 px = ox + num();
-                out.extend([1.0, px, py]);
+                out.extend([OP_LINE_TO as f64, px, py]);
             }
             'V' => {
                 py = oy + num();
-                out.extend([1.0, px, py]);
+                out.extend([OP_LINE_TO as f64, px, py]);
             }
             'C' | 'S' => {
                 let (c1x, c1y) = if cmd.eq_ignore_ascii_case(&'C') {
@@ -176,7 +179,7 @@ fn svg_path(d: &str) -> Vec<f64> {
                     (px, py)
                 };
                 let (c2x, c2y, ex, ey) = (ox + num(), oy + num(), ox + num(), oy + num());
-                out.extend([2.0, c1x, c1y, c2x, c2y, ex, ey]);
+                out.extend([OP_CUBIC as f64, c1x, c1y, c2x, c2y, ex, ey]);
                 (pcx, pcy, px, py) = (c2x, c2y, ex, ey);
             }
             'Q' | 'T' => {
@@ -188,7 +191,7 @@ fn svg_path(d: &str) -> Vec<f64> {
                     (px, py)
                 };
                 let (ex, ey) = (ox + num(), oy + num());
-                out.extend([3.0, cx, cy, ex, ey]);
+                out.extend([OP_QUADRATIC as f64, cx, cy, ex, ey]);
                 (pcx, pcy, px, py) = (cx, cy, ex, ey);
             }
             'A' => {
@@ -198,10 +201,14 @@ fn svg_path(d: &str) -> Vec<f64> {
                 (px, py) = (ex, ey);
             }
             'Z' => {
-                out.push(5.0);
+                out.push(OP_CLOSE as f64);
                 (px, py) = (sx, sy);
             }
             _ => break,
+        }
+        if short {
+            out.truncate(mark);
+            break;
         }
         last = Some(cmd);
         // (…a stray number after `Z` consumes nothing: stop rather than loop)
@@ -274,7 +281,7 @@ fn svg_tokens(d: &str) -> Vec<Tok> {
 fn svg_arc(out: &mut Vec<f64>, p: [f64; 9]) {
     let [x0, y0, rx, ry, rot, large, sweep, x, y] = p;
     if rx == 0.0 || ry == 0.0 {
-        out.extend([1.0, x, y]);
+        out.extend([OP_LINE_TO as f64, x, y]);
         return;
     }
     let (mut rx, mut ry) = (rx.abs(), ry.abs());
@@ -306,7 +313,7 @@ fn svg_arc(out: &mut Vec<f64>, p: [f64; 9]) {
     } else if sweep && d_theta < 0.0 {
         d_theta += TAU;
     }
-    out.extend([4.0, cx, cy, rx, ry, rot, theta, theta + d_theta, f64::from(u8::from(!sweep))]);
+    out.extend([OP_ELLIPSE as f64, cx, cy, rx, ry, rot, theta, theta + d_theta, f64::from(u8::from(!sweep))]);
 }
 
 // ── a path being built ──
@@ -326,25 +333,29 @@ struct Builder<'a> {
     cx: f64,
     cy: f64,
     cur: Option<usize>,
-    // The CTM each added point is baked through (a context's own path), and the flattening resolution it implies.
+    // The CTM each added point is baked through (a context's own path).
     ctm: Option<Matrix>,
-    scale: f64,
 }
 
 impl<'a> Builder<'a> {
-    // A builder over `old` — a fresh empty path where it holds none.
+    // A builder over `old` — a fresh empty path where it holds none. The array is the page's own (a Path2D's `_buf`
+    // is an ordinary property), so nothing in it is trusted to index by: a current subpath is taken only where its
+    // header and a point lie in the length in use, and is otherwise none.
     fn new(old: &'a mut [f64], ctm: Option<Matrix>) -> Builder<'a> {
-        let scale = ctm.map_or(1.0, |m| match m[0].hypot(m[1]).max(m[2].hypot(m[3])) {
-            s if s > 0.0 => s,
-            _ => 1.0,
-        });
         let len = used(old);
         if len < HEAD {
-            return Builder { old, len: 0, tail: SmallVec::from_elem(0.0, HEAD), cx: 0.0, cy: 0.0, cur: None, ctm, scale };
+            return Builder { old, len: 0, tail: SmallVec::from_elem(0.0, HEAD), cx: 0.0, cy: 0.0, cur: None, ctm };
         }
-        let cur = (old[3] >= 0.0).then_some(old[3] as usize);
+        let cur = (old[3] >= HEAD as f64 && old[3] + 3.0 < len as f64).then_some(old[3] as usize);
         let (cx, cy) = (old[1], old[2]);
-        Builder { old, len, tail: SmallVec::new(), cx, cy, cur, ctm, scale }
+        Builder { old, len, tail: SmallVec::new(), cx, cy, cur, ctm }
+    }
+    // The flattening resolution of the CTM's scale: a curve stays smooth in device pixels.
+    fn scale(&self) -> f64 {
+        self.ctm.map_or(1.0, |m| match m[0].hypot(m[1]).max(m[2].hypot(m[3])) {
+            s if s > 0.0 => s,
+            _ => 1.0,
+        })
     }
     fn slot(&mut self, off: usize) -> &mut f64 {
         if off < self.len { &mut self.old[off] } else { &mut self.tail[off - self.len] }
@@ -420,21 +431,21 @@ impl<'a> Builder<'a> {
     }
     fn cubic_to(&mut self, p: [f64; 6]) {
         self.ensure(p[0], p[1]);
-        for (x, y) in cubic([self.cx, self.cy, p[0], p[1], p[2], p[3], p[4], p[5]], self.scale) {
+        for (x, y) in cubic([self.cx, self.cy, p[0], p[1], p[2], p[3], p[4], p[5]], self.scale()) {
             self.store(x, y);
         }
         (self.cx, self.cy) = (p[4], p[5]);
     }
     fn quadratic_to(&mut self, p: [f64; 4]) {
         self.ensure(p[0], p[1]);
-        for (x, y) in quadratic([self.cx, self.cy, p[0], p[1], p[2], p[3]], self.scale) {
+        for (x, y) in quadratic([self.cx, self.cy, p[0], p[1], p[2], p[3]], self.scale()) {
             self.store(x, y);
         }
         (self.cx, self.cy) = (p[2], p[3]);
     }
     // An elliptical arc (`arc`), joined to the current point by its first point — or starting the subpath there.
     fn arc(&mut self, p: [f64; 8]) {
-        let pts = arc(p, self.scale);
+        let pts = arc(p, self.scale());
         if self.cur.is_none() {
             self.move_to(pts[0].0, pts[0].1);
         }
@@ -538,24 +549,17 @@ impl<'a> Builder<'a> {
         let c = svg_path(d);
         let mut k = 0;
         while k < c.len() {
-            let at = |n: usize| &c[k + 1..k + 1 + n];
-            match c[k] as i32 {
-                0 => self.move_to(c[k + 1], c[k + 2]),
-                1 => self.line_to(c[k + 1], c[k + 2]),
-                2 => self.cubic_to(at(6).try_into().expect("six")),
-                3 => self.quadratic_to(at(4).try_into().expect("four")),
-                4 => self.arc(at(8).try_into().expect("eight")),
-                _ => self.close(),
-            }
-            k += 1 + [2, 2, 6, 4, 8].get(c[k] as usize).copied().unwrap_or(0);
+            let (op, n) = (c[k] as i32, arity(c[k] as i32));
+            let _ = self.op(op, &c[k + 1..k + 1 + n]);
+            k += 1 + n;
         }
     }
 
-    // A building op (`canvasPath`'s `op`) on its arguments (as many as the op takes, at least; an anticlockwise flag
-    // 1 or 0): a non-finite one makes it nothing, a negative radius refuses it.
+    // A building op (`canvasPath`'s `op`) on its arguments (`arity` of them; an anticlockwise flag 1 or 0): a
+    // non-finite one makes it nothing, a negative radius refuses it.
     fn op(&mut self, op: i32, a: &[f64]) -> Result<(), Refusal> {
-        let n = [2, 2, 0, 4, 4, 6, 4, 5, 7, 5, 0].get(op as usize).copied().unwrap_or(0);
-        if !a.iter().take(n).all(|v| v.is_finite()) {
+        let flag = usize::from(matches!(op, OP_ARC | OP_ELLIPSE));
+        if !a.iter().take(arity(op) - flag).all(|v| v.is_finite()) {
             return Ok(());
         }
         let arr = |n: usize| -> &[f64] { &a[..n] };
@@ -588,13 +592,26 @@ impl<'a> Builder<'a> {
                 }
                 self.arc_to(arr(5).try_into().expect("five"));
             }
-            _ => {
-                // OP_RESET: an empty path, in the array it had
+            OP_RESET => {
+                // (…an empty path, in the array it had)
                 (self.len, self.cur, self.cx, self.cy) = (0, None, 0.0, 0.0);
                 self.tail = SmallVec::from_elem(0.0, HEAD);
             }
+            _ => {}
         }
         Ok(())
+    }
+}
+
+// How many numbers an op takes — roundRect its rectangle, before the radii.
+fn arity(op: i32) -> usize {
+    match op {
+        OP_MOVE_TO | OP_LINE_TO => 2,
+        OP_RECT | OP_ROUND_RECT | OP_QUADRATIC => 4,
+        OP_ARC_TO => 5,
+        OP_CUBIC | OP_ARC => 6,
+        OP_ELLIPSE => 8,
+        _ => 0,
     }
 }
 
@@ -608,6 +625,7 @@ const OP_QUADRATIC: i32 = 6;
 const OP_ARC: i32 = 7;
 const OP_ELLIPSE: i32 = 8;
 const OP_ARC_TO: i32 = 9;
+const OP_RESET: i32 = 10;
 
 // Why an op refused its arguments: the script exception it throws.
 enum Refusal {
@@ -1014,8 +1032,8 @@ fn path_mut<'a>(val: v8::Local<'a, v8::Value>) -> &'a mut [f64] {
     if n == 0 || ptr.is_null() || (ptr as usize) % std::mem::align_of::<f64>() != 0 {
         return &mut [];
     }
-    // SAFETY: the view's own `n` aligned f64s, valid for the op (no JS runs while it holds them), borrowed by nothing
-    // else (an op that reads a second array copies it first).
+    // SAFETY: the view's own `n` aligned f64s, valid for the op (no JS runs and nothing allocates on the V8 heap while it
+    // holds them), borrowed by nothing else (an op that reads a second array copies it first).
     unsafe { std::slice::from_raw_parts_mut(ptr, n) }
 }
 // Hand back what a builder wrote: the bigger array it needed, or nothing where it wrote in place.
@@ -1035,15 +1053,16 @@ fn canvas_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let num = |k: i32| v8::Local::<v8::Number>::try_from(args.get(k)).map_or(f64::NAN, |n| n.value());
     let op = num(1) as i32;
     let ctm = args.get(2).is_true().then(|| std::array::from_fn(|k| num(3 + k as i32)));
-    // (…every op's own arguments there, missing ones NaN; roundRect's radii are the rest)
+    // (…the op's own arguments, missing ones NaN; roundRect's radii are the rest)
+    let n = arity(op);
     let mut fixed = [f64::NAN; 8];
     let radii: Vec<f64>;
     let a: &[f64] = if op == OP_ROUND_RECT {
-        radii = (9..args.length().max(13)).map(num).collect();
+        radii = (9..args.length().max(9 + n as i32)).map(num).collect();
         &radii
     } else {
-        fixed.iter_mut().enumerate().for_each(|(k, v)| *v = num(9 + k as i32));
-        &fixed
+        fixed[..n].iter_mut().enumerate().for_each(|(k, v)| *v = num(9 + k as i32));
+        &fixed[..n]
     };
     let mut b = Builder::new(path_mut(args.get(0)), ctm);
     match b.op(op, a) {
@@ -1147,6 +1166,17 @@ mod tests {
     }
 
     #[test]
+    fn trusts_nothing_in_the_array_it_is_handed() {
+        // (…the page can hand over any array: a current subpath past the length in use, or at its very end, is none)
+        for cur in [100.0, 7.0, 6.0, 1e300, f64::NAN, -1.0] {
+            let mut buf = vec![8.0, 0.0, 0.0, cur, 0.0, 0.0, 0.0, 0.0];
+            let mut b = Builder::new(&mut buf, None);
+            assert!(b.op(OP_LINE_TO, &[1.0, 1.0]).is_ok() && b.op(OP_CLOSE, &[]).is_ok());
+            b.finish();
+        }
+    }
+
+    #[test]
     fn builds_a_path_in_place_and_grows_it() {
         let lines: Vec<(i32, &[f64])> = std::iter::repeat_n((OP_LINE_TO, &[1.0, 2.0][..]), 100).collect();
         let path = built(None, &lines);
@@ -1191,10 +1221,12 @@ mod tests {
 
     #[test]
     fn reads_path_data() {
-        assert_eq!(svg_path("M10 10 h5 v5 z"), vec![0.0, 10.0, 10.0, 1.0, 15.0, 10.0, 1.0, 15.0, 15.0, 5.0]);
+        assert_eq!(svg_path("M10 10 h5 v5 z"), vec![0.0, 10.0, 10.0, 1.0, 15.0, 10.0, 1.0, 15.0, 15.0, 2.0]);
         assert_eq!(svg_path("M0 0 L1 1 2 2"), vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0]);
-        assert_eq!(svg_path("M0 0 Q1 1 2 0 T4 0"), vec![0.0, 0.0, 0.0, 3.0, 1.0, 1.0, 2.0, 0.0, 3.0, 3.0, -1.0, 4.0, 0.0]);
+        assert_eq!(svg_path("M0 0 Q1 1 2 0 T4 0"), vec![0.0, 0.0, 0.0, 6.0, 1.0, 1.0, 2.0, 0.0, 6.0, 3.0, -1.0, 4.0, 0.0]);
         assert_eq!(svg_path("5 5"), Vec::<f64>::new());
+        // (…a segment short of a number is not drawn, nor anything after it)
+        assert_eq!(svg_path("M0 0 L100 0 L50 L1 1"), vec![0.0, 0.0, 0.0, 1.0, 100.0, 0.0]);
     }
 
     #[test]
