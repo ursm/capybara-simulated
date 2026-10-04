@@ -363,10 +363,29 @@ thread_local! {
 // The SFNT a font file holds: a WOFF 1.0 container's tables inflated, a WOFF 2.0 one's Brotli stream decompressed
 // and its transformed glyf / loca (and hmtx) rebuilt, anything else as it is. None for a container that does not
 // decode, which a face then treats as no font at all.
+// A container whose header promises more than `MAX_SFNT` bytes is refused before anything is allocated for it, as
+// Chrome's font sanitiser (OTS) refuses a font past 30 MB — and a WOFF 1.0's tables must fit what its header promises.
 pub(crate) fn sfnt(bytes: &[u8]) -> Option<std::borrow::Cow<'_, [u8]>> {
+    const MAX_SFNT: u64 = 30 << 20;
+    let u16_at = |at: usize| Some(u64::from(u16::from_be_bytes(bytes.get(at..at + 2)?.try_into().ok()?)));
+    let u32_at = |at: usize| Some(u64::from(u32::from_be_bytes(bytes.get(at..at + 4)?.try_into().ok()?)));
+    let total = u32_at(16).filter(|&t| t <= MAX_SFNT);
     let unwrapped = match bytes.get(..4) {
-        Some(b"wOFF") => wuff::decompress_woff1(bytes),
-        Some(b"wOF2") => wuff::decompress_woff2(bytes),
+        Some(b"wOFF") => {
+            let (total, tables) = (total?, u16_at(12)?);
+            let mut size = 12 + 16 * tables;
+            for i in 0..tables as usize {
+                size += u32_at(44 + 20 * i + 12)?.next_multiple_of(4);
+            }
+            if size > total {
+                return None;
+            }
+            wuff::decompress_woff1(bytes)
+        }
+        Some(b"wOF2") => {
+            total?;
+            wuff::decompress_woff2(bytes)
+        }
         _ => return Some(bytes.into()),
     };
     unwrapped.ok().map(Into::into)
@@ -527,5 +546,9 @@ mod tests {
         assert!(font.outline_glyphs().get(gid).is_some_and(|g| g.draw(Size::new(10.0), &mut skrifa::outline::pen::NullPen).is_ok()));
         assert_eq!(sfnt(&ttf).as_deref(), Some(&ttf[..]));
         assert!(sfnt(b"wOF2 broken").is_none());
+        // (…a WOFF 1.0 table claiming 4 GB, past what its header promises, is refused before it is inflated)
+        let mut forged = [&b"wOFF\0\x01\0\0\0\0\x10\0\0\x01\0\0\0\0\x01\0"[..], &[0; 24], b"glyf\0\0\0\x40\0\0\0\x10\xF0\0\0\0\0\0\0\0"].concat();
+        forged.resize(0x60, 0);
+        assert!(sfnt(&forged).is_none());
     }
 }

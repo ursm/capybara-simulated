@@ -46,8 +46,9 @@ class Raster
       a, b = rgba.byteslice(y * stride, stride), other.rgba.byteslice(y * stride, stride)
       next if a == b
 
-      a.bytes.each_slice(4).zip(b.bytes.each_slice(4)) do |p, q|
-        d = (0..2).map {|c| (p[c] - q[c]).abs }.max
+      p, q = a.unpack('C*'), b.unpack('C*')
+      0.step(stride - 1, 4) do |i|
+        d = [(p[i] - q[i]).abs, (p[i + 1] - q[i + 1]).abs, (p[i + 2] - q[i + 2]).abs].max
         next if d.zero?
 
         pixels += 1
@@ -59,7 +60,8 @@ class Raster
 
   # The per-channel difference from `other` as a PNG: black where they agree.
   def difference_png(other)
-    delta = rgba.bytes.each_slice(4).zip(other.rgba.bytes.each_slice(4)).flat_map {|p, q| (0..2).map {|c| (p[c] - q[c]).abs } }
+    p, q = rgba.unpack('C*'), other.rgba.unpack('C*')
+    delta = Array.new(width * height * 3) {|k| (p[(k / 3 * 4) + (k % 3)] - q[(k / 3 * 4) + (k % 3)]).abs }
     Raster.png(width, height, delta.pack('C*'))
   end
 

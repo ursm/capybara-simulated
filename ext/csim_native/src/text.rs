@@ -85,7 +85,7 @@ fn face_of_handle(handle: i32, c: char) -> Option<(Arc<Face>, f64)> {
 }
 
 // The line split into runs by the face each character is set in: the line's own (`face_of_handle`), else — for a
-// character it does not map — fontconfig's face for that character (the first face that has it, as pango asks
+// character it does not map — fontconfig's face for that character (the first face that has it, as Chrome asks
 // fontconfig), else the line's own still (its `.notdef`). With `small_caps` and a face without `smcp`, a lowercase
 // letter becomes its capital, at `SMALL_CAPS_SIZE`.
 fn runs(text: &str, handle: i32, small_caps: bool) -> Vec<Run> {
@@ -341,13 +341,15 @@ pub(crate) struct Mask {
 // Where a line is drawn (HTML §4.12.5.1.4, the text preparation algorithm's anchor point), in device pixels: its anchor
 // (fillText's x, y through the CTM), the fraction of its advance `textAlign` puts left of that (0, ½ or 1), its
 // `textBaseline`, the width `maxWidth` condenses it to (0: none), and the window of device pixels that can reach the
-// canvas (left, top, right, bottom) — the canvas's own, and where the shadow's offset brings the rest from.
+// canvas (left, top, right, bottom) — the canvas's own, and where the shadow's offset brings the rest from — which a
+// shadow's blur (`shadow_blur`, its `shadowBlur`; 0 for none) widens by its reach.
 pub(crate) struct Placement {
     pub(crate) anchor: (f64, f64),
     pub(crate) align: f64,
     pub(crate) baseline: Baseline,
     pub(crate) max_width: f64,
     pub(crate) window: [f64; 4],
+    pub(crate) shadow_blur: f64,
 }
 
 // `textBaseline`, in the IDL enumeration's order.
@@ -431,6 +433,8 @@ impl Line {
         let (ink_x, ink_y) = ((origin.0 + x0 * squeeze).round(), (origin.1 + y0).round());
         let span = |lo: f64, hi: f64, at: f64, n: usize| ((lo.floor() - at).clamp(0.0, n as f64) as usize, (hi.ceil() - at).clamp(0.0, n as f64) as usize);
         let [wl, wt, wr, wb] = place.window;
+        let reach = crate::canvas::blur_reach(crate::canvas::blur_radius(place.shadow_blur), (wr - wl).max(0.0) as usize, (wb - wt).max(0.0) as usize) as f64;
+        let [wl, wt, wr, wb] = [wl - reach, wt - reach, wr + reach, wb + reach];
         let ((j0, j1), (i0, i1)) = (span(wl, wr, ink_x, out_w), span(wt, wb, ink_y, h));
         if j0 >= j1 || i0 >= i1 {
             return None;
@@ -535,7 +539,7 @@ fn first_strong_direction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
 // `size` px, on a right-to-left base direction where `rtl` (`line`): `{advance, inkLeft, inkRight, inkAscent,
 // inkDescent, ascent, descent, emAscent, emDescent[, hangingBaseline, ideographicBaseline][, maskX, maskY, maskWidth,
 // maskHeight, mask]}` — or null where the face is none native reads. `place`, a Float64Array `[anchorX, anchorY, align,
-// baseline, maxWidth, windowLeft, windowTop, windowRight, windowBottom]` (`Placement`; the baseline its
+// baseline, maxWidth, windowLeft, windowTop, windowRight, windowBottom, shadowBlur]` (`Placement`; the baseline its
 // `textBaseline`'s index), draws it too: the mask is what of it reaches the canvas, its left and top in device pixels,
 // its bytes a Uint8Array of coverage.
 fn canvas_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -544,9 +548,14 @@ fn canvas_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let size = args.get(2).number_value(scope).unwrap_or(10.0);
     let [kerning, small_caps, rtl] = [3, 4, 5].map(|k| args.get(k).boolean_value(scope));
     let place = match *crate::dom::f64_arg(args.get(6)) {
-        [ax, ay, align, baseline, max_width, wl, wt, wr, wb] => {
-            Some(Placement { anchor: (ax, ay), align, baseline: Baseline::from_index(baseline as i32), max_width, window: [wl, wt, wr, wb] })
-        }
+        [ax, ay, align, baseline, max_width, wl, wt, wr, wb, shadow_blur] => Some(Placement {
+            anchor: (ax, ay),
+            align,
+            baseline: Baseline::from_index(baseline as i32),
+            max_width,
+            window: [wl, wt, wr, wb],
+            shadow_blur,
+        }),
         _ => None,
     };
     let Some(line) = std::panic::catch_unwind(|| line(&text, handle, size, kerning, small_caps, rtl, place.as_ref())).ok().flatten() else { return rv.set_null() };

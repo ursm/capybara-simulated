@@ -8,7 +8,9 @@ require_relative 'support/session_teardown'
 # an even-odd path, linear / radial / conic gradients, a transformed pattern, drawImage smoothed and nearest, a shadow,
 # the compositing operators, a clip, clearRect, a dashed stroke, Display P3; and the paths — SVG path data, arcTo,
 # roundRect, a dashed transformed ellipse, addPath, isPointInPath / isPointInStroke. Each held to the figures the
-# rasterizer gave when it was ported to Rust, which matched the JS one it replaced to the byte.
+# rasterizer gave when it was ported to Rust, which matched the JS one it replaced to the byte — but the shadow, since
+# blurred by the σ the spec gives (half the blur, as Chrome's: each alpha within 6 of its) over a plane that does not
+# clamp at the canvas's edge.
 RSpec.describe 'canvas rasterizer' do
   let(:app) { ->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>x</body>']] } }
   let(:fixtures) { File.join(__dir__, 'fixtures/canvas_raster') }

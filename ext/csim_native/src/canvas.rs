@@ -717,12 +717,15 @@ impl Draw<'_> {
 
     // Cast the shadow (§4.12.5.1.17): the shape's coverage, moved by the offset and weighted by the alpha the paint
     // deposits, blurred, tinted with the shadow colour and composited under the operator — source-over for a
-    // whole-canvas one, whose surface-wide shadow layer this does not model.
+    // whole-canvas one, whose surface-wide shadow layer this does not model. The coverage is gathered on a plane wider
+    // than the canvas by the blur's reach (`Shadow::reach`) on every side, so ink just off the canvas still blurs onto it.
     fn cast(&self, buf: &mut [u8], shape: &Shape<'_>, paint: &Paint<'_>, shadow: &Shadow) -> Result<(), Oom> {
         let (cw, ch) = (self.cw, self.ch);
-        let mut plane = zeroed(cw * ch, 0f32)?;
-        let shift = shadow.offset;
-        shape.cover(cw, ch, shift, &mut |px, py, cov| {
+        let m = shadow.reach(cw, ch);
+        let (pw, ph) = (cw + 2 * m, ch + 2 * m);
+        let mut plane = zeroed(pw * ph, 0f32)?;
+        let shift = (shadow.offset.0 + m as f64, shadow.offset.1 + m as f64);
+        shape.cover(pw, ph, shift, &mut |px, py, cov| {
             let a = match paint {
                 Paint::Solid { a, .. } => *a,
                 _ => {
@@ -731,16 +734,17 @@ impl Draw<'_> {
                 }
             };
             if a > 0.0 {
-                let idx = py * cw + px;
+                let idx = py * pw + px;
                 let c = cov * a;
                 if c > f64::from(plane[idx]) {
                     plane[idx] = c as f32;
                 }
             }
         })?;
-        let plane = blur(plane, cw, ch, shadow.radius)?;
+        let plane = blur(plane, pw, ph, shadow.radius)?;
         let op = if self.op.whole_canvas() { Op::SourceOver } else { self.op };
-        for (idx, &sc) in plane.iter().enumerate() {
+        for idx in 0..cw * ch {
+            let sc = plane[(idx / cw + m) * pw + idx % cw + m];
             if sc <= 0.0 || self.clipped(idx) {
                 continue;
             }
@@ -755,6 +759,24 @@ struct Shadow {
     a: f64,
     offset: (f64, f64),
     radius: usize,
+}
+
+impl Shadow {
+    fn reach(&self, cw: usize, ch: usize) -> usize {
+        blur_reach(self.radius, cw, ch)
+    }
+}
+
+// The box radius whose three passes blur as the Gaussian a `shadowBlur` of `blur` asks for (§4.12.5.1.17: σ is half the
+// blur): three boxes of width w have a variance of 3 (w² − 1) / 12, which is σ² where w = √(4σ² + 1).
+pub(crate) fn blur_radius(blur: f64) -> usize {
+    let sigma = blur.max(0.0) / 2.0;
+    js_round(((4.0 * sigma * sigma + 1.0).sqrt() - 1.0) / 2.0) as usize
+}
+// How far a blur of `radius` carries coverage onto a `cw` × `ch` canvas, px: its three box passes, `radius` each — no
+// further than the canvas is long, past which a blur that wide has spread whatever lies there thinner than it shows.
+pub(crate) fn blur_reach(radius: usize, cw: usize, ch: usize) -> usize {
+    (3 * radius).min(cw.max(ch))
 }
 
 // A Gaussian approximated by three separable box blurs of `radius`.
@@ -979,7 +1001,7 @@ fn canvas_draw(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         col: convert_rgb(to, Rgb { r: state[10], g: state[11], b: state[12] }),
         a: state[13],
         offset: (js_round(state[15]), js_round(state[16])),
-        radius: js_round(state[14] / 2.0).max(0.0) as usize,
+        radius: blur_radius(state[14]),
     });
     let Some(buf) = bytes_mut(args.get(0)) else { return };
     if buf.len() < cw * ch * 4 {

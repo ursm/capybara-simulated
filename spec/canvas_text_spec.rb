@@ -112,4 +112,22 @@ RSpec.describe 'canvas text' do
     expect(got[0..1]).to eq([true, true])
     expect(got[2]).to eq(50 * 50 * 255)                                   # inside the stem of the I
   end
+
+  # A blurred shadow reaches past the ink by the blur: a glyph whose ink ends 3px left of the canvas still blurs its
+  # shadow onto it. Chrome: 6275 of alpha in the first ten columns (the blur here three box passes, a little off it).
+  it 'blurs the shadow of ink just off the canvas onto it' do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const g = Object.assign(document.createElement('canvas'), {width: 100, height: 60}).getContext('2d');
+        g.font = '40px sans-serif';
+        g.shadowColor = 'red';
+        g.shadowBlur = 20;
+        g.fillText('I', -g.measureText('I').actualBoundingBoxRight - 3, 45);
+        return g.getImageData(0, 0, 10, 60).data.filter((_, i) => i % 4 === 3).reduce((a, b) => a + b, 0);
+      })()
+    JS
+    expect(got).to be_within(600).of(6275)
+  end
 end

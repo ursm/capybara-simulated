@@ -27,13 +27,13 @@ pub(crate) fn picture_source(arena: &RealmArena, img: NodeId, media_matches: &dy
     }
     None
 }
-// A `type` naming an image format — what libvips decodes, told apart from the `image/bogus` a page uses to force the
-// fallback.
+// A `type` naming an image format the decoder reads (image_decode.rs: as Chrome, no TIFF or HEIF), told apart from the
+// `image/bogus` a page uses to force the fallback.
 fn decodable_image_type(t: &str) -> bool {
     let t = t.to_ascii_lowercase();
     matches!(
         t.strip_prefix("image/").unwrap_or(""),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "svg+xml" | "bmp" | "x-icon" | "vnd.microsoft.icon" | "tiff" | "heic" | "heif"
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "svg+xml" | "bmp" | "x-icon" | "vnd.microsoft.icon"
     )
 }
 
