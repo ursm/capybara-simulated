@@ -273,6 +273,18 @@ enum Shape<'a> {
 }
 
 impl Shape<'_> {
+    // The device box the shape can cover (left, top, right, bottom) — None for one that covers nothing.
+    fn bounds(&self) -> Option<[f64; 4]> {
+        match self {
+            Shape::Box(b) => Some(*b),
+            Shape::Rings { rings, .. } => {
+                let mut it = rings.iter().flatten();
+                let &(x, y) = it.next()?;
+                Some(it.fold([x, y, x, y], |[l, t, r, b], &(x, y)| [l.min(x), t.min(y), r.max(x), b.max(y)]))
+            }
+            &Shape::Mask { w, h, x, y, .. } => Some([x as f64, y as f64, (x + w as i64) as f64, (y + h as i64) as f64]),
+        }
+    }
     // Call `emit(px, py, coverage)` for each pixel of a `cw` × `ch` bitmap the shape covers, coverage in (0, 1], the
     // shape moved by `shift` device pixels (a shadow's offset).
     fn cover(&self, cw: usize, ch: usize, shift: (f64, f64), emit: &mut dyn FnMut(usize, usize, f64)) -> Result<(), Oom> {
@@ -717,14 +729,23 @@ impl Draw<'_> {
 
     // Cast the shadow (§4.12.5.1.17): the shape's coverage, moved by the offset and weighted by the alpha the paint
     // deposits, blurred, tinted with the shadow colour and composited under the operator — source-over for a
-    // whole-canvas one, whose surface-wide shadow layer this does not model. The coverage is gathered on a plane wider
-    // than the canvas by the blur's reach (`Shadow::reach`) on every side, so ink just off the canvas still blurs onto it.
+    // whole-canvas one, whose surface-wide shadow layer this does not model. The coverage is gathered on a plane that
+    // reaches past the canvas by the blur's reach (`Shadow::reach`), so ink just off the canvas still blurs onto it.
     fn cast(&self, buf: &mut [u8], shape: &Shape<'_>, paint: &Paint<'_>, shadow: &Shadow) -> Result<(), Oom> {
         let (cw, ch) = (self.cw, self.ch);
-        let m = shadow.reach(cw, ch);
-        let (pw, ph) = (cw + 2 * m, ch + 2 * m);
+        let m = shadow.reach(cw, ch) as f64;
+        // (…only where the moved shape, grown by the reach, meets the canvas grown by it: a plane of that, its device
+        // origin at (x0, y0) — whatever lies outside it is coverage none of the canvas's pixels can receive)
+        let Some([l, t, r, b]) = shape.bounds() else { return Ok(()) };
+        let (ox, oy) = shadow.offset;
+        let span = |lo: f64, hi: f64, n: usize| ((lo.floor() - m).max(-m), (hi.ceil() + m).min(n as f64 + m));
+        let ((x0, x1), (y0, y1)) = (span(l + ox, r + ox, cw), span(t + oy, b + oy, ch));
+        if !(x0 < x1 && y0 < y1 && x1 > 0.0 && y1 > 0.0 && x0 < cw as f64 && y0 < ch as f64) {
+            return Ok(());
+        }
+        let (pw, ph) = ((x1 - x0) as usize, (y1 - y0) as usize);
         let mut plane = zeroed(pw * ph, 0f32)?;
-        let shift = (shadow.offset.0 + m as f64, shadow.offset.1 + m as f64);
+        let shift = (ox - x0, oy - y0);
         shape.cover(pw, ph, shift, &mut |px, py, cov| {
             let a = match paint {
                 Paint::Solid { a, .. } => *a,
@@ -743,12 +764,17 @@ impl Draw<'_> {
         })?;
         let plane = blur(plane, pw, ph, shadow.radius)?;
         let op = if self.op.whole_canvas() { Op::SourceOver } else { self.op };
-        for idx in 0..cw * ch {
-            let sc = plane[(idx / cw + m) * pw + idx % cw + m];
-            if sc <= 0.0 || self.clipped(idx) {
-                continue;
+        let (cx0, cy0) = (x0.max(0.0) as usize, y0.max(0.0) as usize);
+        let (cx1, cy1) = (x1.min(cw as f64) as usize, y1.min(ch as f64) as usize);
+        for y in cy0..cy1 {
+            for x in cx0..cx1 {
+                let sc = plane[(y as f64 - y0) as usize * pw + (x as f64 - x0) as usize];
+                let idx = y * cw + x;
+                if sc <= 0.0 || self.clipped(idx) {
+                    continue;
+                }
+                composite(buf, idx * 4, shadow.col, clamp01(shadow.a * self.alpha * f64::from(sc)), op);
             }
-            composite(buf, idx * 4, shadow.col, clamp01(shadow.a * self.alpha * f64::from(sc)), op);
         }
         Ok(())
     }
