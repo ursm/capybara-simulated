@@ -80,7 +80,9 @@ ryu-js = "1"
 # held inline — a path is built one call per point, and a heap allocation each costs more than the op.
 smallvec = "1"
 # A canvas serialised as a file (image_encode.rs: toDataURL / toBlob / the screenshot): PNG, JPEG and lossless WebP,
-# pure Rust, so no system image library is needed at run time.
+# pure Rust, so no system image library is needed at run time; and ICC colour management (moxcms) — the Display P3
+# profile a P3 canvas's file carries, and (image_decode.rs) a profiled image's colours.
+moxcms = "0.9"
 png = "0.18"
 jpeg-encoder = "0.7"
 image-webp = "0.2"

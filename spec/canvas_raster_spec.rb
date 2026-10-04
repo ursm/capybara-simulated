@@ -109,8 +109,9 @@ RSpec.describe 'canvas rasterizer' do
     expect(got).to eq([true, false, true, true, 'nothing', 'RangeError'])
   end
 
-  # Chrome's answers (measured): SVG path data short of a number draws up to the segment in error and no further, and
-  # the current point stays the last one drawn; a radii object whose `@@iterator` is not a method is a TypeError. A
+  # Chrome's answers (measured): SVG path data in error — short of a number, a number out of range, not opening with a
+  # moveto, an arc flag that is not one `0` or `1` — draws up to the segment in error and no further, and the current
+  # point stays the last one drawn; a radii object whose `@@iterator` is not a method is a TypeError. A
   # Path2D's array is the page's to replace — a lying one is no current point, not a crash.
   it 'stops SVG path data at a segment short of a number, and trusts nothing in a path array the page hands over' do
     s = simulated_session(app)
@@ -122,6 +123,12 @@ RSpec.describe 'canvas rasterizer' do
         r.push(ctx.isPointInPath(p, 60, 20), ctx.isPointInPath(p, 20, 60), ctx.isPointInPath(p, 99, 98));
         var q = new Path2D('M0 0 L100 0 L50'); q.lineTo(100, 100);
         r.push(ctx.isPointInStroke(q, 100, 50));
+        // (…a number out of range, a first command that is no moveto, a flag that is not one character; and flags
+        // packed into one number, which is no error)
+        r.push(ctx.isPointInPath(new Path2D('M0 0 L100 0 L1e400 100 L0 100 Z'), 50, 50));
+        r.push(ctx.isPointInPath(new Path2D('L100 0 L100 100 L0 100 Z'), 50, 50));
+        r.push(ctx.isPointInPath(new Path2D('M0 0 L100 0 A 10 10 0 2 1 100 100 L0 100 Z'), 50, 50));
+        r.push(ctx.isPointInPath(new Path2D('M0 0 L100 0 A50 50 0 0150 100 Z'), 60, 40));
         try { new Path2D().roundRect(0, 0, 10, 10, {[Symbol.iterator]: 1, x: 1}); r.push('nothing'); } catch (e) { r.push(e.name); }
         var h = new Path2D(); h.moveTo(0, 0);
         h._buf = new Float64Array([8, 0, 0, 100, 0, 0, 0, 0]);
@@ -130,6 +137,6 @@ RSpec.describe 'canvas rasterizer' do
         return r;
       })()
     JS
-    expect(got).to eq([true, false, true, true, 'TypeError', 'alive'])
+    expect(got).to eq([true, false, true, true, false, false, false, true, 'TypeError', 'alive'])
   end
 end

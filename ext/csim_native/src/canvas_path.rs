@@ -116,166 +116,178 @@ fn arc_to(p: [f64; 7]) -> Vec<f64> {
 // ── SVG path data ──
 // The calls a path data string makes (SVG 2 §9.3: M L H V C S Q T A Z, absolute and relative; a smooth curve reflects
 // the last control point; an arc in endpoint form converted to its centre), flat: each a building op (`OP_MOVE_TO`,
-// `OP_LINE_TO`, `OP_CUBIC`, `OP_QUADRATIC`, `OP_ELLIPSE`, `OP_CLOSE`) and its numbers. It stops at the first token that
-// makes no sense, and before a segment short of a number (SVG 2 §9.5.4: rendering stops before the segment in error).
+// `OP_LINE_TO`, `OP_CUBIC`, `OP_QUADRATIC`, `OP_ELLIPSE`, `OP_CLOSE`) and its numbers. Data in error — one that does
+// not open with a moveto, a segment short of a number, a number out of range, an arc flag other than one `0` or `1`,
+// a character the grammar has no place for — is drawn up to the segment in error and no further (§9.5.4).
 fn svg_path(d: &str) -> Vec<f64> {
-    let toks = svg_tokens(d);
+    let mut data = PathData { b: d.as_bytes(), i: 0, after_number: false };
     let mut out = Vec::new();
-    let (mut i, mut px, mut py, mut sx, mut sy, mut pcx, mut pcy) = (0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-    let mut last: Option<char> = None;
-    while i < toks.len() {
-        let before = i;
-        let cmd = match toks[i] {
-            Tok::Cmd(c) => {
-                i += 1;
-                c
-            }
-            Tok::Num(_) => match last {
-                Some('M') => 'L',
-                Some('m') => 'l',
-                Some(c) => c,
-                None => break,
+    let (mut px, mut py, mut sx, mut sy, mut pcx, mut pcy) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    let mut last: Option<u8> = None;
+    'parse: loop {
+        let cmd = match data.command() {
+            Some(c) => c,
+            None if data.at_number() => match last {
+                Some(b'M') => b'L',
+                Some(b'm') => b'l',
+                Some(c) if !c.eq_ignore_ascii_case(&b'Z') => c,
+                _ => break,
             },
+            None => break,
         };
-        let (mark, mut short) = (out.len(), false);
-        let mut num = || match toks.get(i) {
-            Some(&Tok::Num(v)) => {
-                i += 1;
-                v
-            }
-            _ => {
-                short = true;
-                f64::NAN
-            }
-        };
+        if last.is_none() && !cmd.eq_ignore_ascii_case(&b'M') {
+            break;
+        }
+        macro_rules! num {
+            () => {
+                match data.number() {
+                    Some(v) => v,
+                    None => break 'parse,
+                }
+            };
+        }
         let (ox, oy) = if cmd.is_ascii_lowercase() { (px, py) } else { (0.0, 0.0) };
-        let smooth = |kinds: &str| last.is_some_and(|c| kinds.contains(c.to_ascii_lowercase()));
+        let smooth = |kinds: &[u8]| last.is_some_and(|c| kinds.contains(&c.to_ascii_lowercase()));
         match cmd.to_ascii_uppercase() {
-            'M' => {
-                px = ox + num();
-                py = oy + num();
+            b'M' => {
+                (px, py) = (ox + num!(), oy + num!());
                 out.extend([OP_MOVE_TO as f64, px, py]);
                 (sx, sy) = (px, py);
             }
-            'L' => {
-                px = ox + num();
-                py = oy + num();
+            b'L' => {
+                (px, py) = (ox + num!(), oy + num!());
                 out.extend([OP_LINE_TO as f64, px, py]);
             }
-            'H' => {
-                px = ox + num();
+            b'H' => {
+                px = ox + num!();
                 out.extend([OP_LINE_TO as f64, px, py]);
             }
-            'V' => {
-                py = oy + num();
+            b'V' => {
+                py = oy + num!();
                 out.extend([OP_LINE_TO as f64, px, py]);
             }
-            'C' | 'S' => {
-                let (c1x, c1y) = if cmd.eq_ignore_ascii_case(&'C') {
-                    (ox + num(), oy + num())
-                } else if smooth("cs") {
+            b'C' | b'S' => {
+                let (c1x, c1y) = if cmd.eq_ignore_ascii_case(&b'C') {
+                    (ox + num!(), oy + num!())
+                } else if smooth(b"cs") {
                     (2.0 * px - pcx, 2.0 * py - pcy)
                 } else {
                     (px, py)
                 };
-                let (c2x, c2y, ex, ey) = (ox + num(), oy + num(), ox + num(), oy + num());
+                let (c2x, c2y, ex, ey) = (ox + num!(), oy + num!(), ox + num!(), oy + num!());
                 out.extend([OP_CUBIC as f64, c1x, c1y, c2x, c2y, ex, ey]);
                 (pcx, pcy, px, py) = (c2x, c2y, ex, ey);
             }
-            'Q' | 'T' => {
-                let (cx, cy) = if cmd.eq_ignore_ascii_case(&'Q') {
-                    (ox + num(), oy + num())
-                } else if smooth("qt") {
+            b'Q' | b'T' => {
+                let (cx, cy) = if cmd.eq_ignore_ascii_case(&b'Q') {
+                    (ox + num!(), oy + num!())
+                } else if smooth(b"qt") {
                     (2.0 * px - pcx, 2.0 * py - pcy)
                 } else {
                     (px, py)
                 };
-                let (ex, ey) = (ox + num(), oy + num());
+                let (ex, ey) = (ox + num!(), oy + num!());
                 out.extend([OP_QUADRATIC as f64, cx, cy, ex, ey]);
                 (pcx, pcy, px, py) = (cx, cy, ex, ey);
             }
-            'A' => {
-                let (rx, ry, rot, large, sweep) = (num(), num(), num() * PI / 180.0, num(), num());
-                let (ex, ey) = (ox + num(), oy + num());
-                svg_arc(&mut out, [px, py, rx, ry, rot, large, sweep, ex, ey]);
+            b'A' => {
+                let (rx, ry, rot) = (num!(), num!(), num!() * PI / 180.0);
+                let (Some(large), Some(sweep)) = (data.flag(), data.flag()) else { break };
+                let (ex, ey) = (ox + num!(), oy + num!());
+                svg_arc(&mut out, [px, py, rx, ry, rot, f64::from(u8::from(large)), f64::from(u8::from(sweep)), ex, ey]);
                 (px, py) = (ex, ey);
             }
-            'Z' => {
+            b'Z' => {
                 out.push(OP_CLOSE as f64);
                 (px, py) = (sx, sy);
             }
             _ => break,
         }
-        if short {
-            out.truncate(mark);
-            break;
-        }
         last = Some(cmd);
-        // (…a stray number after `Z` consumes nothing: stop rather than loop)
-        if i == before {
-            break;
-        }
     }
     out
 }
-enum Tok {
-    Cmd(char),
-    Num(f64),
+
+// Path data read a token at a time (SVG 2 §9.3.9's grammar): whitespace anywhere between tokens, and one comma
+// between two numbers (or flags) — after a number, never after a command letter.
+struct PathData<'a> {
+    b: &'a [u8],
+    i: usize,
+    after_number: bool,
 }
-// A path string's tokens: each command letter, and each number (`-1.5e3`, `.5`, `1.`, the two of `1.5.5`).
-fn svg_tokens(d: &str) -> Vec<Tok> {
-    let b = d.as_bytes();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < b.len() {
-        let c = b[i];
-        if c.is_ascii_alphabetic() && !matches!(c, b'e' | b'E') {
-            out.push(Tok::Cmd(c as char));
-            i += 1;
-            continue;
+
+impl PathData<'_> {
+    fn skip_ws(&mut self) {
+        while self.b.get(self.i).is_some_and(|c| matches!(c, b' ' | b'\t' | b'\n' | b'\x0C' | b'\r')) {
+            self.i += 1;
         }
-        let start = i;
-        let mut j = i;
-        if j < b.len() && matches!(b[j], b'+' | b'-') {
-            j += 1;
+    }
+    // Past the separator before an argument.
+    fn separator(&mut self) {
+        self.skip_ws();
+        if self.after_number && self.b.get(self.i) == Some(&b',') {
+            self.i += 1;
+            self.skip_ws();
         }
-        let int_start = j;
-        while j < b.len() && b[j].is_ascii_digit() {
-            j += 1;
-        }
-        let mut digits = j > int_start;
-        if j < b.len() && b[j] == b'.' {
-            let frac_start = j + 1;
-            let mut k = frac_start;
-            while k < b.len() && b[k].is_ascii_digit() {
-                k += 1;
+    }
+    // A command letter, where one comes next.
+    fn command(&mut self) -> Option<u8> {
+        self.skip_ws();
+        let c = *self.b.get(self.i).filter(|c| b"MmZzLlHhVvCcSsQqTtAa".contains(c))?;
+        self.i += 1;
+        self.after_number = false;
+        Some(c)
+    }
+    // Whether an argument comes next (a command's implicit repetition).
+    fn at_number(&mut self) -> bool {
+        let at = self.i;
+        self.separator();
+        let yes = self.b.get(self.i).is_some_and(|c| c.is_ascii_digit() || matches!(c, b'+' | b'-' | b'.'));
+        self.i = at;
+        yes
+    }
+    // A number (`-1.5e3`, `.5`, `1.`, the two of `1.5.5`): None where none comes next, or it is out of range.
+    fn number(&mut self) -> Option<f64> {
+        self.separator();
+        let (b, start) = (self.b, self.i);
+        let mut j = start + usize::from(b.get(start).is_some_and(|c| matches!(c, b'+' | b'-')));
+        let digits = |j: &mut usize| {
+            let from = *j;
+            while b.get(*j).is_some_and(u8::is_ascii_digit) {
+                *j += 1;
             }
-            if k > frac_start || digits {
-                digits = true;
-                j = k;
-            }
-        }
-        if !digits {
-            i = start + 1;
-            continue;
-        }
-        if j < b.len() && matches!(b[j], b'e' | b'E') {
+            *j > from
+        };
+        let mut any = digits(&mut j);
+        if b.get(j) == Some(&b'.') {
             let mut k = j + 1;
-            if k < b.len() && matches!(b[k], b'+' | b'-') {
-                k += 1;
-            }
-            let exp_start = k;
-            while k < b.len() && b[k].is_ascii_digit() {
-                k += 1;
-            }
-            if k > exp_start {
+            if digits(&mut k) || any {
+                any = true;
                 j = k;
             }
         }
-        out.push(Tok::Num(d[start..j].parse().unwrap_or(f64::NAN)));
-        i = j;
+        if !any {
+            return None;
+        }
+        if b.get(j).is_some_and(|c| matches!(c, b'e' | b'E')) {
+            let mut k = j + 1 + usize::from(b.get(j + 1).is_some_and(|c| matches!(c, b'+' | b'-')));
+            if digits(&mut k) {
+                j = k;
+            }
+        }
+        let v = std::str::from_utf8(&b[start..j]).ok()?.parse::<f64>().ok().filter(|v| v.is_finite())?;
+        self.i = j;
+        self.after_number = true;
+        Some(v)
     }
-    out
+    // An arc flag: one `0` or `1` character, which may run straight into what follows (`0150` is two flags and 50).
+    fn flag(&mut self) -> Option<bool> {
+        self.separator();
+        let c = *self.b.get(self.i).filter(|c| matches!(c, b'0' | b'1'))?;
+        self.i += 1;
+        self.after_number = true;
+        Some(c == b'1')
+    }
 }
 // An SVG arc in endpoint form (SVG 2 §B.2.4) as the ellipse() call that draws it, or a line where a radius is zero.
 fn svg_arc(out: &mut Vec<f64>, p: [f64; 9]) {
@@ -1214,9 +1226,12 @@ mod tests {
     }
 
     #[test]
-    fn tokenizes_path_data() {
-        let toks: Vec<f64> = svg_tokens("M1.5.5-2e1,3L.5 1.").iter().map(|t| if let Tok::Num(v) = t { *v } else { f64::INFINITY }).collect();
-        assert_eq!(toks, vec![f64::INFINITY, 1.5, 0.5, -20.0, 3.0, f64::INFINITY, 0.5, 1.0]);
+    fn reads_numbers_and_flags() {
+        let mut d = PathData { b: b"1.5.5-2e1,3 0150".as_slice(), i: 0, after_number: false };
+        let nums: Vec<f64> = std::iter::from_fn(|| d.number()).take(4).collect();
+        assert_eq!(nums, vec![1.5, 0.5, -20.0, 3.0]);
+        assert_eq!((d.flag(), d.flag(), d.number()), (Some(false), Some(true), Some(50.0)));
+        assert_eq!(PathData { b: b"1e400".as_slice(), i: 0, after_number: false }.number(), None);
     }
 
     #[test]
@@ -1225,8 +1240,13 @@ mod tests {
         assert_eq!(svg_path("M0 0 L1 1 2 2"), vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0]);
         assert_eq!(svg_path("M0 0 Q1 1 2 0 T4 0"), vec![0.0, 0.0, 0.0, 6.0, 1.0, 1.0, 2.0, 0.0, 6.0, 3.0, -1.0, 4.0, 0.0]);
         assert_eq!(svg_path("5 5"), Vec::<f64>::new());
-        // (…a segment short of a number is not drawn, nor anything after it)
+        // (…data in error is drawn up to the segment in error: one short of a number, one out of range, a first
+        // command that is not a moveto, a flag that is not one character)
         assert_eq!(svg_path("M0 0 L100 0 L50 L1 1"), vec![0.0, 0.0, 0.0, 1.0, 100.0, 0.0]);
+        assert_eq!(svg_path("M0 0 L1e400 0"), vec![0.0, 0.0, 0.0]);
+        assert_eq!(svg_path("L1 1"), Vec::<f64>::new());
+        assert_eq!(svg_path("M0 0 A1 1 0 2 1 5 5"), vec![0.0, 0.0, 0.0]);
+        assert_eq!(svg_path("M0 0 Z 5 5"), vec![0.0, 0.0, 0.0, 2.0]);
     }
 
     #[test]

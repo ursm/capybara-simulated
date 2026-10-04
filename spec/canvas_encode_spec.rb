@@ -95,4 +95,48 @@ RSpec.describe 'canvas encoding' do
     expect(got[4][1..]).to eq([0, 0, 255])
     expect(got[5..]).to eq([nil, 'IndexSizeError'])
   end
+
+  # Chrome's answers (measured), where the spec does not leave them open: toBlob serialises the bitmap as it is at the
+  # call (a copy, §4.12.5.1 step 3) and calls back once, an exception it throws reported rather than answered with a
+  # second, null, call; convertToBlob converts its ImageEncodeOptions first (quality, then type; a quality string is a
+  # number) and rejects a tainted bitmap before one with no pixels. And by the spec (§4.12.5.5): a Display P3 canvas's
+  # PNG carries its profile.
+  it 'serialises the bitmap at the call, calls back once, and converts convertToBlob options as WebIDL does' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body></body>']] })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0], r = [];
+      const c = document.createElement('canvas');
+      c.width = c.height = 1;
+      const g = c.getContext('2d');
+      g.fillStyle = 'red';
+      g.fillRect(0, 0, 1, 1);
+      let calls = 0;
+      window.onerror = () => { r.push('reported'); return true; };
+      c.toBlob(b => {
+        calls++;
+        createImageBitmap(b).then(bm => {
+          const d = document.createElement('canvas').getContext('2d');
+          d.drawImage(bm, 0, 0);
+          r.push(Array.from(d.getImageData(0, 0, 1, 1).data), calls);
+          const read = [];
+          const opts = { get quality() { read.push('quality'); return '0.05'; }, get type() { read.push('type'); return 'image/jpeg'; } };
+          const o = new OffscreenCanvas(0, 0);
+          o.convertToBlob(opts).catch(e => {
+            r.push(read.join(','), e.name);
+            const p3 = document.createElement('canvas');
+            p3.width = p3.height = 1;
+            p3.getContext('2d', {colorSpace: 'display-p3'}).fillRect(0, 0, 1, 1);
+            p3.toBlob(b => b.arrayBuffer().then(buf => {
+              r.push(new TextDecoder('latin1').decode(buf).includes('iCCP'));
+              done(r);
+            }));
+          });
+        });
+        throw new Error('in the callback');
+      });
+      g.clearRect(0, 0, 1, 1);
+    JS
+    expect(got).to eq(['reported', [255, 0, 0, 255], 1, 'quality,type', 'IndexSizeError', true])
+  end
 end

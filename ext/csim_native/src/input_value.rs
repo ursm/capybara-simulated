@@ -16,9 +16,6 @@ fn is_ascii_ws(c: char) -> bool {
 fn trim_ascii_ws(s: &str) -> &str {
     s.trim_matches(is_ascii_ws)
 }
-fn strip_newlines(s: &str) -> String {
-    s.chars().filter(|&c| c != '\r' && c != '\n').collect()
-}
 
 // HTML "valid floating-point number" (and finite), as its number.
 pub(crate) fn parse_float(s: &str) -> Option<f64> {
