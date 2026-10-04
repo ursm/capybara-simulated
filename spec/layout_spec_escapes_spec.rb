@@ -31,8 +31,9 @@ RSpec.describe 'layout spec markup' do
   # The `-`/`~` is REQUIRED: a bare `<<NAME` is legal Ruby but indistinguishable from `list << CONST`, and
   # mistaking that for an opener would silently swallow the rest of the file — a guard that scans nothing.
   # The same swallow is still reachable by writing `<<~NAME` INSIDE a string on a code line; no spec does,
-  # and the fix would be a Ruby lexer, so it is written down here instead of guessed at in code.
-  HEREDOC_OPEN = /<<[-~]([A-Z_]+)\b/
+  # and the fix would be a Ruby lexer, so it is written down here instead of guessed at in code. A QUOTED
+  # name (`<<~'JS'`, which keeps a `\u` from Ruby so that script reads it) opens one just the same.
+  HEREDOC_OPEN = /<<[-~]['"]?([A-Z_]+)\b/
   SPECS = Dir[File.expand_path('*_spec.rb', __dir__)].reject {|f| f == __FILE__ }   # …this file TALKS about it
 
   it 'writes an escape in a shape only where Ruby interprets it' do

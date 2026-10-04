@@ -169,11 +169,11 @@ pub(crate) struct NodeData {
     // A CDATA section, of the text nodes — which XML serializes as one.
     pub(crate) cdata: bool,
     // A doctype's public and system identifiers (its name is its `data`) — which XML serializes.
-    pub(crate) doctype_ids: Option<Box<(String, String)>>,
+    pub(crate) doctype_ids: Option<Box<(Vec<u16>, Vec<u16>)>>,
     // A `<template>`'s contents (the fragment `content` is), which no child list holds — what serializing it writes.
     pub(crate) template_content: Option<NodeId>,
     // The `is` value an element was made with (a customized built-in's) — serialized where it holds no `is` attribute.
-    pub(crate) is_value: Option<Box<str>>,
+    pub(crate) is_value: Option<Box<[u16]>>,
     // A form control's live value once dirty (a script's `.value`, typing), in UTF-16 code units; None while it is
     // its default — the `value` attribute, or a `<textarea>`'s text.
     pub(crate) value: Option<Box<[u16]>>,
@@ -1147,6 +1147,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "linkPseudoBox", link_pseudo_box, context_id);
     register(scope, ns, "directionality", directionality, context_id);
     register(scope, ns, "setTemplateContent", set_template_content, context_id);
+    register(scope, ns, "setDoctype", set_doctype, context_id);
     register(scope, ns, "setIsValue", set_is_value, context_id);
     register(scope, ns, "setContainerMargins", set_container_margins, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
@@ -1321,7 +1322,7 @@ fn create_node(
     let kind = NodeKind::from_node_type(node_type);
     let data = utf16_arg(scope, args.get(1));
     let doctype_ids = (node_type == 10)
-        .then(|| Box::new((args.get(3).to_rust_string_lossy(scope), args.get(4).to_rust_string_lossy(scope))));
+        .then(|| Box::new((utf16_arg(scope, args.get(3)), utf16_arg(scope, args.get(4)))));
     let parent = nid_arg(scope, &args, 2);
     let local_name = if kind == NodeKind::ProcessingInstruction {
         LocalName::from(args.get(3).to_rust_string_lossy(scope))
@@ -1461,6 +1462,19 @@ fn set_value(
     }
 }
 
+// __dom.setDoctype(nid, name, publicId, systemId): a doctype's name and identifiers, as a reused document's next parse
+// gives them.
+fn set_doctype(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let name = utf16_arg(scope, args.get(1));
+    let ids = Box::new((utf16_arg(scope, args.get(2)), utf16_arg(scope, args.get(3))));
+    let cid = realm_id(scope, &args);
+    if let Some(node) = realm(scope, cid).get_mut_quietly(id) {
+        node.data = name;
+        node.doctype_ids = Some(ids);
+    }
+}
+
 // __dom.setTemplateContent(nid, contentNid): a `<template>`'s contents, the fragment `contentNid` (-1 for none).
 fn set_template_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return };
@@ -1475,7 +1489,7 @@ fn set_template_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 fn set_is_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return };
     let v = args.get(1);
-    let value = (!v.is_null_or_undefined()).then(|| v.to_rust_string_lossy(scope).into_boxed_str());
+    let value = (!v.is_null_or_undefined()).then(|| utf16_arg(scope, v).into_boxed_slice());
     let cid = realm_id(scope, &args);
     if let Some(node) = realm(scope, cid).get_mut_quietly(id) {
         node.is_value = value;

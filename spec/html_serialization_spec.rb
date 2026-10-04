@@ -30,4 +30,37 @@ RSpec.describe 'HTML serialization' do
     JS
     expect(got).to eq('<?x y z>a&lt;b&amp;c<svg xlink:href="#a" xml:lang="en" p:q="1"></svg><template><b>t</b></template><div is="x-y"></div>')
   end
+
+  it "keeps a template's contents when it is copied into another document's realm" do
+    a = ->(env) {
+      body = env['PATH_INFO'] == '/frame' ? '<!DOCTYPE html><body><template id="ft"><i>fi</i></template></body>' : '<!DOCTYPE html><body><iframe src="/frame"></iframe></body>'
+      [200, {'content-type' => 'text/html'}, [body]]
+    }
+    s = simulated_session(a)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (function () {
+        var fd = document.querySelector('iframe').contentDocument;
+        var t = document.createElement('template'); t.innerHTML = '<b>x</b>';
+        fd.body.appendChild(t.cloneNode(true));
+        return [document.importNode(fd.getElementById('ft'), true).outerHTML, fd.body.lastChild.outerHTML];
+      })()
+    JS
+    expect(got).to eq(['<template id="ft"><i>fi</i></template>', '<template><b>x</b></template>'])
+  end
+
+  it 'serializes a tree of any depth, and keeps a lone surrogate in an is value or a doctype identifier' do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~'JS')
+      (function () {
+        var root = document.createElement('div'), cur = root;
+        for (var i = 0; i < 30000; i++) { var d = document.createElement('div'); cur.appendChild(d); cur = d; }
+        return [root.innerHTML.length, new XMLSerializer().serializeToString(root).length,
+                document.createElement('div', {is: 'x\ud800'}).outerHTML === '<div is="x\ud800"></div>',
+                new XMLSerializer().serializeToString(document.implementation.createDocumentType('a', 'p\ud800', 's')) === '<!DOCTYPE a PUBLIC "p\ud800" "s">'];
+      })()
+    JS
+    expect(got).to eq([330_000, 330_048, true, true])
+  end
 end

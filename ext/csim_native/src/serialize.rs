@@ -2,6 +2,8 @@
 // what `innerHTML`, `outerHTML`, `getHTML()` and a driver's page source read. Over UTF-16 code units, as the DOM holds
 // text and as a page reads the result: a lone surrogate in a text node or an attribute value passes through.
 
+use std::rc::Rc;
+
 use crate::dom::{NodeData, NodeId, NodeKind, RealmArena};
 use web_atoms::ns;
 
@@ -41,43 +43,63 @@ impl Writer<'_> {
         }
     }
 
-    // The children of `id` (a `<template>`'s: its contents), and first a host's shadow root where one is asked for.
-    fn children(&mut self, id: NodeId) {
-        let Some(n) = self.arena.get(id) else { return };
-        if let Some((_, open)) = self.shadows.iter().find(|(host, _)| *host == id) {
-            if let Some(root) = n.shadow_root {
-                self.out.extend_from_slice(open);
-                self.children(root);
-                self.push("</template>");
-            }
-        }
-        let parent = if n.kind == NodeKind::Element && n.is_html_named("template") { n.template_content } else { Some(id) };
-        let Some(parent) = parent.and_then(|p| self.arena.get(p)) else { return };
-        let raw = n.kind == NodeKind::Element && n.ns == ns!(html) && RAW_TEXT.contains(&&*n.local_name);
-        for &c in &parent.children {
-            let Some(child) = self.arena.get(c) else { continue };
-            match child.kind {
-                NodeKind::Element => self.element(c, child),
-                NodeKind::Text if raw => self.out.extend_from_slice(&child.data),
-                NodeKind::Text => self.escaped(&child.data, false),
-                NodeKind::Comment => {
-                    self.push("<!--");
-                    self.out.extend_from_slice(&child.data);
-                    self.push("-->");
+    // The work still to do, last first — a walk with its own stack, so a tree of any depth serializes (and none
+    // overflows the native one): a node to write (its parent's text raw, or not), or markup to append.
+    fn run(&mut self, mut stack: Vec<Task>) {
+        while let Some(task) = stack.pop() {
+            match task {
+                Task::Markup(units) => self.out.extend_from_slice(&units),
+                Task::Node(id, raw) => {
+                    let Some(n) = self.arena.get(id) else { continue };
+                    match n.kind {
+                        NodeKind::Element => {
+                            if let Some(name) = self.start_tag(n) {
+                                stack.push(Task::Markup(format!("</{name}>").encode_utf16().collect()));
+                                self.children(id, &mut stack);
+                            }
+                        }
+                        NodeKind::Text if raw => self.out.extend_from_slice(&n.data),
+                        NodeKind::Text => self.escaped(&n.data, false),
+                        NodeKind::Comment => {
+                            self.push("<!--");
+                            self.out.extend_from_slice(&n.data);
+                            self.push("-->");
+                        }
+                        NodeKind::ProcessingInstruction => {
+                            self.push("<?");
+                            self.push(&n.local_name);
+                            self.push(" ");
+                            self.out.extend_from_slice(&n.data);
+                            self.push(">");
+                        }
+                        _ => {}
+                    }
                 }
-                NodeKind::ProcessingInstruction => {
-                    self.push("<?");
-                    self.push(&child.local_name);
-                    self.push(" ");
-                    self.out.extend_from_slice(&child.data);
-                    self.push(">");
-                }
-                _ => {}
             }
         }
     }
 
-    fn element(&mut self, id: NodeId, n: &NodeData) {
+    // Queue the children of `id` (a `<template>`'s: its contents) — and, before them, a host's shadow root where one
+    // is asked for.
+    fn children(&self, id: NodeId, stack: &mut Vec<Task>) {
+        let Some(n) = self.arena.get(id) else { return };
+        let parent = if n.kind == NodeKind::Element && n.is_html_named("template") { n.template_content } else { Some(id) };
+        let raw = n.kind == NodeKind::Element && n.ns == ns!(html) && RAW_TEXT.contains(&&*n.local_name);
+        if let Some(parent) = parent.and_then(|p| self.arena.get(p)) {
+            stack.extend(parent.children.iter().rev().map(|&c| Task::Node(c, raw)));
+        }
+        if let Some((_, open)) = self.shadows.iter().find(|(host, _)| *host == id) {
+            if let Some(root) = n.shadow_root {
+                stack.push(Task::Markup("</template>".encode_utf16().collect()));
+                self.children(root, stack);
+                stack.push(Task::Markup(open.clone()));
+            }
+        }
+    }
+
+    // An element's start tag written: its name, for the end tag — none for a void element, which has neither end tag
+    // nor content.
+    fn start_tag(&mut self, n: &NodeData) -> Option<String> {
         // (…an HTML, SVG or MathML element by its local name — `foreignObject` keeps its case — any other by its
         // qualified name)
         let name = if n.ns == ns!(html) || n.ns == ns!(svg) || n.ns == ns!(mathml) {
@@ -93,7 +115,7 @@ impl Writer<'_> {
         // (…an `is` value the element was made with and holds no attribute for, first)
         if let Some(is) = n.is_value.as_deref().filter(|_| n.plain_attr("is").is_none()) {
             self.push(" is=\"");
-            self.escaped(&is.encode_utf16().collect::<Vec<_>>(), true);
+            self.escaped(is, true);
             self.push("\"");
         }
         for (key, value) in &n.attributes {
@@ -107,14 +129,13 @@ impl Writer<'_> {
             self.push("\"");
         }
         self.push(">");
-        if n.ns == ns!(html) && VOID.contains(&&*n.local_name) {
-            return;
-        }
-        self.children(id);
-        self.push("</");
-        self.push(&name);
-        self.push(">");
+        (!(n.ns == ns!(html) && VOID.contains(&&*n.local_name))).then_some(name)
     }
+}
+
+enum Task {
+    Node(NodeId, bool),
+    Markup(Vec<u16>),
 }
 
 // The name an attribute is written under: its local name in no namespace; `xml:`, `xmlns:` (`xmlns` itself bare) or
@@ -135,11 +156,13 @@ fn attribute_name(n: &NodeData, key: &str) -> String {
 // `id`'s children serialized — or, `outer`, `id` itself — with the shadow roots `shadows` names.
 pub(crate) fn html(arena: &RealmArena, id: NodeId, outer: bool, shadows: &[(NodeId, Vec<u16>)]) -> Vec<u16> {
     let mut w = Writer { arena, shadows, out: Vec::new() };
+    let mut stack = Vec::new();
     match arena.get(id) {
-        Some(n) if outer && n.kind == NodeKind::Element => w.element(id, n),
-        Some(_) if !outer => w.children(id),
+        Some(n) if outer && n.kind == NodeKind::Element => stack.push(Task::Node(id, false)),
+        Some(_) if !outer => w.children(id, &mut stack),
         _ => {}
     }
+    w.run(stack);
     w.out
 }
 
@@ -246,6 +269,11 @@ fn contains(units: &[u16], s: &str) -> bool {
     units.windows(needle.len()).any(|w| w == needle)
 }
 
+enum XmlTask {
+    Node(NodeId, Option<Rc<str>>, Rc<PrefixMap>),
+    Markup(Vec<u16>),
+}
+
 struct XmlWriter<'a> {
     arena: &'a RealmArena,
     // "require well-formed" (the innerHTML / outerHTML getters): what has no well-formed serialization is refused.
@@ -284,10 +312,28 @@ impl XmlWriter<'_> {
         generated
     }
 
-    fn node(&mut self, id: NodeId, namespace: Option<&str>, map: &PrefixMap) -> Result<(), Refused> {
+    // The work still to do, last first — a walk with its own stack, as the HTML one: a node to write, in the namespace
+    // it inherits and under the prefix map its parent leaves, or markup to append.
+    fn run(&mut self, mut stack: Vec<XmlTask>) -> Result<(), Refused> {
+        while let Some(task) = stack.pop() {
+            match task {
+                XmlTask::Markup(units) => self.out.extend_from_slice(&units),
+                XmlTask::Node(id, namespace, map) => self.node(id, namespace, map, &mut stack)?,
+            }
+        }
+        Ok(())
+    }
+
+    fn node(&mut self, id: NodeId, namespace: Option<Rc<str>>, map: Rc<PrefixMap>, stack: &mut Vec<XmlTask>) -> Result<(), Refused> {
         let Some(n) = self.arena.get(id) else { return Ok(()) };
         match n.kind {
-            NodeKind::Element => self.element(n, namespace, map)?,
+            NodeKind::Element => {
+                if let Some((qualified, inherited, map, children)) = self.element(n, namespace.as_deref(), &map)? {
+                    stack.push(XmlTask::Markup(format!("</{qualified}>").encode_utf16().collect()));
+                    let (inherited, map) = (inherited.map(Rc::from), Rc::new(map));
+                    stack.extend(children.into_iter().rev().map(|c| XmlTask::Node(c, inherited.clone(), map.clone())));
+                }
+            }
             NodeKind::Text if n.cdata => {
                 if self.well_formed && (!xml_chars(&n.data) || contains(&n.data, "]]>")) {
                     return Err("Failed to serialize XML: CDATA section data is not well-formed.");
@@ -324,23 +370,25 @@ impl XmlWriter<'_> {
                 self.push("?>");
             }
             NodeKind::Other => {
-                let (public, system) = n.doctype_ids.as_deref().map_or(("", ""), |(p, s)| (p.as_str(), s.as_str()));
+                let (public, system) = n.doctype_ids.as_deref().map_or((&[][..], &[][..]), |(p, s)| (&p[..], &s[..]));
                 self.push("<!DOCTYPE ");
                 self.out.extend_from_slice(&n.data);
                 if !public.is_empty() {
-                    self.push(&format!(" PUBLIC \"{public}\""));
+                    self.push(" PUBLIC \"");
+                    self.out.extend_from_slice(public);
+                    self.push("\"");
                 } else if !system.is_empty() {
                     self.push(" SYSTEM");
                 }
                 if !system.is_empty() {
-                    self.push(&format!(" \"{system}\""));
+                    self.push(" \"");
+                    self.out.extend_from_slice(system);
+                    self.push("\"");
                 }
                 self.push(">");
             }
             NodeKind::Document | NodeKind::Fragment => {
-                for &c in &n.children {
-                    self.node(c, namespace, map)?;
-                }
+                stack.extend(n.children.iter().rev().map(|&c| XmlTask::Node(c, namespace.clone(), map.clone())));
             }
         }
         Ok(())
@@ -377,7 +425,10 @@ impl XmlWriter<'_> {
         default
     }
 
-    fn element(&mut self, n: &NodeData, namespace: Option<&str>, parent_map: &PrefixMap) -> Result<(), Refused> {
+    // An element's start tag written, by the namespace it inherits and its parent's prefix map: its qualified name, the
+    // namespace and prefix map its children inherit, and its children — none where it closes itself.
+    #[allow(clippy::type_complexity)]
+    fn element(&mut self, n: &NodeData, namespace: Option<&str>, parent_map: &PrefixMap) -> Result<Option<(String, Option<String>, PrefixMap, Vec<NodeId>)>, Refused> {
         let local_name = &*n.local_name;
         if self.well_formed && local_name.contains(':') {
             return Err("Failed to serialize XML: an element's local name contains ':'.");
@@ -440,17 +491,11 @@ impl XmlWriter<'_> {
         let html = ns == Some(HTML_NS);
         if n.children.is_empty() && (!html || XML_VOID.contains(&local_name)) {
             self.push(if html { " />" } else { "/>" });
-            return Ok(());
+            return Ok(None);
         }
         self.push(">");
         let children = if html && local_name == "template" { n.template_content.map(|c| vec![c]).unwrap_or_default() } else { n.children.clone() };
-        for c in children {
-            self.node(c, inherited.as_deref(), &map)?;
-        }
-        self.push("</");
-        self.push(&qualified);
-        self.push(">");
-        Ok(())
+        Ok(Some((qualified, inherited, map, children)))
     }
 
     fn attributes(&mut self, n: &NodeData, map: &mut PrefixMap, local_prefixes: &[(String, String)], ignore_namespace_definition: bool) -> Result<(), Refused> {
@@ -506,16 +551,13 @@ impl XmlWriter<'_> {
 // `id` serialized as XML — or, `inner`, its children — requiring it well-formed where `well_formed`.
 pub(crate) fn xml(arena: &RealmArena, id: NodeId, inner: bool, well_formed: bool) -> Result<Vec<u16>, Refused> {
     let mut w = XmlWriter { arena, well_formed, prefix_index: 1, out: Vec::new() };
-    let map: PrefixMap = vec![(XML_NS.to_string(), vec!["xml".to_string()])];
-    match arena.get(id) {
-        Some(n) if inner => {
-            for c in n.children.clone() {
-                w.node(c, None, &map)?;
-            }
-        }
-        Some(_) => w.node(id, None, &map)?,
-        None => {}
-    }
+    let map: Rc<PrefixMap> = Rc::new(vec![(XML_NS.to_string(), vec!["xml".to_string()])]);
+    let stack = match arena.get(id) {
+        Some(n) if inner => n.children.iter().rev().map(|&c| XmlTask::Node(c, None, map.clone())).collect(),
+        Some(_) => vec![XmlTask::Node(id, None, map)],
+        None => Vec::new(),
+    };
+    w.run(stack)?;
     Ok(w.out)
 }
 
