@@ -31,7 +31,9 @@ pub(crate) fn avif(bytes: &[u8]) -> Option<Bitmap> {
         for (px, a) in rgba.chunks_exact_mut(4).zip(alpha.rgba.chunks_exact(4)) {
             px[3] = a[0];
             if file.premultiplied_alpha && a[0] > 0 {
-                [0, 1, 2].map(|c| px[c] = ((u32::from(px[c]) * 255 + u32::from(a[0]) / 2) / u32::from(a[0])).min(255) as u8);
+                for c in &mut px[..3] {
+                    *c = ((u32::from(*c) * 255 + u32::from(a[0]) / 2) / u32::from(a[0])).min(255) as u8;
+                }
             }
         }
     }

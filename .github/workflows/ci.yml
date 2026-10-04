@@ -28,10 +28,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # ruby-vips `dlopen`s `libvips.so.42` at load, and the gem requires it at load,
-      # so WITHOUT this step nothing runs — not just the canvas specs. (It renders
-      # canvas text; images and videos decode natively.) Keep this step failing
-      # loudly: made best-effort, every job would fail later and less clearly.
+      # The specs read screenshots and encoded canvases back, and the WPT gate diffs reftest
+      # renderings, with ruby-vips, which `dlopen`s `libvips.so.42` (the driver itself needs
+      # no libvips). Keep this step failing loudly: made best-effort, those specs would fail
+      # later and less clearly.
       - name: Install libvips
         # `--no-install-recommends`: libvips's recommends are nothing the specs use.
         #
@@ -100,19 +100,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-
-      # ruby-vips dlopens libvips at load and the gem requires it at load, so the gem won't
-      # load without it even here (see the `test` job for the mirror-hardening rationale).
-      - name: Install libvips
-        timeout-minutes: 6
-        run: |
-          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt || true
-          apt_try() {
-            sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 update &&
-            sudo timeout 120 apt-get -o Acquire::http::Timeout=15 -o Acquire::Retries=2 \
-                             install -y --no-install-recommends libvips42t64
-          }
-          apt_try || { echo 'apt failed; retrying once' >&2; sleep 10; apt_try; }
 
       - uses: ruby/setup-ruby@v1
         with:

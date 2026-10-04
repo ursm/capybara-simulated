@@ -711,12 +711,8 @@ css/css-flexbox/relayout-input.html:
 css/css-font-loading/fontface-descriptor-updates-2.html:
 - Descriptor mutations before adding to FontFaceSet are correctly reflected
 - FontFace descriptor mutations are reflected in FontFaceSet
-css/css-font-loading/fontface-descriptor-updates.html:
-- "== css/css-font-loading/fontface-descriptor-updates-ref.html"
 css/css-font-loading/fontface-font-variation-settings-persisted-js-api.html:
 - Test FontFace variationSettings property
-css/css-font-loading/fontface-from-arraybuffer.html:
-- "== css/css-font-loading/fontface-from-arraybuffer-ref.html"
 css/css-shadow/part/exportparts-layered.html:
 - "== css/css-shadow/part/exportparts-layered.ref.html"
 css/css-shadow/part/interaction-with-pseudo-elements.html:
@@ -2679,6 +2675,24 @@ html/canvas/element/manual/text/canvas.2d.direction.inherit.disconnected.canvas.
 - "== html/canvas/element/manual/text/canvas.2d.direction-ref.html"
 html/canvas/element/manual/text/canvas.2d.disconnected.html:
 - "== html/canvas/element/manual/text/canvas.2d.disconnected-ref.html"
+html/canvas/element/manual/text/canvas.2d.fontStretch.condensed.html:
+- "== html/canvas/element/manual/text/canvas.2d.fontStretch-ref.html"
+html/canvas/element/manual/text/canvas.2d.fontStretch.expanded.html:
+- "== html/canvas/element/manual/text/canvas.2d.fontStretch-ref.html"
+html/canvas/element/manual/text/canvas.2d.fontStretch.extra-condensed.html:
+- "== html/canvas/element/manual/text/canvas.2d.fontStretch-ref.html"
+html/canvas/element/manual/text/canvas.2d.fontStretch.extra-expanded.html:
+- "== html/canvas/element/manual/text/canvas.2d.fontStretch-ref.html"
+html/canvas/element/manual/text/canvas.2d.fontStretch.normal.html:
+- "== html/canvas/element/manual/text/canvas.2d.fontStretch-ref.html"
+html/canvas/element/manual/text/canvas.2d.fontStretch.semi-condensed.html:
+- "== html/canvas/element/manual/text/canvas.2d.fontStretch-ref.html"
+html/canvas/element/manual/text/canvas.2d.fontStretch.semi-expanded.html:
+- "== html/canvas/element/manual/text/canvas.2d.fontStretch-ref.html"
+html/canvas/element/manual/text/canvas.2d.fontStretch.ultra-condensed.html:
+- "== html/canvas/element/manual/text/canvas.2d.fontStretch-ref.html"
+html/canvas/element/manual/text/canvas.2d.fontStretch.ultra-expanded.html:
+- "== html/canvas/element/manual/text/canvas.2d.fontStretch-ref.html"
 html/canvas/element/manual/text/canvas.2d.lang.dynamic.html:
 - "== html/canvas/element/manual/text/canvas.2d.lang.dynamic-ref.html (never ready
   to capture)"
@@ -2853,10 +2867,6 @@ html/canvas/element/text/2d.text.measure.lang.html:
 - Testing the lang attribute
 html/canvas/element/text/2d.text.measure.lang.inherit.html:
 - Testing the lang attribute
-html/canvas/element/text/direction-inherit-rtl.html:
-- "== html/canvas/element/text/reference/direction-rtl-ref.html"
-html/canvas/element/text/direction-rtl.html:
-- "== html/canvas/element/text/reference/direction-rtl-ref.html"
 html/dom/elements/global-attributes/dir-auto-dynamic-simple-dataChange.html:
 - "== html/dom/elements/global-attributes/dir-auto-dynamic-simple-ref.html (never
   ready to capture)"
@@ -2876,12 +2886,8 @@ html/dom/elements/global-attributes/dir_auto-pre-N-between-Rs.html:
 - "== html/dom/elements/global-attributes/dir_auto-pre-N-between-Rs-ref.html"
 html/dom/elements/global-attributes/dir_auto-textarea-N-between-Rs.html:
 - "== html/dom/elements/global-attributes/dir_auto-textarea-N-between-Rs-ref.html"
-html/dom/elements/global-attributes/dir_auto-textarea-mixed.html:
-- "== html/dom/elements/global-attributes/dir_auto-textarea-mixed-ref.html"
 html/dom/elements/global-attributes/dir_auto-textarea-script-N-between-Rs.html:
 - "== html/dom/elements/global-attributes/dir_auto-textarea-script-N-between-Rs-ref.html"
-html/dom/elements/global-attributes/dir_auto-textarea-script-mixed.html:
-- "== html/dom/elements/global-attributes/dir_auto-textarea-script-mixed-ref.html"
 html/dom/elements/global-attributes/the-lang-attribute-003.html:
 - The browser will recognize a language declared in the HTTP header, when there is
   no internal language declaration.

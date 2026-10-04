@@ -36,14 +36,11 @@ gem 'capybara-simulated', group: :test
 
 ### System libraries
 
-**libvips** — Debian/Ubuntu `libvips42`, Homebrew `vips`, Gentoo `media-libs/vips`. The `ruby-vips`
-gem comes with the driver and binds to it; the driver names the package it wants if the library is
-missing.
-
 **fontconfig** — text is MEASURED from the font file fontconfig resolves each CSS family to (the
 same face a browser gets on the same machine), so a box's height and a line's wrapping depend on
-the fonts installed. A machine with no fonts falls back to an estimate and measures text wider or
-narrower than a real browser would.
+the fonts installed; a canvas draws its text in that face too. The driver opens the library at
+`require` and says so if it is missing. Images, video frames and canvas files are decoded and
+encoded inside the driver: nothing else needs installing.
 
 ### JS engine
 

@@ -528,7 +528,7 @@ pub(crate) struct CanvasFont {
     // 0 upright, 1 italic, 2 oblique.
     pub(crate) slant: u8,
     pub(crate) small_caps: bool,
-    // The first family: a name as written, or a generic family's keyword.
+    // The family stack, serialized: what a page's `font-family` resolves to a face by (font-metrics.js).
     pub(crate) family: String,
 }
 pub(crate) fn canvas_font(text: &str, em: f64, rem: f64, lh: f64, rlh: f64) -> Option<CanvasFont> {
@@ -594,8 +594,8 @@ pub(crate) fn canvas_font(text: &str, em: f64, rem: f64, lh: f64, rlh: f64) -> O
     }
     let px = (px * 1e6).round() / 1e6;
     parts.push(format!("{}px", crate::numbers::to_js_string(px)));
-    parts.push(font.family.iter().map(|f| f.to_css_string()).collect::<Vec<_>>().join(", "));
-    let family = font.family.iter().next().map_or_else(String::new, family_name);
+    let family = font.family.iter().map(|f| f.to_css_string()).collect::<Vec<_>>().join(", ");
+    parts.push(family.clone());
     Some(CanvasFont { css: parts.join(" "), px, weight, slant, small_caps, family })
 }
 // A family as a name: a family name as written, a generic family's keyword.

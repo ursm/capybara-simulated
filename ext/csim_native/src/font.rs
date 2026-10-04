@@ -29,7 +29,8 @@ pub(crate) struct FontMetrics {
     // The `size-adjust` its advances are scaled by (`register_scaled`), which a painter draws its glyphs at too — 1 for
     // a face as its file has it.
     scale: f64,
-    // Its `hhea` ascent, descent and line gap in ems — None where it has no positive ascent — and its x-height (OS/2's
+    // Its ascent, descent and line gap in ems (`hhea`'s, or OS/2's typographic ones where it asks for those) — None where
+    // it has no positive ascent — and its x-height (OS/2's
     // `sxHeight`, 0 where the table is older than version 2): what a line and an `ex` are laid out by. Scaled with the
     // advances.
     vertical: Option<VerticalMetrics>,
@@ -37,6 +38,8 @@ pub(crate) struct FontMetrics {
     // Whether it maps any ASCII letter: a face with none (a colour emoji font maps the digits, `#` and `*` for its
     // keycaps, and no letter) sets no text, which falls back to the next family.
     letters: bool,
+    // The file it was read from, which a canvas's text is shaped and drawn from (text.rs).
+    path: std::sync::Arc<str>,
 }
 
 // One face of a `unicode-range` split: its registered handle, the ranges it covers (None: every code point), and its
@@ -76,6 +79,10 @@ impl FontMetrics {
     // own (no split, or no member covers it).
     fn member_for(&self, cp: u32) -> Option<&StackMember> {
         self.split.as_ref()?.iter().find(|m| m.covers(cp))
+    }
+    // The registered face a character takes in a split — its covering member's handle — or None for this face's own.
+    pub(crate) fn member_handle(&self, cp: u32) -> Option<i32> {
+        self.member_for(cp).map(|m| m.handle)
     }
     // Whether this face splits a run's characters across faces (`registerFontStack`).
     pub(crate) fn is_split(&self) -> bool {
@@ -135,17 +142,16 @@ impl FontMetrics {
             return None;
         }
         use skrifa::raw::TableProvider;
-        let vertical = font.hhea().ok().and_then(|hhea| {
-            let asc = f64::from(hhea.ascender().to_i16());
-            (asc > 0.0).then(|| VerticalMetrics {
-                asc: asc / upem,
-                desc: -f64::from(hhea.descender().to_i16()) / upem,
-                gap: f64::from(hhea.line_gap().to_i16()) / upem,
-            })
+        // (…its OS/2 typographic metrics where it asks for them — fsSelection's USE_TYPO_METRICS, bit 7 — as Skia reads
+        // a face for Chrome; else its hhea)
+        let typo = font.os2().ok().filter(|os2| os2.fs_selection().bits() & 0x80 != 0).map(|os2| (os2.s_typo_ascender(), os2.s_typo_descender(), os2.s_typo_line_gap()));
+        let lines = typo.or_else(|| font.hhea().ok().map(|h| (h.ascender().to_i16(), h.descender().to_i16(), h.line_gap().to_i16())));
+        let vertical = lines.and_then(|(asc, desc, gap)| {
+            (asc > 0).then(|| VerticalMetrics { asc: f64::from(asc) / upem, desc: -f64::from(desc) / upem, gap: f64::from(gap) / upem })
         });
         let x_height = font.os2().ok().filter(|os2| os2.version() >= 2).and_then(|os2| os2.sx_height()).map_or(0.0, |x| f64::from(x) / upem);
         let letters = (b'A'..=b'Z').chain(b'a'..=b'z').any(|c| ascii[c as usize].is_some());
-        Some(FontMetrics { ascii, avg: total / count as f64, split: None, scale: 1.0, vertical, x_height, letters })
+        Some(FontMetrics { ascii, avg: total / count as f64, split: None, scale: 1.0, vertical, x_height, letters, path: "".into() })
     }
 
     // The metrics a face's lines, its spaces and an `ex` of it are laid out by, per em: its vertical metrics — an
@@ -357,7 +363,7 @@ pub(crate) fn register_path(path: &str) -> i32 {
     }
     let h = match std::fs::read(path) {
         Ok(bytes) => {
-            let metrics = FontMetrics::from_bytes(&bytes);
+            let metrics = FontMetrics::from_bytes(&bytes).map(|fm| FontMetrics { path: path.into(), ..fm });
             let ok = metrics.is_some();
             let handle = FONTS.with(|f| {
                 let mut v = f.borrow_mut();
@@ -393,6 +399,7 @@ pub(crate) fn register_scaled(handle: i32, scale: f64) -> i32 {
             vertical: fm.vertical.map(|v| VerticalMetrics { asc: v.asc * scale, desc: v.desc * scale, gap: v.gap * scale }),
             x_height: fm.x_height * scale,
             letters: fm.letters,
+            path: fm.path.clone(),
         })
     });
     let h = match scaled {
@@ -428,6 +435,7 @@ pub(crate) fn register_stack(primary: i32, members: Vec<StackMember>) -> i32 {
             vertical: fm.vertical,
             x_height: fm.x_height,
             letters: fm.letters,
+            path: fm.path.clone(),
         })
     });
     let h = match stacked {
@@ -440,6 +448,13 @@ pub(crate) fn register_stack(primary: i32, members: Vec<StackMember>) -> i32 {
     };
     FONT_IDX.with(|m| m.borrow_mut().insert(key, h));
     h
+}
+
+impl FontMetrics {
+    // The file it was read from, the `size-adjust` it is drawn at, and its vertical metrics in ems.
+    pub(crate) fn source(&self) -> (std::sync::Arc<str>, f64, Option<VerticalMetrics>) {
+        (self.path.clone(), self.scale, self.vertical)
+    }
 }
 
 // Run `f` with the FontMetrics for `handle`, or None when the handle is out of range / unusable. The

@@ -57,7 +57,11 @@ regress = { version = "0.12", features = ["utf16"] }
 # Native text metrics for native layout (stage L2): fontations (the pure-Rust font stack Chrome & Servo
 # use). `skrifa` reads a font's cmap + hmtx advances + metrics, so native inline layout measures runs +
 # breaks lines IN-PROCESS (no per-run V8 crossing). Re-exports read-fonts as `skrifa::raw`.
-skrifa = "0.31"
+skrifa = "0.44"
+# A canvas's text shaped as HarfBuzz shapes it (text.rs), on the same font model skrifa reads.
+harfrust = "0.12"
+# …in visual order by the Unicode bidirectional algorithm.
+unicode-bidi = "0.3"
 
 # The Unicode general categories the ORACLE asks a regex for (`\p{L}` / `\p{N}` / `\p{M}`) — the classes
 # `layout::hyphen_breaks_after` and `font::zero_width` have to agree with it about. regex-syntax bakes in a

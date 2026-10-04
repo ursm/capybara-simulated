@@ -51,6 +51,7 @@ mod sheets;
 // The style engine: stylo over the arena.
 mod style;
 mod style_fonts;
+mod text;
 mod text_codec;
 // The Unicode classes layout asks of a character, parsed out of the regex that spells them by regex-syntax.
 mod unicode;

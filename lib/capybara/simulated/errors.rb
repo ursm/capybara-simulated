@@ -18,8 +18,7 @@ module Capybara
     # real driver's ElementClickInterceptedError.
     class ClickIntercepted < Capybara::ElementNotFound; end
 
-    # Raised by `save_screenshot` when the page could not be rastered — most often because
-    # `ruby-vips` (the rasteriser behind the whole canvas stack) isn't in the bundle.
+    # Raised by `save_screenshot` when the page could not be rastered: it painted nothing.
     class ScreenshotFailed < Capybara::CapybaraError; end
   end
 end

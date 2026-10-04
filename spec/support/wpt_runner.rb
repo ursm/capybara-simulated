@@ -7,6 +7,8 @@ require 'set'
 require 'json'
 require 'open3'
 require 'digest'
+# The reftest raster diff reads both renderings' PNGs with libvips (a development dependency: the driver needs none).
+require 'vips'
 
 # Drives the vendored web-platform-tests (spec/wpt/) through the :simulated
 # driver and normalises each file's testharness.js results. Shared by the

@@ -48,10 +48,6 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency 'capybara', '>= 3.37'
   spec.add_dependency 'rack',     '>= 2.2'
-  # The rasteriser: image decoding (an `<img>`'s intrinsic size, which LAYOUT sizes the box from),
-  # the canvas surface, and `save_screenshot`. Binds to the libvips SYSTEM library — Debian/Ubuntu
-  # `libvips42`, Homebrew `vips`, Gentoo `media-libs/vips`.
-  spec.add_dependency 'ruby-vips', '~> 2.2'
   # Brotli, to decode WOFF2 web fonts to their real text metrics.
   spec.add_dependency 'brotli', '~> 0.5'
   # rb-sys drives the native extension's build (ext/csim_native/extconf.rb). Needed

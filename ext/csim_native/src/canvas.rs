@@ -254,7 +254,7 @@ fn apply(m: &Matrix, x: f64, y: f64) -> (f64, f64) {
 // A buffer an operation needs that cannot be had — a page's own size asked for one it cannot get (a canvas
 // 2147483647 wide): the op throws a RangeError, as the typed array that held it used to, rather than abort.
 #[derive(Debug)]
-struct Oom;
+pub(crate) struct Oom;
 fn zeroed<T: Copy>(n: usize, v: T) -> Result<Vec<T>, Oom> {
     let mut out = Vec::new();
     out.try_reserve_exact(n).map_err(|_| Oom)?;
@@ -346,7 +346,7 @@ fn cover_box(b: [f64; 4], cw: usize, ch: usize, shift: (f64, f64), emit: &mut dy
 // Rings filled by scanline: each pixel row sampled at four sub-scanlines, each covered span adding its exact
 // horizontal overlap into the row's coverage. Nonzero merges each region of nonzero winding (overlapping pieces of a
 // stroke cover a pixel once); even-odd alternates.
-fn cover_rings(rings: &[Ring], even_odd: bool, cw: usize, ch: usize, shift: (f64, f64), emit: &mut dyn FnMut(usize, usize, f64)) -> Result<(), Oom> {
+pub(crate) fn cover_rings(rings: &[Ring], even_odd: bool, cw: usize, ch: usize, shift: (f64, f64), emit: &mut dyn FnMut(usize, usize, f64)) -> Result<(), Oom> {
     let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
     for &(_, y) in rings.iter().flatten() {
         min_y = min_y.min(y);
