@@ -100,4 +100,18 @@ RSpec.describe 'node handles' do
     JS
     expect([before[:id], before.visible?]).to eq(['before', true])
   end
+
+  # The snapshot made every realm's skeleton with the same ids: a frame's `<body>` moved into the document is renamed
+  # where it lands, and the document's own keeps its handle — across the move and back out.
+  it "keeps the document's body named apart from a frame's body moved into it" do
+    pages = {'/' => '<!DOCTYPE html><meta charset=utf-8><body><button id=b0>main</button><div id=out></div><iframe id=f src="/f"></iframe>',
+             '/f' => '<!DOCTYPE html><meta charset=utf-8><body><p>frame text</p>'}
+    s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [pages.fetch(env['PATH_INFO'], '')]] })
+    s.visit '/'
+    body = s.find(:css, 'body')
+    s.execute_script("document.getElementById('out').appendChild(document.getElementById('f').contentWindow.document.body)")
+    expect(body.all(:css, 'button').size).to eq(1)
+    s.execute_script("document.getElementById('out').textContent = ''")
+    expect(body.text).to eq('main')
+  end
 end
