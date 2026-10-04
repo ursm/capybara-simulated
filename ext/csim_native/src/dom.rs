@@ -166,6 +166,10 @@ pub(crate) struct NodeData {
     // A slot's assigned nodes, in tree order, and a slotted node's slot: the flat tree the style engine walks.
     pub(crate) assigned: Vec<NodeId>,
     pub(crate) assigned_slot: Option<NodeId>,
+    // A CDATA section, of the text nodes — which XML serializes as one.
+    pub(crate) cdata: bool,
+    // A doctype's public and system identifiers (its name is its `data`) — which XML serializes.
+    pub(crate) doctype_ids: Option<Box<(String, String)>>,
     // A `<template>`'s contents (the fragment `content` is), which no child list holds — what serializing it writes.
     pub(crate) template_content: Option<NodeId>,
     // The `is` value an element was made with (a customized built-in's) — serialized where it holds no `is` attribute.
@@ -246,6 +250,8 @@ impl NodeData {
             shadow_root: None,
             assigned: Vec::new(),
             assigned_slot: None,
+            cdata: false,
+            doctype_ids: None,
             template_content: None,
             is_value: None,
             value: None,
@@ -1303,16 +1309,19 @@ fn import_node(
     set_nid(scope, &mut rv, id);
 }
 
-// __dom.createNode(nodeType, data, parentNid, target) -> nid. Adds any other node — a Text / CDATA / Comment / PI with
-// its data (and a PI its target), a Document, a DocumentFragment or ShadowRoot, a DocumentType — appended to
-// `parentNid` when that is live.
+// __dom.createNode(nodeType, data, parentNid, target, systemId) -> nid. Adds any other node — a Text / CDATA / Comment /
+// PI with its data (and a PI its target), a Document, a DocumentFragment or ShadowRoot, a DocumentType (its name the
+// data, its public identifier the target) — appended to `parentNid` when that is live.
 fn create_node(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let kind = NodeKind::from_node_type(args.get(0).integer_value(scope).unwrap_or(0));
+    let node_type = args.get(0).integer_value(scope).unwrap_or(0);
+    let kind = NodeKind::from_node_type(node_type);
     let data = utf16_arg(scope, args.get(1));
+    let doctype_ids = (node_type == 10)
+        .then(|| Box::new((args.get(3).to_rust_string_lossy(scope), args.get(4).to_rust_string_lossy(scope))));
     let parent = nid_arg(scope, &args, 2);
     let local_name = if kind == NodeKind::ProcessingInstruction {
         LocalName::from(args.get(3).to_rust_string_lossy(scope))
@@ -1321,7 +1330,7 @@ fn create_node(
     };
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
-    let id = arena.create(NodeData { local_name, ..NodeData::of_kind(kind, data) }, parent);
+    let id = arena.create(NodeData { local_name, cdata: node_type == 4, doctype_ids, ..NodeData::of_kind(kind, data) }, parent);
     if let (Some(engine), Some(p)) = (engine, parent) {
         engine.children_changed(arena, p);
     }
