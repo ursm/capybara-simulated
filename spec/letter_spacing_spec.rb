@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'capybara/simulated'
-require 'vips'
+require_relative 'support/raster'
 require_relative 'support/session_teardown'
 
 # `letter-spacing` and `word-spacing` are part of an advance. The flow measured a run from the
@@ -276,11 +276,9 @@ RSpec.describe 'letter-spacing and word-spacing reach the flow' do
     path = File.join(Dir.tmpdir, "csim-ls-#{Process.pid}.png")
     begin
       s.driver.save_screenshot(path)
-      img = Vips::Image.new_from_file(path)
-      raw = img.write_to_memory
-      bands = img.bands
+      img = Raster.read(path)
       ink_right = lambda do |(y0, y1)|
-        (0...img.width).select {|x| (y0...y1).any? {|y| raw.byteslice(((y * img.width) + x) * bands, 3).bytes[0] < 128 } }.max
+        img.ink_columns(y0, y1).max
       end
       unspaced = ink_right.call(band.call('u'))
       spaced   = ink_right.call(band.call('t'))

@@ -123,7 +123,7 @@ const TREES = [
                                        // engine; the pure-API slice of CSS (css/cssom-view is the
                                        // layout-dependent one and is deliberately NOT vendored)
   'html/canvas/element',               // 2D canvas context — the in-process software rasterizer (paths /
-                                       // gradients / text via libvips / shadow / compositing / Path2D / AA)
+                                       // gradients / text / shadow / compositing / Path2D / AA)
                                        // measured against the harness tests. Pixel-exact-Chrome-AA / filter
                                        // / reftest cases earn out; the API + close-enough-pixel slice is in
                                        // scope. (offscreen/ mirrors this via OffscreenCanvas — added later.)

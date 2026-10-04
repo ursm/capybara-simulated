@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'capybara/simulated'
-require 'vips'
+require_relative 'support/raster'
 require_relative 'support/session_teardown'
 
 # `text-align` never moved a line: every line started at the block's content edge whatever the
@@ -496,12 +496,10 @@ RSpec.describe "text-align lines a block's lines up" do
     path = File.join(Dir.tmpdir, "csim-tj-#{Process.pid}.png")
     begin
       s.driver.save_screenshot(path)
-      img = Vips::Image.new_from_file(path)
-      raw = img.write_to_memory
-      bands = img.bands
+      img = Raster.read(path)
       # The right edge of the ink in each run's own band: "bb" ends where the run ends.
       ink_right = lambda do |(_x, _w, y0, y1)|
-        (0...img.width).select {|x| (y0...y1).any? {|y| raw.byteslice(((y * img.width) + x) * bands, 3).bytes[0] < 128 } }.max
+        img.ink_columns(y0, y1).max
       end
       shift = ink_right.call(r[1]) - ink_right.call(r[0])
       expect(shift).to be_within(1.5).of(r[1][1] - r[0][1])              # by the run's widening
@@ -517,11 +515,9 @@ RSpec.describe "text-align lines a block's lines up" do
     path = File.join(Dir.tmpdir, "csim-ta-#{Process.pid}.png")
     begin
       s.driver.save_screenshot(path)
-      img = Vips::Image.new_from_file(path)
-      raw = img.write_to_memory
-      bands = img.bands
+      img = Raster.read(path)
       ink_left = lambda do |(y0, y1)|
-        (0...img.width).find {|x| (y0...y1).any? {|y| raw.byteslice(((y * img.width) + x) * bands, 3).bytes[0] < 128 } }
+        img.ink_columns(y0, y1).min
       end
       shift = ink_left.call(band.call('t')) - ink_left.call(band.call('u'))
       expect(shift).to be_within(1.5).of(300 - r['t'][2])              # ± antialiasing

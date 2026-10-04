@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'capybara/simulated'
-require 'vips'
+require_relative 'support/raster'
 require_relative 'support/session_teardown'
 
 # A preserved tab advances to the next TAB STOP: stops every `tab-size` from the block's content
@@ -202,12 +202,10 @@ RSpec.describe 'tab stops' do
     path = File.join(Dir.tmpdir, "csim-tab-#{Process.pid}.png")
     begin
       s.driver.save_screenshot(path)
-      img = Vips::Image.new_from_file(path)
-      raw = img.write_to_memory
-      bands = img.bands
+      img = Raster.read(path)
       # The right edge of the ink in each band: "cd" ends one stop later in the tabbed block.
       ink_right = lambda do |(y0, y1)|
-        (0...img.width).select {|x| (y0...y1).any? {|y| raw.byteslice(((y * img.width) + x) * bands, 3).bytes[0] < 128 } }.max
+        img.ink_columns(y0, y1).max
       end
       expect(ink_right.call(band.call('t')) - ink_right.call(band.call('c'))).to be_within(1.5).of(8 * sp)
     ensure

@@ -239,16 +239,13 @@ RSpec.describe 'style engine invalidation' do
   # (the WPT reftest `offset-change-inline-backface-visibility-hidden`), its background where it went. The glyph's ink
   # starts at x 100, as its box does.
   it 'paints text where a margin written after the last pass put it' do
-    require 'vips'
+    require_relative 'support/raster'
     s = visit('<div id="c"><div style="width: 100px; font: 30px monospace"><span>X</span></div></div>', css: 'body { margin: 0 }')
     s.evaluate_script('document.body.offsetHeight')   # the Rust walk's pass, before the write
     s.execute_script("document.getElementById('c').style.marginLeft = '100px'")
     path = File.join(Dir.tmpdir, "csim-edges-#{Process.pid}.png")
     s.driver.save_screenshot(path)
-    img = Vips::Image.new_from_file(path)
-    raw = img.write_to_memory
-    ink = (0...img.width).select {|x| (0...30).any? {|y| raw.byteslice(((y * img.width) + x) * img.bands, 3).bytes[0] < 128 } }
-    expect(ink.min).to be >= 100
+    expect(Raster.read(path).ink_columns(0, 30).min).to be >= 100
   ensure
     File.delete(path) if path && File.exist?(path)
   end

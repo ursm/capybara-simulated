@@ -2,7 +2,7 @@ require_relative 'spec_helper'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
-# `canvas.toBlob` must emit the encoded image as raw binary. The libvips
+# `canvas.toBlob` must emit the encoded image as raw binary. The native
 # encoder hands back a byte buffer; if that buffer is funnelled through a
 # latin1 string into the Blob constructor it becomes a USVString part and
 # gets UTF-8-encoded on readback, so every byte >= 0x80 is doubled and the

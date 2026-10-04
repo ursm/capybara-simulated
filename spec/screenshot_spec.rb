@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'capybara/simulated'
-require 'vips'
+require_relative 'support/raster'
 require_relative 'support/session_teardown'
 
 # `save_screenshot` rasters the laid-out page (js/src/paint.js) rather than serializing it. There
@@ -31,23 +31,8 @@ RSpec.describe 'save_screenshot' do
   def shot(session, **opts)
     path = File.join(Dir.tmpdir, "csim-shot-#{Process.pid}-#{rand(1 << 32)}.png")
     session.driver.save_screenshot(path, **opts)
-    img = Vips::Image.new_from_file(path)
-    # The whole raster once, then plain string indexing. `getpoint` is a full Vips operation per
-    # call — fine for a handful, but the ink scan below asks thousands, which took this file past
-    # its 60s budget on CI while passing locally.
-    raw   = img.write_to_memory
-    bands = img.bands
-    px = lambda do |x, y|
-      # Bounds-checked: the offset arithmetic would otherwise wrap an out-of-range x onto the NEXT
-      # ROW and answer with a real pixel from the wrong place — which is exactly how a stale
-      # coordinate passed here once, reading red where the assertion wanted white.
-      raise ArgumentError, "(#{x}, #{y}) is outside the #{img.width}x#{img.height} raster" \
-        unless x.between?(0, img.width - 1) && y.between?(0, img.height - 1)
-
-      off = ((y * img.width) + x) * bands
-      raw.byteslice(off, 3).bytes
-    end
-    yield img, px, path
+    img = Raster.read(path)
+    yield img, ->(x, y) { img[x, y].first(3) }, path
   ensure
     File.delete(path) if path && File.exist?(path)
   end

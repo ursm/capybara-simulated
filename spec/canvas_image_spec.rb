@@ -8,7 +8,7 @@ require_relative 'support/session_teardown'
 
 # Coverage for the pixel-buffer stack: ImageData, OffscreenCanvas,
 # CanvasRenderingContext2D's drawImage / getImageData / putImageData
-# round-trip, and createImageBitmap(blob) decoding through libvips.
+# round-trip, and createImageBitmap(blob) decoding natively.
 
 RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   # Pre-encoded 4×3 RGBA PNG. Row 0 is red/green/blue/white; the rest
@@ -70,7 +70,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(arr[12,4]).to eq([0, 0, 0, 0])         # untouched
   end
 
-  it 'createImageBitmap decodes a PNG blob via libvips and drawImage copies pixels' do
+  it 'createImageBitmap decodes a PNG blob and drawImage copies pixels' do
     session = simulated_session(app)
     session.visit('/')
     # Build a Blob from a known PNG. A string blobPart is UTF-8-encoded

@@ -22,8 +22,6 @@ group :development, :test do
   gem 'rake',              require: false
   gem 'rake-compiler',     require: false # builds the native ext (ext/csim_native: V8 engine + native DOM) for dev/CI
   gem 'rspec',             '~> 3.13'
-  gem 'ruby-vips',         '~> 2.2' # specs read a screenshot / an encoded canvas back, and the WPT gate diffs reftest
-                                    # renderings, with libvips; the driver itself needs neither
   gem 'selenium-webdriver' # bench/run.rb under :selenium
   gem 'stackprof',         require: false # sampling profiler for perf investigations
   gem 'sinatra',           '>= 4.0'

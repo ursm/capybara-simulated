@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'capybara/simulated'
-require 'vips'
+require_relative 'support/raster'
 require_relative 'support/session_teardown'
 
 # The HTTP cache as a test sees it across sessions: what `reset!` keeps (a persistent browser
@@ -16,7 +16,7 @@ RSpec.describe 'HTTP cache across sessions' do
   end
 
   def png(width, height)
-    Vips::Image.black(width, height, bands: 3).write_to_buffer('.png')
+    Raster.png(width, height, "\0".b * (width * height * 3))
   end
 
   def wait_for_image(session, id)

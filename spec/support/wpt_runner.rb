@@ -7,8 +7,8 @@ require 'set'
 require 'json'
 require 'open3'
 require 'digest'
-# The reftest raster diff reads both renderings' PNGs with libvips (a development dependency: the driver needs none).
-require 'vips'
+# The reftest raster diff reads both renderings' PNGs with the driver's own decoder.
+require_relative 'raster'
 
 # Drives the vendored web-platform-tests (spec/wpt/) through the :simulated
 # driver and normalises each file's testharness.js results. Shared by the
@@ -982,10 +982,9 @@ module WptRunner
 
   # Reference tests: a file that names a reference with `<link rel="match">` /
   # `<link rel="mismatch">` and is judged by RENDERING both and comparing the two
-  # images — the way Chromium and Firefox run them, and what the painter (plus
-  # libvips) made possible here. The comparison is between two renderings by the
-  # SAME painter, so this painter's coarseness (no gradients, no border-radius,
-  # no glyph shaping) largely CANCELS and what survives is the difference the
+  # images — the way Chromium and Firefox run them, and what the painter made
+  # possible here. The comparison is between two renderings by the SAME painter,
+  # so this painter's coarseness largely CANCELS and what survives is the difference the
   # test isolates. A file carrying both a reference and testharness.js reports
   # subtests, so it stays a harness test and is not run twice.
   def reftest_files
@@ -1513,32 +1512,20 @@ module WptRunner
   end
 
   # How two renderings differ: the largest per-channel difference and how many pixels differ at all
-  # — exactly the pair a `fuzzy` annotation is written against. `max` is over bands AND pixels, so
-  # it is WPT's maxDifference; the pixel count needs the bands OR-ed together first, since a pixel
-  # differing in any one channel is a differing pixel.
+  # — exactly the pair a `fuzzy` annotation is written against (`Raster#difference`).
   def image_difference(test_png, ref_png)
-    a = raster(test_png)
-    b = raster(ref_png)
+    a = Raster.new(test_png)
+    b = Raster.new(ref_png)
     return {sizes: [a, b].map {|img| "#{img.width}x#{img.height}" }} if a.width != b.width || a.height != b.height
 
-    delta = (a - b).abs
-    # Count from the histogram rather than materialising every pixel in Ruby: bin 0
-    # holds the pixels that match, so the rest differ.
-    matching = delta.cast(:uchar).bandor.hist_find.getpoint(0, 0).first.to_i
-    {max_difference: delta.max.to_i, differing_pixels: a.width * a.height - matching}
+    a.difference(b)
   end
 
   # Whether a rendering is the BLANK page: every pixel white, which is what a painter that drew
   # nothing leaves behind. See REFTEST_BLANK_SUFFIX for why that makes a `==` comparison
   # meaningless — and why a flat NON-white page is a real rendering, not a blank one.
   def blank_render?(png)
-    raster(png).min.to_i == 255
-  end
-
-  # A PNG as a plain 3-band sRGB image. Alpha is dropped: these are opaque page
-  # rasters, so a band-count difference between two of them is not a rendering one.
-  def raster(png)
-    Vips::Image.new_from_buffer(png, '').colourspace(:srgb).extract_band(0, n: 3)
+    Raster.new(png).white?
   end
 
   # Render one document the way a reftest is captured: a fresh browsing context,
@@ -1589,10 +1576,10 @@ module WptRunner
     base = File.join(dir, "#{rel.tr('/', '_').sub(/\.\w+\z/, '')}--#{File.basename(ref_rel, '.*')}")
     File.binwrite("#{base}.test.png", test_png)
     File.binwrite("#{base}.ref.png", ref_png)
-    a = raster(test_png)
-    b = raster(ref_png)
+    a = Raster.new(test_png)
+    b = Raster.new(ref_png)
     return unless a.width == b.width && a.height == b.height
-    File.binwrite("#{base}.diff.png", (a - b).abs.cast(:uchar).write_to_buffer('.png'))
+    File.binwrite("#{base}.diff.png", a.difference_png(b))
   end
 
   # `<link rel="match|mismatch" href>` — the references this test is judged against,

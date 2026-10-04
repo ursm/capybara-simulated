@@ -2,7 +2,7 @@
 
 require 'capybara/simulated'
 require 'base64'
-require 'vips'
+require_relative 'support/raster'
 require_relative 'support/session_teardown'
 
 # A canvas's pixels reach the host encoder through the transfer-buffer registry, which stores what
@@ -27,9 +27,9 @@ RSpec.describe 'canvas encoding' do
 
     path = File.join(Dir.tmpdir, "csim-canvas-#{Process.pid}-#{rand(1 << 32)}.png")
     File.binwrite(path, Base64.decode64(url.delete_prefix('data:image/png;base64,')))
-    img = Vips::Image.new_from_file(path)
+    img = Raster.read(path)
     expect([img.width, img.height]).to eq([4, 4])
-    expect(img.getpoint(1, 1).map(&:to_i)[0, 3]).to eq([0, 0, 255])
+    expect(img[1, 1].first(3)).to eq([0, 0, 255])
   ensure
     File.delete(path) if path && File.exist?(path)
   end
@@ -54,9 +54,9 @@ RSpec.describe 'canvas encoding' do
       JS
       path = File.join(Dir.tmpdir, "csim-canvas-#{Process.pid}-#{rand(1 << 32)}.png")
       File.binwrite(path, Base64.decode64(url.delete_prefix('data:image/png;base64,')))
-      img = Vips::Image.new_from_file(path)
+      img = Raster.read(path)
       expect([img.width, img.height]).to eq([w, h])
-      expect(img.getpoint(w - 1, 0).map(&:to_i)[0, 3]).to eq([255, 128, 0])
+      expect(img[w - 1, 0].first(3)).to eq([255, 128, 0])
     ensure
       File.delete(path) if path && File.exist?(path)
     end
@@ -144,8 +144,12 @@ RSpec.describe 'canvas encoding' do
       g.clearRect(0, 0, 1, 1);
     JS
     expect(got[0..-2]).to eq(['reported', [255, 0, 0, 255], 1, 'quality,type', 'IndexSizeError', 'TypeError', false])
-    # (…a profile libpng keeps: one whose length is not a whole number of words it drops, with a warning)
-    png = Vips::Image.new_from_buffer(Base64.decode64(got.last.delete_prefix('data:image/png;base64,')), '')
-    expect(png.get_fields).to include('icc-profile-data')
+    # (…a profile libpng keeps: one whose length is not a whole number of words, or whose header misstates its size or
+    # the D50 white, it drops with a warning — and one a decoder reads as Display P3)
+    png = Base64.decode64(got.last.delete_prefix('data:image/png;base64,'))
+    at = png.index('iCCP')
+    profile = Zlib::Inflate.inflate(png.byteslice(at + 4, png.unpack1('N', offset: at - 4)).split("\0".b, 2).last.byteslice(1..))
+    expect([profile.bytesize % 4, profile.unpack1('N'), profile.byteslice(68, 12).unpack('N3')]).to eq([0, profile.bytesize, [0xF6D6, 0x10000, 0xD32D]])
+    expect(Capybara::Simulated::Native.decode_image(png, 0, 0)['colorSpace']).to eq('display-p3')
   end
 end
