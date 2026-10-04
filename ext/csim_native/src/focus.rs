@@ -70,7 +70,7 @@ fn editable_host(n: &NodeData) -> bool {
 // assigned to, and from a shadow root to its host (Chrome and Firefox, measured: an `inert` around the slot makes its
 // assigned content inert).
 fn inert(arena: &RealmArena, id: NodeId) -> bool {
-    std::iter::successors(Some(id), |&c| arena.get(c).and_then(|n| n.assigned_slot.or(n.parent).or(n.host)))
+    std::iter::successors(Some(id), |&c| arena.get(c).and_then(|n| n.assigned_slot.filter(|&s| arena.get(s).is_some()).or(n.parent).or(n.host)))
         .any(|e| arena.get(e).is_some_and(|n| n.kind == NodeKind::Element && n.plain_attr("inert").is_some()))
 }
 // The element ancestors of `id`, nearest first, up to the first node that is none (a shadow root, a document).

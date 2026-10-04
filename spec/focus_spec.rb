@@ -74,8 +74,9 @@ RSpec.describe 'focus' do
     HTML
     got = s.evaluate_script(<<~JS)
       ['a1', 'a2', 'b', 'f', 'o', 'd', 's1', 's2', 's3', 'e', 'v', 'ce', 'sa'].map((id) => document.getElementById(id).tabIndex)
-        .concat([document.createElementNS('http://www.w3.org/2000/svg', 'input').tabIndex])
+        .concat([document.createElementNS('http://www.w3.org/2000/svg', 'input').tabIndex,
+                 document.createElementNS('http://www.w3.org/1999/xhtml', 'BUTTON').tabIndex])
     JS
-    expect(got).to eq([0, 0, 0, 0, 0, -1, 0, -1, -1, -1, -1, -1, 0, -1])
+    expect(got).to eq([0, 0, 0, 0, 0, -1, 0, -1, -1, -1, -1, -1, 0, -1, -1])
   end
 end
