@@ -2137,14 +2137,16 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     session.visit('/')
     out = Timeout.timeout(15) do
       session.evaluate_script(<<~JS)
+        const ctx = new OffscreenCanvas(6, 6).getContext('2d');
         const p = new Path2D(); p.rect(0, 0, 4, 4);
-        const before = p._path.length;
+        const before = ctx.isPointInPath(p, 2, 2, 'evenodd');
         p.addPath(p);                                  // self-addition must not loop
         // DOMMatrix2DInit alias form {m11,m22} → scale 2×.
         const q = new Path2D('M0 0 h2 v2 h-2 z');
         const r = new Path2D(); r.addPath(q, { m11: 2, m22: 2 });
-        const ctx = new OffscreenCanvas(6, 6).getContext('2d'); ctx.fillStyle = '#f00'; ctx.fill(r);
-        JSON.stringify({ doubled: p._path.length === before * 2, scaledInside: ctx.isPointInPath(r, 3, 3) });
+        ctx.fillStyle = '#f00'; ctx.fill(r);
+        // (…the rectangle twice over: even-odd, its inside is outside)
+        JSON.stringify({ doubled: before && !ctx.isPointInPath(p, 2, 2, 'evenodd'), scaledInside: ctx.isPointInPath(r, 3, 3) });
       JS
     end
     r = JSON.parse(out)

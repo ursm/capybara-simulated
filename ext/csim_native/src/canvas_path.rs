@@ -3,6 +3,7 @@
 // device space for a fill, the outline a stroke paints (its dash pattern, joins and caps), and whether a point is in a
 // path or on its stroke. The page side keeps a path's points; every computation on them is here.
 
+use smallvec::SmallVec;
 use std::f64::consts::{PI, TAU};
 
 pub(crate) type Ring = Vec<(f64, f64)>;
@@ -306,6 +307,328 @@ fn svg_arc(out: &mut Vec<f64>, p: [f64; 9]) {
         d_theta += TAU;
     }
     out.extend([4.0, cx, cy, rx, ry, rot, theta, theta + d_theta, f64::from(u8::from(!sweep))]);
+}
+
+// ── a path being built ──
+// The page side holds a path as one Float64Array, which the building ops write in place: `[len, cx, cy, cur,
+// …subpaths]` — the length in use, the current point in USER space (what the curve and arc math starts from), and the
+// offset of the subpath the next point joins (-1 where there is none, so no current point) — each subpath `[closed,
+// count, x, y, …]`, its points in their STORED form: device space for a context's own path (the CTM as each point was
+// added, baked in — a later transform does not move a point already in the path), user space for a Path2D (the
+// consuming context's CTM maps it at paint time). An op that outgrows the array writes a bigger one.
+const HEAD: usize = 4;
+
+struct Builder<'a> {
+    // The array as handed over, its first `len` in use; what the op adds goes to `tail`, after them.
+    old: &'a mut [f64],
+    len: usize,
+    tail: SmallVec<[f64; 16]>,
+    cx: f64,
+    cy: f64,
+    cur: Option<usize>,
+    // The CTM each added point is baked through (a context's own path), and the flattening resolution it implies.
+    ctm: Option<Matrix>,
+    scale: f64,
+}
+
+impl<'a> Builder<'a> {
+    // A builder over `old` — a fresh empty path where it holds none.
+    fn new(old: &'a mut [f64], ctm: Option<Matrix>) -> Builder<'a> {
+        let scale = ctm.map_or(1.0, |m| match m[0].hypot(m[1]).max(m[2].hypot(m[3])) {
+            s if s > 0.0 => s,
+            _ => 1.0,
+        });
+        let len = used(old);
+        if len < HEAD {
+            return Builder { old, len: 0, tail: SmallVec::from_elem(0.0, HEAD), cx: 0.0, cy: 0.0, cur: None, ctm, scale };
+        }
+        let cur = (old[3] >= 0.0).then_some(old[3] as usize);
+        let (cx, cy) = (old[1], old[2]);
+        Builder { old, len, tail: SmallVec::new(), cx, cy, cur, ctm, scale }
+    }
+    fn slot(&mut self, off: usize) -> &mut f64 {
+        if off < self.len { &mut self.old[off] } else { &mut self.tail[off - self.len] }
+    }
+    fn end(&self) -> usize {
+        self.len + self.tail.len()
+    }
+
+    // Write what the op built: in place where it fits, else into a new array returned (twice the room, so a path
+    // built a point at a time is copied a logarithmic number of times).
+    fn finish(self) -> Option<Vec<f64>> {
+        let end = self.end();
+        let head = [end as f64, self.cx, self.cy, self.cur.map_or(-1.0, |c| c as f64)];
+        if end <= self.old.len() {
+            self.old[self.len..end].copy_from_slice(&self.tail);
+            self.old[..HEAD].copy_from_slice(&head);
+            return None;
+        }
+        let mut out = Vec::with_capacity((self.old.len() * 2).max(end).max(64));
+        out.extend_from_slice(&self.old[..self.len]);
+        out.extend_from_slice(&self.tail);
+        out[..HEAD].copy_from_slice(&head);
+        out.resize(out.capacity(), 0.0);
+        Some(out)
+    }
+
+    // Add a user-space point to the current subpath, in its stored form.
+    fn store(&mut self, x: f64, y: f64) {
+        let (x, y) = self.ctm.map_or((x, y), |m| apply(&m, x, y));
+        self.tail.extend([x, y]);
+        let c = self.cur.expect("a subpath to add to");
+        *self.slot(c + 1) += 1.0;
+    }
+    // Start a new subpath at (x, y), the current point.
+    fn move_to(&mut self, x: f64, y: f64) {
+        self.cur = Some(self.end());
+        self.tail.extend([0.0, 0.0]);
+        self.store(x, y);
+        (self.cx, self.cy) = (x, y);
+    }
+    // "Ensure there is a subpath for (x, y)": where there is no current point, one is started there.
+    fn ensure(&mut self, x: f64, y: f64) {
+        if self.cur.is_none() {
+            self.move_to(x, y);
+        }
+    }
+    fn line_to(&mut self, x: f64, y: f64) {
+        if self.cur.is_none() {
+            return self.move_to(x, y);
+        }
+        self.store(x, y);
+        (self.cx, self.cy) = (x, y);
+    }
+    // Mark the current subpath closed, and start the next at its first point — the point as STORED, not re-baked
+    // through a CTM that may have changed since — taken back to user space for the curve math.
+    fn close(&mut self) {
+        let Some(c) = self.cur else { return };
+        *self.slot(c) = 1.0;
+        let (fx, fy) = (*self.slot(c + 2), *self.slot(c + 3));
+        self.cur = Some(self.end());
+        self.tail.extend([0.0, 1.0, fx, fy]);
+        (self.cx, self.cy) = self.ctm.and_then(|m| invert(&m)).map_or((fx, fy), |inv| apply(&inv, fx, fy));
+    }
+    // A closed rectangle, leaving a new subpath at its corner.
+    fn rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        let start = self.end();
+        self.cur = Some(start);
+        self.tail.extend([1.0, 0.0]);
+        for (px, py) in [(x, y), (x + w, y), (x + w, y + h), (x, y + h)] {
+            self.store(px, py);
+        }
+        self.move_to(x, y);
+    }
+    fn cubic_to(&mut self, p: [f64; 6]) {
+        self.ensure(p[0], p[1]);
+        for (x, y) in cubic([self.cx, self.cy, p[0], p[1], p[2], p[3], p[4], p[5]], self.scale) {
+            self.store(x, y);
+        }
+        (self.cx, self.cy) = (p[4], p[5]);
+    }
+    fn quadratic_to(&mut self, p: [f64; 4]) {
+        self.ensure(p[0], p[1]);
+        for (x, y) in quadratic([self.cx, self.cy, p[0], p[1], p[2], p[3]], self.scale) {
+            self.store(x, y);
+        }
+        (self.cx, self.cy) = (p[2], p[3]);
+    }
+    // An elliptical arc (`arc`), joined to the current point by its first point — or starting the subpath there.
+    fn arc(&mut self, p: [f64; 8]) {
+        let pts = arc(p, self.scale);
+        if self.cur.is_none() {
+            self.move_to(pts[0].0, pts[0].1);
+        }
+        for &(x, y) in &pts {
+            self.store(x, y);
+        }
+        (self.cx, self.cy) = *pts.last().expect("an arc has points");
+    }
+    // arcTo: the edge to the first tangent point and the arc to the second (`arc_to`), or a line to the corner.
+    fn arc_to(&mut self, [x1, y1, x2, y2, r]: [f64; 5]) {
+        self.ensure(x1, y1);
+        let c = arc_to([self.cx, self.cy, x1, y1, x2, y2, r]);
+        if c.is_empty() {
+            return self.line_to(x1, y1);
+        }
+        self.line_to(c[0], c[1]);
+        self.arc([c[2], c[3], r, r, 0.0, c[4], c[5], c[6]]);
+        (self.cx, self.cy) = (c[7], c[8]);
+    }
+    // roundRect (§4.12.5.1.6): `radii` 1 to 4 (x, y) pairs in CSS corner order with its shorthands, a non-finite one
+    // making the call nothing and a negative one a RangeError, in the order they come; scaled down together where
+    // corners would overlap. A rectangle of negative width or height swaps its corners to keep them where they show, and
+    // one of each winds the other way. It leaves a new subpath at (x, y), as rect() does.
+    fn round_rect(&mut self, [mut x, mut y, mut w, mut h]: [f64; 4], radii: &[(f64, f64)]) -> Result<(), Refusal> {
+        if !(1..=4).contains(&radii.len()) {
+            return Err(Refusal::Range("roundRect takes one to four radii"));
+        }
+        for &(rx, ry) in radii {
+            if !rx.is_finite() || !ry.is_finite() {
+                return Ok(());
+            }
+            if rx < 0.0 || ry < 0.0 {
+                return Err(Refusal::Range("a roundRect radius is negative"));
+            }
+        }
+        let r = |i: usize| radii[i];
+        let mut c = match radii.len() {
+            1 => [r(0); 4],
+            2 => [r(0), r(1), r(0), r(1)],
+            3 => [r(0), r(1), r(2), r(1)],
+            _ => [r(0), r(1), r(2), r(3)],
+        };
+        let flip = (w < 0.0) != (h < 0.0);
+        if w < 0.0 {
+            (x, w) = (x + w, -w);
+            c = [c[1], c[0], c[3], c[2]];
+        }
+        if h < 0.0 {
+            (y, h) = (y + h, -h);
+            c = [c[3], c[2], c[1], c[0]];
+        }
+        // (…an edge whose corners have no radius constrains nothing; a zero-length one collapses them)
+        let ratio = |num: f64, den: f64| if den > 0.0 { num / den } else { f64::INFINITY };
+        let k = 1f64
+            .min(ratio(w, c[0].0 + c[1].0))
+            .min(ratio(w, c[3].0 + c[2].0))
+            .min(ratio(h, c[0].1 + c[3].1))
+            .min(ratio(h, c[1].1 + c[2].1));
+        let [tl, tr, br, bl] = c.map(|(rx, ry)| (rx * k, ry * k));
+        let q = PI / 2.0;
+        self.move_to(x + tl.0, y);
+        self.line_to(x + w - tr.0, y);
+        self.arc([x + w - tr.0, y + tr.1, tr.0, tr.1, 0.0, -q, 0.0, 0.0]);
+        self.line_to(x + w, y + h - br.1);
+        self.arc([x + w - br.0, y + h - br.1, br.0, br.1, 0.0, 0.0, q, 0.0]);
+        self.line_to(x + bl.0, y + h);
+        self.arc([x + bl.0, y + h - bl.1, bl.0, bl.1, 0.0, q, PI, 0.0]);
+        self.line_to(x, y + tl.1);
+        self.arc([x + tl.0, y + tl.1, tl.0, tl.1, 0.0, PI, 3.0 * q, 0.0]);
+        let sub = self.cur.expect("the rectangle's subpath") - self.len;
+        self.close();
+        if flip {
+            let pts = &mut self.tail[sub + 2..self.cur.expect("the subpath after it") - self.len];
+            pts.reverse();
+            pts.chunks_exact_mut(2).for_each(|p| p.swap(0, 1));
+        }
+        self.move_to(x, y);
+        Ok(())
+    }
+
+    // Append `src`'s subpaths (a path array), through `m` where given; the last of them is then the one a next point
+    // joins, its last point the current point.
+    fn add(&mut self, src: &[f64], m: Option<Matrix>) {
+        let (len, mut k) = (used(src), HEAD);
+        while k + 1 < len {
+            let (closed, n) = (src[k], src[k + 1] as usize);
+            let Some(pts) = src.get(k + 2..k + 2 + 2 * n) else { break };
+            self.cur = Some(self.end());
+            self.tail.extend([closed, n as f64]);
+            for p in pts.chunks_exact(2) {
+                let (x, y) = m.map_or((p[0], p[1]), |m| apply(&m, p[0], p[1]));
+                self.tail.extend([x, y]);
+                (self.cx, self.cy) = (x, y);
+            }
+            k += 2 + 2 * n;
+        }
+    }
+
+    // The calls SVG path data makes (`svg_path`), made.
+    fn svg(&mut self, d: &str) {
+        let c = svg_path(d);
+        let mut k = 0;
+        while k < c.len() {
+            let at = |n: usize| &c[k + 1..k + 1 + n];
+            match c[k] as i32 {
+                0 => self.move_to(c[k + 1], c[k + 2]),
+                1 => self.line_to(c[k + 1], c[k + 2]),
+                2 => self.cubic_to(at(6).try_into().expect("six")),
+                3 => self.quadratic_to(at(4).try_into().expect("four")),
+                4 => self.arc(at(8).try_into().expect("eight")),
+                _ => self.close(),
+            }
+            k += 1 + [2, 2, 6, 4, 8].get(c[k] as usize).copied().unwrap_or(0);
+        }
+    }
+
+    // A building op (`canvasPath`'s `op`) on its arguments (as many as the op takes, at least; an anticlockwise flag
+    // 1 or 0): a non-finite one makes it nothing, a negative radius refuses it.
+    fn op(&mut self, op: i32, a: &[f64]) -> Result<(), Refusal> {
+        let n = [2, 2, 0, 4, 4, 6, 4, 5, 7, 5, 0].get(op as usize).copied().unwrap_or(0);
+        if !a.iter().take(n).all(|v| v.is_finite()) {
+            return Ok(());
+        }
+        let arr = |n: usize| -> &[f64] { &a[..n] };
+        match op {
+            OP_MOVE_TO => self.move_to(a[0], a[1]),
+            OP_LINE_TO => self.line_to(a[0], a[1]),
+            OP_CLOSE => self.close(),
+            OP_RECT => self.rect(a[0], a[1], a[2], a[3]),
+            OP_ROUND_RECT => {
+                let radii: Vec<(f64, f64)> = a[4..].chunks_exact(2).map(|p| (p[0], p[1])).collect();
+                self.round_rect(arr(4).try_into().expect("four"), &radii)?;
+            }
+            OP_CUBIC => self.cubic_to(arr(6).try_into().expect("six")),
+            OP_QUADRATIC => self.quadratic_to(arr(4).try_into().expect("four")),
+            OP_ARC => {
+                if a[2] < 0.0 {
+                    return Err(Refusal::IndexSize("the radius is negative"));
+                }
+                self.arc([a[0], a[1], a[2], a[2], 0.0, a[3], a[4], f64::from(u8::from(a[5] == 1.0))]);
+            }
+            OP_ELLIPSE => {
+                if a[2] < 0.0 || a[3] < 0.0 {
+                    return Err(Refusal::IndexSize("a radius is negative"));
+                }
+                self.arc([a[0], a[1], a[2], a[3], a[4], a[5], a[6], f64::from(u8::from(a[7] == 1.0))]);
+            }
+            OP_ARC_TO => {
+                if a[4] < 0.0 {
+                    return Err(Refusal::IndexSize("the radius is negative"));
+                }
+                self.arc_to(arr(5).try_into().expect("five"));
+            }
+            _ => {
+                // OP_RESET: an empty path, in the array it had
+                (self.len, self.cur, self.cx, self.cy) = (0, None, 0.0, 0.0);
+                self.tail = SmallVec::from_elem(0.0, HEAD);
+            }
+        }
+        Ok(())
+    }
+}
+
+const OP_MOVE_TO: i32 = 0;
+const OP_LINE_TO: i32 = 1;
+const OP_CLOSE: i32 = 2;
+const OP_RECT: i32 = 3;
+const OP_ROUND_RECT: i32 = 4;
+const OP_CUBIC: i32 = 5;
+const OP_QUADRATIC: i32 = 6;
+const OP_ARC: i32 = 7;
+const OP_ELLIPSE: i32 = 8;
+const OP_ARC_TO: i32 = 9;
+
+// Why an op refused its arguments: the script exception it throws.
+enum Refusal {
+    Range(&'static str),
+    IndexSize(&'static str),
+}
+
+// The shape the rasterizer takes (`Path::parse`, after what `head` says the shape is): the CTM, whether the path
+// array's points are baked through it, and its subpaths.
+fn shape(head: &[f64], path: &[f64], ctm: Matrix, baked: bool) -> Vec<f64> {
+    let subs = path.get(HEAD..used(path)).unwrap_or(&[]);
+    let mut out = Vec::with_capacity(head.len() + 7 + subs.len());
+    out.extend_from_slice(head);
+    out.extend_from_slice(&ctm);
+    out.push(f64::from(u8::from(baked)));
+    out.extend_from_slice(subs);
+    out
+}
+// The length of a path array in use.
+fn used(path: &[f64]) -> usize {
+    path.first().map_or(0, |&l| l as usize).min(path.len())
 }
 
 // ── a path, as the page side hands it over ──
@@ -664,42 +987,117 @@ fn dist_to_segment(px: f64, py: f64, p1: (f64, f64), p2: (f64, f64)) -> f64 {
 
 // ── the ops ──
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "canvasCurve", canvas_curve, context_id);
-    crate::dom::register(scope, ns, "canvasArcTo", canvas_arc_to, context_id);
-    crate::dom::register(scope, ns, "canvasSvgPath", canvas_svg_path, context_id);
+    crate::dom::register(scope, ns, "canvasPath", canvas_path, context_id);
+    crate::dom::register(scope, ns, "canvasPathAdd", canvas_path_add, context_id);
+    crate::dom::register(scope, ns, "canvasPathSvg", canvas_path_svg, context_id);
+    crate::dom::register(scope, ns, "canvasPathShape", canvas_path_shape, context_id);
+    crate::dom::register(scope, ns, "canvasPathEmpty", canvas_path_empty, context_id);
     crate::dom::register(scope, ns, "canvasHit", canvas_hit, context_id);
 }
 
 fn numbers<const N: usize>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, from: i32) -> [f64; N] {
     std::array::from_fn(|k| args.get(from + k as i32).number_value(scope).unwrap_or(f64::NAN))
 }
+// A matrix argument — an array of its six numbers — or None for anything else.
+fn matrix_arg(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>) -> Option<Matrix> {
+    let arr = v8::Local::<v8::Array>::try_from(val).ok()?;
+    let mut m = [0.0; 6];
+    for (k, v) in m.iter_mut().enumerate() {
+        *v = arr.get_index(scope, k as u32)?.number_value(scope)?;
+    }
+    Some(m)
+}
+// The f64s of a path array, to write in place: ours (`f64_array`'s, aligned, offset 0) or nothing.
+fn path_mut<'a>(val: v8::Local<'a, v8::Value>) -> &'a mut [f64] {
+    let Ok(arr) = v8::Local::<v8::Float64Array>::try_from(val) else { return &mut [] };
+    let (ptr, n) = (arr.data() as *mut f64, arr.length());
+    if n == 0 || ptr.is_null() || (ptr as usize) % std::mem::align_of::<f64>() != 0 {
+        return &mut [];
+    }
+    // SAFETY: the view's own `n` aligned f64s, valid for the op (no JS runs while it holds them), borrowed by nothing
+    // else (an op that reads a second array copies it first).
+    unsafe { std::slice::from_raw_parts_mut(ptr, n) }
+}
+// Hand back what a builder wrote: the bigger array it needed, or nothing where it wrote in place.
+fn finish(scope: &mut v8::PinScope<'_, '_>, b: Builder<'_>, rv: &mut v8::ReturnValue<'_, v8::Value>) {
+    if let Some(grown) = b.finish() {
+        rv.set(crate::dom::f64_array(scope, &grown).into());
+    }
+}
 
-// __dom.canvasCurve(kind, scale, x0, y0, …) -> the flattened points after the current point (x0, y0), flat: kind 0 a
-// cubic Bézier (c1x, c1y, c2x, c2y, x, y), 1 a quadratic one (cx, cy, x, y); 2 an elliptical arc's points from its
-// start (`cx, cy, rx, ry, rotation, a0, a1, ccw`, no current point).
-fn canvas_curve(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let kind = args.get(0).int32_value(scope).unwrap_or(-1);
-    let scale = args.get(1).number_value(scope).unwrap_or(1.0);
-    let pts = match kind {
-        0 => cubic(numbers(scope, &args, 2), scale),
-        1 => quadratic(numbers(scope, &args, 2), scale),
-        2 => arc(numbers(scope, &args, 2), scale),
-        _ => Vec::new(),
+// __dom.canvasPath(path, op, baked, a, b, c, d, e, f, …args) -> a building op on the path array (`Builder::op`; the ops
+// are its `OP_` constants, in the order of `CanvasPath`'s methods, then a reset), each point baked through the CTM `a`
+// to `f` where `baked`: nothing where it wrote in place, the array that replaces it where it outgrew it (or was none),
+// or a refusal `[exception, message]` — "RangeError", or the DOMException's name. Every number is one already (the page
+// side converts them as WebIDL does), read as such: an op is made a point at a time, and a ToNumber for each costs more
+// than the op.
+fn canvas_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let num = |k: i32| v8::Local::<v8::Number>::try_from(args.get(k)).map_or(f64::NAN, |n| n.value());
+    let op = num(1) as i32;
+    let ctm = args.get(2).is_true().then(|| std::array::from_fn(|k| num(3 + k as i32)));
+    // (…every op's own arguments there, missing ones NaN; roundRect's radii are the rest)
+    let mut fixed = [f64::NAN; 8];
+    let radii: Vec<f64>;
+    let a: &[f64] = if op == OP_ROUND_RECT {
+        radii = (9..args.length().max(13)).map(num).collect();
+        &radii
+    } else {
+        fixed.iter_mut().enumerate().for_each(|(k, v)| *v = num(9 + k as i32));
+        &fixed
     };
-    let flat: Vec<f64> = pts.into_iter().flat_map(|(x, y)| [x, y]).collect();
+    let mut b = Builder::new(path_mut(args.get(0)), ctm);
+    match b.op(op, a) {
+        Ok(()) => finish(scope, b, &mut rv),
+        Err(refusal) => {
+            let (name, message) = match refusal {
+                Refusal::Range(m) => ("RangeError", m),
+                Refusal::IndexSize(m) => ("IndexSizeError", m),
+            };
+            let parts = [name, message].map(|s| v8::String::new(scope, s).expect("a short string").into());
+            rv.set(v8::Array::new_with_elements(scope, &parts).into());
+        }
+    }
+}
+
+// __dom.canvasPathAdd(path, other, m) -> Path2D's addPath: `other`'s subpaths appended, through the matrix `m` where it
+// is one (a non-finite one adds nothing); returns as `canvasPath`.
+fn canvas_path_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let m = matrix_arg(scope, args.get(2));
+    if m.is_some_and(|m| !m.iter().all(|v| v.is_finite())) {
+        return;
+    }
+    // (…copied first: a path added to itself is the same array)
+    let src = crate::dom::f64_arg(args.get(1)).to_vec();
+    let mut b = Builder::new(path_mut(args.get(0)), None);
+    b.add(&src, m);
+    finish(scope, b, &mut rv);
+}
+
+// __dom.canvasPathSvg(path, d) -> the path SVG path data `d` builds, added to `path` (Path2D's constructor); returns as
+// `canvasPath`.
+fn canvas_path_svg(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let d = args.get(1).to_rust_string_lossy(scope);
+    let mut b = Builder::new(path_mut(args.get(0)), None);
+    b.svg(&d);
+    finish(scope, b, &mut rv);
+}
+
+// __dom.canvasPathShape(head, path, ctm, baked) -> the shape a path array makes under `ctm` (`shape`): `head` `[1,
+// evenOdd]` its fill, `[3, …pen]` its stroke.
+fn canvas_path_shape(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let head: Vec<f64> = match v8::Local::<v8::Array>::try_from(args.get(0)) {
+        Ok(arr) => (0..arr.length()).map(|k| arr.get_index(scope, k).and_then(|v| v.number_value(scope)).unwrap_or(f64::NAN)).collect(),
+        Err(_) => Vec::new(),
+    };
+    let ctm = matrix_arg(scope, args.get(2)).unwrap_or([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    let baked = args.get(3).boolean_value(scope);
+    let flat = shape(&head, &crate::dom::f64_arg(args.get(1)), ctm, baked);
     rv.set(crate::dom::f64_array(scope, &flat).into());
 }
 
-// __dom.canvasArcTo(x0, y0, x1, y1, x2, y2, r) -> arcTo's corner (`arc_to`), empty for a straight line to (x1, y1).
-fn canvas_arc_to(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let corner = arc_to(numbers(scope, &args, 0));
-    rv.set(crate::dom::f64_array(scope, &corner).into());
-}
-
-// __dom.canvasSvgPath(d) -> the calls SVG path data makes (`svg_path`).
-fn canvas_svg_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let d = args.get(0).to_rust_string_lossy(scope);
-    rv.set(crate::dom::f64_array(scope, &svg_path(&d)).into());
+// __dom.canvasPathEmpty(path) -> whether a path array has no subpaths.
+fn canvas_path_empty(_scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(used(&crate::dom::f64_arg(args.get(0))) <= HEAD);
 }
 
 // __dom.canvasHit(shape, x, y) -> whether the point (canvas coordinates) is in the shape: `[1, evenOdd, …path]` a
@@ -731,6 +1129,59 @@ fn canvas_hit(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A path array after `ops`, each `(op, args)` made on it in turn from an empty one, through `ctm` where given.
+    fn built(ctm: Option<Matrix>, ops: &[(i32, &[f64])]) -> Vec<f64> {
+        let mut buf: Vec<f64> = Vec::new();
+        for &(op, a) in std::iter::once(&(10, &[][..])).chain(ops) {
+            let mut a = a.to_vec();
+            a.resize(a.len().max(if op == OP_ROUND_RECT { 4 } else { 8 }), f64::NAN);
+            let mut b = Builder::new(&mut buf, ctm);
+            assert!(b.op(op, &a).is_ok());
+            if let Some(grown) = b.finish() {
+                buf = grown;
+            }
+        }
+        buf.truncate(used(&buf));
+        buf
+    }
+
+    #[test]
+    fn builds_a_path_in_place_and_grows_it() {
+        let lines: Vec<(i32, &[f64])> = std::iter::repeat_n((OP_LINE_TO, &[1.0, 2.0][..]), 100).collect();
+        let path = built(None, &lines);
+        assert_eq!(&path[..HEAD + 4], &[206.0, 1.0, 2.0, 4.0, 0.0, 100.0, 1.0, 2.0]);
+    }
+
+    #[test]
+    fn closes_a_subpath_at_its_stored_start() {
+        // (…a translated CTM baked into the points; the subpath after the close starts at the first point as stored,
+        // and the current point is that one in user space)
+        let path = built(Some([1.0, 0.0, 0.0, 1.0, 10.0, 0.0]), &[(OP_MOVE_TO, &[1.0, 1.0]), (OP_LINE_TO, &[2.0, 1.0]), (OP_CLOSE, &[])]);
+        assert_eq!(path, vec![14.0, 1.0, 1.0, 10.0, 1.0, 2.0, 11.0, 1.0, 12.0, 1.0, 0.0, 1.0, 11.0, 1.0]);
+    }
+
+    #[test]
+    fn a_flipped_round_rect_winds_the_other_way() {
+        let area = |path: &[f64]| signed_area(&path[HEAD + 2..].chunks_exact(2).take(path[HEAD + 1] as usize).map(|p| (p[0], p[1])).collect::<Vec<_>>());
+        let plain = built(None, &[(OP_ROUND_RECT, &[0.0, 0.0, 10.0, 10.0, 2.0, 2.0])]);
+        let flipped = built(None, &[(OP_ROUND_RECT, &[10.0, 0.0, -10.0, 10.0, 2.0, 2.0])]);
+        assert!(area(&plain) * area(&flipped) < 0.0);
+        let mut b = Builder::new(&mut [], None);
+        assert!(matches!(b.round_rect([0.0, 0.0, 1.0, 1.0], &[(f64::NAN, 0.0), (-1.0, 0.0)]), Ok(())));
+        assert!(matches!(b.round_rect([0.0, 0.0, 1.0, 1.0], &[(-1.0, 0.0), (f64::NAN, 0.0)]), Err(Refusal::Range(_))));
+    }
+
+    #[test]
+    fn an_added_path_is_continued_from_its_last_point() {
+        let src = built(None, &[(OP_MOVE_TO, &[50.0, 50.0]), (OP_LINE_TO, &[60.0, 50.0])]);
+        let mut dst = built(None, &[(OP_MOVE_TO, &[10.0, 10.0])]);
+        let mut b = Builder::new(&mut dst, None);
+        b.add(&src, Some([1.0, 0.0, 0.0, 1.0, 0.0, 5.0]));
+        b.line_to(60.0, 70.0);
+        let grown = b.finish().expect("a bigger array");
+        assert_eq!(&grown[..used(&grown)], &[16.0, 60.0, 70.0, 8.0, 0.0, 1.0, 10.0, 10.0, 0.0, 3.0, 50.0, 55.0, 60.0, 55.0, 60.0, 70.0]);
+    }
 
     #[test]
     fn tokenizes_path_data() {

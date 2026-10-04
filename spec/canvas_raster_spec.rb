@@ -81,4 +81,31 @@ RSpec.describe 'canvas rasterizer' do
     JS
     expect(got).to eq([false, true])
   end
+
+  # Chrome's answers (measured): a path added to another is continued from its own last point, a copied one from the
+  # point it had; a DOMPointInit radius missing a member takes it as 0; a non-finite radius before a negative one makes
+  # roundRect nothing, as the spec reads them in order.
+  it 'continues a path from where an added or copied one left off, and reads roundRect radii as the spec does' do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (function () {
+        var ctx = new OffscreenCanvas(100, 100).getContext('2d'), r = [];
+        ctx.lineWidth = 2;
+        var p = new Path2D(); p.moveTo(10, 10); p.lineTo(20, 10);
+        var q = new Path2D(); q.moveTo(50, 50); q.lineTo(60, 50);
+        p.addPath(q); p.lineTo(60, 70);
+        r.push(ctx.isPointInStroke(p, 60, 60), ctx.isPointInStroke(p, 40, 40));
+        var a = new Path2D(); a.moveTo(10, 10); a.lineTo(20, 10);
+        var b = new Path2D(a); b.lineTo(20, 30);
+        r.push(ctx.isPointInStroke(b, 20, 20));
+        var rr = new Path2D(); rr.roundRect(0, 0, 10, 10, [{x: 5}]);
+        r.push(ctx.isPointInPath(rr, 0.5, 0.5));
+        try { new Path2D().roundRect(0, 0, 10, 10, [NaN, -1]); r.push('nothing'); } catch (e) { r.push(e.name); }
+        try { new Path2D().roundRect(0, 0, 10, 10, [-1, NaN]); r.push('nothing'); } catch (e) { r.push(e.name); }
+        return r;
+      })()
+    JS
+    expect(got).to eq([true, false, true, true, 'nothing', 'RangeError'])
+  end
 end

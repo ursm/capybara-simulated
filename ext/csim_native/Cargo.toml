@@ -76,6 +76,9 @@ typed-arena = "2"
 # A number as script writes it (ECMAScript Number::toString): Ryu with the JS formatting rules, V8's own shortest digits
 # (numbers.rs).
 ryu-js = "1"
+# What a canvas path op adds before it is written into the page's array (canvas_path.rs `Builder`): a point or a few,
+# held inline — a path is built one call per point, and a heap allocation each costs more than the op.
+smallvec = "1"
 
 # The HTML parser: Servo's html5ever — tokenizer and tree builder, the select parser relaxation and `selectedcontent`
 # included — run natively, the page side taking the tree it builds as steps (html_parse.rs).
