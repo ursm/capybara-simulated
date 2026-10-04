@@ -43,8 +43,14 @@ RSpec.describe 'element state in the native arena' do
   def native_ids(sel)
     session.evaluate_script(<<~JS)
       (() => {
-        const byNid = new Map([...document.getElementsByTagName('*')].map((e) => [e._nid, e]));
-        return __dom.queryIds(document._nid, #{sel.to_json}, false).map((n) => byNid.get(n)?.id ?? '?');
+        // (…each match as its path from the document: a length, then child indices)
+        const paths = __dom.query(document._nid, #{sel.to_json}, false), out = [];
+        for (let at = 0; at < paths.length; at += paths[at] + 1) {
+          let n = document;
+          for (let k = 1; k <= paths[at]; k++) n = n.childNodes[paths[at + k]];
+          out.push(n ? n.id : '?');
+        }
+        return out;
       })()
     JS
   end
@@ -284,7 +290,8 @@ RSpec.describe 'element state in the native arena' do
       ms = session.evaluate_script(<<~JS)
         (() => {
           const t = performance.now();
-          const nat = __dom.queryIds(document._nid, ':indeterminate', false).length + __dom.queryIds(document._nid, ':default', false).length;
+          const count = (paths) => { let n = 0; for (let at = 0; at < paths.length; at += paths[at] + 1) n++; return n; };
+          const nat = count(__dom.query(document._nid, ':indeterminate', false)) + count(__dom.query(document._nid, ':default', false));
           return [nat, performance.now() - t];
         })()
       JS
@@ -416,7 +423,7 @@ RSpec.describe 'element state in the native arena' do
           for (let i = 0; i < 200; i++) {
             const p = document.body.appendChild(document.createElement('p'));
             p.matches(':target');
-            __dom.queryIds(p._nid, ':scope:target', false);
+            __dom.query(p._nid, ':scope:target', false);
           }
           return performance.now() - t;
         })()

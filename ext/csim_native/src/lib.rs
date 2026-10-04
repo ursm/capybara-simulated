@@ -50,6 +50,7 @@ mod scroll_into_view;
 mod selector;
 mod serialize;
 mod sheets;
+mod slots;
 // The style engine: stylo over the arena.
 mod style;
 mod style_fonts;

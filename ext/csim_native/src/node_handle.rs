@@ -8,9 +8,14 @@
 // collection, where the arena may be in use, so its slot is only queued (`Reclaim`, its isolate's) and freed at the next
 // op that creates a node, which is where a freed slot is wanted again — and the TREE's edges, as the collector sees
 // them: its parent, its first child and its next sibling (Blink's layout), written by the arena as its children change
-// (`relink`), so a node is kept alive by the tree it is in the way its JS object's references once kept it — and its
-// object, traced back (`wrapper`), so a slot leads to the object a script holds (`object_of`): the tree's nodes are
-// found by the arena's ids, and the tree keeps their objects, expandos and all.
+// (`relink`), so a node is kept alive by the tree it is in the way its JS object's references once kept it.
+//
+// The handle does not lead back to its object yet. Traced from the handle, as Blink traces a wrapper, an object is a ROOT
+// in every scavenge: V8 drops a young traced object only where it is an unmodified API object, and every node object
+// carries its own state as properties (`_id`, `_parent`, …), so no node made and dropped could die young — measured, a
+// node churn +11-18% and its heap 4x; a weak handle per node cost +10% too. A slot is found in the JS tree by its path
+// instead (`RealmArena::path_from`) until a node's object is a bare wrapper, its state the engine's: then the trace can
+// be droppable, and the tree keep its objects.
 
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,9 +44,6 @@ pub(crate) struct NodeHandle {
     // The tree it owns outside its children: a host's shadow root, a `<template>`'s contents — whose root's `parent` is
     // its owner, the other way.
     owned: Edge,
-    // The object the node is handed out as: the one that wraps the handle, or the Proxy a `<form>` or a document is seen
-    // through (`rewrap`). Written on the main thread only.
-    wrapper: UnsafeCell<v8::TracedReference<v8::Object>>,
 }
 
 unsafe impl GarbageCollected for NodeHandle {
@@ -50,8 +52,6 @@ unsafe impl GarbageCollected for NodeHandle {
         self.first.trace(visitor);
         self.next.trace(visitor);
         self.owned.trace(visitor);
-        // SAFETY: the collector reads the reference as TracedReference's barriers allow; nothing here hands one out.
-        visitor.trace(unsafe { &*self.wrapper.get() });
     }
     fn get_name(&self) -> &'static std::ffi::CStr {
         c"NodeHandle"
@@ -110,15 +110,7 @@ impl Link {
     fn handle(&self) -> Option<&NodeHandle> {
         self.0.as_ref().and_then(|w| w.get())
     }
-    // The handle, apart from the arena's borrow — to be read with `object_of` before anything allocates on V8's heap,
-    // which is when a collection could take it.
-    pub(crate) fn held(&self) -> Option<Held> {
-        self.handle().map(|h| Held(h))
-    }
 }
-
-#[derive(Clone, Copy)]
-pub(crate) struct Held(*const NodeHandle);
 
 // The arena's side: `parent`'s children are `kids`; from `from` on, each one's parent and next-sibling edges are
 // rewritten, and the parent's first-child edge where `from` is 0. `link_of` finds a node's link.
@@ -205,15 +197,12 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         first: Edge::new(),
         next: Edge::new(),
         owned: Edge::new(),
-        wrapper: UnsafeCell::new(v8::TracedReference::empty()),
     };
     let heap = scope.get_cpp_heap().expect("NodeBase is installed only on an isolate with a C++ heap");
-    // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it; the
-    // reference back is written where the handle now lives (a TracedReference is not to be moved once it holds a cell).
+    // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
     unsafe {
         let ptr = v8::cppgc::make_garbage_collected(heap, handle);
         v8::Object::wrap::<TAG, NodeHandle>(scope, obj, &ptr);
-        (*ptr.as_ref().wrapper.get()).reset(scope, Some(obj));
     }
 }
 
@@ -247,21 +236,6 @@ pub(crate) fn bind(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Va
     *h.reclaim.borrow_mut() = queue;
     // …and the slot holds the handle (weakly), its edges in the tree written as the slot's are
     crate::dom::realm(scope, realm).set_link(nid, Link(Some(WeakPersistent::new(&ptr))));
-}
-
-// The node `value` is the object of is handed out as `value` from here on — a Proxy over its object (a `<form>`'s, a
-// document's) — a no-op for one that is no node's.
-pub(crate) fn rewrap(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) {
-    let (Some(ptr), Ok(obj)) = (handle_of(scope, value), v8::Local::<v8::Object>::try_from(value)) else { return };
-    // SAFETY: the handle lives while its object does, which the caller holds; the main thread writes the reference.
-    unsafe { (*ptr.as_ref().wrapper.get()).reset(scope, Some(obj)) }
-}
-
-// The object of the node whose handle a slot held (`Link::held`).
-pub(crate) fn object_of<'s>(scope: &v8::PinScope<'s, '_>, held: Held) -> Option<v8::Local<'s, v8::Object>> {
-    // SAFETY: a handle a live link named is alive until the next collection, which nothing between `held` and here
-    // allocates to start; the main thread alone writes the reference.
-    unsafe { (*(*held.0).wrapper.get()).get(scope) }
 }
 
 // `__dom.NodeBase` for a realm: the constructor of the isolate's template, made once per isolate — none on an isolate

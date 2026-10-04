@@ -563,8 +563,7 @@ fn painting<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgu
 }
 
 // __dom.hitTest(x, y, all, now) -> Float64Array: the elements a hit at the viewport point lands on, topmost first (only
-// the topmost unless `all`), each as its path from the document `[length, nid, …]` — the nodes the JS side walks down
-// to it by (`Painting::hit`).
+// the topmost unless `all`), each as its path from the document (`RealmArena::push_path`) (`Painting::hit`).
 fn hit_test_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let x = args.get(0).number_value(scope).unwrap_or(f64::NAN);
     let y = args.get(1).number_value(scope).unwrap_or(f64::NAN);
@@ -574,9 +573,7 @@ fn hit_test_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let arena = crate::dom::realm(scope, cid);
     let mut out = Vec::new();
     for id in hits {
-        let path = dom_path(arena, id);
-        out.push(path.len() as f64);
-        out.extend(path);
+        arena.push_path(arena.shadow_including_root(id), id, &mut out);
     }
     rv.set(crate::dom::f64_array(scope, &out).into());
 }
@@ -596,14 +593,3 @@ fn paint_order_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set(crate::dom::f64_array(scope, &order).into());
 }
 
-// `id`'s path from its document, top first: each node's parent, and a shadow root's host above it.
-pub(crate) fn dom_path(arena: &RealmArena, id: NodeId) -> Vec<f64> {
-    let mut path = vec![id.to_f64()];
-    let mut at = id;
-    while let Some(up) = arena.get(at).and_then(|n| n.parent.or(n.host)) {
-        path.push(up.to_f64());
-        at = up;
-    }
-    path.reverse();
-    path
-}

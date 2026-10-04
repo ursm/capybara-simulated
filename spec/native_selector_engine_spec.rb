@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 # The native selector engine (selector.rs) answers every selector there is — there is no other engine to hand one to:
-# queryIds returns the ids of the elements a selector matches, and `null` for one it does not parse (a SyntaxError).
+# `query` returns the elements a selector matches (each as its path from the root), and `null` for one it does not parse
+# (a SyntaxError).
 
 require 'capybara/simulated'
 require 'rack'
@@ -36,7 +37,15 @@ RSpec.describe 'native selector engine' do
 
   # How many elements `sel` matches natively in the document — or 'INVALID'.
   def count(sel)
-    session.evaluate_script("(() => { const r = __dom.queryIds(document._nid, #{sel.to_json}, false); return r === null ? 'INVALID' : r.length; })()")
+    session.evaluate_script(<<~JS)
+      (() => {
+        const paths = __dom.query(document._nid, #{sel.to_json}, false);
+        if (paths === null) return 'INVALID';
+        let n = 0;
+        for (let at = 0; at < paths.length; at += paths[at] + 1) n++;
+        return n;
+      })()
+    JS
   end
 
   before do

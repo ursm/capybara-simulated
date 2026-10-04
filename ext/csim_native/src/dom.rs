@@ -165,6 +165,10 @@ pub(crate) struct NodeData {
     // `delegatesFocus`).
     pub(crate) shadow_root: Option<NodeId>,
     pub(crate) delegates_focus: bool,
+    // …and whether a shadow root assigns its slots by hand (`slotAssignment: "manual"`, slots.rs), and a slot's nodes
+    // `assign()`ed to it, in that order — those in this arena.
+    pub(crate) manual_slot_assignment: bool,
+    pub(crate) manual_assigned: Vec<NodeId>,
     // The node's handle on the C++ heap (node_handle.rs), whose tree edges the slot's are written into.
     pub(crate) link: crate::node_handle::Link,
     // A slot's assigned nodes, in tree order, and a slotted node's slot: the flat tree the style engine walks.
@@ -255,6 +259,8 @@ impl NodeData {
             host: None,
             shadow_root: None,
             delegates_focus: false,
+            manual_slot_assignment: false,
+            manual_assigned: Vec::new(),
             link: crate::node_handle::Link::default(),
             assigned: Vec::new(),
             assigned_slot: None,
@@ -800,19 +806,58 @@ impl RealmArena {
     }
 
     // `root` is the shadow root of `host`, delegating focus or not.
-    pub(crate) fn set_shadow_host(&mut self, root: NodeId, host: NodeId, delegates_focus: bool) {
+    pub(crate) fn set_shadow_host(&mut self, root: NodeId, host: NodeId, delegates_focus: bool, manual_slot_assignment: bool) {
         if self.get(host).is_none() {
             return;
         }
         if let Some(node) = self.get_mut(root) {
             node.host = Some(host);
             node.delegates_focus = delegates_focus;
+            node.manual_slot_assignment = manual_slot_assignment;
             self.has_shadow_hosts = true;
         }
         if let Some(node) = self.get_mut(host) {
             node.shadow_root = Some(root);
         }
         self.reown(host);
+    }
+
+    // The root of `id`'s tree, shadow-including: a shadow root's host is its parent here (not a template's contents':
+    // they are a tree of their own). (`root_of`, element_state.rs, is the plain one.)
+    pub(crate) fn shadow_including_root(&self, mut id: NodeId) -> NodeId {
+        loop {
+            id = self.root_of(id);
+            match self.get(id).and_then(|n| n.host) {
+                Some(h) => id = h,
+                None => return id,
+            }
+        }
+    }
+    // Where `id` is in the JS tree: its path from `anchor`, appended to `out` as its length and then its steps down — a
+    // child's index, -1 for a host's shadow root, -2 for a template's contents — or a length of -1 where `anchor` is not
+    // above it. How a slot the engine answers with is found as the object a script holds (node_handle.rs).
+    pub(crate) fn push_path(&self, anchor: NodeId, id: NodeId, out: &mut Vec<f64>) {
+        let at = out.len();
+        out.push(0.0);
+        let mut cur = id;
+        while cur != anchor {
+            let Some(n) = self.get(cur) else { break };
+            let (step, up) = match (n.parent, n.host, n.template_host) {
+                (Some(p), _, _) => (n.child_index as f64, p),
+                (None, Some(h), _) => (-1.0, h),
+                (None, None, Some(t)) => (-2.0, t),
+                _ => break,
+            };
+            out.push(step);
+            cur = up;
+        }
+        if cur != anchor {
+            out.truncate(at);
+            out.push(-1.0);
+            return;
+        }
+        out[at] = (out.len() - at - 1) as f64;
+        out[at + 1..].reverse();
     }
 
     // `template`'s contents are `content` (or none) — and the handles' edges between them.
@@ -1229,7 +1274,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     let id = v8::Integer::new(scope, context_id);
     ns.set(scope, key.into(), id.into());
     // Bulk import + id-level query: build the arena from an already-parsed page (importNode /
-    // syncChildren) and match over it natively (queryIds / matchesId).
+    // syncChildren) and match over it natively (query / matchesId).
     register(scope, ns, "importNode", import_node, context_id);
     // Every other node kind, character-data changes, and the parser's per-node tree steps.
     register(scope, ns, "createNode", create_node, context_id);
@@ -1248,13 +1293,18 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setIsValue", set_is_value, context_id);
     register(scope, ns, "setContainerMargins", set_container_margins, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
-    register(scope, ns, "setAssignedNodes", set_assigned_nodes, context_id);
+    // Slot assignment (slots.rs): what each slot is assigned, run over a shadow tree as what it depends on changes, and
+    // read back by its slots and its slottables.
+    register(scope, ns, "assignSlots", assign_slots, context_id);
+    register(scope, ns, "setManualAssigned", set_manual_assigned, context_id);
+    register(scope, ns, "assignedSlotOf", assigned_slot_of, context_id);
+    register(scope, ns, "assignedNodesOf", assigned_nodes_of, context_id);
     register(scope, ns, "setValue", set_value, context_id);
     register(scope, ns, "setParserFormOwner", set_parser_form_owner, context_id);
     register(scope, ns, "setCustomStates", set_custom_states, context_id);
     register(scope, ns, "setTarget", set_target, context_id);
     register(scope, ns, "setFocusRingHidden", set_focus_ring_hidden, context_id);
-    register(scope, ns, "queryIds", query_ids, context_id);
+    register(scope, ns, "query", query, context_id);
     register(scope, ns, "matchesId", matches_id, context_id);
     register(scope, ns, "closestId", closest_id, context_id);
     register(scope, ns, "selectorValid", selector_valid, context_id);
@@ -1353,10 +1403,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // slot bumps its gen, so any surviving reference reads absent.
     register(scope, ns, "dropNode", drop_node, context_id);
     register(scope, ns, "handleEdgesMismatch", handle_edges_mismatch, context_id);
-    // A node's object by its slot, and a node handed out through a Proxy (node_handle.rs).
-    register(scope, ns, "nodeOf", node_of, context_id);
-    register(scope, ns, "nodesOf", nodes_of, context_id);
-    register(scope, ns, "rewrap", rewrap, context_id);
     // Free a disposed realm's arena — csim calls this before tearing down a frame realm (main reuses
     // slot 0). Takes an explicit id (the realm being dropped), not the caller's own.
     register(scope, ns, "dropRealm", drop_realm, context_id);
@@ -1788,37 +1834,114 @@ fn set_shadow_host(
     };
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
-    arena.set_shadow_host(root, host, args.get(2).is_true());
+    arena.set_shadow_host(root, host, args.get(2).is_true(), args.get(3).is_true());
     if let Some(engine) = engine {
         engine.shadow_attached(arena, host);
     }
 }
 
-// __dom.setAssignedNodes(slotNid, [nid, …]): the slot's assigned nodes are these now (HTML's "assign slottables").
-fn set_assigned_nodes(
+// The nids a JS array lists (an entry that is none skipped).
+fn nids_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<NodeId> {
+    let Ok(arr) = v8::Local::<v8::Array>::try_from(value) else { return Vec::new() };
+    (0..arr.length())
+        .filter_map(|i| arr.get_index(scope, i).and_then(|v| v.integer_value(scope)).and_then(NodeId::from_i64))
+        .collect()
+}
+// __dom.assignSlots(rootNid, [slotNid, …]) -> [slot, count, node, …, slot, …]: assign the slots of the shadow tree
+// `rootNid` (-1 for none) and the slots listed (ones that left it, assigned what their own tree now gives them), and
+// answer each slot whose assigned nodes changed with the nodes that left it — for the caller's `slotchange` and layout
+// marks. A slot listed is answered by its index in the list, any other by -1 and its path; a node by its path. Every
+// path is from the shadow-including root of the tree `rootNid` is in — or, without one, of the slot's.
+fn assign_slots(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let root = nid_arg(scope, &args, 0);
+    let extra = nids_arg(scope, args.get(1));
+    let cid = realm_id(scope, &args);
+    let (arena, mut engine) = arena_and_engine(scope, cid);
+    let changed = crate::slots::assign(arena, root, &extra, |arena, slot, old, now| {
+        if let Some(engine) = engine.as_deref_mut() {
+            for &n in old.iter().filter(|n| !now.contains(n)).chain(now.iter().filter(|n| !old.contains(n))) {
+                engine.node_left(arena, n);
+            }
+            engine.slot_assignment_changed(arena, slot);
+        }
+    });
+    let tree = root.map(|r| arena.shadow_including_root(r));
+    let mut out = Vec::new();
+    for c in &changed {
+        let anchor = tree.unwrap_or_else(|| arena.shadow_including_root(c.slot));
+        match extra.iter().position(|&s| s == c.slot) {
+            Some(i) => out.push(i as f64),
+            None => {
+                out.push(-1.0);
+                arena.push_path(anchor, c.slot, &mut out);
+            }
+        }
+        out.push(c.left.len() as f64);
+        for &n in &c.left {
+            arena.push_path(anchor, n, &mut out);
+        }
+    }
+    rv.set(f64_array(scope, &out).into());
+}
+
+// __dom.setManualAssigned(slotNid, [nid, …]): the nodes `assign()`ed to a slot, in that order (those in this arena).
+fn set_manual_assigned(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let Some(slot) = nid_arg(scope, &args, 0) else { return };
-    let mut nodes = Vec::new();
-    if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
-        for i in 0..arr.length() {
-            if let Some(id) = arr.get_index(scope, i).and_then(|v| v.integer_value(scope)).and_then(NodeId::from_i64) {
-                nodes.push(id);
-            }
-        }
-    }
+    let nodes = nids_arg(scope, args.get(1));
     let cid = realm_id(scope, &args);
-    let (arena, engine) = arena_and_engine(scope, cid);
-    let old = arena.set_assigned_nodes(slot, nodes);
-    if let Some(engine) = engine {
-        let now = arena.get(slot).map_or(Vec::new(), |s| s.assigned.clone());
-        for &n in old.iter().filter(|n| !now.contains(n)).chain(now.iter().filter(|n| !old.contains(n))) {
-            engine.node_left(arena, n);
-        }
-        engine.slot_assignment_changed(arena, slot);
+    if let Some(s) = realm(scope, cid).get_mut_quietly(slot) {
+        s.manual_assigned = nodes;
     }
+}
+
+// __dom.assignedSlotOf(nid) -> the slot a slottable is assigned to (HTML "find a slot"), as its path from the node's
+// shadow-including root; undefined for none.
+fn assigned_slot_of(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let Some(slot) = arena.get(id).and_then(|n| n.assigned_slot).filter(|&s| arena.get(s).is_some()) else { return };
+    let mut out = Vec::new();
+    arena.push_path(arena.shadow_including_root(id), slot, &mut out);
+    rv.set(f64_array(scope, &out).into());
+}
+
+// __dom.assignedNodesOf(slotNid, flatten) -> a slot's assigned nodes ("find slottables"), or with `flatten` its flattened
+// ones ("find flattened slottables"), as their paths from the slot's shadow-including root.
+fn assigned_nodes_of(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(slot) = nid_arg(scope, &args, 0) else { return };
+    let flatten = args.get(1).is_true();
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let ids = if flatten {
+        let mut out = Vec::new();
+        crate::slots::flattened(arena, slot, &mut out);
+        out
+    } else {
+        arena.get(slot).map_or(Vec::new(), |s| s.assigned.clone())
+    };
+    let anchor = arena.shadow_including_root(slot);
+    let mut out = Vec::new();
+    for id in ids {
+        arena.push_path(anchor, id, &mut out);
+    }
+    rv.set(f64_array(scope, &out).into());
 }
 
 // __dom.setFocusRingHidden(hidden): whether the realm's focus shows no ring (`:focus-visible` does not match).
@@ -2079,10 +2202,10 @@ fn set_attr_namespace(
     }
 }
 
-// __dom.queryIds(rootNid, selector, quirks, firstOnly, scopeNid, xml) -> [nid, …] in document order, or `null` for an
-// invalid selector (the caller's SyntaxError); `undefined` for a root the arena does not hold. Nids, not wrappers:
-// the query layer maps them back onto the JS tree.
-fn query_ids(
+// __dom.query(rootNid, selector, quirks, firstOnly, scopeNid, xml) -> the elements matched, in document order, each as
+// its path from the root (`RealmArena::push_path`), or `null` for an invalid selector (the caller's SyntaxError);
+// `undefined` for a root the arena does not hold.
+fn query(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
@@ -2100,12 +2223,12 @@ fn query_ids(
     let html_doc = !args.get(5).is_true();
     match crate::selector::query_text(realm(scope, cid), root, scope_el, &selector, first_only, quirks, html_doc) {
         Some(ids) => {
-            let array = v8::Array::new(scope, ids.len() as i32);
-            for (i, id) in ids.iter().enumerate() {
-                let v: v8::Local<v8::Value> = v8::Number::new(scope, id.to_f64()).into();
-                array.set_index(scope, i as u32, v);
+            let arena = realm(scope, cid);
+            let mut out = Vec::new();
+            for id in ids {
+                arena.push_path(root, id, &mut out);
             }
-            rv.set(array.into());
+            rv.set(f64_array(scope, &out).into());
         }
         None => rv.set_null(),
     }
@@ -2385,8 +2508,8 @@ fn xpath_prefixes(
 }
 
 // __dom.xpathEvaluate(expression, contextNid, attrKey, html, namespaces, resultType) -> a number, string or boolean,
-// or for a node-set [node, key, node, key, …] in document order (each node's object, `key` an attribute's store key, null
-// for the node itself). The context is the node
+// or for a node-set [key, path…, key, path…, …] in document order (each node as its path from the root of the context's
+// tree, `RealmArena::push_path`; `key` an attribute's store key, null for the node itself). The context is the node
 // `contextNid`, or its attribute stored under `attrKey` (a string); `namespaces` a flat [prefix, uri, …] array.
 // Throws a TypeError for a value of the wrong type; `undefined` for a context the arena does not hold.
 fn xpath_evaluate(
@@ -2424,15 +2547,20 @@ fn xpath_evaluate(
         None => crate::xpath::XNode::Node(id),
     };
     let answer = crate::xpath::evaluate(arena, &text, context, html, &namespaces, result_type);
-    // (…the node-set as (handle, key) pairs, read while the arena is borrowed)
+    // (…the node-set as (path, key) pairs, read while the arena is borrowed)
+    let root = arena.root_of(id);
     let answer = answer.map(|a| match a {
         crate::xpath::Answer::Nodes(nodes) => {
-            let held = |n: NodeId| arena.get(n).and_then(|d| d.link.held());
+            let path = |n: NodeId| {
+                let mut out = Vec::new();
+                arena.push_path(root, n, &mut out);
+                out
+            };
             let pairs: Vec<_> = nodes
                 .iter()
                 .map(|x| match *x {
-                    crate::xpath::XNode::Node(n) => (held(n), None),
-                    crate::xpath::XNode::Attr(n, i) => (held(n), crate::xpath::attribute_key(arena, n, i).map(str::to_owned)),
+                    crate::xpath::XNode::Node(n) => (path(n), None),
+                    crate::xpath::XNode::Attr(n, i) => (path(n), crate::xpath::attribute_key(arena, n, i).map(str::to_owned)),
                 })
                 .collect();
             Err(pairs)
@@ -2449,22 +2577,15 @@ fn xpath_evaluate(
             scope.throw_exception(error);
         }
         Ok(Err(pairs)) => {
-            // (…each node's object made a handle of this scope before anything is allocated)
-            let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
-            let objects: Vec<v8::Local<v8::Value>> = pairs
-                .iter()
-                .map(|(h, _)| h.and_then(|h| crate::node_handle::object_of(scope, h)).map_or(undefined, |o| o.into()))
-                .collect();
-            let array = v8::Array::new(scope, 2 * pairs.len() as i32);
-            for (i, (object, (_, key))) in objects.into_iter().zip(&pairs).enumerate() {
-                array.set_index(scope, 2 * i as u32, object);
-                let k: v8::Local<v8::Value> = match key.as_deref().and_then(|k| v8::String::new(scope, k)) {
+            let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
+            for (path, key) in &pairs {
+                items.push(match key.as_deref().and_then(|k| v8::String::new(scope, k)) {
                     Some(k) => k.into(),
                     None => v8::null(scope).into(),
-                };
-                array.set_index(scope, 2 * i as u32 + 1, k);
+                });
+                items.extend(path.iter().map(|&v| -> v8::Local<v8::Value> { v8::Number::new(scope, v).into() }));
             }
-            rv.set(array.into());
+            rv.set(v8::Array::new_with_elements(scope, &items).into());
         }
         Ok(Ok(crate::xpath::Answer::Number(n))) => rv.set_double(n),
         Ok(Ok(crate::xpath::Answer::Bool(b))) => rv.set_bool(b),
@@ -3170,51 +3291,6 @@ fn drop_node(
     if let Some(arena) = dom(scope).realms.get_mut(&cid) {
         arena.free_node(id);
     }
-}
-
-// __dom.nodeOf(nid) -> the object of the node in slot `nid`, or undefined (no such node, or none V8 still has).
-fn node_of(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
-    let cid = realm_id(scope, &args);
-    let Some(held) = realm(scope, cid).get(id).and_then(|n| n.link.held()) else { return };
-    if let Some(obj) = crate::node_handle::object_of(scope, held) {
-        rv.set(obj.into());
-    }
-}
-
-// __dom.nodesOf(nids) -> their objects, in order (undefined for one `nodeOf` has none for).
-fn nodes_of(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
-    let ids: Vec<Option<NodeId>> = (0..list.length())
-        .map(|i| list.get_index(scope, i).and_then(|v| v.integer_value(scope)).and_then(NodeId::from_i64))
-        .collect();
-    let cid = realm_id(scope, &args);
-    let arena = realm(scope, cid);
-    let held: Vec<_> = ids.iter().map(|id| id.and_then(|id| arena.get(id)).and_then(|n| n.link.held())).collect();
-    // (…each one's object made a handle of this scope before the list is made, which allocates)
-    let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
-    let objects: Vec<v8::Local<v8::Value>> = held
-        .into_iter()
-        .map(|h| h.and_then(|h| crate::node_handle::object_of(scope, h)).map_or(undefined, |o| o.into()))
-        .collect();
-    rv.set(v8::Array::new_with_elements(scope, &objects).into());
-}
-
-// __dom.rewrap(object) — the node `object` is a Proxy over is handed out as it from here on.
-fn rewrap(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    crate::node_handle::rewrap(scope, args.get(0));
 }
 
 // __dom.handleEdgesMismatch(nid) -> where the node's handle's tree edges disagree with its slot's tree
