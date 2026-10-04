@@ -20,8 +20,8 @@
 // ~30 unsynced `_children` splice sites that can plant) carries the OLD gen, so following it
 // gen-mismatches and is SKIPPED rather than aliasing the new occupant. That converts the silent
 // tree corruption naive index-reuse caused (proven on Avo) into safe, self-healing behaviour, which
-// is what lets the JS side reclaim a collected node's slot (FinalizationRegistry -> dropNode) and
-// bound arena growth in a long no-navigation session. See native-query-shadow.js for the JS lifecycle.
+// is what lets a collected node's slot be reclaimed (its handle's, node_handle.rs) and bounds arena
+// growth in a long no-navigation session. See native-query-shadow.js for the JS lifecycle.
 //
 // The `nid` that crosses the FFI is the `(index, gen)` pair PACKED into one JS Number (index in the
 // low `INDEX_BITS`, gen above — both fit exactly under 2^53); JS treats it as an opaque token and only
@@ -617,7 +617,7 @@ impl RealmArena {
         }
         self.mutations += 1;
         let slot = &mut self.slots[id.idx as usize];
-        let assigned_slot = slot.data.as_ref().and_then(|n| n.assigned_slot);
+        let (assigned_slot, pseudo_boxes) = slot.data.as_ref().map_or((None, [None; 2]), |n| (n.assigned_slot, n.pseudo_boxes));
         slot.data = None;
         if slot.generation < GEN_MAX {
             slot.generation += 1;
@@ -632,6 +632,11 @@ impl RealmArena {
         // …and the slot it was assigned to no longer lists it: a change to the slot's flat children.
         if let Some(s) = assigned_slot.and_then(|s| self.get_mut(s)) {
             s.assigned.retain(|&n| n != id);
+        }
+        // …and its generated boxes' slots go with it: a `::before` / `::after` is no node of its own, held by nothing but
+        // its element (style-proxy.js `pseudoNodeFor`)
+        for b in pseudo_boxes.into_iter().flatten() {
+            self.free_node(b);
         }
     }
 
@@ -3106,9 +3111,9 @@ fn reset_arena(
     }
 }
 
-// __dom.dropNode(nid) — free ONE node's slot (its JS wrapper was garbage-collected). Routes to the
-// CALLING realm's arena (the FinalizationRegistry that fires it was created in that realm). Idempotent
-// and safe against a stale nid (a slot resetArena already recycled): free_node no-ops on a gen mismatch.
+// __dom.dropNode(nid) — free ONE node's slot, the one a node registered afresh left (native-query-shadow.js `leaveSlot`):
+// nothing names it any more. Idempotent and safe against a stale nid (a slot resetArena already recycled): free_node
+// no-ops on a gen mismatch.
 fn drop_node(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -3118,9 +3123,8 @@ fn drop_node(
         return;
     };
     let cid = realm_id(scope, &args);
-    // NON-creating lookup on purpose: a frame's FR cleanup can fire AFTER dropRealm removed its arena.
-    // `realm()` would resurrect an empty RealmArena (a lingering HashMap entry per such frame); freeing
-    // nothing from a dropped realm is exactly right, so skip when the realm is gone.
+    // NON-creating lookup on purpose: `realm()` would resurrect an empty RealmArena for a dropped realm (a lingering
+    // HashMap entry per such frame); freeing nothing from one is exactly right.
     if let Some(arena) = dom(scope).realms.get_mut(&cid) {
         arena.free_node(id);
     }

@@ -217,7 +217,9 @@ module Capybara
         (function () {
           // Drive a representative document through parse → script
           // eval → selector / event / cascade primitives so the
-          // bytecode cache covers them when a real visit hits.
+          // bytecode cache covers them when a real visit hits. (…in a
+          // realm with its own state, as a real one is: its document.)
+          try { __csimInitRealm(); } catch (_) {}
           const html = '<!doctype html><html><head><style>' +
             '.a { display: none } .a.show { display: block }' +
             '#m, .b > .c { visibility: hidden }' +
@@ -630,7 +632,7 @@ module Capybara
             # contexts N -> 1). See `relieve_heap_pressure`.
             relieve_heap_pressure
             attach_host_fns(@ctx)
-            @ctx.eval_void('__csim_installWorker();')
+            @ctx.eval_void('__csimInitRealm();')
             return @ctx
           rescue StandardError => e
             warn "[capybara-simulated] warm context reset failed, falling back to cold rebuild: #{e.class}: #{e.message}"
@@ -790,7 +792,7 @@ module Capybara
       def build_ctx
         c = Ctx.new(snapshot: @snapshot || self.class.snapshot, timeout: CALL_TIMEOUT_MS)
         attach_host_fns(c)
-        c.eval_void('__csim_installWorker();')
+        c.eval_void('__csimInitRealm();')
         c
       end
 
@@ -1547,11 +1549,12 @@ module Capybara
       # A fresh per-frame realm boots from the snapshot, so every
       # `globalThis.…` assignment csim ran *post-snapshot* in `build_ctx` is
       # missing (realm state). Re-seed the `__csim_yield` alias and the
-      # `__csim_installWorker()` post-snapshot init; the `__csim_runScript`
-      # dispatcher comes from `attach_run_script_with_cache` (realm-bound).
+      # realm's own state (`__csimInitRealm()`: its document, the Worker
+      # constructors); the `__csim_runScript` dispatcher comes from
+      # `attach_run_script_with_cache` (realm-bound).
       def reseed_realm_js(c)
         c.eval_void("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
-        c.eval_void('__csim_installWorker();')
+        c.eval_void('__csimInitRealm();')
         seed_layout(c)
       end
 

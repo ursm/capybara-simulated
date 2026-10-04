@@ -43,6 +43,22 @@ RSpec.describe 'node handles' do
     expect(got).to eq([{'text' => 10, 'element' => 10, 'appended' => 10, 'fragment' => 10}, true])
   end
 
+  # A `::before` is no node of its own: its box's slot belongs to its element, and goes with it.
+  it "frees a generated box's slot with its element's" do
+    s = page('<style>.g::before { content: "x" }</style><div id=g class=g>g</div>')
+    s.execute_script(<<~JS)
+      const g = document.getElementById('g');
+      g.getBoundingClientRect();   // (…laid out: the box is made as it renders)
+      window.__box = g._pseudoNodes.before._nid;
+      window.__live = __dom.inspectNode(__box) != null;
+      g.remove();
+    JS
+    s.evaluate_script('0')
+    runtime = s.driver.browser.instance_variable_get(:@runtime)
+    2.times { runtime.ctx.low_memory_notification }
+    expect(s.evaluate_script('(document.createElement("i"), [__live, __dom.inspectNode(__box) == null])')).to eq([true, true])
+  end
+
   def page(html)
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{html}"]] })
     s.visit '/'
@@ -101,8 +117,8 @@ RSpec.describe 'node handles' do
     expect([before[:id], before.visible?]).to eq(['before', true])
   end
 
-  # The snapshot made every realm's skeleton with the same ids: a frame's `<body>` moved into the document is renamed
-  # where it lands, and the document's own keeps its handle — across the move and back out.
+  # Every realm makes a skeleton of its own: a frame's `<body>` moved into the document is named apart from the
+  # document's own, which keeps its handle — across the move and back out.
   it "keeps the document's body named apart from a frame's body moved into it" do
     pages = {'/' => '<!DOCTYPE html><meta charset=utf-8><body><button id=b0>main</button><div id=out></div><iframe id=f src="/f"></iframe>',
              '/f' => '<!DOCTYPE html><meta charset=utf-8><body><p>frame text</p>'}
