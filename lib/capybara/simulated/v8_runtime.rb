@@ -813,10 +813,10 @@ module Capybara
         c.eval_void('globalThis.__csimNativeLayoutVerifyReuse = true;') if ENV['CSIM_NL_REUSE_VERIFY'] == '1'
         # …and the check on the arena: the whole JS tree held against it at every layout and cascade entry, what it finds
         # kept here — a page navigated away or a frame removed takes no record with it — for the harness to take.
-        return unless ENV['CSIM_ARENA_VERIFY'] == '1'
-
-        c.eval_void('globalThis.__csimArenaVerify = true;')
-        c.attach('__csim_arenaVerifyFailed', ->(message) { (@arena_verify_failures ||= []) << message.to_s; nil })
+        if ENV['CSIM_ARENA_VERIFY'] == '1'
+          c.eval_void('globalThis.__csimArenaVerify = true;')
+          c.attach('__csim_arenaVerifyFailed', ->(message) { (@arena_verify_failures ||= []) << message.to_s; nil })
+        end
       end
 
       # The differences CSIM_ARENA_VERIFY=1 found since the last call, in every realm this runtime ran.
