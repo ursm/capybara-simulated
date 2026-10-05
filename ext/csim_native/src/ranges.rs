@@ -69,6 +69,8 @@ struct Boundary {
 struct Entry {
     handle: WeakPersistent<RangeHandle>,
     points: [Boundary; 2],
+    // Where each point is in its node's list (`Ranges::by_node`), so it leaves it in one step.
+    listed: [u32; 2],
 }
 
 // Every live range of the isolate — and its points by the node each is in, so a step touches the ranges at the nodes
@@ -100,7 +102,7 @@ impl Ranges {
     }
     // A new range's entry, both points at `point`.
     fn add(&mut self, handle: WeakPersistent<RangeHandle>, point: Boundary) -> u32 {
-        let entry = Some(Entry { handle, points: [point; 2] });
+        let entry = Some(Entry { handle, points: [point; 2], listed: [0; 2] });
         let id = match self.free.pop() {
             Some(id) => {
                 self.entries[id as usize] = entry;
@@ -111,13 +113,31 @@ impl Ranges {
                 self.entries.len() as u32 - 1
             }
         };
-        self.by_node.entry(point.node).or_default().extend([(id, START as u8), (id, END as u8)]);
+        self.list(point.node, id, START);
+        self.list(point.node, id, END);
         id
     }
+    // Point `w` of range `id` into `node`'s list…
+    fn list(&mut self, node: NodeId, id: u32, w: usize) {
+        let list = self.by_node.entry(node).or_default();
+        let at = list.len() as u32;
+        list.push((id, w as u8));
+        if let Some(e) = self.entries[id as usize].as_mut() {
+            e.listed[w] = at;
+        }
+    }
+    // …and out of it, the last of the list moved into its place.
     fn unindex(&mut self, node: NodeId, id: u32, w: usize) {
+        let Some(at) = self.entries.get(id as usize).and_then(|e| e.as_ref()).map(|e| e.listed[w] as usize) else { return };
         let Some(list) = self.by_node.get_mut(&node) else { return };
-        if let Some(i) = list.iter().position(|&(e, x)| e == id && x as usize == w) {
-            list.swap_remove(i);
+        if list.get(at) != Some(&(id, w as u8)) {
+            return;
+        }
+        list.swap_remove(at);
+        if let Some(&(moved, mw)) = list.get(at) {
+            if let Some(e) = self.entries[moved as usize].as_mut() {
+                e.listed[mw as usize] = at as u32;
+            }
         }
         if list.is_empty() {
             self.by_node.remove(&node);
@@ -129,7 +149,7 @@ impl Ranges {
         let old = std::mem::replace(&mut e.points[w], point).node;
         if old != point.node {
             self.unindex(old, id, w);
-            self.by_node.entry(point.node).or_default().push((id, w as u8));
+            self.list(point.node, id, w);
         }
     }
     fn point(&self, id: u32, w: usize) -> Boundary {
