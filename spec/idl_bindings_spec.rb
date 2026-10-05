@@ -34,7 +34,7 @@ RSpec.describe 'IDL bindings' do
   # (…before it counts the arguments, as Web IDL orders it — and an object that inherits from one is no object of the
   # interface)
   it "checks `this` first, and only the object's own" do
-    expect(outcome('DOMTokenList.prototype.contains.call({})')).to eq("TypeError: Failed to execute 'contains' on 'DOMTokenList': Illegal invocation")
+    expect(outcome('DOMTokenList.prototype.contains.call({})')).to eq('TypeError: Illegal invocation')
     expect(outcome('Object.create(document.getElementById("a").classList).length')).to start_with('TypeError: ')
   end
 

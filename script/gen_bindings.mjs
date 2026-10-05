@@ -136,10 +136,10 @@ function generateInterface(def) {
       if (m.special === 'stringifier') stringifier = m.name;
       else if (m.special) throw new Error(`${label}: a ${m.special} attribute is not generated yet`);
       members.push(m.name);
-      body.push(`    get ${m.name}() { return impl.get_${m.name}(thisOf(this, KEY, '${name}', '${m.name}')); }`);
+      body.push(`    get ${m.name}() { return impl.get_${m.name}(thisOf(this, KEY)); }`);
       if (!m.readonly) {
         const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
-        body.push(`    set ${m.name}(v) { impl.set_${m.name}(thisOf(this, KEY, '${name}', '${m.name}'), ${v}); }`);
+        body.push(`    set ${m.name}(v) { impl.set_${m.name}(thisOf(this, KEY), ${v}); }`);
       }
       continue;
     }
@@ -158,11 +158,14 @@ function generateInterface(def) {
     throw new Error(`${label}: a ${m.type} member is not generated yet`);
   }
   if (constructor) throw new Error(`${name}: a constructor is not generated yet`);
+  if (indexed && !members.includes('length')) throw new Error(`${name}: an indexed getter with no \`length\` is not generated yet`);
 
   const lines = [];
   lines.push(`// interface ${name} (${def.spec})`);
   lines.push(`export function define${name}(impl) {`);
   lines.push(`  const KEY = brandKey('${name}');`);
+  // (…registered before the interfaces its members take are looked up: those may be its own)
+  lines.push(`  registerInterface('${name}', (o) => slotsOf(o, KEY) !== undefined);`);
   for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
   lines.push(`  // (…made by the platform alone: the interface has no constructor)`);
   lines.push(`  class ${name} {`);
@@ -171,9 +174,8 @@ function generateInterface(def) {
   lines.push(`      impl.init(makeSlots(this, KEY), ...args.slice(1));`);
   lines.push(`    }`);
   lines.push(...body);
-  if (stringifier) lines.push(`    toString() { return impl.get_${stringifier}(thisOf(this, KEY, '${name}', 'toString')); }`);
+  if (stringifier) lines.push(`    toString() { return impl.get_${stringifier}(thisOf(this, KEY)); }`);
   lines.push(`  }`);
-  lines.push(`  registerInterface('${name}', (o) => slotsOf(o, KEY) !== undefined);`);
   if (constants.length) {
     const list = JSON.stringify(constants.map(([n]) => n));
     lines.push(`  defineConstants(${name}, ${list}, [${constants.map(([, v]) => v).join(', ')}]);`);
@@ -194,6 +196,17 @@ function generateInterface(def) {
   return lines.join('\n');
 }
 
+// The JS name of an argument: its IDL name, but where strict code reserves that (`interface`, `arguments`, …).
+const RESERVED = new Set([
+  'arguments', 'eval', 'implements', 'interface', 'let', 'package', 'private', 'protected', 'public', 'static', 'yield',
+  'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'enum',
+  'export', 'extends', 'false', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'null',
+  'return', 'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with'
+]);
+function argName(a) {
+  return RESERVED.has(a.name) ? `${a.name}_` : a.name;
+}
+
 // An operation: its required arguments its parameters (so its `length` is their count, Web IDL §3.7.7), the optional
 // ones read from `arguments`, a variadic one the rest — each converted, and handed to the implementation.
 function operation(iface, m, checks) {
@@ -201,19 +214,19 @@ function operation(iface, m, checks) {
   const requiredCount = args.filter((a) => !a.optional && !a.variadic).length;
   if (args.some((a, i) => (a.optional || a.variadic) && i < requiredCount)) throw new Error(`${iface}.${m.name}: a required argument after an optional one`);
   if (args.some((a) => a.optional) && args.some((a) => a.variadic)) throw new Error(`${iface}.${m.name}: an optional argument beside a variadic one is not generated yet`);
-  const params = args.filter((a) => !a.optional).map((a) => (a.variadic ? `...${a.name}` : a.name)).join(', ');
+  const params = args.filter((a) => !a.optional).map((a) => (a.variadic ? `...${argName(a)}` : argName(a))).join(', ');
   const converted = args.map((a, i) => {
     const where = { iface, member: m.name, index: i };
-    if (a.variadic) return `${a.name}.map((x) => ${conversion(a.idlType, 'x', where, checks, a.extAttrs)})`;
+    if (a.variadic) return `${argName(a)}.map((x) => ${conversion(a.idlType, 'x', where, checks, a.extAttrs)})`;
     if (a.optional) {
       // (…an optional argument passed as undefined is one not passed, Web IDL §3.6.8)
       const missing = a.default ? defaultValue(a.default, `${iface}.${m.name}(${a.name})`) : 'undefined';
       return `(arguments[${i}] !== undefined ? ${conversion(a.idlType, `arguments[${i}]`, where, checks, a.extAttrs)} : ${missing})`;
     }
-    return conversion(a.idlType, a.name, where, checks, a.extAttrs);
+    return conversion(a.idlType, argName(a), where, checks, a.extAttrs);
   });
   // (…`this` checked first, then the arguments counted — Web IDL's order, as Chrome's)
-  const self = `const self = thisOf(this, KEY, '${iface}', '${m.name}'); `;
+  const self = `const self = thisOf(this, KEY); `;
   const check = requiredCount ? `required(arguments, ${requiredCount}, '${m.name}', '${iface}'); ` : '';
   return `${m.name}(${params}) { ${self}${check}return impl.${m.name}(${['self', ...converted].join(', ')}); }`;
 }
@@ -243,7 +256,7 @@ function generateCallbackInterface(def) {
   if (operations.length !== 1) throw new Error(`${name}: a callback interface of ${operations.length} operations is not generated yet`);
   const op = operations[0];
   if (op.idlType.idlType !== 'unsigned short' || op.idlType.nullable) throw new Error(`${name}.${op.name}: no binding converts a result of ${op.idlType.idlType} yet`);
-  const params = op.arguments.map((a) => a.name).join(', ');
+  const params = op.arguments.map(argName).join(', ');
   const lines = [];
   lines.push(`// callback interface ${name} (${def.spec})`);
   lines.push(`export function define${name}() {`);
