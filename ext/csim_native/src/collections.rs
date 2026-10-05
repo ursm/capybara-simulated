@@ -1,7 +1,8 @@
 // The element lists the DOM names by a filter (DOM §4.2.6, HTML §3.1.3): `getElementsByClassName`, `getElementsByTagName`
 // and its namespaced form, and the document's legacy collections (`forms`, `images`, `links`, `scripts`, `anchors`,
 // `embeds`) — the scope's descendant elements in tree order (not into a shadow tree or a template's contents) that the
-// filter takes, answered as their paths from the scope (`RealmArena::push_path`), which the live collections wrap.
+// filter takes, answered as `nodes_value` says (their objects, or their paths from the scope), which the live
+// collections wrap.
 
 use web_atoms::ns;
 
@@ -82,8 +83,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "elementById", element_by_id, context_id);
 }
 
-// __dom.elementById(rootNid, id) -> `getElementById`: the path from the root of the first element in tree order, the
-// root itself included, whose id is `id` (exactly, as UTF-16), or a length of -1 for none.
+// __dom.elementById(rootNid, id) -> `getElementById`: the first element in tree order, the root itself included, whose id
+// is `id` (exactly, as UTF-16) — none or it, as `nodes_value` answers.
 fn element_by_id(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let id = utf16_arg(scope, args.get(1));
@@ -95,19 +96,17 @@ fn element_by_id(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     let mut stack = vec![root];
-    let mut out = Vec::new();
+    let mut found = None;
     while let Some(n) = stack.pop() {
         let Some(node) = arena.get(n) else { continue };
         if node.kind == NodeKind::Element && matches(node) {
-            arena.push_path(root, n, &mut out);
+            found = Some(n);
             break;
         }
         stack.extend(node.children.iter().rev());
     }
-    if out.is_empty() {
-        out.push(-1.0);
-    }
-    rv.set(f64_array(scope, &out).into());
+    let answer = crate::dom::nodes_value(scope, cid, root, found.as_slice());
+    rv.set(answer);
 }
 
 const CLASSES: u32 = 0;
@@ -126,7 +125,7 @@ fn name_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Op
     (s != "*").then_some(s)
 }
 
-// __dom.elementsBy(scopeNid, kind, a, b) -> the paths of the scope's descendant elements a filter takes: class names
+// __dom.elementsBy(scopeNid, kind, a, b) -> the scope's descendant elements a filter takes, as `nodes_value` answers: class names
 // (`kind` 0: `a` the list, `b` quirks mode), a namespace and local name (1: `a` the namespace, null for none, `b` the
 // local name; "*" any), a qualified name (2: `a`, "*" any; `b` an HTML document), or a legacy document collection
 // (3 forms, 4 images, 5 links, 6 scripts, 7 anchors, 8 embeds).
@@ -168,10 +167,7 @@ fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         _ => return,
     };
     let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let mut out = Vec::new();
-    for id in collect(arena, root, &filter) {
-        arena.push_path(root, id, &mut out);
-    }
-    rv.set(f64_array(scope, &out).into());
+    let ids = collect(crate::dom::realm(scope, cid), root, &filter);
+    let answer = crate::dom::nodes_value(scope, cid, root, &ids);
+    rv.set(answer);
 }

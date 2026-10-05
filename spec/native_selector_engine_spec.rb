@@ -39,10 +39,12 @@ RSpec.describe 'native selector engine' do
   def count(sel)
     session.evaluate_script(<<~JS)
       (() => {
-        const paths = __dom.query(document._nid, #{sel.to_json}, false);
-        if (paths === null) return 'INVALID';
+        const answer = __dom.query(document._nid, #{sel.to_json}, false);
+        if (answer === null) return 'INVALID';
+        // (…the matches themselves, in a document; else each one's path: a length, then child indices)
+        if (Array.isArray(answer)) return answer.length;
         let n = 0;
-        for (let at = 0; at < paths.length; at += paths[at] + 1) n++;
+        for (let at = 0; at < answer.length; at += answer[at] + 1) n++;
         return n;
       })()
     JS

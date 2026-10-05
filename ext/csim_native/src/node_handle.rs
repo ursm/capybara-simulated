@@ -10,12 +10,14 @@
 // them: its parent, its first child and its next sibling (Blink's layout), written by the arena as its children change
 // (`relink`), so a node is kept alive by the tree it is in the way its JS object's references once kept it.
 //
-// The handle does not lead back to its object yet. Traced from the handle, as Blink traces a wrapper, an object is a ROOT
-// in every scavenge: V8 drops a young traced object only where it is an unmodified API object, and every node object
-// carries its own state as properties (`_id`, `_parent`, …), so no node made and dropped could die young — measured, a
-// node churn +11-18% and its heap 4x; a weak handle per node cost +10% too. A slot is found in the JS tree by its path
-// instead (`RealmArena::path_from`) until a node's object is a bare wrapper, its state the engine's: then the trace can
-// be droppable, and the tree keep its objects.
+// The handle leads back to its object only while the node is in a document (`hold` / `release`, as handles.js registers
+// and unregisters it). Traced from the handle, as Blink traces a wrapper, an object is a ROOT in every scavenge: V8 drops
+// a young traced object only where it is an unmodified API object, and every node object carries its own state as
+// properties (`_id`, `_parent`, …), so no node made and dropped could die young — measured, a node churn +11-18% and its
+// heap 4x; a weak handle per node cost +10% too. A node in a document is held alive by it anyway, and one made and
+// dropped never is in one: so the engine hands back such a node's object itself (`object_of`), and finds any other by
+// its path in the JS tree (`RealmArena::push_path`) — until a node's object is a bare wrapper, its state the engine's:
+// then every trace can be droppable, and the tree keep its objects.
 
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -42,6 +44,8 @@ pub(crate) struct NodeHandle {
     // The tree it owns outside its children: a host's shadow root, a `<template>`'s contents — whose root's `parent` is
     // its owner, the other way.
     owned: Edge,
+    // Its object — the one a script holds (a `<form>`'s Proxy) — while the node is in a document; empty otherwise.
+    object: UnsafeCell<v8::TracedReference<v8::Object>>,
 }
 
 unsafe impl GarbageCollected for NodeHandle {
@@ -50,6 +54,8 @@ unsafe impl GarbageCollected for NodeHandle {
         self.first.trace(visitor);
         self.next.trace(visitor);
         self.owned.trace(visitor);
+        // SAFETY: written on the main thread only, between collections' marking steps as TracedReference allows.
+        visitor.trace(unsafe { &*self.object.get() });
     }
     fn get_name(&self) -> &'static std::ffi::CStr {
         c"NodeHandle"
@@ -192,6 +198,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         first: Edge::new(),
         next: Edge::new(),
         owned: Edge::new(),
+        object: UnsafeCell::new(v8::TracedReference::empty()),
     };
     let heap = scope.get_cpp_heap().expect("NodeBase is installed only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
@@ -248,4 +255,44 @@ pub(crate) fn base_function<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::
         }
     };
     template.get_function(scope)
+}
+
+// `__dom.holdObjects(nodes)` / `__dom.releaseObjects(nodes)`: the nodes (their objects, as a script holds them) are now
+// in a document — their handles hold their objects — or are no longer.
+pub(crate) fn hold_objects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    set_objects(scope, args.get(0), true);
+}
+pub(crate) fn release_objects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    set_objects(scope, args.get(0), false);
+}
+fn set_objects(scope: &mut v8::PinScope<'_, '_>, nodes: v8::Local<'_, v8::Value>, hold: bool) {
+    let Ok(nodes) = v8::Local::<v8::Array>::try_from(nodes) else { return };
+    for i in 0..nodes.length() {
+        let Some(value) = nodes.get_index(scope, i) else { continue };
+        let Some(ptr) = handle_of(scope, value) else { continue };
+        let Ok(obj) = v8::Local::<v8::Object>::try_from(value) else { continue };
+        // SAFETY: the handle lives while its object does, which the array holds; the main thread writes the reference.
+        let slot = unsafe { &mut *ptr.as_ref().object.get() };
+        // (…a node held already — moved within its document — keeps its reference: making one costs a traced handle)
+        let current = slot.get(scope);
+        if hold && current == Some(obj) || !hold && current.is_none() {
+            continue;
+        }
+        slot.reset(scope, hold.then_some(obj));
+    }
+}
+
+// Where the object of the node whose handle `link` is lies, while the node is in a document — read with the scope once
+// the arena is let go (`HeldObject::get`), and before anything is allocated on the JS heap (a collection in between could
+// take the handle).
+pub(crate) fn held(link: &Link) -> Option<HeldObject> {
+    link.handle().map(|h| HeldObject(h.object.get()))
+}
+pub(crate) struct HeldObject(*const v8::TracedReference<v8::Object>);
+
+impl HeldObject {
+    pub(crate) fn get<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Object>> {
+        // SAFETY: as `held` says — the handle has not been collected since.
+        unsafe { (*self.0).get(scope) }
+    }
 }

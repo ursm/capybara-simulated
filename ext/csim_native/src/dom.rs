@@ -1505,6 +1505,26 @@ pub(crate) fn realm<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> &'s mu
     dom(scope).arena.enter(cid)
 }
 
+// Nodes the engine answers with, under `anchor`, to the page side: their objects, where every one is in a document (its
+// handle holds its object, node_handle.rs) — else each one's path from the anchor (`RealmArena::push_path`), a
+// Float64Array the page side walks (native-query-shadow.js `nodesAtPaths`).
+pub(crate) fn nodes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, anchor: NodeId, ids: &[NodeId]) -> v8::Local<'s, v8::Value> {
+    let arena = realm(scope, cid);
+    let held: Option<Vec<crate::node_handle::HeldObject>> =
+        ids.iter().map(|&id| arena.get(id).and_then(|n| crate::node_handle::held(&n.link))).collect();
+    // (…the objects read before anything is allocated: a collection in between could take a handle)
+    let objects: Option<Vec<v8::Local<'s, v8::Value>>> = held.and_then(|held| held.iter().map(|h| h.get(scope).map(Into::into)).collect());
+    if let Some(objects) = objects {
+        return v8::Array::new_with_elements(scope, &objects).into();
+    }
+    let arena = realm(scope, cid);
+    let mut out = Vec::new();
+    for &id in ids {
+        arena.push_path(anchor, id, &mut out);
+    }
+    f64_array(scope, &out).into()
+}
+
 // The arena for realm `cid` and its style engine, for a change the engine has to hear of — the engine's change hooks
 // (`attributes_will_change`, `children_changed`, `node_left`, …) are Firefox's restyle manager, called where the DOM changes.
 fn arena_and_engine<'s>(
@@ -1753,6 +1773,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // that node's attributes (the Element constructor installs it in place of the JS `{}`).
     register(scope, ns, "attrsView", attrs_view, context_id);
     register(scope, ns, "adoptSubtree", adopt_subtree, context_id);
+    // …and a node's object, held by its handle while the node is in a document (node_handle.rs)
+    register(scope, ns, "holdObjects", crate::node_handle::hold_objects, context_id);
+    register(scope, ns, "releaseObjects", crate::node_handle::release_objects, context_id);
     register(scope, ns, "handleEdgesMismatch", handle_edges_mismatch, context_id);
     // Free a disposed realm's state and nodes — csim calls this before tearing down a frame realm (main
     // reuses id 0). Takes an explicit id (the realm being dropped), not the caller's own.
@@ -2570,9 +2593,9 @@ fn set_attr_namespace(
     }
 }
 
-// __dom.query(rootNid, selector, quirks, firstOnly, scopeNid, xml) -> the elements matched, in document order, each as
-// its path from the root (`RealmArena::push_path`), or `null` for an invalid selector (the caller's SyntaxError);
-// `undefined` for a root the arena does not hold.
+// __dom.query(rootNid, selector, quirks, firstOnly, scopeNid, xml) -> the elements matched, in document order, as
+// `nodes_value` answers them, or `null` for an invalid selector (the caller's SyntaxError); `undefined` for a root the
+// arena does not hold.
 fn query(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2591,12 +2614,8 @@ fn query(
     let html_doc = !args.get(5).is_true();
     match crate::selector::query_text(realm(scope, cid), root, scope_el, &selector, first_only, quirks, html_doc) {
         Some(ids) => {
-            let arena = realm(scope, cid);
-            let mut out = Vec::new();
-            for id in ids {
-                arena.push_path(root, id, &mut out);
-            }
-            rv.set(f64_array(scope, &out).into());
+            let answer = nodes_value(scope, cid, root, &ids);
+            rv.set(answer);
         }
         None => rv.set_null(),
     }
