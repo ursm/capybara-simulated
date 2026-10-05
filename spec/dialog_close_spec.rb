@@ -3,12 +3,12 @@ require_relative 'support/session_teardown'
 
 # HTML "close the dialog", for `close()` and for a `dialog` method's submission: a dialog that is not open stays as it
 # is; an open one loses `open` and modal-ness, takes the result as its returnValue unless the result is null, and
-# queues the task that fires `close` (Chrome and Firefox both fire it after the script). A submission with the `dialog`
-# method runs the whole submission algorithm up to it — validation, `submit`, the entry list and so `formdata`
-# (Firefox; Chrome skips it) — and whichever way it is submitted, a submit button's value is the result, an image
-# button's the selected coordinate. With no submit button, or one with no value, the result is null and the
-# returnValue stays: the spec's explicit rule, which Chrome follows only for the valueless button and Firefox for
-# neither (both set "").
+# queues the task that fires `close` (Chrome and Firefox both fire it after the script). `close()`'s result is its
+# argument, a DOMString — `close(null)`'s "null". A submission with the `dialog` method runs the whole submission
+# algorithm up to it — validation, `submit`, the entry list and so `formdata` (Firefox; Chrome skips it) — and
+# whichever way it is submitted, a submit button's value is the result, an image button's the selected coordinate.
+# With no submit button, or one with no value, the result is null and the returnValue stays: the spec's explicit
+# rule, which Chrome follows only for the valueless button and Firefox for neither (both set "").
 RSpec.describe 'Closing a dialog' do
   let(:app) {
     lambda do |env|
@@ -29,6 +29,9 @@ RSpec.describe 'Closing a dialog' do
             a.showModal();
             a.close();
             __log.push('close() ' + a.returnValue + ' ' + (document.querySelector(':modal') === null));
+            a.show();
+            a.close(null);
+            __log.push('close(null) ' + a.returnValue);
             a.show();
             document.getElementById('fa').requestSubmit(document.getElementById('ba'));
             __log.push('button ' + a.returnValue + ' ' + a.open);
@@ -56,6 +59,7 @@ RSpec.describe 'Closing a dialog' do
     expect(session.evaluate_script('window.__log')).to eq([
       'not open prev',
       'close() prev true',
+      'close(null) null',
       'formdata',
       'button yes false',
       'formdata',
@@ -64,6 +68,7 @@ RSpec.describe 'Closing a dialog' do
       'no button x',
       'formdata',
       'valueless keep',
+      'a close true x',
       'a close true x',
       'a close true x',
       'a close true x',
