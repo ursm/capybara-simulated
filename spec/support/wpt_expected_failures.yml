@@ -3920,19 +3920,6 @@ dom/idlharness.window.js:
 - 'Node interface: constant PROCESSING_INSTRUCTION_NODE on interface prototype object'
 - 'Node interface: constant TEXT_NODE on interface object'
 - 'Node interface: constant TEXT_NODE on interface prototype object'
-- 'Node interface: document.createComment("abc") must inherit property "nodeType"
-  with the proper type'
-- 'Node interface: document.createDocumentFragment() must inherit property "nodeType"
-  with the proper type'
-- 'Node interface: document.createTextNode("abc") must inherit property "nodeType"
-  with the proper type'
-- 'Node interface: document.doctype must inherit property "nodeType" with the proper
-  type'
-- 'Node interface: document.querySelector("[id]").attributes[0] must inherit property
-  "nodeType" with the proper type'
-- 'Node interface: element must inherit property "nodeType" with the proper type'
-- 'Node interface: new Document() must inherit property "nodeType" with the proper
-  type'
 - 'Node interface: operation appendChild(Node)'
 - 'Node interface: operation cloneNode(optional boolean)'
 - 'Node interface: operation compareDocumentPosition(Node)'
@@ -3948,9 +3935,6 @@ dom/idlharness.window.js:
 - 'Node interface: operation normalize()'
 - 'Node interface: operation removeChild(Node)'
 - 'Node interface: operation replaceChild(Node, Node)'
-- 'Node interface: xmlDoc must inherit property "nodeType" with the proper type'
-- 'Node interface: xmlDoc.createProcessingInstruction("abc", "def") must inherit property
-  "nodeType" with the proper type'
 - 'NodeList interface: attribute length'
 - 'NodeList interface: calling item(unsigned long) on document.querySelectorAll("script")
   with too few arguments must throw TypeError'

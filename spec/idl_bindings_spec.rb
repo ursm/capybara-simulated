@@ -143,6 +143,24 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  # (…`nodeType` is Node.prototype's accessor, as IDL has it — so a form's named control overrides it, the form's own
+  # steps reading the node's type it was made with)
+  it "keeps a node's type out of a script's reach, and a form's named control above it" do
+    got = outcome(<<~JS)
+      (() => {
+        const form = document.body.appendChild(document.createElement('form'));
+        const input = form.appendChild(document.createElement('input'));
+        input.name = 'nodeType';
+        form.appendChild(document.createElement('b'));
+        return [
+          Object.hasOwn(document.body, 'nodeType'), typeof Object.getOwnPropertyDescriptor(Node.prototype, 'nodeType').get,
+          form.nodeType === input, form.children.length, form.contains(input)
+        ];
+      })()
+    JS
+    expect(got).to eq([false, 'function', true, 2, true])
+  end
+
   it 'marks only the [Unscopable] members of each interface' do
     got = outcome('[Document, DocumentFragment, Element].map((i) => Object.keys(i.prototype[Symbol.unscopables]).sort())')
     expect(got).to eq([
