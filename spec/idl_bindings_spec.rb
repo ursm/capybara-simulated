@@ -311,6 +311,32 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  # (…a custom element whose constructor failed is HTMLUnknownElement — a customized built-in its built-in — and an
+  # interface prototype's `constructor` and class string are its own data properties)
+  it "makes a failed custom element of its interface, and names each prototype's interface" do
+    got = outcome(<<~JS)
+      (() => {
+        const prev = window.onerror;
+        window.onerror = () => true;
+        customElements.define('x-failing', class extends HTMLElement { constructor() { super(); throw new Error('no'); } });
+        customElements.define('x-failing-button', class extends HTMLButtonElement { constructor() { super(); throw new Error('no'); } }, {extends: 'button'});
+        const bad = document.createElement('x-failing'), btn = document.createElement('button', {is: 'x-failing-button'});
+        window.onerror = prev;
+        return [
+          [Object.prototype.toString.call(bad), typeof bad.style, Object.prototype.toString.call(btn), btn.type],
+          [Object.hasOwn(HTMLMediaElement.prototype, 'play'), document.createElement('video').NETWORK_EMPTY],
+          ['search', 'rb'].map((n) => Object.prototype.toString.call(document.createElement(n))),
+          [typeof Object.getOwnPropertyDescriptor(Element.prototype, 'constructor').value,
+           Object.getOwnPropertyDescriptor(HTMLDivElement.prototype, Symbol.toStringTag).value]
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      ['[object HTMLUnknownElement]', 'object', '[object HTMLButtonElement]', 'submit'], [true, 0],
+      ['[object HTMLElement]', '[object HTMLElement]'], %w[function HTMLDivElement]
+    ])
+  end
+
   # (…an attribute adopted is taken from its element first, and each member converting an Attr names itself)
   it 'adopts an attribute out of its element' do
     got = outcome(<<~JS)

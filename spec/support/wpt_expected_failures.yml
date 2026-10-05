@@ -3060,8 +3060,6 @@ dom/idlharness.any.js:
 - 'Element interface: attribute slot'
 - 'Element interface: attribute tagName'
 - 'Element interface: existence and properties of interface object'
-- 'Element interface: existence and properties of interface prototype object''s "constructor"
-  property'
 - 'Element interface: operation after((Node or DOMString)...)'
 - 'Element interface: operation append((Node or DOMString)...)'
 - 'Element interface: operation attachShadow(ShadowRootInit)'
@@ -3512,8 +3510,6 @@ dom/idlharness.window.js:
 - 'Element interface: element must inherit property "requestFullscreen(optional FullscreenOptions)"
   with the proper type'
 - 'Element interface: existence and properties of interface object'
-- 'Element interface: existence and properties of interface prototype object''s "constructor"
-  property'
 - 'Element interface: operation after((Node or DOMString)...)'
 - 'Element interface: operation append((Node or DOMString)...)'
 - 'Element interface: operation attachShadow(ShadowRootInit)'
@@ -6049,15 +6045,6 @@ html/dom/idlharness.any.js:
 - 'HTMLMediaElement interface: attribute textTracks'
 - 'HTMLMediaElement interface: attribute videoTracks'
 - 'HTMLMediaElement interface: attribute volume'
-- 'HTMLMediaElement interface: constant HAVE_CURRENT_DATA on interface prototype object'
-- 'HTMLMediaElement interface: constant HAVE_ENOUGH_DATA on interface prototype object'
-- 'HTMLMediaElement interface: constant HAVE_FUTURE_DATA on interface prototype object'
-- 'HTMLMediaElement interface: constant HAVE_METADATA on interface prototype object'
-- 'HTMLMediaElement interface: constant HAVE_NOTHING on interface prototype object'
-- 'HTMLMediaElement interface: constant NETWORK_EMPTY on interface prototype object'
-- 'HTMLMediaElement interface: constant NETWORK_IDLE on interface prototype object'
-- 'HTMLMediaElement interface: constant NETWORK_LOADING on interface prototype object'
-- 'HTMLMediaElement interface: constant NETWORK_NO_SOURCE on interface prototype object'
 - 'HTMLMediaElement interface: operation addTextTrack(TextTrackKind, optional DOMString,
   optional DOMString)'
 - 'HTMLMediaElement interface: operation canPlayType(DOMString)'
@@ -8620,33 +8607,6 @@ html/dom/idlharness.https.html:
   with too few arguments must throw TypeError'
 - 'HTMLMediaElement interface: calling fastSeek(double) on new Audio() with too few
   arguments must throw TypeError'
-- 'HTMLMediaElement interface: constant HAVE_CURRENT_DATA on interface prototype object'
-- 'HTMLMediaElement interface: constant HAVE_ENOUGH_DATA on interface prototype object'
-- 'HTMLMediaElement interface: constant HAVE_FUTURE_DATA on interface prototype object'
-- 'HTMLMediaElement interface: constant HAVE_METADATA on interface prototype object'
-- 'HTMLMediaElement interface: constant HAVE_NOTHING on interface prototype object'
-- 'HTMLMediaElement interface: constant NETWORK_EMPTY on interface prototype object'
-- 'HTMLMediaElement interface: constant NETWORK_IDLE on interface prototype object'
-- 'HTMLMediaElement interface: constant NETWORK_LOADING on interface prototype object'
-- 'HTMLMediaElement interface: constant NETWORK_NO_SOURCE on interface prototype object'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "HAVE_CURRENT_DATA" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "HAVE_ENOUGH_DATA" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "HAVE_FUTURE_DATA" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "HAVE_METADATA" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "HAVE_NOTHING" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "NETWORK_EMPTY" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "NETWORK_IDLE" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "NETWORK_LOADING" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "NETWORK_NO_SOURCE" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "addTextTrack(TextTrackKind, optional DOMString, optional DOMString)" with the proper
   type'
@@ -8695,24 +8655,6 @@ html/dom/idlharness.https.html:
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "volume" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "HAVE_CURRENT_DATA" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "HAVE_ENOUGH_DATA" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "HAVE_FUTURE_DATA" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "HAVE_METADATA" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "HAVE_NOTHING" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "NETWORK_EMPTY" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "NETWORK_IDLE" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "NETWORK_LOADING" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "NETWORK_NO_SOURCE" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
   "addTextTrack(TextTrackKind, optional DOMString, optional DOMString)" with the proper
   type'
 - 'HTMLMediaElement interface: document.createElement("video") must inherit property
@@ -8745,24 +8687,6 @@ html/dom/idlharness.https.html:
   "videoTracks" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("video") must inherit property
   "volume" with the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "HAVE_CURRENT_DATA"
-  with the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "HAVE_ENOUGH_DATA"
-  with the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "HAVE_FUTURE_DATA"
-  with the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "HAVE_METADATA" with
-  the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "HAVE_NOTHING" with
-  the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "NETWORK_EMPTY" with
-  the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "NETWORK_IDLE" with
-  the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "NETWORK_LOADING"
-  with the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "NETWORK_NO_SOURCE"
-  with the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "addTextTrack(TextTrackKind,
   optional DOMString, optional DOMString)" with the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "audioTracks" with
