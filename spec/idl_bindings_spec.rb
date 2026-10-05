@@ -538,6 +538,42 @@ RSpec.describe 'IDL bindings' do
     expect(got).to eq([[0, 1, 'Illegal invocation'], [true, true, false, true], 'kept'])
   end
 
+  # (…a number conversion's TypeError the member's, a Symbol's or a BigInt's included; an option removed by the
+  # collection's own steps; the window's scrolls its own members, converting as IDL says; Chrome's answers)
+  it "converts numbers, removes options and scrolls the window as Chrome does" do
+    got = outcome(<<~JS)
+      (() => {
+        const div = document.getElementById('a');
+        const select = document.createElement('select');
+        select.innerHTML = '<option>1<option>2';
+        const t = (f) => { try { return JSON.stringify(f()) ?? 'undefined'; } catch (e) { return e.name + ': ' + e.message; } };
+        window.rejected = window.scroll(5).catch((e) => e.message);
+        const own = HTMLSelectElement.prototype.remove;
+        HTMLSelectElement.prototype.remove = () => { throw new Error('a page remove'); };
+        try { select.options.remove(0); } finally { HTMLSelectElement.prototype.remove = own; }
+        return [
+          t(() => { div.scrollLeft = Symbol(); }),
+          t(() => div.setPointerCapture(1n)),
+          t(() => div.insertAdjacentText('x', 'y')),
+          t(() => div.toggleAttribute('a b')),
+          t(() => select.options.remove()),
+          [select.options.length, window.scroll === window.scrollTo, [window.scroll.name, window.scrollBy.name, window.scroll.length]],
+          ['audio/flac; codecs=""', 'video/mp4; codecs=""'].map((type) => new Audio().canPlayType(type))
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      "TypeError: Failed to set the 'scrollLeft' property on 'Element': Cannot convert a Symbol value to a number",
+      "TypeError: Failed to execute 'setPointerCapture' on 'Element': Cannot convert a BigInt value to a number",
+      "SyntaxError: Failed to execute 'insertAdjacentText' on 'Element': The value provided ('x') is not one of 'beforeBegin', 'afterBegin', 'beforeEnd', or 'afterEnd'.",
+      "InvalidCharacterError: Failed to execute 'toggleAttribute' on 'Element': 'a b' is not a valid attribute name.",
+      "TypeError: Failed to execute 'remove' on 'HTMLOptionsCollection': 1 argument required, but only 0 present.",
+      [1, false, %w[scroll scrollBy] + [0]],
+      %w[probably maybe]
+    ])
+    expect(session.evaluate_async_script('rejected.then(arguments[0])')).to eq("Failed to execute 'scroll' on 'Window': The provided value is not of type 'ScrollToOptions'.")
+  end
+
   # (…the document element among them, and a name compared as it is, not as a selector)
   it "finds a document's elements by name, its root too" do
     got = outcome(<<~JS)

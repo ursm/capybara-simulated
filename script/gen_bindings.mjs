@@ -145,11 +145,11 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
     case 'DOMString': c = `toDOMString(${expr}, ${legacyNull}, ${failure(where)})`; break;
     case 'USVString': c = `toUSVString(${expr}, ${failure(where)})`; break;
     case 'boolean': c = `toBoolean(${expr})`; break;
-    case 'unsigned short': c = `toUnsignedShort(${expr})`; break;
-    case 'unsigned long': c = `toUnsignedLong(${expr})`; break;
-    case 'long': c = `toLong(${expr})`; break;
-    case 'double': c = `toDouble(${expr}, ${failure(where, 'The provided double value is non-finite.')})`; break;
-    case 'unrestricted double': c = `toUnrestrictedDouble(${expr})`; break;
+    case 'unsigned short': c = `toUnsignedShort(${expr}, ${failure(where)})`; break;
+    case 'unsigned long': c = `toUnsignedLong(${expr}, ${failure(where)})`; break;
+    case 'long': c = `toLong(${expr}, ${failure(where)})`; break;
+    case 'double': c = `toDouble(${expr}, ${failure(where)})`; break;
+    case 'unrestricted double': c = `toUnrestrictedDouble(${expr}, ${failure(where)})`; break;
     case 'any': c = expr; break;
     case 'object': c = `toObject(${expr}, ${conversionError(where, 'object')})`; break;
     default: {
@@ -257,7 +257,7 @@ function dictionaryConverter(name) {
     chain.unshift(d);
   }
   const checks = new Set(), lines = [];
-  lines.push(`function ${fn}(v, prefix) {`);
+  lines.push(`export function ${fn}(v, prefix) {`);
   lines.push(`  if (v !== undefined && v !== null && typeof v !== 'object' && typeof v !== 'function') throw new TypeError(prefix + ${JSON.stringify(`The provided value is not of type '${name}'.`)});`);
   lines.push(`  const dict = {};`);
   for (const d of chain) {

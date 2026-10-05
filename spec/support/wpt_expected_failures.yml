@@ -5790,7 +5790,6 @@ html/dom/idlharness.any.js:
 - 'HTMLOptionsCollection interface: existence and properties of interface object'
 - 'HTMLOptionsCollection interface: operation add((HTMLOptionElement or HTMLOptGroupElement),
   optional (HTMLElement or long)?)'
-- 'HTMLOptionsCollection interface: operation remove(long)'
 - 'HTMLOutputElement interface: attribute defaultValue'
 - 'HTMLOutputElement interface: attribute form'
 - 'HTMLOutputElement interface: attribute htmlFor'
@@ -8392,12 +8391,9 @@ html/dom/idlharness.https.html:
 - 'HTMLOptionElement interface: attribute value'
 - 'HTMLOptionsCollection interface: attribute length'
 - 'HTMLOptionsCollection interface: attribute selectedIndex'
-- 'HTMLOptionsCollection interface: calling remove(long) on document.createElement("select").options
-  with too few arguments must throw TypeError'
 - 'HTMLOptionsCollection interface: existence and properties of interface object'
 - 'HTMLOptionsCollection interface: operation add((HTMLOptionElement or HTMLOptGroupElement),
   optional (HTMLElement or long)?)'
-- 'HTMLOptionsCollection interface: operation remove(long)'
 - 'HTMLOutputElement interface: attribute defaultValue'
 - 'HTMLOutputElement interface: attribute form'
 - 'HTMLOutputElement interface: attribute htmlFor'
