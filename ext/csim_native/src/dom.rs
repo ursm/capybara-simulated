@@ -3681,6 +3681,15 @@ fn ensure_templates(scope: &mut v8::PinScope<'_, '_>) {
                 .enumerator(attrs_enumerate)
                 .descriptor(attrs_descriptor),
         );
+        // (…an attribute named like an array index — `<div 2=a>` — is a key V8 hands the INDEXED handler)
+        tmpl.set_indexed_property_handler(
+            v8::IndexedPropertyHandlerConfiguration::new()
+                .getter(|scope: &mut v8::PinScope<'_, '_>, index: u32, args: v8::PropertyCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>| attr_get(scope, &index.to_string(), &args, rv))
+                .setter(|scope: &mut v8::PinScope<'_, '_>, index: u32, value: v8::Local<'_, v8::Value>, args: v8::PropertyCallbackArguments<'_>, _rv: v8::ReturnValue<'_, ()>| attr_set(scope, &index.to_string(), value, &args))
+                .query(|scope: &mut v8::PinScope<'_, '_>, index: u32, args: v8::PropertyCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Integer>| attr_query(scope, &index.to_string(), &args, rv))
+                .deleter(|scope: &mut v8::PinScope<'_, '_>, index: u32, args: v8::PropertyCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Boolean>| attr_delete(scope, &index.to_string(), &args, rv))
+                .descriptor(|scope: &mut v8::PinScope<'_, '_>, index: u32, args: v8::PropertyCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>| attr_descriptor(scope, &index.to_string(), &args, rv)),
+        );
         let global = v8::Global::new(scope, tmpl);
         dom(scope).attrs_view_template = Some(global);
     }
@@ -3729,21 +3738,29 @@ fn attrs_get(
     scope: &mut v8::PinScope<'_, '_>,
     key: v8::Local<'_, v8::Name>,
     args: v8::PropertyCallbackArguments<'_>,
+    rv: v8::ReturnValue<'_, v8::Value>,
+) -> v8::Intercepted {
+    match name_string(scope, key) {
+        Some(name) => attr_get(scope, &name, &args, rv),
+        None => v8::Intercepted::kNo,
+    }
+}
+fn attr_get(
+    scope: &mut v8::PinScope<'_, '_>,
+    name: &str,
+    args: &v8::PropertyCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) -> v8::Intercepted {
-    let Some(id) = holder_node_id(scope, &args) else {
+    let Some(id) = holder_node_id(scope, args) else {
         return v8::Intercepted::kNo;
     };
-    let cid = holder_realm_id(scope, &args);
-    let Some(name) = name_string(scope, key) else {
-        return v8::Intercepted::kNo;
-    };
+    let cid = holder_realm_id(scope, args);
     // Prefer the lossless UTF-16 override (a value that carried a lone surrogate); else the UTF-8. Clone
     // the chosen representation out of the node borrow so the V8 string can be built with the scope after.
     let value: Option<Result<Vec<u16>, String>> = realm(scope, cid).get(id).and_then(|n| {
-        match n.get_attr_u16(&name) {
+        match n.get_attr_u16(name) {
             Some(u) => Some(Ok(u.to_vec())),
-            None => n.get_attr(&name).map(|v| Err(v.to_string())),
+            None => n.get_attr(name).map(|v| Err(v.to_string())),
         }
     });
     match value {
@@ -3770,18 +3787,26 @@ fn attrs_set(
     args: v8::PropertyCallbackArguments<'_>,
     _rv: v8::ReturnValue<'_, ()>,
 ) -> v8::Intercepted {
-    let Some(id) = holder_node_id(scope, &args) else {
+    match name_string(scope, key) {
+        Some(name) => attr_set(scope, &name, value, &args),
+        None => v8::Intercepted::kNo,
+    }
+}
+fn attr_set(
+    scope: &mut v8::PinScope<'_, '_>,
+    name: &str,
+    value: v8::Local<'_, v8::Value>,
+    args: &v8::PropertyCallbackArguments<'_>,
+) -> v8::Intercepted {
+    let Some(id) = holder_node_id(scope, args) else {
         return v8::Intercepted::kNo;
     };
-    let cid = holder_realm_id(scope, &args);
-    let Some(name) = name_string(scope, key) else {
-        return v8::Intercepted::kNo;
-    };
+    let cid = holder_realm_id(scope, args);
     let (utf8, u16) = read_v8_value(scope, value);
     let (arena, engine) = arena_and_engine(scope, cid);
-    before_attribute_write(arena, engine, id, &[&name]);
+    before_attribute_write(arena, engine, id, &[name]);
     if let Some(node) = arena.get_mut(id) {
-        node.set_attr_full(&name, utf8, u16);
+        node.set_attr_full(name, utf8, u16);
     }
     v8::Intercepted::kYes
 }
@@ -3790,16 +3815,24 @@ fn attrs_query(
     scope: &mut v8::PinScope<'_, '_>,
     key: v8::Local<'_, v8::Name>,
     args: v8::PropertyCallbackArguments<'_>,
+    rv: v8::ReturnValue<'_, v8::Integer>,
+) -> v8::Intercepted {
+    match name_string(scope, key) {
+        Some(name) => attr_query(scope, &name, &args, rv),
+        None => v8::Intercepted::kNo,
+    }
+}
+fn attr_query(
+    scope: &mut v8::PinScope<'_, '_>,
+    name: &str,
+    args: &v8::PropertyCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Integer>,
 ) -> v8::Intercepted {
-    let Some(id) = holder_node_id(scope, &args) else {
+    let Some(id) = holder_node_id(scope, args) else {
         return v8::Intercepted::kNo;
     };
-    let cid = holder_realm_id(scope, &args);
-    let Some(name) = name_string(scope, key) else {
-        return v8::Intercepted::kNo;
-    };
-    let present = realm(scope, cid).get(id).is_some_and(|n| n.get_attr(&name).is_some());
+    let cid = holder_realm_id(scope, args);
+    let present = realm(scope, cid).get(id).is_some_and(|n| n.get_attr(name).is_some());
     if present {
         // PropertyAttribute::NONE (0) = enumerable + writable + configurable.
         rv.set_uint32(0);
@@ -3813,19 +3846,27 @@ fn attrs_delete(
     scope: &mut v8::PinScope<'_, '_>,
     key: v8::Local<'_, v8::Name>,
     args: v8::PropertyCallbackArguments<'_>,
+    rv: v8::ReturnValue<'_, v8::Boolean>,
+) -> v8::Intercepted {
+    match name_string(scope, key) {
+        Some(name) => attr_delete(scope, &name, &args, rv),
+        None => v8::Intercepted::kNo,
+    }
+}
+fn attr_delete(
+    scope: &mut v8::PinScope<'_, '_>,
+    name: &str,
+    args: &v8::PropertyCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Boolean>,
 ) -> v8::Intercepted {
-    let Some(id) = holder_node_id(scope, &args) else {
+    let Some(id) = holder_node_id(scope, args) else {
         return v8::Intercepted::kNo;
     };
-    let cid = holder_realm_id(scope, &args);
-    let Some(name) = name_string(scope, key) else {
-        return v8::Intercepted::kNo;
-    };
+    let cid = holder_realm_id(scope, args);
     let (arena, engine) = arena_and_engine(scope, cid);
-    before_attribute_write(arena, engine, id, &[&name]);
+    before_attribute_write(arena, engine, id, &[name]);
     if let Some(node) = arena.get_mut(id) {
-        node.remove_attr(&name);
+        node.remove_attr(name);
     }
     rv.set_bool(true);
     v8::Intercepted::kYes
@@ -3857,19 +3898,27 @@ fn attrs_descriptor(
     scope: &mut v8::PinScope<'_, '_>,
     key: v8::Local<'_, v8::Name>,
     args: v8::PropertyCallbackArguments<'_>,
+    rv: v8::ReturnValue<'_, v8::Value>,
+) -> v8::Intercepted {
+    match name_string(scope, key) {
+        Some(name) => attr_descriptor(scope, &name, &args, rv),
+        None => v8::Intercepted::kNo,
+    }
+}
+fn attr_descriptor(
+    scope: &mut v8::PinScope<'_, '_>,
+    name: &str,
+    args: &v8::PropertyCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) -> v8::Intercepted {
-    let Some(id) = holder_node_id(scope, &args) else {
+    let Some(id) = holder_node_id(scope, args) else {
         return v8::Intercepted::kNo;
     };
-    let cid = holder_realm_id(scope, &args);
-    let Some(name) = name_string(scope, key) else {
-        return v8::Intercepted::kNo;
-    };
+    let cid = holder_realm_id(scope, args);
     let value: Option<Result<Vec<u16>, String>> = realm(scope, cid).get(id).and_then(|n| {
-        match n.get_attr_u16(&name) {
+        match n.get_attr_u16(name) {
             Some(u) => Some(Ok(u.to_vec())),
-            None => n.get_attr(&name).map(|v| Err(v.to_string())),
+            None => n.get_attr(name).map(|v| Err(v.to_string())),
         }
     });
     match value {
