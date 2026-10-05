@@ -39,6 +39,12 @@ module WptRunner
   # Sentinel allowlist value for a file whose harness never reaches completion
   # (unsupported include, parse crash, real hang → testharness timeout, …).
   HARNESS_ERROR = 'HARNESS_ERROR'
+  # …and for one that completes having reported NO subtest at all. A file whose include is missing (an absolute
+  # `<script src>` not vendored: the helper undefined, the inline script throwing) completes that way, so it would
+  # pass with nothing measured — every idlharness file did, the IDL surface measured by none of them. Its own
+  # sentinel turns that into a listed, visible state, never a silent green.
+  NO_SUBTESTS = 'NO_SUBTESTS'
+  SENTINELS = [HARNESS_ERROR, NO_SUBTESTS].freeze
 
   # Per-file drain budget. We drain in small virtual-clock steps and stop the
   # instant the harness reports completion — so sync and quick-async tests pay
@@ -1686,7 +1692,7 @@ module WptRunner
   # deliberate non-goal per CLAUDE.md rule 1). The gate is symmetric over the
   # UNION: a non-PASS subtest listed in NEITHER turns red, and a listed subtest
   # that now passes turns red regardless of which file it's in. `expected` returns
-  # that merged view per file — a name multiset, or the HARNESS_ERROR sentinel.
+  # that merged view per file — a name multiset, or a whole-file sentinel (HARNESS_ERROR / NO_SUBTESTS).
   def expected
     @expected ||= begin
       in_map  = load_yaml_map(EXPECTED_PATH)
@@ -1694,11 +1700,12 @@ module WptRunner
       (in_map.keys | out_map.keys).each_with_object({}) do |rel, merged|
         iv = in_map[rel]
         out_names = out_subtest_names(rel)
-        # HARNESS_ERROR is a whole-file sentinel (the harness never completed). It
+        # A sentinel is for the whole file (its harness never completed, or completed with no subtest). It
         # may be listed in EITHER file — in-scope (a gap to fix) or out-of-scope
         # (an earned non-goal, e.g. a target=_blank test that hangs without a real
-        # multi-window model), the latter as a single {name: HARNESS_ERROR} entry.
-        merged[rel] = (iv == HARNESS_ERROR || out_names.include?(HARNESS_ERROR)) ? HARNESS_ERROR : Array(iv) + out_names
+        # multi-window model), the latter as a single {name: <sentinel>} entry.
+        sentinel = SENTINELS.find {|s| iv == s || out_names.include?(s) }
+        merged[rel] = sentinel || Array(iv) + out_names
       end
     end
   end

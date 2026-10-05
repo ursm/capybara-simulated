@@ -6,7 +6,8 @@
 #
 # The allowlist is SPLIT across two files:
 #   - spec/support/wpt_expected_failures.yml — IN-SCOPE backlog (bare name lists,
-#     plus the HARNESS_ERROR sentinel for files whose harness never completes)
+#     plus the HARNESS_ERROR sentinel for files whose harness never completes, and
+#     NO_SUBTESTS for those that complete reporting no subtest)
 #   - spec/support/wpt_out_of_scope.yml      — EARNED non-goals ({name, reason}
 #     lists; needs a subsystem we deliberately don't model, per CLAUDE.md rule 1)
 #
@@ -21,6 +22,7 @@
 #   "dom/nodes/Node-appendChild.html":
 #   - "Appending to a text node"        # IN-scope: subtest currently FAIL/TIMEOUT
 #   "dom/nodes/some-broken.html": HARNESS_ERROR   # harness never completed
+#   "dom/nodes/some-empty.html": NO_SUBTESTS      # harness completed, reporting no subtest
 #
 # Serialized with Psych (not String#inspect) so the writer's escape grammar is
 # the exact inverse of the gate's YAML.safe_load_file reader — a subtest name
@@ -94,10 +96,11 @@ out_existing = WptRunner.out_of_scope.each_with_object({}) do |(rel, entries), h
   h[rel] = by_name
 end
 
-in_map  = {}   # rel => [name, …]  | HARNESS_ERROR
+in_map  = {}   # rel => [name, …]  | HARNESS_ERROR | NO_SUBTESTS
 out_map = {}   # rel => [{ 'name' =>, 'reason' => }, …]
 completed_count = 0
 error_count = 0
+no_subtests_count = 0
 in_subtests = 0
 out_subtests = 0
 
@@ -112,7 +115,8 @@ def confirmed_run(rel)
   result   = WptRunner.run(rel)
   expected = WptRunner.expected[rel]
   same = if result[:completed]
-    WptRunner.multiset_minus(result[:failing], Array(expected)).empty? &&
+    Array(result[:tests]).empty? == (expected == WptRunner::NO_SUBTESTS) &&
+      WptRunner.multiset_minus(result[:failing], Array(expected)).empty? &&
       WptRunner.multiset_minus(Array(expected), result[:failing]).empty?
   else
     expected == WptRunner::HARNESS_ERROR
@@ -174,6 +178,11 @@ def next_index(path)
   end
 end
 
+# What a worker hands back of a run: the failing subtests and how many there were, or the error.
+def outcome(result)
+  result[:completed] ? {failing: result[:failing], subtests: Array(result[:tests]).size} : {error: result[:error]}
+end
+
 def drain_queue(files, cursor, out_path, progress_path)
   results = {}
   loop do
@@ -184,7 +193,7 @@ def drain_queue(files, cursor, out_path, progress_path)
     # end, so a worker that died at file 700 discarded 700 results and identified none of them.
     File.binwrite(progress_path, rel)
     r = confirmed_run(rel)
-    results[rel] = r[:completed] ? {failing: r[:failing]} : {error: r[:error]}
+    results[rel] = outcome(r)
     warn "\r  #{i + 1}/#{files.size}" if ((i + 1) % 50).zero?
   end
   File.binwrite(out_path, Marshal.dump(results))
@@ -193,7 +202,7 @@ end
 def run_serially(files)
   files.each_with_object({}).with_index do |(rel, h), i|
     r = confirmed_run(rel)
-    h[rel] = r[:completed] ? {failing: r[:failing]} : {error: r[:error]}
+    h[rel] = outcome(r)
     warn "\r  #{i + 1}/#{files.size}" if ((i + 1) % 50).zero?
   end
 end
@@ -236,6 +245,22 @@ def run_in_parallel(files, workers)
   end
 end
 
+# A whole-file sentinel (HARNESS_ERROR / NO_SUBTESTS). Kept OUT-OF-SCOPE (with its reason) where it's already
+# classified there as a non-goal — e.g. a target=_blank test that hangs without a real multi-window model — and put
+# there for an unratified file, as its failing subtests are; otherwise it defaults in-scope.
+def record_sentinel(rel, sentinel, out_existing, in_map, out_map)
+  pool   = out_existing[rel]
+  reason = if pool && pool[sentinel] && !pool[sentinel].empty? then pool[sentinel].shift.to_s
+           elsif tentative_path?(rel) then TENTATIVE_REASON
+           else WICG_OUT[rel] || PROPOSAL_OUT[rel]
+           end
+  if reason
+    out_map[rel] = [{ 'name' => sentinel, 'reason' => reason }]
+  else
+    in_map[rel] = sentinel
+  end
+end
+
 warn "  #{WORKERS} worker#{'s' unless WORKERS == 1}"
 # rel => {failing:} | {error:}. Keyed by path, so the merge order never matters.
 results = WORKERS <= 1 ? run_serially(files) : run_in_parallel(files, WORKERS)
@@ -243,7 +268,10 @@ results = WORKERS <= 1 ? run_serially(files) : run_in_parallel(files, WORKERS)
 files.each do |rel|
   raw    = results.fetch(rel)
   result = raw.key?(:failing) ? {completed: true, failing: raw[:failing]} : {completed: false, error: raw[:error]}
-  if result[:completed]
+  if result[:completed] && raw[:subtests].zero?
+    no_subtests_count += 1
+    record_sentinel(rel, WptRunner::NO_SUBTESTS, out_existing, in_map, out_map)
+  elsif result[:completed]
     completed_count += 1
     # Keep the full multiset (no uniq): a subtest name that fails more than once
     # must be recorded with its multiplicity, or the gate's multiset comparison
@@ -286,17 +314,7 @@ files.each do |rel|
     end
   else
     error_count += 1
-    # A non-completing file is HARNESS_ERROR. Keep it OUT-OF-SCOPE (with its reason)
-    # when it's already classified there as a HARNESS_ERROR non-goal — e.g. a
-    # target=_blank test that hangs without a real multi-window model — otherwise it
-    # defaults in-scope.
-    pool = out_existing[rel]
-    if pool && pool[WptRunner::HARNESS_ERROR] && !pool[WptRunner::HARNESS_ERROR].empty?
-      reason = pool[WptRunner::HARNESS_ERROR].shift
-      out_map[rel] = [{ 'name' => WptRunner::HARNESS_ERROR, 'reason' => reason.to_s }]
-    else
-      in_map[rel] = WptRunner::HARNESS_ERROR
-    end
+    record_sentinel(rel, WptRunner::HARNESS_ERROR, out_existing, in_map, out_map)
   end
 end
 warn ''   # close the workers' \r progress line before the summary
@@ -310,7 +328,8 @@ in_hdr = <<~H
   # an earned non-goal, then moved to wpt_out_of_scope.yml with a reason.
   #
   # Each entry is one file: a list of not-yet-passing subtest names, or the string
-  # HARNESS_ERROR if the harness never completed. Shrinking THIS file is the roadmap.
+  # HARNESS_ERROR if the harness never completed, or NO_SUBTESTS if it completed
+  # reporting none (a missing include, most often). Shrinking THIS file is the roadmap.
   #
   # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
   #
@@ -345,8 +364,8 @@ out_hdr = <<~H
   # The gate (spec/support/wpt_gate.rb) merges this with the in-scope file and checks the union
   # symmetrically, so an out-of-scope subtest that starts PASSing still turns RED (move
   # it to the in-scope file / delete it). Format per file: a list of {name, reason} —
-  # or a single {name: HARNESS_ERROR, reason} entry for a whole file whose harness
-  # never completes as an earned non-goal (e.g. a target=_blank test that hangs
+  # or a single {name: HARNESS_ERROR | NO_SUBTESTS, reason} entry for a whole file whose harness
+  # never completes (or reports nothing) as an earned non-goal (e.g. a target=_blank test that hangs
   # without a real multi-window model); if such a file later completes, the gate goes
   # RED so it gets reclassified.
   #
@@ -368,5 +387,6 @@ warn "  and  #{WptRunner::OUT_OF_SCOPE_PATH}"
 warn "  files:          #{files.size}"
 warn "  completed:      #{completed_count}"
 warn "  harness errors: #{error_count}"
+warn "  no subtests:    #{no_subtests_count}"
 warn "  in-scope:       #{in_map.size} files / #{in_subtests} subtests"
 warn "  out-of-scope:   #{out_map.size} files / #{out_subtests} subtests"

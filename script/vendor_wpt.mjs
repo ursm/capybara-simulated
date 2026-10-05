@@ -227,7 +227,18 @@ const HARNESS_ONLY_TREES = ['css/css-flexbox'];
 // pulls cookie-helper.sub.js + the set/drop/postToParent .py endpoints by absolute path);
 // the tree is self-contained (helpers.py + the endpoint handlers). `cookies/samesite/
 // resources` rides along: cookie-helper's resetSameSiteCookies drives its puppet.html.
-const SUPPORT_TREES = ['common', 'html/canvas/resources', 'images', 'fonts', 'cookies/resources', 'cookies/samesite/resources'];
+// `interfaces` is the IDL every idlharness test fetches (`idl_test(['dom'], ['html'], …)` reads
+// `/interfaces/dom.idl` and its dependencies): the interface objects, prototypes, members, descriptors and brand
+// checks the IDL says, held against the page's — what the bindings generated from the same IDL must answer.
+const SUPPORT_TREES = [
+  'common',
+  'html/canvas/resources',
+  'images',
+  'fonts',
+  'cookies/resources',
+  'cookies/samesite/resources',
+  'interfaces'
+];
 // Individual support files (outside the vendored trees) that tests include via
 // `<script src>`. Kept across re-vendoring so local includes resolve.
 // `html/resources/common.js` provides newHTMLDocument / newRenderedHTMLDocument
@@ -274,6 +285,9 @@ const SUPPORT_FILES = [
   // without it they load, silently generate NO subtests, and "complete" green, which is worse
   // than failing. It is self-contained on top of testharness.
   'resources/check-layout-th.js',
+  // idlharness: without it every `idlharness.*` test loads, generates NO subtests, and completes green — the IDL
+  // surface, the one thing those files test, measured by nothing. Its parser is ALIASED_FILES' WebIDLParser.js.
+  'resources/idlharness.js',
   // service-workers fetch-request-redirect / fetch-canvas-tainting-video load
   // getAudioURI()/getVideoURI()'s /media/sound_5.* and fetch-access-control.py's
   // /media/movie_5.* — vendor the four small files, not the whole media tree.
@@ -309,6 +323,12 @@ const SUPPORT_FILES = [
   // FileAPI / fetch/api all include the upstream helper now. The tree also hosts committed
   // local `csim-*` fixtures (SW round-trip regression guards) — `cleanTree` preserves those.
 ];
+
+// Files the WPT server serves under a name of its own (tools/serve aliases): vendored at the served path from the
+// path in the tree. `/resources/WebIDLParser.js` is webidl2, which idlharness tests include by the served name.
+const ALIASED_FILES = {
+  'resources/WebIDLParser.js': 'resources/webidl2/lib/webidl2.js'
+};
 
 const CONCURRENCY = 24;
 
@@ -444,9 +464,15 @@ async function main() {
     await cleanTree(join(OUT, tree));
   }
   await rm(join(OUT, 'resources', 'testharness.js'), { force: true });
+  for (const served of Object.keys(ALIASED_FILES)) await rm(join(OUT, served), { force: true });
 
   console.error(`Downloading ${paths.length} files (concurrency ${CONCURRENCY})…`);
   await pool(paths, CONCURRENCY, (p) => vendorPath(sha, p));
+  for (const [served, from] of Object.entries(ALIASED_FILES)) {
+    const dest = join(OUT, served);
+    await mkdir(dirname(dest), { recursive: true });
+    await writeFile(dest, await fetchRaw(sha, from));
+  }
   if (skipped) console.error(`  ${skipped} reftest/unused files fetched and dropped (harness-only trees)`);
 
   // Fixtures a vendored in-scope test imports by a FIXED relative name that is ABSENT from the WPT
@@ -465,7 +491,8 @@ async function main() {
     join(OUT, 'WPT_VERSION'),
     `${sha}\nweb-platform-tests/wpt\ntrees: ${TREES.join(', ')}` +
       `\nharness-only trees: ${HARNESS_ONLY_TREES.join(', ')}` +
-      `\nsupport: ${SUPPORT_TREES.join(', ')}, resources/testharness.js, ${SUPPORT_FILES.join(', ')}\n`
+      `\nsupport: ${SUPPORT_TREES.join(', ')}, resources/testharness.js, ${SUPPORT_FILES.join(', ')}` +
+      `\naliased: ${Object.entries(ALIASED_FILES).map(([served, from]) => `${served} (${from})`).join(', ')}\n`
   );
   console.error(`Done. Pinned SHA written to spec/wpt/WPT_VERSION.`);
   console.error(`Next: WPT_REGEN=1 bundle exec rspec spec/wpt_gate  # refresh the allowlist`);
