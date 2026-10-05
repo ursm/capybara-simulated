@@ -21,9 +21,9 @@ const OUT = join(ROOT, 'lib', 'capybara', 'simulated', 'js', 'src', 'generated',
 
 // The interfaces generated, by spec. `install`: an interface whose objects a hand-written class makes, its members
 // generated onto that class's prototype (`install<Name>(iface, impl)`) — the class, its constructor and the objects it
-// makes stay the hand-written code's, which registers the test that tells its objects apart. `omit`: a mixin or
-// partial interface another spec adds to it that no implementation here answers yet, by name (a mixin) or spec (a
-// partial), and why — any other is merged, or an error.
+// makes stay the hand-written code's, which registers the test that tells its objects apart. `omit`: what another spec
+// adds to it that no implementation here answers yet, and why — a mixin it includes, by name; a partial interface of
+// it, or a partial of a mixin it includes, by the spec's name. Anything else added is merged.
 const INTERFACES = [
   ['dom', 'DOMTokenList'],
   ['dom', 'NodeFilter'],
@@ -32,13 +32,15 @@ const INTERFACES = [
   ['dom', 'CharacterData', { install: true }],
   ['dom', 'Text', { install: true, omit: { GeometryUtils: 'getBoxQuads / convert*FromNode (cssom-view) are not implemented' } }],
   ['dom', 'Comment', { install: true }],
+  ['dom', 'CDATASection', { install: true }],
   ['dom', 'ProcessingInstruction', { install: true }],
-  ['dom', 'DocumentType', { install: true }]
+  ['dom', 'DocumentType', { install: true }],
+  ['dom', 'DocumentFragment', { install: true }]
 ];
 
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
-  'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
+  'PLATFORM', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'toDOMString', 'toUSVString', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toLong', 'toDouble',
   'toUnrestrictedDouble', 'toInterface', 'toCallbackInterface', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineClassString', 'enumerable', 'installMembers',
@@ -47,15 +49,16 @@ const RUNTIME = [
 
 const all = await parseAll();
 // Every interface, callback interface and mixin of every spec, by name: what an interface type, or an `includes`,
-// names. And what adds to an interface beside its definition — a mixin it includes, a partial interface — by the
-// name of the mixin, or the spec of the partial.
+// names. And what adds to an interface or a mixin beside its definition — a mixin it includes, a partial of it — by
+// the name of the mixin, or the spec of the partial.
 const definitions = new Map(), mixins = new Map(), additions = new Map();
+const add = (to, addition) => additions.set(to, [...(additions.get(to) || []), addition]);
 for (const [spec, defs] of Object.entries(all)) {
   for (const d of defs) {
     if ((d.type === 'interface' || d.type === 'callback interface') && !d.partial) definitions.set(d.name, d);
     if (d.type === 'interface mixin' && !d.partial) mixins.set(d.name, d);
-    const to = d.type === 'includes' ? d.target : d.type === 'interface' && d.partial ? d.name : null;
-    if (to) additions.set(to, [...(additions.get(to) || []), d.type === 'includes' ? { mixin: d.includes } : { partial: spec, def: d }]);
+    if (d.type === 'includes') add(d.target, { mixin: d.includes });
+    if ((d.type === 'interface' || d.type === 'interface mixin') && d.partial) add(d.name, { partial: spec, def: d });
   }
 }
 
@@ -142,24 +145,24 @@ function constantValue(m, where) {
   return m.value.value;
 }
 
-// An interface's members: its own, and those of the mixins it includes and the partial interfaces of it — but those
+// An interface's members: its own, those of the mixins it includes, and those of the partials of either — but what
 // `omit` names (and why). What no binding here makes of a definition yet, beside its members, is an error.
 function membersOf(def, omit = {}) {
-  checkExtAttrs(def.extAttrs, 'interface', def.name);
-  const members = [...def.members];
   const omitted = new Set();
-  for (const a of additions.get(def.name) || []) {
-    const key = a.mixin || a.partial;
-    if (key in omit) { omitted.add(key); continue; }
-    if (a.mixin) {
+  const gather = (d) => {
+    checkExtAttrs(d.extAttrs, 'interface', d.name);
+    const found = [...d.members];
+    for (const a of additions.get(d.name) || []) {
+      const key = a.mixin || a.partial;
+      if (key in omit) { omitted.add(key); continue; }
+      if (a.partial) { found.push(...a.def.members); continue; }
       const mixin = mixins.get(a.mixin);
       if (!mixin) throw new Error(`${def.name}: includes ${a.mixin}, which no spec defines`);
-      checkExtAttrs(mixin.extAttrs, 'interface', a.mixin);
-      members.push(...mixin.members);
-    } else {
-      throw new Error(`${def.name}: no binding merges a partial interface (${a.partial}) yet`);
+      found.push(...gather(mixin));
     }
-  }
+    return found;
+  };
+  const members = gather(def);
   const unknown = Object.keys(omit).filter((k) => !omitted.has(k));
   if (unknown.length) throw new Error(`${def.name}: omits ${unknown.join(', ')}, which nothing adds to it`);
   const names = members.filter((m) => m.type === 'operation' && m.name).map((m) => m.name);
@@ -383,9 +386,6 @@ const source = `// GENERATED by script/gen_bindings.mjs from @webref/idl — do 
 import {
 ${wrap(RUNTIME)}
 } from '../webidl.js';
-
-// What the platform passes its own constructions, which a script's \`new\` cannot.
-const PLATFORM = Symbol('platform');
 
 ${parts.join('\n\n')}
 `;

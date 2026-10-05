@@ -2988,8 +2988,6 @@ dom/idlharness.any.js:
 - 'Attr interface: attribute specified'
 - 'Attr interface: attribute value'
 - 'Attr interface: existence and properties of interface object'
-- 'CDATASection interface: existence and properties of interface object'
-- 'CharacterData interface: existence and properties of interface object'
 - CustomEvent interface object length
 - 'CustomEvent interface: attribute detail'
 - 'CustomEvent interface: new CustomEvent("foo") must inherit property "detail" with
@@ -3020,8 +3018,6 @@ dom/idlharness.any.js:
 - 'Document interface: attribute inputEncoding'
 - 'Document interface: attribute lastElementChild'
 - 'Document interface: existence and properties of interface prototype object'
-- 'Document interface: existence and properties of interface prototype object''s @@unscopables
-  property'
 - 'Document interface: operation adoptNode(Node)'
 - 'Document interface: operation append((Node or DOMString)...)'
 - 'Document interface: operation createAttribute(DOMString)'
@@ -3054,20 +3050,7 @@ dom/idlharness.any.js:
 - 'Document interface: operation querySelector(DOMString)'
 - 'Document interface: operation querySelectorAll(DOMString)'
 - 'Document interface: operation replaceChildren((Node or DOMString)...)'
-- 'DocumentFragment interface: attribute childElementCount'
-- 'DocumentFragment interface: attribute children'
-- 'DocumentFragment interface: attribute firstElementChild'
-- 'DocumentFragment interface: attribute lastElementChild'
-- 'DocumentFragment interface: existence and properties of interface prototype object''s
-  @@unscopables property'
-- 'DocumentFragment interface: operation append((Node or DOMString)...)'
-- 'DocumentFragment interface: operation getElementById(DOMString)'
 - 'DocumentFragment interface: operation moveBefore(Node, Node?)'
-- 'DocumentFragment interface: operation prepend((Node or DOMString)...)'
-- 'DocumentFragment interface: operation querySelector(DOMString)'
-- 'DocumentFragment interface: operation querySelectorAll(DOMString)'
-- 'DocumentFragment interface: operation replaceChildren((Node or DOMString)...)'
-- 'DocumentType interface: existence and properties of interface object'
 - Element interface object length
 - 'Element interface: attribute assignedSlot'
 - 'Element interface: attribute attributes'
@@ -3089,8 +3072,6 @@ dom/idlharness.any.js:
 - 'Element interface: attribute tagName'
 - 'Element interface: existence and properties of interface object'
 - 'Element interface: existence and properties of interface prototype object''s "constructor"
-  property'
-- 'Element interface: existence and properties of interface prototype object''s @@unscopables
   property'
 - 'Element interface: operation after((Node or DOMString)...)'
 - 'Element interface: operation append((Node or DOMString)...)'
@@ -3293,7 +3274,6 @@ dom/idlharness.any.js:
 - 'NodeList interface: existence and properties of interface prototype object'
 - 'NodeList interface: iterable<Node>'
 - 'NodeList interface: operation item(unsigned long)'
-- 'ProcessingInstruction interface: existence and properties of interface object'
 - Range interface object length
 - Range interface object name
 - 'Range interface: attribute commonAncestorContainer'
@@ -3420,8 +3400,6 @@ dom/idlharness.window.js:
 - 'Attr interface: attribute specified'
 - 'Attr interface: attribute value'
 - 'Attr interface: existence and properties of interface object'
-- 'CDATASection interface: existence and properties of interface object'
-- 'CharacterData interface: existence and properties of interface object'
 - CustomEvent interface object length
 - 'CustomEvent interface: attribute detail'
 - 'CustomEvent interface: new CustomEvent("foo") must inherit property "detail" with
@@ -3528,8 +3506,6 @@ dom/idlharness.window.js:
 - 'Document interface: calling importNode(Node, optional (boolean or ImportNodeOptions))
   on xmlDoc with too few arguments must throw TypeError'
 - 'Document interface: existence and properties of interface prototype object'
-- 'Document interface: existence and properties of interface prototype object''s @@unscopables
-  property'
 - 'Document interface: new Document() must inherit property "fullscreen" with the
   proper type'
 - 'Document interface: new Document() must inherit property "fullscreenEnabled" with
@@ -3570,22 +3546,6 @@ dom/idlharness.window.js:
 - 'Document interface: xmlDoc must inherit property "fullscreen" with the proper type'
 - 'Document interface: xmlDoc must inherit property "fullscreenEnabled" with the proper
   type'
-- 'DocumentFragment interface: attribute childElementCount'
-- 'DocumentFragment interface: attribute children'
-- 'DocumentFragment interface: attribute firstElementChild'
-- 'DocumentFragment interface: attribute lastElementChild'
-- 'DocumentFragment interface: calling getElementById(DOMString) on document.createDocumentFragment()
-  with too few arguments must throw TypeError'
-- 'DocumentFragment interface: existence and properties of interface prototype object''s
-  @@unscopables property'
-- 'DocumentFragment interface: operation append((Node or DOMString)...)'
-- 'DocumentFragment interface: operation getElementById(DOMString)'
-- 'DocumentFragment interface: operation moveBefore(Node, Node?)'
-- 'DocumentFragment interface: operation prepend((Node or DOMString)...)'
-- 'DocumentFragment interface: operation querySelector(DOMString)'
-- 'DocumentFragment interface: operation querySelectorAll(DOMString)'
-- 'DocumentFragment interface: operation replaceChildren((Node or DOMString)...)'
-- 'DocumentType interface: existence and properties of interface object'
 - Element interface object length
 - 'Element interface: attribute assignedSlot'
 - 'Element interface: attribute attributes'
@@ -3651,8 +3611,6 @@ dom/idlharness.window.js:
   with the proper type'
 - 'Element interface: existence and properties of interface object'
 - 'Element interface: existence and properties of interface prototype object''s "constructor"
-  property'
-- 'Element interface: existence and properties of interface prototype object''s @@unscopables
   property'
 - 'Element interface: operation after((Node or DOMString)...)'
 - 'Element interface: operation append((Node or DOMString)...)'
@@ -4000,7 +3958,6 @@ dom/idlharness.window.js:
 - 'NodeList interface: existence and properties of interface prototype object'
 - 'NodeList interface: iterable<Node>'
 - 'NodeList interface: operation item(unsigned long)'
-- 'ProcessingInstruction interface: existence and properties of interface object'
 - Range interface object length
 - Range interface object name
 - 'Range interface: attribute commonAncestorContainer'
@@ -4088,7 +4045,6 @@ dom/idlharness.window.js:
 - 'StaticRange interface: existence and properties of interface object'
 - 'StaticRange interface: existence and properties of interface prototype object'
 - Stringification of detachedRange
-- Stringification of document.createDocumentFragment()
 - Stringification of document.createRange()
 - Stringification of document.implementation
 - Stringification of document.querySelectorAll("script")

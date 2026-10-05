@@ -103,12 +103,53 @@ RSpec.describe 'IDL bindings' do
         const dt = document.implementation.createDocumentType('html', 'p', 's');
         return [
           'before' in document, 'previousElementSibling' in document, 'remove' in document.createDocumentFragment(),
+          'append' in document.createTextNode(''), 'innerHTML' in document.createDocumentFragment(),
           'remove' in dt, 'before' in document.body, ['name', 'publicId', 'systemId'].some((k) => Object.hasOwn(dt, k)),
           [dt.name, dt.publicId, dt.systemId]
         ];
       })()
     JS
-    expect(got).to eq([false, false, false, true, true, false, %w[html p s]])
+    expect(got).to eq([false, false, false, false, false, true, true, false, %w[html p s]])
+  end
+
+  # (…what tells an installed interface's objects apart is the node itself — its own type, fixed when it was made — not
+  # what it inherits; and an interface with no constructor of its own makes none for a script)
+  it "checks an installed member's `this` by the node's own fixed type, and constructs only what IDL lets a script" do
+    got = outcome(<<~JS)
+      (() => {
+        const thrown = (f) => { try { f(); return 'no'; } catch (e) { return e.message; } };
+        const x = document.createTextNode('z');
+        x.nodeType = 1;
+        const p = document.createElement('p');
+        p.append(Object.create(document.createElement('b')));
+        const xml = document.implementation.createDocument(null, 'r', null);
+        const cdata = xml.documentElement.appendChild(xml.createCDATASection('ab'));
+        return [
+          [x.nodeType, x.data],
+          thrown(() => Object.create(document.createTextNode('abc')).data),
+          p.firstChild.nodeName,
+          thrown(() => new CharacterData('x')), thrown(() => new DocumentType('x')),
+          thrown(() => new ProcessingInstruction('x', 'y')), thrown(() => new CDATASection('x')),
+          Object.prototype.toString.call(cdata), Object.prototype.toString.call(cdata.splitText(1)),
+          xml.createProcessingInstruction('x', 'y').sheet
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      [3, 'z'], 'Illegal invocation', '#text',
+      "Failed to construct 'CharacterData': Illegal constructor", "Failed to construct 'DocumentType': Illegal constructor",
+      "Failed to construct 'ProcessingInstruction': Illegal constructor", "Failed to construct 'CDATASection': Illegal constructor",
+      '[object CDATASection]', '[object CDATASection]', nil
+    ])
+  end
+
+  it 'marks only the [Unscopable] members of each interface' do
+    got = outcome('[Document, DocumentFragment, Element].map((i) => Object.keys(i.prototype[Symbol.unscopables]).sort())')
+    expect(got).to eq([
+      %w[append prepend replaceChildren],
+      %w[append prepend replaceChildren],
+      %w[after append before prepend remove replaceChildren replaceWith slot]
+    ])
   end
 
   it "converts an installed member's arguments as IDL says" do
