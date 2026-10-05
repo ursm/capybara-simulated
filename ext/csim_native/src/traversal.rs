@@ -429,7 +429,36 @@ fn iterator_pre_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     rv.set(answer);
 }
 
+// __dom.iteratorPreRemoveAll(parentNid, rootNid, referenceNid, before) -> the NodeIterator pre-removing steps for the
+// removal of every child of `parentNid`, one after another, at once: null where the iterator stays as it is, else where
+// its reference is then, as `iteratorPreRemove` answers, from the parent. A reference under the parent goes — the
+// children before its own gone first, and each following one in turn the reference while it is before it — to what
+// follows the last child under the root, before it; else to the parent, after it.
+fn iterator_pre_remove_all(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let (Some(parent), Some(root), Some(reference)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1), nid_arg(scope, &args, 2)) else { return };
+    let before = args.get(3).is_true();
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    // (…the child the reference is in; one that holds the root takes the iterator's whole tree with it)
+    if arena.relation(parent, reference) != Some(Relation::Ancestor) {
+        return;
+    }
+    let child = arena.chain(reference).into_iter().skip_while(|&n| n != parent).nth(1);
+    if child.is_none_or(|c| matches!(arena.relation(c, root), Some(Relation::Same | Relation::Ancestor))) {
+        return;
+    }
+    let mut walk = Walk { cid, root, what_to_show: 0, filter: None, node: parent, steps: Vec::new(), moved_before: None, current: parent };
+    if before && walk.go(scope, Step::LastChild) && walk.following(scope, Some(root), true) {
+        let answer = walk.answer(scope, true, 2);
+        return rv.set(answer);
+    }
+    let answer = answer_value(scope, 1, &[]);
+    rv.set(answer);
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "iteratorPreRemoveAll", iterator_pre_remove_all, context_id);
     crate::dom::register(scope, ns, "comparePosition", compare_position, context_id);
     crate::dom::register(scope, ns, "traverse", traverse, context_id);
     crate::dom::register(scope, ns, "traverseFrom", traverse_from, context_id);
