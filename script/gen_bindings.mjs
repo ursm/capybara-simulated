@@ -140,6 +140,8 @@ const INTERFACES = [
     }
   }],
   ['dom', 'EventTarget', { install: true, omit: { observable: 'when: Observables are not implemented' } }],
+  ['dom', 'Event', { install: true }],
+  ['dom', 'CustomEvent', { install: true }],
   ['dom', 'ShadowRoot', { install: true, omit: { 'sanitizer-api': 'setHTML: the Sanitizer API is not implemented' } }]
 ];
 
@@ -201,7 +203,9 @@ function failure(where, text = '') {
   if (where.dictionary) return `prefix + ${JSON.stringify(`Failed to read the '${where.member}' property from '${where.dictionary}': ${text}`)}`;
   return JSON.stringify((where.index === undefined
     ? `Failed to set the '${where.member}' property on '${where.iface}': `
-    : `Failed to execute '${where.member}' on '${where.iface}': `) + text);
+    : where.member === undefined
+      ? `Failed to construct '${where.iface}': `
+      : `Failed to execute '${where.member}' on '${where.iface}': `) + text);
 }
 function conversionError(where, what) {
   return failure(where, where.index === undefined
@@ -607,6 +611,7 @@ function installInterface(def, { body, unforgeables, checks, unscopables, constr
   lines.push(`  defineClassString(iface.prototype, '${name}');`);
   if (unscopables.length) lines.push(`  defineUnscopables(iface.prototype, ${JSON.stringify(unscopables)});`);
   if (unforgeables.length) lines.push(`  class Unforgeables {`, ...unforgeables, `  }`);
+  if (constructor) lines.unshift(constructorArguments(name, constructor), '');
   if (global) {
     lines.push(`  const descriptors = Object.getOwnPropertyDescriptors(members);`);
     lines.push(`  return {`);
@@ -618,6 +623,22 @@ function installInterface(def, { body, unforgeables, checks, unscopables, constr
     lines.push(`  return unforgeableMembers(Unforgeables.prototype);`);
   }
   lines.push(`}`);
+  return lines.join('\n');
+}
+
+// An installed interface's constructor arguments, converted as Web IDL's constructor steps would (Chrome's messages):
+// the hand-written class's constructor calls `convert<Name>Arguments(arguments)` for them.
+function constructorArguments(name, m) {
+  const required = m.arguments.filter((a) => !a.optional && !a.variadic).length;
+  const checks = new Set();
+  const converted = convertArguments(name, m, checks, () => null, 'args');
+  const lines = [`export function convert${name}Arguments(args) {`];
+  if (required) {
+    const message = `Failed to construct '${name}': ${required} argument${required === 1 ? '' : 's'} required, but only `;
+    lines.push(`  if (args.length < ${required}) throw new TypeError(${JSON.stringify(message)} + args.length + ' present.');`);
+  }
+  for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
+  lines.push(`  return [${converted.join(', ')}];`, `}`);
   return lines.join('\n');
 }
 
@@ -663,10 +684,10 @@ const rejecting = (steps) => `try { ${steps} } catch (e) { return rejectedPromis
 // Each argument of `m` converted to its type: a required one read as `named(a)` gives it, an optional one from
 // `arguments` (one passed as undefined is one not passed, Web IDL §3.6 — but a dictionary, or one defaulting to `{}`,
 // is converted from undefined: its members' defaults), a variadic one the rest.
-function convertArguments(iface, m, checks, named) {
+function convertArguments(iface, m, checks, named, source = 'arguments') {
   return m.arguments.map((a, i) => {
     const where = { iface, member: m.name, index: i };
-    const expr = named(a) ?? (a.variadic ? `restOf(arguments, ${i})` : `arguments[${i}]`);
+    const expr = named(a) ?? (a.variadic ? `restOf(${source}, ${i})` : `${source}[${i}]`);
     if (a.variadic) return `${expr}.map((x) => ${conversion(a.idlType, 'x', where, checks, a.extAttrs)})`;
     if (a.optional) {
       if (dictionaries.has(a.idlType.idlType) || a.default?.type === 'dictionary') return conversion(a.idlType, expr, where, checks, a.extAttrs);

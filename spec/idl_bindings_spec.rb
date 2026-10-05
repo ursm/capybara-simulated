@@ -805,6 +805,38 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  it "installs Event's and CustomEvent's members as their IDL says" do
+    got = outcome(<<~JS)
+      (() => {
+        const t = (f) => { try { return JSON.stringify(f()) ?? 'undefined'; } catch (e) { return e.name + ': ' + e.message; } };
+        return [
+          t(() => Object.getOwnPropertyNames(new Event('x')).filter((k) => !k.startsWith('_'))),
+          t(() => { const d = Object.getOwnPropertyDescriptor(new Event('x'), 'isTrusted'); return [typeof d.get, d.configurable, d.enumerable]; }),
+          t(() => ['type', 'target', 'bubbles', 'timeStamp', 'composedPath'].map((k) => Object.hasOwn(Event.prototype, k))),
+          t(() => { const e = new Event('x', { bubbles: 1, cancelable: true }); e.preventDefault(); return [e.type, e.bubbles, e.cancelable, e.defaultPrevented, e.returnValue]; }),
+          t(() => new Event()),
+          t(() => new Event('x', 5)),
+          t(() => { const e = new Event('x'); e.isTrusted = true; return e.isTrusted; }),
+          t(() => Object.getOwnPropertyDescriptor(Event.prototype, 'type').get.call({})),
+          t(() => { const c = new CustomEvent('c', { detail: 7 }); const d = document.createEvent('CustomEvent'); d.initCustomEvent('q', true, false, 8); return [c.detail, d.type, d.bubbles, d.detail]; }),
+          t(() => { class Mine extends Event {} return [new MouseEvent('m'), new Event('e'), new CustomEvent('c'), new Mine('x')].map(String); })
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      '["isTrusted"]',
+      '["function",false,true]',
+      '[true,true,true,true,true]',
+      '["x",true,true,true,false]',
+      "TypeError: Failed to construct 'Event': 1 argument required, but only 0 present.",
+      "TypeError: Failed to construct 'Event': The provided value is not of type 'EventInit'.",
+      'false',
+      'TypeError: Illegal invocation',
+      '[7,"q",true,8]',
+      '["[object MouseEvent]","[object Event]","[object CustomEvent]","[object Event]"]'
+    ])
+  end
+
   # (…the document element among them, and a name compared as it is, not as a selector)
   it "finds a document's elements by name, its root too" do
     got = outcome(<<~JS)
