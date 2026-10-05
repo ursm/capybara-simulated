@@ -206,7 +206,7 @@ RSpec.describe 'IDL bindings' do
         f.append('t');
         return [
           x.previousSibling.nodeName, f.lastChild.nodeName,
-          thrown(() => document.importNode()), thrown(() => document.importNode({})),
+          thrown(() => document.importNode()), thrown(() => document.importNode({})), thrown(() => document.importNode(document)),
           thrown(() => { document.createElement('p').textContent = Symbol(); })
         ];
       })()
@@ -215,6 +215,7 @@ RSpec.describe 'IDL bindings' do
       'I', '#text',
       "Failed to execute 'importNode' on 'Document': 1 argument required, but only 0 present.",
       "Failed to execute 'importNode' on 'Document': parameter 1 is not of type 'Node'.",
+      "Failed to execute 'importNode' on 'Document': The node provided is a document, which may not be imported.",
       "Failed to set the 'textContent' property on 'Node': Cannot convert a Symbol value to a string"
     ])
   end
