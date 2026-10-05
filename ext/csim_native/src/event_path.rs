@@ -18,25 +18,13 @@ fn host_of(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
     arena.get(id)?.host
 }
 
-// Whether `x` is a shadow-including inclusive ancestor of `y`.
-fn shadow_including_ancestor(arena: &RealmArena, x: NodeId, y: NodeId) -> bool {
-    let mut cur = Some(y);
-    while let Some(n) = cur {
-        if n == x {
-            return true;
-        }
-        cur = arena.parent_of(n).or_else(|| host_of(arena, n));
-    }
-    false
-}
-
 // DOM "retarget" `a` against `b`: up out of every shadow tree whose root is no shadow-including ancestor of `b`.
 fn retarget(arena: &RealmArena, a: Related, b: NodeId) -> Related {
     let Related::Node(mut a) = a else { return a };
     loop {
         let root = arena.root_of(a);
         match host_of(arena, root) {
-            Some(host) if !shadow_including_ancestor(arena, root, b) => a = host,
+            Some(host) if !arena.shadow_including_ancestor(root, b) => a = host,
             _ => return Related::Node(a),
         }
     }
@@ -103,7 +91,7 @@ fn path(arena: &RealmArena, target: NodeId, related: Related, composed: bool) ->
             slottable = Some(p);
         }
         let rel = retarget(arena, related, p);
-        if shadow_including_ancestor(arena, current_root, p) {
+        if arena.shadow_including_ancestor(current_root, p) {
             // (…still in the current target's tree: its listeners see the running target)
         } else if related != Related::None && rel == Related::Node(p) {
             // (…the relatedTarget has caught up: the rest is ancestry both share, pruned)

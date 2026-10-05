@@ -1918,26 +1918,10 @@ custom-elements/reactions/Document.html:
 - execCommand on Document must enqueue a disconnected reaction when deleting a custom
   element from a contenteditable element
 - open on Document must enqueue disconnectedCallback when removing a custom element
-- title on Document must enqueue disconnectedCallback when removing a custom element
 - write on Document must enqueue disconnectedCallback when removing a custom element
 - writeln on Document must enqueue disconnectedCallback when removing a custom element
-custom-elements/reactions/HTMLAnchorElement.html:
-- text on HTMLAnchorElement must enqueue disconnectedCallback when removing a custom
-  element
 custom-elements/reactions/HTMLElement.html:
-- innerText on HTMLElement must enqueue a disconnected reaction
 - outerText on HTMLElement must enqueue a disconnected reaction
-custom-elements/reactions/HTMLOptionElement.html:
-- text on HTMLOptionElement must enqueue disconnectedCallback when removing a custom
-  element
-custom-elements/reactions/HTMLOutputElement.html:
-- defaultValue on HTMLOutputElement must enqueue disconnectedCallback when removing
-  a custom element
-- value on HTMLOutputElement must enqueue disconnectedCallback when removing a custom
-  element
-custom-elements/reactions/HTMLTitleElement.html:
-- text on HTMLTitleElement must enqueue disconnectedCallback when removing a custom
-  element
 custom-elements/reactions/Selection.html:
 - deleteFromDocument on Selection must enqueue a disconnected reaction
 custom-elements/reactions/ShadowRoot.html:

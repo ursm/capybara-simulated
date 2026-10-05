@@ -119,6 +119,26 @@ pub(crate) enum Relation {
     After,
 }
 
+// __dom.nodesUnder(rootNid, [nid, …]) -> [kept, nodes]: of the nodes named, those `rootNid` is a shadow-including
+// inclusive ancestor of (`kept`, their nids, in the order named) and the nodes themselves, as `nodes_value` answers them
+// — which a page side that has only nids (an animation's target) finds them by, in place of a walk of the tree.
+fn nodes_under(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(root) = nid_arg(scope, &args, 0) else { return };
+    let named = crate::dom::f64_arg(args.get(1)).to_vec();
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let kept: Vec<NodeId> = named
+        .iter()
+        .filter_map(|&n| NodeId::from_i64(n as i64))
+        .filter(|&id| arena.get(id).is_some() && arena.shadow_including_ancestor(root, id))
+        .collect();
+    let kept_nids: Vec<f64> = kept.iter().map(|id| id.to_f64()).collect();
+    let nodes = nodes_value(scope, cid, root, &kept);
+    let kept_nids = f64_array(scope, &kept_nids);
+    let answer = v8::Array::new_with_elements(scope, &[kept_nids.into(), nodes]);
+    rv.set(answer.into());
+}
+
 // What a shadow root was attached with (`attachShadow`'s init, as far as the engine reads it).
 pub(crate) struct ShadowInit {
     pub(crate) delegates_focus: bool,
@@ -1142,6 +1162,17 @@ impl RealmArena {
             Relation::Descendant | Relation::After => Greater,
         })
     }
+    // Whether `ancestor` is a shadow-including inclusive ancestor of `id` (a shadow root's host its parent).
+    pub(crate) fn shadow_including_ancestor(&self, ancestor: NodeId, id: NodeId) -> bool {
+        let mut cur = Some(id);
+        while let Some(n) = cur {
+            if n == ancestor {
+                return true;
+            }
+            cur = self.parent_of(n).or_else(|| self.get(n).and_then(|d| d.host));
+        }
+        false
+    }
     // The root of `id`'s tree, shadow-including: a shadow root's host is its parent here (not a template's contents':
     // they are a tree of their own). (`root_of`, element_state.rs, is the plain one.)
     pub(crate) fn shadow_including_root(&self, mut id: NodeId) -> NodeId {
@@ -1811,6 +1842,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // …and a node's object, held by its handle while the node is in a document (node_handle.rs)
     register(scope, ns, "holdObjects", crate::node_handle::hold_objects, context_id);
     register(scope, ns, "releaseObjects", crate::node_handle::release_objects, context_id);
+    register(scope, ns, "nodesUnder", nodes_under, context_id);
     register(scope, ns, "handleEdgesMismatch", handle_edges_mismatch, context_id);
     // Free a disposed realm's state and nodes — csim calls this before tearing down a frame realm (main
     // reuses id 0). Takes an explicit id (the realm being dropped), not the caller's own.

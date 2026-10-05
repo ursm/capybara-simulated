@@ -222,4 +222,33 @@ RSpec.describe 'node handles' do
     JS
     expect(got).to eq([true, true, true])
   end
+
+  # An inert document — `createHTMLDocument`'s, a DOMParser's — is no page Ruby reaches into: its nodes are not held for
+  # the page's life. And a subtree `textContent` replaces is removed as any other is: let go, and its reactions run.
+  it "lets an inert document's nodes and a replaced subtree go" do
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.__gone = [];
+      for (let i = 0; i < 20; i++) {
+        const doc = document.implementation.createHTMLDocument('');
+        doc.body.innerHTML = '<p><b>x</b></p>';
+        __gone.push(doc.body.firstChild._nid);
+      }
+      const box = document.body.appendChild(document.createElement('div'));
+      box.innerHTML = '<p>y</p>';
+      __gone.push(box.firstChild._nid);
+      box.textContent = '';
+    JS
+    s.evaluate_script('0')
+    runtime = s.driver.browser.instance_variable_get(:@runtime)
+    2.times { runtime.ctx.low_memory_notification }
+    freed = s.evaluate_script(<<~JS)
+      (() => {
+        document.createElement('span');   // (…which frees what was collected)
+        return __gone.filter((nid) => __dom.inspectNode(nid) == null).length;
+      })()
+    JS
+    expect(freed).to eq(21)
+  end
 end
