@@ -574,6 +574,47 @@ RSpec.describe 'IDL bindings' do
     expect(session.evaluate_async_script('rejected.then(arguments[0])')).to eq("Failed to execute 'scroll' on 'Window': The provided value is not of type 'ScrollToOptions'.")
   end
 
+  # (…Document's members its IDL's: `readyState` read-only, `location` [LegacyUnforgeable] — an own property of each
+  # document — `designMode` an enumeration's, arguments converted, and Chrome's messages; Chrome's answers)
+  it "installs Document's members as its IDL says" do
+    got = outcome(<<~JS)
+      (() => {
+        const t = (f) => { try { return JSON.stringify(f()) ?? 'undefined'; } catch (e) { return e.name + ': ' + e.message; } };
+        const location = Object.getOwnPropertyDescriptor(document, 'location');
+        const div = document.createElement('div');
+        div.innerHTML = '<b>x</b>';
+        return [
+          t(() => { document.readyState = 'x'; return [document.readyState, Object.hasOwn(document, 'readyState')]; }),
+          [location.configurable, location.enumerable, Object.hasOwn(Document.prototype, 'location')],
+          t(() => { const modes = []; for (const m of ['ON', 'bogus', 'off']) { document.designMode = m; modes.push(document.designMode); } return modes; }),
+          t(() => document.createElement('div', 'x-y').outerHTML),
+          t(() => document.createElement('1a')),
+          [document.importNode(div, null).innerHTML, document.importNode(div).innerHTML, typeof document.parentWindow],
+          t(() => document.evaluate('//div', 5)),
+          t(() => { document.body = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); }),
+          t(() => document.createEvent('UİEvent')),
+          t(() => document.createProcessingInstruction('x', '?>')),
+          t(() => document.elementFromPoint(NaN, 0)),
+          [Object.getOwnPropertyDescriptor(Document.prototype, 'title').get.name, Document.prototype.createElement.length, Document.prototype.evaluate.length]
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      '["complete",false]',
+      [false, true, false],
+      '["on","on","off"]',
+      '"<div></div>"',
+      "InvalidCharacterError: Failed to execute 'createElement' on 'Document': The tag name provided ('1a') is not a valid name.",
+      ['<b>x</b>', '', 'undefined'],
+      "TypeError: Failed to execute 'evaluate' on 'Document': parameter 2 is not of type 'Node'.",
+      "TypeError: Failed to set the 'body' property on 'Document': Failed to convert value to 'HTMLElement'.",
+      "NotSupportedError: Failed to execute 'createEvent' on 'Document': The provided event type ('UİEvent') is invalid.",
+      "InvalidCharacterError: Failed to execute 'createProcessingInstruction' on 'Document': The data provided ('?>') contains '?>'.",
+      "TypeError: Failed to execute 'elementFromPoint' on 'Document': The provided double value is non-finite.",
+      ['get title', 1, 2]
+    ])
+  end
+
   # (…the document element among them, and a name compared as it is, not as a selector)
   it "finds a document's elements by name, its root too" do
     got = outcome(<<~JS)

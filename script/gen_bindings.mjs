@@ -23,7 +23,9 @@ const OUT = join(ROOT, 'lib', 'capybara', 'simulated', 'js', 'src', 'generated',
 // generated onto that class's prototype (`install<Name>(iface, impl)`) — the class, its constructor and the objects it
 // makes stay the hand-written code's, which registers the test that tells its objects apart. `omit`: what another spec
 // adds to it that no implementation here answers yet, and why — a mixin it includes, by name; a partial interface of
-// it, or a partial of a mixin it includes, by the spec's name; a single member, by its own. Anything else added is merged.
+// it, or a partial of a mixin it includes, by the spec's name. Anything else added is merged. `omitMembers`: single
+// members no implementation answers, by name (and why). `namedProperties`: how an installed interface's objects answer
+// its named property getter themselves (a Proxy of the class's).
 const INTERFACES = [
   ['dom', 'DOMTokenList'],
   ['dom', 'NodeFilter'],
@@ -51,9 +53,37 @@ const INTERFACES = [
       'sanitizer-api': 'setHTML: the Sanitizer API is not implemented',
       Region: 'regionOverset / getRegionFlowRanges: CSS Regions are not implemented',
       GeometryUtils: 'getBoxQuads / convert*FromNode (cssom-view) are not implemented',
-      ARIANotifyMixin: 'ariaNotify: no accessibility tree to announce to',
+      ARIANotifyMixin: 'ariaNotify: no accessibility tree to announce to'
+    },
+    omitMembers: {
       currentCSSZoom: 'the effective zoom is not computed',
       requestFullscreen: 'no fullscreen'
+    }
+  }],
+  ['dom', 'Document', {
+    install: true,
+    namedProperties: 'the DocumentNamedProps Proxy spliced into its prototype chain (dom-nodes.js)',
+    omit: {
+      SVG: 'rootElement: the SVG document is not modelled',
+      'css-regions': 'namedFlows: CSS Regions are not implemented',
+      'css-view-transitions': 'startViewTransition / activeViewTransition: View Transitions are not implemented',
+      GeometryUtils: 'getBoxQuads / convert*FromNode (cssom-view) are not implemented',
+      'font-metrics-api': 'measureElement / measureText: the Font Metrics API is not implemented',
+      'permissions-policy': 'permissionsPolicy: Permissions Policy is not implemented',
+      'sanitizer-api': 'parseHTML: the Sanitizer API is not implemented',
+      'scroll-to-text-fragment': 'fragmentDirective: text fragments are not implemented',
+      'trust-token-api': 'hasPrivateToken / hasRedemptionRecord: Private State Tokens are not implemented',
+      ARIANotifyMixin: 'ariaNotify: no accessibility tree to announce to'
+    },
+    omitMembers: {
+      caretPositionFromPoint: 'CaretPosition is not implemented',
+      fullscreenEnabled: 'no fullscreen',
+      fullscreen: 'no fullscreen',
+      parseHTMLUnsafe: 'a static operation: not generated yet',
+      all: 'HTMLAllCollection is not implemented',
+      wasDiscarded: 'no discarding is modelled (Page Lifecycle)',
+      pictureInPictureEnabled: 'no Picture-in-Picture',
+      prerendering: 'no prerendering'
     }
   }]
 ];
@@ -64,7 +94,7 @@ const RUNTIME = [
   'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toLong', 'toDouble',
   'toUnrestrictedDouble', 'toSequence', 'toObject', 'toInterface', 'toCallbackInterface', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineClassString', 'enumerable', 'installMembers',
-  'defineLength', 'defineUnscopables'
+  'defineLength', 'defineUnscopables', 'unforgeableMembers'
 ];
 
 const all = await parseAll();
@@ -89,11 +119,15 @@ for (const [spec, defs] of Object.entries(all)) {
 // The extended attributes a binding here makes what IDL says of, by where they stand; any other is an error.
 // [CEReactions]: an implementation's writes run their reactions as each returns (handleAttributeChanges) — which is
 // the operation's return where it writes once, as every one generated here does. [Reflect]: the implementation reflects
-// the content attribute. [SameObject] / [NewObject]: what the
-// implementation returns. [Exposed]: the global the interface object is put on, the Window's here.
+// the content attribute. [SameObject] / [NewObject]: what the implementation returns. [Exposed]: the global the
+// interface object is put on, the Window's here. [SecureContext]: exposed, every realm here being a secure context
+// (`isSecureContext`, platform-globals.js). The rest the generator makes as Web IDL says.
 const HANDLED = {
-  interface: ['Exposed'],
-  member: ['SameObject', 'NewObject', 'CEReactions', 'Unscopable', 'PutForwards', 'Reflect'],
+  interface: ['Exposed', 'SecureContext'],
+  member: [
+    'SameObject', 'NewObject', 'CEReactions', 'Unscopable', 'PutForwards', 'Reflect', 'SecureContext', 'LegacyLenientSetter',
+    'LegacyUnforgeable', 'LegacyLenientThis'
+  ],
   type: ['LegacyNullToEmptyString']
 };
 function checkExtAttrs(extAttrs, where, label) {
@@ -127,8 +161,9 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
   if (t.union) return unionConversion(t, expr, where, checks, argExtAttrs);
   const typedef = !t.generic && typedefs.get(t.idlType);
   if (typedef) return conversion(typeOf(typedef, t), expr, where, checks, argExtAttrs);
-  if (t.generic === 'sequence' || t.generic === 'FrozenArray') {
-    // (Web IDL §3.2.21, §3.2.27: the values its iterator gives, each converted; a frozen array frozen)
+  if (t.generic === 'sequence' || t.generic === 'FrozenArray' || t.generic === 'ObservableArray') {
+    // (Web IDL §3.2.21, §3.2.27, §3.2.28: the values its iterator gives, each converted; a frozen array frozen; an
+    // observable array's setter given them, which its implementation's backing list is set to)
     const each = conversion(t.idlType[0], 'x', where, checks);
     const c = `toSequence(${expr}, (x) => ${each}, ${failure(where, 'The provided value cannot be converted to a sequence.')})`;
     const value = t.generic === 'FrozenArray' ? `Object.freeze(${c})` : c;
@@ -292,8 +327,9 @@ function constantValue(m, where) {
 }
 
 // An interface's members: its own, those of the mixins it includes, and those of the partials of either — but what
-// `omit` names (and why). What no binding here makes of a definition yet, beside its members, is an error.
-function membersOf(def, omit = {}) {
+// `omit` and `omitMembers` name (and why). What no binding here makes of a definition yet, beside its members, is an
+// error, as is an omission of something nothing adds.
+function membersOf(def, omit = {}, omitMembers = {}) {
   const omitted = new Set();
   const gather = (d) => {
     checkExtAttrs(d.extAttrs, 'interface', d.name);
@@ -309,11 +345,11 @@ function membersOf(def, omit = {}) {
     return found;
   };
   const members = gather(def).filter((m) => {
-    if (!Object.hasOwn(omit, m.name)) return true;
+    if (!Object.hasOwn(omitMembers, m.name)) return true;
     omitted.add(m.name);
     return false;
   });
-  const unknown = Object.keys(omit).filter((k) => !omitted.has(k));
+  const unknown = [...Object.keys(omit), ...Object.keys(omitMembers)].filter((k) => !omitted.has(k));
   if (unknown.length) throw new Error(`${def.name}: omits ${unknown.join(', ')}, which nothing adds to it`);
   for (const m of members) checkExtAttrs(m.extAttrs, 'member', `${def.name}.${m.name || m.type}`);
   return members;
@@ -322,7 +358,7 @@ function membersOf(def, omit = {}) {
 function generateInterface(def, options = {}) {
   const name = def.name;
   if (def.inheritance && !options.install) throw new Error(`${name}: an inherited interface is not generated yet`);
-  const members = [], constants = [], body = [], checks = new Set(), unscopables = [], handlers = [];
+  const members = [], constants = [], body = [], unforgeables = [], checks = new Set(), unscopables = [], handlers = [];
   // (…`this` checked: by its brand where the binding makes the object, by the test its class registered where it is
   // installed on that class)
   // (…`prefix` the message's, for an operation whose TypeError becomes its promise's rejection)
@@ -332,7 +368,7 @@ function generateInterface(def, options = {}) {
   };
   const self = selfCheck();
   let indexed = null, valueIterator = false, stringifier = null, constructor = null;
-  const memberList = membersOf(def, options.omit);
+  const memberList = membersOf(def, options.omit, options.omitMembers);
   for (const m of memberList) {
     const label = `${name}.${m.name || m.type}`;
     if ((m.extAttrs || []).some((e) => e.name === 'Unscopable')) unscopables.push(m.name);
@@ -344,32 +380,49 @@ function generateInterface(def, options = {}) {
       continue;
     }
     if (m.type === 'attribute' && EVENT_HANDLER_TYPES.has(m.idlType.idlType)) {
+      // (…[LegacyLenientThis] or not: the installing class's accessors answer any `this`)
       handlers.push(m.name);
       continue;
     }
     if (m.type === 'attribute') {
+      // ([LegacyUnforgeable], Web IDL §3.4.10: an own property of each object, which cannot be reconfigured)
+      const out = (m.extAttrs || []).some((e) => e.name === 'LegacyUnforgeable') ? unforgeables : body;
       if (m.special === 'stringifier') stringifier = m.name;
       else if (m.special) throw new Error(`${label}: a ${m.special} attribute is not generated yet`);
       members.push(m.name);
-      body.push(`    get ${m.name}() { return impl.get_${m.name}(${self}); }`);
+      if ((m.extAttrs || []).some((e) => e.name === 'LegacyLenientThis')) {
+        // [LegacyLenientThis] (Web IDL §3.4.3): on an object not the interface's, the getter answers undefined
+        if (!options.install || !m.readonly) throw new Error(`${label}: a [LegacyLenientThis] attribute of this kind is not generated yet`);
+        out.push(`    get ${m.name}() { return IS_SELF(this) ? impl.get_${m.name}(this) : undefined; }`);
+        continue;
+      }
+      out.push(`    get ${m.name}() { return impl.get_${m.name}(${self}); }`);
       const forwards = (m.extAttrs || []).find((e) => e.name === 'PutForwards');
       if (forwards) {
         // [PutForwards=x] (Web IDL §3.7.6): a write to the attribute is a write of `x` on the object it answers
         // (`el.classList = 'a b'` sets the list's `value`).
         const target = forwards.rhs.value;
-        body.push(`    set ${m.name}(v) { const object = impl.get_${m.name}(${self}); object.${target} = v; }`);
+        out.push(`    set ${m.name}(v) { const object = impl.get_${m.name}(${self}); object.${target} = v; }`);
+      } else if ((m.extAttrs || []).some((e) => e.name === 'LegacyLenientSetter')) {
+        // [LegacyLenientSetter] (Web IDL §3.4.2): a read-only attribute with a setter that does nothing, so a page's
+        // own assignment to it (an old polyfill's) is no error
+        out.push(`    set ${m.name}(v) {}`);
       } else if (!m.readonly && enums.has(m.idlType.idlType)) {
         // (…an enumeration's: a string it has not is ignored, not an error — Web IDL §3.7.6)
         const value = `enumValue(v, ${JSON.stringify(enums.get(m.idlType.idlType))}, ${failure({ iface: name, member: m.name })})`;
         const v = m.idlType.nullable ? `v == null ? null : ${value}` : value;
-        body.push(`    set ${m.name}(v) { const self = ${self}; const value = ${v}; if (value !== undefined) impl.set_${m.name}(self, value); }`);
+        out.push(`    set ${m.name}(v) { const self = ${self}; const value = ${v}; if (value !== undefined) impl.set_${m.name}(self, value); }`);
       } else if (!m.readonly) {
         const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
-        body.push(`    set ${m.name}(v) { impl.set_${m.name}(${self}, ${v}); }`);
+        out.push(`    set ${m.name}(v) { impl.set_${m.name}(${self}, ${v}); }`);
       }
       continue;
     }
     if (m.type === 'operation') {
+      if (m.special === 'getter' && m.arguments.length === 1 && m.arguments[0].idlType.idlType === 'DOMString' && options.namedProperties) {
+        // (…a named property getter the installing class's objects answer themselves: `namedProperties` says how)
+        continue;
+      }
       if (m.special === 'getter') {
         if (m.arguments.length !== 1 || m.arguments[0].idlType.idlType !== 'unsigned long') throw new Error(`${label}: only an indexed getter is generated`);
         indexed = m.name;
@@ -391,8 +444,9 @@ function generateInterface(def, options = {}) {
   const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
   if (options.install) {
     if (indexed || valueIterator) throw new Error(`${name}: an installed interface with an indexed getter or an iterator is not generated yet`);
-    return installInterface(def, { body, checks, unscopables, constructor, constants, handlers });
+    return installInterface(def, { body, unforgeables, checks, unscopables, constructor, constants, handlers });
   }
+  if (unforgeables.length) throw new Error(`${name}: [LegacyUnforgeable] members of an interface the binding makes are not generated yet`);
   if (handlers.length) throw new Error(`${name}: event handlers of an interface the binding makes are not generated yet`);
   if (constructor) throw new Error(`${name}: a constructor is not generated yet`);
 
@@ -435,7 +489,9 @@ function generateInterface(def, options = {}) {
 // An installed interface: its members generated in a class of their own, then put on the prototype of the hand-written
 // class (`iface`) that makes its objects — their names, lengths and conversions IDL's, enumerable; the interface
 // object's `length` its constructor's required arguments; its class string and @@unscopables.
-function installInterface(def, { body, checks, unscopables, constructor, constants, handlers }) {
+// …its [LegacyUnforgeable] members, own properties of each object, defined on one by the function it returns, which the
+// class's constructor calls.
+function installInterface(def, { body, unforgeables, checks, unscopables, constructor, constants, handlers }) {
   const name = def.name;
   const length = constructor ? constructor.arguments.filter((a) => !a.optional && !a.variadic).length : 0;
   const lines = [];
@@ -456,6 +512,10 @@ function installInterface(def, { body, checks, unscopables, constructor, constan
   lines.push(`  defineLength(iface, ${length});`);
   lines.push(`  defineClassString(iface.prototype, '${name}');`);
   if (unscopables.length) lines.push(`  defineUnscopables(iface.prototype, ${JSON.stringify(unscopables)});`);
+  if (unforgeables.length) {
+    lines.push(`  class Unforgeables {`, ...unforgeables, `  }`);
+    lines.push(`  return unforgeableMembers(Unforgeables.prototype);`);
+  }
   lines.push(`}`);
   return lines.join('\n');
 }
