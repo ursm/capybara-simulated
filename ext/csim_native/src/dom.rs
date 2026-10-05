@@ -1417,6 +1417,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
         ns.set(scope, key.into(), base.into());
     }
     crate::ranges::install(scope, ns, context_id);
+    // …and an attribute's token set (token_list.rs)
+    crate::token_list::install(scope, ns, context_id);
     // …and the realm's id, which spaces its nodes' handle ids apart from every other realm's (dom-nodes.js `Node`).
     let key = v8::String::new(scope, "realmId").expect("a short string");
     let id = v8::Integer::new(scope, context_id);
