@@ -131,6 +131,7 @@ impl Ranges {
         let Some(at) = self.entries.get(id as usize).and_then(|e| e.as_ref()).map(|e| e.listed[w] as usize) else { return };
         let Some(list) = self.by_node.get_mut(&node) else { return };
         if list.get(at) != Some(&(id, w as u8)) {
+            debug_assert!(false, "range {id} point {w} is not where its entry lists it");
             return;
         }
         list.swap_remove(at);
