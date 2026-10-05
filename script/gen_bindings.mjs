@@ -104,8 +104,8 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
   const legacyNull = extAttrs.some((e) => e.name === 'LegacyNullToEmptyString');
   let c;
   switch (t.idlType) {
-    case 'DOMString': c = `toDOMString(${expr}${legacyNull ? ', true' : ''})`; break;
-    case 'USVString': c = `toUSVString(${expr})`; break;
+    case 'DOMString': c = `toDOMString(${expr}, ${legacyNull}, ${JSON.stringify(failure(where))})`; break;
+    case 'USVString': c = `toUSVString(${expr}, ${JSON.stringify(failure(where))})`; break;
     case 'boolean': c = `toBoolean(${expr})`; break;
     case 'unsigned short': c = `toUnsignedShort(${expr})`; break;
     case 'unsigned long': c = `toUnsignedLong(${expr})`; break;

@@ -3437,10 +3437,6 @@ dom/idlharness.window.js:
   Document() with too few arguments must throw TypeError'
 - 'Document interface: calling getElementsByTagNameNS(DOMString?, DOMString) on xmlDoc
   with too few arguments must throw TypeError'
-- 'Document interface: calling importNode(Node, optional (boolean or ImportNodeOptions))
-  on new Document() with too few arguments must throw TypeError'
-- 'Document interface: calling importNode(Node, optional (boolean or ImportNodeOptions))
-  on xmlDoc with too few arguments must throw TypeError'
 - 'Document interface: existence and properties of interface prototype object'
 - 'Document interface: new Document() must inherit property "fullscreen" with the
   proper type'

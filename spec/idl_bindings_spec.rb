@@ -193,6 +193,51 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  # (…and the driver's own steps call Node's internally, not the members a page sees: a form control named after one
+  # shadows it on the form, and a page's replacement of one is the page's)
+  it "runs Node's steps whatever a form's controls are named, and converts as Chrome says" do
+    got = outcome(<<~JS)
+      (() => {
+        const thrown = (f) => { try { f(); return 'no'; } catch (e) { return e.message; } };
+        const f = document.body.appendChild(document.createElement('form'));
+        f.innerHTML = '<input name=insertBefore><input name=appendChild><input name=contains><b id=x></b>';
+        const x = f.querySelector('#x');
+        x.before(document.createElement('i'));
+        f.append('t');
+        return [
+          x.previousSibling.nodeName, f.lastChild.nodeName,
+          thrown(() => document.importNode()), thrown(() => document.importNode({})),
+          thrown(() => { document.createElement('p').textContent = Symbol(); })
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      'I', '#text',
+      "Failed to execute 'importNode' on 'Document': 1 argument required, but only 0 present.",
+      "Failed to execute 'importNode' on 'Document': parameter 1 is not of type 'Node'.",
+      "Failed to set the 'textContent' property on 'Node': Cannot convert a Symbol value to a string"
+    ])
+  end
+
+  # (…a clone's shadow tree upgraded as the clone is: once for a clone, never for an import into an inert document)
+  it 'upgrades a cloned shadow tree with the clone' do
+    got = outcome(<<~JS)
+      (() => {
+        let n = 0;
+        customElements.define('x-counted', class extends HTMLElement { constructor() { super(); n++; } });
+        const host = document.createElement('div');
+        host.attachShadow({mode: 'open', clonable: true}).innerHTML = '<x-counted></x-counted>';
+        n = 0;
+        document.implementation.createHTMLDocument('').importNode(host, true);
+        const imported = n;
+        n = 0;
+        host.cloneNode(true);
+        return [imported, n];
+      })()
+    JS
+    expect(got).to eq([0, 1])
+  end
+
   it 'marks only the [Unscopable] members of each interface' do
     got = outcome('[Document, DocumentFragment, Element].map((i) => Object.keys(i.prototype[Symbol.unscopables]).sort())')
     expect(got).to eq([
