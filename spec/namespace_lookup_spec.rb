@@ -26,4 +26,30 @@ RSpec.describe 'namespace lookups' do
     JS
     expect(got).to eq(['http://www.w3.org/1999/xhtml', nil, 'http://www.w3.org/XML/1998/namespace', 'urn:b', nil, true, 'a', 'urn:a', 'a', nil, nil])
   end
+
+  # A namespace or a prefix may carry a lone surrogate, which the arena's UTF-8 names lose: it is compared as UTF-16.
+  it 'compares names exactly' do
+    got = session.evaluate_script(<<~'JS')
+      (() => {
+        const units = (v) => v == null ? null : [...v].map((c) => c.charCodeAt(0));
+        const e = document.createElementNS('urn:a', '\uD800:e');
+        const f = document.createElementNS('urn:\uDC00', 'f');
+        f.setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:\uD801', 'urn:\uD802');
+        return [
+          e.lookupNamespaceURI('\uFFFD'), units(e.lookupPrefix('urn:a')), f.isDefaultNamespace('urn:\uFFFD'), f.isDefaultNamespace('urn:\uDC00'),
+          units(f.lookupNamespaceURI('\uD801')), units(f.lookupPrefix('urn:\uD802')), f.lookupPrefix('urn:\uFFFD')
+        ];
+      })()
+    JS
+    expect(got).to eq([nil, [0xD800], false, true, [117, 114, 110, 58, 0xD802], [0xD801], nil])
+  end
+
+  it 'takes its argument as required' do
+    got = session.evaluate_script(<<~JS)
+      ['lookupNamespaceURI', 'lookupPrefix', 'isDefaultNamespace', 'compareDocumentPosition'].map((m) => {
+        try { document.body[m](); return 'ok'; } catch (e) { return e.name; }
+      })
+    JS
+    expect(got).to eq(%w[TypeError TypeError TypeError TypeError])
+  end
 end

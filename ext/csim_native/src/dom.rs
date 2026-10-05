@@ -28,6 +28,7 @@
 // hands it back. `attrsView(nid)` is the native-backed `_attrs` (a named interceptor over a node's
 // attributes Vec), installed by the Element constructor in place of the JS `{}`.
 
+use std::borrow::Cow;
 use style::Atom;
 use web_atoms::{ns, LocalName, Namespace};
 
@@ -137,8 +138,11 @@ pub(crate) struct NodeData {
     // one for an element in no namespace), interned — what every matcher compares.
     pub(crate) local_name: LocalName,
     pub(crate) ns: Namespace,
-    // An element's namespace prefix (`prefix`; None for none) — fixed at creation, read only by XPath's `name()`.
+    // An element's namespace prefix (`prefix`; None for none) — fixed at creation.
     pub(crate) prefix: Option<Box<str>>,
+    // …and, for the rare element whose namespace or prefix carries a LONE SURROGATE (U+FFFD in the two above), both
+    // exactly, as UTF-16 — what a namespace lookup compares (`ns_units`, `prefix_units`).
+    pub(crate) name_u16: Option<Box<(Vec<u16>, Option<Vec<u16>>)>>,
     pub(crate) attributes: Vec<(String, String)>,
     // Lossless override for the rare attribute value that carries a LONE SURROGATE (unpaired U+D800..
     // U+DFFF) — valid in a JS DOMString (UTF-16) but not in Rust's UTF-8 `String`, where it degrades to
@@ -152,6 +156,9 @@ pub(crate) struct NodeData {
     // JS side's synthetic key for an unprefixed one): (key, namespace URL, local name). Empty for virtually every
     // element — every other attribute is in no namespace, named by its key.
     pub(crate) attr_ns: Vec<(String, String, String)>,
+    // …and, for the rare one whose namespace or local name carries a lone surrogate, both exactly: (key, namespace, local
+    // name) as UTF-16.
+    pub(crate) attr_ns_u16: Vec<(String, Vec<u16>, Vec<u16>)>,
     pub(crate) parent: Option<NodeId>,
     pub(crate) children: Vec<NodeId>,
     // Position within `parent.children`, kept current on every link/unlink, so the
@@ -266,9 +273,11 @@ impl NodeData {
             local_name: LocalName::default(),
             ns: Namespace::default(),
             prefix: None,
+            name_u16: None,
             attributes: Vec::new(),
             attr_u16: Vec::new(),
             attr_ns: Vec::new(),
+            attr_ns_u16: Vec::new(),
             parent: None,
             children: Vec::new(),
             child_index: 0,
@@ -368,6 +377,59 @@ impl NodeData {
         }
     }
 
+    // An element's namespace, exactly (the empty one for none).
+    pub(crate) fn ns_units(&self) -> Cow<'_, [u16]> {
+        match &self.name_u16 {
+            Some(exact) => Cow::Borrowed(&exact.0),
+            None => Cow::Owned(self.ns.encode_utf16().collect()),
+        }
+    }
+    // Whether an element's namespace is `units`, exactly.
+    pub(crate) fn ns_is(&self, units: &[u16]) -> bool {
+        match &self.name_u16 {
+            Some(exact) => exact.0 == units,
+            None => self.ns.encode_utf16().eq(units.iter().copied()),
+        }
+    }
+    // …and its prefix (None for none).
+    pub(crate) fn prefix_is(&self, units: Option<&[u16]>) -> bool {
+        match (&self.name_u16, units) {
+            (Some(exact), _) => exact.1.as_deref() == units,
+            (None, Some(units)) => self.prefix.as_deref().is_some_and(|p| p.encode_utf16().eq(units.iter().copied())),
+            (None, None) => self.prefix.is_none(),
+        }
+    }
+    // …and its prefix, exactly.
+    pub(crate) fn prefix_units(&self) -> Option<Cow<'_, [u16]>> {
+        match &self.name_u16 {
+            Some(exact) => exact.1.as_deref().map(Cow::Borrowed),
+            None => self.prefix.as_deref().map(|p| Cow::Owned(p.encode_utf16().collect())),
+        }
+    }
+    // The attributes that are in a namespace, in attribute-list order: each one's key, namespace and local name, exactly.
+    pub(crate) fn namespaced_attributes(&self) -> impl Iterator<Item = (&str, Cow<'_, [u16]>, Cow<'_, [u16]>)> {
+        let records = if self.attr_ns.is_empty() { &[][..] } else { &self.attributes[..] };
+        records.iter().filter_map(|(key, _)| {
+            let (_, ns, local) = self.attr_ns.iter().find(|(k, _, _)| k == key)?;
+            Some(match self.attr_ns_u16.iter().find(|(k, _, _)| k == key) {
+                Some((_, ns, local)) => (key.as_str(), Cow::Borrowed(&ns[..]), Cow::Borrowed(&local[..])),
+                None => (key.as_str(), Cow::Owned(ns.encode_utf16().collect()), Cow::Owned(local.encode_utf16().collect())),
+            })
+        })
+    }
+    // The value of the attribute stored under `key`, exactly.
+    pub(crate) fn attr_units(&self, key: &str) -> Option<Cow<'_, [u16]>> {
+        match self.get_attr_u16(key) {
+            Some(units) => Some(Cow::Borrowed(units)),
+            None => self.get_attr(key).map(|v| Cow::Owned(v.encode_utf16().collect())),
+        }
+    }
+    // Keep the namespace records of the attributes `keep` names.
+    fn retain_attr_ns(&mut self, keep: impl Fn(&str) -> bool) {
+        self.attr_ns.retain(|(k, _, _)| keep(k));
+        self.attr_ns_u16.retain(|(k, _, _)| keep(k));
+    }
+
     // The value of the attribute `local` in NO namespace — what an HTML reflection or an unprefixed selector names.
     pub(crate) fn plain_attr(&self, local: &str) -> Option<&str> {
         if self.attr_ns.iter().any(|(k, _, _)| k == local) {
@@ -393,7 +455,7 @@ impl NodeData {
         self.attributes.retain(|(k, _)| k != name);
         self.clear_attr_u16(name);
         if !self.attr_ns.is_empty() {
-            self.attr_ns.retain(|(k, _, _)| k != name);
+            self.retain_attr_ns(|k| k != name);
         }
         self.attr_changed(Some(name));
     }
@@ -1677,15 +1739,27 @@ fn import_node(
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let local_name = LocalName::from(args.get(0).to_rust_string_lossy(scope));
-    let ns = Namespace::from(args.get(1).to_rust_string_lossy(scope));
+    let (ns, ns_u16) = read_v8_value(scope, args.get(1));
     let parent = nid_arg(scope, &args, 2);
     let (attributes, attr_u16) = read_attrs_flat(scope, args.get(3));
-    let prefix = args.get(4).is_string().then(|| args.get(4).to_rust_string_lossy(scope).into_boxed_str());
+    let (prefix, prefix_u16) = match args.get(4).is_string() {
+        true => {
+            let (lossy, exact) = read_v8_value(scope, args.get(4));
+            (Some(lossy), exact)
+        }
+        false => (None, None),
+    };
+    // (…exactly, beside, where either lost a lone surrogate)
+    let name_u16 = (ns_u16.is_some() || prefix_u16.is_some()).then(|| {
+        let prefix_units = prefix.as_ref().map(|p| prefix_u16.unwrap_or_else(|| p.encode_utf16().collect()));
+        Box::new((ns_u16.unwrap_or_else(|| ns.encode_utf16().collect()), prefix_units))
+    });
+    let (ns, prefix) = (Namespace::from(ns), prefix.map(String::into_boxed_str));
     let cid = realm_id(scope, &args);
     crate::node_handle::reclaim(dom(scope));
     let (arena, engine) = arena_and_engine(scope, cid);
     let id = arena.create(
-        NodeData { local_name, ns, prefix, attributes, attr_u16, ..NodeData::of_kind(NodeKind::Element, Vec::new()) },
+        NodeData { local_name, ns, prefix, name_u16, attributes, attr_u16, ..NodeData::of_kind(NodeKind::Element, Vec::new()) },
         parent,
     );
     if let (Some(engine), Some(p)) = (engine, parent) {
@@ -2396,8 +2470,9 @@ fn sync_attrs(
     if let Some(node) = arena.get_mut(id) {
         node.attributes = attributes;
         node.attr_u16 = attr_u16;
-        let attrs = &node.attributes;
-        node.attr_ns.retain(|(k, _, _)| attrs.iter().any(|(a, _)| a == k));
+        let attrs = std::mem::take(&mut node.attributes);
+        node.retain_attr_ns(|k| attrs.iter().any(|(a, _)| a == k));
+        node.attributes = attrs;
         node.attr_changed(None);
         // (…with or without an engine to hear of it: the parser's `dir` is what `is_rtl` must not miss)
         let notes = notes_direction(node);
@@ -2416,14 +2491,19 @@ fn set_attr_namespace(
         return;
     };
     let key = args.get(1).to_rust_string_lossy(scope);
-    let ns = args.get(2).to_rust_string_lossy(scope);
-    let local = args.get(3).to_rust_string_lossy(scope);
+    let (ns, ns_u16) = read_v8_value(scope, args.get(2));
+    let (local, local_u16) = read_v8_value(scope, args.get(3));
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
     before_attribute_write(arena, engine, id, &[&key]);
     if let Some(node) = arena.get_mut(id) {
-        node.attr_ns.retain(|(k, _, _)| k != &key);
+        node.retain_attr_ns(|k| k != key);
         if !ns.is_empty() {
+            // (…exactly, beside, where either lost a lone surrogate)
+            if ns_u16.is_some() || local_u16.is_some() {
+                let exact = |lossy: &str, units: Option<Vec<u16>>| units.unwrap_or_else(|| lossy.encode_utf16().collect());
+                node.attr_ns_u16.push((key.clone(), exact(&ns, ns_u16), exact(&local, local_u16)));
+            }
             node.attr_ns.push((key, ns, local));
         }
         node.attr_changed(None);

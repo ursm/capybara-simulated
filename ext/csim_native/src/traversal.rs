@@ -58,9 +58,11 @@ fn compare_position(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         let key = (!key.is_null_or_undefined()).then(|| key.to_rust_string_lossy(scope));
         let tie = args.get(i + 2).number_value(scope).unwrap_or(0.0);
         let arena = crate::dom::realm(scope, cid);
-        // (…an Attr's place in its element's attribute list, which the arena keeps in order)
-        let attr = key.and_then(|k| arena.get(node?)?.attributes.iter().position(|(name, _)| *name == k));
-        Side { node, attr, tie }
+        // (…an Attr's place in its element's attribute list, which the arena keeps in order — an Attr no longer in it is
+        // in no tree)
+        let Some(key) = key else { return Side { node, attr: None, tie } };
+        let attr = node.and_then(|n| arena.get(n)?.attributes.iter().position(|(name, _)| *name == key));
+        Side { node: node.filter(|_| attr.is_some()), attr, tie }
     };
     let (other, this) = (side(scope, 0), side(scope, 3));
     rv.set_uint32(position(crate::dom::realm(scope, cid), &other, &this));
