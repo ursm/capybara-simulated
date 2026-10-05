@@ -1348,7 +1348,12 @@ pub(crate) fn attribute_reads_state(name: &str) -> bool {
 // A NodeId argument off the JS wire: reads arg `i` as a Number and unpacks it, or None for a negative
 // sentinel / non-number. Does NOT check liveness — the op does that via `realm(...).get(id)`.
 pub(crate) fn nid_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, i: i32) -> Option<NodeId> {
-    args.get(i).integer_value(scope).and_then(NodeId::from_i64)
+    // (…a number only: `null` or `undefined` — a node with no slot — is no node, not slot 0)
+    let v = args.get(i);
+    if !v.is_number() {
+        return None;
+    }
+    v.integer_value(scope).and_then(NodeId::from_i64)
 }
 
 // Set a NodeId return value as its packed JS Number.

@@ -176,8 +176,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "rangeOffset", range_offset, context_id);
     register(scope, ns, "rangesInsert", ranges_insert, context_id);
     register(scope, ns, "rangesRemove", ranges_remove, context_id);
+    register(scope, ns, "rangesRemoveAll", ranges_remove_all, context_id);
     register(scope, ns, "rangesReplaceData", ranges_replace_data, context_id);
     register(scope, ns, "rangesSplit", ranges_split, context_id);
+    register(scope, ns, "rangesMerge", ranges_merge, context_id);
     register(scope, ns, "rangesLive", ranges_live, context_id);
     register(scope, ns, "rangeSetPoint", range_set_point, context_id);
     register(scope, ns, "rangeComparePoint", range_compare_point, context_id);
@@ -185,6 +187,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "rangeCollapsed", range_collapsed, context_id);
     register(scope, ns, "rangeCommonAncestor", range_common_ancestor, context_id);
     register(scope, ns, "comparePoints", compare_points_op, context_id);
+    register(scope, ns, "rangeIntersectsNode", range_intersects_node, context_id);
+    register(scope, ns, "rangeText", range_text, context_id);
 }
 
 // ── boundary points in tree order (DOM §5.2) ─────────────────────────────────────────────────────────────────────
@@ -327,7 +331,8 @@ fn range_compare_point(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 }
 
 // __dom.rangeCompareBoundaries(range, how, other) -> `compareBoundaryPoints`: START_TO_START 0, START_TO_END 1,
-// END_TO_END 2, END_TO_START 3 — the range's point against the other's; null in another tree.
+// END_TO_END 2, END_TO_START 3 — the range's point against the other's; null in another tree, undefined where the
+// other is no Range.
 fn range_compare_boundaries(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let how = args.get(1).uint32_value(scope).unwrap_or(0);
     let (Some(this), Some(other)) = (entry_points(scope, args.get(0)), entry_points(scope, args.get(2))) else { return };
@@ -339,12 +344,29 @@ fn range_compare_boundaries(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
     };
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    // (…in another tree where the two ranges' roots differ, whichever points are compared)
-    let same_tree = arena.root_of(this[START].node) == arena.root_of(other[START].node);
-    match ordering_value(compare(arena, a, b)).filter(|_| same_tree) {
+    // (…in another tree where the two ranges' roots differ: each range's points share a root)
+    match ordering_value(compare(arena, a, b)) {
         Some(v) => rv.set_int32(v),
         None => rv.set_null(),
     }
+}
+
+// __dom.rangeIntersectsNode(range, nid) -> DOM `intersectsNode` (§5.5): whether the node is in the range's tree and
+// (its parent, its index) is before the range's end and (its parent, its index + 1) after its start — a root (a shadow
+// root included) always is.
+fn range_intersects_node(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(points), Some(nid)) = (entry_points(scope, args.get(0)), nid_arg(scope, &args, 1)) else { return rv.set_bool(false) };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    if arena.root_of(nid) != arena.root_of(points[START].node) {
+        return rv.set_bool(false);
+    }
+    let Some(parent) = arena.parent_of(nid) else { return rv.set_bool(true) };
+    let offset = arena.get(nid).map_or(0, |n| n.child_index) as u32;
+    use std::cmp::Ordering::*;
+    let before_end = compare(arena, Boundary { node: parent, offset }, points[END]) == Some(Less);
+    let after_start = compare(arena, Boundary { node: parent, offset: offset + 1 }, points[START]) == Some(Greater);
+    rv.set_bool(before_end && after_start);
 }
 
 // __dom.rangeCollapsed(range) -> whether its start is its end.
@@ -362,6 +384,71 @@ fn range_common_ancestor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let shared = cs.iter().zip(&ce).take_while(|(x, y)| x == y).count();
     let common = if shared == 0 { s.node } else { cs[shared - 1] };
     rv.set_double(common.to_f64());
+}
+
+// The node after `id` in tree order — into its children first unless `skip_children` — within `id`'s tree.
+fn following(arena: &RealmArena, id: NodeId, skip_children: bool) -> Option<NodeId> {
+    if !skip_children {
+        if let Some(&c) = arena.get(id).and_then(|n| n.children.first()) {
+            return Some(c);
+        }
+    }
+    let mut cur = id;
+    loop {
+        let parent = arena.parent_of(cur)?;
+        let at = arena.get(cur)?.child_index;
+        if let Some(&next) = arena.get(parent).and_then(|p| p.children.get(at + 1)) {
+            return Some(next);
+        }
+        cur = parent;
+    }
+}
+
+// __dom.rangeText(range) -> the range's stringifier (DOM §5.5): the start node's data from its offset where it is a Text
+// node, the data of every Text node the range contains in tree order, and the end node's up to its offset — or, start
+// and end one Text node, its data between them.
+fn range_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some([s, e]) = entry_points(scope, args.get(0)) else { return };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let text = |id: NodeId| arena.get(id).filter(|n| n.kind == crate::dom::NodeKind::Text).map(|n| &n.data[..]);
+    let slice = |d: &[u16], from: u32, to: u32| d[(from as usize).min(d.len())..(to as usize).min(d.len()).max((from as usize).min(d.len()))].to_vec();
+    let mut out: Vec<u16> = Vec::new();
+    if let (true, Some(d)) = (s.node == e.node, text(s.node)) {
+        out = slice(d, s.offset, e.offset);
+    } else {
+        if let Some(d) = text(s.node) {
+            out.extend(slice(d, s.offset, u32::MAX));
+        }
+        // (…from the first node after the start point: past a Text start node, or the start container's child at the
+        // offset, or what follows the container where the offset is its end)
+        let mut cur = match text(s.node) {
+            Some(_) => following(arena, s.node, true),
+            None => match arena.get(s.node).and_then(|n| n.children.get(s.offset as usize)) {
+                Some(&c) => Some(c),
+                None => following(arena, s.node, true),
+            },
+        };
+        use std::cmp::Ordering::*;
+        while let Some(n) = cur {
+            // (…until the end node, whose part follows, or a node that starts at or past the end point)
+            if n == e.node || compare(arena, Boundary { node: n, offset: 0 }, e) != Some(Less) {
+                break;
+            }
+            if let Some(d) = text(n) {
+                let end = Boundary { node: n, offset: d.len() as u32 };
+                if compare(arena, end, e) != Some(Greater) {
+                    out.extend_from_slice(d);
+                }
+            }
+            cur = following(arena, n, false);
+        }
+        if let Some(d) = text(e.node) {
+            out.extend(slice(d, 0, e.offset));
+        }
+    }
+    let value = crate::dom::utf16_value(scope, &out);
+    rv.set(value);
 }
 
 // __dom.comparePoints(nidA, offsetA, nidB, offsetB) -> -1, 0 or 1: where the first boundary point is against the
@@ -399,9 +486,16 @@ fn range_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     set_range(scope, &args, which.min(2));
 }
 
-// __dom.rangeContainer(range, which) -> its start's (0) or end's (1) container.
+// A TypeError thrown for `this` that is no Range.
+fn not_a_range(scope: &mut v8::PinScope<'_, '_>) {
+    let message = v8::String::new(scope, "Illegal invocation: the receiver is not a Range.").expect("a short string");
+    let error = v8::Exception::type_error(scope, message);
+    scope.throw_exception(error);
+}
+
+// __dom.rangeContainer(range, which) -> its start's (0) or end's (1) container; a TypeError for no range.
 fn range_container(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(ptr) = handle_of(scope, args.get(0)) else { return };
+    let Some(ptr) = handle_of(scope, args.get(0)) else { return not_a_range(scope) };
     let which = (args.get(1).uint32_value(scope).unwrap_or(0) as usize).min(END);
     // SAFETY: the handle lives while its object does, which the caller holds; the main thread writes the reference.
     if let Some(obj) = unsafe { (*ptr.as_ref().containers[which].get()).get(scope) } {
@@ -409,9 +503,9 @@ fn range_container(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     }
 }
 
-// __dom.rangeOffset(range, which) -> its start's (0) or end's (1) offset.
+// __dom.rangeOffset(range, which) -> its start's (0) or end's (1) offset; a TypeError for no range.
 fn range_offset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(ptr) = handle_of(scope, args.get(0)) else { return };
+    let Some(ptr) = handle_of(scope, args.get(0)) else { return not_a_range(scope) };
     let which = (args.get(1).uint32_value(scope).unwrap_or(0) as usize).min(END);
     // SAFETY: as `range_container`.
     let Some(id) = (unsafe { ptr.as_ref() }).id.get() else { return rv.set_uint32(0) };
@@ -465,6 +559,68 @@ fn ranges_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         // SAFETY: a handle a live entry's weak reference named is alive until the next collection, which nothing here
         // allocates to start.
         set_point(scope, unsafe { &*h }, w, parent_obj);
+    }
+}
+
+// __dom.rangesRemoveAll(parentNid, parent) — every child of the parent (object `parent`) is about to be removed, one after
+// another, as "replace all" removes them: a boundary inside any collapses to (parent, 0), as does one in the parent.
+fn ranges_remove_all(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(parent) = nid_arg(scope, &args, 0) else { return };
+    let Ok(parent_obj) = v8::Local::<v8::Object>::try_from(args.get(1)) else { return };
+    let cid = realm_id(scope, &args);
+    let d = crate::dom::dom(scope);
+    let arena = d.arena.enter(cid);
+    let r = &mut d.ranges;
+    r.sweep();
+    let mut moved: Vec<(*const RangeHandle, usize)> = Vec::new();
+    for e in r.entries.iter_mut().flatten() {
+        for (w, p) in e.points.iter_mut().enumerate() {
+            if p.node == parent {
+                p.offset = 0;
+            } else if contains(arena, parent, p.node) {
+                *p = Boundary { node: parent, offset: 0 };
+                if let Some(h) = e.handle.get() {
+                    moved.push((h as *const RangeHandle, w));
+                }
+            }
+        }
+    }
+    for (h, w) in moved {
+        // SAFETY: as `ranges_remove`.
+        set_point(scope, unsafe { &*h }, w, parent_obj);
+    }
+}
+
+// __dom.rangesMerge(nid, node, mergedNid, parentNid, index, length) — `normalize()` merges the text node `mergedNid` (at
+// `index` in the parent) into the text node `nid` (object `node`), whose data ran `length` units before it (DOM §4.4
+// normalize, steps 6.4-6.5): a boundary in the merged node moves into `node`, past those units, and one in the parent at
+// the merged node's index to `node`'s `length`.
+fn ranges_merge(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(node), Some(merged), Some(parent)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2), nid_arg(scope, &args, 3)) else { return };
+    let Ok(node_obj) = v8::Local::<v8::Object>::try_from(args.get(1)) else { return };
+    let index = args.get(4).uint32_value(scope).unwrap_or(0);
+    let length = args.get(5).uint32_value(scope).unwrap_or(0);
+    let r = ranges(scope);
+    r.sweep();
+    let mut moved: Vec<(*const RangeHandle, usize)> = Vec::new();
+    for e in r.entries.iter_mut().flatten() {
+        for (w, p) in e.points.iter_mut().enumerate() {
+            let to = if p.node == merged {
+                p.offset + length
+            } else if p.node == parent && p.offset == index {
+                length
+            } else {
+                continue;
+            };
+            *p = Boundary { node, offset: to };
+            if let Some(h) = e.handle.get() {
+                moved.push((h as *const RangeHandle, w));
+            }
+        }
+    }
+    for (h, w) in moved {
+        // SAFETY: as `ranges_remove`.
+        set_point(scope, unsafe { &*h }, w, node_obj);
     }
 }
 
