@@ -179,28 +179,96 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "rangesReplaceData", ranges_replace_data, context_id);
     register(scope, ns, "rangesSplit", ranges_split, context_id);
     register(scope, ns, "rangesLive", ranges_live, context_id);
+    register(scope, ns, "rangeSetPoint", range_set_point, context_id);
+    register(scope, ns, "rangeComparePoint", range_compare_point, context_id);
+    register(scope, ns, "rangeCompareBoundaries", range_compare_boundaries, context_id);
+    register(scope, ns, "rangeCollapsed", range_collapsed, context_id);
+    register(scope, ns, "rangeCommonAncestor", range_common_ancestor, context_id);
+    register(scope, ns, "comparePoints", compare_points_op, context_id);
 }
 
-// __dom.rangesLive() -> how many live ranges the isolate keeps (those V8 collected freed first).
-fn ranges_live(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let r = ranges(scope);
-    r.sweep();
-    let n = r.live().count();
-    rv.set_uint32(n as u32);
+// ── boundary points in tree order (DOM §5.2) ─────────────────────────────────────────────────────────────────────
+
+// `id` and its ancestors, root first — in its node tree (a shadow root is a root).
+fn chain(arena: &RealmArena, id: NodeId) -> Vec<NodeId> {
+    let mut out = vec![id];
+    while let Some(p) = arena.parent_of(*out.last().expect("never empty")) {
+        out.push(p);
+    }
+    out.reverse();
+    out
+}
+// Where `a` is against `b` in tree order — None where they are in different trees.
+fn tree_order(arena: &RealmArena, a: NodeId, b: NodeId) -> Option<std::cmp::Ordering> {
+    use std::cmp::Ordering::*;
+    if a == b {
+        return Some(Equal);
+    }
+    let (ca, cb) = (chain(arena, a), chain(arena, b));
+    if ca[0] != cb[0] {
+        return None;
+    }
+    let shared = ca.iter().zip(&cb).take_while(|(x, y)| x == y).count();
+    // (…an ancestor precedes what it contains)
+    let (Some(&xa), Some(&xb)) = (ca.get(shared), cb.get(shared)) else { return Some(if shared == ca.len() { Less } else { Greater }) };
+    let index = |n: NodeId| arena.get(n).map_or(0, |d| d.child_index);
+    Some(index(xa).cmp(&index(xb)))
+}
+// "The position of a boundary point relative to another" — None where they are in different trees.
+fn compare(arena: &RealmArena, a: Boundary, b: Boundary) -> Option<std::cmp::Ordering> {
+    use std::cmp::Ordering::*;
+    match tree_order(arena, a.node, b.node)? {
+        Equal => Some(a.offset.cmp(&b.offset)),
+        Greater => compare(arena, b, a).map(std::cmp::Ordering::reverse),
+        Less => {
+            // (…`a`'s node an ancestor of `b`'s: after where its child towards `b` is before `a`'s offset)
+            let cb = chain(arena, b.node);
+            match cb.iter().position(|&n| n == a.node) {
+                Some(i) => {
+                    let child = cb[i + 1];
+                    let index = arena.get(child).map_or(0, |d| d.child_index) as u32;
+                    Some(if index < a.offset { Greater } else { Less })
+                }
+                None => Some(Less),
+            }
+        }
+    }
+}
+fn ordering_value(o: Option<std::cmp::Ordering>) -> Option<i32> {
+    o.map(|o| o as i32)
 }
 
-// The point `which` of a range (0 its start, 1 its end; 2 both), and the object of the node it is in.
-fn set_point(scope: &mut v8::PinScope<'_, '_>, h: &RangeHandle, which: usize, node: v8::Local<'_, v8::Object>) {
-    // SAFETY: the main thread, which alone writes the references; the assignment runs TracedReference's barrier.
-    unsafe { (*h.containers[which].get()).reset(scope, Some(node)) }
+// The live entry of the range `value` is the object of, with the arena — or None for no range's.
+fn entry_points(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<[Boundary; 2]> {
+    let ptr = handle_of(scope, value)?;
+    // SAFETY: the handle lives while its object does, which the caller holds.
+    let id = unsafe { ptr.as_ref() }.id.get()?;
+    ranges(scope).entries.get(id as usize)?.as_ref().map(|e| e.points)
 }
 
-// __dom.rangeSet(range, which, node, nid, offset) — the range's start (`which` 0), end (1) or both (2) is (`node`,
-// `offset`), `nid` the node's slot.
-fn range_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.rangeSetPoint(range, which, node, nid, offset) — DOM "set the start or end" (§5.5), the node and offset checked
+// already: the range's start (`which` 0) or end (1) is (`node`, `offset`), and the other point with it where it would
+// be in another tree, or on the wrong side.
+fn range_set_point(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    let which = (args.get(1).uint32_value(scope).unwrap_or(0) as usize).min(END);
+    let (Some(nid), Some(points)) = (nid_arg(scope, &args, 3), entry_points(scope, args.get(0))) else { return range_set(scope, args, rv) };
+    let offset = args.get(4).uint32_value(scope).unwrap_or(0);
+    let point = Boundary { node: nid, offset };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let other = points[1 - which];
+    let order = compare(arena, point, other);
+    let collapse = match (which, order) {
+        (_, None) => true,
+        (START, Some(o)) => o == std::cmp::Ordering::Greater,
+        (_, Some(o)) => o == std::cmp::Ordering::Less,
+    };
+    set_range(scope, &args, if collapse { 2 } else { which });
+}
+// `range_set`, with `which` decided.
+fn set_range(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, which: usize) {
     let Some(ptr) = handle_of(scope, args.get(0)) else { return };
-    let which = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
-    let (Ok(node), Some(nid)) = (v8::Local::<v8::Object>::try_from(args.get(2)), nid_arg(scope, &args, 3)) else { return };
+    let (Ok(node), Some(nid)) = (v8::Local::<v8::Object>::try_from(args.get(2)), nid_arg(scope, args, 3)) else { return };
     let offset = args.get(4).uint32_value(scope).unwrap_or(0);
     // SAFETY: the handle lives while its object does, which the caller holds.
     let h = unsafe { ptr.as_ref() };
@@ -236,6 +304,99 @@ fn range_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
             set_point(scope, h, w, node);
         }
     }
+}
+
+// __dom.rangeComparePoint(range, nid, offset) -> where the point is against the range: -1 before its start, 1 after its
+// end, 0 in it; null in another tree.
+fn range_compare_point(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(points), Some(nid)) = (entry_points(scope, args.get(0)), nid_arg(scope, &args, 1)) else { return };
+    let point = Boundary { node: nid, offset: args.get(2).uint32_value(scope).unwrap_or(0) };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    use std::cmp::Ordering::*;
+    let value = match (compare(arena, point, points[START]), compare(arena, point, points[END])) {
+        (Some(Less), _) => Some(-1),
+        (Some(_), Some(Greater)) => Some(1),
+        (Some(_), Some(_)) => Some(0),
+        _ => None,
+    };
+    match value {
+        Some(v) => rv.set_int32(v),
+        None => rv.set_null(),
+    }
+}
+
+// __dom.rangeCompareBoundaries(range, how, other) -> `compareBoundaryPoints`: START_TO_START 0, START_TO_END 1,
+// END_TO_END 2, END_TO_START 3 — the range's point against the other's; null in another tree.
+fn range_compare_boundaries(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let how = args.get(1).uint32_value(scope).unwrap_or(0);
+    let (Some(this), Some(other)) = (entry_points(scope, args.get(0)), entry_points(scope, args.get(2))) else { return };
+    let (a, b) = match how {
+        0 => (this[START], other[START]),
+        1 => (this[END], other[START]),
+        2 => (this[END], other[END]),
+        _ => (this[START], other[END]),
+    };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    // (…in another tree where the two ranges' roots differ, whichever points are compared)
+    let same_tree = arena.root_of(this[START].node) == arena.root_of(other[START].node);
+    match ordering_value(compare(arena, a, b)).filter(|_| same_tree) {
+        Some(v) => rv.set_int32(v),
+        None => rv.set_null(),
+    }
+}
+
+// __dom.rangeCollapsed(range) -> whether its start is its end.
+fn range_collapsed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some([s, e]) = entry_points(scope, args.get(0)) else { return rv.set_bool(true) };
+    rv.set_bool(s.node == e.node && s.offset == e.offset);
+}
+
+// __dom.rangeCommonAncestor(range) -> the nid of the nearest inclusive ancestor of both its containers.
+fn range_common_ancestor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some([s, e]) = entry_points(scope, args.get(0)) else { return };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let (cs, ce) = (chain(arena, s.node), chain(arena, e.node));
+    let shared = cs.iter().zip(&ce).take_while(|(x, y)| x == y).count();
+    let common = if shared == 0 { s.node } else { cs[shared - 1] };
+    rv.set_double(common.to_f64());
+}
+
+// __dom.comparePoints(nidA, offsetA, nidB, offsetB) -> -1, 0 or 1: where the first boundary point is against the
+// second; null in another tree.
+fn compare_points_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(a), Some(b)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2)) else { return };
+    let a = Boundary { node: a, offset: args.get(1).uint32_value(scope).unwrap_or(0) };
+    let b = Boundary { node: b, offset: args.get(3).uint32_value(scope).unwrap_or(0) };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    match ordering_value(compare(arena, a, b)) {
+        Some(v) => rv.set_int32(v),
+        None => rv.set_null(),
+    }
+}
+
+// __dom.rangesLive() -> how many live ranges the isolate keeps (those V8 collected freed first).
+fn ranges_live(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let r = ranges(scope);
+    r.sweep();
+    let n = r.live().count();
+    rv.set_uint32(n as u32);
+}
+
+// The point `which` of a range (0 its start, 1 its end; 2 both), and the object of the node it is in.
+fn set_point(scope: &mut v8::PinScope<'_, '_>, h: &RangeHandle, which: usize, node: v8::Local<'_, v8::Object>) {
+    // SAFETY: the main thread, which alone writes the references; the assignment runs TracedReference's barrier.
+    unsafe { (*h.containers[which].get()).reset(scope, Some(node)) }
+}
+
+// __dom.rangeSet(range, which, node, nid, offset) — the range's start (`which` 0), end (1) or both (2) is (`node`,
+// `offset`), `nid` the node's slot.
+fn range_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let which = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
+    set_range(scope, &args, which.min(2));
 }
 
 // __dom.rangeContainer(range, which) -> its start's (0) or end's (1) container.
