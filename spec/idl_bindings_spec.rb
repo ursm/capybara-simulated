@@ -692,7 +692,11 @@ RSpec.describe 'IDL bindings' do
           t(() => EventTarget.prototype.addEventListener.call({}, 'x', () => {})),
           [new AbortController().signal, new XMLHttpRequest().upload, new FileReader(), matchMedia('(min-width: 1px)')].map((o) => Object.prototype.toString.call(o)),
           [new MediaQueryListEvent('change', { matches: true, media: 'x' }).matches, new IDBVersionChangeEvent('upgradeneeded', { oldVersion: 1, newVersion: 2 }).newVersion],
-          [EventTarget.prototype.addEventListener.length, EventTarget.prototype.dispatchEvent.length]
+          [EventTarget.prototype.addEventListener.length, EventTarget.prototype.dispatchEvent.length],
+          t(() => { const e = new EventTarget(); let r; e.addEventListener('x', (ev) => { try { e.dispatchEvent(ev); } catch (er) { r = er.name; } }); e.dispatchEvent(new Event('x')); return r; }),
+          t(() => new EventTarget().dispatchEvent(document.createEvent('Event'))),
+          t(() => { const a = new EventTarget(), b = new EventTarget(), ev = new Event('x'); let p; b.addEventListener('x', () => { p = ev.composedPath(); }); a.dispatchEvent(ev); b.dispatchEvent(ev); return [ev.target === b, p.length === 1 && p[0] === b, ev.composedPath().length, ev.eventPhase]; }),
+          [Object.getOwnPropertyNames(EventTarget.prototype).filter((k) => k.startsWith('__')), '__csimEvent' in new Event('x')]
         ];
       })()
     JS
@@ -703,7 +707,11 @@ RSpec.describe 'IDL bindings' do
       "TypeError: Failed to execute 'dispatchEvent' on 'EventTarget': parameter 1 is not of type 'Event'.",
       '1', 'TypeError: Illegal invocation',
       ['[object AbortSignal]', '[object XMLHttpRequestUpload]', '[object FileReader]', '[object MediaQueryList]'],
-      [true, 2], [2, 1]
+      [true, 2], [2, 1],
+      '"InvalidStateError"',
+      'InvalidStateError: The event is already being dispatched, or has not been initialized.',
+      '[true,true,0,0]',
+      [[], false]
     ])
   end
 

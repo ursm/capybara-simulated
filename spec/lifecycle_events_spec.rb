@@ -27,7 +27,8 @@ RSpec.describe 'document lifecycle events' do
               window.__loadEvent = {
                 target:  e.target === document,
                 current: e.currentTarget === window,
-                trusted: e.isTrusted
+                trusted: e.isTrusted,
+                path:    e.composedPath().length === 1 && e.composedPath()[0] === window
               };
             });
           </script>
@@ -51,10 +52,11 @@ RSpec.describe 'document lifecycle events' do
 
   # The window `load` event carries the "legacy target override flag": HTML fires
   # it AT the window, but its `target` is the DOCUMENT (Chrome-measured — page code
-  # routes on it), and it is a UA event, so it is trusted.
+  # routes on it), and it is a UA event, so it is trusted. Its path is the window
+  # alone, the invocation target (Chrome and Firefox).
   it 'targets the document, is trusted, and fires exactly once' do
     expect(session.evaluate_script('window.__loadEvent')).to eq(
-      'target' => true, 'current' => true, 'trusted' => true
+      'target' => true, 'current' => true, 'trusted' => true, 'path' => true
     )
     # Several places can be the one to fire it (the driver here, the realm builder
     # for a frame, the WPT harness for a test file) — whoever gets there first
