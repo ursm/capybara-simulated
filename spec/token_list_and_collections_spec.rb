@@ -30,11 +30,23 @@ RSpec.describe 'token lists and filtered element lists' do
     got = run(<<~JS)
       const xml = new DOMParser().parseFromString('<Root><a/><A/></Root>', 'application/xml');
       const f = document.createElement('div');
-      f.append(document.createElementNS('urn:x', 'a\\ud800'), document.createElementNS('urn:x', 'a\\ufffd'), document.createElementNS('urn:\\ud800', 'z'));
+      f.append(document.createElementNS('urn:x', 'a\\ud800'), document.createElementNS('urn:x', 'a\\ufffd'), document.createElementNS('urn:\\ud800', 'z'), document.createElement('x\\ufffd'));
       return [xml.getElementsByTagName('root').length, xml.getElementsByTagName('Root').length,
-              f.getElementsByTagName('a\\ud800').length, f.getElementsByTagNameNS('urn:\\ufffd', 'z').length,
+              f.getElementsByTagName('a\\ud800').length, f.getElementsByTagNameNS('urn:\\ufffd', 'z').length, f.getElementsByTagName('X\\ufffd').length,
               typeof document.createDocumentFragment().getElementsByTagName];
     JS
-    expect(got).to eq([0, 1, 1, 0, 'undefined'])
+    expect(got).to eq([0, 1, 1, 0, 1, 'undefined'])
+  end
+
+  it "gives an SVG element's class as an SVGAnimatedString" do
+    got = run(<<~JS)
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      svg.classList.add('A');
+      const c = svg.className;
+      svg.className = 'ignored';
+      c.baseVal = 'B C';
+      return [c instanceof SVGAnimatedString, c === svg.className, c.baseVal, c.animVal, svg.classList.length];
+    JS
+    expect(got).to eq([true, true, 'B C', 'B C', 2])
   end
 end
