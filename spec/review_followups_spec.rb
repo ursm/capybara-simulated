@@ -74,4 +74,26 @@ RSpec.describe 'review follow-ups' do
     sleep 0.1 until session.evaluate_script("document.querySelector('iframe').contentDocument.body.textContent") == 'y'
     expect(session.evaluate_script('__w.closed')).to be(false)
   end
+
+  # A replacement goes in before what followed the node it replaces, whatever the removal's steps (a frame's unload) did
+  # to the children meanwhile; a document with no browsing context — a removed frame's, a clone — has no location, no
+  # domain, no focus, and is hidden.
+  it 'replaces before what followed, and keeps a document with no browsing context out of the page' do
+    session.execute_script(<<~JS)
+      const q = document.body.appendChild(document.createElement('div'));
+      q.id = 'q';
+      q.innerHTML = '<i>a</i><div><iframe srcdoc="<p>q"></iframe></div><b>b</b>';
+    JS
+    sleep 0.1 until session.evaluate_script("document.querySelector('#q iframe').contentDocument.body.textContent") == 'q'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const q = document.getElementById('q'), frame = q.querySelector('iframe'), fd = frame.contentDocument;
+        frame.contentWindow.addEventListener('unload', () => q.firstChild.remove());
+        q.children[1].outerHTML = '<s></s><s></s>';
+        const clone = document.cloneNode(true);
+        return [[...q.children].map((c) => c.localName).join(), fd.location, fd.hasFocus(), clone.domain, clone.visibilityState, clone.hidden];
+      })()
+    JS
+    expect(got).to eq(['s,s,b', nil, false, '', 'hidden', true])
+  end
 end
