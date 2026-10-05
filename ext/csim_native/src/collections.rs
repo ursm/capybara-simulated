@@ -1,5 +1,5 @@
 // The element lists the DOM names by a filter (DOM §4.2.6, HTML §3.1.3): `getElementsByClassName`, `getElementsByTagName`
-// and its namespaced form, and the document's legacy collections (`forms`, `images`, `links`, `scripts`, `anchors`,
+// and its namespaced form, the document's `getElementsByName`, and its legacy collections (`forms`, `images`, `links`, `scripts`, `anchors`,
 // `embeds`) — the scope's descendant elements in tree order (not into a shadow tree or a template's contents) that the
 // filter takes, answered as `nodes_value` says (their objects, or their paths from the scope), which the live
 // collections wrap.
@@ -15,6 +15,8 @@ enum Filter {
     TagNs(Option<String>, Option<String>),
     // A qualified name (None for any) and, in an HTML document, its lowercase, which an HTML element's is compared with.
     Tag(Option<(String, Option<String>)>),
+    // An HTML element whose `name` is this, exactly (as UTF-16).
+    Name(Vec<u16>),
     // The legacy document collections: an HTML element of a local name, and an attribute it must hold.
     Html(&'static [&'static str], Option<&'static str>),
 }
@@ -53,6 +55,13 @@ impl Filter {
                     Some(p) => want.len() == p.len() + 1 + n.local_name.len() && want.starts_with(&**p) && want[p.len()..].starts_with(':') && want[p.len() + 1..] == *n.local_name,
                     None => *want == *n.local_name,
                 }
+            }
+            Filter::Name(name) => {
+                n.ns == ns!(html)
+                    && match n.get_attr_u16("name") {
+                        Some(units) => units == &name[..],
+                        None => n.plain_attr("name").is_some_and(|v| v.encode_utf16().eq(name.iter().copied())),
+                    }
             }
             Filter::Html(names, attr) => {
                 n.ns == ns!(html) && names.contains(&&*n.local_name) && attr.is_none_or(|a| n.plain_attr(a).is_some())
@@ -118,6 +127,7 @@ const LINKS: u32 = 5;
 const SCRIPTS: u32 = 6;
 const ANCHORS: u32 = 7;
 const EMBEDS: u32 = 8;
+const NAME: u32 = 9;
 
 // A string argument, or None for "*" (any).
 fn name_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Option<String> {
@@ -127,8 +137,8 @@ fn name_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Op
 
 // __dom.elementsBy(scopeNid, kind, a, b) -> the scope's descendant elements a filter takes, as `nodes_value` answers: class names
 // (`kind` 0: `a` the list, `b` quirks mode), a namespace and local name (1: `a` the namespace, null for none, `b` the
-// local name; "*" any), a qualified name (2: `a`, "*" any; `b` an HTML document), or a legacy document collection
-// (3 forms, 4 images, 5 links, 6 scripts, 7 anchors, 8 embeds).
+// local name; "*" any), a qualified name (2: `a`, "*" any; `b` an HTML document), a legacy document collection
+// (3 forms, 4 images, 5 links, 6 scripts, 7 anchors, 8 embeds), or a `name` (9: `a`).
 fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let kind = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
@@ -164,6 +174,7 @@ fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         SCRIPTS => Filter::Html(&["script"], None),
         ANCHORS => Filter::Html(&["a"], Some("name")),
         EMBEDS => Filter::Html(&["embed"], None),
+        NAME => Filter::Name(utf16_arg(scope, a)),
         _ => return,
     };
     let cid = realm_id(scope, &args);

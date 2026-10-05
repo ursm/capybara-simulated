@@ -5600,8 +5600,6 @@ html/dom/idlharness.any.js:
 - 'HTMLAreaElement interface: attribute type'
 - 'HTMLAreaElement interface: attribute username'
 - 'HTMLAreaElement interface: stringifier'
-- 'HTMLAudioElement interface: named constructor length'
-- 'HTMLAudioElement interface: named constructor prototype property'
 - 'HTMLBRElement interface: attribute clear'
 - 'HTMLBaseElement interface: attribute href'
 - 'HTMLBaseElement interface: attribute target'
@@ -5903,8 +5901,6 @@ html/dom/idlharness.any.js:
 - 'HTMLImageElement interface: attribute useMap'
 - 'HTMLImageElement interface: attribute vspace'
 - 'HTMLImageElement interface: attribute width'
-- 'HTMLImageElement interface: named constructor length'
-- 'HTMLImageElement interface: named constructor prototype property'
 - 'HTMLImageElement interface: operation decode()'
 - 'HTMLInputElement interface: attribute accept'
 - 'HTMLInputElement interface: attribute align'
@@ -6108,8 +6104,6 @@ html/dom/idlharness.any.js:
 - 'HTMLOptionElement interface: attribute selected'
 - 'HTMLOptionElement interface: attribute text'
 - 'HTMLOptionElement interface: attribute value'
-- 'HTMLOptionElement interface: named constructor length'
-- 'HTMLOptionElement interface: named constructor prototype property'
 - 'HTMLOptionsCollection interface: attribute length'
 - 'HTMLOptionsCollection interface: attribute selectedIndex'
 - 'HTMLOptionsCollection interface: existence and properties of interface object'
@@ -6317,14 +6311,6 @@ html/dom/idlharness.any.js:
 - 'HTMLTrackElement interface: attribute src'
 - 'HTMLTrackElement interface: attribute srclang'
 - 'HTMLTrackElement interface: attribute track'
-- 'HTMLTrackElement interface: constant ERROR on interface object'
-- 'HTMLTrackElement interface: constant ERROR on interface prototype object'
-- 'HTMLTrackElement interface: constant LOADED on interface object'
-- 'HTMLTrackElement interface: constant LOADED on interface prototype object'
-- 'HTMLTrackElement interface: constant LOADING on interface object'
-- 'HTMLTrackElement interface: constant LOADING on interface prototype object'
-- 'HTMLTrackElement interface: constant NONE on interface object'
-- 'HTMLTrackElement interface: constant NONE on interface prototype object'
 - 'HTMLUListElement interface: attribute compact'
 - 'HTMLUListElement interface: attribute type'
 - 'HTMLVideoElement interface: attribute height'
@@ -7883,9 +7869,6 @@ html/dom/idlharness.https.html:
 - 'HTMLAreaElement interface: attribute type'
 - 'HTMLAreaElement interface: attribute username'
 - 'HTMLAreaElement interface: stringifier'
-- 'HTMLAudioElement interface: named constructor length'
-- 'HTMLAudioElement interface: named constructor prototype property'
-- 'HTMLAudioElement interface: named constructor without ''new'''
 - 'HTMLBRElement interface: attribute clear'
 - 'HTMLBaseElement interface: attribute href'
 - 'HTMLBaseElement interface: attribute target'
@@ -8281,9 +8264,6 @@ html/dom/idlharness.https.html:
 - 'HTMLImageElement interface: attribute width'
 - 'HTMLImageElement interface: document.createElement("img") must inherit property
   "fetchPriority" with the proper type'
-- 'HTMLImageElement interface: named constructor length'
-- 'HTMLImageElement interface: named constructor prototype property'
-- 'HTMLImageElement interface: named constructor without ''new'''
 - 'HTMLImageElement interface: new Image() must inherit property "fetchPriority" with
   the proper type'
 - 'HTMLImageElement interface: operation decode()'
@@ -8619,10 +8599,6 @@ html/dom/idlharness.https.html:
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "defaultPlaybackRate" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "duration" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "error" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "fastSeek(double)" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "getStartDate()" with the proper type'
@@ -8632,8 +8608,6 @@ html/dom/idlharness.https.html:
   "played" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "preservesPitch" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "readyState" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "seekable" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
@@ -8685,10 +8659,6 @@ html/dom/idlharness.https.html:
   the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "defaultPlaybackRate"
   with the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "duration" with the
-  proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "error" with the
-  proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "fastSeek(double)"
   with the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "getStartDate()"
@@ -8699,8 +8669,6 @@ html/dom/idlharness.https.html:
   proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "preservesPitch"
   with the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "readyState" with
-  the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "seekable" with the
   proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "seeking" with the
@@ -8778,9 +8746,6 @@ html/dom/idlharness.https.html:
 - 'HTMLOptionElement interface: attribute selected'
 - 'HTMLOptionElement interface: attribute text'
 - 'HTMLOptionElement interface: attribute value'
-- 'HTMLOptionElement interface: named constructor length'
-- 'HTMLOptionElement interface: named constructor prototype property'
-- 'HTMLOptionElement interface: named constructor without ''new'''
 - 'HTMLOptionsCollection interface: attribute length'
 - 'HTMLOptionsCollection interface: attribute selectedIndex'
 - 'HTMLOptionsCollection interface: calling remove(long) on document.createElement("select").options
@@ -9022,24 +8987,6 @@ html/dom/idlharness.https.html:
 - 'HTMLTrackElement interface: attribute src'
 - 'HTMLTrackElement interface: attribute srclang'
 - 'HTMLTrackElement interface: attribute track'
-- 'HTMLTrackElement interface: constant ERROR on interface object'
-- 'HTMLTrackElement interface: constant ERROR on interface prototype object'
-- 'HTMLTrackElement interface: constant LOADED on interface object'
-- 'HTMLTrackElement interface: constant LOADED on interface prototype object'
-- 'HTMLTrackElement interface: constant LOADING on interface object'
-- 'HTMLTrackElement interface: constant LOADING on interface prototype object'
-- 'HTMLTrackElement interface: constant NONE on interface object'
-- 'HTMLTrackElement interface: constant NONE on interface prototype object'
-- 'HTMLTrackElement interface: document.createElement("track") must inherit property
-  "ERROR" with the proper type'
-- 'HTMLTrackElement interface: document.createElement("track") must inherit property
-  "LOADED" with the proper type'
-- 'HTMLTrackElement interface: document.createElement("track") must inherit property
-  "LOADING" with the proper type'
-- 'HTMLTrackElement interface: document.createElement("track") must inherit property
-  "NONE" with the proper type'
-- 'HTMLTrackElement interface: document.createElement("track") must inherit property
-  "readyState" with the proper type'
 - 'HTMLTrackElement interface: document.createElement("track") must inherit property
   "track" with the proper type'
 - 'HTMLUListElement interface: attribute compact'

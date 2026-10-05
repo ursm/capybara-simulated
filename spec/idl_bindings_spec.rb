@@ -352,6 +352,71 @@ RSpec.describe 'IDL bindings' do
     expect(got).to eq([true, [], [true, 0, 1, false, 'auto', 'x.mp3'], [false, false, true]])
   end
 
+  # (…Web IDL §3.7.2: only `new` calls one, its `prototype` fixed, the global property not enumerable; arguments converted)
+  it 'makes Option, Image and Audio legacy factory functions' do
+    got = outcome(<<~JS)
+      (() => {
+        const prototype = (F) => Object.getOwnPropertyDescriptor(F, 'prototype');
+        const called = (F) => { try { F(); return 'called'; } catch (e) { return e.message; } };
+        const option = new Option('t', 'v', true, false);
+        return [
+          [Option, Image, Audio].map((F) => [F.name, F.length, prototype(F).writable, prototype(F).configurable, Object.getOwnPropertyDescriptor(window, F.name).enumerable]),
+          called(Audio),
+          [new Image(null, 5).outerHTML, new Image().outerHTML, option.outerHTML, option.selected, new Audio(null).getAttribute('src')]
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      [['Option', 0, false, false, false], ['Image', 0, false, false, false], ['Audio', 0, false, false, false]],
+      "Failed to construct 'Audio': Please use the 'new' operator, this DOM object constructor cannot be called as a function.",
+      ['<img width="0" height="5">', '<img>', '<option value="v" selected="">t</option>', false, 'null']
+    ])
+  end
+
+  # (…a media element with no media data: a double converted before the range is checked, a seek only remembered, a
+  # change of `volume` or `muted` a `volumechange`; Chrome's answers)
+  it "keeps an audio element's state as a media element with no media data" do
+    got = outcome(<<~JS)
+      (() => {
+        const a = window.audio = new Audio();
+        window.events = [];
+        for (const type of ['volumechange', 'seeked']) a.addEventListener(type, () => events.push(type));
+        const set = (k, v) => { try { a[k] = v; return a[k]; } catch (e) { return e.name + ': ' + e.message; } };
+        return [
+          set('volume', NaN), set('volume', 2), set('currentTime', Infinity), set('currentTime', 3), set('volume', '0.5'),
+          set('volume', 0.5), set('muted', true), set('muted', 1),
+          [a.readyState, String(a.duration), a.error, a.canPlayType('video/webm')],
+          (() => { try { Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'paused').get.call(document.body); } catch (e) { return e.message; } })()
+        ];
+      })()
+    JS
+    nonfinite = ->(member) { "TypeError: Failed to set the '#{member}' property on 'HTMLMediaElement': The provided double value is non-finite." }
+    expect(got).to eq([
+      nonfinite['volume'],
+      "IndexSizeError: Failed to set the 'volume' property on 'HTMLMediaElement': The volume provided (2) is outside the range [0, 1].",
+      nonfinite['currentTime'], 3, 0.5, 0.5, true, true,
+      [0, 'NaN', nil, 'maybe'],
+      'Illegal invocation'
+    ])
+    expect(session.evaluate_script('events')).to eq(%w[volumechange volumechange])
+  end
+
+  # (…the document element among them, and a name compared as it is, not as a selector)
+  it "finds a document's elements by name, its root too" do
+    got = outcome(<<~JS)
+      (() => {
+        document.documentElement.setAttribute('name', 'x');
+        document.getElementById('a').setAttribute('name', 'x');
+        // (…a backslash, a quote and bracket, a newline: what a selector built of the name would misread)
+        const names = ['a' + String.fromCharCode(92) + 'b', 'q"]', 'n' + String.fromCharCode(10) + 'l'];
+        for (const n of names) document.body.append(Object.assign(document.createElement('span'), {title: n}));
+        document.querySelectorAll('span').forEach((s) => s.setAttribute('name', s.title));
+        return ['x', ...names].map((n) => [...document.getElementsByName(n)].map((e) => e.localName).join());
+      })()
+    JS
+    expect(got).to eq(['html,div', 'span', 'span', 'span'])
+  end
+
   # (…an attribute adopted is taken from its element first, and each member converting an Attr names itself)
   it 'adopts an attribute out of its element' do
     got = outcome(<<~JS)

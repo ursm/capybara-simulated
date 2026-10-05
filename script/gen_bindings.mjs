@@ -23,7 +23,7 @@ const OUT = join(ROOT, 'lib', 'capybara', 'simulated', 'js', 'src', 'generated',
 // generated onto that class's prototype (`install<Name>(iface, impl)`) — the class, its constructor and the objects it
 // makes stay the hand-written code's, which registers the test that tells its objects apart. `omit`: what another spec
 // adds to it that no implementation here answers yet, and why — a mixin it includes, by name; a partial interface of
-// it, or a partial of a mixin it includes, by the spec's name. Anything else added is merged.
+// it, or a partial of a mixin it includes, by the spec's name; a single member, by its own. Anything else added is merged.
 const INTERFACES = [
   ['dom', 'DOMTokenList'],
   ['dom', 'NodeFilter'],
@@ -43,8 +43,8 @@ const INTERFACES = [
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
   'PLATFORM', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
-  'toDOMString', 'toUSVString', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toLong', 'toDouble',
-  'toUnrestrictedDouble', 'toInterface', 'toCallbackInterface', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
+  'toDOMString', 'toUSVString', 'toEnum', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toLong', 'toDouble',
+  'toUnrestrictedDouble', 'toSequence', 'toObject', 'toInterface', 'toCallbackInterface', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables'
 ];
@@ -53,13 +53,16 @@ const all = await parseAll();
 // Every interface, callback interface and mixin of every spec, by name: what an interface type, or an `includes`,
 // names. And what adds to an interface or a mixin beside its definition — a mixin it includes, a partial of it — by
 // the name of the mixin, or the spec of the partial.
-const definitions = new Map(), mixins = new Map(), dictionaries = new Map(), additions = new Map();
+const definitions = new Map(), mixins = new Map(), dictionaries = new Map(), typedefs = new Map(), enums = new Map();
+const additions = new Map();
 const add = (to, addition) => additions.set(to, [...(additions.get(to) || []), addition]);
 for (const [spec, defs] of Object.entries(all)) {
   for (const d of defs) {
     if ((d.type === 'interface' || d.type === 'callback interface') && !d.partial) definitions.set(d.name, d);
     if (d.type === 'interface mixin' && !d.partial) mixins.set(d.name, d);
     if (d.type === 'dictionary' && !d.partial) dictionaries.set(d.name, d);
+    if (d.type === 'typedef') typedefs.set(d.name, d.idlType);
+    if (d.type === 'enum') enums.set(d.name, d.values.map((v) => v.value));
     if (d.type === 'includes') add(d.target, { mixin: d.includes });
     if ((d.type === 'interface' || d.type === 'interface mixin') && d.partial) add(d.name, { partial: spec, def: d });
   }
@@ -67,11 +70,12 @@ for (const [spec, defs] of Object.entries(all)) {
 
 // The extended attributes a binding here makes what IDL says of, by where they stand; any other is an error.
 // [CEReactions]: an implementation's writes run their reactions as each returns (handleAttributeChanges) — which is
-// the operation's return where it writes once, as every one generated here does. [SameObject] / [NewObject]: what the
+// the operation's return where it writes once, as every one generated here does. [Reflect]: the implementation reflects
+// the content attribute. [SameObject] / [NewObject]: what the
 // implementation returns. [Exposed]: the global the interface object is put on, the Window's here.
 const HANDLED = {
   interface: ['Exposed'],
-  member: ['SameObject', 'NewObject', 'CEReactions', 'Unscopable'],
+  member: ['SameObject', 'NewObject', 'CEReactions', 'Unscopable', 'PutForwards', 'Reflect'],
   type: ['LegacyNullToEmptyString']
 };
 function checkExtAttrs(extAttrs, where, label) {
@@ -82,13 +86,17 @@ function checkExtAttrs(extAttrs, where, label) {
 
 // What a conversion's TypeError says, by where the value comes from (Chrome's messages): an operation's argument
 // (`index`, from 0), or an attribute's value.
-function failure(where) {
-  return where.index === undefined
+// A conversion's TypeError message, as the JS expression of a string — Chrome's: the member's prefix, and in a
+// dictionary's member, the dictionary member's after the prefix of what converts the dictionary (`prefix`, at run
+// time) — then `text`.
+function failure(where, text = '') {
+  if (where.dictionary) return `prefix + ${JSON.stringify(`Failed to read the '${where.member}' property from '${where.dictionary}': ${text}`)}`;
+  return JSON.stringify((where.index === undefined
     ? `Failed to set the '${where.member}' property on '${where.iface}': `
-    : `Failed to execute '${where.member}' on '${where.iface}': `;
+    : `Failed to execute '${where.member}' on '${where.iface}': `) + text);
 }
 function conversionError(where, what) {
-  return failure(where) + (where.index === undefined
+  return failure(where, where.index === undefined
     ? `Failed to convert value to '${what}'.`
     : `parameter ${where.index + 1} is not of type '${what}'.`);
 }
@@ -97,32 +105,48 @@ function conversionError(where, what) {
 // takes, into `checks`.
 // `extAttrs` are those on the type and, for an argument, the argument's own (where webidl2 puts `[EnforceRange] long x`'s).
 function conversion(t, expr, where, checks, argExtAttrs = []) {
-  const label = `${where.iface}.${where.member}`;
+  const label = `${where.iface ?? where.dictionary}.${where.member}`;
   if (t.union) return unionConversion(t, expr, where, checks);
+  const typedef = !t.generic && typedefs.get(t.idlType);
+  if (typedef) return conversion(typeOf(typedef, t), expr, where, checks, argExtAttrs);
+  if (t.generic === 'sequence' || t.generic === 'FrozenArray') {
+    // (Web IDL §3.2.27, §3.2.30: the values its iterator gives, each converted; a frozen array frozen)
+    const each = conversion(t.idlType[0], 'x', where, checks);
+    const c = `toSequence(${expr}, (x) => ${each}, ${failure(where, 'The provided value cannot be converted to a sequence.')})`;
+    const value = t.generic === 'FrozenArray' ? `Object.freeze(${c})` : c;
+    return t.nullable ? `(${expr} == null ? null : ${value})` : value;
+  }
   if (t.generic) throw new Error(`${label}: no binding converts ${JSON.stringify(t.idlType)} yet`);
   const extAttrs = [...(t.extAttrs || []), ...argExtAttrs];
   checkExtAttrs(extAttrs, 'type', label);
   const legacyNull = extAttrs.some((e) => e.name === 'LegacyNullToEmptyString');
   let c;
   switch (t.idlType) {
-    case 'DOMString': c = `toDOMString(${expr}, ${legacyNull}, ${JSON.stringify(failure(where))})`; break;
-    case 'USVString': c = `toUSVString(${expr}, ${JSON.stringify(failure(where))})`; break;
+    // (…CSSOMString, which CSSOM lets an implementation make either string type, DOMString — as Chrome does)
+    case 'CSSOMString':
+    case 'DOMString': c = `toDOMString(${expr}, ${legacyNull}, ${failure(where)})`; break;
+    case 'USVString': c = `toUSVString(${expr}, ${failure(where)})`; break;
     case 'boolean': c = `toBoolean(${expr})`; break;
     case 'unsigned short': c = `toUnsignedShort(${expr})`; break;
     case 'unsigned long': c = `toUnsignedLong(${expr})`; break;
     case 'long': c = `toLong(${expr})`; break;
-    case 'double': c = `toDouble(${expr}, ${JSON.stringify(failure(where) + 'The provided double value is non-finite.')})`; break;
+    case 'double': c = `toDouble(${expr}, ${failure(where, 'The provided double value is non-finite.')})`; break;
     case 'unrestricted double': c = `toUnrestrictedDouble(${expr})`; break;
     case 'any': c = expr; break;
+    case 'object': c = `toObject(${expr}, ${conversionError(where, 'object')})`; break;
     default: {
       const def = definitions.get(t.idlType);
       if (def && def.type === 'interface') {
         checks.add(t.idlType);
-        c = `toInterface(${expr}, IS_${t.idlType}, ${JSON.stringify(conversionError(where, t.idlType))})`;
+        c = `toInterface(${expr}, IS_${t.idlType}, ${conversionError(where, t.idlType)})`;
       } else if (def && def.type === 'callback interface') {
-        c = `toCallbackInterface(${expr}, ${JSON.stringify(conversionError(where, 'Object'))})`;
+        c = `toCallbackInterface(${expr}, ${conversionError(where, 'Object')})`;
+      } else if (enums.has(t.idlType)) {
+        // (…a string the enumeration has: Chrome's message for one it has not)
+        const values = enums.get(t.idlType);
+        c = `toEnum(${expr}, ${JSON.stringify(values)}, ${JSON.stringify(t.idlType)}, ${failure(where)})`;
       } else if (dictionaries.has(t.idlType)) {
-        c = `${dictionaryConverter(t.idlType)}(${expr}, ${JSON.stringify(failure(where) + `The provided value is not of type '${t.idlType}'.`)})`;
+        c = `${dictionaryConverter(t.idlType)}(${expr}, ${failure(where)})`;
       } else {
         throw new Error(`${label}: no binding converts ${t.idlType} yet`);
       }
@@ -131,24 +155,67 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
   return t.nullable ? `(${expr} == null ? null : ${c})` : c;
 }
 
-// A union of interface types and one string type (`(Node or DOMString)`): an object of one of its interfaces as it is,
-// anything else converted to the string type (Web IDL §3.2.24 — the string type the last step takes).
+// Interfaces of specs no implementation here answers, which no value is an object of — a union member of one is
+// none (Trusted Types: with no policy, the string a page passes is what the API takes).
+const ABSENT_INTERFACES = new Set(['TrustedHTML', 'TrustedScript', 'TrustedScriptURL']);
+
+// The type `t` names `u` as: `u`, with `t`'s extended attributes besides its own and nullable if either is. (Its
+// fields read off it: webidl2's types answer them by getters, which a spread would drop.)
+function typeOf(u, t) {
+  return { idlType: u.idlType, union: u.union, generic: u.generic, extAttrs: [...(u.extAttrs || []), ...(t.extAttrs || [])], nullable: u.nullable || t.nullable };
+}
+
+// A union's member types, its typedefs' expanded and its absent interfaces dropped.
+function unionMembers(t) {
+  return t.idlType.flatMap((u) => {
+    const def = !u.union && typedefs.get(u.idlType);
+    if (def) return def.union ? unionMembers(def) : [def];
+    return u.union ? unionMembers(u) : [u];
+  }).filter((u) => !ABSENT_INTERFACES.has(u.idlType));
+}
+
+// A union's conversion (Web IDL §3.2.24), for unions of interfaces, a dictionary, a string, a numeric type and boolean:
+// null or undefined the dictionary's (null where it is nullable); an object of one of its interfaces as it is; any other
+// object the dictionary's; a boolean or a number as itself where its type is a member; then the string type's
+// conversion, else the numeric type's, else boolean's — and with none of them, a TypeError. A union that is one type
+// once its absent interfaces are dropped is that type's conversion.
+const NUMERIC_TYPES = new Set(['unsigned short', 'unsigned long', 'long', 'double', 'unrestricted double']);
 function unionConversion(t, expr, where, checks) {
-  const label = `${where.iface}.${where.member}`;
-  const strings = t.idlType.filter((u) => ['DOMString', 'USVString'].includes(u.idlType));
-  const ifaces = t.idlType.filter((u) => definitions.get(u.idlType)?.type === 'interface' && !u.nullable && !u.union);
-  if (t.nullable || strings.length !== 1 || ifaces.length + 1 !== t.idlType.length) {
-    throw new Error(`${label}: no binding converts ${JSON.stringify(t.idlType.map((u) => u.idlType))} yet`);
+  const label = `${where.iface ?? where.dictionary}.${where.member}`;
+  const members = unionMembers(t);
+  if (members.length === 1) {
+    return conversion(typeOf(members[0], t), expr, where, checks);
   }
-  for (const u of ifaces) checks.add(u.idlType);
-  const test = ifaces.map((u) => `IS_${u.idlType}(${expr})`).join(' || ');
-  return `(${test} ? ${expr} : ${conversion(strings[0], expr, where, checks)})`;
+  const unsupported = () => new Error(`${label}: no binding converts ${JSON.stringify(t.idlType.map((u) => u.idlType))} yet`);
+  if (members.some((u) => u.nullable || u.union || u.generic)) throw unsupported();
+  const of = (test) => members.filter(test);
+  const ifaces = of((u) => definitions.get(u.idlType)?.type === 'interface');
+  const dicts = of((u) => dictionaries.has(u.idlType));
+  const strings = of((u) => ['DOMString', 'USVString'].includes(u.idlType));
+  const numerics = of((u) => NUMERIC_TYPES.has(u.idlType));
+  const booleans = of((u) => u.idlType === 'boolean');
+  if (dicts.length > 1 || strings.length > 1 || numerics.length > 1 || ifaces.length + dicts.length + strings.length + numerics.length + booleans.length !== members.length) throw unsupported();
+  const [dict] = dicts, [string] = strings, [numeric] = numerics, [boolean] = booleans;
+  const convert = (u) => conversion(u, expr, where, checks);
+  const steps = [];
+  if (t.nullable) steps.push([`${expr} == null`, 'null']);
+  if (dict) steps.push([`${expr} == null`, convert(dict)]);
+  for (const u of ifaces) {
+    checks.add(u.idlType);
+    steps.push([`IS_${u.idlType}(${expr})`, expr]);
+  }
+  if (dict) steps.push([`(typeof ${expr} === 'object' || typeof ${expr} === 'function')`, convert(dict)]);
+  if (boolean) steps.push([`typeof ${expr} === 'boolean'`, expr]);
+  if (numeric) steps.push([`typeof ${expr} === 'number'`, convert(numeric)]);
+  const last = string || numeric || boolean;
+  const otherwise = last ? convert(last) : `(() => { throw new TypeError(${conversionError(where, t.idlType.map((u) => u.idlType).join(' or '))}); })()`;
+  return `(${steps.map(([test, value]) => `${test} ? ${value} : `).join('')}${otherwise})`;
 }
 
 // A dictionary's conversion (Web IDL §3.2.20): a function of its own, written once beside the interfaces — undefined
-// or null an empty dictionary, any other non-object a TypeError (`message`); each member, its inherited dictionaries'
-// first and each's in lexicographic order, got from the object, converted, or its default where it is undefined (a
-// required one missing a TypeError).
+// or null an empty dictionary, any other non-object a TypeError; each member, its inherited dictionaries' first and
+// each's in lexicographic order, got from the object, converted, or its default where it is undefined (a required one
+// missing a TypeError). Its messages follow `prefix`, what converts the dictionary's.
 const dictionaryConverters = new Map();
 function dictionaryConverter(name) {
   const fn = `to${name}`;
@@ -161,15 +228,15 @@ function dictionaryConverter(name) {
     chain.unshift(d);
   }
   const checks = new Set(), lines = [];
-  lines.push(`function ${fn}(v, message) {`);
-  lines.push(`  if (v !== undefined && v !== null && typeof v !== 'object' && typeof v !== 'function') throw new TypeError(message);`);
+  lines.push(`function ${fn}(v, prefix) {`);
+  lines.push(`  if (v !== undefined && v !== null && typeof v !== 'object' && typeof v !== 'function') throw new TypeError(prefix + ${JSON.stringify(`The provided value is not of type '${name}'.`)});`);
   lines.push(`  const dict = {};`);
   for (const d of chain) {
     for (const m of [...d.members].sort((a, b) => (a.name < b.name ? -1 : 1))) {
-      const where = { iface: d.name, member: m.name };
+      const where = { dictionary: d.name, member: m.name };
       lines.push(`  {`);
       lines.push(`    const x = v == null ? undefined : v.${m.name};`);
-      const missing = m.required ? `(() => { throw new TypeError(${JSON.stringify(`Failed to read the '${m.name}' property from '${d.name}': Required member is undefined.`)}); })()`
+      const missing = m.required ? `(() => { throw new TypeError(${failure(where, 'Required member is undefined.')}); })()`
         : m.default ? defaultValue(m.default, `${d.name}.${m.name}`) : null;
       const converted = conversion(m.idlType, 'x', where, checks, m.extAttrs);
       lines.push(missing === null
@@ -178,7 +245,8 @@ function dictionaryConverter(name) {
       lines.push(`  }`);
     }
   }
-  if (checks.size) throw new Error(`${name}: a dictionary member of an interface type is not converted yet`);
+  // (…the tests of the interfaces its members take, looked up as it converts: those are registered by then)
+  for (const c of checks) lines.splice(1, 0, `  const IS_${c} = interfaceCheck('${c}');`);
   lines.push(`  return dict;`);
   lines.push(`}`);
   dictionaryConverters.set(name, lines.join('\n'));
@@ -199,7 +267,7 @@ function membersOf(def, omit = {}) {
     const found = [...d.members];
     for (const a of additions.get(d.name) || []) {
       const key = a.mixin || a.partial;
-      if (key in omit) { omitted.add(key); continue; }
+      if (Object.hasOwn(omit, key)) { omitted.add(key); continue; }
       if (a.partial) { found.push(...a.def.members); continue; }
       const mixin = mixins.get(a.mixin);
       if (!mixin) throw new Error(`${def.name}: includes ${a.mixin}, which no spec defines`);
@@ -207,12 +275,13 @@ function membersOf(def, omit = {}) {
     }
     return found;
   };
-  const members = gather(def);
+  const members = gather(def).filter((m) => {
+    if (!Object.hasOwn(omit, m.name)) return true;
+    omitted.add(m.name);
+    return false;
+  });
   const unknown = Object.keys(omit).filter((k) => !omitted.has(k));
   if (unknown.length) throw new Error(`${def.name}: omits ${unknown.join(', ')}, which nothing adds to it`);
-  const names = members.filter((m) => m.type === 'operation' && m.name).map((m) => m.name);
-  const overloaded = names.find((n, i) => names.indexOf(n) !== i);
-  if (overloaded) throw new Error(`${def.name}.${overloaded}: an overloaded operation is not generated yet`);
   for (const m of members) checkExtAttrs(m.extAttrs, 'member', `${def.name}.${m.name || m.type}`);
   return members;
 }
@@ -220,12 +289,13 @@ function membersOf(def, omit = {}) {
 function generateInterface(def, options = {}) {
   const name = def.name;
   if (def.inheritance && !options.install) throw new Error(`${name}: an inherited interface is not generated yet`);
-  const members = [], constants = [], body = [], checks = new Set(), unscopables = [];
+  const members = [], constants = [], body = [], checks = new Set(), unscopables = [], handlers = [];
   // (…`this` checked: by its brand where the binding makes the object, by the test its class registered where it is
   // installed on that class)
   const self = options.install ? 'thisIs(this, IS_SELF)' : 'thisOf(this, KEY)';
   let indexed = null, valueIterator = false, stringifier = null, constructor = null;
-  for (const m of membersOf(def, options.omit)) {
+  const memberList = membersOf(def, options.omit);
+  for (const m of memberList) {
     const label = `${name}.${m.name || m.type}`;
     if ((m.extAttrs || []).some((e) => e.name === 'Unscopable')) unscopables.push(m.name);
     if (m.type === 'constructor') { constructor = m; continue; }
@@ -235,12 +305,22 @@ function generateInterface(def, options = {}) {
       valueIterator = true;
       continue;
     }
+    if (m.type === 'attribute' && EVENT_HANDLER_TYPES.has(m.idlType.idlType)) {
+      handlers.push(m.name);
+      continue;
+    }
     if (m.type === 'attribute') {
       if (m.special === 'stringifier') stringifier = m.name;
       else if (m.special) throw new Error(`${label}: a ${m.special} attribute is not generated yet`);
       members.push(m.name);
       body.push(`    get ${m.name}() { return impl.get_${m.name}(${self}); }`);
-      if (!m.readonly) {
+      const forwards = (m.extAttrs || []).find((e) => e.name === 'PutForwards');
+      if (forwards) {
+        // [PutForwards=x] (Web IDL §3.7.6): a write to the attribute is a write of `x` on the object it answers
+        // (`el.classList = 'a b'` sets the list's `value`).
+        const target = forwards.rhs.value;
+        body.push(`    set ${m.name}(v) { const object = impl.get_${m.name}(${self}); object.${target} = v; }`);
+      } else if (!m.readonly) {
         const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
         body.push(`    set ${m.name}(v) { impl.set_${m.name}(${self}, ${v}); }`);
       }
@@ -254,8 +334,11 @@ function generateInterface(def, options = {}) {
         throw new Error(`${label}: a ${m.special} operation is not generated yet`);
       }
       if (!m.name) throw new Error(`${label}: an anonymous operation is not generated yet`);
+      // (…an overloaded one written once, where its first overload stands)
+      if (members.includes(m.name)) continue;
       members.push(m.name);
-      body.push(`    ${operation(name, m, checks, self)}`);
+      const group = memberList.filter((o) => o.type === 'operation' && o.name === m.name);
+      body.push(`    ${group.length > 1 ? overloadedOperation(name, group, checks, self) : operation(name, m, checks, self)}`);
       continue;
     }
     throw new Error(`${label}: a ${m.type} member is not generated yet`);
@@ -265,8 +348,9 @@ function generateInterface(def, options = {}) {
   const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
   if (options.install) {
     if (indexed || valueIterator) throw new Error(`${name}: an installed interface with an indexed getter or an iterator is not generated yet`);
-    return installInterface(def, { body, checks, unscopables, constructor, constants });
+    return installInterface(def, { body, checks, unscopables, constructor, constants, handlers });
   }
+  if (handlers.length) throw new Error(`${name}: event handlers of an interface the binding makes are not generated yet`);
   if (constructor) throw new Error(`${name}: a constructor is not generated yet`);
 
   const lines = [];
@@ -308,7 +392,7 @@ function generateInterface(def, options = {}) {
 // An installed interface: its members generated in a class of their own, then put on the prototype of the hand-written
 // class (`iface`) that makes its objects — their names, lengths and conversions IDL's, enumerable; the interface
 // object's `length` its constructor's required arguments; its class string and @@unscopables.
-function installInterface(def, { body, checks, unscopables, constructor, constants }) {
+function installInterface(def, { body, checks, unscopables, constructor, constants, handlers }) {
   const name = def.name;
   const length = constructor ? constructor.arguments.filter((a) => !a.optional && !a.variadic).length : 0;
   const lines = [];
@@ -320,6 +404,7 @@ function installInterface(def, { body, checks, unscopables, constructor, constan
   lines.push(...body);
   lines.push(`  }`);
   lines.push(`  installMembers(iface.prototype, Members.prototype);`);
+  if (handlers.length) lines.push(`  impl.installEventHandlers(iface.prototype, ${JSON.stringify(handlers)});`);
   if (constants.length) {
     const list = JSON.stringify(constants.map(([n]) => n));
     lines.push(`  defineConstants(iface, ${list}, [${constants.map(([, v]) => v).join(', ')}]);`);
@@ -331,6 +416,10 @@ function installInterface(def, { body, checks, unscopables, constructor, constan
   lines.push(`}`);
   return lines.join('\n');
 }
+
+// An event handler IDL attribute's types (HTML §8.1.8.1): what it is, the same for each — its handler stored and
+// called as the event loop's — the installing class's (events.js), handed the names.
+const EVENT_HANDLER_TYPES = new Set(['EventHandler', 'OnErrorEventHandler', 'OnBeforeUnloadEventHandler']);
 
 // The JS name of an argument: its IDL name, but where strict code reserves that (`interface`, `arguments`, …) or the
 // generated code names something of its own by it (`self`, `impl`, a conversion it calls, … — CSSMathSum's
@@ -354,21 +443,59 @@ function operation(iface, m, checks, self) {
   if (args.some((a, i) => (a.optional || a.variadic) && i < requiredCount)) throw new Error(`${iface}.${m.name}: a required argument after an optional one`);
   if (args.some((a) => a.optional) && args.some((a) => a.variadic)) throw new Error(`${iface}.${m.name}: an optional argument beside a variadic one is not generated yet`);
   const params = args.filter((a) => !a.optional).map((a) => (a.variadic ? `...${argName(a)}` : argName(a))).join(', ');
-  const converted = args.map((a, i) => {
-    const where = { iface, member: m.name, index: i };
-    if (a.variadic) return `${argName(a)}.map((x) => ${conversion(a.idlType, 'x', where, checks, a.extAttrs)})`;
-    if (a.optional) {
-      // (…an optional argument passed as undefined is one not passed, Web IDL §3.6.8 — but a dictionary is converted
-      // from undefined, its members' defaults)
-      if (dictionaries.has(a.idlType.idlType)) return conversion(a.idlType, `arguments[${i}]`, where, checks, a.extAttrs);
-      const missing = a.default ? defaultValue(a.default, `${iface}.${m.name}(${a.name})`) : 'undefined';
-      return `(arguments[${i}] !== undefined ? ${conversion(a.idlType, `arguments[${i}]`, where, checks, a.extAttrs)} : ${missing})`;
-    }
-    return conversion(a.idlType, argName(a), where, checks, a.extAttrs);
-  });
+  const converted = convertArguments(iface, m, checks, (a) => (a.variadic || !a.optional ? argName(a) : null));
   // (…`this` checked first, then the arguments counted — Web IDL's order, as Chrome's)
   const check = requiredCount ? `required(arguments, ${requiredCount}, '${m.name}', '${iface}'); ` : '';
   return `${m.name}(${params}) { const self = ${self}; ${check}return impl.${m.name}(${['self', ...converted].join(', ')}); }`;
+}
+
+// Each argument of `m` converted to its type: a required one read as `named(a)` gives it, an optional one from
+// `arguments` (one passed as undefined is one not passed, Web IDL §3.6.8 — but a dictionary, or one defaulting to `{}`,
+// is converted from undefined: its members' defaults), a variadic one the rest.
+function convertArguments(iface, m, checks, named) {
+  return m.arguments.map((a, i) => {
+    const where = { iface, member: m.name, index: i };
+    const expr = named(a) ?? `arguments[${i}]`;
+    if (a.variadic) return `${expr}.map((x) => ${conversion(a.idlType, 'x', where, checks, a.extAttrs)})`;
+    if (a.optional) {
+      if (dictionaries.has(a.idlType.idlType) || a.default?.type === 'dictionary') return conversion(a.idlType, expr, where, checks, a.extAttrs);
+      const missing = a.default ? defaultValue(a.default, `${iface}.${m.name}(${a.name})`) : 'undefined';
+      return `(${expr} !== undefined ? ${conversion(a.idlType, expr, where, checks, a.extAttrs)} : ${missing})`;
+    }
+    return conversion(a.idlType, expr, where, checks, a.extAttrs);
+  });
+}
+
+// An overloaded operation (Web IDL §3.7.7 overload resolution): the overload chosen by how many arguments were passed
+// (no more than the longest takes), each one's arguments converted to its own types and handed to an implementation
+// of its own — named for its arguments, `scroll_options` / `scroll_x_y`. Overloads that one count of arguments could
+// call more than one of (told apart by their arguments' types) are not generated yet. Its `length` is the shortest
+// overload's required arguments.
+function overloadedOperation(iface, group, checks, self) {
+  const name = group[0].name;
+  if (group.some((m) => m.arguments.some((a) => a.variadic))) throw new Error(`${iface}.${name}: an overload with a variadic argument is not generated yet`);
+  const least = (m) => m.arguments.filter((a) => !a.optional).length;
+  const most = Math.max(...group.map((m) => m.arguments.length));
+  const cases = [];
+  for (let n = 0; n <= most; n++) {
+    const takers = group.filter((m) => least(m) <= n && n <= m.arguments.length);
+    if (takers.length > 1) throw new Error(`${iface}.${name}: overloads told apart by their arguments' types are not generated yet`);
+    if (takers.length) cases.push([n, takers[0]]);
+  }
+  const shortest = group.reduce((a, b) => (least(b) < least(a) ? b : a));
+  const required = least(shortest);
+  const params = shortest.arguments.slice(0, required).map(argName).join(', ');
+  const implName = (m) => `${name}_${m.arguments.length ? m.arguments.map((a) => a.name).join('_') : 'none'}`;
+  const lines = [`${name}(${params}) {`, `      const self = ${self};`];
+  if (required) lines.push(`      required(arguments, ${required}, '${name}', '${iface}');`);
+  lines.push(`      switch (Math.min(arguments.length, ${most})) {`);
+  for (const [n, m] of cases) {
+    const converted = convertArguments(iface, m, checks, () => null);
+    lines.push(`        case ${n}: return impl.${implName(m)}(${['self', ...converted].join(', ')});`);
+  }
+  lines.push(`        default: throw new TypeError(${JSON.stringify(`Failed to execute '${name}' on '${iface}': No function was found that matched the signature provided.`)});`);
+  lines.push(`      }`, `    }`);
+  return lines.join('\n');
 }
 
 function defaultValue(d, where) {
@@ -377,6 +504,7 @@ function defaultValue(d, where) {
     case 'boolean': return String(d.value);
     case 'number': return String(d.value);
     case 'null': return 'null';
+    case 'sequence': return '[]';
     default: throw new Error(`${where}: no binding gives a default of ${d.type} yet`);
   }
 }

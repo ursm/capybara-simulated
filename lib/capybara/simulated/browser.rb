@@ -9778,7 +9778,7 @@ module Capybara
           # we read from the still-alive realm. (A blob: URL entered this way is
           # re-fetched through Rack and so does NOT reuse retained bytes — reloading
           # an *entered* revoked-blob frame is an accepted gap; the common parent-
-          # held path below reuses bytes via reloadFrame.) Otherwise (a parent's
+          # held path below reuses bytes via _reloadFrame.) Otherwise (a parent's
           # `iframe.contentWindow.location.reload()`, empty href, or a realm torn
           # down between flag and drain) re-navigate the owning iframe by realm id
           # JS-side, reusing the retained content so blob bytes survive a revoke.
