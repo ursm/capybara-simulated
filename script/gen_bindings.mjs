@@ -611,7 +611,7 @@ function installInterface(def, { body, unforgeables, checks, unscopables, constr
   lines.push(`  defineClassString(iface.prototype, '${name}');`);
   if (unscopables.length) lines.push(`  defineUnscopables(iface.prototype, ${JSON.stringify(unscopables)});`);
   if (unforgeables.length) lines.push(`  class Unforgeables {`, ...unforgeables, `  }`);
-  if (constructor) lines.unshift(constructorArguments(name, constructor), '');
+  if (constructor && constructor.arguments.length) lines.unshift(constructorArguments(name, constructor), '');
   if (global) {
     lines.push(`  const descriptors = Object.getOwnPropertyDescriptors(members);`);
     lines.push(`  return {`);

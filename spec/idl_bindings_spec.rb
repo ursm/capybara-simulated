@@ -819,7 +819,12 @@ RSpec.describe 'IDL bindings' do
           t(() => { const e = new Event('x'); e.isTrusted = true; return e.isTrusted; }),
           t(() => Object.getOwnPropertyDescriptor(Event.prototype, 'type').get.call({})),
           t(() => { const c = new CustomEvent('c', { detail: 7 }); const d = document.createEvent('CustomEvent'); d.initCustomEvent('q', true, false, 8); return [c.detail, d.type, d.bubbles, d.detail]; }),
-          t(() => { class Mine extends Event {} return [new MouseEvent('m'), new Event('e'), new CustomEvent('c'), new Mine('x')].map(String); })
+          t(() => { class Mine extends Event {} return [new MouseEvent('m'), new Event('e'), new CustomEvent('c'), new Mine('x')].map(String); }),
+          // (…every event interface's prototype its own class string)
+          t(() => Object.getOwnPropertyNames(window).filter((k) => /Event$/.test(k) && typeof window[k] === 'function' && window[k].prototype instanceof Event)
+            .filter((k) => Object.prototype.toString.call(window[k].prototype) !== '[object ' + k + ']')),
+          t(() => { const c = document.createEvent('CustomEvent'); c.initCustomEvent('q'); const s = document.createEvent('StorageEvent'); s.initStorageEvent('w'); return [c.type, s.type]; }),
+          t(() => new Text(Symbol()))
         ];
       })()
     JS
@@ -833,7 +838,10 @@ RSpec.describe 'IDL bindings' do
       'false',
       'TypeError: Illegal invocation',
       '[7,"q",true,8]',
-      '["[object MouseEvent]","[object Event]","[object CustomEvent]","[object Event]"]'
+      '["[object MouseEvent]","[object Event]","[object CustomEvent]","[object Event]"]',
+      '[]',
+      '["q","w"]',
+      "TypeError: Failed to construct 'Text': Cannot convert a Symbol value to a string"
     ])
   end
 
