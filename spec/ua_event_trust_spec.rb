@@ -6,7 +6,9 @@ require_relative 'support/session_teardown'
 # history traversal's `popstate`, a frame's `load`, an image's `error` — and `unhandledrejection` reaches
 # `onunhandledrejection` once, as one of the window's listeners. And the events a script's call makes the UA fire —
 # `focus()`'s, `checkValidity()`'s `invalid`, a popover's `toggle` (Chrome), `new FormData(form)`'s `formdata`,
-# `execCommand()`'s `input`. And the events of the user's actions the driver plays.
+# `execCommand()`'s `input`. And the events of the user's actions the driver plays — a drop's DragEvents, the drop
+# itself only where `dragover` was canceled — and the UA's in answer to them: a button's `submit`, interactive
+# validation's `invalid`.
 RSpec.describe 'UA-fired events' do
   let(:app) {
     lambda do |env|
@@ -17,6 +19,7 @@ RSpec.describe 'UA-fired events' do
           <input id=t><input id=r required><div id=p popover></div>
           <form id=fm><input id=u name=u><select id=s name=s><option>a<option>b</select></form>
           <div id=h>h</div><div id=ce contenteditable>c</div>
+          <form id=fs><button>go</button></form><form id=fv><input required><button>check</button></form>
           <script>
             window.__trust = {};
             window.dispatchEvent = () => { throw new Error('the page\\'s dispatchEvent'); };
@@ -37,8 +40,12 @@ RSpec.describe 'UA-fired events' do
             history.pushState({}, '', '#b');
             history.back();
             window.__seen = {};
-            for (const type of ['keydown', 'keypress', 'beforeinput', 'input', 'keyup', 'change', 'pointerover', 'mouseover', 'mousemove', 'formdata']) {
-              document.addEventListener(type, (e) => { __seen[type] = (__seen[type] ?? true) && e.isTrusted; }, true);
+            for (const type of ['keydown', 'keypress', 'beforeinput', 'input', 'keyup', 'change', 'pointerover', 'mouseover', 'mousemove', 'formdata', 'submit', 'invalid', 'dragenter', 'dragover', 'drop', 'dragleave']) {
+              document.addEventListener(type, (e) => {
+                __seen[type] = (__seen[type] ?? true) && e.isTrusted && (!type.startsWith('drag') && type !== 'drop' || e instanceof DragEvent);
+                if (type === 'submit' || type === 'dragover' && e.target.id === 'h') e.preventDefault();
+                if (type === 'drop' || type === 'dragleave') __seen.dropped = [...(__seen.dropped || []), `${e.target.id} ${type}`];
+              }, true);
             }
           </script>
         </body></html>
@@ -62,6 +69,10 @@ RSpec.describe 'UA-fired events' do
     session.find('#u').send_keys('z')
     session.select 'b', from: 's'
     session.find('#h').hover
+    session.click_button 'go'
+    session.click_button 'check'
+    session.find('#h').drop('text/plain' => 'd')
+    session.find('#ce').drop('text/plain' => 'd')
     session.execute_script(<<~JS)
       new FormData(document.getElementById('fm'));
       document.getElementById('ce').focus();
@@ -69,7 +80,9 @@ RSpec.describe 'UA-fired events' do
     JS
     expect(session.evaluate_script('window.__seen')).to eq(
       'keydown' => true, 'keypress' => true, 'beforeinput' => true, 'input' => true, 'keyup' => true, 'change' => true,
-      'pointerover' => true, 'mouseover' => true, 'mousemove' => true, 'formdata' => true
+      'pointerover' => true, 'mouseover' => true, 'mousemove' => true, 'formdata' => true, 'submit' => true,
+      'invalid' => true, 'dragenter' => true, 'dragover' => true, 'drop' => true, 'dragleave' => true,
+      'dropped' => ['h drop', 'ce dragleave']
     )
   end
 end
