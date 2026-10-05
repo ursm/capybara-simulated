@@ -196,6 +196,23 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
     expect(cross_window_eval('w.location.assign')).to eq('SecurityError') # assign not cross-origin
   end
 
+  # (b2) A Window member called with a cross-origin window as `this` passes Web IDL's security check only for a
+  # CrossOriginProperty: the getter of `document` read off this window and called on the frame's throws, as reading
+  # it through the frame does; its driver state is no more reachable; `postMessage` / `closed` stay callable.
+  it "security-checks a Window member called on a cross-origin window" do
+    expect(cross_window_eval("Object.getOwnPropertyDescriptor(window, 'document').get.call(w)")).to eq('SecurityError')
+    expect(cross_window_eval("Object.getOwnPropertyDescriptor(window, 'name').get.call(w)")).to eq('SecurityError')
+    expect(cross_window_eval('w.__csimDocument')).to eq('SecurityError')
+    expect(cross_window_eval("Object.getOwnPropertyDescriptor(window, 'closed').get.call(w)")).to eq('ok:boolean')
+    expect(cross_window_eval('Object.getOwnPropertyDescriptor(w, "closed").enumerable')).to eq('ok:boolean')
+    expect(session.evaluate_script(<<~JS)).to eq(false)
+      (function () {
+        const f = document.createElement('iframe'); f.src = 'http://cross.example.org/child';
+        document.body.appendChild(f); return Object.getOwnPropertyDescriptor(f.contentWindow, 'closed').enumerable;
+      })()
+    JS
+  end
+
   # (c) `[[Has]]` / `[[GetOwnProperty]]` are SOP-gated too, so a probe can't enumerate
   # the same-origin surface: `'document' in frame` is false, a descriptor probe throws,
   # and a cross-origin-safe name still answers present.

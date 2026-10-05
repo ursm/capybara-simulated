@@ -26,6 +26,10 @@ const OUT = join(ROOT, 'lib', 'capybara', 'simulated', 'js', 'src', 'generated',
 // it, or a partial of a mixin it includes, by the spec's name. Anything else added is merged. `omitMembers`: single
 // members no implementation answers, by name (and why). `namedProperties`: how an installed interface's objects answer
 // its named property getter themselves (a Proxy of the class's).
+// GlobalEventHandlers' touch handlers, which a desktop with no touch screen — headless Chrome's and Firefox's, measured —
+// exposes on no object: feature detection reads them (flatpickr binds `touchstart` instead of `mousedown` where
+// `window.ontouchstart` is defined).
+const NO_TOUCH = { 'touch-events': 'ontouch*: no touch screen, whose handlers a desktop browser exposes nowhere' };
 const INTERFACES = [
   ['dom', 'DOMTokenList'],
   ['dom', 'NodeFilter'],
@@ -64,6 +68,7 @@ const INTERFACES = [
     install: true,
     namedProperties: 'the DocumentNamedProps Proxy spliced into its prototype chain (dom-nodes.js)',
     omit: {
+      ...NO_TOUCH,
       SVG: 'rootElement: the SVG document is not modelled',
       'css-regions': 'namedFlows: CSS Regions are not implemented',
       'css-view-transitions': 'startViewTransition / activeViewTransition: View Transitions are not implemented',
@@ -89,6 +94,7 @@ const INTERFACES = [
   ['html', 'HTMLElement', {
     install: true,
     omit: {
+      ...NO_TOUCH,
       'css-typed-om': 'attributeStyleMap: the Typed OM is not implemented',
       'edit-context': 'editContext: EditContext is not implemented'
     },
@@ -98,12 +104,13 @@ const INTERFACES = [
       scrollParent: 'the scroll container is not exposed'
     }
   }],
-  ['SVG', 'SVGElement', { install: true, omit: { 'css-typed-om': 'attributeStyleMap: the Typed OM is not implemented' } }],
-  ['mathml-core', 'MathMLElement', { install: true, omit: { 'css-typed-om': 'attributeStyleMap: the Typed OM is not implemented' } }],
+  ['SVG', 'SVGElement', { install: true, omit: { ...NO_TOUCH, 'css-typed-om': 'attributeStyleMap: the Typed OM is not implemented' } }],
+  ['mathml-core', 'MathMLElement', { install: true, omit: { ...NO_TOUCH, 'css-typed-om': 'attributeStyleMap: the Typed OM is not implemented' } }],
   ['html', 'Window', {
     install: true,
     namedProperties: true,
     omit: {
+      ...NO_TOUCH,
       'anonymous-iframe': 'credentialless: credentialless iframes are not implemented',
       compat: 'orientation / onorientationchange: a mobile-only legacy, which a desktop browser has not',
       cookiestore: 'cookieStore: the Cookie Store API is not implemented',

@@ -32674,6 +32674,37 @@ dom/events/scrolling/scrollend-event-not-fired-after-removing-scroller.tentative
 - name: No scrollend is received after removing scrolling element
   reason: 'Same test, same reason: the scroller is removed while a smooth scroll is
     still animating, which our instant-scroll model has no equivalent of.'
+dom/nodes/Document-createEvent.https.html:
+- name: TOUCHEVENT should be an alias for TouchEvent.
+  reason: 'Optional (assert_implements_optional): exposing the legacy touch event
+    APIs is the UA''s choice, which a desktop with no touch screen — headless Chrome
+    and Firefox, measured — makes as this driver does (no ontouch* anywhere, createEvent(''touchevent'')
+    NotSupportedError).'
+- name: TouchEvent should be an alias for TouchEvent.
+  reason: 'Optional (assert_implements_optional): exposing the legacy touch event
+    APIs is the UA''s choice, which a desktop with no touch screen — headless Chrome
+    and Firefox, measured — makes as this driver does (no ontouch* anywhere, createEvent(''touchevent'')
+    NotSupportedError).'
+- name: createEvent('TOUCHEVENT') should be initialized correctly.
+  reason: 'Optional (assert_implements_optional): exposing the legacy touch event
+    APIs is the UA''s choice, which a desktop with no touch screen — headless Chrome
+    and Firefox, measured — makes as this driver does (no ontouch* anywhere, createEvent(''touchevent'')
+    NotSupportedError).'
+- name: createEvent('TouchEvent') should be initialized correctly.
+  reason: 'Optional (assert_implements_optional): exposing the legacy touch event
+    APIs is the UA''s choice, which a desktop with no touch screen — headless Chrome
+    and Firefox, measured — makes as this driver does (no ontouch* anywhere, createEvent(''touchevent'')
+    NotSupportedError).'
+- name: createEvent('touchevent') should be initialized correctly.
+  reason: 'Optional (assert_implements_optional): exposing the legacy touch event
+    APIs is the UA''s choice, which a desktop with no touch screen — headless Chrome
+    and Firefox, measured — makes as this driver does (no ontouch* anywhere, createEvent(''touchevent'')
+    NotSupportedError).'
+- name: touchevent should be an alias for TouchEvent.
+  reason: 'Optional (assert_implements_optional): exposing the legacy touch event
+    APIs is the UA''s choice, which a desktop with no touch screen — headless Chrome
+    and Firefox, measured — makes as this driver does (no ontouch* anywhere, createEvent(''touchevent'')
+    NotSupportedError).'
 dom/nodes/insertion-removing-steps/Node-append-meta-referrer-and-script-from-fragment.html:
 - name: "<meta name=referrer> gets processed and applied in the post-insertion steps"
   reason: Asserts referrer-policy effect observed via real async fetch() to an echo-referrer
@@ -43495,6 +43526,11 @@ html/semantics/forms/the-select-element/show-picker-being-rendered.html:
 - name: select showPicker() throws when not being rendered
   reason: showPicker() gating on render state (being-rendered / content-visibility:hidden)
     — needs visibility/render state we do not model.
+html/webappapis/scripting/events/event-handler-onmove-01.tentative.html:
+- name: Window move event
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/webappapis/scripting/events/event-handler-onmove-02.tentative.html:
 - name: Window move event
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

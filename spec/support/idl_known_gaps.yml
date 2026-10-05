@@ -33,6 +33,12 @@ Document:
   - measureElement
   - measureText
   - namedFlows
+  # The touch handlers a desktop with no touch screen exposes nowhere (headless Chrome and Firefox, measured):
+  # flatpickr binds `touchstart` instead of `mousedown` where `window.ontouchstart` is defined.
+  - ontouchcancel
+  - ontouchend
+  - ontouchmove
+  - ontouchstart
   - permissionsPolicy
   - pictureInPictureEnabled
   - prerendering
@@ -70,6 +76,12 @@ HTMLElement:
   - editContext
   - headingOffset
   - headingReset
+  # The touch handlers a desktop with no touch screen exposes nowhere (headless Chrome and Firefox, measured):
+  # flatpickr binds `touchstart` instead of `mousedown` where `window.ontouchstart` is defined.
+  - ontouchcancel
+  - ontouchend
+  - ontouchmove
+  - ontouchstart
   - scrollParent
 HTMLInputElement:
   - popoverTargetElement

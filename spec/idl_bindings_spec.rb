@@ -780,7 +780,11 @@ RSpec.describe 'IDL bindings' do
           t(() => { let e; addEventListener('zz', (ev) => { e = window.event === ev; }, { once: true }); dispatchEvent(new Event('zz')); return [e, window.event === undefined]; }),
           t(() => getComputedStyle(5)),
           t(() => Object.getOwnPropertyDescriptor(window, 'scrollY').get.call({})),
-          t(() => [locationbar.visible, typeof external.AddSearchProvider, status, name, length, screenX, originAgentCluster])
+          t(() => [locationbar.visible, typeof external.AddSearchProvider, status, name, length, screenX, originAgentCluster]),
+          t(() => ['ontouchstart' in window, 'ontouchstart' in document, 'ontouchstart' in document.body]),
+          t(() => document.createEvent('TouchEvent')),
+          t(() => { const r = []; addEventListener('error', (e) => r.push(e.error.message), { once: true }); window.onclick = () => { throw new Error('boom'); }; document.body.click(); window.onclick = null; return r; }),
+          t(() => { const s = document.createElement('script'); s.textContent = 'var origin = "shadowed"'; document.head.appendChild(s); const f = document.body.appendChild(document.createElement('iframe')); f.srcdoc = '<p>x'; const r = [origin, f.contentDocument !== null]; f.remove(); return r; })
         ];
       })()
     JS
@@ -793,7 +797,11 @@ RSpec.describe 'IDL bindings' do
       '[true,true]',
       "TypeError: Failed to execute 'getComputedStyle' on 'Window': parameter 1 is not of type 'Element'.",
       'TypeError: Illegal invocation',
-      '[true,"function","","",0,0,false]'
+      '[true,"function","","",0,0,false]',
+      '[false,false,false]',
+      "NotSupportedError: Failed to execute 'createEvent' on 'Document': The provided event type ('TouchEvent') is invalid.",
+      '["boom"]',
+      '["shadowed",true]'
     ])
   end
 
