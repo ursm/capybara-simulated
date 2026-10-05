@@ -43268,6 +43268,11 @@ html/rendering/widgets/the-select-element/select-as-listbox-default-styles.tenta
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/semantics/forms/customizable-combobox/customizable-combobox-beforefilter.tentative.html:
+- name: beforefilter event for customizable combobox.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/semantics/forms/customizable-combobox/customizable-combobox-keyboard-behavior.tentative.html:
 - name: Disabled options should not match :active-option.
   reason: 'Customizable combobox / filterable-select popup: rendered datalist/listbox
@@ -43436,6 +43441,11 @@ html/semantics/forms/the-select-element/filterable-select/filterable-select-keyb
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: 'nested input in listbox select: Keyboard behavior for filterable select.'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/semantics/forms/the-select-element/filterable-select/select-beforefilter.tentative.html:
+- name: beforefilter event for customizable combobox.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

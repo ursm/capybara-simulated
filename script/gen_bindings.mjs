@@ -91,7 +91,7 @@ const INTERFACES = [
 
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
-  'PLATFORM', 'rejectedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
+  'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toLong', 'toDouble',
   'toUnrestrictedDouble', 'toSequence', 'toObject', 'toInterface', 'toCallbackInterface', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineClassString', 'enumerable', 'installMembers',
@@ -166,7 +166,7 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
     // (Web IDL §3.2.21, §3.2.27, §3.2.28: the values its iterator gives, each converted; a frozen array frozen; an
     // observable array's setter given them, which its implementation's backing list is set to)
     const each = conversion(t.idlType[0], 'x', where, checks);
-    const c = `toSequence(${expr}, (x) => ${each}, ${failure(where, 'The provided value cannot be converted to a sequence.')})`;
+    const c = `toSequence(${expr}, (x) => ${each}, ${failure(where)})`;
     const value = t.generic === 'FrozenArray' ? `Object.freeze(${c})` : c;
     return t.nullable ? `(${expr} == null ? null : ${value})` : value;
   }
@@ -293,8 +293,10 @@ function dictionaryConverter(name) {
     chain.unshift(d);
   }
   const checks = new Set(), lines = [];
+  let defaults = false;
   lines.push(`export function ${fn}(v, prefix) {`);
   lines.push(`  if (v !== undefined && v !== null && typeof v !== 'object' && typeof v !== 'function') throw new TypeError(prefix + ${JSON.stringify(`The provided value is not of type '${name}'.`)});`);
+  const head = lines.length;
   lines.push(`  const dict = {};`);
   for (const d of chain) {
     // (…its partials' members among its own — but one whose type is an interface no implementation here answers, which is
@@ -307,6 +309,7 @@ function dictionaryConverter(name) {
       lines.push(`    const x = v == null ? undefined : v.${m.name};`);
       const missing = m.required ? `(() => { throw new TypeError(${failure(where, 'Required member is undefined.')}); })()`
         : m.default ? defaultValue(m.default, `${d.name}.${m.name}`) : null;
+      if (missing !== null) defaults = true;
       const converted = conversion(m.idlType, 'x', where, checks, m.extAttrs);
       lines.push(missing === null
         ? `    if (x !== undefined) dict.${m.name} = ${converted};`
@@ -314,8 +317,11 @@ function dictionaryConverter(name) {
       lines.push(`  }`);
     }
   }
-  // (…the tests of the interfaces its members take, looked up as it converts: those are registered by then)
-  for (const c of checks) lines.splice(1, 0, `  const IS_${c} = interfaceCheck('${c}');`);
+  // (…the tests of the interfaces its members take, looked up as it converts — those are registered by then — and, for
+  // a dictionary none of whose members has a default or is required, null or undefined the one empty dictionary: the
+  // common call with no options allocates nothing)
+  const lookups = [...checks].map((c) => `  const IS_${c} = interfaceCheck('${c}');`);
+  lines.splice(head, 0, ...(defaults ? [] : ['  if (v == null) return EMPTY_DICTIONARY;']), ...lookups);
   lines.push(`  return dict;`);
   lines.push(`}`);
   dictionaryConverters.set(name, lines.join('\n'));
@@ -391,23 +397,21 @@ function generateInterface(def, options = {}) {
       if (m.special === 'stringifier') stringifier = m.name;
       else if (m.special) throw new Error(`${label}: a ${m.special} attribute is not generated yet`);
       members.push(m.name);
-      if ((m.extAttrs || []).some((e) => e.name === 'LegacyLenientThis')) {
-        // [LegacyLenientThis] (Web IDL §3.4.3): on an object not the interface's, the getter answers undefined
-        if (!options.install || !m.readonly) throw new Error(`${label}: a [LegacyLenientThis] attribute of this kind is not generated yet`);
-        out.push(`    get ${m.name}() { return IS_SELF(this) ? impl.get_${m.name}(this) : undefined; }`);
-        continue;
-      }
+      // (…[LegacyLenientThis] only an event handler's here, whose accessors the installing class's are)
+      if ((m.extAttrs || []).some((e) => e.name === 'LegacyLenientThis')) throw new Error(`${label}: a [LegacyLenientThis] attribute is not generated yet`);
       out.push(`    get ${m.name}() { return impl.get_${m.name}(${self}); }`);
       const forwards = (m.extAttrs || []).find((e) => e.name === 'PutForwards');
       if (forwards) {
         // [PutForwards=x] (Web IDL §3.7.6): a write to the attribute is a write of `x` on the object it answers
         // (`el.classList = 'a b'` sets the list's `value`).
+        // (…the object no object — a document's `location` with no window — a TypeError)
         const target = forwards.rhs.value;
-        out.push(`    set ${m.name}(v) { const object = impl.get_${m.name}(${self}); object.${target} = v; }`);
+        const notObject = JSON.parse(failure({ iface: name, member: m.name }, 'The attribute value is not an object'));
+        out.push(`    set ${m.name}(v) { const object = impl.get_${m.name}(${self}); if (object === null || (typeof object !== 'object' && typeof object !== 'function')) throw new TypeError(${JSON.stringify(notObject)}); object.${target} = v; }`);
       } else if ((m.extAttrs || []).some((e) => e.name === 'LegacyLenientSetter')) {
-        // [LegacyLenientSetter] (Web IDL §3.4.2): a read-only attribute with a setter that does nothing, so a page's
-        // own assignment to it (an old polyfill's) is no error
-        out.push(`    set ${m.name}(v) {}`);
+        // [LegacyLenientSetter] (Web IDL §3.4.2): a read-only attribute with a setter that does nothing — but check its
+        // `this` — so a page's own assignment to it (an old polyfill's) is no error
+        out.push(`    set ${m.name}(v) { ${self}; }`);
       } else if (!m.readonly && enums.has(m.idlType.idlType)) {
         // (…an enumeration's: a string it has not is ignored, not an error — Web IDL §3.7.6)
         const value = `enumValue(v, ${JSON.stringify(enums.get(m.idlType.idlType))}, ${failure({ iface: name, member: m.name })})`;
@@ -601,10 +605,12 @@ function overloadedOperation(iface, group, checks, selfCheck) {
   const lines = [`const self = ${selfCheck(promise && `Failed to execute '${name}' on '${iface}': `)};`];
   if (required) lines.push(`required(arguments, ${required}, '${name}', '${iface}');`);
   lines.push(`switch (Math.min(arguments.length, ${most})) {`);
-  for (const [n, m] of cases) {
+  // (…the counts one overload takes falling through to its one call)
+  cases.forEach(([n, m], i) => {
+    if (i + 1 < cases.length && cases[i + 1][1] === m) { lines.push(`  case ${n}:`); return; }
     const converted = convertArguments(iface, m, checks, () => null);
     lines.push(`  case ${n}: return impl.${implName(m)}(${['self', ...converted].join(', ')});`);
-  }
+  });
   // (…a count of arguments no overload takes: Chrome's message)
   if (cases.length < most - required + 1) {
     const arities = `Failed to execute '${name}' on '${iface}': Valid arities are: [${cases.map(([n]) => n).join(', ')}], but `;
@@ -698,10 +704,17 @@ const htmlParents = [...definitions.values()]
   .filter((d) => d.type === 'interface' && /^HTML\w*Element$/.test(d.name) && d.inheritance)
   .map((d) => [d.name, d.inheritance])
   .sort(([a], [b]) => (a < b ? -1 : 1));
+// …and the event handlers of GlobalEventHandlers (its own and its partials'): what the hand-written element and window
+// classes install, an element's as content attributes too.
+const globalHandlers = [mixins.get('GlobalEventHandlers'), ...(additions.get('GlobalEventHandlers') || []).map((a) => a.def)]
+  .flatMap((d) => d.members).filter((m) => m.type === 'attribute' && EVENT_HANDLER_TYPES.has(m.idlType.idlType)).map((m) => m.name);
 const memberTable = `// The members of the element interfaces, by name (each one's own, its mixins' and partials').
 export const INTERFACE_MEMBERS = {
 ${MEMBER_INTERFACES.map((n) => `  ${n}: ${JSON.stringify(memberNames(n))}`).join(',\n')}
 };
+
+// GlobalEventHandlers' event handler attributes.
+export const GLOBAL_EVENT_HANDLERS = ${JSON.stringify(globalHandlers)};
 
 // The interface each HTML element interface inherits.
 export const HTML_INTERFACE_PARENTS = {

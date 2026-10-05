@@ -642,6 +642,40 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  # (…[PutForwards] onto no object a TypeError, [LegacyLenientSetter]'s `this` checked, a sequence's two TypeErrors,
+  # adopted sheets converted alike on a document and a shadow root, a nameless cookie its value alone, and no window
+  # scroll recursing on a forged window; Chrome's answers — but for its 'HTMLDocument')
+  it "converts and checks as Chrome does where the bindings forward, lean or adopt" do
+    got = outcome(<<~JS)
+      (() => {
+        const t = (f) => { try { return JSON.stringify(f()) ?? 'undefined'; } catch (e) { return e.name + ': ' + e.message; } };
+        const root = document.getElementById('a').attachShadow({ mode: 'open' });
+        const forged = {};
+        forged.window = forged;
+        forged.scrollTo = window.scrollTo;
+        return [
+          t(() => { document.implementation.createHTMLDocument('').location = 'x'; }),
+          t(() => Object.getOwnPropertyDescriptor(Document.prototype, 'fullscreenElement').set.call({}, 1)),
+          ['video/mp4; codecs=", avc1.42E01E"', 'video/webm; codecs="vp8, ,vorbis"'].map((type) => document.createElement('video').canPlayType(type)),
+          forged.scrollTo(0, 1) instanceof Promise,
+          t(() => { root.adoptedStyleSheets = null; }),
+          t(() => { root.adoptedStyleSheets = { length: 0 }; }),
+          t(() => { root.adoptedStyleSheets = new Set([new CSSStyleSheet()]); return root.adoptedStyleSheets.length; }),
+          t(() => { document.adoptedStyleSheets[0] = 5; }),
+          t(() => { document.cookie = null; return document.cookie.split('; ').includes('null'); })
+        ];
+      })()
+    JS
+    root = "TypeError: Failed to set the 'adoptedStyleSheets' property on 'ShadowRoot': "
+    expect(got).to eq([
+      "TypeError: Failed to set the 'location' property on 'Document': The attribute value is not an object",
+      'TypeError: Illegal invocation', ['', ''], true,
+      "#{root}The provided value cannot be converted to a sequence.",
+      "#{root}The object must have a callable @@iterator property.",
+      '1', "TypeError: Failed to convert value to 'CSSStyleSheet'.", 'true'
+    ])
+  end
+
   # (…the document element among them, and a name compared as it is, not as a selector)
   it "finds a document's elements by name, its root too" do
     got = outcome(<<~JS)

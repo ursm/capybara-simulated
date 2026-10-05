@@ -10446,9 +10446,20 @@ module Capybara
             else               next unless lax_ok
             end
           end
-          "#{k}=#{v}"
+          # (…a cookie with no name its value alone — RFC 6265bis §5.8.3)
+          k.empty? ? v : "#{k}=#{v}"
         }
         RuntimeShared.utf8_text(pairs.join('; '))
+      end
+
+      # A set-cookie-string's name and value (RFC 6265bis §5.6): split at its first `=`, each trimmed — with no `=`, a
+      # cookie with no name, the whole pair its value (`document.cookie = 'null'` sets `null`, Chrome) — or nil where
+      # both are empty.
+      def cookie_name_value(pair)
+        name, value = pair.include?('=') ? pair.split('=', 2) : ['', pair]
+        name = name.strip
+        value = value.to_s.strip
+        name.empty? && value.empty? ? nil : [name, value]
       end
 
       # `document.cookie` reads/writes the CURRENT document's host jar.
@@ -10463,22 +10474,21 @@ module Capybara
       def write_document_cookie(s)
         return if s.nil? || s.empty?
         host = document_cookie_host or return
-        name, rest = s.split('=', 2)
-        return if name.nil? || name.empty?
-        parts = (rest || '').split(';').map(&:strip)
-        value = parts.shift.to_s
+        parts = s.split(';').map(&:strip)
+        name, value = cookie_name_value(parts.shift.to_s)
+        return if name.nil?
         jar = (@cookies[host] ||= {})
-        key = "#{host}\0#{name.strip}"
+        key = "#{host}\0#{name}"
         flags = cookie_attr_flags(parts)
         return if flags[:same_site] == 'none' && !flags[:secure]   # None requires Secure
         secure_channel = secure_cookie_channel?(current_browsing_context_url)
         # Strict Secure Cookies, same as merge_set_cookie above.
         return if !secure_channel && (flags[:secure] || @cookie_flags[key]&.dig(:secure))
         if cookie_deletion?(parts)
-          jar.delete(name.strip)
+          jar.delete(name)
           @cookie_flags.delete(key)
         else
-          jar[name.strip] = value
+          jar[name] = value
           if flags.empty?
             @cookie_flags.delete(key)
           else
@@ -11535,10 +11545,9 @@ module Capybara
         lines = sc.is_a?(Array) ? sc : sc.split("\n")
         lines.each {|line|
           parts = line.split(';').map(&:strip)
-          pair = parts.shift.to_s
-          name, value = pair.split('=', 2)
-          next if name.nil? || name.empty?
-          key = "#{host}\0#{name.strip}"
+          name, value = cookie_name_value(parts.shift.to_s)
+          next if name.nil?
+          key = "#{host}\0#{name}"
           flags = cookie_attr_flags(parts)
           # SameSite=None without Secure is rejected outright (RFC 6265bis / Chrome 80+):
           # accepting it would mint the MOST permissive cookie kind from the weakest set.
@@ -11547,10 +11556,10 @@ module Capybara
           # Secure cookie nor evict/overwrite an existing Secure one of the same name.
           next if !secure_channel && (flags[:secure] || @cookie_flags[key]&.dig(:secure))
           if cookie_deletion?(parts)
-            jar.delete(name.strip)
+            jar.delete(name)
             @cookie_flags.delete(key)
           else
-            jar[name.strip] = value.to_s.strip
+            jar[name] = value
             # Attribute sidecar: the jar itself stays name=>value (every reader depends on
             # that), but the send side needs Secure (never over non-secure transport) and
             # SameSite (withheld from cross-site requests — see cookie_header_for).
