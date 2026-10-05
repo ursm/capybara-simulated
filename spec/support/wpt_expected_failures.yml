@@ -8617,23 +8617,15 @@ html/dom/idlharness.https.html:
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "currentSrc" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "currentTime" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "defaultPlaybackRate" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "duration" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "ended" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "error" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "fastSeek(double)" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "getStartDate()" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "muted" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "paused" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "playbackRate" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
@@ -8652,8 +8644,6 @@ html/dom/idlharness.https.html:
   "textTracks" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "videoTracks" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "volume" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("video") must inherit property
   "addTextTrack(TextTrackKind, optional DOMString, optional DOMString)" with the proper
   type'
@@ -8685,25 +8675,17 @@ html/dom/idlharness.https.html:
   "textTracks" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("video") must inherit property
   "videoTracks" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "volume" with the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "addTextTrack(TextTrackKind,
   optional DOMString, optional DOMString)" with the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "audioTracks" with
   the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "buffered" with the
   proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "canPlayType(DOMString)"
-  with the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "currentSrc" with
-  the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "currentTime" with
   the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "defaultPlaybackRate"
   with the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "duration" with the
-  proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "ended" with the
   proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "error" with the
   proper type'
@@ -8711,16 +8693,6 @@ html/dom/idlharness.https.html:
   with the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "getStartDate()"
   with the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "load()" with the
-  proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "muted" with the
-  proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "pause()" with the
-  proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "paused" with the
-  proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "play()" with the
-  proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "playbackRate" with
   the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "played" with the
@@ -8739,8 +8711,6 @@ html/dom/idlharness.https.html:
   the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "videoTracks" with
   the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "volume" with the
-  proper type'
 - 'HTMLMediaElement interface: operation addTextTrack(TextTrackKind, optional DOMString,
   optional DOMString)'
 - 'HTMLMediaElement interface: operation canPlayType(DOMString)'

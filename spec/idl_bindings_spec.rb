@@ -337,6 +337,21 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  # (…`new Audio()` is a legacy factory, its element's members its interface's; Document's handlers are Document's)
+  it "makes Audio an audio element of its interface, and leaves Document's members off elements" do
+    got = outcome(<<~JS)
+      (() => {
+        const a = new Audio('x.mp3');
+        return [
+          Audio.prototype === HTMLAudioElement.prototype, Object.getOwnPropertyNames(a).filter((k) => !k.startsWith('_')),
+          [a.paused, a.currentTime, a.volume, a.muted, a.getAttribute('preload'), a.getAttribute('src')],
+          ['getElementsByName' in document.body, 'onfreeze' in document.body, 'onfreeze' in document]
+        ];
+      })()
+    JS
+    expect(got).to eq([true, [], [true, 0, 1, false, 'auto', 'x.mp3'], [false, false, true]])
+  end
+
   # (…an attribute adopted is taken from its element first, and each member converting an Attr names itself)
   it 'adopts an attribute out of its element' do
     got = outcome(<<~JS)
