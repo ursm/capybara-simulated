@@ -2595,8 +2595,8 @@ impl<'a> TNode for StyleNode<'a> {
     }
     fn prev_sibling(&self) -> Option<Self> {
         let parent = self.arena().get(self.arena().parent_of(self.id)?)?;
-        let i = self.node().index_in(parent);
-        parent.children[..i.min(parent.children.len())]
+        let i = self.node().index_in(parent)?;
+        parent.children[..i]
             .iter()
             .rev()
             .find(|&&c| self.arena().get(c).is_some())
@@ -2604,7 +2604,7 @@ impl<'a> TNode for StyleNode<'a> {
     }
     fn next_sibling(&self) -> Option<Self> {
         let parent = self.arena().get(self.arena().parent_of(self.id)?)?;
-        let i = self.node().index_in(parent);
+        let i = self.node().index_in(parent)?;
         parent.children.get(i + 1..)?.iter().find(|&&c| self.arena().get(c).is_some()).map(|&c| self.at(c))
     }
     fn owner_doc(&self) -> Self::ConcreteDocument {

@@ -353,10 +353,9 @@ impl NodeData {
             })
             .collect()
     }
-    // Its index in `parent`'s children, where that is its parent — held to the list's bounds, so a position that
-    // drifted reads as a place the list does not hold it, which the sibling walks step over.
-    pub(crate) fn index_in(&self, parent: &NodeData) -> usize {
-        (self.position - parent.first_position).clamp(0, parent.children.len() as i64) as usize
+    // Its index in `parent`'s children, where that is its parent — None for a position that drifted out of the list.
+    pub(crate) fn index_in(&self, parent: &NodeData) -> Option<usize> {
+        usize::try_from(self.position - parent.first_position).ok().filter(|&i| i < parent.children.len())
     }
     // The DOM `nodeType` (an arena node with no kind of its own — no element, character data, document or fragment —
     // is a doctype where it carries one's identifiers, else an Attr's slot).
@@ -978,7 +977,7 @@ impl RealmArena {
         let n = self.get(id)?;
         // (…and its position, handle or none, where it is listed: its parent's list holds it at the index it says)
         if let Some(p) = n.parent.and_then(|p| self.get(p)) {
-            if p.children.get(n.index_in(p)) != Some(&id) && p.children.contains(&id) {
+            if n.index_in(p).and_then(|i| p.children.get(i)) != Some(&id) && p.children.contains(&id) {
                 return Some(format!("position {} under first {}, listed at {:?}", n.position, p.first_position, p.children.iter().position(|&c| c == id)));
             }
         }
@@ -986,7 +985,7 @@ impl RealmArena {
         let handled = |k: NodeId| self.get(k).is_some_and(|d| crate::node_handle::edges(&d.link).is_some());
         let parent = n.parent.or(n.host).or(n.template_host).filter(|&p| handled(p));
         let first = n.children.first().copied().filter(|&c| handled(c));
-        let next = n.parent.and_then(|p| self.get(p)).and_then(|p| p.children.get(n.index_in(p) + 1).copied()).filter(|&c| handled(c));
+        let next = n.parent.and_then(|p| self.get(p)).and_then(|p| n.index_in(p).and_then(|i| p.children.get(i + 1)).copied()).filter(|&c| handled(c));
         let owned = n.shadow_root.or(n.template_content).filter(|&c| handled(c));
         let want = [parent, first, next, owned];
         (got != want).then(|| format!("handle edges {got:?}, tree {want:?}"))
@@ -1294,10 +1293,9 @@ impl RealmArena {
         self.detach(child);
         // `before`'s place, by its position when it is a child of `parent`.
         let pos = match (before.and_then(|b| self.get(b).map(|n| (b, n))), self.get(parent)) {
-            (Some((b, bn)), Some(pn)) if bn.parent == Some(parent) => match pn.children.get(bn.index_in(pn)) {
-                Some(&c) if c == b => Some(bn.index_in(pn)),
-                _ => pn.children.iter().position(|&c| c == b),
-            },
+            (Some((b, bn)), Some(pn)) if bn.parent == Some(parent) => {
+                bn.index_in(pn).filter(|&i| pn.children[i] == b).or_else(|| pn.children.iter().position(|&c| c == b))
+            }
             _ => None,
         };
         match pos {
@@ -1357,7 +1355,10 @@ impl RealmArena {
     // `id`'s index in its parent's children (0 for a node with none).
     pub(crate) fn child_index(&self, id: NodeId) -> usize {
         let Some(n) = self.get(id) else { return 0 };
-        n.parent.and_then(|p| self.get(p)).map_or(0, |p| n.index_in(p))
+        // (…by its position, or where that drifted, by looking)
+        n.parent.and_then(|p| self.get(p)).map_or(0, |p| {
+            n.index_in(p).filter(|&i| p.children[i] == id).or_else(|| p.children.iter().position(|&c| c == id)).unwrap_or(0)
+        })
     }
     pub(crate) fn parent_of(&self, id: NodeId) -> Option<NodeId> {
         let parent = self.get(id)?.parent?;
@@ -1374,7 +1375,7 @@ impl RealmArena {
         let parent = self.get(node.parent?)?;
         // Step back from this child's position, skipping any stale edge, to the nearest live sibling.
         // With no stale edges (the synced document tree) this is the single `index - 1` step.
-        let mut i = node.index_in(parent);
+        let mut i = node.index_in(parent)?;
         while i > 0 {
             i -= 1;
             if let Some(&c) = parent.children.get(i) {
@@ -1388,7 +1389,7 @@ impl RealmArena {
     pub(crate) fn next_element_sibling(&self, id: NodeId) -> Option<NodeId> {
         let node = self.get(id)?;
         let parent = self.get(node.parent?)?;
-        let mut i = node.index_in(parent) + 1;
+        let mut i = node.index_in(parent)? + 1;
         while let Some(&c) = parent.children.get(i) {
             if self.is_element(c) {
                 return Some(c);
@@ -1457,6 +1458,8 @@ impl RealmArena {
 pub(crate) struct Dom {
     // The slots of the nodes V8 collected, to be freed (`node_handle::reclaim`).
     pub(crate) reclaim: std::sync::Arc<crate::node_handle::Reclaim>,
+    // The handles of nodes that left a document, whose references go at the next node made (`node_handle::let_go`).
+    pub(crate) let_go: Vec<NodeId>,
     // Every realm's nodes, and each realm's state (`RealmArena`).
     pub(crate) arena: RealmArena,
     // The store-flip's native-backed `_attrs`: a full named-interceptor view over a node's
