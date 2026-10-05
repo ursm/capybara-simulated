@@ -19,31 +19,41 @@ import { dirname, join } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'lib', 'capybara', 'simulated', 'js', 'src', 'generated', 'bindings.js');
 
-// The interfaces generated, by spec.
+// The interfaces generated, by spec. `install`: an interface whose objects a hand-written class makes, its members
+// generated onto that class's prototype (`install<Name>(iface, impl)`) — the class, its constructor and the objects it
+// makes stay the hand-written code's, which registers the test that tells its objects apart. `omit`: a mixin or
+// partial interface another spec adds to it that no implementation here answers yet, by name (a mixin) or spec (a
+// partial), and why — any other is merged, or an error.
 const INTERFACES = [
   ['dom', 'DOMTokenList'],
   ['dom', 'NodeFilter'],
   ['dom', 'NodeIterator'],
-  ['dom', 'TreeWalker']
+  ['dom', 'TreeWalker'],
+  ['dom', 'CharacterData', { install: true }],
+  ['dom', 'Text', { install: true, omit: { GeometryUtils: 'getBoxQuads / convert*FromNode (cssom-view) are not implemented' } }],
+  ['dom', 'Comment', { install: true }]
 ];
 
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
-  'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
+  'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'toDOMString', 'toUSVString', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toLong', 'toDouble',
   'toUnrestrictedDouble', 'toInterface', 'toCallbackInterface', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
-  'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineClassString', 'enumerable'
+  'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineClassString', 'enumerable', 'installMembers',
+  'defineLength', 'defineUnscopables'
 ];
 
 const all = await parseAll();
-// Every interface and callback interface of every spec, by name: what an interface type names. And what adds to one
-// beside its definition — a partial interface, a mixin it includes — which no binding here merges yet.
-const definitions = new Map(), additions = new Map();
+// Every interface, callback interface and mixin of every spec, by name: what an interface type, or an `includes`,
+// names. And what adds to an interface beside its definition — a mixin it includes, a partial interface — by the
+// name of the mixin, or the spec of the partial.
+const definitions = new Map(), mixins = new Map(), additions = new Map();
 for (const [spec, defs] of Object.entries(all)) {
   for (const d of defs) {
     if ((d.type === 'interface' || d.type === 'callback interface') && !d.partial) definitions.set(d.name, d);
-    const to = d.type === 'includes' ? d.target : d.partial ? d.name : null;
-    if (to) additions.set(to, [...(additions.get(to) || []), `${d.type === 'includes' ? `includes ${d.includes}` : 'a partial'} (${spec})`]);
+    if (d.type === 'interface mixin' && !d.partial) mixins.set(d.name, d);
+    const to = d.type === 'includes' ? d.target : d.type === 'interface' && d.partial ? d.name : null;
+    if (to) additions.set(to, [...(additions.get(to) || []), d.type === 'includes' ? { mixin: d.includes } : { partial: spec, def: d }]);
   }
 }
 
@@ -53,7 +63,7 @@ for (const [spec, defs] of Object.entries(all)) {
 // implementation returns. [Exposed]: the global the interface object is put on, the Window's here.
 const HANDLED = {
   interface: ['Exposed'],
-  member: ['SameObject', 'NewObject', 'CEReactions'],
+  member: ['SameObject', 'NewObject', 'CEReactions', 'Unscopable'],
   type: ['LegacyNullToEmptyString']
 };
 function checkExtAttrs(extAttrs, where, label) {
@@ -80,7 +90,8 @@ function conversionError(where, what) {
 // `extAttrs` are those on the type and, for an argument, the argument's own (where webidl2 puts `[EnforceRange] long x`'s).
 function conversion(t, expr, where, checks, argExtAttrs = []) {
   const label = `${where.iface}.${where.member}`;
-  if (t.union || t.generic) throw new Error(`${label}: no binding converts ${JSON.stringify(t.idlType)} yet`);
+  if (t.union) return unionConversion(t, expr, where, checks);
+  if (t.generic) throw new Error(`${label}: no binding converts ${JSON.stringify(t.idlType)} yet`);
   const extAttrs = [...(t.extAttrs || []), ...argExtAttrs];
   checkExtAttrs(extAttrs, 'type', label);
   const legacyNull = extAttrs.some((e) => e.name === 'LegacyNullToEmptyString');
@@ -110,29 +121,63 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
   return t.nullable ? `(${expr} == null ? null : ${c})` : c;
 }
 
+// A union of interface types and one string type (`(Node or DOMString)`): an object of one of its interfaces as it is,
+// anything else converted to the string type (Web IDL §3.2.24 — the string type the last step takes).
+function unionConversion(t, expr, where, checks) {
+  const label = `${where.iface}.${where.member}`;
+  const strings = t.idlType.filter((u) => ['DOMString', 'USVString'].includes(u.idlType));
+  const ifaces = t.idlType.filter((u) => definitions.get(u.idlType)?.type === 'interface' && !u.nullable && !u.union);
+  if (t.nullable || strings.length !== 1 || ifaces.length + 1 !== t.idlType.length) {
+    throw new Error(`${label}: no binding converts ${JSON.stringify(t.idlType.map((u) => u.idlType))} yet`);
+  }
+  for (const u of ifaces) checks.add(u.idlType);
+  const test = ifaces.map((u) => `IS_${u.idlType}(${expr})`).join(' || ');
+  return `(${test} ? ${expr} : ${conversion(strings[0], expr, where, checks)})`;
+}
+
 function constantValue(m, where) {
   if (m.value.type !== 'number') throw new Error(`${where}: no binding gives a constant of ${m.value.type} yet`);
   return m.value.value;
 }
 
-// What no binding here makes of a definition yet, beside its members: an error.
-function checkDefinition(def) {
+// An interface's members: its own, and those of the mixins it includes and the partial interfaces of it — but those
+// `omit` names (and why). What no binding here makes of a definition yet, beside its members, is an error.
+function membersOf(def, omit = {}) {
   checkExtAttrs(def.extAttrs, 'interface', def.name);
-  if (additions.has(def.name)) throw new Error(`${def.name}: no binding merges ${additions.get(def.name).join(', ')} yet`);
-  const names = def.members.filter((m) => m.type === 'operation' && m.name).map((m) => m.name);
+  const members = [...def.members];
+  const omitted = new Set();
+  for (const a of additions.get(def.name) || []) {
+    const key = a.mixin || a.partial;
+    if (key in omit) { omitted.add(key); continue; }
+    if (a.mixin) {
+      const mixin = mixins.get(a.mixin);
+      if (!mixin) throw new Error(`${def.name}: includes ${a.mixin}, which no spec defines`);
+      checkExtAttrs(mixin.extAttrs, 'interface', a.mixin);
+      members.push(...mixin.members);
+    } else {
+      throw new Error(`${def.name}: no binding merges a partial interface (${a.partial}) yet`);
+    }
+  }
+  const unknown = Object.keys(omit).filter((k) => !omitted.has(k));
+  if (unknown.length) throw new Error(`${def.name}: omits ${unknown.join(', ')}, which nothing adds to it`);
+  const names = members.filter((m) => m.type === 'operation' && m.name).map((m) => m.name);
   const overloaded = names.find((n, i) => names.indexOf(n) !== i);
   if (overloaded) throw new Error(`${def.name}.${overloaded}: an overloaded operation is not generated yet`);
-  for (const m of def.members) checkExtAttrs(m.extAttrs, 'member', `${def.name}.${m.name || m.type}`);
+  for (const m of members) checkExtAttrs(m.extAttrs, 'member', `${def.name}.${m.name || m.type}`);
+  return members;
 }
 
-function generateInterface(def) {
+function generateInterface(def, options = {}) {
   const name = def.name;
-  if (def.inheritance) throw new Error(`${name}: an inherited interface is not generated yet`);
-  checkDefinition(def);
-  const members = [], constants = [], body = [], checks = new Set();
+  if (def.inheritance && !options.install) throw new Error(`${name}: an inherited interface is not generated yet`);
+  const members = [], constants = [], body = [], checks = new Set(), unscopables = [];
+  // (…`this` checked: by its brand where the binding makes the object, by the test its class registered where it is
+  // installed on that class)
+  const self = options.install ? 'thisIs(this, IS_SELF)' : 'thisOf(this, KEY)';
   let indexed = null, valueIterator = false, stringifier = null, constructor = null;
-  for (const m of def.members) {
+  for (const m of membersOf(def, options.omit)) {
     const label = `${name}.${m.name || m.type}`;
+    if ((m.extAttrs || []).some((e) => e.name === 'Unscopable')) unscopables.push(m.name);
     if (m.type === 'constructor') { constructor = m; continue; }
     if (m.type === 'const') { constants.push([m.name, constantValue(m, label)]); continue; }
     if (m.type === 'iterable') {
@@ -144,10 +189,10 @@ function generateInterface(def) {
       if (m.special === 'stringifier') stringifier = m.name;
       else if (m.special) throw new Error(`${label}: a ${m.special} attribute is not generated yet`);
       members.push(m.name);
-      body.push(`    get ${m.name}() { return impl.get_${m.name}(thisOf(this, KEY)); }`);
+      body.push(`    get ${m.name}() { return impl.get_${m.name}(${self}); }`);
       if (!m.readonly) {
         const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
-        body.push(`    set ${m.name}(v) { impl.set_${m.name}(thisOf(this, KEY), ${v}); }`);
+        body.push(`    set ${m.name}(v) { impl.set_${m.name}(${self}, ${v}); }`);
       }
       continue;
     }
@@ -160,13 +205,19 @@ function generateInterface(def) {
       }
       if (!m.name) throw new Error(`${label}: an anonymous operation is not generated yet`);
       members.push(m.name);
-      body.push(`    ${operation(name, m, checks)}`);
+      body.push(`    ${operation(name, m, checks, self)}`);
       continue;
     }
     throw new Error(`${label}: a ${m.type} member is not generated yet`);
   }
-  if (constructor) throw new Error(`${name}: a constructor is not generated yet`);
   if (indexed && !members.includes('length')) throw new Error(`${name}: an indexed getter with no \`length\` is not generated yet`);
+  if (stringifier) body.push(`    toString() { return impl.get_${stringifier}(${self}); }`);
+  const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
+  if (options.install) {
+    if (constants.length || indexed || valueIterator) throw new Error(`${name}: an installed interface with constants, an indexed getter or an iterator is not generated yet`);
+    return installInterface(def, { body, checks, unscopables, constructor });
+  }
+  if (constructor) throw new Error(`${name}: a constructor is not generated yet`);
 
   const lines = [];
   lines.push(`// interface ${name} (${def.spec})`);
@@ -182,7 +233,6 @@ function generateInterface(def) {
   lines.push(`      impl.init(makeSlots(this, KEY), ...args.slice(1));`);
   lines.push(`    }`);
   lines.push(...body);
-  if (stringifier) lines.push(`    toString() { return impl.get_${stringifier}(thisOf(this, KEY)); }`);
   lines.push(`  }`);
   if (constants.length) {
     const list = JSON.stringify(constants.map(([n]) => n));
@@ -190,7 +240,8 @@ function generateInterface(def) {
     lines.push(`  defineConstants(${name}.prototype, ${list}, [${constants.map(([, v]) => v).join(', ')}]);`);
   }
   lines.push(`  defineClassString(${name}.prototype, '${name}');`);
-  lines.push(`  enumerable(${name}.prototype, ${JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []))});`);
+  lines.push(`  enumerable(${name}.prototype, ${enumerated});`);
+  if (unscopables.length) lines.push(`  defineUnscopables(${name}.prototype, ${JSON.stringify(unscopables)});`);
   if (valueIterator) {
     if (!indexed) throw new Error(`${name}: a value iterator with no indexed getter is not generated yet`);
     lines.push(`  defineValueIterator(${name}.prototype);`);
@@ -200,6 +251,28 @@ function generateInterface(def) {
     ? `withIndexedGetter(new ${name}(PLATFORM, ...state), (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s))`
     : `new ${name}(PLATFORM, ...state)`;
   lines.push(`  return { interface: ${name}, create: (...state) => ${make} };`);
+  lines.push(`}`);
+  return lines.join('\n');
+}
+
+// An installed interface: its members generated in a class of their own, then put on the prototype of the hand-written
+// class (`iface`) that makes its objects — their names, lengths and conversions IDL's, enumerable; the interface
+// object's `length` its constructor's required arguments; its class string and @@unscopables.
+function installInterface(def, { body, checks, unscopables, constructor }) {
+  const name = def.name;
+  const length = constructor ? constructor.arguments.filter((a) => !a.optional && !a.variadic).length : 0;
+  const lines = [];
+  lines.push(`// interface ${name}${def.inheritance ? ` : ${def.inheritance}` : ''} (${def.spec}), installed on the class that makes its objects`);
+  lines.push(`export function install${name}(iface, impl) {`);
+  lines.push(`  const IS_SELF = interfaceCheck('${name}');`);
+  for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
+  lines.push(`  class Members {`);
+  lines.push(...body);
+  lines.push(`  }`);
+  lines.push(`  installMembers(iface.prototype, Members.prototype);`);
+  lines.push(`  defineLength(iface, ${length});`);
+  lines.push(`  defineClassString(iface.prototype, '${name}');`);
+  if (unscopables.length) lines.push(`  defineUnscopables(iface.prototype, ${JSON.stringify(unscopables)});`);
   lines.push(`}`);
   return lines.join('\n');
 }
@@ -220,7 +293,7 @@ function argName(a) {
 
 // An operation: its required arguments its parameters (so its `length` is their count, Web IDL §3.7.7), the optional
 // ones read from `arguments`, a variadic one the rest — each converted, and handed to the implementation.
-function operation(iface, m, checks) {
+function operation(iface, m, checks, self) {
   const args = m.arguments;
   const requiredCount = args.filter((a) => !a.optional && !a.variadic).length;
   if (args.some((a, i) => (a.optional || a.variadic) && i < requiredCount)) throw new Error(`${iface}.${m.name}: a required argument after an optional one`);
@@ -237,9 +310,8 @@ function operation(iface, m, checks) {
     return conversion(a.idlType, argName(a), where, checks, a.extAttrs);
   });
   // (…`this` checked first, then the arguments counted — Web IDL's order, as Chrome's)
-  const self = `const self = thisOf(this, KEY); `;
   const check = requiredCount ? `required(arguments, ${requiredCount}, '${m.name}', '${iface}'); ` : '';
-  return `${m.name}(${params}) { ${self}${check}return impl.${m.name}(${['self', ...converted].join(', ')}); }`;
+  return `${m.name}(${params}) { const self = ${self}; ${check}return impl.${m.name}(${['self', ...converted].join(', ')}); }`;
 }
 
 function defaultValue(d, where) {
@@ -256,7 +328,7 @@ function defaultValue(d, where) {
 // its constants on it — and the call of its operation on a user object, its result converted to the operation's type.
 function generateCallbackInterface(def) {
   const name = def.name;
-  checkDefinition(def);
+  membersOf(def);
   const constants = [], operations = [];
   for (const m of def.members) {
     const label = `${name}.${m.name || m.type}`;
@@ -296,11 +368,11 @@ function wrap(names) {
 }
 
 const parts = [];
-for (const [spec, name] of INTERFACES) {
+for (const [spec, name, options] of INTERFACES) {
   const def = (all[spec] || []).find((d) => (d.type === 'interface' || d.type === 'callback interface') && d.name === name && !d.partial);
   if (!def) throw new Error(`${spec}: no interface ${name}`);
   def.spec = spec;
-  parts.push(def.type === 'interface' ? generateInterface(def) : generateCallbackInterface(def));
+  parts.push(def.type === 'interface' ? generateInterface(def, options) : generateCallbackInterface(def));
 }
 const source = `// GENERATED by script/gen_bindings.mjs from @webref/idl — do not edit; run \`node script/gen_bindings.mjs\`.
 // The bindings of the interfaces the driver implements: what Web IDL says of each, its implementation handed the

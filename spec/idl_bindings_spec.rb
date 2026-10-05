@@ -76,6 +76,42 @@ RSpec.describe 'IDL bindings' do
     expect(outcome('document.createTreeWalker(document.body) instanceof TreeWalker')).to be(true)
   end
 
+  # An interface whose objects a hand-written class makes has its members generated onto that class's prototype —
+  # CharacterData, Text and Comment, with the ChildNode / NonDocumentTypeChildNode / Slottable mixins they include.
+  it "installs an interface's members on the class that makes its objects" do
+    got = outcome(<<~JS)
+      (() => {
+        const thrown = (f) => { try { f(); return 'no'; } catch (e) { return e.message; } };
+        return [
+          Object.getOwnPropertyDescriptor(CharacterData.prototype, 'appendData').enumerable,
+          Object.getOwnPropertyDescriptor(CharacterData.prototype, 'data').enumerable,
+          thrown(() => Object.getOwnPropertyDescriptor(CharacterData.prototype, 'data').get.call(document.body)),
+          thrown(() => Text.prototype.splitText.call(document.createComment('ab'), 1)),
+          [CharacterData.length, Text.length, Comment.length, CharacterData.prototype.substringData.length, CharacterData.prototype.before.length],
+          Object.keys(CharacterData.prototype[Symbol.unscopables]).sort(),
+          Object.getPrototypeOf(CharacterData.prototype[Symbol.unscopables])
+        ];
+      })()
+    JS
+    expect(got).to eq([true, true, 'Illegal invocation', 'Illegal invocation', [0, 0, 0, 2, 0], %w[after before remove replaceWith], nil])
+  end
+
+  it "converts an installed member's arguments as IDL says" do
+    got = outcome(<<~JS)
+      (() => {
+        const p = document.createElement('p');
+        const t = p.appendChild(document.createTextNode('t'));
+        t.before('s', document.createComment('c'));
+        const n = document.createTextNode('a');
+        n.data = null;
+        let few;
+        try { n.substringData(1); } catch (e) { few = e.message; }
+        return [[...p.childNodes].map((c) => c.nodeName + ':' + c.data), n.data, few];
+      })()
+    JS
+    expect(got).to eq([['#text:s', '#comment:c', '#text:t'], '', "Failed to execute 'substringData' on 'CharacterData': 2 arguments required, but only 1 present."])
+  end
+
   it "makes a callback interface's object a function with its constants but no constructor" do
     expect(outcome('[typeof NodeFilter, "prototype" in NodeFilter, NodeFilter.name, NodeFilter.length]')).to eq(['function', false, 'NodeFilter', 0])
     expect(outcome('new NodeFilter()')).to eq('TypeError: NodeFilter is not a constructor')
