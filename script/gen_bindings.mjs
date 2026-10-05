@@ -37,12 +37,30 @@ const INTERFACES = [
   ['dom', 'ProcessingInstruction', { install: true }],
   ['dom', 'DocumentType', { install: true }],
   ['dom', 'Attr', { install: true }],
-  ['dom', 'DocumentFragment', { install: true }]
+  ['dom', 'DocumentFragment', { install: true }],
+  ['dom', 'Element', {
+    install: true,
+    omit: {
+      'container-timing': 'containertiming / containertimingIgnore: Container Timing is not implemented',
+      'css-nav': 'spatial navigation is not implemented',
+      'css-pseudo': 'pseudo(): CSSPseudoElement is not implemented',
+      'css-typed-om': 'computedStyleMap(): the Typed OM is not implemented',
+      'css-view-transitions': 'startViewTransition / activeViewTransition: View Transitions are not implemented',
+      'element-timing': 'elementTiming: Element Timing is not implemented',
+      pointerlock: 'requestPointerLock: Pointer Lock is not implemented',
+      'sanitizer-api': 'setHTML: the Sanitizer API is not implemented',
+      Region: 'regionOverset / getRegionFlowRanges: CSS Regions are not implemented',
+      GeometryUtils: 'getBoxQuads / convert*FromNode (cssom-view) are not implemented',
+      ARIANotifyMixin: 'ariaNotify: no accessibility tree to announce to',
+      currentCSSZoom: 'the effective zoom is not computed',
+      requestFullscreen: 'no fullscreen'
+    }
+  }]
 ];
 
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
-  'PLATFORM', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
+  'PLATFORM', 'rejectedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toLong', 'toDouble',
   'toUnrestrictedDouble', 'toSequence', 'toObject', 'toInterface', 'toCallbackInterface', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineClassString', 'enumerable', 'installMembers',
@@ -136,7 +154,9 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
     case 'object': c = `toObject(${expr}, ${conversionError(where, 'object')})`; break;
     default: {
       const def = definitions.get(t.idlType);
-      if (def && def.type === 'interface') {
+      if (ABSENT_INTERFACES.has(t.idlType)) {
+        c = `(() => { throw new TypeError(${conversionError(where, t.idlType)}); })()`;
+      } else if (def && def.type === 'interface') {
         checks.add(t.idlType);
         c = `toInterface(${expr}, IS_${t.idlType}, ${conversionError(where, t.idlType)})`;
       } else if (def && def.type === 'callback interface') {
@@ -156,8 +176,11 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
 }
 
 // Interfaces of specs no implementation here answers, which no value is an object of — a union member of one is
-// none (Trusted Types: with no policy, the string a page passes is what the API takes).
-const ABSENT_INTERFACES = new Set(['TrustedHTML', 'TrustedScript', 'TrustedScriptURL']);
+// none (Trusted Types: with no policy, the string a page passes is what the API takes), a dictionary member of one
+// no member, and anything else converted to one no such object: the Typed OM's values, Animation Triggers'.
+const ABSENT_INTERFACES = new Set([
+  'TrustedHTML', 'TrustedScript', 'TrustedScriptURL', 'CSSNumericValue', 'CSSKeywordValue', 'AnimationTrigger'
+]);
 
 // The type `t` names `u` as: `u`, with `t`'s extended attributes besides its own and nullable if either is. (Its
 // fields read off it: webidl2's types answer them by getters, which a spread would drop.)
@@ -238,8 +261,10 @@ function dictionaryConverter(name) {
   lines.push(`  if (v !== undefined && v !== null && typeof v !== 'object' && typeof v !== 'function') throw new TypeError(prefix + ${JSON.stringify(`The provided value is not of type '${name}'.`)});`);
   lines.push(`  const dict = {};`);
   for (const d of chain) {
-    // (…its partials' members among its own)
-    const members = [...d.members, ...(additions.get(d.name) || []).flatMap((a) => a.def.members)];
+    // (…its partials' members among its own — but one whose type is an interface no implementation here answers, which is
+    // no member here: `{trigger: x}` ignored, as in a browser without Animation Triggers)
+    const members = [...d.members, ...(additions.get(d.name) || []).flatMap((a) => a.def.members)]
+      .filter((m) => !(!m.idlType.union && ABSENT_INTERFACES.has(m.idlType.idlType)));
     for (const m of members.sort((a, b) => (a.name < b.name ? -1 : 1))) {
       const where = { dictionary: d.name, member: m.name };
       lines.push(`  {`);
@@ -300,7 +325,12 @@ function generateInterface(def, options = {}) {
   const members = [], constants = [], body = [], checks = new Set(), unscopables = [], handlers = [];
   // (…`this` checked: by its brand where the binding makes the object, by the test its class registered where it is
   // installed on that class)
-  const self = options.install ? 'thisIs(this, IS_SELF)' : 'thisOf(this, KEY)';
+  // (…`prefix` the message's, for an operation whose TypeError becomes its promise's rejection)
+  const selfCheck = (prefix) => {
+    const message = prefix ? `, ${JSON.stringify(prefix)}` : '';
+    return options.install ? `thisIs(this, IS_SELF${message})` : `thisOf(this, KEY${message})`;
+  };
+  const self = selfCheck();
   let indexed = null, valueIterator = false, stringifier = null, constructor = null;
   const memberList = membersOf(def, options.omit);
   for (const m of memberList) {
@@ -351,7 +381,7 @@ function generateInterface(def, options = {}) {
       if (members.includes(m.name)) continue;
       members.push(m.name);
       const group = memberList.filter((o) => o.type === 'operation' && o.name === m.name);
-      body.push(`    ${group.length > 1 ? overloadedOperation(name, group, checks, self) : operation(name, m, checks, self)}`);
+      body.push(`    ${group.length > 1 ? overloadedOperation(name, group, checks, selfCheck) : operation(name, m, checks, selfCheck)}`);
       continue;
     }
     throw new Error(`${label}: a ${m.type} member is not generated yet`);
@@ -450,7 +480,7 @@ function argName(a) {
 
 // An operation: its required arguments its parameters (so its `length` is their count, Web IDL §3.7.7), the optional
 // ones read from `arguments`, a variadic one the rest — each converted, and handed to the implementation.
-function operation(iface, m, checks, self) {
+function operation(iface, m, checks, selfCheck) {
   const args = m.arguments;
   const requiredCount = args.filter((a) => !a.optional && !a.variadic).length;
   if (args.some((a, i) => (a.optional || a.variadic) && i < requiredCount)) throw new Error(`${iface}.${m.name}: a required argument after an optional one`);
@@ -459,8 +489,14 @@ function operation(iface, m, checks, self) {
   const converted = convertArguments(iface, m, checks, (a) => (a.variadic || !a.optional ? argName(a) : null));
   // (…`this` checked first, then the arguments counted — Web IDL's order, as Chrome's)
   const check = requiredCount ? `required(arguments, ${requiredCount}, '${m.name}', '${iface}'); ` : '';
-  return `${m.name}(${params}) { const self = ${self}; ${check}return impl.${m.name}(${['self', ...converted].join(', ')}); }`;
+  const steps = `const self = ${selfCheck(promiseOf(m) && `Failed to execute '${m.name}' on '${iface}': `)}; ${check}return impl.${m.name}(${['self', ...converted].join(', ')});`;
+  return `${m.name}(${params}) { ${promiseOf(m) ? rejecting(steps) : steps} }`;
 }
+
+// Whether an operation returns a promise — which every exception its steps throw rejects instead, `this` and argument
+// conversions' included (Web IDL §3.7.7: "an exception … converted to a rejected promise").
+const promiseOf = (m) => m.idlType && m.idlType.generic === 'Promise';
+const rejecting = (steps) => `try { ${steps} } catch (e) { return rejectedPromise(e); }`;
 
 // Each argument of `m` converted to its type: a required one read as `named(a)` gives it, an optional one from
 // `arguments` (one passed as undefined is one not passed, Web IDL §3.6 — but a dictionary, or one defaulting to `{}`,
@@ -484,8 +520,10 @@ function convertArguments(iface, m, checks, named) {
 // of its own — named for its arguments, `scroll_options` / `scroll_x_y`. Overloads that one count of arguments could
 // call more than one of (told apart by their arguments' types) are not generated yet. Its `length` is the shortest
 // overload's required arguments.
-function overloadedOperation(iface, group, checks, self) {
+function overloadedOperation(iface, group, checks, selfCheck) {
   const name = group[0].name;
+  const promise = group.some(promiseOf);
+  if (promise && !group.every(promiseOf)) throw new Error(`${iface}.${name}: overloads returning a promise and not are not generated`);
   if (group.some((m) => m.arguments.some((a) => a.variadic))) throw new Error(`${iface}.${name}: an overload with a variadic argument is not generated yet`);
   const least = (m) => m.arguments.filter((a) => !a.optional).length;
   const most = Math.max(...group.map((m) => m.arguments.length));
@@ -499,20 +537,21 @@ function overloadedOperation(iface, group, checks, self) {
   const required = least(shortest);
   const params = shortest.arguments.slice(0, required).map(argName).join(', ');
   const implName = (m) => `${name}_${m.arguments.length ? m.arguments.map((a) => a.name).join('_') : 'none'}`;
-  const lines = [`${name}(${params}) {`, `      const self = ${self};`];
-  if (required) lines.push(`      required(arguments, ${required}, '${name}', '${iface}');`);
-  lines.push(`      switch (Math.min(arguments.length, ${most})) {`);
+  const lines = [`const self = ${selfCheck(promise && `Failed to execute '${name}' on '${iface}': `)};`];
+  if (required) lines.push(`required(arguments, ${required}, '${name}', '${iface}');`);
+  lines.push(`switch (Math.min(arguments.length, ${most})) {`);
   for (const [n, m] of cases) {
     const converted = convertArguments(iface, m, checks, () => null);
-    lines.push(`        case ${n}: return impl.${implName(m)}(${['self', ...converted].join(', ')});`);
+    lines.push(`  case ${n}: return impl.${implName(m)}(${['self', ...converted].join(', ')});`);
   }
   // (…a count of arguments no overload takes: Chrome's message)
   if (cases.length < most - required + 1) {
     const arities = `Failed to execute '${name}' on '${iface}': Valid arities are: [${cases.map(([n]) => n).join(', ')}], but `;
-    lines.push(`        default: throw new TypeError(${JSON.stringify(arities)} + arguments.length + ' arguments provided.');`);
+    lines.push(`  default: throw new TypeError(${JSON.stringify(arities)} + arguments.length + ' arguments provided.');`);
   }
-  lines.push(`      }`, `    }`);
-  return lines.join('\n');
+  lines.push(`}`);
+  const body = promise ? ['try {', ...lines.map((l) => `  ${l}`), '} catch (e) {', '  return rejectedPromise(e);', '}'] : lines;
+  return [`${name}(${params}) {`, ...body.map((l) => `      ${l}`), `    }`].join('\n');
 }
 
 function defaultValue(d, where) {

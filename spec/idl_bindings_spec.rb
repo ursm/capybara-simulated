@@ -451,6 +451,93 @@ RSpec.describe 'IDL bindings' do
     expect(got).to eq([true, 'img', true, true])
   end
 
+  # (…Element's members its IDL's: `this` checked, arguments counted and converted — a dictionary's members with
+  # Chrome's messages, an enumeration's values — before its steps; Chrome's answers, measured)
+  it "converts Element's arguments as its IDL says" do
+    got = outcome(<<~JS)
+      (() => {
+        const div = document.getElementById('a');
+        const t = (f) => { try { return JSON.stringify(f()) ?? 'undefined'; } catch (e) { return e.constructor.name + ': ' + e.message; } };
+        return [
+          t(() => Element.prototype.getAttribute.call(document, 'x')),
+          t(() => div.getAttribute()),
+          t(() => document.createElement('div').attachShadow({ mode: 'x' })),
+          t(() => document.createElement('div').attachShadow({})),
+          t(() => document.createElement('div').attachShadow(5)),
+          t(() => [div.toggleAttribute('q', undefined), div.hasAttribute('q')]),
+          t(() => { div.ariaControlsElements = 5; }),
+          t(() => { div.ariaControlsElements = [1]; }),
+          t(() => div.insertAdjacentElement('beforeend', document.createTextNode('x'))),
+          t(() => div.getHTML({ shadowRoots: 5 })),
+          t(() => typeof div.animate([], { trigger: 5 })),
+          [Object.getOwnPropertyDescriptor(Element.prototype, 'id').get.name, Element.prototype.getAttribute.length, Element.prototype.scroll.length]
+        ];
+      })()
+    JS
+    attach = "TypeError: Failed to execute 'attachShadow' on 'Element': "
+    aria = "TypeError: Failed to set the 'ariaControlsElements' property on 'Element': "
+    expect(got).to eq([
+      'TypeError: Illegal invocation',
+      "TypeError: Failed to execute 'getAttribute' on 'Element': 1 argument required, but only 0 present.",
+      "#{attach}Failed to read the 'mode' property from 'ShadowRootInit': The provided value 'x' is not a valid enum value of type ShadowRootMode.",
+      "#{attach}Failed to read the 'mode' property from 'ShadowRootInit': Required member is undefined.",
+      "#{attach}The provided value is not of type 'ShadowRootInit'.",
+      '[true,true]',
+      "#{aria}The provided value cannot be converted to a sequence.",
+      "#{aria}Failed to convert value to 'Element'.",
+      "TypeError: Failed to execute 'insertAdjacentElement' on 'Element': parameter 2 is not of type 'Element'.",
+      "TypeError: Failed to execute 'getHTML' on 'Element': Failed to read the 'shadowRoots' property from 'GetHTMLOptions': The provided value cannot be converted to a sequence.",
+      '"object"',
+      ['get id', 1, 0]
+    ])
+  end
+
+  # (…a scroll is a promise of its completion, and what its steps throw — `this`, a conversion — its rejection)
+  it "makes Element's and the window's scrolls promises" do
+    got = outcome(<<~JS)
+      (() => {
+        const div = document.getElementById('a');
+        window.rejections = [];
+        const promises = [div.scrollIntoView(), div.scrollTo(0, 0), div.scrollBy({}), div.scroll(), window.scrollTo(0, 0),
+                          Element.prototype.scrollIntoView.call({}), div.scrollIntoView({ block: 'bogus' })];
+        promises.slice(5).forEach((p) => p.catch((e) => rejections.push(e.message)));
+        return promises.map((p) => p instanceof Promise);
+      })()
+    JS
+    expect(got).to eq([true] * 7)
+    expect(session.evaluate_script('rejections')).to eq([
+      "Failed to execute 'scrollIntoView' on 'Element': Illegal invocation",
+      "Failed to execute 'scrollIntoView' on 'Element': Failed to read the 'block' property from 'ScrollIntoViewOptions': The provided value 'bogus' is not a valid enum value of type ScrollLogicalPosition."
+    ])
+  end
+
+  # (…a select's `remove()` and `remove(index)` its own; the fullscreen handlers Element's and Document's, IDL attributes
+  # alone — a shadow root has none; a page's own `setAttribute` not what an attribute's steps call)
+  it "gives a select its own remove, the fullscreen handlers their owners, the steps their own attribute writes" do
+    got = outcome(<<~JS)
+      (() => {
+        const select = document.createElement('select');
+        select.innerHTML = '<option>1<option>2<option>3';
+        select.remove(0);
+        select.remove('1');
+        const div = document.getElementById('a');
+        const removed = (() => { try { HTMLSelectElement.prototype.remove.call(div); } catch (e) { return e.message; } })();
+        const input = document.createElement('input');
+        input.value = 'kept';
+        const own = Element.prototype.setAttribute;
+        Element.prototype.setAttribute = () => { throw new Error('a page setAttribute'); };
+        try { input.type = 'radio'; } finally { Element.prototype.setAttribute = own; }
+        return [
+          [HTMLSelectElement.prototype.remove.length, select.options.length, removed],
+          ['onfullscreenchange' in div, 'onfullscreenchange' in document, 'onfullscreenchange' in document.createElement('div').attachShadow({ mode: 'open' }),
+           Object.hasOwn(Element.prototype, 'onfullscreenchange')],
+          input.getAttribute('value')
+        ];
+      })()
+    JS
+    expect(got).to eq([[0, 1, 'Illegal invocation'], [true, true, false, true], 'kept'])
+  end
+
   # (…the document element among them, and a name compared as it is, not as a selector)
   it "finds a document's elements by name, its root too" do
     got = outcome(<<~JS)
