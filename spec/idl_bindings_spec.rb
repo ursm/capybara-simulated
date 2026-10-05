@@ -615,6 +615,33 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  # (…ShadowRoot's members its IDL's: `onslotchange` its one handler, getHTML's options and setHTMLUnsafe's markup
+  # converted as Element's are, Chrome's legacy hit tests kept; Chrome's answers)
+  it "installs ShadowRoot's members as its IDL says" do
+    got = outcome(<<~JS)
+      (() => {
+        const t = (f) => { try { return JSON.stringify(f()) ?? 'undefined'; } catch (e) { return e.name + ': ' + e.message; } };
+        const root = document.getElementById('a').attachShadow({ mode: 'open' });
+        return [
+          ['onclick' in root, 'onslotchange' in root, Object.hasOwn(ShadowRoot.prototype, 'onslotchange')],
+          t(() => root.getHTML(5)),
+          t(() => { root.setHTMLUnsafe(null); return root.innerHTML; }),
+          t(() => { root.innerHTML = null; return root.innerHTML; }),
+          t(() => Object.getOwnPropertyDescriptor(ShadowRoot.prototype, 'host').get.call(document.createDocumentFragment())),
+          [Object.getOwnPropertyDescriptor(ShadowRoot.prototype, 'mode').get.name, ShadowRoot.prototype.getHTML.length, ShadowRoot.prototype.setHTMLUnsafe.length],
+          [typeof root.elementFromPoint, typeof root.getSelection],
+          t(() => { root.fullscreenElement = 5; return root.fullscreenElement; })
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      [false, true, true],
+      "TypeError: Failed to execute 'getHTML' on 'ShadowRoot': The provided value is not of type 'GetHTMLOptions'.",
+      '"null"', '""', 'TypeError: Illegal invocation',
+      ['get mode', 0, 1], %w[function function], 'null'
+    ])
+  end
+
   # (…the document element among them, and a name compared as it is, not as a selector)
   it "finds a document's elements by name, its root too" do
     got = outcome(<<~JS)

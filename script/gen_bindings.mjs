@@ -85,7 +85,8 @@ const INTERFACES = [
       pictureInPictureEnabled: 'no Picture-in-Picture',
       prerendering: 'no prerendering'
     }
-  }]
+  }],
+  ['dom', 'ShadowRoot', { install: true, omit: { 'sanitizer-api': 'setHTML: the Sanitizer API is not implemented' } }]
 ];
 
 // What the generated code imports from the runtime (webidl.js).

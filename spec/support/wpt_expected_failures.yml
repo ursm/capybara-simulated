@@ -2311,8 +2311,6 @@ css/cssom/idlharness.html:
 - 'MediaList interface: stringifier'
 - 'SVGElement interface: attribute style'
 - 'SVGStyleElement interface: attribute sheet'
-- 'ShadowRoot interface: attribute adoptedStyleSheets'
-- 'ShadowRoot interface: attribute styleSheets'
 - Stringification of document.styleSheets
 - Stringification of getComputedStyle(svg_element)
 - Stringification of sheet.cssRules
@@ -3097,15 +3095,7 @@ dom/idlharness.any.js:
 - 'Range interface: operation setStartBefore(Node)'
 - 'Range interface: operation surroundContents(Node)'
 - 'Range interface: stringifier'
-- ShadowRoot interface object length
-- 'ShadowRoot interface: attribute clonable'
-- 'ShadowRoot interface: attribute customElementRegistry'
-- 'ShadowRoot interface: attribute delegatesFocus'
-- 'ShadowRoot interface: attribute host'
-- 'ShadowRoot interface: attribute mode'
 - 'ShadowRoot interface: attribute onslotchange'
-- 'ShadowRoot interface: attribute serializable'
-- 'ShadowRoot interface: attribute slotAssignment'
 - 'StaticRange interface: existence and properties of interface object'
 - 'StaticRange interface: existence and properties of interface prototype object'
 - Stringification of new AbortController()
@@ -3461,16 +3451,8 @@ dom/idlharness.window.js:
 - 'Range interface: operation setStartBefore(Node)'
 - 'Range interface: operation surroundContents(Node)'
 - 'Range interface: stringifier'
-- ShadowRoot interface object length
-- 'ShadowRoot interface: attribute clonable'
-- 'ShadowRoot interface: attribute customElementRegistry'
-- 'ShadowRoot interface: attribute delegatesFocus'
 - 'ShadowRoot interface: attribute fullscreenElement'
-- 'ShadowRoot interface: attribute host'
-- 'ShadowRoot interface: attribute mode'
 - 'ShadowRoot interface: attribute onslotchange'
-- 'ShadowRoot interface: attribute serializable'
-- 'ShadowRoot interface: attribute slotAssignment'
 - 'StaticRange interface: existence and properties of interface object'
 - 'StaticRange interface: existence and properties of interface prototype object'
 - Stringification of detachedRange
@@ -6361,12 +6343,7 @@ html/dom/idlharness.any.js:
 - 'Sanitizer interface: operation replaceElementWithChildren(SanitizerElement)'
 - 'Sanitizer interface: operation setComments(boolean)'
 - 'Sanitizer interface: operation setDataAttributes(boolean)'
-- 'ShadowRoot interface: attribute activeElement'
-- 'ShadowRoot interface: attribute innerHTML'
-- 'ShadowRoot interface: operation getHTML(optional GetHTMLOptions)'
 - 'ShadowRoot interface: operation setHTML(DOMString, optional SetHTMLOptions)'
-- 'ShadowRoot interface: operation setHTMLUnsafe((TrustedHTML or DOMString), optional
-  SetHTMLUnsafeOptions)'
 - SharedWorker interface object length
 - SharedWorker interface object name
 - 'SharedWorker interface: attribute onerror'
@@ -9092,12 +9069,7 @@ html/dom/idlharness.https.html:
 - 'Sanitizer interface: operation replaceElementWithChildren(SanitizerElement)'
 - 'Sanitizer interface: operation setComments(boolean)'
 - 'Sanitizer interface: operation setDataAttributes(boolean)'
-- 'ShadowRoot interface: attribute activeElement'
-- 'ShadowRoot interface: attribute innerHTML'
-- 'ShadowRoot interface: operation getHTML(optional GetHTMLOptions)'
 - 'ShadowRoot interface: operation setHTML(DOMString, optional SetHTMLOptions)'
-- 'ShadowRoot interface: operation setHTMLUnsafe((TrustedHTML or DOMString), optional
-  SetHTMLUnsafeOptions)'
 - SharedWorker interface object length
 - 'SharedWorker interface: attribute onerror'
 - 'SharedWorker interface: attribute port'
@@ -12299,7 +12271,6 @@ web-animations/idlharness.window.js:
 - 'SequenceEffect interface: existence and properties of interface prototype object''s
   @@unscopables property'
 - 'SequenceEffect interface: operation clone()'
-- 'ShadowRoot interface: operation getAnimations()'
 web-animations/interfaces/Animatable/animate-no-browsing-context.html:
 - Element.animate() creates an animation with the correct timeline when called on
   an element in a document without a browsing context
