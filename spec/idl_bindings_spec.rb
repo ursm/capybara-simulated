@@ -402,7 +402,7 @@ RSpec.describe 'IDL bindings' do
   end
 
   # (…HTMLMediaElement's members its own, a track's `readyState` HTMLTrackElement's: named as Chrome names them, each
-  # checking its `this` — a promise rejected, not thrown)
+  # checking its `this` — a promise rejected, not thrown; `canPlayType` Chrome's answers, audio's too)
   it "puts the media elements' members on their interfaces" do
     got = outcome(<<~JS)
       (() => {
@@ -416,14 +416,20 @@ RSpec.describe 'IDL bindings' do
           [get(HTMLMediaElement, 'paused').name, Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'volume').set.name, HTMLMediaElement.prototype.play.name],
           illegal(() => get(HTMLTrackElement, 'readyState').call(new Audio())),
           illegal(() => get(HTMLMediaElement, 'readyState').call(document.createElement('track'))),
-          [document.createElement('track').readyState, HTMLTrackElement.LOADED]
+          [document.createElement('track').readyState, HTMLTrackElement.LOADED],
+          [['autoplay', 'loop', 'controls', 'playsInline'].map(own), get(HTMLMediaElement, 'autoplay').name, 'loop' in document.body],
+          illegal(() => get(HTMLMediaElement, 'controls').call(document.body)),
+          ['audio/mpeg', 'audio/ogg', 'audio/ogg; codecs="opus"', 'audio/wave', 'video/webm'].map((t) => new Audio().canPlayType(t))
         ];
       })()
     JS
     expect(got).to eq([
       ['HTMLMediaElement+HTMLTrackElement', 'HTMLMediaElement', 'HTMLVideoElement'],
       ['get paused', 'set volume', 'play'],
-      'Illegal invocation', 'Illegal invocation', [0, 2]
+      'Illegal invocation', 'Illegal invocation', [0, 2],
+      [%w[HTMLMediaElement HTMLMediaElement HTMLMediaElement HTMLVideoElement], 'get autoplay', false],
+      'Illegal invocation',
+      %w[probably maybe probably] + ['', 'maybe']
     ])
     expect(session.evaluate_async_script('played.then(arguments[0])')).to eq("Failed to execute 'play' on 'HTMLMediaElement': Illegal invocation")
   end

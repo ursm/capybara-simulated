@@ -1579,9 +1579,9 @@ module Capybara
         # attached-fn cross-thread round-trip.
         c.eval_void("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
         # Register the bridge's recorder for V8's promise-reject notifications
-        # — the channel that surfaces rejections NO handler ever sees
-        # (fire-and-forget async functions, bare `Promise.reject`); the
-        # bridge's `.then`-wrap can't observe those. Post-snapshot: the host
+        # — the one channel that surfaces rejections no handler sees by the
+        # checkpoint (fire-and-forget async functions, bare `Promise.reject`,
+        # a throwing `then` callback with nothing downstream). Post-snapshot: the host
         # namespace doesn't exist while the snapshot is built, which is why
         # unhandled-rejection.js leaves registration to us. Main realm only —
         # the recorder routes per-realm via `contextGlobal` itself, and a

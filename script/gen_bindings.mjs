@@ -330,8 +330,8 @@ function generateInterface(def, options = {}) {
         body.push(`    set ${m.name}(v) { const object = impl.get_${m.name}(${self}); object.${target} = v; }`);
       } else if (!m.readonly && enums.has(m.idlType.idlType)) {
         // (…an enumeration's: a string it has not is ignored, not an error — Web IDL §3.7.6)
-        const values = JSON.stringify(enums.get(m.idlType.idlType));
-        const v = m.idlType.nullable ? `v === null ? null : enumValue(v, ${values})` : `enumValue(v, ${values})`;
+        const value = `enumValue(v, ${JSON.stringify(enums.get(m.idlType.idlType))}, ${failure({ iface: name, member: m.name })})`;
+        const v = m.idlType.nullable ? `v == null ? null : ${value}` : value;
         body.push(`    set ${m.name}(v) { const self = ${self}; const value = ${v}; if (value !== undefined) impl.set_${m.name}(self, value); }`);
       } else if (!m.readonly) {
         const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
