@@ -147,7 +147,7 @@ pub(crate) struct NodeData {
     // …or, for an INLINE box, which no record lays out, the FRAGMENTS the lines broke it into, `[x, y, w, h]` each
     // (`geometry::store_layout`); None for any other node. A node has one or the other, as the last pass laid it out.
     pub(crate) layout_frags: Option<Box<[[f64; 4]]>>,
-    // The layout pass (`RealmArena::layout_pass`) that last laid it out: its box or fragments are the page's only while
+    // The layout pass (`RealmState::layout_pass`) that last laid it out: its box or fragments are the page's only while
     // this is the current one (`geometry::laid`).
     pub(crate) laid_at: u64,
     // …and, for an OUT-OF-FLOW box, the element whose box it was placed against (None: the viewport, or a box in flow).
@@ -171,8 +171,10 @@ pub(crate) struct NodeData {
     pub(crate) manual_assigned: Vec<NodeId>,
     // The node's handle on the C++ heap (node_handle.rs), whose tree edges the slot's are written into.
     pub(crate) link: crate::node_handle::Link,
-    // The realm that made it — whose page load frees it (`RealmArena::reset`).
+    // The realm whose tree it is in (the one that made it, until it joins another's: `RealmArena::adopt`), and its index
+    // in that realm's list of nodes (`RealmArena::realm_nodes`).
     pub(crate) realm: i32,
+    pub(crate) realm_pos: u32,
     // A slot's assigned nodes, in tree order, and a slotted node's slot: the flat tree the style engine walks.
     pub(crate) assigned: Vec<NodeId>,
     pub(crate) assigned_slot: Option<NodeId>,
@@ -271,6 +273,7 @@ impl NodeData {
             template_content: None,
             template_host: None,
             realm: 0,
+            realm_pos: 0,
             is_value: None,
             value: None,
             natural_size: None,
@@ -465,6 +468,9 @@ pub(crate) struct RealmArena {
     state: RealmState,
     parked: std::collections::HashMap<i32, RealmState>,
     dropped: std::collections::HashSet<i32>,
+    // Each realm's nodes, by slot index: what a realm's style engine walks (`element_ids`) and a new context or
+    // `dropRealm` frees, in the realm's size rather than the isolate's.
+    realm_nodes: std::collections::HashMap<i32, Vec<u32>>,
     // Whether any shadow root has a host — `:focus` walks out of shadow trees only then.
     pub(crate) has_shadow_hosts: bool,
     // The form the HTML parser's form element pointer gave a control it inserted (`<table><form>…<input>`: the form
@@ -474,9 +480,6 @@ pub(crate) struct RealmArena {
     custom_states: std::collections::HashMap<NodeId, Vec<String>>,
     // Moves with every write to the arena (a node made or freed, any `get_mut`): what a memo of it keys on.
     pub(crate) mutations: u64,
-    // Moves with every write that can change an element's STATE (`:checked`, `:focus`, `:valid`, `:default`, …): a
-    // state write, a value, a tree change (form owners, radio groups, fieldsets), an attribute a state reads.
-    pub(crate) state_epoch: u64,
     // The lock the style engines' rules and every element's parsed declarations are read under — ONE for the isolate's
     // life, as a block parsed under one lock can never be read under another, and an element keeps its `style` block
     // into another realm's tree.
@@ -493,11 +496,17 @@ pub(crate) struct RealmArena {
     // (`NodeData::stamp`), so a stamp past the epoch a walk began at is a change since that walk — one clock for every
     // realm's walks, as a node carries its stamp into another realm's tree.
     pub(crate) layout_epoch: std::cell::Cell<u64>,
+    // The layouts begun, every realm's: what numbers each (`RealmState::layout_pass`), so one realm's never equals
+    // another's — a node carries its `laid_at` into another realm's tree.
+    layouts: u64,
 }
 
 // A realm's own state (`RealmArena`): its document's.
 #[derive(Default)]
 pub(crate) struct RealmState {
+    // Moves with every write to the realm's nodes that can change an element's STATE (`:checked`, `:focus`, `:valid`, `:default`, …): a
+    // state write, a value, a tree change (form owners, radio groups, fieldsets), an attribute a state reads.
+    pub(crate) state_epoch: u64,
     // The realm document's focused and hovered element — the one carrying STATE_FOCUSED / STATE_HOVERED — from which
     // `:focus-within` and `:hover` walk up.
     pub(crate) focus: Option<NodeId>,
@@ -521,7 +530,8 @@ pub(crate) struct RealmState {
     // geometry (geometry.rs) reads every box of that layout in.
     pub(crate) layout_root: Option<NodeId>,
     pub(crate) viewport: [f64; 2],
-    // …and which layout that is, counted from 1: a node laid out by an earlier one has no box in this one.
+    // …and which layout that is (numbered across every realm's: `RealmArena::layouts`): a node laid out by an earlier one
+    // has no box in this one.
     pub(crate) layout_pass: u64,
     // Moves with anything a geometry read reads (`boxes_moved`, `scrolled`): what its memo is kept against (`geometry::Memo`) —
     // and `boxes_epoch` with all of it but a scroll, which moves no box: what the parts of it no scroll offset enters are.
@@ -551,11 +561,11 @@ impl RealmArena {
     // The arena with realm `cid`'s state the one it holds (made afresh for a realm it has not seen).
     pub(crate) fn enter(&mut self, cid: i32) -> &mut RealmArena {
         if cid != self.cur {
-            let left = std::mem::take(&mut self.state);
+            let incoming = self.parked.remove(&cid).unwrap_or_default();
+            let left = std::mem::replace(&mut self.state, incoming);
             if !self.dropped.contains(&self.cur) {
                 self.parked.insert(self.cur, left);
             }
-            self.state = self.parked.remove(&cid).unwrap_or_default();
             self.cur = cid;
         }
         self
@@ -571,20 +581,40 @@ impl RealmArena {
         let cur = self.cur;
         let mut stack = vec![id];
         while let Some(n) = stack.pop() {
-            let Some(node) = self.get_mut_quietly(n) else { continue };
-            node.realm = cur;
+            let Some(node) = self.get(n) else { continue };
+            if node.realm != cur {
+                self.unlist(n.idx);
+                let list = self.realm_nodes.entry(cur).or_default();
+                let pos = list.len() as u32;
+                list.push(n.idx);
+                let node = self.get_mut_quietly(n).expect("a live node");
+                node.realm = cur;
+                node.realm_pos = pos;
+            }
+            let node = self.get(n).expect("a live node");
             stack.extend(node.children.iter().copied());
             stack.extend(node.shadow_root.into_iter().chain(node.template_content).chain(node.pseudo_boxes.into_iter().flatten()));
         }
     }
     // A new context is realm `cid`: whatever an earlier context of that id made is unreachable, and its state with it.
     pub(crate) fn realm_begins(&mut self, cid: i32) {
-        if cid == self.cur {
-            self.state = RealmState::default();
-        } else if self.parked.remove(&cid).is_none() {
+        if cid != self.cur && !self.parked.contains_key(&cid) {
             return;
         }
+        self.enter(cid);
+        // (…afresh, but its faces table and sheet store in place: the realm's style engine, which outlives the context,
+        // holds the one, and the ids the other hands out are never to be handed out again — a late drop of the old
+        // context's sheet would free the new page's)
+        let RealmState { faces, mut sheets, state_epoch, .. } = std::mem::take(&mut self.state);
+        sheets.reset();
+        faces.with(|f| *f = Default::default());
+        self.state = RealmState { faces, sheets, state_epoch: state_epoch + 1, ..RealmState::default() };
         self.free_realm_nodes(cid);
+        // (…and what the isolate latched for any realm's page, where this is the only realm left)
+        if self.parked.is_empty() {
+            self.has_shadow_hosts = false;
+            self.direction_sources = false;
+        }
     }
     pub(crate) fn is_dropped(&self, cid: i32) -> bool {
         self.dropped.contains(&cid)
@@ -601,14 +631,12 @@ impl RealmArena {
     // Free every node realm `cid` made.
     fn free_realm_nodes(&mut self, cid: i32) {
         self.mutations += 1;
-        for idx in 0..self.slots.len() {
-            let slot = &mut self.slots[idx];
-            if slot.data.as_ref().is_some_and(|n| n.realm == cid) {
-                slot.data = None;
-                if slot.generation < GEN_MAX {
-                    slot.generation += 1;
-                    self.free.push(idx as u32);
-                }
+        for idx in self.realm_nodes.remove(&cid).unwrap_or_default() {
+            let slot = &mut self.slots[idx as usize];
+            slot.data = None;
+            if slot.generation < GEN_MAX {
+                slot.generation += 1;
+                self.free.push(idx);
             }
         }
         // (…and what the arena kept of them by their ids)
@@ -656,7 +684,8 @@ impl RealmArena {
     pub(crate) fn begin_layout(&mut self, root: NodeId, viewport: [f64; 2]) {
         self.layout_root = Some(root);
         self.viewport = viewport;
-        self.layout_pass += 1;
+        self.layouts += 1;
+        self.state.layout_pass = self.layouts;
         self.boxes_moved();
     }
     // The start of a layout walk: the epoch it walks at, the clock moved on past it.
@@ -695,10 +724,14 @@ impl RealmArena {
 
     // Put `data` in a free slot (reusing a recycled index when one is listed, else growing), returning
     // its NodeId at the slot's CURRENT generation. A recycled slot's gen was already bumped at free.
-    fn alloc(&mut self, data: NodeData) -> NodeId {
+    fn alloc(&mut self, mut data: NodeData) -> NodeId {
         self.mutations += 1;
         data.stamp.set(self.layout_epoch.get());
-        if let Some(idx) = self.free.pop() {
+        let list = self.realm_nodes.entry(data.realm).or_default();
+        data.realm_pos = list.len() as u32;
+        let idx = self.free.pop().unwrap_or(self.slots.len() as u32);
+        list.push(idx);
+        if (idx as usize) < self.slots.len() {
             let slot = &mut self.slots[idx as usize];
             slot.data = Some(data);
             NodeId { idx, generation: slot.generation }
@@ -711,6 +744,17 @@ impl RealmArena {
             debug_assert!((idx as i64) <= INDEX_MASK, "arena index overflowed INDEX_BITS ({idx} > {INDEX_MASK})");
             self.slots.push(Slot { generation: 0, data: Some(data) });
             NodeId { idx, generation: 0 }
+        }
+    }
+    // Take slot `idx`'s node out of its realm's list (the last one moved into its place).
+    fn unlist(&mut self, idx: u32) {
+        let Some((realm, pos)) = self.slots[idx as usize].data.as_ref().map(|n| (n.realm, n.realm_pos as usize)) else { return };
+        let Some(list) = self.realm_nodes.get_mut(&realm) else { return };
+        list.swap_remove(pos);
+        if let Some(&moved) = list.get(pos) {
+            if let Some(n) = self.slots[moved as usize].data.as_mut() {
+                n.realm_pos = pos as u32;
+            }
         }
     }
 
@@ -728,6 +772,7 @@ impl RealmArena {
             return;
         }
         self.mutations += 1;
+        self.unlist(id.idx);
         let slot = &mut self.slots[id.idx as usize];
         let (assigned_slot, pseudo_boxes) = slot.data.as_ref().map_or((None, [None; 2]), |n| (n.assigned_slot, n.pseudo_boxes));
         slot.data = None;
@@ -770,9 +815,8 @@ impl RealmArena {
         // (…in place: the style engine holds the same table, and outlives the page)
         self.faces.with(|faces| *faces = Default::default());
         self.mutations += 1;
-        let cur = self.cur;
-        for slot in &mut self.slots {
-            if let Some(node) = slot.data.as_mut().filter(|n| n.realm == cur) {
+        for &i in self.realm_nodes.get(&self.cur).into_iter().flatten() {
+            if let Some(node) = self.slots[i as usize].data.as_mut() {
                 node.style.take();
             }
         }
@@ -1156,11 +1200,12 @@ impl RealmArena {
         }
         None
     }
-    // Every element of the realm, whichever tree it is in.
+    // Every element of the realm it holds the state of, whichever of its trees it is in.
     pub(crate) fn element_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.slots.iter().enumerate().filter_map(|(i, slot)| {
+        self.realm_nodes.get(&self.cur).into_iter().flatten().filter_map(|&i| {
+            let slot = &self.slots[i as usize];
             let node = slot.data.as_ref()?;
-            (node.kind == NodeKind::Element).then_some(NodeId { idx: i as u32, generation: slot.generation })
+            (node.kind == NodeKind::Element).then_some(NodeId { idx: i, generation: slot.generation })
         })
     }
     // An element's style slot, made on first use.

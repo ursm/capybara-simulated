@@ -86,4 +86,64 @@ RSpec.describe 'native arena upkeep' do
     expect(session.evaluate_script("[__dom.inspectNode(__mv._nid) !== null, document.querySelector('#mv b') === __mv.firstChild]")).to eq([true, true])
     expect(session.find(:css, '#mv').text).to eq('xt')
   end
+
+  # A realm's style engine walks the realm's own elements (`RealmArena::element_ids`): a frame's flush once scanned the
+  # whole isolate's, read the main page's states under the frame's focus and `:target` (both none), and wrote that
+  # into the main page's — a `:target` match the main page had was lost to it.
+  it "keeps the main page's states through a frame's style flush" do
+    session = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset=utf-8>
+        <style>#w:focus-within { color: rgb(0, 0, 255) } #t:target { color: rgb(0, 128, 0) }</style>
+        <body><div id=w><input id=i></div><p id=t>t</p>
+      HTML
+    })
+    session.visit '/'
+    session.execute_script(<<~JS)
+      const f = document.createElement('iframe');
+      f.srcdoc = '<style>input:checked { color: red }</style><input type=checkbox id=c><i id=ready></i>';
+      document.body.appendChild(f);
+    JS
+    session.within_frame(0) { session.find('#ready', visible: :all) }
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        getComputedStyle(document.getElementById('w')).color;
+        document.getElementById('i').focus();
+        location.hash = '#t';
+        const fd = document.querySelector('iframe').contentDocument;
+        fd.getElementById('c').checked = true;
+        fd.defaultView.getComputedStyle(fd.getElementById('c')).color;
+        return [getComputedStyle(document.getElementById('w')).color, getComputedStyle(document.getElementById('t')).color];
+      })()
+    JS
+    expect(got).to eq(['rgb(0, 0, 255)', 'rgb(0, 128, 0)'])
+  end
+
+  # A new context of the main realm (every visit) starts its state afresh but keeps its faces table in place: the
+  # realm's style engine outlives the context and reads its font metrics from that table — a new one left it reading
+  # the first visit's faces for good (`1ex` of a serif face a later visit asked for fell back to 0.5em).
+  it "measures a later visit's faces as a first visit does" do
+    pages = {
+      '/a' => '<div id=m style="font-family: monospace; height: 1em">x</div>',
+      '/b' => '<div id=m style="font-family: serif; height: 1ex">x</div>'
+    }
+    app = ->(env) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{pages[env['PATH_INFO']]}"]] }
+    height = ->(s) { s.evaluate_script("document.getElementById('m').getBoundingClientRect().height") }
+    fresh = simulated_session(app)
+    fresh.visit '/b'
+    later = simulated_session(app)
+    later.visit '/a'
+    later.visit '/b'
+    expect(height.(later)).to eq(height.(fresh))
+  end
+
+  # A page loaded into a document in place reuses its `<html>` and `<body>`, whose slots stay theirs: the old page's
+  # attributes are cleared in them.
+  it "clears the reused skeleton's attributes for a page loaded in place" do
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html lang=en data-old=1><body class=old data-x=1>']] })
+    session.visit '/'
+    session.execute_script("__csimLoadDocument('<!DOCTYPE html><html><body><p id=three>3</p>')")
+    got = session.evaluate_script("[document.documentElement.getAttributeNames().join(','), document.body.getAttributeNames().join(','), !!document.querySelector('body.old')]")
+    expect(got).to eq(['', '', false])
+  end
 end
