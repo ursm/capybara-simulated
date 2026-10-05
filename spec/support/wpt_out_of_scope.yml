@@ -41563,13 +41563,6 @@ html/dom/documents/dom-tree-accessors/nameditem-names.html:
     The subtest asserts the opposite, so it matches no real browser; our output (include
     it) matches Chrome. Independent of the named-properties machinery. The other 9
     subtests in this file now PASS."
-html/dom/elements/global-attributes/dataset.html:
-- name: Should not have a .dataset on random elements
-  reason: Requires `"dataset" in foreignNamespaceEl` to be false, but the dataset
-    getter is on the single shared Element.prototype (load-bearing perf choice), so
-    the property exists on every element; making it per-namespace needs a per-instance
-    defineProperty (hot path) and the naive return-undefined gate regresses encoding/utf-32
-    (which relies on `"dataset" in foreignEl` being false). (CLAUDE.md rule 1 bounded-design-cost.)
 html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - name: <audio> contents ignored ("<audio style='display:block'>abc")
   reason: 'The TEST contradicts the spec and both engines: HTML''s UA sheet has `audio:not([controls])
@@ -54628,17 +54621,6 @@ shadow-dom/Document-caretPositionFromPoint.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-shadow-dom/HTMLSlotElement-interface.html:
-- name: HTMLSlotElement must be defined on window
-  reason: The failing assert is Object.getPrototypeOf(HTMLSlotElement.prototype) ===
-    HTMLElement.prototype. 'HTMLSlotElement' in window, the instanceof checks, and
-    member existence all pass — only the per-interface prototype CHAIN differs. By
-    deliberate design (dom-class-aliases.js) every HTML interface ctor shares the
-    single Element.prototype so feature-detection probes ('download' in HTMLAnchorElement.prototype)
-    and Object.getPrototypeOf(el) === HTMLXxxElement.prototype hold uniformly; the
-    spec-accurate chain (HTMLSlotElement.prototype -> HTMLElement.prototype -> Element.prototype)
-    would require per-tag instance prototypes — the same load-bearing collapse as
-    HTMLCollection extends Array (rule 1 bounded gap).
 shadow-dom/accesskey.tentative.html:
 - name: button element with accesskey in the shadow tree of closed mode
   reason: Tentative accesskey activation, driven via testdriver input injection (WebDriver);

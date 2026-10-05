@@ -19,7 +19,7 @@ RSpec.describe 'HTML elements in an XML document' do
         const select = doc.getElementsByTagNameNS('http://www.w3.org/1999/xhtml', 'select')[0];
         const upper = document.createElementNS('http://www.w3.org/1999/xhtml', 'DIV');
         return [form instanceof HTMLFormElement, 'elements' in form, form.elements.length, form.elements[0].localName,
-                select[1] && select[1].textContent, Object.getPrototypeOf(upper) === Element.prototype];
+                select[1] && select[1].textContent, Object.getPrototypeOf(upper) === HTMLUnknownElement.prototype];
       })()
     JS
     expect(got).to eq([true, true, 1, 'input', 'b', true])

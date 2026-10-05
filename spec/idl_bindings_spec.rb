@@ -280,6 +280,56 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  # An element's interface chain is a browser's: its tag's interface, the one that inherits (HTMLMediaElement for audio
+  # and video), HTMLElement / SVGElement / MathMLElement by namespace, Element — each namespace interface's members its
+  # own (Chrome 154).
+  it "chains an element's interfaces as IDL does, each with its own members" do
+    got = outcome(<<~JS)
+      (() => {
+        const chain = (e) => { const c = []; for (let p = Object.getPrototypeOf(e); p && p !== Node.prototype; p = Object.getPrototypeOf(p)) c.push(p); return c; };
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        const math = document.createElementNS('http://www.w3.org/1998/Math/MathML', 'mi');
+        const none = document.createElementNS('urn:x', 'foo');
+        const is = (e, ...ifaces) => { const c = chain(e); return c.length === ifaces.length && ifaces.every((i, k) => c[k] === i.prototype); };
+        return [
+          is(document.createElement('div'), HTMLDivElement, HTMLElement, Element),
+          is(document.createElement('video'), HTMLVideoElement, HTMLMediaElement, HTMLElement, Element),
+          is(document.createElement('section'), HTMLElement, Element),
+          is(document.createElement('foo'), HTMLUnknownElement, HTMLElement, Element),
+          is(document.createElementNS('http://www.w3.org/1999/xhtml', 'DIV'), HTMLUnknownElement, HTMLElement, Element),
+          is(svg, SVGElement, Element), is(math, MathMLElement, Element), is(none, Element),
+          ['click', 'innerText', 'offsetWidth', 'focus', 'style', 'dataset'].map((k) => k in svg),
+          ['focus', 'style', 'onclick'].map((k) => k in none),
+          ['focus', 'click', 'innerText'].map((k) => Object.hasOwn(Element.prototype, k)),
+          [Image.prototype === HTMLImageElement.prototype, Option.prototype === HTMLOptionElement.prototype]
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      true, true, true, true, true, true, true, true,
+      [false, false, false, true, true, true], [false, false, false], [false, false, false], [true, true]
+    ])
+  end
+
+  # (…an attribute adopted is taken from its element first, and each member converting an Attr names itself)
+  it 'adopts an attribute out of its element' do
+    got = outcome(<<~JS)
+      (() => {
+        const thrown = (f) => { try { f(); return 'no'; } catch (e) { return e.message; } };
+        const el = document.createElement('p');
+        el.setAttribute('z', '1');
+        const a = el.getAttributeNode('z');
+        const d2 = document.implementation.createHTMLDocument('');
+        d2.adoptNode(a);
+        return [a.ownerElement, el.hasAttribute('z'), a.ownerDocument === d2,
+                thrown(() => document.body.setAttributeNodeNS()), thrown(() => document.body.attributes.setNamedItem({}))];
+      })()
+    JS
+    expect(got).to eq([nil, false, true,
+      "Failed to execute 'setAttributeNodeNS' on 'Element': 1 argument required, but only 0 present.",
+      "Failed to execute 'setNamedItem' on 'NamedNodeMap': parameter 1 is not of type 'Attr'."])
+  end
+
   it 'marks only the [Unscopable] members of each interface' do
     got = outcome('[Document, DocumentFragment, Element].map((i) => Object.keys(i.prototype[Symbol.unscopables]).sort())')
     expect(got).to eq([
