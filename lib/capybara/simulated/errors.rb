@@ -20,5 +20,9 @@ module Capybara
 
     # Raised by `save_screenshot` when the page could not be rastered: it painted nothing.
     class ScreenshotFailed < Capybara::CapybaraError; end
+
+    # Raised by `evaluate_script` for an answer that holds itself — a Window, an object with a reference back to it —
+    # which no serialization can hand over (WebDriver: a JavaScript error, "cyclic object value").
+    class CyclicScriptResult < Capybara::CapybaraError; end
   end
 end

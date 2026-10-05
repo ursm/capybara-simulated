@@ -861,15 +861,17 @@ module Capybara
         unwrap(current_browser.evaluate_async_script(script, args))
       end
 
-      private def unwrap(value)
-        case value
-        when Hash
-          if (h = value['__elementHandle']) then Node.new(self, h)
-          else value.transform_values {|v| unwrap(v) }
-          end
-        when Array then value.map {|v| unwrap(v) }
-        else value
-        end
+      # A script's answer as Capybara hands it back: element handles as nodes, through hashes and arrays. One that holds
+      # itself (a Window, an object with a reference back to it) has no answer: Capybara walks it as a tree.
+      private def unwrap(value, path = {}.compare_by_identity)
+        return value unless value.is_a?(Hash) || value.is_a?(Array)
+        raise Capybara::Simulated::CyclicScriptResult, 'cyclic object value' if path.key?(value)
+        return Node.new(self, value['__elementHandle']) if value.is_a?(Hash) && value['__elementHandle']
+
+        path[value] = true
+        value.is_a?(Hash) ? value.transform_values {|v| unwrap(v, path) } : value.map {|v| unwrap(v, path) }
+      ensure
+        path.delete(value) if value.is_a?(Hash) || value.is_a?(Array)
       end
 
       def invalid_element_errors = [Capybara::Simulated::StaleElement, Capybara::Simulated::ClickIntercepted]
