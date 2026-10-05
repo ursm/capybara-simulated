@@ -563,7 +563,7 @@ fn painting<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgu
 }
 
 // __dom.hitTest(x, y, all, now) -> Float64Array: the elements a hit at the viewport point lands on, topmost first (only
-// the topmost unless `all`), each as its path from the document (`RealmArena::push_path`) (`Painting::hit`).
+// the topmost unless `all`), as `nodes_value` answers them from the document (`Painting::hit`).
 fn hit_test_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let x = args.get(0).number_value(scope).unwrap_or(f64::NAN);
     let y = args.get(1).number_value(scope).unwrap_or(f64::NAN);
@@ -571,11 +571,9 @@ fn hit_test_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let cid = crate::dom::realm_id(scope, &args);
     let Some(hits) = painting(scope, &args, 3, |p| p.hit(x, y, all)) else { return };
     let arena = crate::dom::realm(scope, cid);
-    let mut out = Vec::new();
-    for id in hits {
-        arena.push_path(arena.shadow_including_root(id), id, &mut out);
-    }
-    rv.set(crate::dom::f64_array(scope, &out).into());
+    let Some(document) = hits.first().map(|&id| arena.shadow_including_root(id)) else { return rv.set(crate::dom::f64_array(scope, &[]).into()) };
+    let answer = crate::dom::nodes_value(scope, cid, document, &hits);
+    rv.set(answer);
 }
 
 // __dom.paintOrder(nids, contents, now) -> Float64Array: the indices of the layers `nids` names — each a box, or where
