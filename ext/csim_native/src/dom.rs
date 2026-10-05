@@ -349,6 +349,21 @@ impl NodeData {
             })
             .collect()
     }
+    // The DOM `nodeType` (an arena node with no kind of its own — no element, character data, document or fragment —
+    // is a doctype where it carries one's identifiers, else an Attr's slot).
+    pub(crate) fn node_type(&self) -> u32 {
+        match self.kind {
+            NodeKind::Element => 1,
+            NodeKind::Text if self.cdata => 4,
+            NodeKind::Text => 3,
+            NodeKind::ProcessingInstruction => 7,
+            NodeKind::Comment => 8,
+            NodeKind::Document => 9,
+            NodeKind::Fragment => 11,
+            NodeKind::Other if self.doctype_ids.is_some() => 10,
+            NodeKind::Other => 2,
+        }
+    }
     pub(crate) fn get_attr(&self, name: &str) -> Option<&str> {
         self.attributes
             .iter()
