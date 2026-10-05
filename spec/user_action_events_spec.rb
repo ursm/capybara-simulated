@@ -6,7 +6,8 @@ require_relative 'support/session_teardown'
 # move with no button pressed a pointer move with no button changed (-1) whose coalesced events are itself, a key's
 # keypress between its keydown and its typing (UI Events' order) and canceling it canceling the typing — Enter typing
 # a line break only where there are lines, Tab nothing, each key's typing done before the next key's — a keyboard's
-# activation a click of no pointer (Enter's on the press, Space's on the release), a right click's contextmenu and
+# activation a click of no pointer (Enter's on the press, Space's on the release), a chord's default action unless its
+# keydown was canceled — a paste a composed ClipboardEvent of a read-only DataTransfer — a right click's contextmenu and
 # auxclick, a double click's two clicks and dblclick — and a drop's files the user's, unreadable while dragged over
 # the page (HTML's protected drag data store) and gone once dropped.
 RSpec.describe 'User action events' do
@@ -16,7 +17,7 @@ RSpec.describe 'User action events' do
       [200, {'content-type' => 'text/html'}, [<<~HTML]]
         <!doctype html><html><body>
           <div id=host></div>
-          <input id=t><textarea id=ta></textarea><button id=btn>btn</button><input id=cb type=checkbox><div id=z style="width: 100px; height: 40px">z</div>
+          <input id=t><textarea id=ta></textarea><button id=btn>btn</button><input id=cb type=checkbox><input id=sub type=submit><div id=z style="width: 100px; height: 40px">z</div>
           <div style="height: 3000px"></div>
           <div id=far>far</div>
           <script>
@@ -119,6 +120,34 @@ RSpec.describe 'User action events' do
       'input InputEvent true true true 0'
     ])
     expect(session.find('#cb')).to be_checked
+    # (…an input button's Enter too; and Space's activation the keyup's default action)
+    session.find('#sub').send_keys(:enter)
+    expect(log.grep(/click/)).to eq(['click PointerEvent true true true 0 0 0 -1 ""'])
+    session.execute_script("document.getElementById('cb').addEventListener('keyup', (e) => e.preventDefault())")
+    session.find('#cb').send_keys(:space)
+    expect(log.grep(/click/)).to eq([])
+    expect(session.find('#cb')).to be_checked
+  end
+
+  it "runs a chord's default unless its keydown was canceled, a paste a ClipboardEvent the document sees" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      document.getElementById('ta').addEventListener('keydown', (e) => { if (e.ctrlKey && e.key === 'a') e.preventDefault(); });
+      window.__paste = [];
+      document.addEventListener('paste', (e) => __paste.push([e.constructor.name, e.isTrusted, e.clipboardData instanceof DataTransfer, e.clipboardData.getData('text/plain')].join(' ')));
+      document.addEventListener('beforeinput', (e) => { if (e.inputType === 'insertFromPaste') __paste.push(e.inputType + ' ' + e.data); });
+    JS
+    session.find('#ta').send_keys('abc', [:control, 'a'], 'Z')
+    expect(session.find('#ta').value).to eq('abcZ')
+    session.evaluate_script("navigator.clipboard.writeText('P')")
+    session.find('#host').shadow_root.find('#inner').send_keys([:control, 'v'])
+    session.find('#ta').send_keys([:control, 'v'])
+    expect(session.find('#ta').value).to eq('abcZP')
+    expect(session.evaluate_script('__paste')).to eq([
+      'ClipboardEvent true true P',
+      'ClipboardEvent true true P',
+      'insertFromPaste P'
+    ])
   end
 
   it "keeps a pressed button's page position after its dispatch, on a scrolled page" do
