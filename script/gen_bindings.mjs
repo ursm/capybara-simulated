@@ -293,7 +293,7 @@ function dictionaryConverter(name) {
     if (d.inheritance && !dictionaries.has(d.inheritance)) throw new Error(`${d.name}: inherits ${d.inheritance}, which no spec defines`);
     chain.unshift(d);
   }
-  const checks = new Set(), lines = [];
+  const lines = [];
   let defaults = false;
   lines.push(`export function ${fn}(v, prefix) {`);
   lines.push(`  if (v !== undefined && v !== null && typeof v !== 'object' && typeof v !== 'function') throw new TypeError(prefix + ${JSON.stringify(`The provided value is not of type '${name}'.`)});`);
@@ -311,18 +311,26 @@ function dictionaryConverter(name) {
       const missing = m.required ? `(() => { throw new TypeError(${failure(where, 'Required member is undefined.')}); })()`
         : m.default ? defaultValue(m.default, `${d.name}.${m.name}`) : null;
       if (missing !== null) defaults = true;
+      const checks = new Set();
       const converted = conversion(m.idlType, 'x', where, checks, m.extAttrs);
-      lines.push(missing === null
-        ? `    if (x !== undefined) dict.${m.name} = ${converted};`
-        : `    dict.${m.name} = x !== undefined ? ${converted} : ${missing};`);
+      if (checks.size) {
+        // (…the tests of the interfaces it takes looked up only when it is given — registered by then — so the common
+        // call that leaves it out looks nothing up)
+        lines.push(`    if (x !== undefined) {`);
+        for (const c of checks) lines.push(`      const IS_${c} = interfaceCheck('${c}');`);
+        lines.push(`      dict.${m.name} = ${converted};`);
+        lines.push(missing === null ? `    }` : `    } else dict.${m.name} = ${missing};`);
+      } else {
+        lines.push(missing === null
+          ? `    if (x !== undefined) dict.${m.name} = ${converted};`
+          : `    dict.${m.name} = x !== undefined ? ${converted} : ${missing};`);
+      }
       lines.push(`  }`);
     }
   }
-  // (…the tests of the interfaces its members take, looked up as it converts — those are registered by then — and, for
-  // a dictionary none of whose members has a default or is required, null or undefined the one empty dictionary: the
-  // common call with no options allocates nothing)
-  const lookups = [...checks].map((c) => `  const IS_${c} = interfaceCheck('${c}');`);
-  lines.splice(head, 0, ...(defaults ? [] : ['  if (v == null) return EMPTY_DICTIONARY;']), ...lookups);
+  // (…and, for a dictionary none of whose members has a default or is required, null or undefined the one empty
+  // dictionary: the common call with no options allocates nothing)
+  if (!defaults) lines.splice(head, 0, '  if (v == null) return EMPTY_DICTIONARY;');
   lines.push(`  return dict;`);
   lines.push(`}`);
   dictionaryConverters.set(name, lines.join('\n'));

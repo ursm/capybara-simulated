@@ -50,12 +50,13 @@ for (let i = 0; i < lines.length; i++) {
 const CALLED = new RegExp(`(?<![\\w$.])(${IDENT})(?=\\s*\\()`, 'g');
 const WRITE = new RegExp(`(?<![\\w$.])(${IDENT})\\s*(?:\\.(?:push|unshift|add|set|delete|clear|splice)\\(|` +
                          `(?:\\.[\\w$]+|\\[[^\\]]*\\])*\\s*(?:=(?![=>])|\\+\\+|--|[-+*/|&]=))`, 'g');
-const METHOD = /^\s+(?:static\s+|async\s+|get\s+|set\s+)*(?!(?:if|for|while|switch|catch|with)\b)[\w$]+\s*\([^)]*\)\s*\{\s*$/;
+// (…a parameter list holding no parenthesis: `register(name, function () {` is a call, its last argument a function)
+const METHOD = /^\s+(?:static\s+|async\s+|get\s+|set\s+)*(?!(?:if|for|while|switch|catch|with)\b)[\w$]+\s*\([^()]*\)\s*\{\s*$/;
 const LOCAL = new RegExp(`(?:\\b(?:let|const|var)\\s+|[(,]\\s*)(${IDENT})(?=\\s*[=,);])`, 'g');
 
 // A method's definition (`dispatchEvent(event) { …`, `get x() { …`): its name is no call — a class a function makes
 // may name a method as a top-level function is named — so it is left out, and the body after it kept.
-const METHOD_HEAD = /^(\s+)(?:static\s+|async\s+|get\s+|set\s+)*[\w$]+\s*\([^)]*\)\s*\{/;
+const METHOD_HEAD = /^(\s+)(?:static\s+|async\s+|get\s+|set\s+)*(?!(?:if|for|while|switch|catch|with)\b)[\w$]+\s*\([^()]*\)\s*\{/;
 
 // Every top-level function a call to `name` can reach.
 function reach(name, seen) {

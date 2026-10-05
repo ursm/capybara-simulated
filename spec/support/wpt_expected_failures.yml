@@ -2761,8 +2761,6 @@ dom/events/EventListener-invoke-legacy.html:
 - Legacy listener of animationstart
 - Legacy listener of transitionend
 - "[harness] TIMEOUT"
-dom/events/EventTarget-constructible.any.js:
-- "[harness] ERROR"
 dom/events/click-on-absolute-pseudo.html:
 - Click on pseudo-element that disappears on mousedown
 - "[harness] ERROR"
@@ -2895,8 +2893,6 @@ dom/events/webkit-transition-end-event.html:
 - webkitTransitionEnd event listener should not trigger if an unprefixed listener
   also exists
 - webkitTransitionEnd event listener should trigger for an animation
-dom/events/window-composed-path.html:
-- "[harness] ERROR"
 dom/idlharness.any.js:
 - 'AbortController interface: attribute signal'
 - 'AbortController interface: new AbortController() must inherit property "signal"
