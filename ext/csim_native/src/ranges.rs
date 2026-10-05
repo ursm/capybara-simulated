@@ -268,6 +268,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "comparePoints", compare_points_op, context_id);
     register(scope, ns, "rangeIntersectsNode", range_intersects_node, context_id);
     register(scope, ns, "rangeText", range_text, context_id);
+    register(scope, ns, "rangeContents", range_contents, context_id);
 }
 
 // ── boundary points in tree order (DOM §5.2) ─────────────────────────────────────────────────────────────────────
@@ -492,6 +493,58 @@ fn range_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
     let value = crate::dom::utf16_value(scope, &out);
     rv.set(value);
+}
+
+// What the contents of the range from `s` to `e` are, as cloning, extracting and deleting them take them (DOM §5.5): its
+// common ancestor (as the number of steps up to it from the start node), the children of that partially contained in
+// it — first and last, as their indexes (None for none) — and the run of its children contained in it (from, to). With
+// the start node an inclusive ancestor of the end node there is no first partially contained child, and the range
+// collapses to its start; else to after the first one.
+struct Contents {
+    common_up: usize,
+    first_partial: Option<usize>,
+    last_partial: Option<usize>,
+    contained: std::ops::Range<usize>,
+    // Whether a contained child is a doctype — which cloning and extracting refuse.
+    doctype: bool,
+}
+
+fn contents(arena: &RealmArena, s: Boundary, e: Boundary) -> Contents {
+    let (cs, ce) = (arena.chain(s.node), arena.chain(e.node));
+    let shared = cs.iter().zip(&ce).take_while(|(x, y)| x == y).count().max(1);
+    let common = cs[shared - 1];
+    let index = |n: NodeId| arena.get(n).map_or(0, |d| d.child_index);
+    // (…the child of the common ancestor towards a boundary node, unless that node is an inclusive ancestor of the other)
+    let first_partial = cs.get(shared).map(|&c| index(c));
+    let last_partial = ce.get(shared).map(|&c| index(c));
+    let from = first_partial.map_or(s.offset as usize, |i| i + 1);
+    let to = last_partial.unwrap_or(e.offset as usize);
+    let kids = arena.get(common).map_or(&[][..], |n| &n.children[..]);
+    let contained = from.min(kids.len())..to.min(kids.len()).max(from.min(kids.len()));
+    let doctype = kids[contained.clone()].iter().any(|&c| arena.get(c).is_some_and(|n| n.node_type() == 10));
+    Contents { common_up: cs.len() - shared, first_partial, last_partial, contained, doctype }
+}
+
+// __dom.rangeContents(startNid, startOffset, endNid, endOffset) -> the contents of the range between those points, for
+// its cloning, extracting or deleting: [steps up from the start node to the common ancestor, the first and the last
+// partially contained child's index (-1 for none), the run of contained children (from, to), and whether a doctype is
+// among them].
+fn range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(s), Some(e)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2)) else { return };
+    let offset = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).uint32_value(scope).unwrap_or(0);
+    let (so, eo) = (offset(scope, 1), offset(scope, 3));
+    let cid = realm_id(scope, &args);
+    let c = contents(crate::dom::realm(scope, cid), Boundary { node: s, offset: so }, Boundary { node: e, offset: eo });
+    let index = |i: Option<usize>| i.map_or(-1.0, |i| i as f64);
+    let plan = [
+        c.common_up as f64,
+        index(c.first_partial),
+        index(c.last_partial),
+        c.contained.start as f64,
+        c.contained.end as f64,
+        c.doctype as u8 as f64,
+    ];
+    rv.set(crate::dom::f64_array(scope, &plan).into());
 }
 
 // __dom.comparePoints(nidA, offsetA, nidB, offsetB) -> -1, 0 or 1: where the first boundary point is against the
