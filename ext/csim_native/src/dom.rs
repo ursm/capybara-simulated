@@ -1421,6 +1421,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::token_list::install(scope, ns, context_id);
     // …and the element lists named by a filter (collections.rs)
     crate::collections::install(scope, ns, context_id);
+    // …and the tree mutation algorithms' checks (mutation.rs)
+    crate::mutation::install(scope, ns, context_id);
     // …and the realm's id, which spaces its nodes' handle ids apart from every other realm's (dom-nodes.js `Node`).
     let key = v8::String::new(scope, "realmId").expect("a short string");
     let id = v8::Integer::new(scope, context_id);

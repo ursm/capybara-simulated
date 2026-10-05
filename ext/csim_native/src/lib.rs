@@ -41,6 +41,7 @@ mod image_source;
 // Layout: the records the walk builds (mod walk) laid out, driven by the `layoutBuild` op (mod walk_ops).
 mod layout;
 mod mime;
+mod mutation;
 mod node_handle;
 mod numbers;
 mod ranges;
