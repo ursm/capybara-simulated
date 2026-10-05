@@ -48,7 +48,8 @@ module Capybara
             if s.match?(%r{\A[a-z]+://}i)
               s
             elsif s.start_with?('/', './', '../')
-              URI.join((ref || url).to_s, s).to_s
+              # (…parsed as the page parses a URL, url_ops.rs)
+              Native.url_parts(s, (ref || url).to_s)&.first || s
             else
               raise "Failed to resolve module specifier '#{s}'"
             end

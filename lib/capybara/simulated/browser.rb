@@ -696,6 +696,19 @@ module Capybara
         "#{url[:protocol]}//#{credentials}#{url[:host]}"
       end
 
+      # A URL string split at its fragment: the URL before it, and the fragment (nil where it has none, '' where it is
+      # empty — `x#` is not `x`).
+      def split_fragment(url)
+        base, fragment = url.split('#', 2)
+        [base, fragment]
+      end
+
+      # A Ruby URI for a URL a socket is opened to (EventSource, a real host's fetch): Ruby's parser takes only a
+      # URI-legal copy of what the URL Standard keeps.
+      def uri_for(url)
+        URI.parse(url.to_s.sub(/#.*/m, '').b.gsub(RACK_URI_ILLEGAL) {|c| format('%%%02X', c.ord) })
+      end
+
       # Queued URLs older than this (real wall clock) are treated as
       # stale and dropped on the next `current_url` read. Capybara's
       # default polling interval is 50 ms, so a `have_current_path`
@@ -1339,7 +1352,7 @@ module Capybara
         env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
         ck = cookie_header_for(env_cookie_host(env), secure: %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}"))
         env['HTTP_COOKIE']     = ck              unless ck.empty?
-        env['HTTP_REFERER']    = @current_url    unless @current_url.nil? || @current_url.empty?
+        env['HTTP_REFERER']    = referrer_header(@current_url) unless @current_url.nil? || @current_url.empty?
         status, headers, body = @app.call(env)
         return unless status.to_i == 200
         # Fall back to the link's `download="filename"` value or the
@@ -1348,7 +1361,7 @@ module Capybara
         # response headers.
         forced_headers = headers.dup
         if content_disposition_header(forced_headers).to_s.empty?
-          name = filename_hint.empty? ? File.basename(URI.parse(url).path.to_s) : filename_hint
+          name = filename_hint.empty? ? File.basename(parse_url(url.to_s)&.fetch(:pathname).to_s) : filename_hint
           forced_headers['Content-Disposition'] = %(attachment; filename="#{name}") unless name.empty?
         end
         save_downloaded_response(url, forced_headers, body)
@@ -1358,19 +1371,15 @@ module Capybara
         return true  if url.start_with?('#')
         doc_url = current_browsing_context_url
         return false if doc_url.nil?
-        target = resolve_against_current(url)
-        a = URI.parse(target)
-        b = URI.parse(doc_url)
+        a = split_fragment(resolve_against_current(url))
+        b = split_fragment(parse_url(doc_url)&.fetch(:href) || doc_url)
         # Same-document iff everything but the fragment matches AND the
-        # fragment actually changes — `a.fragment != b.fragment` covers
+        # fragment actually changes — a differing fragment covers
         # both adding/changing a fragment and *clearing* one (target has
         # no fragment while the current URL does, e.g. `location.hash =
         # ''`). The old `!a.fragment.nil?` missed the clearing case, so a
         # hash-reset turned into a full document reload.
-        a.scheme == b.scheme && a.host == b.host && a.port == b.port &&
-          a.path == b.path && a.query == b.query && a.fragment != b.fragment
-      rescue URI::InvalidURIError
-        false
+        a[0] == b[0] && a[1] != b[1]
       end
 
       def update_current_hash(url)
@@ -3071,18 +3080,18 @@ module Capybara
         if method == 'GET'
           # GET ignores enctype: the entry list is always the urlencoded query.
           query, = encode_entry_list(entries, 'application/x-www-form-urlencoded', encoding)
-          uri = URI.parse(action_url)
           # HTML "mutate action URL" for GET: SET the query to the entry list
           # unconditionally — an empty list clears any query the action already
           # carried (browsers navigate to `action?`), it isn't preserved.
-          uri.query = query
+          base, fragment = split_fragment(parse_url(action_url.to_s)&.fetch(:href) || action_url.to_s)
+          target = "#{base.split('?', 2).first}?#{query}#{"##{fragment}" if fragment}"
           if new_window
-            @driver.open_aux_window(uri.to_s, name: window_name, source: self,
+            @driver.open_aux_window(target, name: window_name, source: self,
                                     opener: keep_opener, referrer: referrer)
           elsif frame_entry
-            navigate_frame(uri.to_s, entry: frame_entry)
+            navigate_frame(target, entry: frame_entry)
           else
-            navigate(uri.to_s)
+            navigate(target)
           end
         else
           body, content_type = encode_entry_list(entries, enctype, encoding)
@@ -3761,7 +3770,7 @@ module Capybara
       # surface so this stays a real network read.
       private def run_event_source_reader(id, url, queue)
         target = resolve_against_current(url)
-        uri    = URI(target)
+        uri    = uri_for(target)
         unless uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
           queue << {id: id, type: '__error', message: "unsupported scheme: #{uri.scheme.inspect}"}
           return
@@ -8852,20 +8861,16 @@ module Capybara
         # The referrer is almost always the (constant) document URL — memoise its parse
         # so the rack_fetch hot path doesn't re-parse it per request (rule 3).
         ref = parse_referrer_url(referrer_url)
-        return nil unless ref && %w[http https].include?(ref.scheme)
-        full        = -> { u = ref.dup; u.fragment = nil; u.password = nil; u.user = nil; u.to_s }
-        origin_only = -> {
-          default_port = ref.scheme == 'https' ? 443 : 80
-          port         = ref.port && ref.port != default_port ? ":#{ref.port}" : ''
-          "#{ref.scheme}://#{ref.host}#{port}/"
-        }
+        return nil unless ref && %w[http: https:].include?(ref[:protocol])
+        full        = -> { referrer_of(ref) }
+        origin_only = -> { "#{ref[:origin]}/" }
         return full.call        if policy == 'unsafe-url'
         return origin_only.call if policy == 'origin'
         # The remaining policies need the target to know same-origin / downgrade.
-        tgt = (URI.parse(target_url) rescue nil)
+        tgt = parse_url(target_url.to_s)
         return nil unless tgt
-        same_origin = ref.scheme == tgt.scheme && ref.host == tgt.host && ref.port == tgt.port
-        downgrade   = ref.scheme == 'https' && tgt.scheme == 'http'
+        same_origin = ref[:origin] == tgt[:origin]
+        downgrade   = ref[:protocol] == 'https:' && tgt[:protocol] == 'http:'
         case policy
         when 'origin-when-cross-origin'        then same_origin ? full.call : origin_only.call
         when 'same-origin'                     then same_origin ? full.call : nil
@@ -8880,7 +8885,18 @@ module Capybara
       def parse_referrer_url(url)
         return @referrer_parsed if defined?(@referrer_parsed_for) && @referrer_parsed_for == url
         @referrer_parsed_for = url
-        @referrer_parsed     = (URI.parse(url) rescue nil)
+        @referrer_parsed     = parse_url(url.to_s)
+      end
+
+      # The `Referer` a request sends for the referrer `url`: stripped (a fragment had been sent).
+      def referrer_header(url)
+        parts = parse_url(url.to_s)
+        parts ? referrer_of(parts) : url
+      end
+
+      # A URL as a referrer: no fragment, no credentials (Referrer Policy "strip url").
+      def referrer_of(url)
+        "#{url[:protocol]}//#{url[:host]}#{url[:pathname]}#{url[:search]}"
       end
 
       # Whether a request to `url_str` must be blocked as a Fetch "bad port". Cheap
@@ -8889,10 +8905,8 @@ module Capybara
       # fetch, cache hits included — skips URI.parse entirely.
       def bad_port?(url_str)
         return false unless url_str =~ %r{\A[a-z]+://[^/]*:\d}i
-        port = URI.parse(url_str).port
-        port && BAD_PORTS.include?(port)
-      rescue URI::Error
-        false
+        port = parse_url(url_str)&.fetch(:port).to_s
+        !port.empty? && BAD_PORTS.include?(port.to_i)
       end
 
       # URLs we won't even try to route through Rack: anything that
@@ -10384,8 +10398,8 @@ module Capybara
       # a same-origin flow behaves exactly like a single jar. nil when the URL carries
       # no host (about:blank / data: / a relative current_url before the first navigate).
       def cookie_host(url)
-        h = safe_uri(url.to_s)&.host
-        h && !h.empty? ? h.downcase : nil
+        h = parse_url(url.to_s)&.fetch(:hostname)
+        h && !h.empty? ? h : nil
       end
 
       # The host cookies attach to for a request built into `env` — the target server
@@ -11162,7 +11176,7 @@ module Capybara
         cd = content_disposition_header(headers).to_s
         m = cd.match(/filename\*?\s*=\s*(?:"([^"]+)"|([^;]+))/i)
         filename = (m && (m[1] || m[2]) || '').strip
-        filename = File.basename(URI.parse(url.to_s).path.to_s) if filename.empty?
+        filename = File.basename(parse_url(url.to_s)&.fetch(:pathname).to_s) if filename.empty?
         filename = 'download' if filename.empty?
         dir = downloads_directory
         FileUtils.mkdir_p(dir)
@@ -11219,7 +11233,7 @@ module Capybara
         # server can negotiate — HTML-only routes still pick html,
         # both-available pick the first registered.
         env['HTTP_ACCEPT'] ||= DEFAULT_HTTP_ACCEPT
-        env['HTTP_REFERER'] = referer unless referer.nil? || referer.empty?
+        env['HTTP_REFERER'] = referrer_header(referer) unless referer.nil? || referer.empty?
         # Attach the TARGET host's cookies (not the document's) — SERVER_NAME is the
         # request's host — so a cross-origin request carries the right jar or none.
         # SameSite context from the request's own Fetch metadata (set by
@@ -11393,14 +11407,12 @@ module Capybara
       # for the single-label TLDs our hosts use); an IP literal / ≤2-label host is its own site.
       # A `blob:` URL derives from its inner origin. nil for a hostless / non-http(s) URL.
       def registrable_site(url)
-        u = URI.parse(url.to_s.sub(/\Ablob:/, ''))
-        host = u.host.to_s
-        return nil if host.empty? || !u.scheme&.match?(/\Ahttps?\z/i)
+        u = parse_url(url.to_s.sub(/\Ablob:/, ''))
+        return nil unless u && %w[http: https:].include?(u[:protocol]) && !u[:hostname].empty?
+        host   = u[:hostname]
         labels = host.split('.')
         regd = host.start_with?('[') || host.match?(/\A\d+(\.\d+){3}\z/) || labels.length <= 2 ? host : labels.last(2).join('.')
-        "#{u.scheme}://#{regd}"
-      rescue URI::Error
-        nil
+        "#{u[:protocol]}//#{regd}"
       end
 
       # Cross-host hop (e.g. Discourse's `discourse_connect` flow
@@ -11437,26 +11449,23 @@ module Capybara
         return true if @all_hosts_local
         s = url.to_s
         return true if s.empty? || s.start_with?('/', '#', '?')
-        uri = safe_uri(s)
-        return true if uri.nil? || uri.host.nil?
-        ref = current_url_uri || safe_uri(@default_host.to_s)
-        return true unless ref&.host
-        uri.host == ref.host && effective_port(uri) == effective_port(ref)
+        uri = parse_url(s)
+        return true if uri.nil? || uri[:hostname].empty?
+        ref = current_url_parts || parse_url(@default_host.to_s)
+        return true if ref.nil? || ref[:hostname].empty?
+        uri[:hostname] == ref[:hostname] && effective_port(uri) == effective_port(ref)
       end
 
-      def safe_uri(s)
-        URI.parse(s) rescue nil
-      end
-
-      def current_url_uri
+      # The current URL's parts, kept while it stays the same string.
+      def current_url_parts
         return nil if @current_url.nil?
-        return @current_url_uri if @current_url_uri_cached_for.equal?(@current_url)
-        @current_url_uri_cached_for = @current_url
-        @current_url_uri = safe_uri(@current_url)
+        return @current_url_parts if @current_url_parts_for.equal?(@current_url)
+        @current_url_parts_for = @current_url
+        @current_url_parts     = parse_url(@current_url)
       end
 
-      def effective_port(uri)
-        uri.port || (uri.scheme == 'https' ? 443 : 80)
+      def effective_port(url)
+        url[:port].empty? ? (url[:protocol] == 'https:' ? 443 : 80) : url[:port].to_i
       end
 
       # Returns a Rack-shaped triple, or `nil` if the network attempt
@@ -11466,7 +11475,7 @@ module Capybara
       # are origin-scoped: ours don't go out. No redirect-follow either
       # — navigate / rack_fetch's loop chooses per hop.
       def net_http_fetch(url, env, method: 'GET', body: nil)
-        uri = URI.parse(url.to_s)
+        uri = uri_for(url)
         Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https', open_timeout: 5, read_timeout: 30) do |http|
           req = Net::HTTP.const_get(method.to_s.capitalize).new(uri.request_uri)
           env.each_pair do |k, v|
@@ -11712,10 +11721,8 @@ module Capybara
       # Whether a URL carries userinfo (`user[:password]@`). A CORS request to such a
       # URL is a network error (access-control-and-redirects "user info" subtest).
       def url_has_userinfo?(url)
-        u = URI.parse(url.to_s)
-        !u.userinfo.to_s.empty?
-      rescue URI::InvalidURIError
-        false
+        u = parse_url(url.to_s)
+        !u.nil? && !(u[:username].empty? && u[:password].empty?)
       end
 
       # An author-set conditional header means the CALLER is doing its own revalidation,
@@ -11874,27 +11881,15 @@ module Capybara
       # unparseable URL (about:blank / data: / a relative current_url) so CORS never
       # treats those as a comparable origin.
       def url_origin(url)
-        u = URI.parse(url.to_s)
-        return nil unless u.scheme && u.host && u.scheme.match?(/\Ahttps?\z/i)
-        # An origin is (scheme, host, port) compared case-insensitively on scheme+host —
-        # so canonicalize both to lowercase, else http://Example.com vs http://example.com
-        # would mis-classify a same-origin request as cross-origin.
-        scheme  = u.scheme.downcase
-        default = scheme == 'https' ? 443 : 80
-        port    = u.port && u.port != default ? ":#{u.port}" : ''
-        "#{scheme}://#{u.host.downcase}#{port}"
-      rescue URI::InvalidURIError
-        nil
+        # (…serialized by the parser: scheme and host lowercased, a default port dropped)
+        u = parse_url(url.to_s)
+        u && %w[http: https:].include?(u[:protocol]) ? u[:origin] : nil
       end
 
       def carry_fragment(from_url, to_url)
-        from = URI.parse(from_url.to_s)
-        to   = URI.parse(to_url.to_s)
-        return to_url if to.fragment || from.fragment.nil? || from.fragment.empty?
-        to.fragment = from.fragment
-        to.to_s
-      rescue URI::InvalidURIError
-        to_url
+        _, from = split_fragment(from_url.to_s)
+        to, own = split_fragment(to_url.to_s)
+        own || from.nil? || from.empty? ? to_url : "#{to}##{from}"
       end
 
       # Trace-wrap layer: prepended so the canonical method bodies above
