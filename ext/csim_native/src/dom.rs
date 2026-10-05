@@ -161,12 +161,15 @@ pub(crate) struct NodeData {
     pub(crate) attr_ns_u16: Vec<(String, Vec<u16>, Vec<u16>)>,
     pub(crate) parent: Option<NodeId>,
     pub(crate) children: Vec<NodeId>,
-    // Position within `parent.children`, kept current on every link/unlink, so the
-    // selector engine's prev/next-sibling nav is O(1) — without it `:nth-child` is
-    // O(n²) per query on a wide parent (a 500-sibling list measured 2.5x slower than
-    // the JS matcher it replaced; O(1) flips it). It counts ALL entries (a stale edge included), so the
-    // sibling walks step from it and skip any stale neighbour they land on.
-    pub(crate) child_index: usize,
+    // Where it is in `parent.children`: its index there plus the parent's `first_position` (`NodeData::index_in`,
+    // `RealmArena::child_index`) — kept current on every link/unlink, so the selector engine's prev/next-sibling nav is
+    // O(1) — without it `:nth-child` is O(n²) per query on a wide parent (a 500-sibling list measured 2.5x slower than
+    // the JS matcher it replaced; O(1) flips it). It counts ALL entries (a stale edge included), so the sibling walks
+    // step from it and skip any stale neighbour they land on. Positions order siblings as their indexes do.
+    pub(crate) position: i64,
+    // …and, for a parent, the position its first child has: a child taken from or put at the FRONT moves this rather
+    // than every sibling's (a `while (el.firstChild) el.removeChild(el.firstChild)` over 20,000 children was quadratic).
+    pub(crate) first_position: i64,
     // The box the last layout pass that laid this node out gave it (`geometry::store_layout`) — KEPT by a pass that lays
     // it out no longer, which `laid_at` tells apart. None until a pass lays it out.
     pub(crate) layout_box: Option<crate::layout::Box>,
@@ -280,7 +283,8 @@ impl NodeData {
             attr_ns_u16: Vec::new(),
             parent: None,
             children: Vec::new(),
-            child_index: 0,
+            position: 0,
+            first_position: 0,
             layout_box: None,
             layout_frags: None,
             laid_at: 0,
@@ -348,6 +352,10 @@ impl NodeData {
                 }
             })
             .collect()
+    }
+    // Its index in `parent`'s children, where that is its parent.
+    pub(crate) fn index_in(&self, parent: &NodeData) -> usize {
+        (self.position - parent.first_position) as usize
     }
     // The DOM `nodeType` (an arena node with no kind of its own — no element, character data, document or fragment —
     // is a doctype where it carries one's identifiers, else an Attr's slot).
@@ -941,18 +949,18 @@ impl RealmArena {
     }
 
     // Append `child` at the end of `parent`'s children, recording its position so prev/next-sibling
-    // nav is O(1). The one place children are linked (create / import), so child_index can never drift
+    // nav is O(1). The one place children are linked (create / import), so a position can never drift
     // from the list.
     fn link_child(&mut self, parent: NodeId, child: NodeId) {
-        let pos = match self.get(parent) {
-            Some(p) => p.children.len(),
+        let (pos, first) = match self.get(parent) {
+            Some(p) => (p.children.len(), p.first_position),
             None => return,
         };
         if let Some(p) = self.get_mut(parent) {
             p.children.push(child);
         }
         if let Some(c) = self.get_mut(child) {
-            c.child_index = pos;
+            c.position = first + pos as i64;
         }
         self.relink(parent, pos.saturating_sub(1), usize::MAX);
     }
@@ -970,16 +978,17 @@ impl RealmArena {
         let handled = |k: NodeId| self.get(k).is_some_and(|d| crate::node_handle::edges(&d.link).is_some());
         let parent = n.parent.or(n.host).or(n.template_host).filter(|&p| handled(p));
         let first = n.children.first().copied().filter(|&c| handled(c));
-        let next = n.parent.and_then(|p| self.get(p)).and_then(|p| p.children.get(n.child_index + 1).copied()).filter(|&c| handled(c));
+        let next = n.parent.and_then(|p| self.get(p)).and_then(|p| p.children.get(n.index_in(p) + 1).copied()).filter(|&c| handled(c));
         let owned = n.shadow_root.or(n.template_content).filter(|&c| handled(c));
         let want = [parent, first, next, owned];
         (got != want).then(|| format!("handle edges {got:?}, tree {want:?}"))
     }
     // `id`'s handle is `link`: its edges written where it is — under its parent, and over its children.
     pub(crate) fn set_link(&mut self, id: NodeId, link: crate::node_handle::Link) {
+        let at = self.child_index(id);
         let Some(node) = self.get_mut_quietly(id) else { return };
         node.link = link;
-        let (parent, at) = (node.parent, node.child_index);
+        let parent = node.parent;
         match parent {
             Some(p) => self.relink(p, at.saturating_sub(1), usize::MAX),
             // (…a root here: whatever tree the handle was in before is no edge of it now)
@@ -1104,8 +1113,8 @@ impl RealmArena {
         let (Some(&xa), Some(&xb)) = (ca.get(shared), cb.get(shared)) else {
             return Some(if shared == ca.len() { Relation::Ancestor } else { Relation::Descendant });
         };
-        let index = |n: NodeId| self.get(n).map_or(0, |d| d.child_index);
-        Some(if index(xa) < index(xb) { Relation::Before } else { Relation::After })
+        let position = |n: NodeId| self.get(n).map_or(0, |d| d.position);
+        Some(if position(xa) < position(xb) { Relation::Before } else { Relation::After })
     }
     // …as tree order: an ancestor before what it contains.
     pub(crate) fn tree_order(&self, a: NodeId, b: NodeId) -> Option<std::cmp::Ordering> {
@@ -1137,7 +1146,7 @@ impl RealmArena {
         while cur != anchor {
             let Some(n) = self.get(cur) else { break };
             let (step, up) = match (n.parent, n.host, n.template_host) {
-                (Some(p), _, _) => (n.child_index as f64, p),
+                (Some(p), _, _) => (self.child_index(cur) as f64, p),
                 (None, Some(h), _) => (-1.0, h),
                 (None, None, Some(t)) => (-2.0, t),
                 _ => break,
@@ -1204,16 +1213,21 @@ impl RealmArena {
         old
     }
 
-    // Take `child` out of its parent's children (its own subtree goes with it). Found by its `child_index`, so taking
-    // the last child is O(1) and any other costs only the shift of the ones after it.
+    // Take `child` out of its parent's children (its own subtree goes with it). Found by its position, so taking the
+    // first or the last child is O(1) and any other costs only the shift of the ones after it.
     pub(crate) fn detach(&mut self, child: NodeId) {
         self.state_epoch += 1;
-        let Some((old, at)) = self.get(child).and_then(|n| Some((n.parent?, n.child_index))) else { return };
+        let Some(old) = self.get(child).and_then(|n| n.parent) else { return };
+        let at = self.child_index(child);
         let (mut from, mut one) = (at, true);
         if let Some(o) = self.get_mut(old) {
             match o.children.get(at) {
                 Some(&c) if c == child => {
                     o.children.remove(at);
+                    // (…the first: the ones after it keep their positions, and the list starts one later)
+                    if at == 0 {
+                        o.first_position += 1;
+                    }
                 }
                 _ => {
                     o.children.retain(|&c| c != child);
@@ -1221,7 +1235,11 @@ impl RealmArena {
                 }
             }
         }
-        self.reindex_children(old, from, one);
+        if from == 0 && one {
+            self.relink(old, 0, 1);
+        } else {
+            self.reindex_children(old, from, one);
+        }
         if let Some(c) = self.get_mut(child) {
             c.parent = None;
             crate::node_handle::unlink(&c.link);
@@ -1266,15 +1284,29 @@ impl RealmArena {
             p = self.get(a).and_then(|n| n.parent);
         }
         self.detach(child);
-        // `before`'s place, by its `child_index` when it is a child of `parent`.
+        // `before`'s place, by its position when it is a child of `parent`.
         let pos = match (before.and_then(|b| self.get(b).map(|n| (b, n))), self.get(parent)) {
-            (Some((b, bn)), Some(pn)) if bn.parent == Some(parent) => match pn.children.get(bn.child_index) {
-                Some(&c) if c == b => Some(bn.child_index),
+            (Some((b, bn)), Some(pn)) if bn.parent == Some(parent) => match pn.children.get(bn.index_in(pn)) {
+                Some(&c) if c == b => Some(bn.index_in(pn)),
                 _ => pn.children.iter().position(|&c| c == b),
             },
             _ => None,
         };
         match pos {
+            // (…at the front: the list starts one earlier, and the ones after keep their positions)
+            Some(0) => {
+                let mut first = 0;
+                if let Some(pn) = self.get_mut(parent) {
+                    pn.children.insert(0, child);
+                    pn.first_position -= 1;
+                    first = pn.first_position;
+                }
+                if let Some(c) = self.get_mut(child) {
+                    c.parent = Some(parent);
+                    c.position = first;
+                }
+                self.relink(parent, 0, 1);
+            }
             Some(i) => {
                 if let Some(pn) = self.get_mut(parent) {
                     pn.children.insert(i, child);
@@ -1293,17 +1325,17 @@ impl RealmArena {
         }
     }
 
-    // Rewrite child_index for the children of `parent` from position `from` on, from their list positions — after an
+    // Rewrite the positions of the children of `parent` from index `from` on, from their list indexes — after an
     // insertion or a removal there shifted them. Quietly: the index is where to find a child in its parent's list, read
     // by nothing a layout walk or a memo keys on — the change itself is the parent's, which `get_mut` stamped. Stamped
     // as a change of each, every sibling after a removed child was walked again rather than spliced back (a 400-item
     // list, `remove()` of the 200th: 203 records walked, 3 once it is not).
     fn reindex_children(&mut self, parent: NodeId, from: usize, one: bool) {
-        let len = self.get(parent).map_or(0, |p| p.children.len());
+        let (len, first) = self.get(parent).map_or((0, 0), |p| (p.children.len(), p.first_position));
         for i in from..len {
             let Some(c) = self.get(parent).and_then(|p| p.children.get(i).copied()) else { break };
             if let Some(node) = self.get_mut_quietly(c) {
-                node.child_index = i;
+                node.position = first + i as i64;
             }
         }
         // (…and the handles' edges, from the child before the first that moved: its next sibling did)
@@ -1314,6 +1346,11 @@ impl RealmArena {
     // The ELEMENT view the matcher walks: a child, a sibling, is the nearest ELEMENT one — text, comments and doctypes
     // between elements are stepped over, as `firstElementChild` / `nextElementSibling` step over them.
 
+    // `id`'s index in its parent's children (0 for a node with none).
+    pub(crate) fn child_index(&self, id: NodeId) -> usize {
+        let Some(n) = self.get(id) else { return 0 };
+        n.parent.and_then(|p| self.get(p)).map_or(0, |p| n.index_in(p))
+    }
     pub(crate) fn parent_of(&self, id: NodeId) -> Option<NodeId> {
         let parent = self.get(id)?.parent?;
         // Only report a parent whose slot still holds that gen — a stale upward edge (parent freed +
@@ -1328,8 +1365,8 @@ impl RealmArena {
         let node = self.get(id)?;
         let parent = self.get(node.parent?)?;
         // Step back from this child's position, skipping any stale edge, to the nearest live sibling.
-        // With no stale edges (the synced document tree) this is the single `child_index - 1` step.
-        let mut i = node.child_index;
+        // With no stale edges (the synced document tree) this is the single `index - 1` step.
+        let mut i = node.index_in(parent);
         while i > 0 {
             i -= 1;
             if let Some(&c) = parent.children.get(i) {
@@ -1343,7 +1380,7 @@ impl RealmArena {
     pub(crate) fn next_element_sibling(&self, id: NodeId) -> Option<NodeId> {
         let node = self.get(id)?;
         let parent = self.get(node.parent?)?;
-        let mut i = node.child_index + 1;
+        let mut i = node.index_in(parent) + 1;
         while let Some(&c) = parent.children.get(i) {
             if self.is_element(c) {
                 return Some(c);

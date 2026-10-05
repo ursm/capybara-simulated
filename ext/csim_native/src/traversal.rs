@@ -81,7 +81,7 @@ const FILTER_SKIP: u32 = 3;
 fn neighbour(arena: &RealmArena, id: NodeId, step: Step) -> Option<NodeId> {
     let sibling = |by: isize| {
         let parent = arena.parent_of(id)?;
-        let i = arena.get(id)?.child_index.checked_add_signed(by)?;
+        let i = arena.child_index(id).checked_add_signed(by)?;
         arena.get(parent)?.children.get(i).copied()
     };
     match step {

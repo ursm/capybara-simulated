@@ -285,7 +285,7 @@ fn compare(arena: &RealmArena, a: Boundary, b: Boundary) -> Option<std::cmp::Ord
             match cb.iter().position(|&n| n == a.node) {
                 Some(i) => {
                     let child = cb[i + 1];
-                    let index = arena.get(child).map_or(0, |d| d.child_index) as u32;
+                    let index = arena.child_index(child) as u32;
                     Some(if index < a.offset { Greater } else { Less })
                 }
                 None => Some(Less),
@@ -406,7 +406,7 @@ fn range_intersects_node(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
         return rv.set_bool(false);
     }
     let Some(parent) = arena.parent_of(nid) else { return rv.set_bool(true) };
-    let offset = arena.get(nid).map_or(0, |n| n.child_index) as u32;
+    let offset = arena.child_index(nid) as u32;
     use std::cmp::Ordering::*;
     let before_end = compare(arena, Boundary { node: parent, offset }, points[END]) == Some(Less);
     let after_start = compare(arena, Boundary { node: parent, offset: offset + 1 }, points[START]) == Some(Greater);
@@ -440,7 +440,7 @@ fn following(arena: &RealmArena, id: NodeId, skip_children: bool) -> Option<Node
     let mut cur = id;
     loop {
         let parent = arena.parent_of(cur)?;
-        let at = arena.get(cur)?.child_index;
+        let at = arena.child_index(cur);
         if let Some(&next) = arena.get(parent).and_then(|p| p.children.get(at + 1)) {
             return Some(next);
         }
@@ -516,7 +516,7 @@ fn contents(arena: &RealmArena, s: Boundary, e: Boundary) -> Contents {
     let (cs, ce) = (arena.chain(s.node), arena.chain(e.node));
     let shared = cs.iter().zip(&ce).take_while(|(x, y)| x == y).count().max(1);
     let common = cs[shared - 1];
-    let index = |n: NodeId| arena.get(n).map_or(0, |d| d.child_index);
+    let index = |n: NodeId| arena.child_index(n);
     // (…the child of the common ancestor towards a boundary node, unless that node is an inclusive ancestor of the other)
     let first_partial = cs.get(shared).map(|&c| index(c));
     let last_partial = ce.get(shared).map(|&c| index(c));

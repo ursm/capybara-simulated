@@ -371,7 +371,7 @@ fn tree_order(arena: &RealmArena, a: NodeId, b: NodeId) -> Ordering {
         return Ordering::Equal;
     }
     let (Some(&x), Some(&y)) = (ca.get(common), cb.get(common)) else { return ca.len().cmp(&cb.len()) };
-    let place = |n: NodeId| arena.get(n).map_or(-1, |d| if d.host.is_some() { -1 } else { d.child_index as i64 });
+    let place = |n: NodeId| arena.get(n).map_or(i64::MIN, |d| if d.host.is_some() { i64::MIN } else { d.position });
     place(x).cmp(&place(y))
 }
 

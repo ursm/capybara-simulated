@@ -1277,7 +1277,7 @@ impl<'a> Eval<'a> {
         let siblings = |x: XNode, forward: bool| -> Vec<XNode> {
             let XNode::Node(id) = x else { return Vec::new() };
             let Some(kids) = self.arena.parent_of(id).and_then(|p| self.data(p)).map(|p| &p.children) else { return Vec::new() };
-            let held = self.data(id).map(|n| n.child_index).filter(|&i| kids.get(i) == Some(&id));
+            let held = Some(self.arena.child_index(id)).filter(|&i| kids.get(i) == Some(&id));
             let Some(at) = held.or_else(|| kids.iter().position(|&c| c == id)) else { return Vec::new() };
             let live = |&c: &NodeId| self.data(c).is_some_and(|n| n.kind != NodeKind::Other);
             let out: Vec<XNode> = if forward {
