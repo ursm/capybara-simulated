@@ -18,7 +18,6 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition iframe
 - Blob URL shouldn't be fetched from a cross-partition service worker
 - Blob URL shouldn't be fetched from a cross-partition shared worker
-- "[harness] ERROR"
 FileAPI/idlharness.any.js:
 - 'Blob interface: attribute size'
 - 'Blob interface: attribute type'
@@ -124,8 +123,6 @@ FileAPI/idlharness.html:
 - 'FileReader interface: operation readAsText(Blob, optional DOMString)'
 - 'URL interface: operation createObjectURL((Blob or MediaSource))'
 - 'URL interface: operation revokeObjectURL(DOMString)'
-FileAPI/url/cross-global-revoke.sub.html:
-- "[harness] ERROR"
 FileAPI/url/sandboxed-iframe.html:
 - Blob URL fragment is implemented.
 - "[harness] TIMEOUT"
@@ -135,21 +132,13 @@ FileAPI/url/unicode-origin.sub.html:
 FileAPI/url/url-in-tags.window.js:
 - Blob URL fragment is implemented.
 - "[harness] TIMEOUT"
-FileAPI/url/url-lifetime.html:
-- "[harness] ERROR"
-FileAPI/url/url-with-fetch.any.js:
-- "[harness] ERROR"
 FileAPI/url/url_xmlhttprequest_img.html:
 - "== FileAPI/url/url_xmlhttprequest_img-ref.html (never ready to capture)"
-WebCryptoAPI/derive_bits_keys/cfrg_curves_keys_curve25519.https.any.js:
-- "[harness] ERROR"
 WebCryptoAPI/derive_bits_keys/derive_key_and_encrypt.https.any.js:
 - HKDF derivation of a ECDH key 1
 - HKDF derivation of a ECDH key 2
 - PBKDF2 derivation of a ECDH key 1
 - PBKDF2 derivation of a ECDH key 2
-WebCryptoAPI/derive_bits_keys/ecdh_keys.https.any.js:
-- "[harness] ERROR"
 WebCryptoAPI/idlharness.https.any.js:
 - 'Crypto interface: attribute subtle'
 - 'Crypto interface: calling getRandomValues(ArrayBufferView) on crypto with too few
@@ -181,7 +170,6 @@ WebCryptoAPI/idlharness.https.any.js:
   BufferSource)'
 - 'SubtleCrypto interface: operation wrapKey(KeyFormat, CryptoKey, CryptoKey, AlgorithmIdentifier)'
 - 'Window interface: attribute crypto'
-- "[harness] ERROR"
 WebCryptoAPI/import_export/ec_importKey.https.any.js:
 - 'Good parameters: P-256 bits (spki, buffer(59, compressed), {name: ECDH, namedCurve:
   P-256}, true, [])'
@@ -207,8 +195,6 @@ WebCryptoAPI/import_export/ec_importKey.https.any.js:
   P-521}, true, [verify, verify])'
 - 'Good parameters: P-521 bits (spki, buffer(90, compressed), {name: ECDSA, namedCurve:
   P-521}, true, [verify])'
-WebCryptoAPI/normalize-algorithm-name.https.any.js:
-- "[harness] ERROR"
 WebCryptoAPI/sign_verify/eddsa_small_order_points.https.any.js:
 - Ed25519 Verification checks with small-order key of order - Test 0
 - Ed25519 Verification checks with small-order key of order - Test 1
@@ -216,8 +202,6 @@ WebCryptoAPI/sign_verify/eddsa_small_order_points.https.any.js:
 - Ed25519 Verification checks with small-order key of order - Test 12
 - Ed25519 Verification checks with small-order key of order - Test 13
 - Ed25519 Verification checks with small-order key of order - Test 2
-WebCryptoAPI/wrapKey_unwrapKey/wrapKey_unwrapKey.https.any.js:
-- "[harness] ERROR"
 css/css-animations/animate-with-background-color-oklch-002.html:
 - Animate from legacy rgb to color-mix oklch
 - Animate from legacy rgb to oklch
@@ -907,19 +891,11 @@ css/css-flexbox/position-relative-stretch-height-001.html:
 - 'height: stretch inside stretched flex item, top: 50%'
 css/css-flexbox/relayout-input.html:
 - "#target 1"
-css/css-font-loading/font-face-reject.html:
-- "[harness] ERROR"
 css/css-font-loading/fontface-descriptor-updates-2.html:
 - Descriptor mutations before adding to FontFaceSet are correctly reflected
 - FontFace descriptor mutations are reflected in FontFaceSet
 css/css-font-loading/fontface-font-variation-settings-persisted-js-api.html:
 - Test FontFace variationSettings property
-css/css-font-loading/fontface-invalid-arraybuffer.html:
-- "[harness] ERROR"
-css/css-font-loading/fontfaceset-load-css-wide-keywords.html:
-- "[harness] ERROR"
-css/css-font-loading/fontfaceset-load-var.html:
-- "[harness] ERROR"
 css/css-font-loading/idlharness.https.html:
 - 'Document interface: attribute fonts'
 - 'FontFace interface: attribute ascentOverride'
@@ -1017,7 +993,7 @@ css/css-font-loading/idlharness.https.html:
 - 'FontFaceVariations interface: existence and properties of interface prototype object''s
   @@unscopables property'
 - 'FontFaceVariations interface: setlike<FontFaceVariationAxis>'
-- "[harness] ERROR"
+- "[harness] TIMEOUT"
 css/css-shadow/part/exportparts-layered.html:
 - "== css/css-shadow/part/exportparts-layered.ref.html"
 css/css-shadow/part/interaction-with-pseudo-elements.html:
@@ -1801,7 +1777,6 @@ css/css-transitions/animations/animate-with-color-mix.html:
 - Transition from srgb to color-mix
 css/css-transitions/animations/transition-timing-function.html:
 - Ensure that transition easing functions are properly applied.
-- "[harness] ERROR"
 css/css-transitions/before-load-001.html:
 - 'CSS Transitions Test: Transitioning before load event'
 css/css-transitions/disconnected-element-001.html:
@@ -1899,8 +1874,6 @@ css/css-transitions/unregistered-custom-property-transition.html:
 - first value -> unset transition with allow-discrete
 css/cssom/CSSStyleSheet-constructable-insertRule-base-uri.html:
 - "== css/cssom/CSSStyleSheet-constructable-insertRule-base-uri-ref.html"
-css/cssom/CSSStyleSheet-constructable-replace-on-regular-sheet.html:
-- "[harness] ERROR"
 css/cssom/CSSStyleSheet-template-adoption.html:
 - adoptedStyleSheets won't be cleared when adopting into/from <template>s
 css/cssom/HTMLLinkElement-load-event-002.html:
@@ -2378,7 +2351,6 @@ css/cssom/idlharness.html:
 - 'Window interface: calling getComputedStyle(Element, optional CSSOMString?) on window
   with too few arguments must throw TypeError'
 - 'Window interface: operation getComputedStyle(Element, optional CSSOMString?)'
-- "[harness] ERROR"
 css/cssom/page-descriptors.html:
 - CSSPageDescriptors properties tests
 css/cssom/preferred-stylesheet-reversed-order.html:
@@ -2545,8 +2517,6 @@ css/geometry/idlharness.any.js:
 - 'DOMRectReadOnly interface: attribute y'
 - 'DOMRectReadOnly interface: operation fromRect(optional DOMRectInit)'
 - 'DOMRectReadOnly interface: operation toJSON()'
-css/geometry/structured-serialization.html:
-- "[harness] ERROR"
 custom-elements/CustomElementRegistry-constructor-and-callbacks-are-held-strongly.html:
 - adoptedCallback
 - attributeChangedCallback
@@ -2584,7 +2554,6 @@ custom-elements/connected-callbacks-html-fragment-parsing.html:
   invoke its constructor
 - Inserting a custom element into the document using HTML fragment parsing must enqueue
   a custom element upgrade reaction, not synchronously invoke its constructor
-- "[harness] ERROR"
 custom-elements/cross-realm-callback-report-exception.html:
 - adoptedCallback
 - attributeChangedCallback
@@ -2600,7 +2569,6 @@ custom-elements/custom-element-reaction-queue.html:
   disconnected during upgrading
 - Upgrading a disconnected custom element must not invoke connectedCallback if the
   element is connected during upgrading
-- "[harness] ERROR"
 custom-elements/element-internals-shadowroot.html:
 - ElementInternals *can* be called after constructor, upgrade case
 - ElementInternals cannot be called before constructor, upgrade case
@@ -2618,7 +2586,6 @@ custom-elements/enqueue-custom-element-callback-reactions-inside-another-callbac
 - Setting an observed attribute on an element with attributeChangedCallback while
   it has a connectedCallback in its custom element reaction queue must result in connectedCallback
   getting invoked before the attribute change completes
-- "[harness] ERROR"
 custom-elements/form-associated/ElementInternals-labels.html:
 - LABEL association
 - LABEL click
@@ -2654,7 +2621,6 @@ custom-elements/htmlconstructor/newtarget-customized-builtins.html:
   (customized built-in elements)
 - If prototype is not object (undefined), derives the fallback from NewTarget's realm
   (customized built-in elements)
-- "[harness] ERROR"
 custom-elements/htmlconstructor/newtarget.html:
 - If prototype is not object (5), derives the fallback from NewTarget's GetFunctionRealm
   (autonomous custom elements)
@@ -2672,7 +2638,6 @@ custom-elements/htmlconstructor/newtarget.html:
   (autonomous custom elements)
 - If prototype is not object (undefined), derives the fallback from NewTarget's realm
   (autonomous custom elements)
-- "[harness] ERROR"
 custom-elements/microtasks-and-constructors.html:
 - Microtasks evaluate immediately when the stack is empty inside the parser
 - Microtasks evaluate immediately when the stack is empty inside the parser, causing
@@ -2702,7 +2667,6 @@ custom-elements/reactions/Animation.html:
 - Animation.animate must enqueue an attributeChanged reaction when it mutates the
   observed style attribute
 custom-elements/reactions/Document.html:
-- "[harness] ERROR"
 - execCommand on Document must enqueue a disconnected reaction when deleting a custom
   element from a contenteditable element
 - open on Document must enqueue disconnectedCallback when removing a custom element
@@ -2713,7 +2677,6 @@ custom-elements/reactions/HTMLElement.html:
 custom-elements/reactions/Selection.html:
 - deleteFromDocument on Selection must enqueue a disconnected reaction
 custom-elements/reactions/ShadowRoot.html:
-- "[harness] ERROR"
 - innerHTML on ShadowRoot must enqueue disconnectedCallback when removing a custom
   element
 custom-elements/registries/CustomElementRegistry-upgrade.html:
@@ -2754,8 +2717,6 @@ custom-elements/registries/scoped-registry-define-upgrade-order.html:
 - Upgrade in association order across documents, then tree order in each document
 - Upgrade order is affected by shadow tree adoption across documents
 - Upgrade order is not affected by DOM order between child frames
-custom-elements/registries/valid-custom-element-names.html:
-- "[harness] ERROR"
 custom-elements/state/ElementInternals-states.html:
 - 'CustomStateSet behavior of ElementInternals.states: Initial state'
 custom-elements/upgrading.html:
@@ -2832,7 +2793,6 @@ dom/events/scrolling/scrollend-event-fired-after-snap.html:
 - Tests that scrollend is fired after scroll snap animation completion.
 - "[harness] TIMEOUT"
 dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.html:
-- "[harness] ERROR"
 - scrollend event fired after load for mandatory snap point
 dom/events/scrolling/scrollend-event-fired-to-document.html:
 - "[harness] ERROR"
@@ -3948,17 +3908,14 @@ encoding/idlharness.any.js:
 - 'TextEncoderStream interface: attribute encoding'
 encoding/streams/decode-bad-chunks.any.js:
 - "[harness] ERROR"
-encoding/streams/decode-incomplete-input.any.js:
-- "[harness] ERROR"
 encoding/streams/decode-non-utf8.any.js:
-- "[harness] ERROR"
-encoding/streams/encode-bad-chunks.any.js:
 - "[harness] ERROR"
 encoding/streams/realms.window.js:
 - TypeError for chunk with the wrong type should come from constructor realm of TextDecoderStream
 - TypeError for incomplete input should come from constructor realm of TextDecoderStream
 - TypeError for invalid chunk should come from constructor realm of TextDecoderStream
 - TypeError for unconvertable chunk should come from constructor realm of TextEncoderStream
+- "[harness] ERROR"
 - the output chunks when write is called with a pending read should come from the
   same realm as the constructor of TextEncoderStream
 - the result object when read is called after write should come from the same realm
@@ -3969,13 +3926,11 @@ fetch/api/abort/general.any.js:
 - "[harness] ERROR"
 fetch/api/abort/keepalive.html:
 - aborting a keepalive fetch should work
-fetch/api/abort/request.any.js:
-- "[harness] ERROR"
 fetch/api/abort/serviceworker-intercepted.https.html:
 - Abort reason serialization happens on abort
 - Service Worker can observe the fetch abort and associated abort reason
 - Stream errors once aborted.
-- "[harness] ERROR"
+- "[harness] TIMEOUT"
 - fetch() response body has abort reason
 fetch/api/basic/block-mime-as-script.html:
 - Should fail loading empty script with audio/aiff MIME type
@@ -4000,46 +3955,27 @@ fetch/api/basic/block-mime-as-script.html:
 - Should fail loading non-empty script with video/whatever MIME type
 fetch/api/basic/conditional-get.any.js:
 - Testing conditional GET with ETags
-- "[harness] ERROR"
 fetch/api/basic/error-after-response.any.js:
 - Response reader closed promise should reject after a network error happening after
   resolving fetch promise
 - Response reader read() promise should reject after a network error happening after
   resolving fetch promise
-fetch/api/basic/header-value-null-byte.any.js:
-- "[harness] ERROR"
 fetch/api/basic/http-response-code.any.js:
 - Fetch on 425 response should not be retried for non TLS early data.
-fetch/api/basic/integrity.sub.any.js:
-- "[harness] ERROR"
 fetch/api/basic/mediasource.window.js:
 - 'Cannot fetch blob: URL from a MediaSource'
-fetch/api/basic/mode-same-origin.any.js:
-- "[harness] ERROR"
-fetch/api/basic/request-head.any.js:
-- "[harness] ERROR"
 fetch/api/basic/request-headers-nonascii.any.js:
 - Non-ascii bytes in request headers
-- "[harness] ERROR"
 fetch/api/basic/request-upload.any.js:
 - Fetch with POST with ReadableStream containing ArrayBuffer
 - Fetch with POST with text body on 421 response should be retried once on new connection.
 - Streaming upload shouldn't work on Http/1.1.
-- "[harness] ERROR"
 fetch/api/basic/request-upload.h2.any.js:
 - Fetch with POST with ReadableStream on 421 response should return the response and
   not retry.
 - ReadbleStream should be closed on signal.abort
 - Streaming upload should fail on a 401 response
-- "[harness] ERROR"
-fetch/api/basic/scheme-about.any.js:
-- "[harness] ERROR"
-fetch/api/basic/scheme-blob.sub.any.js:
-- "[harness] ERROR"
-fetch/api/basic/scheme-data.any.js:
-- "[harness] ERROR"
-fetch/api/basic/scheme-others.sub.any.js:
-- "[harness] ERROR"
+- "[harness] TIMEOUT"
 fetch/api/basic/stream-response.any.js:
 - Stream response's body when content-type is not present
 - Stream response's body when content-type is present
@@ -4147,29 +4083,7 @@ fetch/api/basic/stream-safe-creation.any.js:
 - throwing Object.prototype.type accessor should not affect stream creation by 'fetch'
 - throwing Object.prototype.type accessor should not affect stream creation by 'request'
 - throwing Object.prototype.type accessor should not affect stream creation by 'response'
-fetch/api/cors/cors-basic.any.js:
-- "[harness] ERROR"
 fetch/api/cors/cors-keepalive.any.js:
-- "[harness] ERROR"
-fetch/api/cors/cors-multiple-origins.sub.any.js:
-- "[harness] ERROR"
-fetch/api/cors/cors-origin.any.js:
-- "[harness] ERROR"
-fetch/api/cors/cors-preflight-cache.any.js:
-- "[harness] ERROR"
-fetch/api/cors/cors-preflight-redirect.any.js:
-- "[harness] ERROR"
-fetch/api/cors/cors-preflight-response-validation.any.js:
-- "[harness] ERROR"
-fetch/api/cors/cors-preflight-star.any.js:
-- "[harness] ERROR"
-fetch/api/cors/cors-preflight-status.any.js:
-- "[harness] ERROR"
-fetch/api/cors/cors-preflight.any.js:
-- "[harness] ERROR"
-fetch/api/cors/cors-redirect-credentials.any.js:
-- "[harness] ERROR"
-fetch/api/cors/cors-redirect-preflight.any.js:
 - "[harness] ERROR"
 fetch/api/cors/data-url-iframe.html:
 - fetching "top.txt" without ACAO should be rejected.
@@ -4179,11 +4093,8 @@ fetch/api/cors/data-url-worker.html:
 - fetching "top.txt" without ACAO should be rejected.
 fetch/api/cors/sandboxed-iframe.html:
 - CORS with sandboxed iframe
-fetch/api/headers/header-values-normalize.any.js:
-- "[harness] ERROR"
 fetch/api/headers/header-values.any.js:
 - XMLHttpRequest with all valid values
-- "[harness] ERROR"
 - fetch() with all valid values
 fetch/api/idlharness.https.any.js:
 - FetchLaterResult interface object length
@@ -4297,38 +4208,21 @@ fetch/api/policies/csp-blocked.html:
 fetch/api/policies/referrer-origin-service-worker.https.html:
 - Cross-origin referrer is overridden by client origin
 - Request's referrer is origin
-- "[harness] ERROR"
 fetch/api/policies/referrer-origin-when-cross-origin-service-worker.https.html:
 - Request's referrer is origin
-- "[harness] ERROR"
 fetch/api/policies/referrer-origin-worker.html:
 - Cross-origin referrer is overridden by client origin
 - Request's referrer is origin
-- "[harness] ERROR"
 fetch/api/policies/referrer-origin.html:
 - Cross-origin referrer is overridden by client origin
 - Request's referrer is origin
-- "[harness] ERROR"
-fetch/api/redirect/redirect-count.any.js:
-- "[harness] ERROR"
-fetch/api/redirect/redirect-empty-location.any.js:
-- "[harness] ERROR"
 fetch/api/redirect/redirect-keepalive.any.js:
 - "[harness] ERROR"
 fetch/api/redirect/redirect-keepalive.https.any.js:
 - "[keepalive][iframe][load] mixed content redirect"
-fetch/api/redirect/redirect-location.any.js:
-- "[harness] ERROR"
-fetch/api/redirect/redirect-mode.any.js:
-- "[harness] ERROR"
 fetch/api/redirect/redirect-origin.any.js:
 - "[POST] Redirect 307 Same origin to same origin"
 - "[POST] Redirect 308 Same origin to same origin"
-- "[harness] ERROR"
-fetch/api/redirect/redirect-schemes.any.js:
-- "[harness] ERROR"
-fetch/api/redirect/redirect-to-dataurl.any.js:
-- "[harness] ERROR"
 fetch/api/redirect/redirect-upload.h2.any.js:
 - Fetch upload streaming should fail on 301
 - Fetch upload streaming should fail on 302
@@ -4336,27 +4230,11 @@ fetch/api/redirect/redirect-upload.h2.any.js:
 - Fetch upload streaming should fail on 308
 fetch/api/request/destination/fetch-destination.https.html:
 - AudioWorklet module fetches with a "audioworklet" Request.destination
-fetch/api/request/request-bad-port.any.js:
-- "[harness] ERROR"
-fetch/api/request/request-cache-only-if-cached.any.js:
-- "[harness] ERROR"
 fetch/api/request/request-consume-empty.any.js:
 - Consume empty FormData request body as text
-- "[harness] ERROR"
-fetch/api/request/request-consume.any.js:
-- "[harness] ERROR"
-fetch/api/request/request-disturbed.any.js:
-- "[harness] ERROR"
-fetch/api/request/request-init-priority.any.js:
-- "[harness] ERROR"
 fetch/api/request/request-keepalive-quota.html:
 - A Keep-Alive fetch() should return only its allocated Quota upon promise resolution.
-- "[harness] ERROR"
-- "[harness] ERROR"
-fetch/api/response/json.any.js:
-- "[harness] ERROR"
 fetch/api/response/multi-globals/url-parsing.html:
-- "[harness] ERROR"
 - should parse the redirect Location URL relative to the current settings object
 fetch/api/response/response-arraybuffer-realm.window.js:
 - realm of the ArrayBuffer from Response arrayBuffer()
@@ -4364,32 +4242,14 @@ fetch/api/response/response-blob-realm.any.js:
 - realm of the Uint8Array from Response bytes()
 fetch/api/response/response-consume-empty.any.js:
 - Consume empty FormData response body as text
-- "[harness] ERROR"
 fetch/api/response/response-consume.html:
 - 'Consume response''s body: from multipart form data blob to formData'
-- "[harness] ERROR"
-fetch/api/response/response-error-from-stream.any.js:
-- "[harness] ERROR"
-fetch/api/response/response-form-data.html:
-- "[harness] ERROR"
-fetch/api/response/response-stream-bad-chunk.any.js:
-- "[harness] ERROR"
-fetch/api/response/response-stream-disturbed-2.any.js:
-- "[harness] ERROR"
-fetch/api/response/response-stream-disturbed-3.any.js:
-- "[harness] ERROR"
-fetch/api/response/response-stream-disturbed-4.any.js:
 - "[harness] ERROR"
 fetch/api/response/response-stream-with-broken-then.any.js:
 - Attempt to inject 8.2 via Object.prototype.then.
 - Attempt to inject undefined via Object.prototype.then.
 - 'Attempt to inject value: undefined via Object.prototype.then.'
 - 'Attempt to inject {done: false, value: bye} via Object.prototype.then.'
-- "[harness] ERROR"
-fetch/data-urls/base64.any.js:
-- "[harness] ERROR"
-fetch/data-urls/processing.any.js:
-- "[harness] ERROR"
 fetch/h1-parsing/lone-cr.window.js:
 - "Parsing response with a lone CR before message-body (HTTP/1.1\r200 OK\n\nBODY)"
 - "Parsing response with a lone CR before message-body (HTTP/1.1 200\rOK\n\nBODY)"
@@ -4472,8 +4332,6 @@ html/canvas/element/compositing/2d.composite.grid.no_filter.shadow.fillRect.html
 - "== html/canvas/element/compositing/2d.composite.grid.no_filter.shadow.fillRect-expected.html"
 html/canvas/element/compositing/2d.composite.grid.no_filter.shadow.pattern.html:
 - "== html/canvas/element/compositing/2d.composite.grid.no_filter.shadow.pattern-expected.html"
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.broken.html:
-- "[harness] ERROR"
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.negativedir.html:
 - Negative dimensions do not affect the direction of the image
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.nonexistent.html:
@@ -4584,10 +4442,8 @@ html/canvas/element/manual/filters/svg-flood-filter-visited-color-taints.html:
 html/canvas/element/manual/filters/svg-specular-filter-visited-color-taints.html:
 - Tainting check for visited link in SVG specular lighting filter
 html/canvas/element/manual/imagebitmap/canvas-ImageBitmap-close.html:
-- "[harness] ERROR"
 - canvas-ImageBitmap-close
 html/canvas/element/manual/imagebitmap/canvas-createImageBitmap-resize.html:
-- "[harness] ERROR"
 - createImageBitmap from a Blob with resize option.
 - createImageBitmap from a HTMLCanvasElement with resize option.
 - createImageBitmap from a HTMLImageElement of svg with no specified size with resize
@@ -4599,16 +4455,9 @@ html/canvas/element/manual/imagebitmap/canvas-createImageBitmap-video-resize.htm
 - "[harness] TIMEOUT"
 html/canvas/element/manual/imagebitmap/createImageBitmap-drawImage-closed.html:
 - attempt to draw a closed ImageBitmap to a 2d canvas throws INVALID_STATE_ERR
-html/canvas/element/manual/imagebitmap/createImageBitmap-drawImage.html:
-- "[harness] ERROR"
 html/canvas/element/manual/imagebitmap/createImageBitmap-exif-orientation_none.html:
 - "[harness] ERROR"
-html/canvas/element/manual/imagebitmap/createImageBitmap-flipY.html:
-- "[harness] ERROR"
-html/canvas/element/manual/imagebitmap/createImageBitmap-invalid-args.html:
-- "[harness] ERROR"
 html/canvas/element/manual/imagebitmap/createImageBitmap-origin.sub.html:
-- "[harness] ERROR"
 - 'cross-origin HTMLImageElement: origin unclear bitmaprenderer.transferFromImageBitmap'
 - 'cross-origin HTMLVideoElement: origin unclear 2dContext.drawImage'
 - 'cross-origin HTMLVideoElement: origin unclear bitmaprenderer.transferFromImageBitmap'
@@ -4635,9 +4484,6 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-serializable.html:
 - Serialize ImageBitmap created from an ImageData
 - Serialize ImageBitmap created from an OffscreenCanvas
 - Serializing a non-origin-clean ImageBitmap throws.
-- "[harness] ERROR"
-html/canvas/element/manual/imagebitmap/createImageBitmap-sizeOverflow.html:
-- "[harness] ERROR"
 html/canvas/element/manual/imagebitmap/createImageBitmap-svg-resize.html:
 - "== html/canvas/element/manual/imagebitmap/createImageBitmap-svg-resize-ref.html"
 html/canvas/element/manual/imagebitmap/createImageBitmap-transfer.html:
@@ -4653,7 +4499,6 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-transfer.html:
 - Transfer ImageBitmap created from an ImageData
 - Transfer ImageBitmap created from an OffscreenCanvas
 - Transferring a non-origin-clean ImageBitmap throws.
-- "[harness] ERROR"
 html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap-flipped.html:
 - "== html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap-flipped-expected.html"
 html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap.html:
@@ -6018,37 +5863,24 @@ html/dom/idlharness.any.js:
 - 'HTMLMediaElement interface: attribute controls'
 - 'HTMLMediaElement interface: attribute crossOrigin'
 - 'HTMLMediaElement interface: attribute currentSrc'
-- 'HTMLMediaElement interface: attribute currentTime'
 - 'HTMLMediaElement interface: attribute defaultMuted'
 - 'HTMLMediaElement interface: attribute defaultPlaybackRate'
-- 'HTMLMediaElement interface: attribute duration'
-- 'HTMLMediaElement interface: attribute ended'
-- 'HTMLMediaElement interface: attribute error'
 - 'HTMLMediaElement interface: attribute loading'
 - 'HTMLMediaElement interface: attribute loop'
-- 'HTMLMediaElement interface: attribute muted'
-- 'HTMLMediaElement interface: attribute networkState'
-- 'HTMLMediaElement interface: attribute paused'
 - 'HTMLMediaElement interface: attribute playbackRate'
 - 'HTMLMediaElement interface: attribute played'
 - 'HTMLMediaElement interface: attribute preload'
 - 'HTMLMediaElement interface: attribute preservesPitch'
-- 'HTMLMediaElement interface: attribute readyState'
 - 'HTMLMediaElement interface: attribute seekable'
 - 'HTMLMediaElement interface: attribute seeking'
 - 'HTMLMediaElement interface: attribute src'
 - 'HTMLMediaElement interface: attribute srcObject'
 - 'HTMLMediaElement interface: attribute textTracks'
 - 'HTMLMediaElement interface: attribute videoTracks'
-- 'HTMLMediaElement interface: attribute volume'
 - 'HTMLMediaElement interface: operation addTextTrack(TextTrackKind, optional DOMString,
   optional DOMString)'
-- 'HTMLMediaElement interface: operation canPlayType(DOMString)'
 - 'HTMLMediaElement interface: operation fastSeek(double)'
 - 'HTMLMediaElement interface: operation getStartDate()'
-- 'HTMLMediaElement interface: operation load()'
-- 'HTMLMediaElement interface: operation pause()'
-- 'HTMLMediaElement interface: operation play()'
 - 'HTMLMenuElement interface: attribute compact'
 - 'HTMLMetaElement interface: attribute content'
 - 'HTMLMetaElement interface: attribute httpEquiv'
@@ -6307,7 +6139,6 @@ html/dom/idlharness.any.js:
 - 'HTMLTrackElement interface: attribute default'
 - 'HTMLTrackElement interface: attribute kind'
 - 'HTMLTrackElement interface: attribute label'
-- 'HTMLTrackElement interface: attribute readyState'
 - 'HTMLTrackElement interface: attribute src'
 - 'HTMLTrackElement interface: attribute srclang'
 - 'HTMLTrackElement interface: attribute track'
@@ -6316,8 +6147,6 @@ html/dom/idlharness.any.js:
 - 'HTMLVideoElement interface: attribute height'
 - 'HTMLVideoElement interface: attribute playsInline'
 - 'HTMLVideoElement interface: attribute poster'
-- 'HTMLVideoElement interface: attribute videoHeight'
-- 'HTMLVideoElement interface: attribute videoWidth'
 - 'HTMLVideoElement interface: attribute width'
 - HashChangeEvent interface object length
 - 'HashChangeEvent interface: attribute newURL'
@@ -8544,29 +8373,20 @@ html/dom/idlharness.https.html:
 - 'HTMLMediaElement interface: attribute controls'
 - 'HTMLMediaElement interface: attribute crossOrigin'
 - 'HTMLMediaElement interface: attribute currentSrc'
-- 'HTMLMediaElement interface: attribute currentTime'
 - 'HTMLMediaElement interface: attribute defaultMuted'
 - 'HTMLMediaElement interface: attribute defaultPlaybackRate'
-- 'HTMLMediaElement interface: attribute duration'
-- 'HTMLMediaElement interface: attribute ended'
-- 'HTMLMediaElement interface: attribute error'
 - 'HTMLMediaElement interface: attribute loading'
 - 'HTMLMediaElement interface: attribute loop'
-- 'HTMLMediaElement interface: attribute muted'
-- 'HTMLMediaElement interface: attribute networkState'
-- 'HTMLMediaElement interface: attribute paused'
 - 'HTMLMediaElement interface: attribute playbackRate'
 - 'HTMLMediaElement interface: attribute played'
 - 'HTMLMediaElement interface: attribute preload'
 - 'HTMLMediaElement interface: attribute preservesPitch'
-- 'HTMLMediaElement interface: attribute readyState'
 - 'HTMLMediaElement interface: attribute seekable'
 - 'HTMLMediaElement interface: attribute seeking'
 - 'HTMLMediaElement interface: attribute src'
 - 'HTMLMediaElement interface: attribute srcObject'
 - 'HTMLMediaElement interface: attribute textTracks'
 - 'HTMLMediaElement interface: attribute videoTracks'
-- 'HTMLMediaElement interface: attribute volume'
 - 'HTMLMediaElement interface: calling addTextTrack(TextTrackKind, optional DOMString,
   optional DOMString) on document.createElement("audio") with too few arguments must
   throw TypeError'
@@ -8681,12 +8501,8 @@ html/dom/idlharness.https.html:
   the proper type'
 - 'HTMLMediaElement interface: operation addTextTrack(TextTrackKind, optional DOMString,
   optional DOMString)'
-- 'HTMLMediaElement interface: operation canPlayType(DOMString)'
 - 'HTMLMediaElement interface: operation fastSeek(double)'
 - 'HTMLMediaElement interface: operation getStartDate()'
-- 'HTMLMediaElement interface: operation load()'
-- 'HTMLMediaElement interface: operation pause()'
-- 'HTMLMediaElement interface: operation play()'
 - 'HTMLMenuElement interface: attribute compact'
 - 'HTMLMetaElement interface: attribute content'
 - 'HTMLMetaElement interface: attribute httpEquiv'
@@ -8983,7 +8799,6 @@ html/dom/idlharness.https.html:
 - 'HTMLTrackElement interface: attribute default'
 - 'HTMLTrackElement interface: attribute kind'
 - 'HTMLTrackElement interface: attribute label'
-- 'HTMLTrackElement interface: attribute readyState'
 - 'HTMLTrackElement interface: attribute src'
 - 'HTMLTrackElement interface: attribute srclang'
 - 'HTMLTrackElement interface: attribute track'
@@ -8994,8 +8809,6 @@ html/dom/idlharness.https.html:
 - 'HTMLVideoElement interface: attribute height'
 - 'HTMLVideoElement interface: attribute playsInline'
 - 'HTMLVideoElement interface: attribute poster'
-- 'HTMLVideoElement interface: attribute videoHeight'
-- 'HTMLVideoElement interface: attribute videoWidth'
 - 'HTMLVideoElement interface: attribute width'
 - HashChangeEvent interface object length
 - 'HashChangeEvent interface: attribute newURL'
@@ -11986,8 +11799,6 @@ html/webappapis/structured-clone/structured-clone-cross-realm-method.html:
 - Date instance
 - Object instance
 - RegExp instance
-html/webappapis/structured-clone/structured-clone.any.js:
-- "[harness] ERROR"
 input-events/idlharness.window.js:
 - 'InputEvent interface: attribute dataTransfer'
 - 'InputEvent interface: operation getTargetRanges()'
@@ -12240,24 +12051,15 @@ resource-timing/secure-iframe-in-insecure-context.html:
   context
 resource-timing/sizes-cache.any.js:
 - PerformanceResourceTiming sizes caching test
-- "[harness] ERROR"
 resource-timing/workerStart-tao-protected.https.html:
 - A resource from a cross-origin service worker must expose workerStart when there
   is a TAO match
 resource-timing/worklet-rt-entries.https.html:
 - Worklets should generate Resource Timing Entries
-service-workers/cache-storage/cache-add.https.any.js:
-- "[harness] ERROR"
-service-workers/cache-storage/cache-delete.https.any.js:
-- "[harness] ERROR"
-service-workers/cache-storage/cache-put.https.any.js:
-- "[harness] ERROR"
 service-workers/cache-storage/cache-storage.https.any.js:
 - CacheStorage names are DOMStrings not USVStrings
-- "[harness] ERROR"
 service-workers/cache-storage/credentials.https.html:
 - Cache API matching includes credentials
-- "[harness] ERROR"
 service-workers/service-worker/Service-Worker-Allowed-header.https.html:
 - Registering outside Service-Worker-Allowed path
 - Registering outside Service-Worker-Allowed path with parent reference
@@ -12265,7 +12067,6 @@ service-workers/service-worker/Service-Worker-Allowed-header.https.html:
   scope
 - Service-Worker-Allowed is cross-origin to script, registering on a normally disallowed
   scope
-- "[harness] ERROR"
 service-workers/service-worker/ServiceWorkerGlobalScope/close.https.html:
 - ServiceWorkerGlobalScope close operation
 service-workers/service-worker/ServiceWorkerGlobalScope/error-message-event.https.html:
@@ -12274,7 +12075,7 @@ service-workers/service-worker/ServiceWorkerGlobalScope/extendable-message-event
 - Post an extendable message from a top-level client
 - Post extendable messages among service workers
 - Post loopback extendable messages
-- "[harness] ERROR"
+- "[harness] TIMEOUT"
 service-workers/service-worker/ServiceWorkerGlobalScope/postmessage.https.html:
 - Post loopback messages
 - Post messages among service workers
@@ -12297,7 +12098,6 @@ service-workers/service-worker/claim-using-registration.https.html:
 - Test for the waiting worker claims a client which is using the same registration
 service-workers/service-worker/claim-with-redirect.https.html:
 - Claim works after redirection to another origin
-- "[harness] ERROR"
 service-workers/service-worker/claim-worker-fetch.https.html:
 - "[harness] TIMEOUT"
 - fetch() in blob URL Worker should be intercepted after the client is claimed.
@@ -12307,8 +12107,6 @@ service-workers/service-worker/claim-worker-fetch.https.html:
   the client is claimed.
 - fetch() in nested blob URL Worker created from a blob URL Worker should be intercepted
   after the client is claimed.
-service-workers/service-worker/client-navigate.https.html:
-- "[harness] ERROR"
 service-workers/service-worker/client-url-creation-url.https.html:
 - Going back to new document changes creation URL
 - "[harness] TIMEOUT"
@@ -12327,22 +12125,16 @@ service-workers/service-worker/clients-matchall-order.https.html:
 service-workers/service-worker/controlled-iframe-postMessage.https.html:
 - Verify frame does get messages in order
 - Verify frame gets early messages if setting synchronously message event listener
-service-workers/service-worker/controller-with-no-fetch-event-handler.https.html:
-- "[harness] ERROR"
 service-workers/service-worker/credentials.https.html:
 - Module with an imported statement should not have credentials
 - Script with service worker served as modules should not have credentials
-service-workers/service-worker/csim-sw-roundtrip.html:
-- "[harness] ERROR"
 service-workers/service-worker/data-iframe.html:
-- "[harness] ERROR"
 - 'navigator.serviceWorker is not available in a data: iframe'
 service-workers/service-worker/dedicated-worker-service-worker-interception.https.html:
 - Dynamic import should be intercepted by a service worker.
 - Static import should be intercepted by a service worker.
 - "[harness] TIMEOUT"
 service-workers/service-worker/detached-context.https.html:
-- "[harness] ERROR"
 - accessing a ServiceWorker object from a removed iframe
 - accessing a ServiceWorkerRegistration from a removed iframe
 - accessing navigator.serviceWorker on a detached iframe
@@ -12366,7 +12158,6 @@ service-workers/service-worker/extendable-event-async-waituntil.https.html:
 - Test calling waitUntil in a task at the end of the event handler without an existing
   extension throws
 - Test calling waitUntil on a script constructed ExtendableEvent throws exception
-- "[harness] ERROR"
 service-workers/service-worker/fetch-audio-tainting.https.html:
 - Verify CORS XHR of fetch() in a Service Worker
 service-workers/service-worker/fetch-canvas-tainting-video-with-range-request.https.html:
@@ -12375,23 +12166,15 @@ service-workers/service-worker/fetch-canvas-tainting-video-with-range-request.ht
 - synth and same-origin fallback range responses
 service-workers/service-worker/fetch-csp.https.html:
 - Verify CSP control of fetch() in a Service Worker
-- "[harness] ERROR"
 service-workers/service-worker/fetch-event-is-reload-iframe-navigation-manual.https.html:
 - FetchEvent#request.isReloadNavigation is true for manual reload.
 - "[harness] TIMEOUT"
-service-workers/service-worker/fetch-event-redirect.https.html:
-- "[harness] ERROR"
-service-workers/service-worker/fetch-event-respond-with-response-body-with-invalid-chunk.https.html:
-- "[harness] ERROR"
 service-workers/service-worker/fetch-event-throws-after-respond-with.https.html:
 - Fetch event handler throws after a successful respondWith()
-- "[harness] ERROR"
 service-workers/service-worker/fetch-event-within-sw-manual.https.html:
 - Notification requests intercepted both from window and SW
 service-workers/service-worker/fetch-event.https.h2.html:
 - When the streaming request body is used, network fallback fails.
-service-workers/service-worker/fetch-event.https.html:
-- "[harness] ERROR"
 service-workers/service-worker/fetch-mixed-content-to-inscope.https.html:
 - Verify Mixed content of fetch() in a Service Worker
 - "[harness] TIMEOUT"
@@ -12413,24 +12196,18 @@ service-workers/service-worker/fetch-request-css-images.https.html:
 - Verify FetchEvent for css image-set (backgroundImage).
 - Verify FetchEvent for css image-set (shapeOutside).
 - "[harness] TIMEOUT"
-service-workers/service-worker/fetch-request-fallback.https.html:
-- "[harness] ERROR"
 service-workers/service-worker/fetch-request-xhr-sync-on-worker.https.html:
 - Verify SyncXHR on Worker is intercepted
 service-workers/service-worker/fetch-request-xhr-sync.https.html:
 - Verify SyncXHR is intercepted
-service-workers/service-worker/fetch-response-taint.https.html:
-- "[harness] ERROR"
 service-workers/service-worker/http-to-https-redirect-and-register.https.html:
 - register on a non-secure page after redirect from an non-secure url
 service-workers/service-worker/immutable-prototype-serviceworker.https.html:
-- "[harness] ERROR"
 - worker prototype chain should be immutable
 service-workers/service-worker/import-scripts-updated-flag.https.html:
 - import script not previously imported
 service-workers/service-worker/indexeddb.https.html:
 - Verify Indexed DB operation in a Service Worker
-- "[harness] ERROR"
 service-workers/service-worker/intercepted-referrer.https.html:
 - document.referrer for a navigation intercepted by a Service Worker is unchanged
   and matches the parent URL
@@ -12443,7 +12220,6 @@ service-workers/service-worker/local-url-inherit-controller.https.html:
 - Same-origin blob URL sharedworker should inherit service worker controller.
 - Same-origin blob URL sharedworker should intercept fetch().
 service-workers/service-worker/multi-globals/url-parsing.https.html:
-- "[harness] ERROR"
 - getRegistration should use the relevant global of the object it was called on to
   resolve the script URL
 - register should use the relevant global of the object it was called on to resolve
@@ -12451,16 +12227,13 @@ service-workers/service-worker/multi-globals/url-parsing.https.html:
 - register should use the relevant global of the object it was called on to resolve
   the script URL and the given scope URL
 service-workers/service-worker/multipart-image.https.html:
-- "[harness] ERROR"
 - cross-origin multipart image via SW with approved CORS should be readable
 - cross-origin multipart image with no-cors via SW should not be readable
 - same-origin multipart image via SW should be readable
 service-workers/service-worker/navigate-window.https.html:
 - Clients.matchAll() should not show an old window after it navigates.
 - Clients.matchAll() should not show an old window as controlled after it navigates.
-- "[harness] ERROR"
 service-workers/service-worker/navigation-preload/get-state.https.html:
-- "[harness] ERROR"
 - no active worker
 service-workers/service-worker/navigation-preload/redirect.https.html:
 - Navigation Preload no-location redirect response with body.
@@ -12469,7 +12242,6 @@ service-workers/service-worker/navigation-preload/redirect.https.html:
 - Navigation Preload redirect to the same scope.
 service-workers/service-worker/navigation-preload/request-headers.https.html:
 - Navigation Preload request headers.
-- "[harness] ERROR"
 service-workers/service-worker/navigation-preload/resource-timing.https.html:
 - Navigation Preload Resource Timing.
 service-workers/service-worker/navigation-timing-extended.https.html:
@@ -12496,13 +12268,11 @@ service-workers/service-worker/next-hop-protocol.https.html:
 service-workers/service-worker/opaque-response-preloaded.https.html:
 - Opaque responses should not be reused for XHRs, done case
 - Opaque responses should not be reused for XHRs, loading case
-- "[harness] ERROR"
 service-workers/service-worker/opaque-script.https.html:
 - Verify large cross-origin cache_storage scripts are opaque.
 - Verify small cross-origin cache_storage scripts are opaque.
 service-workers/service-worker/performance-timeline.https.html:
 - Resource Timing
-- "[harness] ERROR"
 service-workers/service-worker/postmessage-blob-url.https.html:
 - "[harness] TIMEOUT"
 - postMessage Blob URL to a ServiceWorker
@@ -12513,8 +12283,6 @@ service-workers/service-worker/postmessage-to-client-message-queue.https.html:
 - Microtasks run before dispatching messages after calling startMessages().
 - Microtasks run before dispatching messages after setting onmessage.
 - "[harness] TIMEOUT"
-service-workers/service-worker/redirected-response.https.html:
-- "[harness] ERROR"
 service-workers/service-worker/referrer-policy-header.https.html:
 - Referrer for a main resource redirected with a module script with referrer-policy
   (origin) should only have origin.
@@ -12528,25 +12296,16 @@ service-workers/service-worker/register-same-scope-different-script-url.https.ht
 - "[harness] ERROR"
 service-workers/service-worker/registration-iframe.https.html:
 - A scope url should start with the given script url
-service-workers/service-worker/registration-mime-types.https.html:
-- "[harness] ERROR"
-service-workers/service-worker/registration-scope.https.html:
-- "[harness] ERROR"
 service-workers/service-worker/registration-script-module.https.html:
 - Registering invalid chunked encoding script with flush
-- "[harness] ERROR"
-service-workers/service-worker/registration-script-url.https.html:
-- "[harness] ERROR"
 service-workers/service-worker/registration-script.https.html:
 - Registering invalid chunked encoding script with flush
-- "[harness] ERROR"
 service-workers/service-worker/registration-security-error.https.html:
 - Registering redirected script
 - Registering same scope as the script directory without the last slash
 - Registration scope outside the script directory
 - Scope including parent-reference and not under the script directory
 - Script URL including consecutive slashes
-- "[harness] ERROR"
 service-workers/service-worker/registration-updateviacache.https.html:
 - "[harness] ERROR"
 service-workers/service-worker/resource-timing-bodySize.https.html:
@@ -12624,7 +12383,6 @@ service-workers/service-worker/service-worker-csp-script.https.html:
 - importScripts test for script-src
 service-workers/service-worker/skip-waiting-installed.https.html:
 - Test skipWaiting when a installed worker is waiting
-- "[harness] ERROR"
 service-workers/service-worker/skip-waiting-using-registration.https.html:
 - Test skipWaiting while a client is using the registration
 - "[harness] TIMEOUT"
@@ -12645,8 +12403,6 @@ service-workers/service-worker/unregister-immediately.https.html:
 - Clear-Site-Data must unregister an activated registration with an update waiting.
 - Clear-Site-Data must unregister an activated registration with controlled clients.
 - "[harness] TIMEOUT"
-service-workers/service-worker/unregister-then-register-new-script.https.html:
-- "[harness] ERROR"
 service-workers/service-worker/update-after-navigation-fetch-event.https.html:
 - Update should be triggered after a navigation (fetch event worker).
 - Update should be triggered after a navigation (network error).
@@ -12659,17 +12415,10 @@ service-workers/service-worker/update-after-oneday.https.html:
 - Update should be triggered after a functional event when last update time is over
   24 hours
 - "[harness] TIMEOUT"
-service-workers/service-worker/update-import-scripts.https.html:
-- "[harness] ERROR"
 service-workers/service-worker/update-module-request-mode.https.html:
 - headers of a main module script
 service-workers/service-worker/update-recovery.https.html:
 - Recover from a bad service worker by updating after a failed navigation.
-- "[harness] ERROR"
-service-workers/service-worker/update-registration-with-type.https.html:
-- "[harness] ERROR"
-service-workers/service-worker/update.https.html:
-- "[harness] ERROR"
 service-workers/service-worker/websocket-in-service-worker.https.html:
 - Verify WebSockets can be created in a Service Worker
 - "[harness] TIMEOUT"
@@ -13024,7 +12773,6 @@ web-animations/interfaces/Animatable/animate-no-browsing-context.html:
   a browsing context leaves it in the pending state
 - The timeline associated with an animation trigger on an element in a document without
   a browsing context is inactive
-- "[harness] ERROR"
 web-animations/interfaces/Animatable/animate.html:
 - Element.animate() correctly sets the Animation's timeline with null timeline in
   KeyframeAnimationOptions.
@@ -13050,10 +12798,6 @@ web-animations/interfaces/Animatable/getAnimations.html:
 - The legacy Selectors Level 2 single-colon selectors can be used
 - Throws SyntaxError for an empty selector
 - Throws SyntaxError for an invalid pseudo-element selector
-web-animations/interfaces/Animation/finished.html:
-- "[harness] ERROR"
-web-animations/interfaces/Animation/oncancel.html:
-- "[harness] ERROR"
 web-animations/interfaces/Animation/onremove.html:
 - "[harness] TIMEOUT"
 - onremove event is fired when replaced animation is removed.
@@ -13071,7 +12815,6 @@ web-animations/interfaces/Animation/persist.html:
 - Allows an animation to be persisted after being removed
 - "[harness] TIMEOUT"
 web-animations/interfaces/Animation/startTime.html:
-- "[harness] ERROR"
 - startTime is resolved when running
 web-animations/interfaces/Animation/style-change-events.html:
 - All property keys are recognized
@@ -13127,8 +12870,6 @@ web-animations/responsive/shapeOutside.html:
 - Neutral path() keyframes invalidate when the underlying <shape-box> changes
 web-animations/responsive/toggle-animated-iframe-visibility.html:
 - "== web-animations/responsive/toggle-animated-iframe-visibility-ref.html"
-web-animations/timing-model/animations/canceling-an-animation.html:
-- "[harness] ERROR"
 web-animations/timing-model/animations/invalidating-animation-before-start-time-synced.html:
 - Animation invalidated before startTime is set doesn't affect startTime
 web-animations/timing-model/animations/play-states.html:
@@ -13174,7 +12915,6 @@ web-animations/timing-model/timelines/sibling-iframe-timeline.html:
 web-animations/timing-model/timelines/timelines.html:
 - Timeline time increases once per animation frame
 - Timeline time increases once per animation frame in an iframe
-- "[harness] ERROR"
 web-animations/timing-model/timelines/update-and-send-events-replacement.html:
 - Dispatches an event when removing
 - Dispatches remove events after finish events
@@ -13359,7 +13099,6 @@ webstorage/event_no_duplicates.html:
 - Setting to same value does not trigger event for sessionStorage
 webstorage/localstorage-about-blank-3P-iframe-opens-3P-window.partitioned.html:
 - 'StorageKey: test 3P about:blank window opened from a 3P iframe'
-- "[harness] ERROR"
 webstorage/localstorage-basic-partitioned.sub.html:
 - Simple test for partitioned localStorage
 webstorage/localstorage-share-data-unrelated-origins.html:

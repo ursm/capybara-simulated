@@ -401,6 +401,50 @@ RSpec.describe 'IDL bindings' do
     expect(session.evaluate_script('events')).to eq(%w[volumechange volumechange])
   end
 
+  # (…HTMLMediaElement's members its own, a track's `readyState` HTMLTrackElement's: named as Chrome names them, each
+  # checking its `this` — a promise rejected, not thrown)
+  it "puts the media elements' members on their interfaces" do
+    got = outcome(<<~JS)
+      (() => {
+        const own = (name) => [HTMLMediaElement, HTMLAudioElement, HTMLVideoElement, HTMLTrackElement, Element]
+          .filter((I) => Object.hasOwn(I.prototype, name)).map((I) => I.name).join('+');
+        const get = (I, name) => Object.getOwnPropertyDescriptor(I.prototype, name).get;
+        const illegal = (f) => { try { f(); return 'no error'; } catch (e) { return e.message; } };
+        window.played = HTMLMediaElement.prototype.play.call(document.body).catch((e) => e.message);
+        return [
+          ['readyState', 'paused', 'videoWidth'].map(own),
+          [get(HTMLMediaElement, 'paused').name, Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'volume').set.name, HTMLMediaElement.prototype.play.name],
+          illegal(() => get(HTMLTrackElement, 'readyState').call(new Audio())),
+          illegal(() => get(HTMLMediaElement, 'readyState').call(document.createElement('track'))),
+          [document.createElement('track').readyState, HTMLTrackElement.LOADED]
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      ['HTMLMediaElement+HTMLTrackElement', 'HTMLMediaElement', 'HTMLVideoElement'],
+      ['get paused', 'set volume', 'play'],
+      'Illegal invocation', 'Illegal invocation', [0, 2]
+    ])
+    expect(session.evaluate_async_script('played.then(arguments[0])')).to eq("Failed to execute 'play' on 'HTMLMediaElement': Illegal invocation")
+  end
+
+  # (…the object NewTarget's: a subclass's prototype, the interface's where NewTarget's is no object)
+  it "makes a legacy factory function's object NewTarget's" do
+    got = outcome(<<~JS)
+      (() => {
+        class Thumb extends Image {}
+        const odd = function () {};
+        odd.prototype = 5;
+        return [
+          new Thumb() instanceof Thumb, new Thumb().localName,
+          Object.getPrototypeOf(Reflect.construct(Image, [], Object)) === Object.prototype,
+          Object.getPrototypeOf(Reflect.construct(Audio, [], odd)) === HTMLAudioElement.prototype
+        ];
+      })()
+    JS
+    expect(got).to eq([true, 'img', true, true])
+  end
+
   # (…the document element among them, and a name compared as it is, not as a selector)
   it "finds a document's elements by name, its root too" do
     got = outcome(<<~JS)

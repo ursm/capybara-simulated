@@ -2,11 +2,10 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
 # A rejection with NO handler ever attached (fire-and-forget async function,
-# bare `Promise.reject`) never flows through the bridge's `Promise.prototype
-# .then` wrap — it is only observable via the engine's native promise-reject
-# channel. These lock that channel's contract: the `unhandledrejection`
-# event fires on window, and a handler attached before the microtask
-# checkpoint suppresses it.
+# bare `Promise.reject`) is observable only via the engine's native
+# promise-reject channel. These lock that channel's contract: the
+# `unhandledrejection` event fires on window, and a handler attached before
+# the microtask checkpoint suppresses it.
 RSpec.describe 'unhandled promise rejections' do
   let(:app) {
     lambda do |_env|
@@ -38,5 +37,17 @@ RSpec.describe 'unhandled promise rejections' do
       p.catch(() => {});
     JS
     expect(session.evaluate_script('window.__seen')).to be_nil
+  end
+
+  # (…a chain whose derived promise is handled — `p.then(f).catch(h)`, testharness's `promise_rejects_js` — is no
+  # unhandled rejection, and `then` is the engine's own)
+  it 'does not fire for a rejection a later link of its chain handles' do
+    session.execute_script(<<~JS)
+      window.__seen = [];
+      window.addEventListener('unhandledrejection', (e) => { window.__seen.push(String(e.reason)); });
+      Promise.reject(new Error('caught downstream')).then(() => {}).catch(() => {});
+      Promise.resolve().then(() => { throw new Error('thrown in then'); }).then(() => {}).catch(() => {});
+    JS
+    expect(session.evaluate_script('[window.__seen, Promise.prototype.then.toString().includes("[native code]")]')).to eq([[], true])
   end
 end
