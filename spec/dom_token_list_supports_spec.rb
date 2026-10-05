@@ -31,6 +31,11 @@ RSpec.describe 'DOMTokenList#supports' do
     expect(session.evaluate_script("document.getElementById('lnk').relList.supports('preload')")).to be true
   end
 
+  # (…in ASCII only: a KELVIN SIGN is no `k`, as Chrome 154 has it too)
+  it 'lowercases the token in ASCII alone' do
+    expect(session.evaluate_script("document.getElementById('ifr').sandbox.supports('allow-pointer-loc\\u212A')")).to be false
+  end
+
   it 'returns false for an unsupported rel token' do
     expect(session.evaluate_script("document.getElementById('lnk').relList.supports('bogus-token')")).to be false
   end

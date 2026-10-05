@@ -28,11 +28,29 @@ const INTERFACES = [
 ];
 
 const all = await parseAll();
-// Every interface and callback interface of every spec, by name: what an interface type names.
-const definitions = new Map();
-for (const defs of Object.values(all)) {
+// Every interface and callback interface of every spec, by name: what an interface type names. And what adds to one
+// beside its definition — a partial interface, a mixin it includes — which no binding here merges yet.
+const definitions = new Map(), additions = new Map();
+for (const [spec, defs] of Object.entries(all)) {
   for (const d of defs) {
     if ((d.type === 'interface' || d.type === 'callback interface') && !d.partial) definitions.set(d.name, d);
+    const to = d.type === 'includes' ? d.target : d.partial ? d.name : null;
+    if (to) additions.set(to, [...(additions.get(to) || []), `${d.type === 'includes' ? `includes ${d.includes}` : 'a partial'} (${spec})`]);
+  }
+}
+
+// The extended attributes a binding here makes what IDL says of, by where they stand; any other is an error.
+// [CEReactions]: an implementation's writes run their reactions as each returns (handleAttributeChanges) — which is
+// the operation's return where it writes once, as every one generated here does. [SameObject] / [NewObject]: what the
+// implementation returns. [Exposed]: the global the interface object is put on, the Window's here.
+const HANDLED = {
+  interface: ['Exposed'],
+  member: ['SameObject', 'NewObject', 'CEReactions'],
+  type: ['LegacyNullToEmptyString']
+};
+function checkExtAttrs(extAttrs, where, label) {
+  for (const e of extAttrs || []) {
+    if (!HANDLED[where].includes(e.name)) throw new Error(`${label}: no binding makes [${e.name}] yet`);
   }
 }
 
@@ -51,10 +69,13 @@ function conversionError(where, what) {
 
 // The JS of converting `expr` to the IDL type `t` (an argument's, an attribute's), and the interfaces whose objects it
 // takes, into `checks`.
-function conversion(t, expr, where, checks) {
+// `extAttrs` are those on the type and, for an argument, the argument's own (where webidl2 puts `[EnforceRange] long x`'s).
+function conversion(t, expr, where, checks, argExtAttrs = []) {
   const label = `${where.iface}.${where.member}`;
   if (t.union || t.generic) throw new Error(`${label}: no binding converts ${JSON.stringify(t.idlType)} yet`);
-  const legacyNull = (t.extAttrs || []).some((e) => e.name === 'LegacyNullToEmptyString');
+  const extAttrs = [...(t.extAttrs || []), ...argExtAttrs];
+  checkExtAttrs(extAttrs, 'type', label);
+  const legacyNull = extAttrs.some((e) => e.name === 'LegacyNullToEmptyString');
   let c;
   switch (t.idlType) {
     case 'DOMString': c = `toDOMString(${expr}${legacyNull ? ', true' : ''})`; break;
@@ -86,9 +107,20 @@ function constantValue(m, where) {
   return m.value.value;
 }
 
+// What no binding here makes of a definition yet, beside its members: an error.
+function checkDefinition(def) {
+  checkExtAttrs(def.extAttrs, 'interface', def.name);
+  if (additions.has(def.name)) throw new Error(`${def.name}: no binding merges ${additions.get(def.name).join(', ')} yet`);
+  const names = def.members.filter((m) => m.type === 'operation' && m.name).map((m) => m.name);
+  const overloaded = names.find((n, i) => names.indexOf(n) !== i);
+  if (overloaded) throw new Error(`${def.name}.${overloaded}: an overloaded operation is not generated yet`);
+  for (const m of def.members) checkExtAttrs(m.extAttrs, 'member', `${def.name}.${m.name || m.type}`);
+}
+
 function generateInterface(def) {
   const name = def.name;
   if (def.inheritance) throw new Error(`${name}: an inherited interface is not generated yet`);
+  checkDefinition(def);
   const members = [], constants = [], body = [], checks = new Set();
   let indexed = null, valueIterator = false, stringifier = null, constructor = null;
   for (const m of def.members) {
@@ -136,13 +168,12 @@ function generateInterface(def) {
   lines.push(`  class ${name} {`);
   lines.push(`    constructor(...args) {`);
   lines.push(`      constructedBy(PLATFORM, args[0], '${name}');`);
-  lines.push(`      brand(this, KEY);`);
-  lines.push(`      impl.init(this, ...args.slice(1));`);
+  lines.push(`      impl.init(makeSlots(this, KEY), ...args.slice(1));`);
   lines.push(`    }`);
   lines.push(...body);
   if (stringifier) lines.push(`    toString() { return impl.get_${stringifier}(thisOf(this, KEY, '${name}', 'toString')); }`);
   lines.push(`  }`);
-  lines.push(`  registerInterface('${name}', (o) => o != null && o[KEY] === true);`);
+  lines.push(`  registerInterface('${name}', (o) => slotsOf(o, KEY) !== undefined);`);
   if (constants.length) {
     const list = JSON.stringify(constants.map(([n]) => n));
     lines.push(`  defineConstants(${name}, ${list}, [${constants.map(([, v]) => v).join(', ')}]);`);
@@ -156,7 +187,7 @@ function generateInterface(def) {
   }
   // …and its objects, as the platform makes them (`create(...state)`), exotic where it has an indexed getter.
   const make = indexed
-    ? `withIndexedGetter(new ${name}(PLATFORM, ...state), (o, i) => impl.${indexed}(o, i), (o) => impl.get_length(o))`
+    ? `withIndexedGetter(new ${name}(PLATFORM, ...state), (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s))`
     : `new ${name}(PLATFORM, ...state)`;
   lines.push(`  return { interface: ${name}, create: (...state) => ${make} };`);
   lines.push(`}`);
@@ -173,17 +204,18 @@ function operation(iface, m, checks) {
   const params = args.filter((a) => !a.optional).map((a) => (a.variadic ? `...${a.name}` : a.name)).join(', ');
   const converted = args.map((a, i) => {
     const where = { iface, member: m.name, index: i };
-    if (a.variadic) return `${a.name}.map((x) => ${conversion(a.idlType, 'x', where, checks)})`;
+    if (a.variadic) return `${a.name}.map((x) => ${conversion(a.idlType, 'x', where, checks, a.extAttrs)})`;
     if (a.optional) {
       // (…an optional argument passed as undefined is one not passed, Web IDL §3.6.8)
       const missing = a.default ? defaultValue(a.default, `${iface}.${m.name}(${a.name})`) : 'undefined';
-      return `(arguments[${i}] !== undefined ? ${conversion(a.idlType, `arguments[${i}]`, where, checks)} : ${missing})`;
+      return `(arguments[${i}] !== undefined ? ${conversion(a.idlType, `arguments[${i}]`, where, checks, a.extAttrs)} : ${missing})`;
     }
-    return conversion(a.idlType, a.name, where, checks);
+    return conversion(a.idlType, a.name, where, checks, a.extAttrs);
   });
-  const call = `impl.${m.name}(${[`thisOf(this, KEY, '${iface}', '${m.name}')`, ...converted].join(', ')})`;
+  // (…`this` checked first, then the arguments counted — Web IDL's order, as Chrome's)
+  const self = `const self = thisOf(this, KEY, '${iface}', '${m.name}'); `;
   const check = requiredCount ? `required(arguments, ${requiredCount}, '${m.name}', '${iface}'); ` : '';
-  return `${m.name}(${params}) { ${check}return ${call}; }`;
+  return `${m.name}(${params}) { ${self}${check}return impl.${m.name}(${['self', ...converted].join(', ')}); }`;
 }
 
 function defaultValue(d, where) {
@@ -200,6 +232,7 @@ function defaultValue(d, where) {
 // its constants on it — and the call of its operation on a user object, its result converted to the operation's type.
 function generateCallbackInterface(def) {
   const name = def.name;
+  checkDefinition(def);
   const constants = [], operations = [];
   for (const m of def.members) {
     const label = `${name}.${m.name || m.type}`;
@@ -239,10 +272,10 @@ const source = `// GENERATED by script/gen_bindings.mjs from @webref/idl — do 
 // converted values (webidl.js is their runtime).
 
 import {
-  brandKey, brand, thisOf, required, constructedBy, registerInterface, interfaceCheck, toDOMString, toUSVString,
-  toBoolean, toUnsignedShort, toUnsignedLong, toLong, toDouble, toUnrestrictedDouble, toInterface, toCallbackInterface,
-  callUserObjectOperation, legacyCallbackInterfaceObject, defineConstants, withIndexedGetter, defineValueIterator,
-  defineClassString, enumerable
+  brandKey, makeSlots, slotsOf, thisOf, required, constructedBy, registerInterface, interfaceCheck, toDOMString,
+  toUSVString, toBoolean, toUnsignedShort, toUnsignedLong, toLong, toDouble, toUnrestrictedDouble, toInterface,
+  toCallbackInterface, callUserObjectOperation, legacyCallbackInterfaceObject, defineConstants, withIndexedGetter,
+  defineValueIterator, defineClassString, enumerable
 } from '../webidl.js';
 
 // What the platform passes its own constructions, which a script's \`new\` cannot.

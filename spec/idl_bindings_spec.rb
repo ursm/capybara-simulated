@@ -31,6 +31,32 @@ RSpec.describe 'IDL bindings' do
     expect(outcome('Object.getOwnPropertyDescriptor(NodeIterator.prototype, "root").get.call({})')).to start_with('TypeError: ')
   end
 
+  # (…before it counts the arguments, as Web IDL orders it — and an object that inherits from one is no object of the
+  # interface)
+  it "checks `this` first, and only the object's own" do
+    expect(outcome('DOMTokenList.prototype.contains.call({})')).to eq("TypeError: Failed to execute 'contains' on 'DOMTokenList': Illegal invocation")
+    expect(outcome('Object.create(document.getElementById("a").classList).length')).to start_with('TypeError: ')
+  end
+
+  # Web IDL §3.9: a legacy platform object with an indexed getter and no setter refuses to define, set or (while
+  # supported) delete an array index property, and to be made non-extensible. Chrome reports `Reflect.set` and
+  # `Reflect.defineProperty` of an index as done (true) where the spec returns false; it sets nothing either way.
+  it "keeps a legacy platform object's indices the getter's" do
+    got = outcome(<<~JS)
+      (() => {
+        const l = document.getElementById('a').classList;
+        l[5] = 'q';
+        const strict = (() => { 'use strict'; try { l[0] = 'q'; return 'set'; } catch (e) { return e.constructor.name; } })();
+        return [
+          Object.keys(l), l[0], strict, Reflect.set(l, '5', 'q'), Reflect.defineProperty(l, '0', {value: 'zz'}),
+          Reflect.deleteProperty(l, '0'), Reflect.deleteProperty(l, '9'), Reflect.preventExtensions(l),
+          Reflect.defineProperty(l, 'foo', {value: 1}) && l.foo
+        ];
+      })()
+    JS
+    expect(got).to eq([['0'], 'x', 'TypeError', false, false, false, true, false, 1])
+  end
+
   it 'gives an operation the length of its required arguments, and takes an optional undefined as not passed' do
     expect(outcome('[DOMTokenList.prototype.toggle.length, DOMTokenList.prototype.add.length, DOMTokenList.prototype.replace.length]')).to eq([1, 0, 2])
     expect(outcome('(() => { const l = document.getElementById("a").classList; return [l.toggle("x", undefined), l.value]; })()')).to eq([false, ''])
