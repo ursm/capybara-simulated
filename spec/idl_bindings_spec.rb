@@ -247,6 +247,20 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  # (…and an Element's members are no other node's: they had been Node's)
+  it "gives an element's members to elements alone" do
+    got = outcome(<<~JS)
+      (() => {
+        const t = document.createTextNode(''), c = document.createComment('');
+        return [
+          ['focus' in t, 'click' in c, 'offsetWidth' in document, 'getBoundingClientRect' in document, 'innerText' in t],
+          ['focus' in document.body, 'click' in document.body, 'offsetWidth' in document.body, 'innerText' in document.body]
+        ];
+      })()
+    JS
+    expect(got).to eq([[false, false, false, false, false], [true, true, true, true]])
+  end
+
   it "converts an installed member's arguments as IDL says" do
     got = outcome(<<~JS)
       (() => {
