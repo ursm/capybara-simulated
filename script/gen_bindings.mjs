@@ -36,6 +36,7 @@ const INTERFACES = [
   ['dom', 'CDATASection', { install: true }],
   ['dom', 'ProcessingInstruction', { install: true }],
   ['dom', 'DocumentType', { install: true }],
+  ['dom', 'Attr', { install: true }],
   ['dom', 'DocumentFragment', { install: true }]
 ];
 

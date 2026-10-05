@@ -2979,15 +2979,6 @@ dom/idlharness.any.js:
   "constructor" property'
 - 'AbstractRange interface: existence and properties of interface prototype object''s
   @@unscopables property'
-- Attr interface object length
-- 'Attr interface: attribute localName'
-- 'Attr interface: attribute name'
-- 'Attr interface: attribute namespaceURI'
-- 'Attr interface: attribute ownerElement'
-- 'Attr interface: attribute prefix'
-- 'Attr interface: attribute specified'
-- 'Attr interface: attribute value'
-- 'Attr interface: existence and properties of interface object'
 - CustomEvent interface object length
 - 'CustomEvent interface: attribute detail'
 - 'CustomEvent interface: new CustomEvent("foo") must inherit property "detail" with
@@ -3327,15 +3318,6 @@ dom/idlharness.window.js:
   "constructor" property'
 - 'AbstractRange interface: existence and properties of interface prototype object''s
   @@unscopables property'
-- Attr interface object length
-- 'Attr interface: attribute localName'
-- 'Attr interface: attribute name'
-- 'Attr interface: attribute namespaceURI'
-- 'Attr interface: attribute ownerElement'
-- 'Attr interface: attribute prefix'
-- 'Attr interface: attribute specified'
-- 'Attr interface: attribute value'
-- 'Attr interface: existence and properties of interface object'
 - CustomEvent interface object length
 - 'CustomEvent interface: attribute detail'
 - 'CustomEvent interface: new CustomEvent("foo") must inherit property "detail" with

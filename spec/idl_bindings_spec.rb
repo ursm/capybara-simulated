@@ -239,6 +239,24 @@ RSpec.describe 'IDL bindings' do
     expect(got).to eq([0, 1])
   end
 
+  it "installs Attr's members on the class that makes attributes" do
+    got = outcome(<<~JS)
+      (() => {
+        const thrown = (f) => { try { f(); return 'no'; } catch (e) { return e.message; } };
+        const el = document.createElementNS('urn:x', 'p:e');
+        el.setAttributeNS('urn:y', 'q:a', 'v');
+        const a = el.getAttributeNodeNS('urn:y', 'a');
+        a.value = 42;
+        return [
+          [a.name, a.localName, a.prefix, a.namespaceURI, a.nodeName, a.value, el.getAttributeNS('urn:y', 'a'), a.ownerElement === el, a.specified],
+          thrown(() => new Attr()), thrown(() => Object.getOwnPropertyDescriptor(Attr.prototype, 'value').get.call(el)),
+          Object.prototype.toString.call(a)
+        ];
+      })()
+    JS
+    expect(got).to eq([['q:a', 'a', 'q', 'urn:y', 'q:a', '42', '42', true, true], "Failed to construct 'Attr': Illegal constructor", 'Illegal invocation', '[object Attr]'])
+  end
+
   it 'marks only the [Unscopable] members of each interface' do
     got = outcome('[Document, DocumentFragment, Element].map((i) => Object.keys(i.prototype[Symbol.unscopables]).sort())')
     expect(got).to eq([
