@@ -289,11 +289,6 @@ pub(crate) fn hold_objects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
 }
 pub(crate) fn release_objects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(nodes) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
-    // (…the subtree's root first: one in no document — a removal from a detached tree — holds nothing under it either)
-    let root_held = nodes.get_index(scope, 0).and_then(|v| handle_of(scope, v)).is_some_and(|p| unsafe { p.as_ref() }.held.get());
-    if !root_held {
-        return;
-    }
     for i in 0..nodes.length() {
         let Some(value) = nodes.get_index(scope, i) else { continue };
         let Some(ptr) = handle_of(scope, value) else { continue };
