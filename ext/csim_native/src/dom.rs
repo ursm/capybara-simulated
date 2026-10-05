@@ -353,9 +353,10 @@ impl NodeData {
             })
             .collect()
     }
-    // Its index in `parent`'s children, where that is its parent.
+    // Its index in `parent`'s children, where that is its parent — held to the list's bounds, so a position that
+    // drifted reads as a place the list does not hold it, which the sibling walks step over.
     pub(crate) fn index_in(&self, parent: &NodeData) -> usize {
-        (self.position - parent.first_position) as usize
+        (self.position - parent.first_position).clamp(0, parent.children.len() as i64) as usize
     }
     // The DOM `nodeType` (an arena node with no kind of its own — no element, character data, document or fragment —
     // is a doctype where it carries one's identifiers, else an Attr's slot).
@@ -971,9 +972,16 @@ impl RealmArena {
         crate::node_handle::relink(Some(&p.link), &p.children, from, to, |k| self.get(k).map(|n| &n.link));
     }
     // For verify mode: where `id`'s handle's edges disagree with the slot's tree — its parent (a root's owner), its first
-    // child, its next sibling and the tree it owns, each the one the slot has where that one has a handle too — or None.
+    // child, its next sibling and the tree it owns, each the one the slot has where that one has a handle too — or where
+    // its position does not find it in its parent's list; else None.
     pub(crate) fn edge_mismatch(&self, id: NodeId) -> Option<String> {
         let n = self.get(id)?;
+        // (…and its position, handle or none, where it is listed: its parent's list holds it at the index it says)
+        if let Some(p) = n.parent.and_then(|p| self.get(p)) {
+            if p.children.get(n.index_in(p)) != Some(&id) && p.children.contains(&id) {
+                return Some(format!("position {} under first {}, listed at {:?}", n.position, p.first_position, p.children.iter().position(|&c| c == id)));
+            }
+        }
         let got = crate::node_handle::edges(&n.link)?;
         let handled = |k: NodeId| self.get(k).is_some_and(|d| crate::node_handle::edges(&d.link).is_some());
         let parent = n.parent.or(n.host).or(n.template_host).filter(|&p| handled(p));
@@ -3644,7 +3652,7 @@ fn adopt_subtree(
     realm(scope, cid).adopt(id);
 }
 
-// __dom.handleEdgesMismatch(nid) -> where the node's handle's tree edges disagree with its slot's tree
+// __dom.handleEdgesMismatch(nid) -> where the node's handle's tree edges, or its position, disagree with its slot's tree
 // (`RealmArena::edge_mismatch`), or undefined — verify mode's check on what keeps the node alive.
 fn handle_edges_mismatch(
     scope: &mut v8::PinScope<'_, '_>,
