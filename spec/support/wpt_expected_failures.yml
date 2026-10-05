@@ -3354,10 +3354,6 @@ dom/idlharness.window.js:
 - 'Document interface: attribute lastElementChild'
 - 'Document interface: attribute onfullscreenchange'
 - 'Document interface: attribute onfullscreenerror'
-- 'Document interface: calling adoptNode(Node) on new Document() with too few arguments
-  must throw TypeError'
-- 'Document interface: calling adoptNode(Node) on xmlDoc with too few arguments must
-  throw TypeError'
 - 'Document interface: calling createAttribute(DOMString) on new Document() with too
   few arguments must throw TypeError'
 - 'Document interface: calling createAttribute(DOMString) on xmlDoc with too few arguments
@@ -3507,18 +3503,12 @@ dom/idlharness.window.js:
   must throw TypeError'
 - 'Element interface: calling removeAttributeNS(DOMString?, DOMString) on element
   with too few arguments must throw TypeError'
-- 'Element interface: calling removeAttributeNode(Attr) on element with too few arguments
-  must throw TypeError'
 - 'Element interface: calling requestFullscreen(optional FullscreenOptions) on element
   with too few arguments must throw TypeError'
 - 'Element interface: calling setAttribute(DOMString, (TrustedType or DOMString))
   on element with too few arguments must throw TypeError'
 - 'Element interface: calling setAttributeNS(DOMString?, DOMString, (TrustedType or
   DOMString)) on element with too few arguments must throw TypeError'
-- 'Element interface: calling setAttributeNode(Attr) on element with too few arguments
-  must throw TypeError'
-- 'Element interface: calling setAttributeNodeNS(Attr) on element with too few arguments
-  must throw TypeError'
 - 'Element interface: calling toggleAttribute(DOMString, optional boolean) on element
   with too few arguments must throw TypeError'
 - 'Element interface: element must inherit property "requestFullscreen(optional FullscreenOptions)"
@@ -3905,9 +3895,6 @@ dom/nodes/NodeList-live-mutations.window.js:
 - 'NodeList live mutations: NodeList ownPropertyNames'
 dom/nodes/ParentNode-querySelector-All-xht.xht:
 - 'Selectors-API Test Suite: XHTML'
-dom/nodes/attributes-namednodemap-cross-document.window.js:
-- Moving an attribute between documents
-- Replacing an attribute across documents
 dom/nodes/insertion-removing-steps/insertion-removing-steps-iframe.window.js:
 - 'Insertion steps: load event fires synchronously *after* iframe DOM insertion, as
   part of the iframe element''s insertion steps'

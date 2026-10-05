@@ -257,6 +257,29 @@ RSpec.describe 'IDL bindings' do
     expect(got).to eq([['q:a', 'a', 'q', 'urn:y', 'q:a', '42', '42', true, true], "Failed to construct 'Attr': Illegal constructor", 'Illegal invocation', '[object Attr]'])
   end
 
+  it "converts an attribute node argument, and adopts one from another document" do
+    got = outcome(<<~JS)
+      (() => {
+        const thrown = (f) => { try { f(); return 'no'; } catch (e) { return e.name + ': ' + e.message; } };
+        const el = document.createElement('p');
+        const other = document.implementation.createHTMLDocument('').createAttribute('z');
+        other.value = 'q';
+        el.setAttributeNode(other);
+        return [
+          thrown(() => el.setAttributeNode({})), thrown(() => el.removeAttributeNode(document.createAttribute('q'))),
+          thrown(() => document.adoptNode(document.implementation.createHTMLDocument(''))),
+          [el.getAttribute('z'), other.ownerDocument === document], typeof document.createTextNode('x').getClientRects
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      "TypeError: Failed to execute 'setAttributeNode' on 'Element': parameter 1 is not of type 'Attr'.",
+      "NotFoundError: Failed to execute 'removeAttributeNode' on 'Element': The node provided is owned by another element.",
+      "NotSupportedError: Failed to execute 'adoptNode' on 'Document': The node provided is of type '#document', which may not be adopted.",
+      ['q', true], 'undefined'
+    ])
+  end
+
   it 'marks only the [Unscopable] members of each interface' do
     got = outcome('[Document, DocumentFragment, Element].map((i) => Object.keys(i.prototype[Symbol.unscopables]).sort())')
     expect(got).to eq([
