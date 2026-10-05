@@ -565,6 +565,18 @@ impl RealmArena {
         let known = (cid == self.cur || self.parked.contains_key(&cid)) && !self.dropped.contains(&cid);
         known.then(|| self.enter(cid))
     }
+    // `id` and everything it holds — its children, shadow tree, template contents and generated boxes, theirs — are the
+    // held realm's now: they joined a tree of it, and its page load frees them, not the one of the realm that made them.
+    pub(crate) fn adopt(&mut self, id: NodeId) {
+        let cur = self.cur;
+        let mut stack = vec![id];
+        while let Some(n) = stack.pop() {
+            let Some(node) = self.get_mut_quietly(n) else { continue };
+            node.realm = cur;
+            stack.extend(node.children.iter().copied());
+            stack.extend(node.shadow_root.into_iter().chain(node.template_content).chain(node.pseudo_boxes.into_iter().flatten()));
+        }
+    }
     pub(crate) fn is_dropped(&self, cid: i32) -> bool {
         self.dropped.contains(&cid)
     }
@@ -1459,6 +1471,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // node_handle.rs). Safe by construction — the generational slot bumps its gen, so any surviving reference
     // reads absent.
     register(scope, ns, "dropNode", drop_node, context_id);
+    register(scope, ns, "adoptSubtree", adopt_subtree, context_id);
     register(scope, ns, "handleEdgesMismatch", handle_edges_mismatch, context_id);
     // Free a disposed realm's state and nodes — csim calls this before tearing down a frame realm (main
     // reuses id 0). Takes an explicit id (the realm being dropped), not the caller's own.
@@ -3347,6 +3360,18 @@ fn drop_node(
     if let Some(arena) = dom(scope).arena.enter_known(cid) {
         arena.free_node(id);
     }
+}
+
+// __dom.adoptSubtree(nid) — a subtree another realm made joined a tree of this realm, in the slots it has
+// (`RealmArena::adopt`).
+fn adopt_subtree(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).adopt(id);
 }
 
 // __dom.handleEdgesMismatch(nid) -> where the node's handle's tree edges disagree with its slot's tree

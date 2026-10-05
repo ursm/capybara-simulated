@@ -59,25 +59,31 @@ RSpec.describe 'native arena upkeep' do
     expect(got).to be true
   end
 
-  # A node registered afresh — moved into another realm's tree — frees the slot it leaves, however often it moves.
-  it 'frees the slot a node leaves when it moves between realms' do
+  # The arena is the isolate's: a node moved into another realm's tree keeps its slot, however often it moves, and is
+  # that realm's from then on — the realm it came from reloading its page frees nothing of it.
+  it 'keeps a node in its slot as it moves between realms, and in the realm it joined' do
     session.execute_script(<<~JS)
       const f = document.createElement('iframe');
       f.srcdoc = '<div id="home"><p id="mv"><b>x</b>t</p></div>';
       document.body.appendChild(f);
     JS
     session.within_frame(0) { session.find('#mv') }
-    live = session.evaluate_script(<<~JS)
+    got = session.evaluate_script(<<~JS)
       (() => {
-        const fd = document.querySelector('iframe').contentDocument, p = fd.getElementById('mv'), seen = [];
+        const fd = document.querySelector('iframe').contentDocument, p = fd.getElementById('mv'), nids = new Set();
         for (let i = 0; i < 10; i++) {
-          document.body.appendChild(p); seen.push([p._nidArena.dom, p._nid]);
-          fd.getElementById('home').appendChild(p); seen.push([p._nidArena.dom, p._nid]);
+          document.body.appendChild(p); nids.add(p._nid);
+          fd.getElementById('home').appendChild(p); nids.add(p._nid);
         }
-        seen.pop();   // where it is now
-        return seen.filter(([d, nid]) => d.inspectNode(nid) !== null).length;
+        document.body.appendChild(p);
+        window.__mv = p;
+        return [nids.size, nids.has(p._nid)];
       })()
     JS
-    expect(live).to eq(0)
+    expect(got).to eq([1, true])
+    session.execute_script("document.querySelector('iframe').srcdoc = '<p>reloaded</p>'")
+    session.within_frame(0) { session.find('p', text: 'reloaded') }
+    expect(session.evaluate_script("[__dom.inspectNode(__mv._nid) !== null, document.querySelector('#mv b') === __mv.firstChild]")).to eq([true, true])
+    expect(session.find(:css, '#mv').text).to eq('xt')
   end
 end
