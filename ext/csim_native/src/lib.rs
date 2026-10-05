@@ -12,6 +12,7 @@ mod animations;
 mod av1;
 mod canvas;
 mod canvas_path;
+mod collections;
 mod css;
 mod css_animations;
 mod css_transitions;
