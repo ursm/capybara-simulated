@@ -71,11 +71,13 @@ struct Entry {
     points: [Boundary; 2],
 }
 
-// Every live range of the isolate.
+// Every live range of the isolate — and its points by the node each is in, so a step touches the ranges at the nodes
+// it changes, not every range there is (a range a script dropped stays an entry until a major collection takes it).
 #[derive(Default)]
 pub(crate) struct Ranges {
     entries: Vec<Option<Entry>>,
     free: Vec<u32>,
+    by_node: std::collections::HashMap<NodeId, Vec<(u32, u8)>>,
     dead: Arc<Dead>,
     template: Option<v8::Global<v8::FunctionTemplate>>,
 }
@@ -88,14 +90,69 @@ impl Ranges {
         }
         let ids = std::mem::take(&mut *self.dead.ids.lock().unwrap_or_else(|e| e.into_inner()));
         for id in ids {
-            if let Some(e) = self.entries.get_mut(id as usize) {
-                *e = None;
-                self.free.push(id);
+            let Some(points) = self.entries.get(id as usize).and_then(|e| e.as_ref()).map(|e| e.points) else { continue };
+            for (w, p) in points.iter().enumerate() {
+                self.unindex(p.node, id, w);
             }
+            self.entries[id as usize] = None;
+            self.free.push(id);
         }
     }
-    fn live(&mut self) -> impl Iterator<Item = &mut Entry> {
-        self.entries.iter_mut().flatten()
+    // A new range's entry, both points at `point`.
+    fn add(&mut self, handle: WeakPersistent<RangeHandle>, point: Boundary) -> u32 {
+        let entry = Some(Entry { handle, points: [point; 2] });
+        let id = match self.free.pop() {
+            Some(id) => {
+                self.entries[id as usize] = entry;
+                id
+            }
+            None => {
+                self.entries.push(entry);
+                self.entries.len() as u32 - 1
+            }
+        };
+        self.by_node.entry(point.node).or_default().extend([(id, START as u8), (id, END as u8)]);
+        id
+    }
+    fn unindex(&mut self, node: NodeId, id: u32, w: usize) {
+        let Some(list) = self.by_node.get_mut(&node) else { return };
+        if let Some(i) = list.iter().position(|&(e, x)| e == id && x as usize == w) {
+            list.swap_remove(i);
+        }
+        if list.is_empty() {
+            self.by_node.remove(&node);
+        }
+    }
+    // Point `w` of range `id` is `point` now.
+    fn place(&mut self, id: u32, w: usize, point: Boundary) {
+        let Some(e) = self.entries.get_mut(id as usize).and_then(|e| e.as_mut()) else { return };
+        let old = std::mem::replace(&mut e.points[w], point).node;
+        if old != point.node {
+            self.unindex(old, id, w);
+            self.by_node.entry(point.node).or_default().push((id, w as u8));
+        }
+    }
+    fn point(&self, id: u32, w: usize) -> Boundary {
+        self.entries[id as usize].as_ref().expect("an indexed range's entry").points[w]
+    }
+    // The points in `node`.
+    fn at(&self, node: NodeId) -> Vec<(u32, usize)> {
+        self.by_node.get(&node).map_or(Vec::new(), |l| l.iter().map(|&(e, w)| (e, w as usize)).collect())
+    }
+    // The handle of range `id`, apart from the store's borrow — read before anything allocates on V8's heap.
+    fn handle(&self, id: u32) -> Option<*const RangeHandle> {
+        self.entries.get(id as usize)?.as_ref()?.handle.get().map(|h| h as *const RangeHandle)
+    }
+    // Each of `points` moved to `to`, and the handles whose references follow it.
+    fn move_to(&mut self, points: &[(u32, usize)], to: Boundary) -> Vec<(*const RangeHandle, usize)> {
+        let mut moved = Vec::new();
+        for &(id, w) in points {
+            self.place(id, w, to);
+            if let Some(h) = self.handle(id) {
+                moved.push((h, w));
+            }
+        }
+        moved
     }
 }
 
@@ -181,6 +238,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "rangesSplit", ranges_split, context_id);
     register(scope, ns, "rangesMerge", ranges_merge, context_id);
     register(scope, ns, "rangesLive", ranges_live, context_id);
+    register(scope, ns, "isRange", is_range, context_id);
     register(scope, ns, "rangeSetPoint", range_set_point, context_id);
     register(scope, ns, "rangeComparePoint", range_compare_point, context_id);
     register(scope, ns, "rangeCompareBoundaries", range_compare_boundaries, context_id);
@@ -282,25 +340,14 @@ fn set_range(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgume
     let id = match h.id.get() {
         Some(id) => id,
         None => {
-            let entry = Entry { handle: WeakPersistent::new(&ptr), points: [point; 2] };
-            let id = match r.free.pop() {
-                Some(id) => {
-                    r.entries[id as usize] = Some(entry);
-                    id
-                }
-                None => {
-                    r.entries.push(Some(entry));
-                    r.entries.len() as u32 - 1
-                }
-            };
+            let id = r.add(WeakPersistent::new(&ptr), point);
             h.id.set(Some(id));
             id
         }
     };
-    let e = r.entries[id as usize].as_mut().expect("a live range's entry");
     for w in [START, END] {
         if which == w || which == 2 {
-            e.points[w] = point;
+            r.place(id, w, point);
         }
     }
     for w in [START, END] {
@@ -465,11 +512,17 @@ fn compare_points_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     }
 }
 
+// __dom.isRange(value) -> whether `value` is a live range's object, any realm's (WebIDL's check for a `Range` argument).
+fn is_range(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let yes = handle_of(scope, args.get(0)).is_some();
+    rv.set_bool(yes);
+}
+
 // __dom.rangesLive() -> how many live ranges the isolate keeps (those V8 collected freed first).
 fn ranges_live(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let r = ranges(scope);
     r.sweep();
-    let n = r.live().count();
+    let n = r.entries.iter().flatten().count();
     rv.set_uint32(n as u32);
 }
 
@@ -513,6 +566,15 @@ fn range_offset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set_uint32(offset);
 }
 
+// Move the handles' references of `moved` to `node`'s object (`Ranges::move_to`).
+fn follow(scope: &mut v8::PinScope<'_, '_>, moved: Vec<(*const RangeHandle, usize)>, node: v8::Local<'_, v8::Object>) {
+    for (h, w) in moved {
+        // SAFETY: a handle a live entry's weak reference named is alive until the next collection, which nothing between
+        // `Ranges::handle` and here allocates to start.
+        set_point(scope, unsafe { &*h }, w, node);
+    }
+}
+
 // __dom.rangesInsert(parentNid, index, count) — `count` nodes were inserted into the parent at `index`: a boundary in it
 // past that point shifts by them.
 fn ranges_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
@@ -521,13 +583,23 @@ fn ranges_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let count = args.get(2).uint32_value(scope).unwrap_or(0);
     let r = ranges(scope);
     r.sweep();
-    for e in r.live() {
-        for p in &mut e.points {
-            if p.node == parent && p.offset > index {
-                p.offset += count;
-            }
+    for (id, w) in r.at(parent) {
+        let p = r.point(id, w);
+        if p.offset > index {
+            r.place(id, w, Boundary { offset: p.offset + count, ..p });
         }
     }
+}
+
+// The nodes holding a boundary that `node` is an inclusive ancestor of, in its tree — the points `node`'s removal moves.
+fn inside(arena: &RealmArena, r: &Ranges, node: NodeId) -> Vec<(u32, usize)> {
+    let mut out = Vec::new();
+    for (&n, list) in &r.by_node {
+        if contains(arena, node, n) {
+            out.extend(list.iter().map(|&(e, w)| (e, w as usize)));
+        }
+    }
+    out
 }
 
 // __dom.rangesRemove(parentNid, parent, nid, index) — the node `nid` (at `index` in the parent, whose object `parent` is)
@@ -541,25 +613,18 @@ fn ranges_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let arena = d.arena.enter(cid);
     let r = &mut d.ranges;
     r.sweep();
-    // (…the handles whose references follow a boundary to the parent, written once the arena is let go)
-    let mut moved: Vec<(*const RangeHandle, usize)> = Vec::new();
-    for e in r.entries.iter_mut().flatten() {
-        for (w, p) in e.points.iter_mut().enumerate() {
-            if contains(arena, node, p.node) {
-                *p = Boundary { node: parent, offset: index };
-                if let Some(h) = e.handle.get() {
-                    moved.push((h as *const RangeHandle, w));
-                }
-            } else if p.node == parent && p.offset > index {
-                p.offset -= 1;
-            }
+    if r.by_node.is_empty() {
+        return;
+    }
+    for (id, w) in r.at(parent) {
+        let p = r.point(id, w);
+        if p.offset > index {
+            r.place(id, w, Boundary { offset: p.offset - 1, ..p });
         }
     }
-    for (h, w) in moved {
-        // SAFETY: a handle a live entry's weak reference named is alive until the next collection, which nothing here
-        // allocates to start.
-        set_point(scope, unsafe { &*h }, w, parent_obj);
-    }
+    let points = inside(arena, r, node);
+    let moved = r.move_to(&points, Boundary { node: parent, offset: index });
+    follow(scope, moved, parent_obj);
 }
 
 // __dom.rangesRemoveAll(parentNid, parent) — every child of the parent (object `parent`) is about to be removed, one after
@@ -572,23 +637,15 @@ fn ranges_remove_all(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let arena = d.arena.enter(cid);
     let r = &mut d.ranges;
     r.sweep();
-    let mut moved: Vec<(*const RangeHandle, usize)> = Vec::new();
-    for e in r.entries.iter_mut().flatten() {
-        for (w, p) in e.points.iter_mut().enumerate() {
-            if p.node == parent {
-                p.offset = 0;
-            } else if contains(arena, parent, p.node) {
-                *p = Boundary { node: parent, offset: 0 };
-                if let Some(h) = e.handle.get() {
-                    moved.push((h as *const RangeHandle, w));
-                }
-            }
-        }
+    if r.by_node.is_empty() {
+        return;
     }
-    for (h, w) in moved {
-        // SAFETY: as `ranges_remove`.
-        set_point(scope, unsafe { &*h }, w, parent_obj);
+    let points: Vec<_> = inside(arena, r, parent).into_iter().filter(|&(id, w)| r.point(id, w).node != parent).collect();
+    for (id, w) in r.at(parent) {
+        r.place(id, w, Boundary { node: parent, offset: 0 });
     }
+    let moved = r.move_to(&points, Boundary { node: parent, offset: 0 });
+    follow(scope, moved, parent_obj);
 }
 
 // __dom.rangesMerge(nid, node, mergedNid, parentNid, index, length) — `normalize()` merges the text node `mergedNid` (at
@@ -602,26 +659,14 @@ fn ranges_merge(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let length = args.get(5).uint32_value(scope).unwrap_or(0);
     let r = ranges(scope);
     r.sweep();
-    let mut moved: Vec<(*const RangeHandle, usize)> = Vec::new();
-    for e in r.entries.iter_mut().flatten() {
-        for (w, p) in e.points.iter_mut().enumerate() {
-            let to = if p.node == merged {
-                p.offset + length
-            } else if p.node == parent && p.offset == index {
-                length
-            } else {
-                continue;
-            };
-            *p = Boundary { node, offset: to };
-            if let Some(h) = e.handle.get() {
-                moved.push((h as *const RangeHandle, w));
-            }
-        }
+    let mut moved = Vec::new();
+    for (id, w) in r.at(merged) {
+        let offset = r.point(id, w).offset + length;
+        moved.extend(r.move_to(&[(id, w)], Boundary { node, offset }));
     }
-    for (h, w) in moved {
-        // SAFETY: as `ranges_remove`.
-        set_point(scope, unsafe { &*h }, w, node_obj);
-    }
+    let at_index: Vec<_> = r.at(parent).into_iter().filter(|&(id, w)| r.point(id, w).offset == index).collect();
+    moved.extend(r.move_to(&at_index, Boundary { node, offset: length }));
+    follow(scope, moved, node_obj);
 }
 
 // __dom.rangesReplaceData(nid, offset, count, length) — `count` code units at `offset` of the node's data were replaced
@@ -633,13 +678,13 @@ fn ranges_replace_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let length = args.get(3).uint32_value(scope).unwrap_or(0);
     let r = ranges(scope);
     r.sweep();
-    for e in r.live() {
-        for p in &mut e.points {
-            if p.node != node || p.offset <= offset {
-                continue;
-            }
-            p.offset = if p.offset <= offset + count { offset } else { p.offset - count + length };
+    for (id, w) in r.at(node) {
+        let p = r.point(id, w);
+        if p.offset <= offset {
+            continue;
         }
+        let to = if p.offset <= offset + count { offset } else { p.offset - count + length };
+        r.place(id, w, Boundary { offset: to, ..p });
     }
 }
 
@@ -654,21 +699,20 @@ fn ranges_split(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let slot = args.get(5).uint32_value(scope).unwrap_or(0);
     let r = ranges(scope);
     r.sweep();
-    let mut moved: Vec<(*const RangeHandle, usize)> = Vec::new();
-    for e in r.entries.iter_mut().flatten() {
-        for (w, p) in e.points.iter_mut().enumerate() {
-            if p.node == node && p.offset > offset {
-                *p = Boundary { node: new_nid, offset: p.offset - offset };
-                if let Some(h) = e.handle.get() {
-                    moved.push((h as *const RangeHandle, w));
-                }
-            } else if Some(p.node) == parent && p.offset == slot {
-                p.offset += 1;
+    if let Some(parent) = parent {
+        for (id, w) in r.at(parent) {
+            let p = r.point(id, w);
+            if p.offset == slot {
+                r.place(id, w, Boundary { offset: p.offset + 1, ..p });
             }
         }
     }
-    for (h, w) in moved {
-        // SAFETY: as `ranges_remove`.
-        set_point(scope, unsafe { &*h }, w, new_obj);
+    let mut moved = Vec::new();
+    for (id, w) in r.at(node) {
+        let p = r.point(id, w);
+        if p.offset > offset {
+            moved.extend(r.move_to(&[(id, w)], Boundary { node: new_nid, offset: p.offset - offset }));
+        }
     }
+    follow(scope, moved, new_obj);
 }

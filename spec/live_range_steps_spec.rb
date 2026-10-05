@@ -92,4 +92,18 @@ RSpec.describe 'live range steps' do
     JS
     expect(got).to eq(%w[TypeError TypeError TypeError])
   end
+
+  it "takes a Range made in another realm into the selection, and nothing while it has one" do
+    got = run(<<~JS)
+      const sel = getSelection(), t = document.getElementById('p').firstChild;
+      sel.removeAllRanges();
+      const r = new (document.querySelector('iframe').contentWindow.Range)();
+      r.setStart(t, 0); r.setEnd(t, 2);
+      sel.addRange(r);
+      const other = document.createRange(); other.selectNodeContents(document.body);
+      sel.addRange(other);
+      return [sel.rangeCount, String(sel), sel.getRangeAt(0) === r];
+    JS
+    expect(got).to eq([1, 'ab', true])
+  end
 end
