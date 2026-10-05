@@ -1352,7 +1352,8 @@ module Capybara
         env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
         ck = cookie_header_for(env_cookie_host(env), secure: %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}"))
         env['HTTP_COOKIE']     = ck              unless ck.empty?
-        env['HTTP_REFERER']    = referrer_header(@current_url) unless @current_url.nil? || @current_url.empty?
+        referrer               = referrer_header(@current_url)
+        env['HTTP_REFERER']    = referrer if referrer
         status, headers, body = @app.call(env)
         return unless status.to_i == 200
         # Fall back to the link's `download="filename"` value or the
@@ -8888,10 +8889,12 @@ module Capybara
         @referrer_parsed     = parse_url(url.to_s)
       end
 
-      # The `Referer` a request sends for the referrer `url`: stripped (a fragment had been sent).
+      # The `Referer` a request sends for the referrer `url`, or nil for none: stripped (a fragment had been sent), and
+      # none for a URL of a local scheme (`about:srcdoc`, `about:blank`, `blob:`, `data:`) — Referrer Policy's "strip url
+      # for use as a referrer" step 1.
       def referrer_header(url)
         parts = parse_url(url.to_s)
-        parts ? referrer_of(parts) : url
+        parts && %w[http: https:].include?(parts[:protocol]) ? referrer_of(parts) : nil
       end
 
       # A URL as a referrer: no fragment, no credentials (Referrer Policy "strip url").
@@ -11233,7 +11236,8 @@ module Capybara
         # server can negotiate — HTML-only routes still pick html,
         # both-available pick the first registered.
         env['HTTP_ACCEPT'] ||= DEFAULT_HTTP_ACCEPT
-        env['HTTP_REFERER'] = referrer_header(referer) unless referer.nil? || referer.empty?
+        referrer = referrer_header(referer)
+        env['HTTP_REFERER'] = referrer if referrer
         # Attach the TARGET host's cookies (not the document's) — SERVER_NAME is the
         # request's host — so a cross-origin request carries the right jar or none.
         # SameSite context from the request's own Fetch metadata (set by

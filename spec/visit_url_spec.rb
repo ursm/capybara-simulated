@@ -74,6 +74,21 @@ RSpec.describe 'visit' do
     end
   end
 
+  # (…and a document of a local scheme sends none: Referrer Policy's "strip url for use as a referrer" step 1 —
+  # `about:blank` had gone out as `about://blank`)
+  it 'sends no referrer from a document of a local scheme' do
+    referrers = []
+    session = simulated_session(lambda {|env|
+      referrers << env.fetch('HTTP_REFERER', :none)
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']]
+    })
+    session.visit '/start'
+    session.switch_to_window(session.open_new_window)
+    session.execute_script("location.href = 'http://www.example.com/next'")
+    expect(session).to have_css('body')
+    expect(referrers.last).to eq(:none)
+  end
+
   it 'encodes what is not ASCII as UTF-8, and resolves dot segments' do
     session.visit '/x/../ü?é'
     expect(session.evaluate_script('location.pathname + location.search')).to eq('/%C3%BC?%C3%A9')
