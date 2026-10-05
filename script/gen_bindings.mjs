@@ -142,13 +142,23 @@ const INTERFACES = [
   ['dom', 'EventTarget', { install: true, omit: { observable: 'when: Observables are not implemented' } }],
   ['dom', 'Event', { install: true }],
   ['dom', 'CustomEvent', { install: true }],
+  ['uievents', 'UIEvent', { install: true, omit: { 'input-device-capabilities': 'sourceCapabilities: InputDeviceCapabilities is not implemented (a WICG proposal; Firefox has none)' } }],
+  ['uievents', 'FocusEvent', { install: true }],
+  ['pointerevents', 'MouseEvent', { install: true }],
+  ['pointerevents', 'WheelEvent', { install: true, omitMembers: { momentum: 'a draft of Pointer Events neither Chrome nor Firefox has' } }],
+  ['uievents', 'TextEvent', { install: true }],
+  ['uievents', 'InputEvent', { install: true }],
+  ['uievents', 'KeyboardEvent', { install: true }],
+  ['uievents', 'CompositionEvent', { install: true }],
+  ['pointerevents', 'PointerEvent', { install: true }],
+  ['html', 'DragEvent', { install: true }],
   ['dom', 'ShadowRoot', { install: true, omit: { 'sanitizer-api': 'setHTML: the Sanitizer API is not implemented' } }]
 ];
 
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
   'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
-  'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toLong', 'toEnforcedInteger', 'toDouble',
+  'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toEnforcedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers'
@@ -245,11 +255,19 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
     case 'boolean': c = `toBoolean(${expr})`; break;
     case 'unsigned short': c = `toUnsignedShort(${expr}, ${failure(where)})`; break;
     case 'unsigned long': c = `toUnsignedLong(${expr}, ${failure(where)})`; break;
+    case 'short': c = `toShort(${expr}, ${failure(where)})`; break;
     case 'long': c = `toLong(${expr}, ${failure(where)})`; break;
     case 'double': c = `toDouble(${expr}, ${failure(where)})`; break;
     case 'unrestricted double': c = `toUnrestrictedDouble(${expr}, ${failure(where)})`; break;
+    case 'float': c = `toFloat(${expr}, ${failure(where)})`; break;
+    case 'unrestricted float': c = `toUnrestrictedFloat(${expr}, ${failure(where)})`; break;
     case 'any': c = expr; break;
     case 'object': c = `toObject(${expr}, ${conversionError(where, 'object')})`; break;
+    // (…WindowProxy, which no IDL defines: HTML's name for what a Window is reached through — Window's test)
+    case 'WindowProxy':
+      checks.add('Window');
+      c = `toInterface(${expr}, IS_Window, ${conversionError(where, 'Window')})`;
+      break;
     default: {
       const def = definitions.get(t.idlType);
       if (ABSENT_INTERFACES.has(t.idlType)) {
@@ -279,9 +297,10 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
 // Interfaces of specs no implementation here answers, which no value is an object of — a union member of one is
 // none (Trusted Types: with no policy, the string a page passes is what the API takes), a dictionary member of one
 // no member, and anything else converted to one no such object: the Typed OM's values, Animation Triggers', WebCodecs'
-// VideoFrame.
+// VideoFrame, and InputDeviceCapabilities (a UI event init's `sourceCapabilities` no member, as in Firefox).
 const ABSENT_INTERFACES = new Set([
-  'TrustedHTML', 'TrustedScript', 'TrustedScriptURL', 'CSSNumericValue', 'CSSKeywordValue', 'AnimationTrigger', 'VideoFrame'
+  'TrustedHTML', 'TrustedScript', 'TrustedScriptURL', 'CSSNumericValue', 'CSSKeywordValue', 'AnimationTrigger', 'VideoFrame',
+  'InputDeviceCapabilities'
 ]);
 
 // The type `t` names `u` as: `u`, with `t`'s extended attributes besides its own and nullable if either is. (Its
@@ -311,7 +330,7 @@ function flattenUnion(t) {
 // string type's conversion, else the numeric type's, else boolean's — and with none of them, a TypeError. A union
 // that is one type once its absent interfaces are dropped is that type's conversion. Its extended attributes, and the
 // argument's, are each member's.
-const NUMERIC_TYPES = new Set(['unsigned short', 'unsigned long', 'long', 'double', 'unrestricted double']);
+const NUMERIC_TYPES = new Set(['unsigned short', 'short', 'unsigned long', 'long', 'double', 'unrestricted double', 'float', 'unrestricted float']);
 function unionConversion(t, expr, where, checks, argExtAttrs) {
   const label = `${where.iface ?? where.dictionary}.${where.member}`;
   const { members, includesNullable } = flattenUnion(t);

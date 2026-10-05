@@ -54,6 +54,12 @@ module CapybaraShared
     # The sibling "should retry clicking" / "should allow to retry longer" examples pass.
     'Capybara::Session Simulated node #click should not retry clicking when wait is disabled'    => 'interception is page-covering-overlays only (coarse-layout false positives); this fixture obstructor is element-sized',
 
+    # The fixture expects a dropped drag to fire `dragleave` AND `drop`, as Capybara's Selenium emulation
+    # (selenium/extensions/html5_drag.rb) dispatches them. HTML's drag-and-drop processing model fires one or the other:
+    # "If the current drag operation is "none" … fire a DND event named dragleave … Otherwise … fire a DND event named
+    # drop" — and a browser's own drag does the same.
+    'Capybara::Session Simulated node #drag_to HTML5 should preserve clientX/Y from last dragover event' => 'a dropped drag fires drop, not dragleave too (HTML drag-and-drop processing model; the fixture follows the Selenium emulation)',
+
     "Capybara::Session Simulated #assert_matches_style should raise error if the elements style doesn't contain the given properties" => STYLE_HASH,
     'Capybara::Session Simulated #has_css? :style option should support Hash'                    => STYLE_HASH
   }.freeze

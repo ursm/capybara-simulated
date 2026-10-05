@@ -1431,25 +1431,7 @@ module Capybara
           # and Redmine's onchange="addInputFiles(this)" reads
           # `inputEl.files` — if we set files after, the handler sees
           # an empty FileList and tears down the input.
-          file_infos = paths.map {|p|
-            stat = (File.stat(p) rescue nil)
-            {
-              'name'         => File.basename(p),
-              'size'         => stat ? stat.size : 0,
-              # Real browsers tag the File with the MIME type they
-              # sniffed from the path / disk header. Uppy's image-type
-              # filter rejects files whose `type` is empty, so without
-              # this even a `logo.png` `attach_file` finishes uploading
-              # 0 bytes through the validator and the composer's
-              # `#file-uploading` flag stays set forever. Use the OS's
-              # extension-based guess (matches what selenium / Chromium
-              # do on these paths) and fall back to empty when the
-              # extension is unknown.
-              'type'         => mime_type_for_path(p),
-              'lastModified' => stat ? (stat.mtime.to_f * 1000).to_i : 0
-            }
-          }
-          dom_call('__csimSetFiles', handle, file_infos)
+          dom_call('__csimSetFiles', handle, paths.map {|p| picked_file(p) })
           # Mirror real browser: <input type=file>.value reflects only
           # the filename of the first chosen file (security-faked path).
           # __csimSetValue dispatches input + change synchronously.
@@ -1522,24 +1504,50 @@ module Capybara
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
-        init = {'bubbles' => true, 'cancelable' => true, 'button' => 2, 'which' => 3}.merge(click_event_init(handle, keys, opts))
+        init = click_event_init(handle, keys, opts)
         raise_if_click_intercepted(handle, init)
-        dom_call('__csimDispatchEvent', handle, 'mousedown', init)
+        # The press retargets to what the point hits; the release is
+        # over the same element.
+        pressed = dom_call('__csimContextPress', handle, init)
         sleep opts[:delay].to_f if opts[:delay].to_f > 0
-        dom_call('__csimDispatchEvent', handle, 'mouseup',     init)
-        dom_call('__csimDispatchEvent', handle, 'contextmenu', init)
+        dom_call('__csimContextRelease', pressed, init) if pressed.to_i > 0
+      end
+
+      # A file the user picked from disk, as the JS side builds its File:
+      # name, size, type and modification time.
+      def picked_file(path)
+        stat = (File.stat(path) rescue nil)
+        {
+          'name'         => File.basename(path),
+          'size'         => stat ? stat.size : 0,
+          # Real browsers tag the File with the MIME type they
+          # sniffed from the path / disk header. Uppy's image-type
+          # filter rejects files whose `type` is empty, so without
+          # this even a `logo.png` `attach_file` finishes uploading
+          # 0 bytes through the validator and the composer's
+          # `#file-uploading` flag stays set forever. Use the OS's
+          # extension-based guess (matches what selenium / Chromium
+          # do on these paths) and fall back to empty when the
+          # extension is unknown.
+          'type'         => mime_type_for_path(path),
+          'lastModified' => stat ? (stat.mtime.to_f * 1000).to_i : 0
+        }
       end
 
       # HTML5 drag-and-drop simulation. Capybara routes `Element#drop`
-      # here with a flat list of paths / Pathnames / Hashes; build a
-      # DataTransfer-shaped object and dispatch dragenter / dragover /
-      # drop in sequence.
+      # here with a flat list of paths / Pathnames / Hashes: a drag
+      # from outside the page released over the element. Its files are
+      # a pick of their own, read like an `attach_file`'s — keyed below
+      # zero, where no element's handle is.
       def drop(handle, args)
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
         items = args.flat_map {|arg| drop_items(arg) }
-        dom_call('__csimDropOnto', handle, items)
+        @drops = (@drops || 0) + 1
+        pick   = -@drops
+        (@file_picks ||= {})[pick] = items.select {|i| i['kind'] == 'file' }.map {|i| i['path'] }
+        dom_call('__csimDropOnto', handle, items, pick)
       end
 
       # Element-to-element drag. Capybara's `Element#drag_to(target,
@@ -1574,10 +1582,9 @@ module Capybara
         when Hash
           arg.map {|type, value| {'kind' => 'string', 'type' => type.to_s, 'value' => value.to_s} }
         when ->(x) { x.respond_to?(:to_path) }
-          path = arg.to_path
-          [{'kind' => 'file', 'name' => File.basename(path), 'path' => path}]
+          [{'kind' => 'file', 'path' => arg.to_path, 'file' => picked_file(arg.to_path)}]
         when String
-          [{'kind' => 'file', 'name' => File.basename(arg), 'path' => arg}]
+          [{'kind' => 'file', 'path' => arg, 'file' => picked_file(arg)}]
         else
           []
         end
@@ -1588,12 +1595,13 @@ module Capybara
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
-        init = {'bubbles' => true, 'cancelable' => true}.merge(click_event_init(handle, keys, opts))
+        init = click_event_init(handle, keys, opts)
         raise_if_click_intercepted(handle, init)
-        # UI Events spec: two full mousedown→mouseup→click chains
-        # before the trailing `dblclick`. Jspreadsheet (table-builder's
-        # `.jss_worksheet`) enters edit mode on the inner mousedown.
-        2.times { dom_call('__csimClickResolve', handle, opts) }
+        # UI Events spec: two full mousedown→mouseup→click chains, the
+        # second's count 2, before the trailing `dblclick`. Jspreadsheet
+        # (table-builder's `.jss_worksheet`) enters edit mode on the inner
+        # mousedown.
+        [1, 2].each {|detail| dom_call('__csimClickResolve', handle, init.merge('detail' => detail)) }
         # A browser selects the word during the SECOND press's default action, so
         # the selection is already in place when `dblclick` fires — ProseMirror's
         # double-click handling reads the selection at event time, and selecting
@@ -1601,7 +1609,7 @@ module Capybara
         # then survived the late correction: the paste-URL-over-selection test
         # wrapped `**bold**` but not the adjacent `` `code` `` span).
         dom_call('__csimSelectWordAt', handle)
-        dom_call('__csimDispatchEvent', handle, 'dblclick', init)
+        dom_call('__csimDblClick', handle, init)
         settle
       end
 

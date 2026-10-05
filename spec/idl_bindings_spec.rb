@@ -845,6 +845,52 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  it "installs the UI Events' members as their IDL says" do
+    got = outcome(<<~JS)
+      (() => {
+        const t = (f) => { try { return JSON.stringify(f()) ?? 'undefined'; } catch (e) { return e.name + ': ' + e.message; } };
+        const target = document.body.appendChild(document.createElement('div'));
+        target.style.cssText = 'position:absolute;left:20px;top:30px;border:3px solid;width:50px;height:50px';
+        return [
+          t(() => [new MouseEvent('c').which, new MouseEvent('c', { button: 2 }).which, new KeyboardEvent('k', { keyCode: 65 }).which, new UIEvent('u', { which: 7 }).which]),
+          t(() => { const m = new MouseEvent('m', { clientX: 5 }); return [m.pageX, m.offsetX, m.x]; }),
+          t(() => { let r; target.addEventListener('click', (e) => { r = [e.offsetX, e.offsetY]; }, { once: true }); target.dispatchEvent(new MouseEvent('click', { clientX: 30, clientY: 40 })); return r; }),
+          t(() => { const k = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true }); return [k.key, k.getModifierState('Control'), k.getModifierState('CapsLock')]; }),
+          t(() => new TextEvent('x')),
+          t(() => { const e = document.createEvent('TextEvent'); e.initTextEvent('textInput', true, true, null, 'q'); return [e.type, e.data]; }),
+          t(() => new FocusEvent('focus', { relatedTarget: 5 })),
+          t(() => new UIEvent('x', { view: 5 })),
+          t(() => { const m = document.createEvent('MouseEvents'); m.initMouseEvent('click', true, true, window, 2, 1, 2, 3, 4, true, false, false, false, 1, null); return [m.detail, m.clientX, m.ctrlKey, m.button]; }),
+          t(() => ['momentum' in WheelEvent.prototype, 'sourceCapabilities' in UIEvent.prototype, Object.getOwnPropertyNames(new MouseEvent('m')).filter((k) => !k.startsWith('_'))]),
+          t(() => [new KeyboardEvent('k', { modifierCapsLock: true }).getModifierState('CapsLock'), new MouseEvent('m', { ctrlKey: true }).getModifierState('Accel')]),
+          t(() => { const p = new PointerEvent('p'), q = new PointerEvent('p', { tiltX: 45 }), r = new PointerEvent('p', { altitudeAngle: 0.5, azimuthAngle: 1 }); return [p.tiltX, p.tiltY, p.altitudeAngle, p.azimuthAngle, +q.altitudeAngle.toFixed(3), r.tiltX, r.tiltY]; }),
+          t(() => new UIEvent('u', { sourceCapabilities: {} }).type),
+          t(() => MouseEvent.prototype.clientX),
+          t(() => { const e = new InputEvent('beforeinput', { targetRanges: [new StaticRange({ startContainer: target, startOffset: 0, endContainer: target, endOffset: 0 })] }); const before = e.getTargetRanges().length; target.dispatchEvent(e); return [before, e.getTargetRanges().length]; }),
+          t(() => { const e = new FocusEvent('focus'); Object.defineProperty(e, 'relatedTarget', { value: target }); let reached = false; target.addEventListener('focus', () => { reached = true; }, { once: true }); target.dispatchEvent(e); return reached; })
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      '[1,3,65,0]',
+      '[5,5,5]',
+      '[7,7]',
+      '["a",true,false]',
+      "TypeError: Failed to construct 'TextEvent': Illegal constructor",
+      '["textInput","q"]',
+      "TypeError: Failed to construct 'FocusEvent': Failed to read the 'relatedTarget' property from 'FocusEventInit': Failed to convert value to 'EventTarget'.",
+      "TypeError: Failed to construct 'UIEvent': Failed to read the 'view' property from 'UIEventInit': Failed to convert value to 'Window'.",
+      '[2,3,true,1]',
+      '[false,false,["isTrusted"]]',
+      '[true,true]',
+      '[0,0,1.5707963267948966,0,0.785,45,57]',
+      '"u"',
+      'TypeError: Illegal invocation',
+      '[1,0]',
+      'true'
+    ])
+  end
+
   # (…the document element among them, and a name compared as it is, not as a selector)
   it "finds a document's elements by name, its root too" do
     got = outcome(<<~JS)

@@ -422,9 +422,9 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
                 'pointermove', 'mousemove'
               ];
               for (const t of types) {
-                target.addEventListener(t, () => {
+                target.addEventListener(t, (e) => {
                   const li = document.createElement('li');
-                  li.textContent = t;
+                  li.textContent = e instanceof PointerEvent ? `${t} ${e.pointerType} ${e.button} ${e.pressure}` : t;
                   log.appendChild(li);
                 });
               }
@@ -438,8 +438,14 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
 
     s.find('#target').hover
 
-    expect(s.all('#log li').map(&:text)).to eq(%w[
-      pointerover pointerenter mouseover mouseenter pointermove mousemove
+    # The pointer events PointerEvents, a mouse's with no button pressed: no button changed, no pressure.
+    expect(s.all('#log li').map(&:text)).to eq([
+      'pointerover mouse -1 0',
+      'pointerenter mouse -1 0',
+      'mouseover',
+      'mouseenter',
+      'pointermove mouse -1 0',
+      'mousemove'
     ])
   end
 

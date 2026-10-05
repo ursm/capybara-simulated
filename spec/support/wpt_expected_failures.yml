@@ -2750,8 +2750,6 @@ dom/events/event-global-extra.window.js:
 - window.event and element from another document
 - window.event and moving an element post-dispatch
 - window.event should not be affected by nodes moving post-dispatch
-dom/events/mouse-event-retarget.html:
-- offsetX is correctly adjusted
 dom/events/relatedTarget.window.js:
 - Reset targets before activation behavior
 - Reset targets on early return
@@ -2881,7 +2879,6 @@ dom/idlharness.any.js:
   "constructor" property'
 - 'AbstractRange interface: existence and properties of interface prototype object''s
   @@unscopables property'
-- 'CustomEvent interface: attribute detail'
 - DOMImplementation interface object length
 - 'DOMImplementation interface: existence and properties of interface object'
 - 'DOMImplementation interface: operation createDocument(DOMString?, DOMString, optional
@@ -2904,18 +2901,6 @@ dom/idlharness.any.js:
 - 'DocumentFragment interface: operation moveBefore(Node, Node?)'
 - 'Element interface: existence and properties of interface object'
 - 'Element interface: operation moveBefore(Node, Node?)'
-- 'Event interface: attribute bubbles'
-- 'Event interface: attribute cancelBubble'
-- 'Event interface: attribute cancelable'
-- 'Event interface: attribute composed'
-- 'Event interface: attribute currentTarget'
-- 'Event interface: attribute defaultPrevented'
-- 'Event interface: attribute eventPhase'
-- 'Event interface: attribute returnValue'
-- 'Event interface: attribute srcElement'
-- 'Event interface: attribute target'
-- 'Event interface: attribute timeStamp'
-- 'Event interface: attribute type'
 - 'HTMLCollection interface: attribute length'
 - 'HTMLCollection interface: existence and properties of interface object'
 - 'HTMLCollection interface: operation item(unsigned long)'
@@ -3059,7 +3044,6 @@ dom/idlharness.window.js:
   "constructor" property'
 - 'AbstractRange interface: existence and properties of interface prototype object''s
   @@unscopables property'
-- 'CustomEvent interface: attribute detail'
 - DOMImplementation interface object length
 - 'DOMImplementation interface: calling createDocumentType(DOMString, DOMString, DOMString)
   on document.implementation with too few arguments must throw TypeError'
@@ -3090,18 +3074,6 @@ dom/idlharness.window.js:
   with the proper type'
 - 'Element interface: existence and properties of interface object'
 - 'Element interface: operation requestFullscreen(optional FullscreenOptions)'
-- 'Event interface: attribute bubbles'
-- 'Event interface: attribute cancelBubble'
-- 'Event interface: attribute cancelable'
-- 'Event interface: attribute composed'
-- 'Event interface: attribute currentTarget'
-- 'Event interface: attribute defaultPrevented'
-- 'Event interface: attribute eventPhase'
-- 'Event interface: attribute returnValue'
-- 'Event interface: attribute srcElement'
-- 'Event interface: attribute target'
-- 'Event interface: attribute timeStamp'
-- 'Event interface: attribute type'
 - 'HTMLCollection interface: attribute length'
 - 'HTMLCollection interface: calling item(unsigned long) on document.body.children
   with too few arguments must throw TypeError'
@@ -4554,8 +4526,6 @@ html/dom/idlharness.any.js:
 - 'Document interface: operation parseHTML(DOMString, optional SetHTMLOptions)'
 - 'Document interface: operation parseHTMLUnsafe((TrustedHTML or DOMString), optional
   ParseHTMLUnsafeOptions)'
-- DragEvent interface object length
-- 'DragEvent interface: attribute dataTransfer'
 - 'Element interface: operation setHTML(DOMString, optional SetHTMLOptions)'
 - ElementInternals interface object length
 - 'ElementInternals interface: attribute form'
@@ -6633,8 +6603,6 @@ html/dom/idlharness.https.html:
 - 'Document interface: operation parseHTML(DOMString, optional SetHTMLOptions)'
 - 'Document interface: operation parseHTMLUnsafe((TrustedHTML or DOMString), optional
   ParseHTMLUnsafeOptions)'
-- DragEvent interface object length
-- 'DragEvent interface: attribute dataTransfer'
 - 'Element interface: calling setHTML(DOMString, optional SetHTMLOptions) on document.createElement("div")
   with too few arguments must throw TypeError'
 - 'Element interface: calling setHTML(DOMString, optional SetHTMLOptions) on document.createElement("noscript")
@@ -9939,9 +9907,6 @@ html/webappapis/scripting/events/onerroreventhandler.html:
 - onerror + ErrorEvent + Window
 html/webappapis/scripting/events/uncompiled_event_handler_with_scripting_disabled.html:
 - when scripting is disabled, the handler is never compiled
-input-events/idlharness.window.js:
-- 'InputEvent interface: attribute dataTransfer'
-- 'InputEvent interface: operation getTargetRanges()'
 input-events/input-events-arrow-key-on-number-input-delete-document.html:
 - Number input should not crash and not fire subsequent events when event handler
   removes document
@@ -10612,12 +10577,6 @@ shadow-dom/HighlightRegistry-highlightsFromPoint.html:
 - CSS.highlights.highlightsFromPoint() handles slotted light DOM content correctly.
 - CSS.highlights.highlightsFromPoint() returns Highlights present at a given point
   inside a shadow tree in the right order.
-shadow-dom/MouseEvent-prototype-offsetX-offsetY.html:
-- MouseEvent's offsetX and offsetY attributes must be relative to the shadow host
-  when an event is dispatched inside its shadow tree.
-- MouseEvent's offsetX and offsetY attributes must be relative to the target when
-  an event is dispatched on a slotted content.
-- MouseEvent's offsetX and offsetY attributes must be relative to the target.
 shadow-dom/declarative/innerhtml-before-closing-tag.html:
 - "[harness] ERROR"
 - "[harness] no subtests"
