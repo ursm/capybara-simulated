@@ -12,15 +12,14 @@ enum Filter {
     Classes(Vec<Vec<u16>>, bool),
     // A namespace (None for any) and a local name (None for any), exactly.
     TagNs(Option<String>, Option<String>),
-    // A qualified name (None for any) — in an HTML document lowercased for an HTML element.
-    Tag(Option<String>, bool),
+    // A qualified name (None for any) and, in an HTML document, its lowercase, which an HTML element's is compared with.
+    Tag(Option<(String, Option<String>)>),
     // The legacy document collections: an HTML element of a local name, and an attribute it must hold.
     Html(&'static [&'static str], Option<&'static str>),
 }
 
-fn ascii_whitespace(u: u16) -> bool {
-    matches!(u, 0x09 | 0x0a | 0x0c | 0x0d | 0x20)
-}
+use crate::validity::is_ascii_ws_unit as ascii_whitespace;
+
 fn ascii_lower(t: &[u16]) -> Vec<u16> {
     t.iter().map(|&u| if (0x41..=0x5a).contains(&u) { u + 0x20 } else { u }).collect()
 }
@@ -29,24 +28,30 @@ impl Filter {
     fn takes(&self, n: &NodeData) -> bool {
         match self {
             Filter::Classes(wanted, quirks) => {
-                let Some(value) = n.plain_attr_units("class") else { return false };
-                let tokens: Vec<Vec<u16>> = value
-                    .split(|&u| ascii_whitespace(u))
-                    .filter(|t| !t.is_empty())
-                    .map(|t| if *quirks { ascii_lower(t) } else { t.to_vec() })
-                    .collect();
-                wanted.iter().all(|w| tokens.contains(w))
+                let fold = |u: u16| if *quirks && (0x41..=0x5a).contains(&u) { u + 0x20 } else { u };
+                let same = |token: &mut dyn Iterator<Item = u16>, w: &[u16]| token.map(fold).eq(w.iter().copied());
+                // (…the attribute as the arena holds it: UTF-16 where it has a lone surrogate, else its string, unsplit
+                // into copies)
+                if let Some(units) = n.get_attr_u16("class") {
+                    let tokens: Vec<&[u16]> = units.split(|&u| ascii_whitespace(u)).filter(|t| !t.is_empty()).collect();
+                    return wanted.iter().all(|w| tokens.iter().any(|t| same(&mut t.iter().copied(), w)));
+                }
+                let Some(value) = n.plain_attr("class") else { return false };
+                wanted.iter().all(|w| value.split_ascii_whitespace().any(|t| same(&mut t.encode_utf16(), w)))
             }
             Filter::TagNs(namespace, local) => {
                 namespace.as_deref().is_none_or(|ns| &*n.ns == ns) && local.as_deref().is_none_or(|l| &*n.local_name == l)
             }
-            Filter::Tag(name, html_doc) => {
-                let Some(name) = name else { return true };
-                let qualified = match &n.prefix {
-                    Some(p) => format!("{p}:{}", &*n.local_name),
-                    None => n.local_name.to_string(),
+            Filter::Tag(name) => {
+                let Some((name, lower)) = name else { return true };
+                let want = match lower {
+                    Some(l) if n.ns == ns!(html) => l,
+                    _ => name,
                 };
-                if *html_doc && n.ns == ns!(html) { qualified == name.to_ascii_lowercase() } else { qualified == *name }
+                match &n.prefix {
+                    Some(p) => want.len() == p.len() + 1 + n.local_name.len() && want.starts_with(&**p) && want[p.len()..].starts_with(':') && want[p.len() + 1..] == *n.local_name,
+                    None => *want == *n.local_name,
+                }
             }
             Filter::Html(names, attr) => {
                 n.ns == ns!(html) && names.contains(&&*n.local_name) && attr.is_none_or(|a| n.plain_attr(a).is_some())
@@ -82,12 +87,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 fn element_by_id(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let id = utf16_arg(scope, args.get(1));
-    // (…compared as a string where neither side holds a lone surrogate, the common case: no copy per element)
-    let id_str = String::from_utf16(&id).ok();
-    let matches = |node: &NodeData| match (node.get_attr_u16("id"), &id_str) {
-        (Some(units), _) => units == &id[..],
-        (None, Some(s)) => node.plain_attr("id") == Some(s.as_str()),
-        (None, None) => false,
+    // (…the attribute as the arena holds it: UTF-16 where it has a lone surrogate, else its string — no copy per element)
+    let matches = |node: &NodeData| match node.get_attr_u16("id") {
+        Some(units) => units == &id[..],
+        None => node.plain_attr("id").is_some_and(|v| v.encode_utf16().eq(id.iter().copied())),
     };
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
@@ -149,7 +152,13 @@ fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             let namespace = if a.is_null_or_undefined() { Some(String::new()) } else { name_arg(scope, a) };
             Filter::TagNs(namespace, name_arg(scope, b))
         }
-        TAG => Filter::Tag(name_arg(scope, a), b.is_true()),
+        TAG => {
+            let html_doc = b.is_true();
+            Filter::Tag(name_arg(scope, a).map(|n| {
+                let lower = html_doc.then(|| n.to_ascii_lowercase());
+                (n, lower)
+            }))
+        }
         FORMS => Filter::Html(&["form"], None),
         IMAGES => Filter::Html(&["img"], None),
         LINKS => Filter::Html(&["a", "area"], Some("href")),

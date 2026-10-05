@@ -6,10 +6,7 @@
 // Tokens are UTF-16 code units, as the attribute holds them (a lone surrogate included), split on ASCII whitespace.
 
 use crate::dom::{nid_arg, realm_id, utf16_arg, utf16_value};
-
-fn ascii_whitespace(u: u16) -> bool {
-    matches!(u, 0x09 | 0x0a | 0x0c | 0x0d | 0x20)
-}
+use crate::validity::is_ascii_ws_unit as ascii_whitespace;
 
 // The attribute's ordered set: its tokens, each once, in the order they first appear.
 fn ordered_set(value: &[u16]) -> Vec<Vec<u16>> {
@@ -20,6 +17,16 @@ fn ordered_set(value: &[u16]) -> Vec<Vec<u16>> {
         }
     }
     out
+}
+
+// Ordered-set "replace" (Infra) of the token at `i` by `new`: the first instance of either is `new`, the others go.
+fn replace_at(set: &mut Vec<Vec<u16>>, i: usize, new: &[u16]) {
+    set[i] = new.to_vec();
+    let mut seen = 0;
+    set.retain(|t| t != new || {
+        seen += 1;
+        seen == 1
+    });
 }
 
 // The ordered set serializer: the tokens joined by a space.
@@ -71,7 +78,8 @@ fn token_list_item(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 // __dom.tokenListContains(nid, name, token) -> whether the set holds `token`.
 fn token_list_contains(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let token = utf16_arg(scope, args.get(2));
-    let yes = value(scope, &args).is_some_and(|v| v.split(|&u| ascii_whitespace(u)).any(|t| t == &token[..]));
+    // (…never the empty token: the set holds none, however many separators the attribute runs)
+    let yes = !token.is_empty() && value(scope, &args).is_some_and(|v| v.split(|&u| ascii_whitespace(u)).any(|t| t == &token[..]));
     rv.set_bool(yes);
 }
 
@@ -125,21 +133,17 @@ fn token_list_edit(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
                 }
             }
         }
-        _ => {
+        REPLACE => {
             let (Some(token), Some(new)) = (tokens.first(), tokens.get(1)) else { return };
             match set.iter().position(|t| t == token) {
-                Some(i) => {
-                    // (…the new token where the old one was, a later copy of it dropped)
-                    set[i] = new.clone();
-                    let mut seen = 0;
-                    set.retain(|t| t != new || { seen += 1; seen == 1 });
-                }
+                Some(i) => replace_at(&mut set, i, new),
                 None => {
                     result = false;
                     write = false;
                 }
             }
         }
+        _ => return,
     }
     // (…and nothing written for an absent attribute whose set stays empty: update steps 1)
     if !present && set.is_empty() {
@@ -148,4 +152,32 @@ fn token_list_edit(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let result: v8::Local<v8::Value> = v8::Boolean::new(scope, result).into();
     let value: v8::Local<v8::Value> = if write { utf16_value(scope, &serialize(&set)) } else { v8::undefined(scope).into() };
     rv.set(v8::Array::new_with_elements(scope, &[result, value]).into());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn u(s: &str) -> Vec<u16> {
+        s.encode_utf16().collect()
+    }
+    fn set(s: &str) -> Vec<Vec<u16>> {
+        ordered_set(&u(s))
+    }
+
+    #[test]
+    fn an_ordered_set_splits_on_ascii_whitespace_only_and_keeps_the_first_of_each() {
+        assert_eq!(set("  a\tb a\u{a0}c  b "), vec![u("a"), u("b"), u("a\u{a0}c")]);
+        assert!(set(" \n ").is_empty());
+    }
+
+    #[test]
+    fn a_replace_keeps_the_first_instance_of_either_token() {
+        let mut s = set("a b c");
+        replace_at(&mut s, 2, &u("a"));
+        assert_eq!(serialize(&s), u("a b"));
+        let mut s = set("a b c");
+        replace_at(&mut s, 0, &u("c"));
+        assert_eq!(serialize(&s), u("c b"));
+    }
 }

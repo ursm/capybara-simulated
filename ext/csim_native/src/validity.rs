@@ -673,7 +673,8 @@ fn strict_unicode_syntax(p: &[u32]) -> bool {
     true
 }
 
-fn is_ascii_ws_unit(u: u16) -> bool {
+// ASCII whitespace (Infra), as a UTF-16 unit.
+pub(crate) fn is_ascii_ws_unit(u: u16) -> bool {
     matches!(u, 0x09 | 0x0A | 0x0C | 0x0D | 0x20)
 }
 fn trim_ascii_ws_units(u: &[u16]) -> &[u16] {
