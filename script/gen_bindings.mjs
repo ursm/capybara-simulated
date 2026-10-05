@@ -86,6 +86,7 @@ const INTERFACES = [
       prerendering: 'no prerendering'
     }
   }],
+  ['dom', 'EventTarget', { install: true, omit: { observable: 'when: Observables are not implemented' } }],
   ['dom', 'ShadowRoot', { install: true, omit: { 'sanitizer-api': 'setHTML: the Sanitizer API is not implemented' } }]
 ];
 
@@ -368,10 +369,12 @@ function generateInterface(def, options = {}) {
   const members = [], constants = [], body = [], unforgeables = [], checks = new Set(), unscopables = [], handlers = [];
   // (…`this` checked: by its brand where the binding makes the object, by the test its class registered where it is
   // installed on that class)
-  // (…`prefix` the message's, for an operation whose TypeError becomes its promise's rejection)
+  // (…a null or undefined `this` the realm's global — Web IDL's operation and attribute steps: a bare
+  // `addEventListener(…)` is the window's — and `prefix` the message's, for an operation whose TypeError becomes its
+  // promise's rejection)
   const selfCheck = (prefix) => {
     const message = prefix ? `, ${JSON.stringify(prefix)}` : '';
-    return options.install ? `thisIs(this, IS_SELF${message})` : `thisOf(this, KEY${message})`;
+    return options.install ? `thisIs(this ?? globalThis, IS_SELF${message})` : `thisOf(this ?? globalThis, KEY${message})`;
   };
   const self = selfCheck();
   let indexed = null, valueIterator = false, stringifier = null, constructor = null;

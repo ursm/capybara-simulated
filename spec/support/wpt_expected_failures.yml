@@ -80,7 +80,6 @@ FileAPI/idlharness.any.js:
 - 'FileReader interface: operation readAsBinaryString(Blob)'
 - 'FileReader interface: operation readAsDataURL(Blob)'
 - 'FileReader interface: operation readAsText(Blob, optional DOMString)'
-- Stringification of new FileReader()
 - 'URL interface: operation createObjectURL((Blob or MediaSource))'
 - 'URL interface: operation revokeObjectURL(DOMString)'
 FileAPI/idlharness.html:
@@ -3008,23 +3007,6 @@ dom/idlharness.any.js:
 - 'Event interface: operation preventDefault()'
 - 'Event interface: operation stopImmediatePropagation()'
 - 'Event interface: operation stopPropagation()'
-- 'EventTarget interface: calling addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean)) on new AbortController().signal with too few
-  arguments must throw TypeError'
-- 'EventTarget interface: calling addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean)) on new EventTarget() with too few arguments
-  must throw TypeError'
-- 'EventTarget interface: calling removeEventListener(DOMString, EventListener?, optional
-  (EventListenerOptions or boolean)) on new AbortController().signal with too few
-  arguments must throw TypeError'
-- 'EventTarget interface: calling removeEventListener(DOMString, EventListener?, optional
-  (EventListenerOptions or boolean)) on new EventTarget() with too few arguments must
-  throw TypeError'
-- 'EventTarget interface: operation addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean))'
-- 'EventTarget interface: operation dispatchEvent(Event)'
-- 'EventTarget interface: operation removeEventListener(DOMString, EventListener?,
-  optional (EventListenerOptions or boolean))'
 - 'HTMLCollection interface: attribute length'
 - 'HTMLCollection interface: existence and properties of interface object'
 - 'HTMLCollection interface: operation item(unsigned long)'
@@ -3099,8 +3081,6 @@ dom/idlharness.any.js:
 - 'StaticRange interface: existence and properties of interface object'
 - 'StaticRange interface: existence and properties of interface prototype object'
 - Stringification of new AbortController()
-- Stringification of new AbortController().signal
-- Stringification of new EventTarget()
 - 'Window interface: attribute event'
 - 'XMLDocument interface: existence and properties of interface object'
 - 'XPathEvaluator interface: operation createExpression(DOMString, optional XPathNSResolver?)'
@@ -3269,76 +3249,6 @@ dom/idlharness.window.js:
 - 'Event interface: operation preventDefault()'
 - 'Event interface: operation stopImmediatePropagation()'
 - 'Event interface: operation stopPropagation()'
-- 'EventTarget interface: calling addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean)) on document.createComment("abc") with too
-  few arguments must throw TypeError'
-- 'EventTarget interface: calling addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean)) on document.createDocumentFragment() with
-  too few arguments must throw TypeError'
-- 'EventTarget interface: calling addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean)) on document.createTextNode("abc") with too
-  few arguments must throw TypeError'
-- 'EventTarget interface: calling addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean)) on document.doctype with too few arguments
-  must throw TypeError'
-- 'EventTarget interface: calling addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean)) on document.querySelector("[id]").attributes[0]
-  with too few arguments must throw TypeError'
-- 'EventTarget interface: calling addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean)) on element with too few arguments must throw
-  TypeError'
-- 'EventTarget interface: calling addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean)) on new AbortController().signal with too few
-  arguments must throw TypeError'
-- 'EventTarget interface: calling addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean)) on new Document() with too few arguments must
-  throw TypeError'
-- 'EventTarget interface: calling addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean)) on new EventTarget() with too few arguments
-  must throw TypeError'
-- 'EventTarget interface: calling addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean)) on xmlDoc with too few arguments must throw
-  TypeError'
-- 'EventTarget interface: calling addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean)) on xmlDoc.createProcessingInstruction("abc",
-  "def") with too few arguments must throw TypeError'
-- 'EventTarget interface: calling removeEventListener(DOMString, EventListener?, optional
-  (EventListenerOptions or boolean)) on document.createComment("abc") with too few
-  arguments must throw TypeError'
-- 'EventTarget interface: calling removeEventListener(DOMString, EventListener?, optional
-  (EventListenerOptions or boolean)) on document.createDocumentFragment() with too
-  few arguments must throw TypeError'
-- 'EventTarget interface: calling removeEventListener(DOMString, EventListener?, optional
-  (EventListenerOptions or boolean)) on document.createTextNode("abc") with too few
-  arguments must throw TypeError'
-- 'EventTarget interface: calling removeEventListener(DOMString, EventListener?, optional
-  (EventListenerOptions or boolean)) on document.doctype with too few arguments must
-  throw TypeError'
-- 'EventTarget interface: calling removeEventListener(DOMString, EventListener?, optional
-  (EventListenerOptions or boolean)) on document.querySelector("[id]").attributes[0]
-  with too few arguments must throw TypeError'
-- 'EventTarget interface: calling removeEventListener(DOMString, EventListener?, optional
-  (EventListenerOptions or boolean)) on element with too few arguments must throw
-  TypeError'
-- 'EventTarget interface: calling removeEventListener(DOMString, EventListener?, optional
-  (EventListenerOptions or boolean)) on new AbortController().signal with too few
-  arguments must throw TypeError'
-- 'EventTarget interface: calling removeEventListener(DOMString, EventListener?, optional
-  (EventListenerOptions or boolean)) on new Document() with too few arguments must
-  throw TypeError'
-- 'EventTarget interface: calling removeEventListener(DOMString, EventListener?, optional
-  (EventListenerOptions or boolean)) on new EventTarget() with too few arguments must
-  throw TypeError'
-- 'EventTarget interface: calling removeEventListener(DOMString, EventListener?, optional
-  (EventListenerOptions or boolean)) on xmlDoc with too few arguments must throw TypeError'
-- 'EventTarget interface: calling removeEventListener(DOMString, EventListener?, optional
-  (EventListenerOptions or boolean)) on xmlDoc.createProcessingInstruction("abc",
-  "def") with too few arguments must throw TypeError'
-- 'EventTarget interface: operation addEventListener(DOMString, EventListener?, optional
-  (AddEventListenerOptions or boolean))'
-- 'EventTarget interface: operation dispatchEvent(Event)'
-- 'EventTarget interface: operation removeEventListener(DOMString, EventListener?,
-  optional (EventListenerOptions or boolean))'
 - 'HTMLCollection interface: attribute length'
 - 'HTMLCollection interface: calling item(unsigned long) on document.body.children
   with too few arguments must throw TypeError'
@@ -3458,10 +3368,7 @@ dom/idlharness.window.js:
 - Stringification of document.implementation
 - Stringification of document.querySelectorAll("script")
 - Stringification of new AbortController()
-- Stringification of new AbortController().signal
-- Stringification of new EventTarget()
 - Stringification of new XSLTProcessor()
-- Stringification of xmlDoc
 - 'Window interface: attribute event'
 - 'XMLDocument interface: existence and properties of interface object'
 - 'XPathEvaluator interface: calling createExpression(DOMString, optional XPathNSResolver?)
@@ -3979,7 +3886,6 @@ hr-time/idlharness.any.js:
 - 'Performance interface: existence and properties of interface object'
 - 'Performance interface: operation now()'
 - 'Performance interface: operation toJSON()'
-- Stringification of performance
 - 'Window interface: attribute performance'
 hr-time/navigation-start-post-before-unload.html:
 - timeOrigin should be set after beforeunload
@@ -6367,7 +6273,6 @@ html/dom/idlharness.any.js:
 - 'StorageEvent interface: operation initStorageEvent(DOMString, optional boolean,
   optional boolean, optional DOMString?, optional DOMString?, optional DOMString?,
   optional USVString, optional Storage?)'
-- Stringification of new EventSource("http://invalid")
 - Stringification of new Origin()
 - Stringification of self
 - Stringification of self.location
@@ -9109,7 +9014,6 @@ html/dom/idlharness.https.html:
 - Stringification of document.head.dataset
 - Stringification of location.ancestorOrigins
 - Stringification of new DOMParser()
-- Stringification of new EventSource("http://invalid")
 - Stringification of new ToggleEvent("beforetoggle")
 - Stringification of new TrackEvent("addtrack", {track:document.createElement("track").track})
 - Stringification of new XMLSerializer()
@@ -12528,7 +12432,6 @@ websockets/idlharness.any.js:
 - 'CloseEvent interface: attribute code'
 - 'CloseEvent interface: attribute reason'
 - 'CloseEvent interface: attribute wasClean'
-- Stringification of new WebSocket("ws://invalid")
 - WebSocket interface object length
 - 'WebSocket interface: attribute binaryType'
 - 'WebSocket interface: attribute bufferedAmount'
@@ -12549,9 +12452,6 @@ websockets/interfaces/WebSocket/close/close-connecting-async.any.js:
 websockets/interfaces/WebSocket/close/close-connecting.html:
 - 'WebSockets: close() when connecting'
 - 'WebSockets: close() when connecting'
-websockets/interfaces/WebSocket/send/010.html:
-- "[harness] ERROR"
-- "[harness] ERROR"
 websockets/mixed-content.https.any.js:
 - opening an insecure WebSocket in a secure context should fail
 websockets/multi-globals/message-received.html:
@@ -12711,7 +12611,6 @@ xhr/idlharness.any.js:
   with the proper type'
 - 'ProgressEvent interface: new ProgressEvent("type") must inherit property "total"
   with the proper type'
-- Stringification of (new XMLHttpRequest()).upload
 - Stringification of new FormData()
 - Stringification of new FormData(form)
 - Stringification of new FormData(form, submitter)

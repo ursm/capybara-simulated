@@ -53,13 +53,17 @@ const WRITE = new RegExp(`(?<![\\w$.])(${IDENT})\\s*(?:\\.(?:push|unshift|add|se
 const METHOD = /^\s+(?:static\s+|async\s+|get\s+|set\s+)*(?!(?:if|for|while|switch|catch|with)\b)[\w$]+\s*\([^)]*\)\s*\{\s*$/;
 const LOCAL = new RegExp(`(?:\\b(?:let|const|var)\\s+|[(,]\\s*)(${IDENT})(?=\\s*[=,);])`, 'g');
 
+// A method's definition (`dispatchEvent(event) { …`, `get x() { …`): its name is no call — a class a function makes
+// may name a method as a top-level function is named — so it is left out, and the body after it kept.
+const METHOD_HEAD = /^(\s+)(?:static\s+|async\s+|get\s+|set\s+)*[\w$]+\s*\([^)]*\)\s*\{/;
+
 // Every top-level function a call to `name` can reach.
 function reach(name, seen) {
   if (seen.has(name) || !bodies.has(name)) return;
   seen.add(name);
   for (const line of bodies.get(name)) {
     if (isComment(line)) continue;
-    for (const [, n] of line.matchAll(CALLED)) reach(n, seen);
+    for (const [, n] of line.replace(METHOD_HEAD, '$1{').matchAll(CALLED)) reach(n, seen);
   }
 }
 

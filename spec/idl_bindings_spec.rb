@@ -676,6 +676,37 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  # (…EventTarget's members its IDL's: a callback no object a TypeError, the options' `signal` an AbortSignal, an event
+  # an Event, `this` the window when there is none; each EventTarget its own class string, and the events the driver
+  # fires real ones — a MediaQueryListEvent, an IDBVersionChangeEvent; Chrome's answers)
+  it "installs EventTarget's members as its IDL says" do
+    got = outcome(<<~JS)
+      (() => {
+        const t = (f) => { try { return JSON.stringify(f()) ?? 'undefined'; } catch (e) { return e.name + ': ' + e.message; } };
+        const target = new EventTarget();
+        return [
+          t(() => target.addEventListener('x', 5)),
+          t(() => target.addEventListener('x', null, { signal: null })),
+          t(() => target.dispatchEvent({ type: 'x' })),
+          t(() => { const add = EventTarget.prototype.addEventListener; let n = 0; add('zzz', () => n++); window.dispatchEvent(new Event('zzz')); return n; }),
+          t(() => EventTarget.prototype.addEventListener.call({}, 'x', () => {})),
+          [new AbortController().signal, new XMLHttpRequest().upload, new FileReader(), matchMedia('(min-width: 1px)')].map((o) => Object.prototype.toString.call(o)),
+          [new MediaQueryListEvent('change', { matches: true, media: 'x' }).matches, new IDBVersionChangeEvent('upgradeneeded', { oldVersion: 1, newVersion: 2 }).newVersion],
+          [EventTarget.prototype.addEventListener.length, EventTarget.prototype.dispatchEvent.length]
+        ];
+      })()
+    JS
+    add = "TypeError: Failed to execute 'addEventListener' on 'EventTarget': "
+    expect(got).to eq([
+      "#{add}parameter 2 is not of type 'Object'.",
+      "#{add}Failed to read the 'signal' property from 'AddEventListenerOptions': Failed to convert value to 'AbortSignal'.",
+      "TypeError: Failed to execute 'dispatchEvent' on 'EventTarget': parameter 1 is not of type 'Event'.",
+      '1', 'TypeError: Illegal invocation',
+      ['[object AbortSignal]', '[object XMLHttpRequestUpload]', '[object FileReader]', '[object MediaQueryList]'],
+      [true, 2], [2, 1]
+    ])
+  end
+
   # (…the document element among them, and a name compared as it is, not as a selector)
   it "finds a document's elements by name, its root too" do
     got = outcome(<<~JS)
