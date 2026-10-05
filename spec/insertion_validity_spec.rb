@@ -24,9 +24,13 @@ RSpec.describe 'insertion validity' do
         tryIt(() => h.appendChild(document.createAttribute('a')));
         tryIt(() => document.appendChild(document.createElement('x')));
         tryIt(() => document.replaceChild(document.createElement('html'), document.documentElement));
+        // (…an Attr is in no tree: the reference child is checked before the node's kind)
+        tryIt(() => h.insertBefore(document.createAttribute('a'), document.createElement('i')));
+        // (…a Document's element child refuses even the node itself, moved)
+        tryIt(() => document.moveBefore(document.documentElement, null));
         return out;
       })()
     JS
-    expect(got).to eq(%w[HierarchyRequestError HierarchyRequestError HierarchyRequestError HierarchyRequestError HierarchyRequestError ok])
+    expect(got).to eq(%w[HierarchyRequestError HierarchyRequestError HierarchyRequestError HierarchyRequestError HierarchyRequestError ok NotFoundError HierarchyRequestError])
   end
 end
