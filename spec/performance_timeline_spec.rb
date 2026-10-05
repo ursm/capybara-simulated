@@ -37,9 +37,8 @@ RSpec.describe 'the Performance surface' do
   it 'defines crossOriginIsolated as false rather than leaving it undefined' do
     # `undefined` is not the same answer as `false`: two hr-time tests assert the boolean before
     # reaching what they actually test, and app code branches on it for SharedArrayBuffer.
-    # …and on the window PROTOTYPE, not as an own enumerable property: Chrome keeps it off
-    # `Object.keys(window)`, and an own accessor would stop a top-level classic-script `var` from
-    # shadowing it — the rule platform-globals.js states for every read-only Window member.
+    # …and the global's own, enumerable, as every Window member is ([Global], Web IDL §3.7.5 —
+    # Chrome measured: `Object.keys(window)` includes it).
     r = session.evaluate_script(<<~JS)
       ({
         type:   typeof crossOriginIsolated,
@@ -47,6 +46,6 @@ RSpec.describe 'the Performance surface' do
         ownKey: Object.keys(globalThis).includes('crossOriginIsolated')
       })
     JS
-    expect(r).to eq('type' => 'boolean', 'value' => false, 'ownKey' => false)
+    expect(r).to eq('type' => 'boolean', 'value' => false, 'ownKey' => true)
   end
 end

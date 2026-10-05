@@ -928,28 +928,19 @@ module Capybara
             // through the parent's own top (already a proxy if the parent is a
             // frame), unwrapped to its raw global then re-proxied for this realm.
             var __pf     = globalThis.__csimFrameWindowProxyFor;
-            var __topRaw = __parentWin.top || __parentWin;
+            var __topRaw = __parentWin.__csimTop || __parentWin;
             if (__topRaw.__csimRawWindow) __topRaw = __topRaw.__csimRawWindow;
-            globalThis.parent = __pf(__NS.contextOf(__parentWin)) || __parentWin;
-            globalThis.top    = __pf(__NS.contextOf(__topRaw)) || __topRaw;
+            globalThis.__csimParent = __pf(__NS.contextOf(__parentWin)) || __parentWin;
+            globalThis.__csimTop    = __pf(__NS.contextOf(__topRaw)) || __topRaw;
             // The container is known from the document's first script on (Chrome): until the parent adopts it
             // (`__csimAdoptFrameContainer`), it is the element the parent is building this realm for
-            // (`__csimBuildingFrame`). The driver reads it as `__csimFrameContainer`; a page reads `frameElement`,
-            // which is null to a document not of its container's origin — a cross-origin or sandboxed one (HTML
-            // §7.2.3.4) — and which a page cannot write.
+            // (`__csimBuildingFrame`). The driver reads it as `__csimFrameContainer`, and `frameElement` from it
+            // (window.js).
             (function (pw) {
               var own;
               var container = function () { return own !== undefined ? own : (pw.__csimBuildingFrame || null); };
               Object.defineProperty(globalThis, '__csimFrameContainer', { configurable: true, get: container });
               Object.defineProperty(globalThis, '__csimAdoptFrameContainer', { configurable: true, value: function (el) { own = el; } });
-              Object.defineProperty(globalThis, 'frameElement', {
-                configurable: true,
-                enumerable:   true,
-                get: function () {
-                  var el = container();
-                  return el && globalThis.origin !== 'null' && globalThis.origin === pw.origin ? el : null;
-                }
-              });
             })(__parentWin);
           }
         JS
@@ -1079,31 +1070,23 @@ module Capybara
         realm = seed_realm_bridge(ctx.create_context)
         # Mark it a top-level window realm so its location setter routes to
         # __csimWindowRealmNavigate (reload THIS realm) rather than the frame-nav or
-        # top-page path — top === self here, so neither default branch fits. Also give
-        # it the window-lifecycle surface a popup needs but a frame realm doesn't:
-        # `window.closed` (flag-backed) and `window.close()` (marks closed; the realm
-        # lingers inert until the Browser tears the isolate down — matching a real
+        # top-page path — top === self here, so neither default branch fits. And make it
+        # a window a script may close, as a frame realm is not: `window.close()` marks it closed (window.js; the
+        # realm lingers inert until the Browser tears the isolate down — matching a real
         # closed window whose proxy stays valid and reports closed === true).
         realm.eval_void(<<~JS)
           globalThis.__csimIsWindowRealm = true;
-          globalThis.__csimWindowClosedFlag = false;
-          try {
-            Object.defineProperty(globalThis, 'closed', {
-              configurable: true,
-              get() { return !!globalThis.__csimWindowClosedFlag; }
-            });
-          } catch (_) {}
-          globalThis.close = function () { globalThis.__csimWindowClosedFlag = true; };
+          globalThis.__csimScriptClosable = true;
         JS
         # window.opener → a WindowProxy for the opener realm. opener_id is the opener's
         # context id (0 = the main realm, a VALID opener); nil means "no opener", so the
-        # guard is on nil, not on 0 (0 is falsy but real here). Assigning globalThis.opener
-        # routes through the bridge's opener setter (stores the override the getter returns).
+        # guard is on nil, not on 0 (0 is falsy but real here). It is the window's opener
+        # (window.js `__csimOpener`) until a page disowns it.
         unless opener_id.nil?
           realm.eval_void(<<~JS)
             if (typeof globalThis.__csimFrameWindowProxyFor === 'function') {
               var __op = globalThis.__csimFrameWindowProxyFor(#{opener_id.to_i});
-              if (__op) globalThis.opener = __op;
+              if (__op) globalThis.__csimOpener = __op;
             }
           JS
         end

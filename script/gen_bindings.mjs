@@ -100,6 +100,38 @@ const INTERFACES = [
   }],
   ['SVG', 'SVGElement', { install: true, omit: { 'css-typed-om': 'attributeStyleMap: the Typed OM is not implemented' } }],
   ['mathml-core', 'MathMLElement', { install: true, omit: { 'css-typed-om': 'attributeStyleMap: the Typed OM is not implemented' } }],
+  ['html', 'Window', {
+    install: true,
+    namedProperties: true,
+    omit: {
+      'anonymous-iframe': 'credentialless: credentialless iframes are not implemented',
+      compat: 'orientation / onorientationchange: a mobile-only legacy, which a desktop browser has not',
+      cookiestore: 'cookieStore: the Cookie Store API is not implemented',
+      'crash-reporting': 'crashReport: crash reporting is not implemented',
+      'css-nav': 'navigate: spatial navigation is not implemented',
+      'css-sizing-4': 'requestResize: not implemented',
+      'css-viewport': 'viewport: the Viewport segments API is not implemented',
+      'digital-goods': 'getDigitalGoodsService: the Digital Goods API is not implemented',
+      'document-picture-in-picture': 'documentPictureInPicture: Document Picture-in-Picture is not implemented',
+      'fenced-frame': 'fence: fenced frames are not implemented',
+      fetch: 'fetch / fetchLater: the Fetch polyfill converts its own arguments; fetchLater is not implemented',
+      'file-system-access': 'show*Picker: the File System Access pickers are not implemented',
+      gamepad: 'ongamepad*: the Gamepad API is not implemented',
+      'local-font-access': 'queryLocalFonts: Local Font Access is not implemented',
+      'manifest-incubations': 'onappinstalled / onbeforeinstallprompt: app installation is not implemented',
+      'orientation-event': 'ondevice*: device orientation and motion are not implemented',
+      portals: 'portalHost / onportalactivate: portals are not implemented',
+      PushManagerAttribute: 'pushManager: the Push API is not implemented',
+      'scheduling-apis': 'scheduler: the Prioritized Task Scheduling API is not implemented',
+      'speech-api': 'speechSynthesis: the Web Speech API is not implemented',
+      'trusted-types': 'trustedTypes: Trusted Types are not implemented',
+      'web-app-launch': 'launchQueue: app launch handling is not implemented',
+      'window-management': 'getScreenDetails: multi-screen window placement is not implemented'
+    },
+    omitMembers: {
+      navigation: 'the Navigation API is not implemented'
+    }
+  }],
   ['dom', 'EventTarget', { install: true, omit: { observable: 'when: Observables are not implemented' } }],
   ['dom', 'ShadowRoot', { install: true, omit: { 'sanitizer-api': 'setHTML: the Sanitizer API is not implemented' } }]
 ];
@@ -107,8 +139,8 @@ const INTERFACES = [
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
   'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
-  'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toLong', 'toDouble',
-  'toUnrestrictedDouble', 'toSequence', 'toObject', 'toInterface', 'toCallbackInterface', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
+  'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toLong', 'toEnforcedInteger', 'toDouble',
+  'toUnrestrictedDouble', 'toSequence', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers'
 ];
@@ -122,7 +154,7 @@ const additions = new Map();
 const add = (to, addition) => additions.set(to, [...(additions.get(to) || []), addition]);
 for (const [spec, defs] of Object.entries(all)) {
   for (const d of defs) {
-    if ((d.type === 'interface' || d.type === 'callback interface') && !d.partial) definitions.set(d.name, d);
+    if ((d.type === 'interface' || d.type === 'callback interface' || d.type === 'callback') && !d.partial) definitions.set(d.name, d);
     if (d.type === 'interface mixin' && !d.partial) mixins.set(d.name, d);
     if (d.type === 'dictionary' && !d.partial) dictionaries.set(d.name, d);
     if (d.type === 'typedef') typedefs.set(d.name, d.idlType);
@@ -139,13 +171,13 @@ for (const [spec, defs] of Object.entries(all)) {
 // interface object is put on, the Window's here. [SecureContext]: exposed, every realm here being a secure context
 // (`isSecureContext`, platform-globals.js). The rest the generator makes as Web IDL says.
 const HANDLED = {
-  interface: ['Exposed', 'SecureContext'],
+  interface: ['Exposed', 'SecureContext', 'Global', 'LegacyUnenumerableNamedProperties'],
   member: [
     'SameObject', 'NewObject', 'CEReactions', 'Unscopable', 'PutForwards', 'Reflect', 'SecureContext', 'LegacyLenientSetter',
-    'LegacyUnforgeable', 'LegacyLenientThis', 'HTMLConstructor', 'ReflectSetter', 'ReflectURL', 'ReflectNonNegative',
+    'LegacyUnforgeable', 'LegacyLenientThis', 'Replaceable', 'HTMLConstructor', 'ReflectSetter', 'ReflectURL', 'ReflectNonNegative',
     'ReflectRange', 'ReflectDefault'
   ],
-  type: ['LegacyNullToEmptyString']
+  type: ['LegacyNullToEmptyString', 'EnforceRange']
 };
 function checkExtAttrs(extAttrs, where, label) {
   for (const e of extAttrs || []) {
@@ -190,8 +222,11 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
   const extAttrs = [...(t.extAttrs || []), ...argExtAttrs];
   checkExtAttrs(extAttrs, 'type', label);
   const legacyNull = extAttrs.some((e) => e.name === 'LegacyNullToEmptyString');
+  const enforceRange = extAttrs.some((e) => e.name === 'EnforceRange');
+  if (enforceRange && !['unsigned short', 'unsigned long', 'long'].includes(t.idlType)) throw new Error(`${label}: no binding enforces the range of ${t.idlType} yet`);
   let c;
-  switch (t.idlType) {
+  switch (enforceRange ? 'EnforceRange' : t.idlType) {
+    case 'EnforceRange': c = `toEnforcedInteger(${expr}, ${JSON.stringify(t.idlType)}, ${failure(where)})`; break;
     // (…CSSOMString, which CSSOM lets an implementation make either string type, DOMString — as Chrome does)
     case 'CSSOMString':
     case 'DOMString': c = `toDOMString(${expr}, ${legacyNull}, ${failure(where)})`; break;
@@ -211,6 +246,9 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
       } else if (def && def.type === 'interface') {
         checks.add(t.idlType);
         c = `toInterface(${expr}, IS_${t.idlType}, ${conversionError(where, t.idlType)})`;
+      } else if (def && def.type === 'callback') {
+        // (…a callback function type: a callable object, kept as it is — Web IDL §3.2.20)
+        c = `toCallbackFunction(${expr}, ${conversionError(where, t.idlType)})`;
       } else if (def && def.type === 'callback interface') {
         c = `toCallbackInterface(${expr}, ${conversionError(where, 'Object')})`;
       } else if (enums.has(t.idlType)) {
@@ -229,9 +267,10 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
 
 // Interfaces of specs no implementation here answers, which no value is an object of — a union member of one is
 // none (Trusted Types: with no policy, the string a page passes is what the API takes), a dictionary member of one
-// no member, and anything else converted to one no such object: the Typed OM's values, Animation Triggers'.
+// no member, and anything else converted to one no such object: the Typed OM's values, Animation Triggers', WebCodecs'
+// VideoFrame.
 const ABSENT_INTERFACES = new Set([
-  'TrustedHTML', 'TrustedScript', 'TrustedScriptURL', 'CSSNumericValue', 'CSSKeywordValue', 'AnimationTrigger'
+  'TrustedHTML', 'TrustedScript', 'TrustedScriptURL', 'CSSNumericValue', 'CSSKeywordValue', 'AnimationTrigger', 'VideoFrame'
 ]);
 
 // The type `t` names `u` as: `u`, with `t`'s extended attributes besides its own and nullable if either is. (Its
@@ -254,7 +293,8 @@ function flattenUnion(t) {
   return { members, includesNullable };
 }
 
-// A union's conversion (Web IDL §3.2.25), for unions of interfaces, a dictionary, a string, a numeric type and boolean:
+// A union's conversion (Web IDL §3.2.25), for unions of interfaces, a callback function, a dictionary, a string, a
+// numeric type and boolean (a callable value the callback function's):
 // null or undefined null where it includes a nullable type, else the dictionary's; an object of one of its interfaces
 // as it is; any other object the dictionary's; a boolean or a number as itself where its type is a member; then the
 // string type's conversion, else the numeric type's, else boolean's — and with none of them, a TypeError. A union
@@ -275,7 +315,9 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   const strings = of((u) => ['DOMString', 'USVString'].includes(u.idlType));
   const numerics = of((u) => NUMERIC_TYPES.has(u.idlType));
   const booleans = of((u) => u.idlType === 'boolean');
-  if (dicts.length > 1 || strings.length > 1 || numerics.length > 1 || ifaces.length + dicts.length + strings.length + numerics.length + booleans.length !== members.length) throw unsupported();
+  const callbacks = of((u) => definitions.get(u.idlType)?.type === 'callback');
+  if (dicts.length > 1 || strings.length > 1 || numerics.length > 1 || callbacks.length > 1 ||
+      ifaces.length + dicts.length + strings.length + numerics.length + booleans.length + callbacks.length !== members.length) throw unsupported();
   const [dict] = dicts, [string] = strings, [numeric] = numerics, [boolean] = booleans;
   const convert = (u) => conversion(u, expr, where, checks, extAttrs);
   // (…the last conversion, which takes what no step before it did — so no step of its own)
@@ -287,6 +329,8 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
     checks.add(u.idlType);
     steps.push([`IS_${u.idlType}(${expr})`, expr]);
   }
+  // (…a callable one the callback function type's, before a dictionary would take it)
+  if (callbacks.length) steps.push([`typeof ${expr} === 'function'`, expr]);
   if (dict) steps.push([`(typeof ${expr} === 'object' || typeof ${expr} === 'function')`, convert(dict)]);
   if (boolean && boolean !== last) steps.push([`typeof ${expr} === 'boolean'`, expr]);
   if (numeric && numeric !== last) steps.push([`typeof ${expr} === 'number'`, convert(numeric)]);
@@ -434,6 +478,10 @@ function generateInterface(def, options = {}) {
         const target = forwards.rhs.value;
         const notObject = JSON.parse(failure({ iface: name, member: m.name }, 'The attribute value is not an object'));
         out.push(`    set ${m.name}(v) { const object = impl.get_${m.name}(${self}); if (object === null || (typeof object !== 'object' && typeof object !== 'function')) throw new TypeError(${JSON.stringify(notObject)}); object.${target} = v; }`);
+      } else if ((m.extAttrs || []).some((e) => e.name === 'Replaceable')) {
+        // [Replaceable] (Web IDL §3.7.6): a write to the read-only attribute replaces it with a data property of the
+        // object — a page's `innerWidth = 1024` keeps its own value, and the attribute is gone for it
+        out.push(`    set ${m.name}(v) { const self = ${self}; Object.defineProperty(self, '${m.name}', { value: v, writable: true, enumerable: true, configurable: true }); }`);
       } else if ((m.extAttrs || []).some((e) => e.name === 'LegacyLenientSetter')) {
         // [LegacyLenientSetter] (Web IDL §3.4.2): a read-only attribute with a setter that does nothing — but check its
         // `this` — so a page's own assignment to it (an old polyfill's) is no error
@@ -522,19 +570,27 @@ function generateInterface(def, options = {}) {
 // object's `length` its constructor's required arguments; its class string and @@unscopables.
 // …its [LegacyUnforgeable] members, own properties of each object, defined on one by the function it returns, which the
 // class's constructor calls.
+// …a [Global] interface's (Window's) on the global object itself (Web IDL §3.7.5), its [LegacyUnforgeable] ones too —
+// by the two functions it returns, which define them on a global: its members (configurable, made once where the
+// snapshot is, which a realm made from it has already), and its [LegacyUnforgeable] ones, as each realm is made.
 function installInterface(def, { body, unforgeables, checks, unscopables, constructor, constants, handlers }) {
   const name = def.name;
+  const global = (def.extAttrs || []).some((e) => e.name === 'Global');
+  const holder = global ? 'members' : 'iface.prototype';
   const length = constructor ? constructor.arguments.filter((a) => !a.optional && !a.variadic).length : 0;
   const lines = [];
-  lines.push(`// interface ${name}${def.inheritance ? ` : ${def.inheritance}` : ''} (${def.spec}), installed on the class that makes its objects`);
+  lines.push(global
+    ? `// interface ${name}${def.inheritance ? ` : ${def.inheritance}` : ''} (${def.spec}), [Global]: installed on the global object`
+    : `// interface ${name}${def.inheritance ? ` : ${def.inheritance}` : ''} (${def.spec}), installed on the class that makes its objects`);
   lines.push(`export function install${name}(iface, impl) {`);
   lines.push(`  const IS_SELF = interfaceCheck('${name}');`);
   for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
   lines.push(`  class Members {`);
   lines.push(...body);
   lines.push(`  }`);
-  lines.push(`  installMembers(iface.prototype, Members.prototype);`);
-  if (handlers.length) lines.push(`  impl.installEventHandlers(iface.prototype, ${JSON.stringify(handlers)});`);
+  if (global) lines.push(`  const members = {};`);
+  lines.push(`  installMembers(${holder}, Members.prototype);`);
+  if (handlers.length) lines.push(`  impl.installEventHandlers(${holder}, ${JSON.stringify(handlers)});`);
   if (constants.length) {
     const list = JSON.stringify(constants.map(([n]) => n));
     lines.push(`  defineConstants(iface, ${list}, [${constants.map(([, v]) => v).join(', ')}]);`);
@@ -543,8 +599,15 @@ function installInterface(def, { body, unforgeables, checks, unscopables, constr
   lines.push(`  defineLength(iface, ${length});`);
   lines.push(`  defineClassString(iface.prototype, '${name}');`);
   if (unscopables.length) lines.push(`  defineUnscopables(iface.prototype, ${JSON.stringify(unscopables)});`);
-  if (unforgeables.length) {
-    lines.push(`  class Unforgeables {`, ...unforgeables, `  }`);
+  if (unforgeables.length) lines.push(`  class Unforgeables {`, ...unforgeables, `  }`);
+  if (global) {
+    lines.push(`  const descriptors = Object.getOwnPropertyDescriptors(members);`);
+    lines.push(`  return {`);
+    lines.push(`    names: Object.keys(descriptors),`);
+    lines.push(`    defineMembers: (global) => Object.defineProperties(global, descriptors),`);
+    lines.push(`    defineUnforgeables: ${unforgeables.length ? 'unforgeableMembers(Unforgeables.prototype)' : '() => {}'}`);
+    lines.push(`  };`);
+  } else if (unforgeables.length) {
     lines.push(`  return unforgeableMembers(Unforgeables.prototype);`);
   }
   lines.push(`}`);
@@ -575,9 +638,10 @@ function operation(iface, m, checks, selfCheck) {
   const args = m.arguments;
   const requiredCount = args.filter((a) => !a.optional && !a.variadic).length;
   if (args.some((a, i) => (a.optional || a.variadic) && i < requiredCount)) throw new Error(`${iface}.${m.name}: a required argument after an optional one`);
-  if (args.some((a) => a.optional) && args.some((a) => a.variadic)) throw new Error(`${iface}.${m.name}: an optional argument beside a variadic one is not generated yet`);
-  const params = args.filter((a) => !a.optional).map((a) => (a.variadic ? `...${argName(a)}` : argName(a))).join(', ');
-  const converted = convertArguments(iface, m, checks, (a) => (a.variadic || !a.optional ? argName(a) : null));
+  // (…a variadic one after optional ones the rest of `arguments`, past them: `setTimeout(handler, timeout, ...arguments)`)
+  const rest = !args.some((a) => a.optional);
+  const params = args.filter((a) => !a.optional && (rest || !a.variadic)).map((a) => (a.variadic ? `...${argName(a)}` : argName(a))).join(', ');
+  const converted = convertArguments(iface, m, checks, (a) => ((a.variadic && rest) || (!a.optional && !a.variadic) ? argName(a) : null));
   // (…`this` checked first, then the arguments counted — Web IDL's order, as Chrome's)
   const check = requiredCount ? `required(arguments, ${requiredCount}, '${m.name}', '${iface}'); ` : '';
   const steps = `const self = ${selfCheck(promiseOf(m) && `Failed to execute '${m.name}' on '${iface}': `)}; ${check}return impl.${m.name}(${['self', ...converted].join(', ')});`;
@@ -595,7 +659,7 @@ const rejecting = (steps) => `try { ${steps} } catch (e) { return rejectedPromis
 function convertArguments(iface, m, checks, named) {
   return m.arguments.map((a, i) => {
     const where = { iface, member: m.name, index: i };
-    const expr = named(a) ?? `arguments[${i}]`;
+    const expr = named(a) ?? (a.variadic ? `restOf(arguments, ${i})` : `arguments[${i}]`);
     if (a.variadic) return `${expr}.map((x) => ${conversion(a.idlType, 'x', where, checks, a.extAttrs)})`;
     if (a.optional) {
       if (dictionaries.has(a.idlType.idlType) || a.default?.type === 'dictionary') return conversion(a.idlType, expr, where, checks, a.extAttrs);
@@ -621,8 +685,9 @@ function overloadedOperation(iface, group, checks, selfCheck) {
   const cases = [];
   for (let n = 0; n <= most; n++) {
     const takers = group.filter((m) => least(m) <= n && n <= m.arguments.length);
-    if (takers.length > 1) throw new Error(`${iface}.${name}: overloads told apart by their arguments' types are not generated yet`);
-    if (takers.length) cases.push([n, takers[0]]);
+    if (takers.length > 2) throw new Error(`${iface}.${name}: more than two overloads of one count are not generated yet`);
+    if (takers.length === 2) cases.push([n, distinguished(iface, name, takers)]);
+    else if (takers.length) cases.push([n, takers[0]]);
   }
   const shortest = group.reduce((a, b) => (least(b) < least(a) ? b : a));
   const required = least(shortest);
@@ -632,10 +697,17 @@ function overloadedOperation(iface, group, checks, selfCheck) {
   if (required) lines.push(`required(arguments, ${required}, '${name}', '${iface}');`);
   lines.push(`switch (Math.min(arguments.length, ${most})) {`);
   // (…the counts one overload takes falling through to its one call)
+  const call = (m) => `return impl.${implName(m)}(${['self', ...convertArguments(iface, m, checks, () => null)].join(', ')});`;
   cases.forEach(([n, m], i) => {
     if (i + 1 < cases.length && cases[i + 1][1] === m) { lines.push(`  case ${n}:`); return; }
-    const converted = convertArguments(iface, m, checks, () => null);
-    lines.push(`  case ${n}: return impl.${implName(m)}(${['self', ...converted].join(', ')});`);
+    if (m.dictionary) {
+      // (…two of the count told apart by the distinguishing argument: undefined, null or an object the dictionary's)
+      const v = `arguments[${m.index}]`;
+      lines.push(`  case ${n}: if (${v} == null || typeof ${v} === 'object' || typeof ${v} === 'function') ${call(m.dictionary)}`);
+      lines.push(`    ${call(m.other)}`);
+      return;
+    }
+    lines.push(`  case ${n}: ${call(m)}`);
   });
   // (…a count of arguments no overload takes: Chrome's message)
   if (cases.length < most - required + 1) {
@@ -645,6 +717,19 @@ function overloadedOperation(iface, group, checks, selfCheck) {
   lines.push(`}`);
   const body = promise ? ['try {', ...lines.map((l) => `  ${l}`), '} catch (e) {', '  return rejectedPromise(e);', '}'] : lines;
   return [`${name}(${params}) {`, ...body.map((l) => `      ${l}`), `    }`].join('\n');
+}
+
+// Web IDL's overload resolution (§3.6.3) for two overloads taking the same count, where it is generated: the first
+// argument whose types differ — a dictionary's in one, a string's in the other — tells them apart.
+const STRING_TYPES = new Set(['DOMString', 'USVString', 'ByteString']);
+function distinguished(iface, name, [a, b]) {
+  const index = a.arguments.findIndex((arg, i) => !b.arguments[i] || arg.idlType.idlType !== b.arguments[i].idlType.idlType);
+  const typeOf = (m) => m.arguments[index] && m.arguments[index].idlType;
+  const isDictionary = (t) => t && !t.union && dictionaries.has(t.idlType);
+  const isString = (t) => t && !t.union && STRING_TYPES.has(t.idlType);
+  if (isDictionary(typeOf(a)) && isString(typeOf(b))) return { index, dictionary: a, other: b };
+  if (isDictionary(typeOf(b)) && isString(typeOf(a))) return { index, dictionary: b, other: a };
+  throw new Error(`${iface}.${name}: overloads told apart by other than a dictionary and a string are not generated yet`);
 }
 
 function defaultValue(d, where) {
@@ -713,7 +798,16 @@ const htmlParents = [...definitions.values()]
   .filter((d) => d.type === 'interface' && /^HTML\w*Element$/.test(d.name) && d.inheritance)
   .map((d) => [d.name, d.inheritance])
   .sort(([a], [b]) => (a < b ? -1 : 1));
-const parentTable = `// The interface each HTML element interface inherits.
+// …and the event handlers of WindowEventHandlers (its own and its partials' — but those of specs the Window omits):
+// what `<body>` / `<frameset>` reflect to their Window (events.js).
+const windowOptions = INTERFACES.find(([, n]) => n === 'Window')[2];
+const windowHandlers = [mixins.get('WindowEventHandlers'), ...(additions.get('WindowEventHandlers') || [])
+  .filter((a) => !Object.hasOwn(windowOptions.omit, a.partial)).map((a) => a.def)]
+  .flatMap((d) => d.members).filter((m) => m.type === 'attribute' && EVENT_HANDLER_TYPES.has(m.idlType.idlType)).map((m) => m.name);
+const parentTable = `// WindowEventHandlers' event handler attributes.
+export const WINDOW_EVENT_HANDLERS = ${JSON.stringify(windowHandlers)};
+
+// The interface each HTML element interface inherits.
 export const HTML_INTERFACE_PARENTS = {
 ${htmlParents.map(([n, p]) => `  ${n}: '${p}'`).join(',\n')}
 };`;

@@ -17913,10 +17913,6 @@ WebCryptoAPI/idlharness.tentative.https.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: 'Window interface: attribute crypto'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 WebCryptoAPI/import_export/AES-OCB_importKey.tentative.https.any.js:
 - name: 'Empty Usages: 128 bits (jwk, {alg: A128OCB, k: AQIDBAUGBwgJCgsMDQ4PEA, kty:
     oct}, {name: AES-OCB}, false, [])'

@@ -766,6 +766,37 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  it "installs Window's members on the global as its IDL says" do
+    got = outcome(<<~JS)
+      (() => {
+        const t = (f) => { try { return JSON.stringify(f()) ?? 'undefined'; } catch (e) { return e.name + ': ' + e.message; } };
+        const shape = (k) => { const d = Object.getOwnPropertyDescriptor(window, k); return d ? ('value' in d ? 'data' : 'accessor') + (d.enumerable ? '+e' : '') + (d.configurable ? '+c' : '') : 'none'; };
+        return [
+          ['document', 'window', 'location', 'top', 'self', 'innerWidth', 'onclick', 'onpopstate', 'setTimeout', 'crossOriginIsolated'].map(shape),
+          t(() => { const r = []; window.onzz = null; window.onclick = () => r.push('handler'); addEventListener('click', () => r.push('listener')); dispatchEvent(new Event('click')); window.onclick = null; return r; }),
+          t(() => { innerWidth = 5; const v = innerWidth; delete window.innerWidth; return v; }),
+          t(() => { document.body.setAttribute('onpopstate', 'return 1'); const r = typeof window.onpopstate; document.body.removeAttribute('onpopstate'); return [r, window.onpopstate]; }),
+          t(() => { let a; window.onerror = (m, s, l) => { a = [m, l]; return true; }; const ok = dispatchEvent(new ErrorEvent('error', { message: 'm', lineno: 3, cancelable: true })); window.onerror = null; return [a, ok]; }),
+          t(() => { let e; addEventListener('zz', (ev) => { e = window.event === ev; }, { once: true }); dispatchEvent(new Event('zz')); return [e, window.event === undefined]; }),
+          t(() => getComputedStyle(5)),
+          t(() => Object.getOwnPropertyDescriptor(window, 'scrollY').get.call({})),
+          t(() => [locationbar.visible, typeof external.AddSearchProvider, status, name, length, screenX, originAgentCluster])
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      ['accessor+e', 'accessor+e', 'accessor+e', 'accessor+e', 'accessor+e+c', 'accessor+e+c', 'accessor+e+c', 'accessor+e+c', 'data+e+c', 'accessor+e+c'],
+      '["handler","listener"]',
+      '5',
+      '["function",null]',
+      '[["m",3],false]',
+      '[true,true]',
+      "TypeError: Failed to execute 'getComputedStyle' on 'Window': parameter 1 is not of type 'Element'.",
+      'TypeError: Illegal invocation',
+      '[true,"function","","",0,0,false]'
+    ])
+  end
+
   # (…the document element among them, and a name compared as it is, not as a selector)
   it "finds a document's elements by name, its root too" do
     got = outcome(<<~JS)
