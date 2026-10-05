@@ -31,7 +31,9 @@ const INTERFACES = [
   ['dom', 'TreeWalker'],
   ['dom', 'CharacterData', { install: true }],
   ['dom', 'Text', { install: true, omit: { GeometryUtils: 'getBoxQuads / convert*FromNode (cssom-view) are not implemented' } }],
-  ['dom', 'Comment', { install: true }]
+  ['dom', 'Comment', { install: true }],
+  ['dom', 'ProcessingInstruction', { install: true }],
+  ['dom', 'DocumentType', { install: true }]
 ];
 
 // What the generated code imports from the runtime (webidl.js).

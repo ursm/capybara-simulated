@@ -96,6 +96,21 @@ RSpec.describe 'IDL bindings' do
     expect(got).to eq([true, true, 'Illegal invocation', 'Illegal invocation', [0, 0, 0, 2, 0], %w[after before remove replaceWith], nil])
   end
 
+  # (…and only an interface that includes a mixin has its members: a Document is no ChildNode)
+  it "puts a mixin's members on the interfaces that include it alone" do
+    got = outcome(<<~JS)
+      (() => {
+        const dt = document.implementation.createDocumentType('html', 'p', 's');
+        return [
+          'before' in document, 'previousElementSibling' in document, 'remove' in document.createDocumentFragment(),
+          'remove' in dt, 'before' in document.body, ['name', 'publicId', 'systemId'].some((k) => Object.hasOwn(dt, k)),
+          [dt.name, dt.publicId, dt.systemId]
+        ];
+      })()
+    JS
+    expect(got).to eq([false, false, false, true, true, false, %w[html p s]])
+  end
+
   it "converts an installed member's arguments as IDL says" do
     got = outcome(<<~JS)
       (() => {
