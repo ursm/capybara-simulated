@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use v8::cppgc::{GarbageCollected, Visitor, WeakPersistent};
 
-use crate::dom::{nid_arg, realm_id, NodeId, RealmArena};
+use crate::dom::{nid_arg, realm_id, NodeId, NodeKind, RealmArena};
 
 // The wrapper tag `Object::wrap` / `unwrap` file the handle under (a node's is 1).
 const TAG: u16 = 2;
@@ -507,6 +507,9 @@ struct Contents {
     contained: std::ops::Range<usize>,
     // Whether a contained child is a doctype — which cloning and extracting refuse.
     doctype: bool,
+    // Whether a node partially contained — an inclusive ancestor of one boundary node but not the other — is no Text
+    // node, which surrounding refuses.
+    partial_non_text: bool,
 }
 
 fn contents(arena: &RealmArena, s: Boundary, e: Boundary) -> Contents {
@@ -522,13 +525,14 @@ fn contents(arena: &RealmArena, s: Boundary, e: Boundary) -> Contents {
     let kids = arena.get(common).map_or(&[][..], |n| &n.children[..]);
     let contained = from.min(kids.len())..to.min(kids.len()).max(from.min(kids.len()));
     let doctype = kids[contained.clone()].iter().any(|&c| arena.get(c).is_some_and(|n| n.node_type() == 10));
-    Contents { common_up: cs.len() - shared, first_partial, last_partial, contained, doctype }
+    let partial_non_text = cs[shared..].iter().chain(&ce[shared..]).any(|&n| arena.get(n).is_some_and(|n| n.kind != NodeKind::Text));
+    Contents { common_up: cs.len() - shared, first_partial, last_partial, contained, doctype, partial_non_text }
 }
 
 // __dom.rangeContents(startNid, startOffset, endNid, endOffset) -> the contents of the range between those points, for
 // its cloning, extracting or deleting: [steps up from the start node to the common ancestor, the first and the last
-// partially contained child's index (-1 for none), the run of contained children (from, to), and whether a doctype is
-// among them].
+// partially contained child's index (-1 for none), the run of contained children (from, to), whether a doctype is
+// among them, and whether a partially contained node is no Text node].
 fn range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(s), Some(e)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2)) else { return };
     let offset = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).uint32_value(scope).unwrap_or(0);
@@ -543,6 +547,7 @@ fn range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         c.contained.start as f64,
         c.contained.end as f64,
         c.doctype as u8 as f64,
+        c.partial_non_text as u8 as f64,
     ];
     rv.set(crate::dom::f64_array(scope, &plan).into());
 }

@@ -25,6 +25,23 @@ RSpec.describe 'range contents' do
     expect(got).to eq(['<p id="a"><b>ef</b>ghi</p><p id="c">jkl<i>mn</i></p>', '<p id="a">abc<b>d</b></p><p id="c"><i>o</i></p>pqr', 1])
   end
 
+  it 'surrounds only what no element is partially contained in' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a'), g = document.createRange();
+        const attempt = (f) => { try { f(); return 'ok'; } catch (e) { return e.name; } };
+        g.setStart(a.querySelector('b').firstChild, 1);
+        g.setEnd(a.lastChild, 2);
+        const across = attempt(() => g.surroundContents(document.createElement('u')));
+        g.setStart(a.firstChild, 1);
+        g.setEnd(a.lastChild, 2);
+        const within = attempt(() => g.surroundContents(document.createElement('u')));
+        return [across, within, a.innerHTML, attempt(() => g.surroundContents({}))];
+      })()
+    JS
+    expect(got).to eq(['InvalidStateError', 'ok', 'a<u>bc<b>def</b>gh</u>i', 'TypeError'])
+  end
+
   # (…the check comes before any change: the comment the range starts in is left whole)
   it 'refuses a doctype before it changes anything' do
     got = session.evaluate_script(<<~JS)
