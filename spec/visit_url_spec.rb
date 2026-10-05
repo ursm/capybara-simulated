@@ -26,6 +26,23 @@ RSpec.describe 'visit' do
     expect(seen.last).to eq('/x?include=(Document|Window)')
   end
 
+  # (…and what the URL Standard keeps, Ruby's URI refuses: the request is built from a URI-legal copy, and the app
+  # handed the target as the URL has it — a `visit` of these had raised URI::InvalidURIError)
+  it "requests a URL Ruby's URI would refuse, and the app sees its target as it is" do
+    session.visit '/x.html#a^b{c}|d'
+    session.visit '/dom/a|b?q={1}`'
+    expect(seen).to eq(['/x.html?', '/dom/a|b?q={1}`'])
+    expect([session.current_url, session.current_path]).to eq(['http://www.example.com/dom/a|b?q={1}`', '/dom/a|b'])
+  end
+
+  it "resolves a page's navigation the same way" do
+    session.visit '/start'
+    session.execute_script("location.href = '/dom/c|d.html'")
+    session.execute_script("location.href = 'rel x.html'")
+    expect(seen.last(2)).to eq(['/dom/c|d.html?', '/dom/rel%20x.html?'])
+    expect(session.current_url).to eq('http://www.example.com/dom/rel%20x.html')
+  end
+
   it 'encodes what is not ASCII as UTF-8, and resolves dot segments' do
     session.visit '/x/../ü?é'
     expect(session.evaluate_script('location.pathname + location.search')).to eq('/%C3%BC?%C3%A9')

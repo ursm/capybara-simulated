@@ -671,19 +671,8 @@ module Capybara
           # root. An opaque or host-less current URL (e.g. `about:blank` in a
           # freshly-opened window) can't yield an origin — fall back to the
           # default host so a subsequent relative `visit` still resolves.
-          host_root =
-            begin
-              u = URI.parse(@current_url.to_s)
-              if u.opaque || u.host.nil?
-                @default_host
-              else
-                u.path = ''; u.query = nil; u.fragment = nil
-                u.to_s
-              end
-            rescue URI::InvalidURIError
-              @default_host
-            end
-          host_root = host_root.sub(/\/+$/, '')
+          current   = parse_url(@current_url.to_s)
+          host_root = current && !current[:host].empty? ? url_root(current) : @default_host.sub(/\/+$/, '')
           s = "/#{s}" unless s.start_with?('/')
           s = "#{host_root}#{s}"
         end
@@ -691,7 +680,20 @@ module Capybara
         # URL's position takes — a space in a path, not a `|` in a query, which an RFC 3986 escape had encoded
         # (`?include=(Document|Window)` reached the page as `(Document%7CWindow)`). A URL it does not parse is left
         # as written, for the navigation to fail on.
-        Native.url_href(s, nil) || s
+        parse_url(s)&.fetch(:href) || s
+      end
+
+      URL_PARTS = %i[href protocol username password host hostname port pathname search hash origin].freeze
+      # The parts of the URL `input` parses to, by the page's parser (url_ops.rs) — or nil where it does not parse.
+      def parse_url(input, base = nil)
+        parts = Native.url_parts(input, base)
+        parts && URL_PARTS.zip(parts).to_h
+      end
+
+      # A URL's scheme, credentials and host — what a path is resolved under.
+      def url_root(url)
+        credentials = url[:username].empty? ? '' : "#{url[:username]}#{":#{url[:password]}" unless url[:password].empty?}@"
+        "#{url[:protocol]}//#{credentials}#{url[:host]}"
       end
 
       # Queued URLs older than this (real wall clock) are treated as
@@ -1332,7 +1334,7 @@ module Capybara
       end
 
       def download_link(url, filename_hint = '')
-        env = Rack::MockRequest.env_for(url, method: 'GET')
+        env = rack_env_for(url, method: 'GET')
         env['HTTP_USER_AGENT'] = @default_user_agent || USER_AGENT
         env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
         ck = cookie_header_for(env_cookie_host(env), secure: %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}"))
@@ -2512,9 +2514,7 @@ module Capybara
       def current_path
         tick_real_time
         return '' if @current_url.nil? || @current_url.empty?
-        URI.parse(@current_url).path
-      rescue URI::InvalidURIError
-        ''
+        parse_url(@current_url)&.fetch(:pathname) || ''
       end
 
       # Capybara polls find / has_? via `synchronize` while
@@ -3228,7 +3228,7 @@ module Capybara
           boot_response_into_ctx(Base64.decode64(sw['body_b64'].to_s))
           return
         end
-        env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
+        env = rack_env_for(url, method: 'POST', input: body)
         # Top-level form-submission Fetch metadata — same model as `navigate` (the
         # SameSite gate reads it; a POST never qualifies for the Lax exception;
         # `nav_site` precomputed above).
@@ -3918,7 +3918,7 @@ module Capybara
         target   = resolve_against_current(http_url)
         key      = SecureRandom.base64(16)
         csim_io, app_io = Socket.pair(:UNIX, :STREAM, 0)
-        env = Rack::MockRequest.env_for(target, method: 'GET')
+        env = rack_env_for(target, method: 'GET')
         apply_default_request_env(env, referer: @current_url)
         env['HTTP_UPGRADE']               = 'websocket'
         env['HTTP_CONNECTION']            = 'Upgrade'
@@ -8802,7 +8802,7 @@ module Capybara
         # Fall through for a base that is not a real URL or is one of those `inline:` pseudo-names.
         base = nil unless base.is_a?(String) && base =~ %r{\A[a-z]+://}i && !base.start_with?('inline:')
         eff = base || @current_url || @default_host
-        # Memo of `URI.join(eff, url)` — a pure function of (effective base, url).
+        # Memo of `url` parsed against `eff` — a pure function of (effective base, url).
         # A heavy ESM app re-resolves the same ~80 module specifiers against the
         # same base on every visit (a fresh VM re-instantiates the whole module
         # graph); Ruby's URI parser was a measured ~11% of per-visit wall. The
@@ -8810,11 +8810,7 @@ module Capybara
         # (same scope/threading assumptions as @importmap / @current_url) turns
         # all but the first visit's resolves into hash hits.
         cache = (@resolve_against_cache ||= {})
-        cache[[eff, url]] ||= begin
-          URI.join(eff, url).to_s
-        rescue URI::InvalidURIError, URI::BadURIError
-          url
-        end
+        cache[[eff, url]] ||= parse_url(url.to_s, eff)&.fetch(:href) || url
       end
 
       # Fetch caps a request at 20 redirects: the 21st is a network error (redirect-count).
@@ -9063,7 +9059,7 @@ module Capybara
           # only-if-cached forbids the network: no usable stored response → a network error.
           return nil if cache_mode == 'only-if-cached'
 
-          env = Rack::MockRequest.env_for(target, method: method, input: body || '')
+          env = rack_env_for(target, method: method, input: body || '')
           env['REQUEST_METHOD'] = method   # env_for upcases the method; restore the exact case (open-method-case-sensitive)
           # env_for always sets Content-Length to the input bytesize (0 for an empty body).
           # Fetch adds Content-Length: 0 for a bodyless request ONLY when the method is
@@ -9963,7 +9959,7 @@ module Capybara
                                    response_content_type(sw['headers'] || {}), restore_state: restore, client_id: rid)
           return
         end
-        env = Rack::MockRequest.env_for(url, method: is_post ? 'POST' : 'GET', input: is_post ? body : '')
+        env = rack_env_for(url, method: is_post ? 'POST' : 'GET', input: is_post ? body : '')
         if is_post
           env['CONTENT_TYPE']   = entry[:content_type].to_s.empty? ? 'application/x-www-form-urlencoded' : entry[:content_type]
           env['CONTENT_LENGTH'] = body.bytesize.to_s
@@ -10637,7 +10633,7 @@ module Capybara
           reload_current_frame_realm('about:blank', '', 'text/html', entry: entry)
           return
         end
-        env = Rack::MockRequest.env_for(url, method: 'GET')
+        env = rack_env_for(url, method: 'GET')
         apply_default_request_env(env, referer: current_browsing_context_url)
         status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
         merge_set_cookie(headers, url)
@@ -10656,7 +10652,7 @@ module Capybara
       def navigate_frame_post(url, body, content_type, depth: 0, entry: @frame_stack.last)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
-        env = Rack::MockRequest.env_for(url, method: 'POST', input: body)
+        env = rack_env_for(url, method: 'POST', input: body)
         env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
         apply_default_request_env(env, referer: current_browsing_context_url)
@@ -10816,7 +10812,7 @@ module Capybara
             boot_response_into_ctx(Base64.decode64(sw['body_b64'].to_s))
             return
           end
-          env = Rack::MockRequest.env_for(url, method: 'GET')
+          env = rack_env_for(url, method: 'GET')
           # Top-level navigation Fetch metadata: Sec-Fetch-Site is the initiator↔target
           # relationship, widened across the redirect chain (site_seed, precomputed as
           # `nav_site` above) exactly like the frame-navigation model — the SameSite
@@ -11185,6 +11181,21 @@ module Capybara
       # `fetch(..., {headers: ...})` overrides win.
       DEFAULT_HTTP_ACCEPT = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'.freeze
 
+      # A Rack env for a request to `url`, a URL the URL Standard parsed. Its request target is what a server reads off
+      # the request line — the path and query as the URL has them, no fragment. Rack's builder parses the URL again with
+      # Ruby's URI, which refuses some of what the URL Standard keeps (`|` in a path, `{` in a fragment, a backtick in a
+      # query), so it is handed a URI-legal copy, and the env then takes the target as it is.
+      RACK_URI_ILLEGAL = %r{[^!*'();:@&=+$,/?\[\]A-Za-z0-9\-._~%]}n
+      def rack_env_for(url, **opts)
+        target = url.to_s.sub(/#.*/m, '')
+        env    = Rack::MockRequest.env_for(target.b.gsub(RACK_URI_ILLEGAL) {|c| format('%%%02X', c.ord) }, **opts)
+        if (m = target.match(%r{\A[^:/?#]+://[^/?#]*([^?#]*)(?:\?(.*))?\z}m))
+          env['PATH_INFO']    = m[1].empty? ? '/' : m[1]
+          env['QUERY_STRING'] = m[2].to_s
+        end
+        env
+      end
+
       def apply_default_request_env(env, referer:, force: true)
         # `Rack::MockRequest.env_for` populates `SERVER_NAME` /
         # `SERVER_PORT` from the URL but leaves `HTTP_HOST` nil. Read
@@ -11290,7 +11301,7 @@ module Capybara
       end
 
       def dispatch_navigation_request(url, method:, initiator:, referrer_policy:, site:, origin_null:, body: nil, content_type: nil, extra_headers: nil, dest: 'iframe', cookie_cross_site: false)
-        env = Rack::MockRequest.env_for(url, method: method, input: body || '')
+        env = rack_env_for(url, method: method, input: body || '')
         env['csim.cookie_cross_site'] = true if cookie_cross_site
         if content_type
           env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
@@ -11596,8 +11607,9 @@ module Capybara
         loc unless loc.to_s.empty?
       end
 
+      # …parsed as the page parses a URL (url_ops.rs): Ruby's URI refused what the URL Standard keeps, and the URL came
+      # back unresolved (`location.href = '/a|b'` left `current_url` the bare path).
       def resolve_against_current(url, use_base: false)
-        return url if url =~ %r{\A[a-z]+://}i
         # Inside a `within_frame` block the "current document" is the frame's,
         # so links / form actions resolve against the frame's URL + <base href>.
         doc_url = current_browsing_context_url || @default_host
@@ -11608,13 +11620,11 @@ module Capybara
             # being resolved — HTML's base-tag semantics. `visit` skips
             # this branch so an address-bar navigation reaches the URL
             # the test typed.
-            URI.join(doc_url, bh).to_s
+            parse_url(bh, doc_url)&.fetch(:href) || doc_url
           else
             doc_url
           end
-        URI.join(base, url.to_s).to_s
-      rescue URI::InvalidURIError, URI::BadURIError
-        url
+        parse_url(url.to_s, base)&.fetch(:href) || url
       end
 
       # The active document's `<base href>` — routed to the current frame realm
@@ -11777,7 +11787,7 @@ module Capybara
       # allow credentials (ACAC:true) and forbids `*` in the origin/method/header grants.
       def cors_run_preflight(target, method, headers, req_origin, credentialed, referer)
         unsafe = cors_unsafe_headers(headers)
-        env    = Rack::MockRequest.env_for(target, method: 'OPTIONS')
+        env    = rack_env_for(target, method: 'OPTIONS')
         env['REQUEST_METHOD'] = 'OPTIONS'
         # The preflight's Referer is the request's referrer under its referrer policy —
         # the SAME value the actual request sends (computed by the caller), not the raw

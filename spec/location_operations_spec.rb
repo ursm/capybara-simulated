@@ -33,6 +33,23 @@ RSpec.describe 'Location operations' do
     expect(session.evaluate_script('location.pathname')).to eq('/start')
   end
 
+  # (…another realm's Location navigates its own browsing context, whoever's operation is called on it)
+  it "navigates the browsing context of the Location it is called on" do
+    session.execute_script(<<~JS)
+      const f = document.body.appendChild(document.createElement('iframe'));
+      f.src = '/frame';
+    JS
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const frame = document.querySelector('iframe').contentWindow;
+        location.assign.call(frame.location, '#in-frame');
+        frame.location.assign.call(location, '#in-page');
+        return [location.hash, frame.location.hash];
+      })()
+    JS
+    expect(got).to eq(['#in-page', '#in-frame'])
+  end
+
   it 'gives each operation the length of its required arguments, and still navigates' do
     expect(session.evaluate_script('[location.assign.length, location.replace.length, location.reload.length]')).to eq([1, 1, 0])
     session.execute_script("location.assign('#zz')")

@@ -46,7 +46,8 @@ module WptRunner
   # made: one whose include is missing (an absolute `<script src>` not vendored: the helper undefined, the inline
   # script throwing) completed with none, measuring nothing — every idlharness file did — and one that threw past its
   # subtests (an uncaught HierarchyRequestError) gated green on the ones before the throw. Per variant: each one's
-  # status counts.
+  # status counts. The pseudo-subtest names the status, not its message (which carries a stack, and would churn): a
+  # file whose harness errors for a NEW reason, while it errored before, stays as listed.
   HARNESS_STATUSES = {1 => 'ERROR', 2 => 'TIMEOUT', 3 => 'PRECONDITION_FAILED'}.freeze
   NO_SUBTESTS = '[harness] no subtests'
 

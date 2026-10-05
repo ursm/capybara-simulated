@@ -14,15 +14,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "urlSet", url_set, context_id);
 }
 
-// The href of the URL `input` parses to (against `base`, given one) — or nil where it does not parse: for the host,
-// which resolves the URL a `visit` names as the page would (`|` kept in a query, a space in a path `%20`, …).
-pub(crate) fn href_for_ruby(input: String, base: Option<String>) -> Option<String> {
-    Url::parse(input.as_str(), base.as_deref()).ok().map(|url| url.href().to_owned())
-}
-
-fn parts<'s>(scope: &mut v8::PinScope<'s, '_>, url: &Url) -> v8::Local<'s, v8::Array> {
-    let origin = url.origin();
-    let texts = [
+// A URL's parts, in `parts`' order.
+fn texts(url: &Url) -> [String; 11] {
+    [
         url.href(),
         url.protocol(),
         url.username(),
@@ -33,10 +27,23 @@ fn parts<'s>(scope: &mut v8::PinScope<'s, '_>, url: &Url) -> v8::Local<'s, v8::A
         url.pathname(),
         url.search(),
         url.hash(),
-        &origin,
-    ];
-    let items: Vec<v8::Local<v8::Value>> =
-        texts.into_iter().map(|t| v8::String::new(scope, t).map_or_else(|| v8::undefined(scope).into(), Into::into)).collect();
+        &url.origin(),
+    ]
+    .map(str::to_owned)
+}
+
+// The parts of the URL `input` parses to (against `base`, given one) — or nil where it does not parse: for the host,
+// which resolves the URL a `visit` names, and reads the current one, as the page would (`|` kept in a query, a space in
+// a path `%20`, …).
+pub(crate) fn parts_for_ruby(input: String, base: Option<String>) -> Option<Vec<String>> {
+    Url::parse(input.as_str(), base.as_deref()).ok().map(|url| texts(&url).into())
+}
+
+fn parts<'s>(scope: &mut v8::PinScope<'s, '_>, url: &Url) -> v8::Local<'s, v8::Array> {
+    let items: Vec<v8::Local<v8::Value>> = texts(url)
+        .iter()
+        .map(|t| v8::String::new(scope, t).map_or_else(|| v8::undefined(scope).into(), Into::into))
+        .collect();
     v8::Array::new_with_elements(scope, &items)
 }
 
