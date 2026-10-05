@@ -150,7 +150,7 @@ fn image_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let viewport = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0) as f32);
     let d = crate::dom::dom(scope);
     let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
-    let Some(arena) = d.realms.get(&cid) else { return };
+    let Some(arena) = d.arena.enter_known(cid) else { return };
     let engine = d.styles.get(&cid);
     let url = select(arena, id, &|media| crate::style::media_matches(engine, arena, screen, media));
     if let Some(s) = url.and_then(|u| v8::String::new(scope, &u)) {

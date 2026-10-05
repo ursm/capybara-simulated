@@ -32,10 +32,8 @@ const TAG: u16 = 1;
 static BRAND: u8 = 0;
 
 pub(crate) struct NodeHandle {
-    // The arena slot the node holds — which realm, which slot — or none yet; and the queue of the isolate whose arena
-    // that is. A node registered afresh (another realm's tree, an arena reset) holds its new slot; the one it left was
-    // freed then.
-    realm: Cell<i32>,
+    // The arena slot the node holds, or none yet; and the queue of the isolate whose arena that is. A node registered
+    // afresh (another realm's tree, an arena reset) holds its new slot; the one it left was freed then.
     nid: Cell<Option<NodeId>>,
     reclaim: RefCell<Weak<Reclaim>>,
     parent: Edge,
@@ -62,7 +60,7 @@ impl Drop for NodeHandle {
     fn drop(&mut self) {
         // (…an isolate already disposed has no arena to free into: its queue is gone, and so is the push)
         if let (Some(nid), Some(queue)) = (self.nid.get(), self.reclaim.get_mut().upgrade()) {
-            queue.slots.lock().unwrap_or_else(|e| e.into_inner()).push((self.realm.get(), nid));
+            queue.slots.lock().unwrap_or_else(|e| e.into_inner()).push(nid);
             queue.pending.store(true, Ordering::Release);
         }
     }
@@ -151,32 +149,30 @@ pub(crate) fn owned_by(root: &Link, owner: Option<&Link>) {
     }
 }
 // What a node's handle says of the tree, for verify mode: its parent's, first child's, next sibling's and owned tree's
-// slots, each with its realm (a slot is a realm's); and the realm of the node's own.
-pub(crate) fn edges(link: &Link) -> Option<([Option<(i32, NodeId)>; 4], i32)> {
+// slots.
+pub(crate) fn edges(link: &Link) -> Option<[Option<NodeId>; 4]> {
     let h = link.handle()?;
-    let slot = |e: &Edge| e.get().and_then(|t| Some((t.realm.get(), t.nid.get()?)));
-    Some(([slot(&h.parent), slot(&h.first), slot(&h.next), slot(&h.owned)], h.realm.get()))
+    let slot = |e: &Edge| e.get().and_then(|t| t.nid.get());
+    Some([slot(&h.parent), slot(&h.first), slot(&h.next), slot(&h.owned)])
 }
 
-// An isolate's slots of collected nodes, waiting to be freed: (realm, slot). Owned by its `Dom`, which the handles only
+// An isolate's slots of collected nodes, waiting to be freed. Owned by its `Dom`, which the handles only
 // point at weakly.
 #[derive(Default)]
 pub(crate) struct Reclaim {
     pending: AtomicBool,
-    slots: Mutex<Vec<(i32, NodeId)>>,
+    slots: Mutex<Vec<NodeId>>,
 }
 
-// Free the queued slots in their realms' arenas (a slot a reset already recycled is declined by its generation, a dropped
-// realm's by its absence). One atomic load when there are none.
+// Free the queued slots (one a reset already recycled is declined by its generation). One atomic load when there are
+// none.
 pub(crate) fn reclaim(dom: &mut crate::dom::Dom) {
     if !dom.reclaim.pending.swap(false, Ordering::Acquire) {
         return;
     }
     let slots = std::mem::take(&mut *dom.reclaim.slots.lock().unwrap_or_else(|e| e.into_inner()));
-    for (realm, nid) in slots {
-        if let Some(arena) = dom.realms.get_mut(&realm) {
-            arena.free_node(nid);
-        }
+    for nid in slots {
+        dom.arena.free_node(nid);
     }
 }
 
@@ -190,7 +186,6 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
     let handle = NodeHandle {
-        realm: Cell::new(0),
         nid: Cell::new(None),
         reclaim: RefCell::new(Weak::new()),
         parent: Edge::new(),
@@ -224,18 +219,17 @@ fn handle_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) 
     unsafe { v8::Object::unwrap::<TAG, NodeHandle>(scope, obj) }
 }
 
-// Bind the node `value` is the object of to slot `nid` of realm `realm` — a no-op for an object that is no node's (one
+// Bind the node `value` is the object of to slot `nid` — a no-op for an object that is no node's (one
 // made before `__dom` existed, the snapshot's bootstrap).
-pub(crate) fn bind(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>, realm: i32, nid: NodeId) {
+pub(crate) fn bind(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>, nid: NodeId) {
     let Some(ptr) = handle_of(scope, value) else { return };
     // SAFETY: the handle lives while its object does, which the caller holds.
     let h = unsafe { ptr.as_ref() };
     let queue = Arc::downgrade(&crate::dom::dom(scope).reclaim);
-    h.realm.set(realm);
     h.nid.set(Some(nid));
     *h.reclaim.borrow_mut() = queue;
     // …and the slot holds the handle (weakly), its edges in the tree written as the slot's are
-    crate::dom::realm(scope, realm).set_link(nid, Link(Some(WeakPersistent::new(&ptr))));
+    crate::dom::dom(scope).arena.set_link(nid, Link(Some(WeakPersistent::new(&ptr))));
 }
 
 // `__dom.NodeBase` for a realm: the constructor of the isolate's template, made once per isolate — none on an isolate

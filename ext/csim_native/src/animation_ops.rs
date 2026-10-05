@@ -52,7 +52,7 @@ fn with_engine(
     let cid = realm_id(scope, args);
     style_op(scope, cid, |scope| {
         let d = dom(scope);
-        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
         let (engine, arena): (*mut StyleEngine, *const RealmArena) = (engine, arena);
         // SAFETY: the engine and the arena live in the realm's `Dom` for the length of the op, which touches nothing
         // else there.

@@ -432,7 +432,7 @@ fn input_sanitize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let ty = args.get(1).to_rust_string_lossy(scope);
     let value = crate::dom::utf16_arg(scope, args.get(2));
     let d = crate::dom::dom(scope);
-    let arena: &crate::dom::RealmArena = d.realms.entry(cid).or_default();
+    let arena: &crate::dom::RealmArena = d.arena.enter(cid);
     let engine = d.styles.get(&cid);
     let colour = |v: &str| {
         let Some(c) = crate::style::parse_color(engine, arena, trim_ascii_ws(v), "") else { return "#000000".to_string() };

@@ -29,7 +29,7 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     // …and whether to CHECK every measure put back against laying it out again (`CSIM_NL_REUSE_VERIFY`).
     let check = args.get(5).is_true();
     let d = dom(scope);
-    let Some(arena) = d.realms.get(&cid) else { return };
+    let Some(arena) = d.arena.enter_known(cid) else { return };
     // (…and its style engine, for a style the traversal leaves to whoever asks: a `::placeholder`'s)
     let engine = d.styles.get(&cid);
     // (…the edge of the initial containing block the root sits at: `walk::principal_starts_right`)
@@ -125,7 +125,7 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     };
     // (…and each box's `position`, which the walk read off the same style: the writer's own question of it, answered
     // by the style engine here — and the root and the viewport the geometry reads the boxes against)
-    if let Some(arena) = dom(scope).realms.get_mut(&cid) {
+    if let Some(arena) = dom(scope).arena.enter_known(cid) {
         for b in laid.boxes.iter_mut().filter(|b| b.nid >= 0.0) {
             b.position = NodeId::from_i64(b.nid as i64)
                 .and_then(|id| crate::geometry::box_style(arena, id))
@@ -171,7 +171,7 @@ fn faces_answer<'s>(scope: &mut v8::PinScope<'s, '_>, wanted: &[(String, &'stati
 fn style_faces(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let generation = (!args.get(0).is_undefined()).then(|| args.get(0).to_rust_string_lossy(scope));
-    let Some(arena) = dom(scope).realms.get(&cid) else { return };
+    let Some(arena) = dom(scope).arena.enter_known(cid) else { return };
     let wanted = arena.faces.with(|faces| {
         if let Some(generation) = &generation {
             faces.at_generation(generation);
@@ -207,7 +207,7 @@ fn walk_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let usable = face.handle >= 0;
     // (…a face the style engine computed a font metric without: its styles are computed again, `ex` and `ch` from it)
     let d = dom(scope);
-    let Some(arena) = d.realms.get(&cid) else { return };
+    let Some(arena) = d.arena.enter_known(cid) else { return };
     if arena.faces.with(|faces| faces.learn((family, bucket), usable.then_some(face))) {
         if let Some(engine) = d.styles.get_mut(&cid) {
             engine.restyle_everything();

@@ -377,7 +377,7 @@ fn resolved_value_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let mut answer = None;
     crate::dom::style_op(scope, cid, |scope| {
         let d = crate::dom::dom(scope);
-        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
         let out = resolved_value(engine, arena, id, pseudo.as_deref(), &name, laid_out, now);
         let failures = engine.take_verify_failures();
         if !crate::dom::threw_verify_failures(scope, failures) {

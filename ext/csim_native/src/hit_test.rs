@@ -549,7 +549,7 @@ fn painting<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgu
     let cid = crate::dom::realm_id(scope, args);
     let now = args.get(now_at).number_value(scope).filter(|n| n.is_finite());
     let d = crate::dom::dom(scope);
-    let arena = d.realms.get(&cid)?;
+    let arena = d.arena.enter_known(cid)?;
     let engine = d.styles.get_mut(&cid);
     let engine = engine.map(|engine| {
         if let Some(now) = now.filter(|&n| engine.web_animations.timeline_time != Some(n)) {

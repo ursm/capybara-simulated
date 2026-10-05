@@ -1,4 +1,4 @@
-// Native DOM: the per-realm node arena the native readers — selector matching, the style engine, the layout walk,
+// Native DOM: the isolate's node arena the native readers — selector matching, the style engine, the layout walk,
 // XPath — read.
 //
 // Lives in capybara-simulated's OWN native extension (not in rusty_racer, which stays a pure V8
@@ -6,9 +6,9 @@
 // which calls `install` in every realm. State lives in the isolate's own TypeId-keyed slot (`Dom`,
 // reached via `dom(scope)`), independent of rusty_racer's IsolateState.
 //
-// `Dom` holds ONE `RealmArena` per realm (keyed by rusty_racer's context_id; see `install` / `realm`),
-// so main and frame realms each match over their own tree. The JS side (native-query-shadow.js) builds
-// a realm's arena from its parsed document (importNode + syncChildren) and keeps it current at the DOM
+// `Dom` holds ONE `RealmArena` for every realm's nodes, with each realm's own state (keyed by rusty_racer's
+// context_id; see `install` / `realm`). The JS side (native-query-shadow.js) builds
+// the arena's copy of a document (importNode + syncChildren) and keeps it current at the DOM
 // mutation seams; the Servo `selectors` matcher (selector.rs), the style engine (style.rs) and the layout
 // walk (walk.rs) read a RealmArena directly. The store stays in JS; the arena is its READER copy.
 //
@@ -171,6 +171,8 @@ pub(crate) struct NodeData {
     pub(crate) manual_assigned: Vec<NodeId>,
     // The node's handle on the C++ heap (node_handle.rs), whose tree edges the slot's are written into.
     pub(crate) link: crate::node_handle::Link,
+    // The realm that made it — whose page load frees it (`RealmArena::reset`).
+    pub(crate) realm: i32,
     // A slot's assigned nodes, in tree order, and a slotted node's slot: the flat tree the style engine walks.
     pub(crate) assigned: Vec<NodeId>,
     pub(crate) assigned_slot: Option<NodeId>,
@@ -268,6 +270,7 @@ impl NodeData {
             doctype_ids: None,
             template_content: None,
             template_host: None,
+            realm: 0,
             is_value: None,
             value: None,
             natural_size: None,
@@ -443,49 +446,43 @@ struct Slot {
     data: Option<NodeData>,
 }
 
-// ONE realm's node arena. The selector matcher reads it through NodeRef, so a match resolves the
-// realm's arena ONCE and then does direct slot indexing (no per-node-access map lookup). Element-tree
-// navigation lives here: the arena is element-only, so children/siblings are already element nodes.
-// Every navigation and deref goes through `get` (gen-checked), so a stale edge self-elides.
+// The isolate's node arena: every realm's nodes, in one slot space, so a node keeps its id whichever realm's tree it is
+// in. The selector matcher reads it through NodeRef with direct slot indexing (no per-node-access map lookup).
+// Element-tree navigation lives here: every navigation and deref goes through `get` (gen-checked), so a stale edge
+// self-elides.
+//
+// What is a realm's own — its document's focus, sheets, layout, geometry — is its `RealmState`: the arena holds the one
+// of the realm an op works in (`enter`), which its fields are read through (`Deref`), and keeps the others aside.
 #[derive(Default)]
 pub(crate) struct RealmArena {
     slots: Vec<Slot>,
     // Indices whose slot is free, LIFO. `importNode` pops one before growing `slots`, so a page's
     // live-node high-water mark bounds `slots.len()` even as nodes churn.
     free: Vec<u32>,
-    // The realm document's focused and hovered element — the one carrying STATE_FOCUSED / STATE_HOVERED — from which
-    // `:focus-within` and `:hover` walk up.
-    pub(crate) focus: Option<NodeId>,
-    pub(crate) hover: Option<NodeId>,
-    // Whether the focus shows NO ring (not `:focus-visible`): only after a pointer focus of a non-text control.
-    pub(crate) focus_ring_hidden: bool,
-    // Whether any shadow root has a host here — `:focus` walks out of shadow trees only then.
+    // The realm whose state is `state`; the others' states; and the realms `dropRealm` freed, whose state an op a script
+    // of one still runs gets afresh and leaves behind (context ids are never reused, so each would stay an entry).
+    cur: i32,
+    state: RealmState,
+    parked: std::collections::HashMap<i32, RealmState>,
+    dropped: std::collections::HashSet<i32>,
+    // Whether any shadow root has a host — `:focus` walks out of shadow trees only then.
     pub(crate) has_shadow_hosts: bool,
     // The form the HTML parser's form element pointer gave a control it inserted (`<table><form>…<input>`: the form
     // is no ancestor of it), until a script moves it — the few controls whose form owner the tree can't tell.
     parser_form_owners: std::collections::HashMap<NodeId, NodeId>,
     // A custom element's custom states (`ElementInternals.states`, `:state()`), for the few elements that have any.
     custom_states: std::collections::HashMap<NodeId, Vec<String>>,
-    // The realm document and its target fragments (as it stands, then decoded), when it has any — what `:target`
-    // resolves (`is_target`).
-    pub(crate) target: Option<(NodeId, Vec<String>)>,
     // Moves with every write to the arena (a node made or freed, any `get_mut`): what a memo of it keys on.
     pub(crate) mutations: u64,
     // Moves with every write that can change an element's STATE (`:checked`, `:focus`, `:valid`, `:default`, …): a
     // state write, a value, a tree change (form owners, radio groups, fieldsets), an attribute a state reads.
     pub(crate) state_epoch: u64,
-    // The lock the style engine's rules and every element's parsed declarations are read under — ONE for the realm's
-    // life, as a block parsed under one lock can never be read under another.
+    // The lock the style engines' rules and every element's parsed declarations are read under — ONE for the isolate's
+    // life, as a block parsed under one lock can never be read under another, and an element keeps its `style` block
+    // into another realm's tree.
     pub(crate) style_lock: crate::style::StyleLock,
-    // The realm's style sheets, parsed under that lock (sheets.rs): what its engine cascades and CSSOM reads.
-    pub(crate) sheets: crate::sheets::SheetStore,
     // Per tree root, the facts element_state.rs asks of every control in turn, as of `mutations` (`form_facts`).
     pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
-    // The `marginwidth` / `marginheight` of the frame this realm's document sits in, which its body takes its margins
-    // from where it declares none (HTML §15.3.2) — pushed in by the parent realm (`setContainerMargins`).
-    pub(crate) container_margins: [Option<String>; 2],
-    // The faces its families resolve to, which its walks and its style engine's font metrics read (`SharedFaces`).
-    pub(crate) faces: crate::walk::SharedFaces,
     // Each element's resolved directionality asked so far, true for rtl, as of `mutations` (`is_rtl`)…
     pub(crate) directionality: std::cell::RefCell<(u64, std::collections::HashMap<NodeId, bool>)>,
     // …which nothing need be asked about until an element has ever been able to decide one of its own — a `dir`
@@ -493,8 +490,30 @@ pub(crate) struct RealmArena {
     // cost the state scan a walk per element (a 1500-row append, 626 → 1150 ms).
     pub(crate) direction_sources: bool,
     // The layout walks' clock: a walk moves it on as it begins, and a change is stamped with where it stands
-    // (`NodeData::stamp`), so a stamp past the epoch a walk began at is a change since that walk.
+    // (`NodeData::stamp`), so a stamp past the epoch a walk began at is a change since that walk — one clock for every
+    // realm's walks, as a node carries its stamp into another realm's tree.
     pub(crate) layout_epoch: std::cell::Cell<u64>,
+}
+
+// A realm's own state (`RealmArena`): its document's.
+#[derive(Default)]
+pub(crate) struct RealmState {
+    // The realm document's focused and hovered element — the one carrying STATE_FOCUSED / STATE_HOVERED — from which
+    // `:focus-within` and `:hover` walk up.
+    pub(crate) focus: Option<NodeId>,
+    pub(crate) hover: Option<NodeId>,
+    // Whether the focus shows NO ring (not `:focus-visible`): only after a pointer focus of a non-text control.
+    pub(crate) focus_ring_hidden: bool,
+    // The realm document and its target fragments (as it stands, then decoded), when it has any — what `:target`
+    // resolves (`is_target`).
+    pub(crate) target: Option<(NodeId, Vec<String>)>,
+    // The realm's style sheets, parsed under the arena's lock (sheets.rs): what its engine cascades and CSSOM reads.
+    pub(crate) sheets: crate::sheets::SheetStore,
+    // The `marginwidth` / `marginheight` of the frame this realm's document sits in, which its body takes its margins
+    // from where it declares none (HTML §15.3.2) — pushed in by the parent realm (`setContainerMargins`).
+    pub(crate) container_margins: [Option<String>; 2],
+    // The faces its families resolve to, which its walks and its style engine's font metrics read (`SharedFaces`).
+    pub(crate) faces: crate::walk::SharedFaces,
     // How many elements a restyle REPLACED the style of since this side last took them (`note_restyled`,
     // `styleRestyled`): what the JS side's layout gate has to hear of, since the engine decides what a change restyles.
     pub(crate) restyled: std::cell::Cell<u32>,
@@ -514,6 +533,69 @@ pub(crate) struct RealmArena {
     pub(crate) scrolled_nodes: Vec<NodeId>,
     // The document's `@font-face`s, as the page side last listed them (font_faces.rs).
     pub(crate) font_faces: Vec<crate::font_faces::FaceRecord>,
+}
+
+impl std::ops::Deref for RealmArena {
+    type Target = RealmState;
+    fn deref(&self) -> &RealmState {
+        &self.state
+    }
+}
+impl std::ops::DerefMut for RealmArena {
+    fn deref_mut(&mut self) -> &mut RealmState {
+        &mut self.state
+    }
+}
+
+impl RealmArena {
+    // The arena with realm `cid`'s state the one it holds (made afresh for a realm it has not seen).
+    pub(crate) fn enter(&mut self, cid: i32) -> &mut RealmArena {
+        if cid != self.cur {
+            let left = std::mem::take(&mut self.state);
+            if !self.dropped.contains(&self.cur) {
+                self.parked.insert(self.cur, left);
+            }
+            self.state = self.parked.remove(&cid).unwrap_or_default();
+            self.cur = cid;
+        }
+        self
+    }
+    // …for a realm it has seen, and has not dropped.
+    pub(crate) fn enter_known(&mut self, cid: i32) -> Option<&mut RealmArena> {
+        let known = (cid == self.cur || self.parked.contains_key(&cid)) && !self.dropped.contains(&cid);
+        known.then(|| self.enter(cid))
+    }
+    pub(crate) fn is_dropped(&self, cid: i32) -> bool {
+        self.dropped.contains(&cid)
+    }
+    // Realm `cid` is gone: its state, and the nodes it made.
+    pub(crate) fn drop_realm(&mut self, cid: i32) {
+        self.dropped.insert(cid);
+        self.parked.remove(&cid);
+        if self.cur == cid {
+            self.state = RealmState::default();
+        }
+        self.free_realm_nodes(cid);
+    }
+    // Free every node realm `cid` made.
+    fn free_realm_nodes(&mut self, cid: i32) {
+        self.mutations += 1;
+        for idx in 0..self.slots.len() {
+            let slot = &mut self.slots[idx];
+            if slot.data.as_ref().is_some_and(|n| n.realm == cid) {
+                slot.data = None;
+                if slot.generation < GEN_MAX {
+                    slot.generation += 1;
+                    self.free.push(idx as u32);
+                }
+            }
+        }
+        // (…and what the arena kept of them by their ids)
+        let live = |slots: &[Slot], id: &NodeId| slots.get(id.idx as usize).is_some_and(|s| s.generation == id.generation && s.data.is_some());
+        let slots = &self.slots;
+        self.parser_form_owners.retain(|id, _| live(slots, id));
+        self.custom_states.retain(|id, _| live(slots, id));
+    }
 }
 
 impl RealmArena {
@@ -654,30 +736,17 @@ impl RealmArena {
     // detached element from the previous page, still held across the navigation, carries a nid whose
     // gen no longer matches, so it reads absent instead of ALIASING whichever new-page node reused its
     // index. Growth stays bounded because the freed indices feed the next page's allocations.
+    // A page load in the realm it holds the state of: that state, and the nodes the realm made.
     fn reset(&mut self) {
         self.focus = None;
         self.hover = None;
-        self.has_shadow_hosts = false;
-        self.parser_form_owners.clear();
-        self.custom_states.clear();
         self.target = None;
         self.form_facts.get_mut().clear();
         self.directionality.get_mut().1.clear();
-        self.direction_sources = false;
         self.sheets.reset();
         // (…in place: the style engine holds the same table, and outlives the page)
         self.faces.with(|faces| *faces = Default::default());
-        self.mutations += 1;
-        for idx in 0..self.slots.len() {
-            let slot = &mut self.slots[idx];
-            if slot.data.is_some() {
-                slot.data = None;
-                if slot.generation < GEN_MAX {
-                    slot.generation += 1;
-                    self.free.push(idx as u32);
-                }
-            }
-        }
+        self.free_realm_nodes(self.cur);
     }
 
     // Append `child` at the end of `parent`'s children, recording its position so prev/next-sibling
@@ -706,14 +775,13 @@ impl RealmArena {
     // child, its next sibling and the tree it owns, each the one the slot has where that one has a handle too — or None.
     pub(crate) fn edge_mismatch(&self, id: NodeId) -> Option<String> {
         let n = self.get(id)?;
-        let (got, realm) = crate::node_handle::edges(&n.link)?;
+        let got = crate::node_handle::edges(&n.link)?;
         let handled = |k: NodeId| self.get(k).is_some_and(|d| crate::node_handle::edges(&d.link).is_some());
         let parent = n.parent.or(n.host).or(n.template_host).filter(|&p| handled(p));
         let first = n.children.first().copied().filter(|&c| handled(c));
         let next = n.parent.and_then(|p| self.get(p)).and_then(|p| p.children.get(n.child_index + 1).copied()).filter(|&c| handled(c));
         let owned = n.shadow_root.or(n.template_content).filter(|&c| handled(c));
-        // (…each in this slot's realm, as the node's handle says it is)
-        let want = [parent, first, next, owned].map(|k| k.map(|k| (realm, k)));
+        let want = [parent, first, next, owned];
         (got != want).then(|| format!("handle edges {got:?}, tree {want:?}"))
     }
     // `id`'s handle is `link`: its edges written where it is — under its parent, and over its children.
@@ -738,7 +806,7 @@ impl RealmArena {
         if parent.is_some() {
             self.state_epoch += 1;
         }
-        let id = self.alloc(NodeData { parent, ..data });
+        let id = self.alloc(NodeData { parent, realm: self.cur, ..data });
         if let Some(p) = parent {
             self.link_child(p, id);
         }
@@ -750,7 +818,8 @@ impl RealmArena {
         self.state_epoch += 1;
         let Some(node) = self.get_mut(id) else { return };
         node.state = bits;
-        for (bit, slot) in [(STATE_FOCUSED, &mut self.focus), (STATE_HOVERED, &mut self.hover)] {
+        let state = &mut self.state;
+        for (bit, slot) in [(STATE_FOCUSED, &mut state.focus), (STATE_HOVERED, &mut state.hover)] {
             if bits & bit != 0 {
                 *slot = Some(id);
             } else if *slot == Some(id) {
@@ -1109,15 +1178,16 @@ impl RealmArena {
     }
 }
 
-// The per-isolate DOM: ONE node arena PER REALM (keyed by rusty_racer's context_id — main = 0, frames
-// 1,2,…) plus the isolate-scoped instance templates every wrapper is stamped from. Reached from any
-// callback via dom(scope); the node ops route to their realm's arena by the context_id carried as
-// each realm's `__dom` function data (see `realm_id` / `realm` / `install`). Templates serve every realm.
+// The per-isolate DOM: the node arena, with each realm's state (keyed by rusty_racer's context_id — main = 0,
+// frames 1,2,…), plus the isolate-scoped instance templates every wrapper is stamped from. Reached from any
+// callback via dom(scope); an op works in its realm's state by the context_id carried as each realm's `__dom`
+// function data (see `realm_id` / `realm` / `install`). Templates serve every realm.
 #[derive(Default)]
 pub(crate) struct Dom {
     // The slots of the nodes V8 collected, to be freed (`node_handle::reclaim`).
     pub(crate) reclaim: std::sync::Arc<crate::node_handle::Reclaim>,
-    pub(crate) realms: std::collections::HashMap<i32, RealmArena>,
+    // Every realm's nodes, and each realm's state (`RealmArena`).
+    pub(crate) arena: RealmArena,
     // The store-flip's native-backed `_attrs`: a full named-interceptor view over a node's
     // attributes Vec (get/set/query/delete/enumerate/descriptor), so `el._attrs.foo`, `for..in`,
     // `hasOwnProperty`, `Object.keys`, `delete` all work against the arena in C++ — faster than a
@@ -1129,10 +1199,6 @@ pub(crate) struct Dom {
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
     // Each realm's Rust walk's last pass and the measures kept of it (`walk_reuse`).
     pub(crate) walk_reuse: std::collections::HashMap<i32, crate::walk_reuse::WalkReuse>,
-    // The realms `dropRealm` freed: an op a script of one still runs lands in `graveyard` rather than bringing its
-    // arena back (context ids are never reused, so each would have stayed an entry for good).
-    dropped: std::collections::HashSet<i32>,
-    graveyard: RealmArena,
     // Whether the session's pointer is a touchscreen (`setTouchInput`): what every realm's device answers `pointer` /
     // `hover` by (style.rs `Screen`).
     pub(crate) touch_input: bool,
@@ -1154,21 +1220,16 @@ pub(crate) fn dom<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Dom {
 }
 
 // The context_id of the realm whose `__dom` invoked this callback — carried as each realm's `__dom`
-// function DATA (set in `install`), so a node op routes to its OWN realm's arena. `0` (main) when
+// function DATA (set in `install`), so an op works in its OWN realm's state. `0` (main) when
 // unset. This is how the isolate-global `Dom` is partitioned per realm without threading a realm id
 // through the JS op signatures.
 pub(crate) fn realm_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> i32 {
     args.data().int32_value(scope).unwrap_or(0)
 }
 
-// The arena for realm `cid` (created empty on first touch). The node ops resolve this from their
-// function data instead of touching a single shared arena.
+// The arena, holding realm `cid`'s state (`RealmArena::enter`) — the realm whose `__dom` an op was called through.
 pub(crate) fn realm<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> &'s mut RealmArena {
-    let d = dom(scope);
-    if d.dropped.contains(&cid) {
-        return &mut d.graveyard;
-    }
-    d.realms.entry(cid).or_default()
+    dom(scope).arena.enter(cid)
 }
 
 // The arena for realm `cid` and its style engine, for a change the engine has to hear of — the engine's change hooks
@@ -1178,10 +1239,7 @@ fn arena_and_engine<'s>(
     cid: i32,
 ) -> (&'s mut RealmArena, Option<&'s mut crate::style::StyleEngine>) {
     let d = dom(scope);
-    if d.dropped.contains(&cid) {
-        return (&mut d.graveyard, None);
-    }
-    (d.realms.entry(cid).or_default(), d.styles.get_mut(&cid))
+    (d.arena.enter(cid), d.styles.get_mut(&cid))
 }
 
 // Whether a node can decide a directionality of its own (`is_rtl`): a `dir` on it, or its being a `<bdi>` or a telephone
@@ -1261,8 +1319,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
 
     // The arena for this realm is created lazily (realm(scope, cid) on first touch) and cleared per
     // page by resetArena, so a re-installed realm (main = context_id 0 on every reset) reuses its slot
-    // rather than accumulating. Each op below carries `context_id` as its function data so it routes to
-    // THIS realm's arena.
+    // rather than accumulating. Each op below carries `context_id` as its function data so it works in
+    // THIS realm's state.
     let ns = v8::Object::new(scope);
     // The constructor every node's object is made through (node_handle.rs).
     if let Some(base) = crate::node_handle::base_function(scope) {
@@ -1402,8 +1460,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // reads absent.
     register(scope, ns, "dropNode", drop_node, context_id);
     register(scope, ns, "handleEdgesMismatch", handle_edges_mismatch, context_id);
-    // Free a disposed realm's arena — csim calls this before tearing down a frame realm (main reuses
-    // slot 0). Takes an explicit id (the realm being dropped), not the caller's own.
+    // Free a disposed realm's state and nodes — csim calls this before tearing down a frame realm (main
+    // reuses id 0). Takes an explicit id (the realm being dropped), not the caller's own.
     register(scope, ns, "dropRealm", drop_realm, context_id);
     // The layout walk's reuse counts (the pass itself, `layoutBuild`, is walk_ops.rs's).
     register(scope, ns, "layoutMeasureCounts", layout_measure_counts, context_id);
@@ -1419,7 +1477,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
 }
 
 // Register one `__dom.<name>` for a realm, carrying the realm's `context_id` as the function's DATA so
-// `realm_id(scope, &args)` can route the op to that realm's arena (each realm gets its own `__dom` with
+// `realm_id(scope, &args)` can work in that realm's state (each realm gets its own `__dom` with
 // its own functions, so the data is per-realm).
 pub(crate) fn register(
     scope: &mut v8::PinScope<'_, '_>,
@@ -1461,7 +1519,7 @@ fn import_node(
     if let (Some(engine), Some(p)) = (engine, parent) {
         engine.children_changed(arena, p);
     }
-    crate::node_handle::bind(scope, args.get(5), cid, id);
+    crate::node_handle::bind(scope, args.get(5), id);
     set_nid(scope, &mut rv, id);
 }
 
@@ -1492,7 +1550,7 @@ fn create_node(
     if let (Some(engine), Some(p)) = (engine, parent) {
         engine.children_changed(arena, p);
     }
-    crate::node_handle::bind(scope, args.get(5), cid, id);
+    crate::node_handle::bind(scope, args.get(5), id);
     set_nid(scope, &mut rv, id);
 }
 
@@ -2331,7 +2389,7 @@ fn sheet_of(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgumen
 fn rules_moved(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, sheet: Option<u32>) {
     let cid = realm_id(scope, args);
     let d = dom(scope);
-    let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+    let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
     let used = match sheet.and_then(|id| arena.sheets.get(id)) {
         Some(s) => s.imported || engine.uses_sheet(&s.sheet),
         None => true,
@@ -2476,7 +2534,7 @@ fn media_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 fn rule_drop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(handle) = handle_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
-    if let Some(arena) = dom(scope).realms.get_mut(&cid) {
+    if let Some(arena) = dom(scope).arena.enter_known(cid) {
         arena.sheets.drop_rule(handle);
     }
 }
@@ -2621,7 +2679,7 @@ pub(crate) fn style_op(scope: &mut v8::PinScope<'_, '_>, cid: i32, op: impl FnOn
     let d = dom(scope);
     let verifies = d.styles.get(&cid).is_some_and(|e| e.verifies());
     d.styles.remove(&cid);
-    if let Some(arena) = d.realms.get(&cid) {
+    if let Some(arena) = d.arena.enter_known(cid) {
         for id in arena.element_ids().collect::<Vec<_>>() {
             if let Some(slot) = arena.existing_style_slot(id) {
                 slot.forget_style();
@@ -2684,11 +2742,11 @@ fn style_sheets_unguarded(
     let ids = sheet_ids(scope, args.get(6));
     let cid = realm_id(scope, &args);
     let d = dom(scope);
-    if d.dropped.contains(&cid) {
+    if d.arena.is_dropped(cid) {
         return;
     }
     let screen = crate::style::Screen { viewport, touch: d.touch_input };
-    let arena = d.realms.entry(cid).or_default();
+    let arena = d.arena.enter(cid);
     let mut engine = crate::style::StyleEngine::for_document(d.styles.remove(&cid), arena, &base, quirks, html_document, screen);
     let sheets: Vec<_> = ids.iter().filter_map(|&id| arena.sheets.get(id)).collect();
     engine.set_sheets(doc, &sheets);
@@ -2736,7 +2794,7 @@ fn style_sheet_facts_unguarded(
 ) {
     let cid = realm_id(scope, &args);
     let d = dom(scope);
-    let (Some(engine), Some(arena)) = (d.styles.get(&cid), d.realms.get(&cid)) else { return };
+    let (Some(engine), Some(arena)) = (d.styles.get(&cid), d.arena.enter_known(cid)) else { return };
     let (css_image, faces) = engine.sheet_facts(&arena.sheets);
     let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Boolean::new(scope, css_image).into()];
     for (sheet, text) in faces {
@@ -2770,7 +2828,7 @@ fn style_import_unguarded(
     let quirks = args.get(2).is_true();
     let cid = realm_id(scope, &args);
     let d = dom(scope);
-    let arena = d.realms.entry(cid).or_default();
+    let arena = d.arena.enter(cid);
     let lock = arena.style_lock.0.clone();
     let pending = arena.sheets.import(&lock, &url, css.as_deref(), quirks);
     if let Some(engine) = d.styles.get_mut(&cid) {
@@ -2810,7 +2868,7 @@ fn sheet_replace(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 fn sheet_drop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = args.get(0).uint32_value(scope) else { return };
     let cid = realm_id(scope, &args);
-    if let Some(arena) = dom(scope).realms.get_mut(&cid) {
+    if let Some(arena) = dom(scope).arena.enter_known(cid) {
         arena.sheets.drop_sheet(id);
     }
 }
@@ -2837,7 +2895,7 @@ fn style_value_unguarded(
     let cid = realm_id(scope, &args);
     let now = clock_arg(scope, &args, 3);
     let d = dom(scope);
-    let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+    let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
     let value = engine.value(arena, id, &name, pseudo.as_deref(), now);
     let failures = engine.take_verify_failures();
     if threw_verify_failures(scope, failures) {
@@ -3011,7 +3069,7 @@ fn media_matches(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
-    let Some(arena) = d.realms.get(&cid) else { return rv.set_bool(false) };
+    let Some(arena) = d.arena.enter_known(cid) else { return rv.set_bool(false) };
     rv.set_bool(crate::style::media_matches(d.styles.get(&cid), arena, screen, &text));
 }
 
@@ -3025,7 +3083,7 @@ fn css_color(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let current = args.get(1).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
     let d = dom(scope);
-    let arena = d.realms.entry(cid).or_default();
+    let arena = d.arena.enter(cid);
     let Some(color) = crate::style::parse_color(d.styles.get(&cid), arena, &text, &current) else { return rv.set_null() };
     let srgb = color.to_color_space(style::color::ColorSpace::Srgb);
     let [r, g, b, _] = *srgb.raw_components();
@@ -3106,7 +3164,7 @@ fn style_generated(
     let now = clock_arg(scope, &args, 2);
     style_op(scope, cid, |scope| {
         let d = dom(scope);
-        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
         let text = engine.generated(arena, id, which, now);
         let failures = engine.take_verify_failures();
         if threw_verify_failures(scope, failures) {
@@ -3127,7 +3185,7 @@ fn style_restyled(
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let cid = realm_id(scope, &args);
-    let Some(arena) = dom(scope).realms.get(&cid) else { return };
+    let Some(arena) = dom(scope).arena.enter_known(cid) else { return };
     rv.set_uint32(arena.restyled.take());
 }
 
@@ -3163,7 +3221,7 @@ fn style_flush(
     style_op(scope, cid, |scope| {
         let now = clock_arg(scope, &args, 0);
         let d = dom(scope);
-        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
         engine.flush(arena, now);
         let failures = engine.take_verify_failures();
         let retargeted = engine.web_animations.take_retargeted();
@@ -3196,7 +3254,7 @@ fn style_tick_unguarded(
     let now = clock_arg(scope, &args, 0);
     let cid = realm_id(scope, &args);
     let d = dom(scope);
-    let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+    let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
     // (The Web Animations' frame first: it moves their timeline, and the flush composes what it moved.)
     engine.web_animations_op(|animations| animations.tick(now));
     engine.flush(arena, now);
@@ -3225,7 +3283,7 @@ fn style_take_animation_events(
 ) {
     let cid = realm_id(scope, &args);
     let d = dom(scope);
-    let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.realms.get(&cid)) else { return };
+    let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
     let events = engine.take_animation_events(arena);
     let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(events.len() * ANIMATION_EVENT_STRIDE);
     push_animation_events(scope, &mut items, events);
@@ -3286,7 +3344,7 @@ fn drop_node(
     let cid = realm_id(scope, &args);
     // NON-creating lookup on purpose: `realm()` would resurrect an empty RealmArena for a dropped realm (a lingering
     // HashMap entry per such frame); freeing nothing from one is exactly right.
-    if let Some(arena) = dom(scope).realms.get_mut(&cid) {
+    if let Some(arena) = dom(scope).arena.enter_known(cid) {
         arena.free_node(id);
     }
 }
@@ -3306,9 +3364,9 @@ fn handle_edges_mismatch(
     }
 }
 
-// __dom.dropRealm(id) — free realm `id`'s arena entirely (not the caller's own). csim calls this as it
-// disposes a frame realm, so a page's frame arenas don't accumulate across visits. Main (id 0) is not
-// dropped — it reuses its slot across resets, cleared per page by resetArena.
+// __dom.dropRealm(id) — free realm `id`'s state and nodes entirely (not the caller's own). csim calls this as it
+// disposes a frame realm, so a page's frames don't accumulate across visits. Main (id 0) is not dropped — it reuses
+// its id across resets, cleared per page by resetArena.
 fn drop_realm(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -3317,9 +3375,7 @@ fn drop_realm(
     if let Some(id) = args.get(0).integer_value(scope) {
         let d = dom(scope);
         let id = id as i32;
-        d.dropped.insert(id);
-        d.graveyard.reset();
-        d.realms.remove(&id);
+        d.arena.drop_realm(id);
         d.styles.remove(&id);          // (…and its style engine)
         d.walk_reuse.remove(&id);      // (…and its Rust walk's last pass)
         crate::text_codec::drop_realm(scope, id);   // (…and the stream decoders it left open)
@@ -3499,7 +3555,7 @@ fn now_nanos(
 
 // Build the native-backed `_attrs` instance template once per isolate. Reserves internal field 0 for
 // the owner nid (packed) and field 1 for its realm's context_id (attrsView stamps both), so the
-// interceptors resolve the RIGHT realm's arena and the RIGHT node generation — the template is
+// interceptors work in the RIGHT realm's state and on the RIGHT node generation — the template is
 // isolate-shared but its instances are per realm.
 fn ensure_templates(scope: &mut v8::PinScope<'_, '_>) {
     if dom(scope).attrs_view_template.is_none() {
@@ -3748,7 +3804,7 @@ fn holder_node_id(
 }
 
 // The realm context_id stamped into the holder's internal field 1 (attrsView), so the interceptor
-// reads the OWNER realm's arena. Defaults to 0 (main) if absent.
+// works in the OWNER realm's state. Defaults to 0 (main) if absent.
 fn holder_realm_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::PropertyCallbackArguments<'_>) -> i32 {
     args.holder()
         .get_internal_field(scope, 1)

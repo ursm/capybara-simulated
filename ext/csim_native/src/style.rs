@@ -485,7 +485,7 @@ impl StyleEngine {
         }
     }
 
-    // The realm's arena was emptied for a new page: nothing the engine held of its nodes means anything now.
+    // The realm's nodes were freed for a new page: nothing the engine held of them means anything now.
     pub(crate) fn reset(&mut self) {
         self.doc = None;
         self.web_animations = waapi::Animations::default();
