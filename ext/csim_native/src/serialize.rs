@@ -222,33 +222,6 @@ fn preferred_prefix(map: &PrefixMap, ns: &str, preferred: Option<&str>) -> Optio
     candidates.last().cloned()
 }
 
-// An attribute as XML serializes it: its namespace, prefix (from its qualified name), local name and value.
-struct XmlAttr {
-    ns: Option<String>,
-    prefix: Option<String>,
-    local: String,
-    value: Vec<u16>,
-}
-fn xml_attrs(n: &NodeData) -> Vec<XmlAttr> {
-    n.attributes
-        .iter()
-        .map(|(key, value)| {
-            let value = match n.attr_u16.iter().find(|(k, _)| k == key) {
-                Some((_, units)) => units.clone(),
-                None => value.encode_utf16().collect(),
-            };
-            match n.attr_ns.iter().find(|(k, _, _)| k == key) {
-                Some((_, url, local)) => {
-                    let qn = key.split('\0').next().unwrap_or(key);
-                    let prefix = qn.split_once(':').filter(|(_, l)| l == local).map(|(p, _)| p.to_string());
-                    XmlAttr { ns: (!url.is_empty()).then(|| url.clone()), prefix, local: local.clone(), value }
-                }
-                None => XmlAttr { ns: None, prefix: None, local: key.clone(), value },
-            }
-        })
-        .collect()
-}
-
 // The XML `Char` production over code units: a valid surrogate pair, or a permitted BMP unit.
 fn xml_chars(units: &[u16]) -> bool {
     let mut i = 0;
@@ -398,7 +371,7 @@ impl XmlWriter<'_> {
     // local prefixes; its default namespace declaration, if it has one.
     fn record_namespaces(n: &NodeData, map: &mut PrefixMap, local: &mut Vec<(String, String)>) -> Option<String> {
         let mut default = None;
-        for attr in xml_attrs(n) {
+        for attr in n.attribute_list() {
             // (…a literal `xmlns` attribute in no namespace — `setAttribute('xmlns', …)`, an HTML parse — declares the
             // default namespace too, so the element does not declare it a second time where the two agree)
             if attr.ns.is_none() && attr.local == "xmlns" && attr.prefix.is_none() {
@@ -499,7 +472,7 @@ impl XmlWriter<'_> {
     }
 
     fn attributes(&mut self, n: &NodeData, map: &mut PrefixMap, local_prefixes: &[(String, String)], ignore_namespace_definition: bool) -> Result<(), Refused> {
-        for attr in xml_attrs(n) {
+        for attr in n.attribute_list() {
             let mut candidate: Option<String> = None;
             if let Some(ns) = attr.ns.as_deref() {
                 candidate = preferred_prefix(map, ns, attr.prefix.as_deref());

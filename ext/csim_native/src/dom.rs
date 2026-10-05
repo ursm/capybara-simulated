@@ -107,6 +107,25 @@ impl NodeKind {
     }
 }
 
+// Where one node is against another in their node tree (`RealmArena::relation`): the same node, an ancestor of it, a
+// descendant of it, or before or after it otherwise.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Relation {
+    Same,
+    Ancestor,
+    Descendant,
+    Before,
+    After,
+}
+
+// An attribute of the DOM's attribute list (`NodeData::attribute_list`): its namespace, prefix, local name and value.
+pub(crate) struct Attribute {
+    pub(crate) ns: Option<String>,
+    pub(crate) prefix: Option<String>,
+    pub(crate) local: String,
+    pub(crate) value: Vec<u16>,
+}
+
 // One arena node's data: what the native readers see. Attributes are the source of truth
 // (ordered, as the DOM keeps them); for a non-element, `local_name` / `ns` / the attributes are empty.
 pub(crate) struct NodeData {
@@ -298,6 +317,28 @@ impl NodeData {
     pub(crate) fn rendering_tag(&self) -> &str {
         let svg_root = self.ns == ns!(svg) && &*self.local_name == "svg";
         if self.kind == NodeKind::Element && (self.ns == ns!(html) || svg_root) { &self.local_name } else { "" }
+    }
+    // The attribute list as the DOM sees it, in its order: each one's namespace, prefix (from its qualified name), local
+    // name and value.
+    pub(crate) fn attribute_list(&self) -> Vec<Attribute> {
+        self.attributes
+            .iter()
+            .map(|(key, value)| {
+                let value = match self.attr_u16.iter().find(|(k, _)| k == key) {
+                    Some((_, units)) => units.clone(),
+                    None => value.encode_utf16().collect(),
+                };
+                match self.attr_ns.iter().find(|(k, _, _)| k == key) {
+                    Some((_, url, local)) => {
+                        // (…a store key is the qualified name, a NUL and a counter after it where two would share it)
+                        let qn = key.split('\0').next().unwrap_or(key);
+                        let prefix = qn.split_once(':').filter(|(_, l)| l == local).map(|(p, _)| p.to_string());
+                        Attribute { ns: (!url.is_empty()).then(|| url.clone()), prefix, local: local.clone(), value }
+                    }
+                    None => Attribute { ns: None, prefix: None, local: key.clone(), value },
+                }
+            })
+            .collect()
     }
     pub(crate) fn get_attr(&self, name: &str) -> Option<&str> {
         self.attributes
@@ -973,21 +1014,30 @@ impl RealmArena {
         out.reverse();
         out
     }
-    // Where `a` is against `b` in tree order — an ancestor before what it contains — or None where they are in
-    // different trees.
-    pub(crate) fn tree_order(&self, a: NodeId, b: NodeId) -> Option<std::cmp::Ordering> {
-        use std::cmp::Ordering::*;
+    // Where `a` is against `b` in their node tree — None where they are in different trees.
+    pub(crate) fn relation(&self, a: NodeId, b: NodeId) -> Option<Relation> {
         if a == b {
-            return Some(Equal);
+            return Some(Relation::Same);
         }
         let (ca, cb) = (self.chain(a), self.chain(b));
         if ca[0] != cb[0] {
             return None;
         }
         let shared = ca.iter().zip(&cb).take_while(|(x, y)| x == y).count();
-        let (Some(&xa), Some(&xb)) = (ca.get(shared), cb.get(shared)) else { return Some(if shared == ca.len() { Less } else { Greater }) };
+        let (Some(&xa), Some(&xb)) = (ca.get(shared), cb.get(shared)) else {
+            return Some(if shared == ca.len() { Relation::Ancestor } else { Relation::Descendant });
+        };
         let index = |n: NodeId| self.get(n).map_or(0, |d| d.child_index);
-        Some(index(xa).cmp(&index(xb)))
+        Some(if index(xa) < index(xb) { Relation::Before } else { Relation::After })
+    }
+    // …as tree order: an ancestor before what it contains.
+    pub(crate) fn tree_order(&self, a: NodeId, b: NodeId) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering::*;
+        self.relation(a, b).map(|r| match r {
+            Relation::Same => Equal,
+            Relation::Ancestor | Relation::Before => Less,
+            Relation::Descendant | Relation::After => Greater,
+        })
     }
     // The root of `id`'s tree, shadow-including: a shadow root's host is its parent here (not a template's contents':
     // they are a tree of their own). (`root_of`, element_state.rs, is the plain one.)
@@ -1450,6 +1500,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::mutation::install(scope, ns, context_id);
     // …and where one node is against another (traversal.rs)
     crate::traversal::install(scope, ns, context_id);
+    // …and the namespace lookups (namespaces.rs)
+    crate::namespaces::install(scope, ns, context_id);
     // …and the realm's id, which spaces its nodes' handle ids apart from every other realm's (dom-nodes.js `Node`).
     let key = v8::String::new(scope, "realmId").expect("a short string");
     let id = v8::Integer::new(scope, context_id);
