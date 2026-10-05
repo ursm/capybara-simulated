@@ -964,6 +964,31 @@ impl RealmArena {
         self.reown(host);
     }
 
+    // `id` and its ancestors, root first — in its node tree (a shadow root is a root).
+    pub(crate) fn chain(&self, id: NodeId) -> Vec<NodeId> {
+        let mut out = vec![id];
+        while let Some(p) = self.parent_of(*out.last().expect("never empty")) {
+            out.push(p);
+        }
+        out.reverse();
+        out
+    }
+    // Where `a` is against `b` in tree order — an ancestor before what it contains — or None where they are in
+    // different trees.
+    pub(crate) fn tree_order(&self, a: NodeId, b: NodeId) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering::*;
+        if a == b {
+            return Some(Equal);
+        }
+        let (ca, cb) = (self.chain(a), self.chain(b));
+        if ca[0] != cb[0] {
+            return None;
+        }
+        let shared = ca.iter().zip(&cb).take_while(|(x, y)| x == y).count();
+        let (Some(&xa), Some(&xb)) = (ca.get(shared), cb.get(shared)) else { return Some(if shared == ca.len() { Less } else { Greater }) };
+        let index = |n: NodeId| self.get(n).map_or(0, |d| d.child_index);
+        Some(index(xa).cmp(&index(xb)))
+    }
     // The root of `id`'s tree, shadow-including: a shadow root's host is its parent here (not a template's contents':
     // they are a tree of their own). (`root_of`, element_state.rs, is the plain one.)
     pub(crate) fn shadow_including_root(&self, mut id: NodeId) -> NodeId {
@@ -1423,6 +1448,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::collections::install(scope, ns, context_id);
     // …and the tree mutation algorithms' checks (mutation.rs)
     crate::mutation::install(scope, ns, context_id);
+    // …and where one node is against another (traversal.rs)
+    crate::traversal::install(scope, ns, context_id);
     // …and the realm's id, which spaces its nodes' handle ids apart from every other realm's (dom-nodes.js `Node`).
     let key = v8::String::new(scope, "realmId").expect("a short string");
     let id = v8::Integer::new(scope, context_id);

@@ -272,40 +272,15 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 
 // ── boundary points in tree order (DOM §5.2) ─────────────────────────────────────────────────────────────────────
 
-// `id` and its ancestors, root first — in its node tree (a shadow root is a root).
-fn chain(arena: &RealmArena, id: NodeId) -> Vec<NodeId> {
-    let mut out = vec![id];
-    while let Some(p) = arena.parent_of(*out.last().expect("never empty")) {
-        out.push(p);
-    }
-    out.reverse();
-    out
-}
-// Where `a` is against `b` in tree order — None where they are in different trees.
-fn tree_order(arena: &RealmArena, a: NodeId, b: NodeId) -> Option<std::cmp::Ordering> {
-    use std::cmp::Ordering::*;
-    if a == b {
-        return Some(Equal);
-    }
-    let (ca, cb) = (chain(arena, a), chain(arena, b));
-    if ca[0] != cb[0] {
-        return None;
-    }
-    let shared = ca.iter().zip(&cb).take_while(|(x, y)| x == y).count();
-    // (…an ancestor precedes what it contains)
-    let (Some(&xa), Some(&xb)) = (ca.get(shared), cb.get(shared)) else { return Some(if shared == ca.len() { Less } else { Greater }) };
-    let index = |n: NodeId| arena.get(n).map_or(0, |d| d.child_index);
-    Some(index(xa).cmp(&index(xb)))
-}
 // "The position of a boundary point relative to another" — None where they are in different trees.
 fn compare(arena: &RealmArena, a: Boundary, b: Boundary) -> Option<std::cmp::Ordering> {
     use std::cmp::Ordering::*;
-    match tree_order(arena, a.node, b.node)? {
+    match arena.tree_order(a.node, b.node)? {
         Equal => Some(a.offset.cmp(&b.offset)),
         Greater => compare(arena, b, a).map(std::cmp::Ordering::reverse),
         Less => {
             // (…`a`'s node an ancestor of `b`'s: after where its child towards `b` is before `a`'s offset)
-            let cb = chain(arena, b.node);
+            let cb = arena.chain(b.node);
             match cb.iter().position(|&n| n == a.node) {
                 Some(i) => {
                     let child = cb[i + 1];
@@ -448,7 +423,7 @@ fn range_common_ancestor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let Some([s, e]) = entry_points(scope, args.get(0)) else { return };
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    let (cs, ce) = (chain(arena, s.node), chain(arena, e.node));
+    let (cs, ce) = (arena.chain(s.node), arena.chain(e.node));
     let shared = cs.iter().zip(&ce).take_while(|(x, y)| x == y).count();
     let common = if shared == 0 { s.node } else { cs[shared - 1] };
     rv.set_double(common.to_f64());

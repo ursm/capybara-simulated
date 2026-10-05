@@ -42,6 +42,7 @@ mod image_source;
 mod layout;
 mod mime;
 mod mutation;
+mod traversal;
 mod node_handle;
 mod numbers;
 mod ranges;
