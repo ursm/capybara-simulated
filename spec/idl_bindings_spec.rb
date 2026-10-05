@@ -715,6 +715,45 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  it "installs HTMLElement's, SVGElement's and MathMLElement's members as their IDL says" do
+    got = outcome(<<~JS)
+      (() => {
+        const t = (f) => { try { return JSON.stringify(f()) ?? 'undefined'; } catch (e) { return e.name + ': ' + e.message; } };
+        const foreign = document.createElementNS('urn:x', 'x');
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        const g = svg.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'g'));
+        const math = document.createElementNS('http://www.w3.org/1998/Math/MathML', 'math');
+        const div = document.createElement('div');
+        return [
+          ['onclick', 'focus', 'style', 'dataset', 'tabIndex', 'nonce'].map((k) => k in foreign),
+          [typeof g.focus, 'click' in g, 'innerText' in g, typeof g.className, g.ownerSVGElement === svg, svg.ownerSVGElement, g.viewportElement === svg],
+          [typeof math.focus, 'onclick' in math, 'click' in math],
+          t(() => { div.contentEditable = 'bogus'; }),
+          t(() => { div.setAttribute('hidden', 'UNTIL-FOUND'); div.setAttribute('popover', 'x'); return [div.hidden, div.popover]; }),
+          t(() => { div.innerText = 'a\\nb\\r\\nc'; return div.innerHTML; }),
+          t(() => { div.outerText = 'x'; }),
+          t(() => { const p = document.createElement('p'); p.innerHTML = 'a<b></b>c'; p.firstChild.nextSibling.outerText = '1\\n2'; return [p.innerHTML, p.childNodes.length]; }),
+          t(() => HTMLElement.prototype.focus.call(foreign)),
+          ['onstorage' in document.body, 'onstorage' in div],
+          [HTMLElement, SVGElement, MathMLElement].map((i) => Object.prototype.toString.call(i.prototype))
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      [false, false, false, false, false, false],
+      ['function', false, false, 'object', true, nil, true],
+      ['function', true, false],
+      "SyntaxError: Failed to set the 'contentEditable' property on 'HTMLElement': The value provided ('bogus') is not one of 'true', 'false', 'plaintext-only', or 'inherit'.",
+      '["until-found","manual"]',
+      '"a<br>b<br>c"',
+      "NoModificationAllowedError: Failed to set the 'outerText' property on 'HTMLElement': The element has no parent.",
+      '["a1<br>2c",3]',
+      'TypeError: Illegal invocation',
+      [true, false],
+      ['[object HTMLElement]', '[object SVGElement]', '[object MathMLElement]']
+    ])
+  end
+
   # (…the document element among them, and a name compared as it is, not as a selector)
   it "finds a document's elements by name, its root too" do
     got = outcome(<<~JS)

@@ -143,13 +143,18 @@ RSpec.describe 'WebIDL reflection behaviour' do
       expect(result).to eq('before' => 'inherit', 'empty_attr' => 'true')
     end
 
-    it 'outerText setter replaces text content without throwing' do
-      v = session.evaluate_script(<<~JS)
-        const e = document.createElement('div');
-        e.outerText = 'hello';
-        e.textContent
+    # HTML "set the outer text": the element itself is replaced, its text merged with the Text on either side — and an
+    # element with no parent has nothing to be replaced in.
+    it 'outerText setter replaces the element, and throws for one with no parent' do
+      result = session.evaluate_script(<<~JS)
+        const p = document.createElement('p');
+        p.innerHTML = 'a<b>x</b>c';
+        p.children[0].outerText = 'hello';
+        let orphan;
+        try { document.createElement('div').outerText = 'x'; } catch (e) { orphan = e.name; }
+        ({ html: p.innerHTML, nodes: p.childNodes.length, orphan: orphan })
       JS
-      expect(v).to eq('hello')
+      expect(result).to eq('html' => 'ahelloc', 'nodes' => 1, 'orphan' => 'NoModificationAllowedError')
     end
   end
 

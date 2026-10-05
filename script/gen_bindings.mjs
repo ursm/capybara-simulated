@@ -86,6 +86,20 @@ const INTERFACES = [
       prerendering: 'no prerendering'
     }
   }],
+  ['html', 'HTMLElement', {
+    install: true,
+    omit: {
+      'css-typed-om': 'attributeStyleMap: the Typed OM is not implemented',
+      'edit-context': 'editContext: EditContext is not implemented'
+    },
+    omitMembers: {
+      headingOffset: 'heading levels are not computed',
+      headingReset: 'heading levels are not computed',
+      scrollParent: 'the scroll container is not exposed'
+    }
+  }],
+  ['SVG', 'SVGElement', { install: true, omit: { 'css-typed-om': 'attributeStyleMap: the Typed OM is not implemented' } }],
+  ['mathml-core', 'MathMLElement', { install: true, omit: { 'css-typed-om': 'attributeStyleMap: the Typed OM is not implemented' } }],
   ['dom', 'EventTarget', { install: true, omit: { observable: 'when: Observables are not implemented' } }],
   ['dom', 'ShadowRoot', { install: true, omit: { 'sanitizer-api': 'setHTML: the Sanitizer API is not implemented' } }]
 ];
@@ -128,7 +142,8 @@ const HANDLED = {
   interface: ['Exposed', 'SecureContext'],
   member: [
     'SameObject', 'NewObject', 'CEReactions', 'Unscopable', 'PutForwards', 'Reflect', 'SecureContext', 'LegacyLenientSetter',
-    'LegacyUnforgeable', 'LegacyLenientThis'
+    'LegacyUnforgeable', 'LegacyLenientThis', 'HTMLConstructor', 'ReflectSetter', 'ReflectURL', 'ReflectNonNegative',
+    'ReflectRange', 'ReflectDefault'
   ],
   type: ['LegacyNullToEmptyString']
 };
@@ -693,41 +708,12 @@ for (const [spec, name, options] of INTERFACES) {
   def.spec = spec;
   parts.push(def.type === 'interface' ? generateInterface(def, options) : generateCallbackInterface(def));
 }
-// The members of the element interfaces whose objects are hand-written (Element and those that extend it for a
-// namespace), by name — their own, their mixins' and partials': what puts a member on the interface that has it
-// (dom-class-aliases.js), the hand-written classes keeping every element member on Element.
-const MEMBER_INTERFACES = ['Element', 'HTMLElement', 'SVGElement', 'MathMLElement'];
-function memberNames(name) {
-  const names = new Set();
-  const add = (d) => { for (const m of d.members) if (m.name && m.type !== 'constructor') names.add(m.name); };
-  const gather = (d) => {
-    add(d);
-    for (const a of additions.get(d.name) || []) {
-      if (a.partial) add(a.def);
-      else if (mixins.has(a.mixin)) gather(mixins.get(a.mixin));
-    }
-  };
-  gather(definitions.get(name));
-  return [...names].sort();
-}
-// …and the interface each HTML element interface inherits: what its interface object extends.
+// The interface each HTML element interface inherits: what its interface object extends.
 const htmlParents = [...definitions.values()]
   .filter((d) => d.type === 'interface' && /^HTML\w*Element$/.test(d.name) && d.inheritance)
   .map((d) => [d.name, d.inheritance])
   .sort(([a], [b]) => (a < b ? -1 : 1));
-// …and the event handlers of GlobalEventHandlers (its own and its partials'): what the hand-written element and window
-// classes install, an element's as content attributes too.
-const globalHandlers = [mixins.get('GlobalEventHandlers'), ...(additions.get('GlobalEventHandlers') || []).map((a) => a.def)]
-  .flatMap((d) => d.members).filter((m) => m.type === 'attribute' && EVENT_HANDLER_TYPES.has(m.idlType.idlType)).map((m) => m.name);
-const memberTable = `// The members of the element interfaces, by name (each one's own, its mixins' and partials').
-export const INTERFACE_MEMBERS = {
-${MEMBER_INTERFACES.map((n) => `  ${n}: ${JSON.stringify(memberNames(n))}`).join(',\n')}
-};
-
-// GlobalEventHandlers' event handler attributes.
-export const GLOBAL_EVENT_HANDLERS = ${JSON.stringify(globalHandlers)};
-
-// The interface each HTML element interface inherits.
+const parentTable = `// The interface each HTML element interface inherits.
 export const HTML_INTERFACE_PARENTS = {
 ${htmlParents.map(([n, p]) => `  ${n}: '${p}'`).join(',\n')}
 };`;
@@ -741,7 +727,7 @@ import {
 ${wrap(RUNTIME)}
 } from '../webidl.js';
 
-${[...dictionaryParts, ...parts, memberTable].join('\n\n')}
+${[...dictionaryParts, ...parts, parentTable].join('\n\n')}
 `;
 
 if (process.argv.includes('--check')) {
