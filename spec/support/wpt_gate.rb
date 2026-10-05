@@ -25,8 +25,8 @@ require_relative 'wpt_runner'
 #   - a subtest that newly FAILs and isn't listed  -> RED (regression / new gap)
 #   - a listed subtest that now PASSes             -> RED (stale; delete the line)
 #   - a file that flips completed <-> HARNESS_ERROR -> RED
-#   - a file that completes with no subtest, unless listed NO_SUBTESTS (or
-#     reports subtests while listed so)          -> RED
+#   - a harness status other than OK, or a run with no subtest, is a failing
+#     pseudo-subtest (`[harness] ERROR`, `[harness] no subtests`) like any other
 #
 # So fixing a driver gap forces its lines out of the allowlist, and a regression
 # that breaks a passing subtest turns the suite red immediately. Shrinking the
@@ -120,14 +120,6 @@ module WptGate
             return ["#{rel}: harness now completes but is allowlisted as HARNESS_ERROR — " \
                     'regenerate with script/regen_wpt_expected_failures.rb']
           end
-          none = Array(result[:tests]).empty?
-          if none != (expected == WptRunner::NO_SUBTESTS)
-            return [none ? "#{rel}: completes having reported NO subtest — a missing include, or a test that measures " \
-                           'nothing here; vendor what it needs, or list it as NO_SUBTESTS' :
-                           "#{rel}: reports subtests now but is allowlisted as NO_SUBTESTS — " \
-                           'regenerate with script/regen_wpt_expected_failures.rb']
-          end
-          return [] if none
           # Multiset diff (not Array#-) so duplicate subtest names are held to their recorded
           # multiplicity — see WptRunner.multiset_minus.
           new_failures = WptRunner.multiset_minus(result[:failing], Array(expected)).sort

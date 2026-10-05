@@ -659,9 +659,6 @@ module Capybara
         navigate(resolve_visit_url(url), referer: referer, initiator: initiator)
       end
 
-      URL_UNSAFE_CHARS = %r{[^!*'();:@&=+$,/?#\[\]A-Za-z0-9\-._~%]}n.freeze
-      private_constant :URL_UNSAFE_CHARS
-
       def resolve_visit_url(url)
         s = url.to_s
         # `about:blank` (and other authority-less schemes) have no `//`, so the
@@ -690,10 +687,11 @@ module Capybara
           s = "/#{s}" unless s.start_with?('/')
           s = "#{host_root}#{s}"
         end
-        # Real browsers percent-encode characters that aren't legal in their
-        # URL position before issuing the request. Skip the escape pass when
-        # the input is already clean (the common case).
-        s.match?(URL_UNSAFE_CHARS) ? URI::DEFAULT_PARSER.escape(s, URL_UNSAFE_CHARS) : s
+        # …parsed as the page parses a URL (the URL Standard's parser, url_ops.rs): what it percent-encodes is what that
+        # URL's position takes — a space in a path, not a `|` in a query, which an RFC 3986 escape had encoded
+        # (`?include=(Document|Window)` reached the page as `(Document%7CWindow)`). A URL it does not parse is left
+        # as written, for the navigation to fail on.
+        Native.url_href(s, nil) || s
       end
 
       # Queued URLs older than this (real wall clock) are treated as

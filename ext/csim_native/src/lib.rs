@@ -106,5 +106,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // A font pattern matched, and the families it is substituted through, by this machine's fontconfig.
     native.define_module_function("font_match", magnus::function!(fontconfig::font_match_for_ruby, 1))?;
     native.define_module_function("font_strong_families", magnus::function!(fontconfig::strong_families_for_ruby, 1))?;
+    // A URL parsed by the URL Standard's parser, the page's own (url_ops.rs).
+    native.define_module_function("url_href", magnus::function!(url_ops::href_for_ruby, 2))?;
     Ok(())
 }

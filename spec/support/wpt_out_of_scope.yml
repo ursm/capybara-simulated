@@ -26,8 +26,8 @@
 # The gate (spec/support/wpt_gate.rb) merges this with the in-scope file and checks the union
 # symmetrically, so an out-of-scope subtest that starts PASSing still turns RED (move
 # it to the in-scope file / delete it). Format per file: a list of {name, reason} —
-# or a single {name: HARNESS_ERROR | NO_SUBTESTS, reason} entry for a whole file whose harness
-# never completes (or reports nothing) as an earned non-goal (e.g. a target=_blank test that hangs
+# or a single {name: HARNESS_ERROR, reason} entry for a whole file whose harness
+# never completes as an earned non-goal (e.g. a target=_blank test that hangs
 # without a real multi-window model); if such a file later completes, the gate goes
 # RED so it gets reclassified.
 #
@@ -49,6 +49,10 @@ FileAPI/url/sandboxed-iframe.html:
     once the WindowProxy event.source fix let the collection complete (the standalone
     url-with-fetch.any.js variant, which loads gc.js, passes).
 WebCryptoAPI/derive_bits_keys/argon2.tentative.https.any.js:
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: setup - define tests
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -189,7 +193,15 @@ WebCryptoAPI/derive_bits_keys/cfrg_curves_keys_curve448.tentative.https.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 WebCryptoAPI/digest/cshake.tentative.https.any.js:
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: cSHAKE128 with 0 bit output and empty source data
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -1309,6 +1321,10 @@ WebCryptoAPI/digest/kangarootwelve.tentative.https.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 WebCryptoAPI/digest/sha3.tentative.https.any.js:
 - name: SHA3-256 with empty source data
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -1499,6 +1515,10 @@ WebCryptoAPI/digest/sha3.tentative.https.any.js:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: SHA3-512 with short source data and transferred buffer during call
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -2147,6 +2167,10 @@ WebCryptoAPI/digest/turboshake.tentative.https.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 WebCryptoAPI/encap_decap/encap_decap_bits.tentative.https.any.js:
 - name: ML-KEM-1024 encapsulateBits basic functionality
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -2668,6 +2692,10 @@ WebCryptoAPI/encap_decap/encap_decap_keys.tentative.https.any.js:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 WebCryptoAPI/encrypt_decrypt/aes_ocb.tentative.https.any.js:
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'importKey step for decryption: AES-OCB 128-bit key, 128-bit tag, 120-bit
     iv'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -4116,6 +4144,10 @@ WebCryptoAPI/encrypt_decrypt/chacha20_poly1305.tentative.https.any.js:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: ChaCha20-Poly1305 round-trip encrypt/decrypt
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -17917,6 +17949,10 @@ WebCryptoAPI/idlharness.tentative.https.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 WebCryptoAPI/import_export/AES-OCB_importKey.tentative.https.any.js:
 - name: 'Empty Usages: 128 bits (jwk, {alg: A128OCB, k: AQIDBAUGBwgJCgsMDQ4PEA, kty:
     oct}, {name: AES-OCB}, false, [])'
@@ -18353,6 +18389,10 @@ WebCryptoAPI/import_export/AES-OCB_importKey.tentative.https.any.js:
     20: 21, 21: 22, 22: 23, 23: 24, 24: 25, 25: 26, 26: 27, 27: 28, 28: 29, 29: 30,
     3: 4, 30: 31, 31: 32, 4: 5, 5: 6, 6: 7, 7: 8, 8: 9, 9: 10}, {name: AES-OCB}, true,
     [encrypt])'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -18823,6 +18863,10 @@ WebCryptoAPI/import_export/ChaCha20-Poly1305_importKey.tentative.https.any.js:
     20: 21, 21: 22, 22: 23, 23: 24, 24: 25, 25: 26, 26: 27, 27: 28, 28: 29, 29: 30,
     3: 4, 30: 31, 31: 32, 4: 5, 5: 6, 6: 7, 7: 8, 8: 9, 9: 10}, {name: ChaCha20-Poly1305},
     true, [encrypt])'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -19700,6 +19744,10 @@ WebCryptoAPI/import_export/KMAC_importKey.tentative.https.any.js:
     20: 21, 21: 22, 22: 23, 23: 24, 24: 25, 25: 26, 26: 27, 27: 28, 28: 29, 29: 30,
     3: 4, 30: 31, 31: 32, 4: 5, 5: 6, 6: 7, 7: 8, 8: 9, 9: 10}, {name: KMAC256}, true,
     [verify])'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -27065,6 +27113,10 @@ WebCryptoAPI/sign_verify/eddsa_curve448.tentative.https.any.js:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 WebCryptoAPI/sign_verify/kmac.tentative.https.any.js:
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'importVectorKeys step: KMAC128 with customization no verify usage'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -27564,6 +27616,10 @@ WebCryptoAPI/sign_verify/kmac.tentative.https.any.js:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 WebCryptoAPI/sign_verify/mldsa.tentative.https.any.js:
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'importVectorKeys step: ML-DSA-44 basic test no verify usage'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -28928,6 +28984,16 @@ css/css-animations/CSSAnimation-effect.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+css/css-animations/CSSAnimation-finished.tentative.html:
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+css/css-animations/CSSAnimation-ready.tentative.html:
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 css/css-animations/Document-getAnimations.tentative.html:
 - name: CSS Animations targetting (pseudo-)elements should have correct order after
     sorting (::marker)
@@ -29530,6 +29596,10 @@ css/css-transitions/event-dispatch.tentative.html:
 css/css-transitions/non-rendered-element-004.tentative.html:
 - name: Transitions on ::marker pseudo-elements are canceled when the parent display
     type is no longer list-item
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] TIMEOUT"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -32415,6 +32485,10 @@ custom-elements/form-associated/ElementInternals-behavior-accessibility.tentativ
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: behavior.disabled prevents focusability
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -32437,6 +32511,10 @@ custom-elements/form-associated/ElementInternals-submit-behavior-dialog.tentativ
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: Disabled custom submit button does not close dialog
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -32580,6 +32658,10 @@ custom-elements/form-associated/ElementInternals-submit-behavior.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: User-initiated click submits form via HTMLSubmitButtonBehavior
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -34860,12 +34942,20 @@ domparsing/tentative/all-stream-methods-with-trusted-types-no-policy.html:
     Streams/TextDecoderStream ARE modeled (web-streams-polyfill); in-scope backlog
     deprioritized (unshipped, no app depends on it).'
 domparsing/tentative/positional-methods-with-parser-options.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 domparsing/tentative/positional-methods-with-trusted-types.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -37781,12 +37871,20 @@ domparsing/tentative/stream-html-with-declarative-shadow-root.html:
     are modeled via web-streams-polyfill) — an unshipped-feature backlog item, deprioritized
     (no library/app depends on it).'
 domparsing/tentative/stream-html-with-trusted-types-error-in-policy.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 domparsing/tentative/stream-html-with-trusted-types-no-createParserOptions.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -37817,22 +37915,38 @@ domparsing/tentative/stream-html-with-trusted-types-no-policy.html:
     are modeled via web-streams-polyfill) — an unshipped-feature backlog item, deprioritized
     (no library/app depends on it).'
 domparsing/tentative/stream-html-with-trusted-types-pass-trusted.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 domparsing/tentative/stream-html-with-trusted-types-runScripts-cannot-be-turned-on.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 domparsing/tentative/stream-html-with-trusted-types-runScripts-off.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 domparsing/tentative/stream-html-with-trusted-types-sanitizer.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -38642,6 +38756,10 @@ fetch/api/redirect/redirect-location-escape.tentative.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 fetch/api/response/response-consume.html:
 - name: 'Consume response''s body: from FormData to blob'
   reason: 'Asserts the blob''s type is the raw Content-Type lowercased (`multipart/form-data;
@@ -39401,6 +39519,26 @@ fetch/h1-parsing/h1-parsing.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSHSL.html:
 - name: CSSHSL works as color input
   reason: CSSHSL / CSSRGB were dropped from CSS Typed OM and no browser ships them
@@ -39719,8 +39857,16 @@ html/canvas/element/manual/draw-element-image/animated-gif-pinned-to-element-ima
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: "[harness] TIMEOUT"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/animated-gif.tentative.html:
 - name: 'Canvas.drawElementImage: animated gif advances and repaints the canvas'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] TIMEOUT"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -40506,6 +40652,10 @@ html/canvas/element/manual/draw-element-image/top-layer-not-painted-in-canvas.te
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/video.tentative.html:
+- name: "[harness] TIMEOUT"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: drawElementImage repaints video frames
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -53982,13 +54132,31 @@ resource-timing/delivery-type.tentative.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 resource-timing/resource-timing-failed-fetch-web-bundle.tentative.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 resource-timing/tentative/initiator-url/direct.any.js:
-- name: NO_SUBTESTS
+- name: The initiator Url for /images/blue.png?initiator_url_direct_worker initiatorUrl
+    from worker thread must be 'http://www.example.com/resource-timing/tentative/initiator-url/direct.any.worker.js'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: The initiator Url for resource-timing/resources/loading-resource-lib.js?direct_any
+    initiatorUrl from worker thread must be 'http://www.example.com/resource-timing/tentative/initiator-url/direct.any.worker.js'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] TIMEOUT"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54010,7 +54178,11 @@ resource-timing/tentative/initiator-url/event-handler.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 resource-timing/tentative/initiator-url/external-script-in-posted-task.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54084,17 +54256,26 @@ resource-timing/tentative/initiator-url/post-message-worker.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 resource-timing/tentative/initiator-url/post-task.any.js:
-- name: NO_SUBTESTS
+- name: "[harness] TIMEOUT"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 resource-timing/tentative/initiator-url/post-task.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 resource-timing/tentative/initiator-url/promise.any.js:
-- name: NO_SUBTESTS
+- name: The initiator Url for /images/blue.png?initiator_url_promise_worker initiatorUrl
+    from promise in worker thread must be 'http://www.example.com/resource-timing/tentative/initiator-url/promise.any.worker.js'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54105,7 +54286,8 @@ resource-timing/tentative/initiator-url/promise.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 resource-timing/tentative/initiator-url/queue-microtask.any.js:
-- name: NO_SUBTESTS
+- name: The initiator Url for /images/blue.png?initiator_url_queuemicrotask_worker
+    initiatorUrl from queueMicrotask() in worker thread must be 'http://www.example.com/resource-timing/tentative/initiator-url/queue-microtask.any.worker.js'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54157,7 +54339,8 @@ resource-timing/tentative/initiator-url/request-idle-callback.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 resource-timing/tentative/initiator-url/set-interval.any.js:
-- name: NO_SUBTESTS
+- name: The initiator Url for /images/blue.png?initiator_url_setinterval_worker initiatorUrl
+    from setInterval() in worker thread must be 'http://www.example.com/resource-timing/tentative/initiator-url/set-interval.any.worker.js'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54168,7 +54351,8 @@ resource-timing/tentative/initiator-url/set-interval.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 resource-timing/tentative/initiator-url/set-timeout.any.js:
-- name: NO_SUBTESTS
+- name: The initiator Url for /images/blue.png?initiator_url_settimeout_worker initiatorUrl
+    from setTimeout() in worker thread must be 'http://www.example.com/resource-timing/tentative/initiator-url/set-timeout.any.worker.js'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54286,18 +54470,34 @@ service-workers/service-worker/tentative/fetch-event-download-fallback.https.htm
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 service-workers/service-worker/tentative/fetch-event-download-out-of-scope.https.html:
 - name: Download FetchEvent fires only for URLs within the SW registration scope.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 service-workers/service-worker/tentative/fetch-event-download-respond-with.https.html:
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: event.respondWith() is accepted for a download FetchEvent.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 service-workers/service-worker/tentative/fetch-event-download.https.html:
 - name: FetchEvent fires for <a download> with destination "".
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54493,6 +54693,10 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
 - name: Failed import() is observed by subsequent shadowrootadoptedstylesheets.
   reason: Needs cross-consumer CSS-module map failure state between import() and declarative
     attribute; no async module-loading runtime modeled.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-async-fetch-failure.html:
 - name: 'Async fetch failure: bare module specifier contributes no sheet.'
   reason: Needs bare-specifier resolution + import() rejecting with TypeError, plus
@@ -54582,7 +54786,11 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
     modeled (rule 1). The async CSS-module-graph + scoped cascade is the lift; the
     IDL-reflection/serialization surface is part of the same unshipped feature.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-fetched-module.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54626,7 +54834,11 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
   reason: Awaits fetchAndWait and asserts the pre-fetch placeholder sheet object survives
     the async CSS fetch; async-fetch outcome.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-same-document.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54862,7 +55074,11 @@ shadow-dom/leaktests/html-collection.html:
     collections in this file (scripts/forms/images/links/anchors/embeds/plugins),
     which pass. document.applets (always-empty per spec) is supported and passes.
 shadow-dom/reference-target/tentative/aria-labelledby.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54954,6 +55170,10 @@ shadow-dom/reference-target/tentative/event-path.html:
 - name: Event propagates to source's shadow tree only; target in deeper shadow root
   reason: event propagation via tentative non-standard shadowRootReferenceTarget;
     not modeled
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: beforetoggle event propagates to source's shadow tree only; target in deeper
     shadow root
   reason: event propagation via tentative non-standard shadowRootReferenceTarget;
@@ -55535,6 +55755,10 @@ webmessaging/broadcastchannel/cross-partition.https.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 webmessaging/message-channels/close-event/document-destroyed.tentative.window.js:
 - name: The context is navigated to a new document and a close event is fired.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -55548,8 +55772,16 @@ webmessaging/message-channels/close-event/document-destroyed.tentative.window.js
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: "[harness] TIMEOUT"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 webmessaging/message-channels/close-event/entangled-after-back-forward-cache-restore.https.tentative.window.js:
 - name: MessagePort still works after the page is restored from BFCache
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -55568,8 +55800,16 @@ webmessaging/message-channels/close-event/explicitly-closed.tentative.window.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: "[harness] TIMEOUT"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 webmessaging/message-channels/close-event/garbage-collected.tentative.any.js:
 - name: Entangled port is garbage collected, and the close event is fired.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] TIMEOUT"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -56261,7 +56501,11 @@ xhr/sync-xhr-supported-by-permissions-policy.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 xhr/xmlhttprequest-sync-default-permissions-policy.tentative.sub.html:
-- name: NO_SUBTESTS
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

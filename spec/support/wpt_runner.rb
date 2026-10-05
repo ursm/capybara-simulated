@@ -39,12 +39,16 @@ module WptRunner
   # Sentinel allowlist value for a file whose harness never reaches completion
   # (unsupported include, parse crash, real hang → testharness timeout, …).
   HARNESS_ERROR = 'HARNESS_ERROR'
-  # …and for one that completes having reported NO subtest at all. A file whose include is missing (an absolute
-  # `<script src>` not vendored: the helper undefined, the inline script throwing) completes that way, so it would
-  # pass with nothing measured — every idlharness file did, the IDL surface measured by none of them. Its own
-  # sentinel turns that into a listed, visible state, never a silent green.
-  NO_SUBTESTS = 'NO_SUBTESTS'
-  SENTINELS = [HARNESS_ERROR, NO_SUBTESTS].freeze
+
+  # A file's HARNESS status (testharness's OK / ERROR / TIMEOUT / PRECONDITION_FAILED) is held to the allowlist as a
+  # subtest of its own: a status other than OK is a pseudo-subtest that fails, `[harness] ERROR`, … — and so is a
+  # run that reports no subtest at all. Without it a file whose harness errored passed on whatever subtests it had
+  # made: one whose include is missing (an absolute `<script src>` not vendored: the helper undefined, the inline
+  # script throwing) completed with none, measuring nothing — every idlharness file did — and one that threw past its
+  # subtests (an uncaught HierarchyRequestError) gated green on the ones before the throw. Per variant: each one's
+  # status counts.
+  HARNESS_STATUSES = {1 => 'ERROR', 2 => 'TIMEOUT', 3 => 'PRECONDITION_FAILED'}.freeze
+  NO_SUBTESTS = '[harness] no subtests'
 
   # Per-file drain budget. We drain in small virtual-clock steps and stop the
   # instant the harness reports completion — so sync and quick-async tests pay
@@ -808,6 +812,17 @@ module WptRunner
         if (m = path.match(%r{\A(/.+\.(?:any|window))\.html\z})) && File.file?(File.expand_path(File.join(WptRunner::ROOT, "#{m[1]}.js")))
           next [200, {'content-type' => 'text/html'}, [WptRunner.any_js_wrapper("#{m[1].sub(%r{\A/}, '')}.js")]]
         end
+        # …and a worker variant's: its page, the worker script it runs, and the GLOBAL probe a module worker imports.
+        if (m = path.match(%r{\A(/.+\.any)\.(worker|serviceworker|serviceworker-module)\.html\z})) && File.file?(File.expand_path(File.join(WptRunner::ROOT, "#{m[1]}.js")))
+          global = m[2] == 'worker' ? 'dedicatedworker' : m[2]
+          next [200, {'content-type' => 'text/html'}, [WptRunner.any_js_worker_page("#{m[1].sub(%r{\A/}, '')}.js", global)]]
+        end
+        if (m = path.match(%r{\A(/.+\.any)\.worker(-module)?\.js\z})) && File.file?(File.expand_path(File.join(WptRunner::ROOT, "#{m[1]}.js")))
+          next [200, {'content-type' => 'text/javascript'}, [WptRunner.any_js_worker_script("#{m[1].sub(%r{\A/}, '')}.js", as_module: !m[2].nil?)]]
+        end
+        if path == WptRunner::WORKER_GLOBAL_PROBE
+          next [200, {'content-type' => 'text/javascript'}, [WptRunner.global_probe(false)]]
+        end
         # Any other vendored `.py` handler: run it under the minimal wptserve shim
         # (script/wpt_py_handler.py) via python3 instead of serving its source as
         # text. The hardcoded fast-paths above stay (proven + no subprocess); this
@@ -1002,36 +1017,113 @@ module WptRunner
     @reftest_set.include?(rel)
   end
 
+  # The globals a `.any.js` test runs in, by its `// META: global=…` — wptserve's default, without one, a window and a
+  # dedicated worker; `worker` is every kind of worker. A `.window.js` test is a window's alone.
+  def any_js_globals(js_rel)
+    return %w[window] if js_rel.end_with?('.window.js')
+    list = any_js_meta(js_rel, 'global').first
+    return %w[window dedicatedworker] unless list
+    list.split(',').flat_map {|g| g == 'worker' ? %w[dedicatedworker sharedworker serviceworker] : [g] }
+  end
+
+  # The page a `.any.js` / `.window.js` test is run at: the wrapper wptserve makes for one of its globals — the
+  # window's where it has one (what every global shares is measured there), else a dedicated worker's, else a
+  # service worker's. A test whose only global is none of those is an error, not a window run it never asks for: a
+  # worker-only test run in a window measured a context WPT never runs (`html/dom/idlharness.any.js` is a dedicated
+  # worker's IDL).
+  WRAPPER_GLOBALS = {
+    'window'               => 'html',
+    'dedicatedworker'      => 'worker.html',
+    'serviceworker'        => 'serviceworker.html',
+    'serviceworker-module' => 'serviceworker-module.html'
+  }.freeze
+  def any_js_page(js_rel)
+    globals = any_js_globals(js_rel)
+    global  = WRAPPER_GLOBALS.keys.find {|g| globals.include?(g) }
+    raise "#{js_rel}: no wrapper for its globals (#{globals.join(', ')})" unless global
+    js_rel.sub(/\.js\z/, ".#{WRAPPER_GLOBALS[global]}")
+  end
+
+  # A `.any.js` test's `// META: <key>=…` values, from its leading comment block.
+  def any_js_meta(js_rel, key)
+    File.read(File.join(ROOT, js_rel)).each_line.take_while {|l| l.start_with?('//') || l.strip.empty? }
+        .filter_map {|l| l[%r{//\s*META:\s*#{key}=(\S+)}, 1] }
+  end
+
+  # …its `// META: script=…` dependencies, resolved relative to the test file, or absolute from the WPT root.
+  def any_js_deps(js_rel)
+    dir = File.dirname(js_rel)
+    any_js_meta(js_rel, 'script').map {|d| d.start_with?('/') ? d : File.expand_path(d, '/' + dir) }
+  end
+
+  # The `GLOBAL` scope probe wptserve injects into every multi-global wrapper (tests branch on window vs worker by it).
+  def global_probe(window)
+    <<~JS
+      self.GLOBAL = {
+        isWindow:      function () { return #{window}; },
+        isWorker:      function () { return #{!window}; },
+        isShadowRealm: function () { return false; }
+      };
+    JS
+  end
+
   # Synthesize the window-variant HTML wrapper for a `.any.js` / `.window.js`
-  # test: testharness + report, each `// META: script=…` dependency (resolved
-  # relative to the test file, or absolute from the WPT root), then the test
-  # source itself. Mirrors what wptserve generates.
+  # test: testharness + report, the GLOBAL probe, each `// META: script=…`
+  # dependency, then the test source itself. Mirrors what wptserve generates.
   def any_js_wrapper(js_rel)
-    src  = File.read(File.join(ROOT, js_rel))
-    dir  = File.dirname(js_rel)
-    deps = src.each_line.take_while {|l| l.start_with?('//') || l.strip.empty? }
-              .filter_map {|l| l[%r{//\s*META:\s*script=(\S+)}, 1] }
-    tags = deps.map {|d|
-      url = d.start_with?('/') ? d : File.expand_path(d, '/' + dir)   # resolve relative to the test's dir
-      %{<script src="#{url}"></script>}
-    }
+    tags = any_js_deps(js_rel).map {|url| %{<script src="#{url}"></script>} }
     <<~HTML
       <!doctype html><meta charset="utf-8">
       <script src="/resources/testharness.js"></script>
       <script src="/resources/testharnessreport.js"></script>
       <script>
-        // The `GLOBAL` scope-probe wptserve injects into every multi-global wrapper
-        // (tests branch on window vs worker via it). This is the window variant.
-        self.GLOBAL = {
-          isWindow:      function () { return true; },
-          isWorker:      function () { return false; },
-          isShadowRealm: function () { return false; }
-        };
-      </script>
+      #{global_probe(true)}</script>
       #{tags.join("\n")}
       <div id=log></div>
       <script src="/#{js_rel}"></script>
     HTML
+  end
+
+  # …a worker variant's page (`global` a WRAPPER_GLOBALS key): it runs the worker script below in a dedicated worker,
+  # or registers it as a service worker (classic or module), and fetches the worker's tests (`fetch_tests_from_worker`)
+  # — the page's query handed on, as wptserve does, for a variant's subset.
+  def any_js_worker_page(js_rel, global)
+    script = "/#{js_rel.sub(/\.js\z/, global == 'serviceworker-module' ? '.worker-module.js' : '.worker.js')}"
+    start  = if global == 'dedicatedworker'
+      %{fetch_tests_from_worker(new Worker(#{script.to_json} + location.search));}
+    else
+      options = global == 'serviceworker-module' ? "{scope, type: 'module'}" : '{scope}'
+      <<~JS
+        (async () => {
+          const scope = 'does/not/exist';
+          const old = await navigator.serviceWorker.getRegistration(scope);
+          if (old) await old.unregister();
+          const reg = await navigator.serviceWorker.register(#{script.to_json} + location.search, #{options});
+          fetch_tests_from_worker(reg.installing);
+        })();
+      JS
+    end
+    <<~HTML
+      <!doctype html><meta charset="utf-8">
+      <script src="/resources/testharness.js"></script>
+      <script src="/resources/testharnessreport.js"></script>
+      <div id=log></div>
+      <script>
+      #{start}</script>
+    HTML
+  end
+
+  # …and the worker script itself: the GLOBAL probe, testharness, the dependencies and the test, and `done()`. A
+  # module worker imports them — the probe from a module of its own, as imports run before the importing module's
+  # body (`WORKER_GLOBAL_PROBE`).
+  WORKER_GLOBAL_PROBE = '/resources/csim-worker-global.js'
+  def any_js_worker_script(js_rel, as_module:)
+    urls = ['/resources/testharness.js', *any_js_deps(js_rel), "/#{js_rel}"]
+    if as_module
+      [WORKER_GLOBAL_PROBE, *urls].map {|u| "import #{u.to_json};\n" }.join + "done();\n"
+    else
+      global_probe(false) + urls.map {|u| "importScripts(#{u.to_json});\n" }.join + "done();\n"
+    end
   end
 
   # Files excluded from the run entirely because they crash or pathologically
@@ -1198,7 +1290,7 @@ module WptRunner
     s = session
     # `.any.js` / `.window.js` tests run through their synthesized HTML wrapper;
     # a variant query (if any) is appended to the visited URL.
-    visit = rel.end_with?('.any.js', '.window.js') ? rel.sub(/\.js\z/, '.html') : rel
+    visit = rel.end_with?('.any.js', '.window.js') ? any_js_page(rel) : rel
     visit = "#{visit}#{query}"
     s.visit(origin ? "#{origin}/#{visit}" : "/#{visit}")
     fire_window_load(s)
@@ -1347,6 +1439,9 @@ module WptRunner
     # other diagnostic surfaces the messages the gate discards.
     tests   = res['tests']
     failing = tests.reject {|t| t['status'].to_i.zero? }.map {|t| t['name'] }
+    status  = HARNESS_STATUSES[res.dig('harness', 'status').to_i]
+    failing << "[harness] #{status}" if status
+    failing << NO_SUBTESTS if tests.empty?
     {completed: true, failing: failing, tests: tests}
   rescue StandardError => e
     # A file that errored may have left the shared session in a bad state;
@@ -1692,7 +1787,7 @@ module WptRunner
   # deliberate non-goal per CLAUDE.md rule 1). The gate is symmetric over the
   # UNION: a non-PASS subtest listed in NEITHER turns red, and a listed subtest
   # that now passes turns red regardless of which file it's in. `expected` returns
-  # that merged view per file — a name multiset, or a whole-file sentinel (HARNESS_ERROR / NO_SUBTESTS).
+  # that merged view per file — a name multiset, or the HARNESS_ERROR sentinel.
   def expected
     @expected ||= begin
       in_map  = load_yaml_map(EXPECTED_PATH)
@@ -1700,12 +1795,11 @@ module WptRunner
       (in_map.keys | out_map.keys).each_with_object({}) do |rel, merged|
         iv = in_map[rel]
         out_names = out_subtest_names(rel)
-        # A sentinel is for the whole file (its harness never completed, or completed with no subtest). It
+        # HARNESS_ERROR is a whole-file sentinel (the harness never completed). It
         # may be listed in EITHER file — in-scope (a gap to fix) or out-of-scope
         # (an earned non-goal, e.g. a target=_blank test that hangs without a real
-        # multi-window model), the latter as a single {name: <sentinel>} entry.
-        sentinel = SENTINELS.find {|s| iv == s || out_names.include?(s) }
-        merged[rel] = sentinel || Array(iv) + out_names
+        # multi-window model), the latter as a single {name: HARNESS_ERROR} entry.
+        merged[rel] = (iv == HARNESS_ERROR || out_names.include?(HARNESS_ERROR)) ? HARNESS_ERROR : Array(iv) + out_names
       end
     end
   end
