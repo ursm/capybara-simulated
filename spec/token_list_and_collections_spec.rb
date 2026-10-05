@@ -45,8 +45,9 @@ RSpec.describe 'token lists and filtered element lists' do
       const c = svg.className;
       svg.className = 'ignored';
       c.baseVal = 'B C';
-      return [c instanceof SVGAnimatedString, c === svg.className, c.baseVal, c.animVal, svg.classList.length];
+      let made; try { new SVGAnimatedString(); } catch (e) { made = e.name; }
+      return [c instanceof SVGAnimatedString, c === svg.className, c.baseVal, c.animVal, svg.classList.length, made];
     JS
-    expect(got).to eq([true, true, 'B C', 'B C', 2])
+    expect(got).to eq([true, true, 'B C', 'B C', 2, 'TypeError'])
   end
 end
