@@ -119,6 +119,13 @@ pub(crate) enum Relation {
     After,
 }
 
+// What a shadow root was attached with (`attachShadow`'s init, as far as the engine reads it).
+pub(crate) struct ShadowInit {
+    pub(crate) delegates_focus: bool,
+    pub(crate) manual_slot_assignment: bool,
+    pub(crate) closed: bool,
+}
+
 // An attribute of the DOM's attribute list (`NodeData::attribute_list`): its namespace, prefix, local name and value.
 pub(crate) struct Attribute {
     pub(crate) ns: Option<String>,
@@ -191,9 +198,10 @@ pub(crate) struct NodeData {
     // A shadow root's host (None for every other node): the shadow-including ancestor chain `:focus` walks…
     pub(crate) host: Option<NodeId>,
     // …and a host's shadow root, the other way; and whether a shadow root delegates focus (`attachShadow`'s
-    // `delegatesFocus`).
+    // `delegatesFocus`), and is closed (its `mode`).
     pub(crate) shadow_root: Option<NodeId>,
     pub(crate) delegates_focus: bool,
+    pub(crate) closed: bool,
     // …and whether a shadow root assigns its slots by hand (`slotAssignment: "manual"`, slots.rs), and a slot's nodes
     // `assign()`ed to it, in that order — those in this arena.
     pub(crate) manual_slot_assignment: bool,
@@ -295,6 +303,7 @@ impl NodeData {
             host: None,
             shadow_root: None,
             delegates_focus: false,
+            closed: false,
             manual_slot_assignment: false,
             manual_assigned: Vec::new(),
             link: crate::node_handle::Link::default(),
@@ -1082,14 +1091,15 @@ impl RealmArena {
     }
 
     // `root` is the shadow root of `host`, delegating focus or not.
-    pub(crate) fn set_shadow_host(&mut self, root: NodeId, host: NodeId, delegates_focus: bool, manual_slot_assignment: bool) {
+    pub(crate) fn set_shadow_host(&mut self, root: NodeId, host: NodeId, init: ShadowInit) {
         if self.get(host).is_none() {
             return;
         }
         if let Some(node) = self.get_mut(root) {
             node.host = Some(host);
-            node.delegates_focus = delegates_focus;
-            node.manual_slot_assignment = manual_slot_assignment;
+            node.delegates_focus = init.delegates_focus;
+            node.manual_slot_assignment = init.manual_slot_assignment;
+            node.closed = init.closed;
             self.has_shadow_hosts = true;
         }
         if let Some(node) = self.get_mut(host) {
@@ -1512,13 +1522,8 @@ pub(crate) fn realm<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> &'s mu
 // handle holds its object, node_handle.rs) — else each one's path from the anchor (`RealmArena::push_path`), a
 // Float64Array the page side walks (native-query-shadow.js `nodesAtPaths`).
 pub(crate) fn nodes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, anchor: NodeId, ids: &[NodeId]) -> v8::Local<'s, v8::Value> {
-    let arena = realm(scope, cid);
-    let held: Option<Vec<crate::node_handle::HeldObject>> =
-        ids.iter().map(|&id| arena.get(id).and_then(|n| crate::node_handle::held(&n.link))).collect();
-    // (…the objects read before anything is allocated: a collection in between could take a handle)
-    let objects: Option<Vec<v8::Local<'s, v8::Value>>> = held.and_then(|held| held.iter().map(|h| h.get(scope).map(Into::into)).collect());
-    if let Some(objects) = objects {
-        return v8::Array::new_with_elements(scope, &objects).into();
+    if let Some(objects) = held_objects(scope, cid, ids) {
+        return objects;
     }
     let arena = realm(scope, cid);
     let mut out = Vec::new();
@@ -1526,6 +1531,31 @@ pub(crate) fn nodes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, anchor
         arena.push_path(anchor, id, &mut out);
     }
     f64_array(scope, &out).into()
+}
+// …and from one of several anchors: where not every one is held, each node's path after the index of the anchor it is
+// under (the first; or 0 and a path of -1 for none).
+pub(crate) fn nodes_value_anchored<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, anchors: &[Option<NodeId>], ids: &[NodeId]) -> v8::Local<'s, v8::Value> {
+    if let Some(objects) = held_objects(scope, cid, ids) {
+        return objects;
+    }
+    let arena = realm(scope, cid);
+    let mut out = Vec::new();
+    for &id in ids {
+        let root = arena.shadow_including_root(id);
+        let at = anchors.iter().position(|&a| a == Some(root)).unwrap_or(0);
+        out.push(at as f64);
+        arena.push_path(anchors[at].unwrap_or(root), id, &mut out);
+    }
+    f64_array(scope, &out).into()
+}
+// The objects of `ids`, where every one is held.
+fn held_objects<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, ids: &[NodeId]) -> Option<v8::Local<'s, v8::Value>> {
+    let arena = realm(scope, cid);
+    let held: Option<Vec<crate::node_handle::HeldObject>> =
+        ids.iter().map(|&id| arena.get(id).and_then(|n| crate::node_handle::held(&n.link))).collect();
+    // (…the objects read before anything is allocated: a collection in between could take a handle)
+    let objects: Vec<v8::Local<'s, v8::Value>> = held?.iter().map(|h| h.get(scope).map(Into::into)).collect::<Option<_>>()?;
+    Some(v8::Array::new_with_elements(scope, &objects).into())
 }
 
 // The arena for realm `cid` and its style engine, for a change the engine has to hear of — the engine's change hooks
@@ -1647,6 +1677,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::traversal::install(scope, ns, context_id);
     // …and the namespace lookups (namespaces.rs)
     crate::namespaces::install(scope, ns, context_id);
+    // …and the event path through shadow trees (event_path.rs)
+    crate::event_path::install(scope, ns, context_id);
     // …and the realm's id, which spaces its nodes' handle ids apart from every other realm's (dom-nodes.js `Node`).
     let key = v8::String::new(scope, "realmId").expect("a short string");
     let id = v8::Integer::new(scope, context_id);
@@ -2212,7 +2244,8 @@ fn set_target(
     realm(scope, cid).set_target(doc, fragments);
 }
 
-// __dom.setShadowHost(rootNid, hostNid, delegatesFocus): the shadow root `rootNid` is attached to `hostNid`.
+// __dom.setShadowHost(rootNid, hostNid, delegatesFocus, manualSlotAssignment, closed): the shadow root `rootNid` is
+// attached to `hostNid`, as `attachShadow` was told.
 fn set_shadow_host(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2223,7 +2256,8 @@ fn set_shadow_host(
     };
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
-    arena.set_shadow_host(root, host, args.get(2).is_true(), args.get(3).is_true());
+    let init = ShadowInit { delegates_focus: args.get(2).is_true(), manual_slot_assignment: args.get(3).is_true(), closed: args.get(4).is_true() };
+    arena.set_shadow_host(root, host, init);
     if let Some(engine) = engine {
         engine.shadow_attached(arena, host);
     }
