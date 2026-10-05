@@ -204,6 +204,7 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
     expect(cross_window_eval("Object.getOwnPropertyDescriptor(window, 'name').get.call(w)")).to eq('SecurityError')
     expect(cross_window_eval('w.__csimDocument')).to eq('SecurityError')
     expect(cross_window_eval("Object.getOwnPropertyDescriptor(window, 'closed').get.call(w)")).to eq('ok:boolean')
+    expect(cross_window_eval("Object.getOwnPropertyDescriptor(window, 'opener').set.call(w, 7)")).to eq('SecurityError')
     expect(cross_window_eval('Object.getOwnPropertyDescriptor(w, "closed").enumerable')).to eq('ok:boolean')
     expect(session.evaluate_script(<<~JS)).to eq(false)
       (function () {

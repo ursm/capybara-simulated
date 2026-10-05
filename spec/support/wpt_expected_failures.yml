@@ -2815,6 +2815,7 @@ dom/events/scrolling/wheel-event-transactions-target-elements.html:
 - Wheel event transactions target elements
 dom/events/scrolling/wheel-event-transactions-target-move.html:
 - Move the initial wheel event target.
+- "[harness] ERROR"
 dom/events/scrolling/wheel-event-transactions-target-removal.html:
 - Remove the initial wheel event target.
 dom/events/scrolling/wheel-event-transactions-target-resize.html:
