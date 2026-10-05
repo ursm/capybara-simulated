@@ -577,6 +577,15 @@ impl RealmArena {
             stack.extend(node.shadow_root.into_iter().chain(node.template_content).chain(node.pseudo_boxes.into_iter().flatten()));
         }
     }
+    // A new context is realm `cid`: whatever an earlier context of that id made is unreachable, and its state with it.
+    pub(crate) fn realm_begins(&mut self, cid: i32) {
+        if cid == self.cur {
+            self.state = RealmState::default();
+        } else if self.parked.remove(&cid).is_none() {
+            return;
+        }
+        self.free_realm_nodes(cid);
+    }
     pub(crate) fn is_dropped(&self, cid: i32) -> bool {
         self.dropped.contains(&cid)
     }
@@ -748,7 +757,9 @@ impl RealmArena {
     // detached element from the previous page, still held across the navigation, carries a nid whose
     // gen no longer matches, so it reads absent instead of ALIASING whichever new-page node reused its
     // index. Growth stays bounded because the freed indices feed the next page's allocations.
-    // A page load in the realm it holds the state of: that state, and the nodes the realm made.
+    // A page load in the realm it holds the state of: that state, and what the style engine kept on the realm's nodes —
+    // the engine starts the page afresh (`StyleEngine::reset`). The nodes stay: a node the old page's script still
+    // holds, or that the new page reuses, is a node yet; the rest go as V8 collects them (node_handle.rs).
     fn reset(&mut self) {
         self.focus = None;
         self.hover = None;
@@ -758,7 +769,13 @@ impl RealmArena {
         self.sheets.reset();
         // (…in place: the style engine holds the same table, and outlives the page)
         self.faces.with(|faces| *faces = Default::default());
-        self.free_realm_nodes(self.cur);
+        self.mutations += 1;
+        let cur = self.cur;
+        for slot in &mut self.slots {
+            if let Some(node) = slot.data.as_mut().filter(|n| n.realm == cur) {
+                node.style.take();
+            }
+        }
     }
 
     // Append `child` at the end of `parent`'s children, recording its position so prev/next-sibling
@@ -1325,6 +1342,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     let scope = &mut v8::ContextScope::new(scope, context);
 
     ensure_templates(scope);
+    // A new context for a realm id the arena has seen (main's, at every warm reset): nothing of the old context is
+    // reachable from it any more, so its nodes go now, as they would one by one as V8 collected them.
+    dom(scope).arena.realm_begins(context_id);
     // What the style engine parses — a property, a selector — is what a page's CSSOM may ask about before any style is
     // computed (an inline script runs before the first flush), so the switches that decide it are set first.
     crate::style::enable_properties();
@@ -1467,10 +1487,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // The store-flip's native-backed `_attrs`: __dom.attrsView(nid) -> an interceptor object over
     // that node's attributes (the Element constructor installs it in place of the JS `{}`).
     register(scope, ns, "attrsView", attrs_view, context_id);
-    // Free ONE node's slot: the one a node registered afresh left (a collected node's is freed by its handle,
-    // node_handle.rs). Safe by construction — the generational slot bumps its gen, so any surviving reference
-    // reads absent.
-    register(scope, ns, "dropNode", drop_node, context_id);
     register(scope, ns, "adoptSubtree", adopt_subtree, context_id);
     register(scope, ns, "handleEdgesMismatch", handle_edges_mismatch, context_id);
     // Free a disposed realm's state and nodes — csim calls this before tearing down a frame realm (main
@@ -3323,10 +3339,8 @@ fn push_animation_events<'s>(
     }
 }
 
-// __dom.resetArena() — free the CALLING REALM's nodes for a new page (a navigation). Each occupied
-// slot's gen is bumped (not zeroed), so a detached element held across the navigation can't alias a
-// new-page node that reuses its index; the freed indices feed the new page.
-// …and its walk's kept pass and measures (`walk_reuse`), which name those nodes: dead the moment the page is, rather
+// __dom.resetArena() — the CALLING REALM starts a new page (a navigation): its state afresh (`RealmArena::reset`), and
+// its walk's kept pass and measures (`walk_reuse`), which name the old page's nodes: dead the moment the page is, rather
 // than after the idle passes that would evict them (`walk_reuse::IDLE_PASSES`).
 fn reset_arena(
     scope: &mut v8::PinScope<'_, '_>,
@@ -3340,25 +3354,6 @@ fn reset_arena(
     // …and the style engine forgets the nodes it held (its sheets stay until the new page sets its own).
     if let Some(engine) = dom(scope).styles.get_mut(&cid) {
         engine.reset();
-    }
-}
-
-// __dom.dropNode(nid) — free ONE node's slot, the one a node registered afresh left (native-query-shadow.js `leaveSlot`):
-// nothing names it any more. Idempotent and safe against a stale nid (a slot resetArena already recycled): free_node
-// no-ops on a gen mismatch.
-fn drop_node(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let cid = realm_id(scope, &args);
-    // NON-creating lookup on purpose: `realm()` would resurrect an empty RealmArena for a dropped realm (a lingering
-    // HashMap entry per such frame); freeing nothing from one is exactly right.
-    if let Some(arena) = dom(scope).arena.enter_known(cid) {
-        arena.free_node(id);
     }
 }
 
