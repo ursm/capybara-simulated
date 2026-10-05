@@ -735,7 +735,13 @@ RSpec.describe 'IDL bindings' do
           t(() => { const p = document.createElement('p'); p.innerHTML = 'a<b></b>c'; p.firstChild.nextSibling.outerText = '1\\n2'; return [p.innerHTML, p.childNodes.length]; }),
           t(() => HTMLElement.prototype.focus.call(foreign)),
           ['onstorage' in document.body, 'onstorage' in div],
-          [HTMLElement, SVGElement, MathMLElement].map((i) => Object.prototype.toString.call(i.prototype))
+          [HTMLElement, SVGElement, MathMLElement].map((i) => Object.prototype.toString.call(i.prototype)),
+          t(() => { const f = document.createElement('form'); f.setAttribute('autocorrect', 'off'); const i = f.appendChild(document.createElement('input')); const r = [i.autocorrect]; i.setAttribute('autocorrect', 'bogus'); r.push(i.autocorrect); return r; }),
+          t(() => { window.__ran = []; foreign.setAttribute('onclick', '__ran.push(1)'); foreign.dispatchEvent(new Event('click')); div.setAttribute('onstorage', '__ran.push(2)'); div.dispatchEvent(new Event('storage')); return window.__ran; }),
+          t(() => document.createElement('div').showPopover()),
+          t(() => { const p = document.createElement('div'); p.popover = 'manual'; p.showPopover(); }),
+          t(() => { const p = document.body.appendChild(document.createElement('div')); p.popover = 'manual'; p.addEventListener('beforetoggle', (e) => e.preventDefault()); p.showPopover(); const r = p.matches(':popover-open'); p.remove(); return r; }),
+          Object.prototype.toString.call(div.dataset)
         ];
       })()
     JS
@@ -750,7 +756,13 @@ RSpec.describe 'IDL bindings' do
       '["a1<br>2c",3]',
       'TypeError: Illegal invocation',
       [true, false],
-      ['[object HTMLElement]', '[object SVGElement]', '[object MathMLElement]']
+      ['[object HTMLElement]', '[object SVGElement]', '[object MathMLElement]'],
+      '[false,true]',
+      '[]',
+      "NotSupportedError: Failed to execute 'showPopover' on 'HTMLElement': Not supported on elements that do not have a valid value for the 'popover' attribute.",
+      "InvalidStateError: Failed to execute 'showPopover' on 'HTMLElement': Invalid on disconnected popover elements.",
+      'false',
+      '[object DOMStringMap]'
     ])
   end
 

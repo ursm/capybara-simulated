@@ -4674,7 +4674,6 @@ html/dom/idlharness.any.js:
   @@unscopables property'
 - 'DOMStringList interface: operation contains(DOMString)'
 - 'DOMStringList interface: operation item(unsigned long)'
-- 'DOMStringMap interface: existence and properties of interface object'
 - 'DataTransfer interface: attribute dropEffect'
 - 'DataTransfer interface: attribute effectAllowed'
 - 'DataTransfer interface: attribute files'
@@ -6827,7 +6826,6 @@ html/dom/idlharness.https.html:
 - 'DOMStringList interface: operation contains(DOMString)'
 - 'DOMStringList interface: operation item(unsigned long)'
 - DOMStringList must be primary interface of location.ancestorOrigins
-- 'DOMStringMap interface: existence and properties of interface object'
 - 'DataTransfer interface: attribute dropEffect'
 - 'DataTransfer interface: attribute effectAllowed'
 - 'DataTransfer interface: attribute files'
@@ -8864,7 +8862,6 @@ html/dom/idlharness.https.html:
 - Stringification of document.createElement("video").buffered
 - Stringification of document.createElement("video").textTracks
 - Stringification of document.createElement("xmp")
-- Stringification of document.head.dataset
 - Stringification of location.ancestorOrigins
 - Stringification of new DOMParser()
 - Stringification of new ToggleEvent("beforetoggle")
