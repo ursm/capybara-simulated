@@ -5,7 +5,8 @@ require_relative 'support/session_teardown'
 # may have replaced, which reports them untrusted (HTML "fire an event"): a fragment navigation's `hashchange`, a
 # history traversal's `popstate`, a frame's `load`, an image's `error` — and `unhandledrejection` reaches
 # `onunhandledrejection` once, as one of the window's listeners. And the events a script's call makes the UA fire —
-# `focus()`'s, `checkValidity()`'s `invalid`, a popover's `toggle` (Chrome).
+# `focus()`'s, `checkValidity()`'s `invalid`, a popover's `toggle` (Chrome), `new FormData(form)`'s `formdata`,
+# `execCommand()`'s `input`. And the events of the user's actions the driver plays.
 RSpec.describe 'UA-fired events' do
   let(:app) {
     lambda do |env|
@@ -14,6 +15,8 @@ RSpec.describe 'UA-fired events' do
         <!doctype html><html><body>
           <iframe id=f srcdoc="<p>x"></iframe><img id=i src="/missing.png">
           <input id=t><input id=r required><div id=p popover></div>
+          <form id=fm><input id=u name=u><select id=s name=s><option>a<option>b</select></form>
+          <div id=h>h</div><div id=ce contenteditable>c</div>
           <script>
             window.__trust = {};
             window.dispatchEvent = () => { throw new Error('the page\\'s dispatchEvent'); };
@@ -33,6 +36,10 @@ RSpec.describe 'UA-fired events' do
             location.hash = '#a';
             history.pushState({}, '', '#b');
             history.back();
+            window.__seen = {};
+            for (const type of ['keydown', 'keypress', 'beforeinput', 'input', 'keyup', 'change', 'pointerover', 'mouseover', 'mousemove', 'formdata']) {
+              document.addEventListener(type, (e) => { __seen[type] = (__seen[type] ?? true) && e.isTrusted; }, true);
+            }
           </script>
         </body></html>
       HTML
@@ -46,6 +53,23 @@ RSpec.describe 'UA-fired events' do
     expect(session.evaluate_script('window.__trust')).to eq(
       'hashchange' => true, 'popstate' => true, 'frameLoad' => true, 'imageError' => true, 'unhandled' => 1,
       'focus' => true, 'invalid' => true, 'toggle' => true
+    )
+  end
+
+  it "fires the user's actions' trusted, and those of a script's call that the UA fires" do
+    session.visit '/'
+    session.fill_in 'u', with: 'x'
+    session.find('#u').send_keys('z')
+    session.select 'b', from: 's'
+    session.find('#h').hover
+    session.execute_script(<<~JS)
+      new FormData(document.getElementById('fm'));
+      document.getElementById('ce').focus();
+      document.execCommand('insertText', false, 'y');
+    JS
+    expect(session.evaluate_script('window.__seen')).to eq(
+      'keydown' => true, 'keypress' => true, 'beforeinput' => true, 'input' => true, 'keyup' => true, 'change' => true,
+      'pointerover' => true, 'mouseover' => true, 'mousemove' => true, 'formdata' => true
     )
   end
 end
