@@ -74,6 +74,37 @@ fn collect(arena: &RealmArena, scope: NodeId, filter: &Filter) -> Vec<NodeId> {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "elementsBy", elements_by, context_id);
+    crate::dom::register(scope, ns, "elementById", element_by_id, context_id);
+}
+
+// __dom.elementById(rootNid, id) -> `getElementById`: the path from the root of the first element in tree order, the
+// root itself included, whose id is `id` (exactly, as UTF-16), or a length of -1 for none.
+fn element_by_id(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(root) = nid_arg(scope, &args, 0) else { return };
+    let id = utf16_arg(scope, args.get(1));
+    // (…compared as a string where neither side holds a lone surrogate, the common case: no copy per element)
+    let id_str = String::from_utf16(&id).ok();
+    let matches = |node: &NodeData| match (node.get_attr_u16("id"), &id_str) {
+        (Some(units), _) => units == &id[..],
+        (None, Some(s)) => node.plain_attr("id") == Some(s.as_str()),
+        (None, None) => false,
+    };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let mut stack = vec![root];
+    let mut out = Vec::new();
+    while let Some(n) = stack.pop() {
+        let Some(node) = arena.get(n) else { continue };
+        if node.kind == NodeKind::Element && matches(node) {
+            arena.push_path(root, n, &mut out);
+            break;
+        }
+        stack.extend(node.children.iter().rev());
+    }
+    if out.is_empty() {
+        out.push(-1.0);
+    }
+    rv.set(f64_array(scope, &out).into());
 }
 
 const CLASSES: u32 = 0;
