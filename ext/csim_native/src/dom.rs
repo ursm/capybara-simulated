@@ -1269,6 +1269,8 @@ pub(crate) struct Dom {
     attrs_view_template: Option<v8::Global<v8::ObjectTemplate>>,
     // The template every node's object is made from (`node_handle`, `__dom.NodeBase`).
     pub(crate) node_template: Option<v8::Global<v8::FunctionTemplate>>,
+    // Every live range's boundary points (ranges.rs).
+    pub(crate) ranges: crate::ranges::Ranges,
     // Each realm's style engine (made by `styleSheets`).
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
     // Each realm's Rust walk's last pass and the measures kept of it (`walk_reuse`).
@@ -1404,6 +1406,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
         let key = v8::String::new(scope, "NodeBase").expect("a short string");
         ns.set(scope, key.into(), base.into());
     }
+    // …the constructor every live range's object is made through, and the ops on its boundary points (ranges.rs)
+    if let Some(base) = crate::ranges::base_function(scope) {
+        let key = v8::String::new(scope, "RangeBase").expect("a short string");
+        ns.set(scope, key.into(), base.into());
+    }
+    crate::ranges::install(scope, ns, context_id);
     // …and the realm's id, which spaces its nodes' handle ids apart from every other realm's (dom-nodes.js `Node`).
     let key = v8::String::new(scope, "realmId").expect("a short string");
     let id = v8::Integer::new(scope, context_id);

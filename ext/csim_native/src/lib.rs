@@ -42,6 +42,7 @@ mod layout;
 mod mime;
 mod node_handle;
 mod numbers;
+mod ranges;
 // Bringing a box into view: the scroll boxes that move, and to where (`scrollIntoView`, a driver's scroll-if-needed).
 // What is rendered, and the text it renders (`innerText`, the visible text a driver reads).
 mod rendered;
