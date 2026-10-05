@@ -104,6 +104,8 @@ struct Walk<'s> {
     steps: Vec<u8>,
     // Whether a NodeIterator is before the node, where its filter moved it.
     moved_before: Option<bool>,
+    // A TreeWalker's current node — the filter may set it as it runs.
+    current: NodeId,
 }
 
 // The filter threw: the traversal stops, and its exception is the caller's.
@@ -113,6 +115,8 @@ thread_local! {
     // Where a NodeIterator's filter moved the node it was handed (`__dom.traverseFrom`): a removal while it ran took the
     // node with it, and the iterator's pre-removing steps moved the node it is at — and whether it is now before it.
     static MOVED: std::cell::Cell<Option<(NodeId, bool)>> = const { std::cell::Cell::new(None) };
+    // …and where a TreeWalker's filter set the walker's current node (`__dom.traverseCurrent`).
+    static CURRENT: std::cell::Cell<Option<NodeId>> = const { std::cell::Cell::new(None) };
 }
 
 impl<'s> Walk<'s> {
@@ -150,6 +154,9 @@ impl<'s> Walk<'s> {
             self.node = node;
             self.moved_before = Some(before);
         }
+        if let Some(current) = CURRENT.take() {
+            self.current = current;
+        }
         Ok(answer.ok_or(Thrown)?.uint32_value(scope).unwrap_or(0))
     }
     // What the traversal answers: the node it ended on (`found`), with a status, or none.
@@ -172,7 +179,6 @@ impl<'s> Walk<'s> {
     // TreeWalker "traverse children": `firstChild()` (`first`) or `lastChild()`.
     fn children(&mut self, scope: &mut v8::PinScope<'s, '_>, first: bool) -> Result<bool, Thrown> {
         let (into, across) = if first { (Step::FirstChild, Step::NextSibling) } else { (Step::LastChild, Step::PreviousSibling) };
-        let start = self.node;
         if !self.go(scope, into) {
             return Ok(false);
         }
@@ -190,7 +196,7 @@ impl<'s> Walk<'s> {
                     break;
                 }
                 let parent = self.peek(scope, self.node, Step::Parent);
-                if parent.is_none() || parent == Some(self.root) || parent == Some(start) {
+                if parent.is_none() || parent == Some(self.root) || parent == Some(self.current) {
                     return Ok(false);
                 }
                 self.go(scope, Step::Parent);
@@ -348,7 +354,8 @@ const ITERATOR_PREVIOUS: u32 = 8;
 // previousNode; `before` its pointer) traversal from the current node (the iterator's reference): where it ends, as
 // `answer_value` says — a status 1, or for an iterator 1 + whether it is before its new reference, and the steps from
 // where `filter` last took them. `filter(steps)` takes the steps to the node it answers for (FILTER_ACCEPT / REJECT /
-// SKIP) — and, for an iterator, tells where it moved that node to (`traverseFrom`); null for no filter. Nothing, where
+// SKIP) — and tells where it moved that node to, for an iterator (`traverseFrom`), or where it set the walker's current
+// node (`traverseCurrent`); null for no filter. Nothing, where
 // the filter threw.
 fn traverse<'s>(scope: &mut v8::PinScope<'s, '_>, args: v8::FunctionCallbackArguments<'s>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(root), Some(node)) = (nid_arg(scope, &args, 1), nid_arg(scope, &args, 2)) else { return };
@@ -356,7 +363,7 @@ fn traverse<'s>(scope: &mut v8::PinScope<'s, '_>, args: v8::FunctionCallbackArgu
     let what_to_show = args.get(3).uint32_value(scope).unwrap_or(0);
     let filter = v8::Local::<v8::Function>::try_from(args.get(4)).ok();
     let before = args.get(5).is_true();
-    let mut walk = Walk { cid: realm_id(scope, &args), root, what_to_show, filter, node, steps: Vec::new(), moved_before: None };
+    let mut walk = Walk { cid: realm_id(scope, &args), root, what_to_show, filter, node, steps: Vec::new(), moved_before: None, current: node };
     let found = match kind {
         PARENT_NODE => walk.parent_node(scope).map(|f| f.then_some(1)),
         FIRST_CHILD | LAST_CHILD => walk.children(scope, kind == FIRST_CHILD).map(|f| f.then_some(1)),
@@ -380,6 +387,14 @@ fn traverse_from(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     }
 }
 
+// __dom.traverseCurrent(nid): a TreeWalker's filter set the walker's current node to `nid` — which the traversal reads
+// as it goes on ("traverse children" stops at it).
+fn traverse_current(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    if let Some(node) = nid_arg(scope, &args, 0) {
+        CURRENT.set(Some(node));
+    }
+}
+
 // __dom.iteratorPreRemove(removedNid, rootNid, referenceNid, before) -> the NodeIterator "pre-removing steps" for the
 // removal of `removedNid`: null where the iterator stays as it is, else where its reference is then, as `answer_value`
 // says — 1, or 2 where it is before it, and the steps to it from the removed node.
@@ -395,10 +410,10 @@ fn iterator_pre_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     if contains(removed, root) || !contains(removed, reference) {
         return;
     }
-    let mut walk = Walk { cid, root, what_to_show: 0, filter: None, node: removed, steps: Vec::new(), moved_before: None };
-    // (…before it: the first node following the removed one and not in it — anywhere in the document)
+    let mut walk = Walk { cid, root, what_to_show: 0, filter: None, node: removed, steps: Vec::new(), moved_before: None, current: removed };
+    // (…before it: the first node following the removed one and not in it, under the root)
     if before {
-        if walk.following(scope, None, true) {
+        if walk.following(scope, Some(root), true) {
             let answer = walk.answer(scope, true, 2);
             return rv.set(answer);
         }
@@ -418,6 +433,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "comparePosition", compare_position, context_id);
     crate::dom::register(scope, ns, "traverse", traverse, context_id);
     crate::dom::register(scope, ns, "traverseFrom", traverse_from, context_id);
+    crate::dom::register(scope, ns, "traverseCurrent", traverse_current, context_id);
     crate::dom::register(scope, ns, "iteratorPreRemove", iterator_pre_remove, context_id);
 }
 
