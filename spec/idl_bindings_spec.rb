@@ -161,6 +161,38 @@ RSpec.describe 'IDL bindings' do
     expect(got).to eq([false, 'function', true, 2, true])
   end
 
+  # Node itself is installed: its members on Node.prototype as IDL has them (a kind's own steps answering where it
+  # differs — a Document's ownerDocument, a shadow root's parentNode), its constants read-only, a dictionary converted.
+  it "installs Node's members, constants and dictionary" do
+    got = outcome(<<~JS)
+      (() => {
+        const thrown = (f) => { try { f(); return 'no'; } catch (e) { return e.message; } };
+        const host = document.body.appendChild(document.createElement('div'));
+        const sr = host.attachShadow({mode: 'open'});
+        const b = sr.appendChild(document.createElement('b'));
+        const constant = Object.getOwnPropertyDescriptor(Node.prototype, 'ELEMENT_NODE');
+        const attr = document.createAttribute('x');
+        attr.nodeValue = null;
+        return [
+          thrown(() => Node.prototype.appendChild.call({}, b)),
+          thrown(() => document.body.appendChild(5)),
+          thrown(() => document.body.getRootNode(5)),
+          [constant.value, constant.writable, constant.enumerable, constant.configurable],
+          Object.getOwnPropertyDescriptor(Node.prototype, 'appendChild').enumerable,
+          [Node.prototype.cloneNode.length, Node.prototype.insertBefore.length],
+          [b.getRootNode() === sr, b.getRootNode({composed: true}) === document],
+          [sr.parentNode, document.ownerDocument, attr.value]
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      'Illegal invocation',
+      "Failed to execute 'appendChild' on 'Node': parameter 1 is not of type 'Node'.",
+      "Failed to execute 'getRootNode' on 'Node': The provided value is not of type 'GetRootNodeOptions'.",
+      [1, false, true, false], true, [0, 2], [true, true], [nil, nil, '']
+    ])
+  end
+
   it 'marks only the [Unscopable] members of each interface' do
     got = outcome('[Document, DocumentFragment, Element].map((i) => Object.keys(i.prototype[Symbol.unscopables]).sort())')
     expect(got).to eq([

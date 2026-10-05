@@ -29,6 +29,7 @@ const INTERFACES = [
   ['dom', 'NodeFilter'],
   ['dom', 'NodeIterator'],
   ['dom', 'TreeWalker'],
+  ['dom', 'Node', { install: true }],
   ['dom', 'CharacterData', { install: true }],
   ['dom', 'Text', { install: true, omit: { GeometryUtils: 'getBoxQuads / convert*FromNode (cssom-view) are not implemented' } }],
   ['dom', 'Comment', { install: true }],
@@ -51,12 +52,13 @@ const all = await parseAll();
 // Every interface, callback interface and mixin of every spec, by name: what an interface type, or an `includes`,
 // names. And what adds to an interface or a mixin beside its definition — a mixin it includes, a partial of it — by
 // the name of the mixin, or the spec of the partial.
-const definitions = new Map(), mixins = new Map(), additions = new Map();
+const definitions = new Map(), mixins = new Map(), dictionaries = new Map(), additions = new Map();
 const add = (to, addition) => additions.set(to, [...(additions.get(to) || []), addition]);
 for (const [spec, defs] of Object.entries(all)) {
   for (const d of defs) {
     if ((d.type === 'interface' || d.type === 'callback interface') && !d.partial) definitions.set(d.name, d);
     if (d.type === 'interface mixin' && !d.partial) mixins.set(d.name, d);
+    if (d.type === 'dictionary' && !d.partial) dictionaries.set(d.name, d);
     if (d.type === 'includes') add(d.target, { mixin: d.includes });
     if ((d.type === 'interface' || d.type === 'interface mixin') && d.partial) add(d.name, { partial: spec, def: d });
   }
@@ -118,6 +120,8 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
         c = `toInterface(${expr}, IS_${t.idlType}, ${JSON.stringify(conversionError(where, t.idlType))})`;
       } else if (def && def.type === 'callback interface') {
         c = `toCallbackInterface(${expr}, ${JSON.stringify(conversionError(where, 'Object'))})`;
+      } else if (dictionaries.has(t.idlType)) {
+        c = `${dictionaryConverter(t.idlType)}(${expr}, ${JSON.stringify(failure(where) + `The provided value is not of type '${t.idlType}'.`)})`;
       } else {
         throw new Error(`${label}: no binding converts ${t.idlType} yet`);
       }
@@ -138,6 +142,46 @@ function unionConversion(t, expr, where, checks) {
   for (const u of ifaces) checks.add(u.idlType);
   const test = ifaces.map((u) => `IS_${u.idlType}(${expr})`).join(' || ');
   return `(${test} ? ${expr} : ${conversion(strings[0], expr, where, checks)})`;
+}
+
+// A dictionary's conversion (Web IDL §3.2.20): a function of its own, written once beside the interfaces — undefined
+// or null an empty dictionary, any other non-object a TypeError (`message`); each member, its inherited dictionaries'
+// first and each's in lexicographic order, got from the object, converted, or its default where it is undefined (a
+// required one missing a TypeError).
+const dictionaryConverters = new Map();
+function dictionaryConverter(name) {
+  const fn = `to${name}`;
+  if (dictionaryConverters.has(name)) return fn;
+  dictionaryConverters.set(name, null);
+  const chain = [];
+  for (let d = dictionaries.get(name); d; d = d.inheritance && dictionaries.get(d.inheritance)) {
+    if (d.inheritance && !dictionaries.has(d.inheritance)) throw new Error(`${d.name}: inherits ${d.inheritance}, which no spec defines`);
+    if ((additions.get(d.name) || []).length) throw new Error(`${d.name}: no binding merges a partial dictionary yet`);
+    chain.unshift(d);
+  }
+  const checks = new Set(), lines = [];
+  lines.push(`function ${fn}(v, message) {`);
+  lines.push(`  if (v !== undefined && v !== null && typeof v !== 'object' && typeof v !== 'function') throw new TypeError(message);`);
+  lines.push(`  const dict = {};`);
+  for (const d of chain) {
+    for (const m of [...d.members].sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const where = { iface: d.name, member: m.name };
+      lines.push(`  {`);
+      lines.push(`    const x = v == null ? undefined : v.${m.name};`);
+      const missing = m.required ? `(() => { throw new TypeError(${JSON.stringify(`Failed to read the '${m.name}' property from '${d.name}': Required member is undefined.`)}); })()`
+        : m.default ? defaultValue(m.default, `${d.name}.${m.name}`) : null;
+      const converted = conversion(m.idlType, 'x', where, checks, m.extAttrs);
+      lines.push(missing === null
+        ? `    if (x !== undefined) dict.${m.name} = ${converted};`
+        : `    dict.${m.name} = x !== undefined ? ${converted} : ${missing};`);
+      lines.push(`  }`);
+    }
+  }
+  if (checks.size) throw new Error(`${name}: a dictionary member of an interface type is not converted yet`);
+  lines.push(`  return dict;`);
+  lines.push(`}`);
+  dictionaryConverters.set(name, lines.join('\n'));
+  return fn;
 }
 
 function constantValue(m, where) {
@@ -219,8 +263,8 @@ function generateInterface(def, options = {}) {
   if (stringifier) body.push(`    toString() { return impl.get_${stringifier}(${self}); }`);
   const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
   if (options.install) {
-    if (constants.length || indexed || valueIterator) throw new Error(`${name}: an installed interface with constants, an indexed getter or an iterator is not generated yet`);
-    return installInterface(def, { body, checks, unscopables, constructor });
+    if (indexed || valueIterator) throw new Error(`${name}: an installed interface with an indexed getter or an iterator is not generated yet`);
+    return installInterface(def, { body, checks, unscopables, constructor, constants });
   }
   if (constructor) throw new Error(`${name}: a constructor is not generated yet`);
 
@@ -263,7 +307,7 @@ function generateInterface(def, options = {}) {
 // An installed interface: its members generated in a class of their own, then put on the prototype of the hand-written
 // class (`iface`) that makes its objects — their names, lengths and conversions IDL's, enumerable; the interface
 // object's `length` its constructor's required arguments; its class string and @@unscopables.
-function installInterface(def, { body, checks, unscopables, constructor }) {
+function installInterface(def, { body, checks, unscopables, constructor, constants }) {
   const name = def.name;
   const length = constructor ? constructor.arguments.filter((a) => !a.optional && !a.variadic).length : 0;
   const lines = [];
@@ -275,6 +319,11 @@ function installInterface(def, { body, checks, unscopables, constructor }) {
   lines.push(...body);
   lines.push(`  }`);
   lines.push(`  installMembers(iface.prototype, Members.prototype);`);
+  if (constants.length) {
+    const list = JSON.stringify(constants.map(([n]) => n));
+    lines.push(`  defineConstants(iface, ${list}, [${constants.map(([, v]) => v).join(', ')}]);`);
+    lines.push(`  defineConstants(iface.prototype, ${list}, [${constants.map(([, v]) => v).join(', ')}]);`);
+  }
   lines.push(`  defineLength(iface, ${length});`);
   lines.push(`  defineClassString(iface.prototype, '${name}');`);
   if (unscopables.length) lines.push(`  defineUnscopables(iface.prototype, ${JSON.stringify(unscopables)});`);
@@ -308,7 +357,9 @@ function operation(iface, m, checks, self) {
     const where = { iface, member: m.name, index: i };
     if (a.variadic) return `${argName(a)}.map((x) => ${conversion(a.idlType, 'x', where, checks, a.extAttrs)})`;
     if (a.optional) {
-      // (…an optional argument passed as undefined is one not passed, Web IDL §3.6.8)
+      // (…an optional argument passed as undefined is one not passed, Web IDL §3.6.8 — but a dictionary is converted
+      // from undefined, its members' defaults)
+      if (dictionaries.has(a.idlType.idlType)) return conversion(a.idlType, `arguments[${i}]`, where, checks, a.extAttrs);
       const missing = a.default ? defaultValue(a.default, `${iface}.${m.name}(${a.name})`) : 'undefined';
       return `(arguments[${i}] !== undefined ? ${conversion(a.idlType, `arguments[${i}]`, where, checks, a.extAttrs)} : ${missing})`;
     }
@@ -379,6 +430,7 @@ for (const [spec, name, options] of INTERFACES) {
   def.spec = spec;
   parts.push(def.type === 'interface' ? generateInterface(def, options) : generateCallbackInterface(def));
 }
+const dictionaryParts = [...dictionaryConverters.values()];
 const source = `// GENERATED by script/gen_bindings.mjs from @webref/idl — do not edit; run \`node script/gen_bindings.mjs\`.
 // The bindings of the interfaces the driver implements: what Web IDL says of each, its implementation handed the
 // converted values (webidl.js is their runtime).
@@ -387,7 +439,7 @@ import {
 ${wrap(RUNTIME)}
 } from '../webidl.js';
 
-${parts.join('\n\n')}
+${[...dictionaryParts, ...parts].join('\n\n')}
 `;
 
 if (process.argv.includes('--check')) {
