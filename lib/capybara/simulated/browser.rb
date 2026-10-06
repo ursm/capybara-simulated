@@ -2079,13 +2079,7 @@ module Capybara
 
       def default_user_agent=(ua)
         @default_user_agent = ua
-        push_user_agent_to_js if ua
-      end
-
-      def push_user_agent_to_js
-        ua = @default_user_agent or return
-        return unless @runtime
-        @runtime.call('__csimSetUserAgent', ua)
+        @runtime.user_agent_changed(ua) if ua && @runtime
       end
 
       def set_viewport(w, h)
@@ -10960,7 +10954,6 @@ module Capybara
           opts['viewportW'] = @viewport_width
           opts['viewportH'] = @viewport_height
         end
-        opts['userAgent'] = @default_user_agent if @default_user_agent
         opts['touch'] = true if @touch_input
         @document_handle = @runtime.call('__csimBootContext', opts).to_i
         # Drain the app's deferred external-script (chunk) boot chain to quiescence.

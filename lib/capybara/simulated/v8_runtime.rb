@@ -633,7 +633,7 @@ module Capybara
             # contexts N -> 1). See `relieve_heap_pressure`.
             relieve_heap_pressure
             attach_host_fns(@ctx)
-            @ctx.eval_void('__csimInitRealm();')
+            init_realm(@ctx)
             return @ctx
           rescue StandardError => e
             warn "[capybara-simulated] warm context reset failed, falling back to cold rebuild: #{e.class}: #{e.message}"
@@ -793,8 +793,22 @@ module Capybara
       def build_ctx
         c = Ctx.new(snapshot: @snapshot || self.class.snapshot, timeout: CALL_TIMEOUT_MS)
         attach_host_fns(c)
-        c.eval_void('__csimInitRealm();')
+        init_realm(c)
         c
+      end
+
+      # A window realm's own state (`__csimInitRealm()`: its document, the Worker constructors) and the user agent a test
+      # set, which its navigator answers — the top-level window's and every frame's and pop-up's alike.
+      def init_realm(c)
+        c.eval_void('__csimInitRealm();')
+        c.call('__csimSetUserAgent', @browser.default_user_agent) if @browser.default_user_agent
+      end
+
+      # …and a user agent set once the realms are made: each live one's navigator answers it from then on.
+      def user_agent_changed(ua)
+        [@ctx, *frame_realms.values].compact.each do |realm|
+          realm.call('__csimSetUserAgent', ua)
+        end
       end
 
 
@@ -1538,7 +1552,7 @@ module Capybara
       # `attach_run_script_with_cache` (realm-bound).
       def reseed_realm_js(c)
         c.eval_void("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
-        c.eval_void('__csimInitRealm();')
+        init_realm(c)
         seed_layout(c)
       end
 
@@ -1617,10 +1631,8 @@ module Capybara
         # `(0, eval)` would block-scope them to the eval and they'd vanish. `c.eval` is
         # the top-level-script path (same as the worker's own body eval).
         c.attach('__csim_workerImportEval', ->(src) { c.eval_void(src.to_s) })
-        # The worker's KIND — 'dedicated', 'shared' or 'service' — and its name, before its global is made one of that
-        # kind's scope (worker-globals.js).
-        c.eval_void("globalThis.__csimWorkerKind = #{JSON.generate(kind)}; globalThis.__csimWorkerName = #{JSON.generate(name.to_s)};")
-        c.eval_void('__csim_installWorkerScope();')
+        # The worker's scope, of its KIND — 'dedicated', 'shared' or 'service' — and name (worker-globals.js).
+        c.call('__csim_installWorkerScope', kind, name.to_s)
         # …and the user agent a test set, which its navigator answers as its requests send it.
         c.call('__csimSetUserAgent', browser.default_user_agent) if browser.default_user_agent
         WorkerRuntime.new(c)

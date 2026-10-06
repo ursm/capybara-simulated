@@ -26,6 +26,14 @@ RSpec.describe 'Worker global scope' do
             (() => { try { postMessage(() => 1); return 'posted'; } catch (e) { return e.name; } })()
           ]);
         JS
+      when '/frame' then [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><p>f']]
+      when '/sw.js'
+        [200, {'content-type' => 'text/javascript'}, [<<~JS]]
+          const me = self.serviceWorker, seen = [[me && me.state, me && new URL(me.scriptURL).pathname]];
+          self.oninstall = () => seen.push([self.serviceWorker === me, me.state, self.registration.installing === me]);
+          self.onactivate = () => seen.push([self.serviceWorker === me, me.state, self.registration.active === me]);
+          self.onmessage = (e) => e.source.postMessage(seen);
+        JS
       else [404, {'content-type' => 'text/plain'}, ['nope']]
       end
     end
@@ -50,10 +58,51 @@ RSpec.describe 'Worker global scope' do
     ])
   end
 
+  it "makes a service worker's ServiceWorker one object, the one its registration holds" do
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      navigator.serviceWorker.onmessage = (e) => done(e.data);
+      navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready).then((r) => r.active.postMessage('?'));
+    JS
+    expect(got).to eq([['parsed', '/sw.js'], [true, 'installing', true], [true, 'activating', true]])
+  ensure
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+  end
+
+  it "names a worker by WorkerOptions' name, a DOMString" do
+    session.visit '/'
+    expect(session.evaluate_script(<<~JS)).to eq('TypeError')
+      (() => { try { new Worker('/w.js', { name: Symbol() }); return 'made'; } catch (e) { return e.name; } })()
+    JS
+  end
+
+  it 'tells every window the user agent a test sets, a frame too' do
+    session.driver.browser.default_user_agent = 'MyUA/1.0'
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const f = document.createElement('iframe');
+      f.src = '/frame';
+      f.onload = () => {
+        const g = document.createElement('iframe');
+        g.srcdoc = 'x';
+        g.onload = () => done([navigator.userAgent, f.contentWindow.navigator.userAgent, g.contentWindow.navigator.userAgent]);
+        document.body.append(g);
+      };
+      document.body.append(f);
+    JS
+    expect(got).to eq(['MyUA/1.0', 'MyUA/1.0', 'MyUA/1.0'])
+    session.driver.browser.default_user_agent = 'Other/2.0'
+    expect(session.evaluate_script('[navigator.userAgent, frames[0].navigator.userAgent]')).to eq(['Other/2.0', 'Other/2.0'])
+  end
+
   it "makes a window's navigator a Navigator" do
     session.visit '/'
     expect(session.evaluate_script(<<~JS)).to eq([true, [], 'Mozilla', 'Gecko', true, 'undefined', false, true, 'Linux x86_64', true, 'TypeError'])
-      [navigator instanceof Navigator, Object.getOwnPropertyNames(navigator), navigator.appCodeName, navigator.product,
+      [navigator instanceof Navigator, Reflect.ownKeys(navigator), navigator.appCodeName, navigator.product,
        Object.getOwnPropertyNames(Navigator.prototype).includes('userAgent'), typeof WorkerGlobalScope,
        'oscpu' in navigator, navigator.appVersion.startsWith('5.0 (X11'), navigator.platform, Object.isFrozen(navigator.languages),
        (() => { try { return Navigator.prototype.doNotTrack; } catch (e) { return e.name; } })()]
