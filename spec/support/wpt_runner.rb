@@ -1068,18 +1068,18 @@ module WptRunner
   def worker_js_page(js_rel)
     <<~HTML
       <!doctype html><meta charset="utf-8">
+      #{timeout_meta(js_rel)}
       <script src="/resources/testharness.js"></script>
       <script src="/resources/testharnessreport.js"></script>
       <div id=log></div>
       <script>
       fetch_tests_from_worker(new Worker(#{"/#{js_rel}".to_json} + location.search));
       </script>
-      #{timeout_meta(js_rel)}
     HTML
   end
 
   # The `<meta name=timeout>` of a JS test's wrapper, as wptserve writes one for its `// META: timeout=long` — read by
-  # the window's harness, whose timeout a worker's tests run under too.
+  # the window's harness as it loads (so ahead of it), whose timeout a worker's tests run under too.
   def timeout_meta(js_rel)
     any_js_meta(js_rel, 'timeout').first == 'long' ? '<meta name="timeout" content="long">' : ''
   end
@@ -1146,9 +1146,9 @@ module WptRunner
     end
     <<~HTML
       <!doctype html><meta charset="utf-8">
+      #{timeout_meta(js_rel)}
       <script src="/resources/testharness.js"></script>
       <script src="/resources/testharnessreport.js"></script>
-      #{timeout_meta(js_rel)}
       <div id=log></div>
       <script>
       #{start}</script>

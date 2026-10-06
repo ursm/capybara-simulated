@@ -4032,7 +4032,8 @@ module Capybara
       # `sleep(0.001) if async`), feeding the reader instead of spinning it into starvation — a
       # binary echo that only lands AFTER the idle-bail is exactly the flake this prevents. Zero-alloc
       # on the common no-WS path (the `empty?` short-circuit); a handful of threads otherwise.
-      def websocket_reader_active? = !@websocket_threads.empty? && @websocket_lock.synchronize { @websocket_threads.each_value.any?(&:alive?) }
+      # (A dropped socket's reader, finishing a closing handshake nobody hears, is no work of the page's.)
+      def websocket_reader_active? = !@websocket_threads.empty? && @websocket_lock.synchronize { @websocket_threads.any? {|id, t| @websocket_sockets.key?(id) && t.alive? } }
 
       # Any live cross-thread actor (a worker / service-worker thread, or a WebSocket
       # reader) — the only things that can revive an apparently-idle page from OUTSIDE
@@ -4631,7 +4632,8 @@ module Capybara
         handle
       end
 
-      def worker_post_to_worker(handle, data)
+      # (`sent_at`: the window's clock as a window's post left it — `V8Runtime#clock_at_least`; none from a worker's)
+      def worker_post_to_worker(handle, data, sent_at = nil)
         w = @workers[handle.to_i]
         # A worker whose thread died (script blocked / load raise → __error → onerror) keeps
         # its registry entry until an explicit terminate; a post to it must be a NO-OP (as in
@@ -4643,6 +4645,7 @@ module Capybara
         # the LAST worker goes — which never happens while a service worker is registered.
         @worker_in_flight += 1
         w[:in_flight] = w[:in_flight].to_i + 1
+        @runtime.clock_at_least(sent_at) if sent_at
         w[:inbox] << data.to_s
       end
 
@@ -5783,11 +5786,19 @@ module Capybara
         rid = realm_id.to_i
         return nil if rid.zero?
 
-        # The realm's own workers, plus — transitively — their NESTED workers (recorded
-        # with realm 0 + parent_worker; their Worker objects live in the dying parents'
-        # isolates, so no one can reach them once those go). Snapshot before iterating:
-        # a live worker thread can insert into @workers (a nested spawn) mid-walk.
-        doomed = @workers.to_a.select {|_h, w| w[:realm] == rid && !w[:service] }.to_h
+        discard_workers(@workers.to_a.select {|_h, w| w[:realm] == rid && !w[:service] }.to_h)
+      end
+
+      # …and every one the window's document — and its frames, and their workers — created, as a navigation replaces
+      # it (HTML: a worker's owner set emptied). Only a service worker outlives its clients.
+      private def terminate_document_workers
+        discard_workers(@workers.to_a.reject {|_h, w| w[:service] }.to_h)
+      end
+
+      # (…`doomed` and — transitively — their NESTED workers, recorded with realm 0 + parent_worker: their Worker
+      # objects live in the dying parents' isolates, so no one can reach them once those go. A snapshot, as a live
+      # worker thread can insert into @workers (a nested spawn) mid-walk.)
+      private def discard_workers(doomed)
         loop do
           more = @workers.to_a.select {|h, w| w[:parent_worker] && doomed.key?(w[:parent_worker]) && !doomed.key?(h) }
           break if more.empty?
@@ -8166,16 +8177,31 @@ module Capybara
         # the window moved while the worker had no timer is spent then, not owed to the next timer it sets; and a
         # window's clock that went back (a navigation's page starts its own at 0) moved nothing.
         window_was = nil
-        worker_clock_step = lambda do
+        # (`floor`: the least it advances — a poll interval once a tick, so a worker whose window's clock stands still
+        # still runs)
+        worker_clock_step = lambda do |floor|
           window = @runtime ? @runtime.clock : 0.0
           moved  = window_was && window > window_was ? window - window_was : 0.0
           window_was = window
-          [WORKER_POLL_INTERVAL * 1000, moved].max
+          [floor, moved].max
         end
         # "Has the session boundary asked this worker to stop?" — the Ruby-side half of that ask
         # (`stop_worker_js` sets the flag; `terminate` handles the JS already in flight). Read
         # where the tick could otherwise commit to another long call.
         stopping = -> { !record.nil? && record[:stopping] }
+        # The worker's timers, run before the tick's message — a poll interval at least — and again after it, as far as
+        # the window has moved since: the message's own timers, and what its handler left in the microtask queue,
+        # progress in the same tick. The stop is asked right before the drain: THIS is the call that can run for seconds — its 50 ms budget is
+        # checked BETWEEN timer callbacks, and one callback is as long as it is — so a stop that arrived while we were
+        # deciding must not buy another one. What lands once the call is already running is `terminate`'s job; between
+        # the two, the window is a few instructions wide.
+        run_worker_timers = lambda do |floor|
+          step = worker_clock_step.call(floor)
+          next if stopping.call || rt.call('__nextTimerDelay').to_f < 0
+
+          rt.drain_microtasks
+          rt.drain_timers(step)
+        end
         # A nil body with `sw_script` set is the DEFERRED case — the script is fetched
         # through the controlling SW below, after the isolate exists.
         raise "worker script not found: #{url}" unless body || sw_script
@@ -8529,6 +8555,15 @@ module Capybara
             break if msg == :terminate
             # …and the same answer from the boundary, which cannot wait for this queue.
             break if stopping.call
+            # Drive the worker's OWN event loop each tick, BEFORE the message: the time the window has moved since the
+            # last tick passes for the timers already set — those due fire ahead of the message, the tasks queued
+            # before it — and a timer the message sets starts from there, not owed what went by before it was set.
+            # An AUTONOMOUS loop (the dispatcher executor-worker's receive→fetch→setTimeout retry, which has no inbox
+            # message) progresses by it alone; worker http fetch is setTimeout(0)+__rackFetch, resolved on this
+            # thread by the drain. Gated on a PENDING timer (any, not just due-now — the clock must advance to fire a
+            # future randomDelay) so an idle message-driven worker with no timers stays lazy. Host CALLS, not string
+            # `eval`, keep the per-tick cost off the V8 compile path (rule 3).
+            run_worker_timers.call(WORKER_POLL_INTERVAL * 1000)
             # A main-side BroadcastChannel post to this worker arrives as a {kind:'broadcast'} hash;
             # deliver it to the worker's channels (the receiver's own origin gate drops cross-origin).
             # A plain string is a postMessage to the worker.
@@ -8703,33 +8738,14 @@ module Capybara
               rt.call('__csim_workerOnMessage', msg)
               drive_worker_to_quiescence(rt, stopping)
             end
-            # Drive the worker's OWN event loop each tick: an AUTONOMOUS loop (the dispatcher
-            # executor-worker's receive→fetch→setTimeout retry, which has no inbox message)
-            # may have pending timers. Drain ~one poll interval (WorkerRuntime#drain_timers
-            # advances the worker clock a step) so they progress; worker http fetch is
-            # setTimeout(0)+__rackFetch, resolved on this thread by the drain. Gated on a
-            # PENDING timer (any, not just due-now — the clock must advance to fire a future
-            # randomDelay) so an idle message-driven worker with no timers stays lazy. A
-            # regular postMessage already drove itself to quiescence above (no timer left),
-            # so this is a no-op for it. Host CALLS, not string `eval`, keep the per-tick
-            # cost off the V8 compile path (rule 3).
-            # Asked again right before the drain, and not only at the top of the tick: THIS is
-            # the call that can run for seconds — its 50 ms budget is checked BETWEEN timer
-            # callbacks, and one callback is as long as it is — so a stop that arrived while we
-            # were deciding must not buy another one. What lands once the call is already running
-            # is `terminate`'s job; between the two, the window is a few instructions wide.
-            # (…and whether it has one is told to the main thread, whose waits go on while it does: `polling?`.)
-            next_timer = stopping.call ? -1.0 : rt.call('__nextTimerDelay').to_f
-            timers_due = next_timer >= 0
+            run_worker_timers.call(0)
+            # Whether the worker has a timer left, after the message, is told to the main thread, whose waits go on
+            # while it does (`polling?`) — and how soon, for the window's event loop, whose page waits on it
+            # (`worker_next_timer`).
             if record
-              record[:timers_due] = timers_due
-              # (…and how soon, for the window's event loop, whose page waits on it: `worker_next_timer`)
+              next_timer = stopping.call ? -1.0 : rt.call('__nextTimerDelay').to_f
+              record[:timers_due] = next_timer >= 0
               record[:next_timer] = next_timer
-            end
-            clock_step = worker_clock_step.call
-            if timers_due
-              rt.drain_microtasks
-              rt.drain_timers(clock_step)
             end
             # A lifecycle phase whose `waitUntil` was parked at boot may have settled off
             # the message dispatch / timer drain above (the extendable-event SYN/ACK, the
@@ -11021,6 +11037,7 @@ module Capybara
         # a leg delivering after this point would resolve the NEW page's same-
         # numbered fetch with the old page's response.
         reset_sw_race_state
+        terminate_document_workers
         drop_document_websockets
         @runtime.rebuild_ctx
         # A full page (re)build disposes every frame realm, so any active

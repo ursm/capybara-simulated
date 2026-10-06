@@ -128,6 +128,15 @@ RSpec.describe 'WebSocket' do
       expect(closes.pop(timeout: 5)).to eq(1001)
     end
 
+    it 'closes a worker\'s socket as a navigation replaces the worker\'s document' do
+      expect(session).to have_title(/echo:ping/)
+      session.visit('/worker')
+      expect(session).to have_title('echo:ping')
+      expect(closes.pop(timeout: 5)).to eq(1001)   # (the first page's, which the visit replaced)
+      session.visit('/?next')
+      expect(closes.pop(timeout: 5)).to eq(1001)   # (its worker's — the page itself has none)
+    end
+
     it 'closes a worker\'s socket as the worker closes itself' do
       expect(session).to have_title(/echo:ping/)
       session.visit('/worker')
