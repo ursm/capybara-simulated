@@ -152,6 +152,16 @@ const INTERFACES = [
   ['uievents', 'CompositionEvent', { install: true }],
   ['pointerevents', 'PointerEvent', { install: true }],
   ['html', 'DragEvent', { install: true }],
+  ['html', 'PopStateEvent', { install: true }],
+  ['html', 'HashChangeEvent', { install: true }],
+  ['html', 'PageTransitionEvent', { install: true }],
+  ['html', 'BeforeUnloadEvent', { install: true }],
+  ['html', 'ErrorEvent', { install: true }],
+  ['html', 'PromiseRejectionEvent', { install: true }],
+  ['html', 'SubmitEvent', { install: true }],
+  ['html', 'FormDataEvent', { install: true }],
+  ['html', 'ToggleEvent', { install: true }],
+  ['html', 'StorageEvent', { install: true }],
   ['dom', 'ShadowRoot', { install: true, omit: { 'sanitizer-api': 'setHTML: the Sanitizer API is not implemented' } }]
 ];
 

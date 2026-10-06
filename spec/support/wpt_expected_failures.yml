@@ -4216,9 +4216,6 @@ html/dom/idlharness.any.js:
   property'
 - 'BarProp interface: existence and properties of interface prototype object''s @@unscopables
   property'
-- BeforeUnloadEvent interface object length
-- 'BeforeUnloadEvent interface: attribute returnValue'
-- 'BeforeUnloadEvent interface: existence and properties of interface object'
 - 'BroadcastChannel interface: attribute name'
 - 'BroadcastChannel interface: attribute onmessage'
 - 'BroadcastChannel interface: attribute onmessageerror'
@@ -4541,12 +4538,6 @@ html/dom/idlharness.any.js:
   optional (File or USVString or FormData)?)'
 - 'ElementInternals interface: operation setValidity(optional ValidityStateFlags,
   optional DOMString, optional HTMLElement)'
-- ErrorEvent interface object length
-- 'ErrorEvent interface: attribute colno'
-- 'ErrorEvent interface: attribute error'
-- 'ErrorEvent interface: attribute filename'
-- 'ErrorEvent interface: attribute lineno'
-- 'ErrorEvent interface: attribute message'
 - EventSource interface object length
 - 'EventSource interface: attribute onerror'
 - 'EventSource interface: attribute onmessage'
@@ -4583,7 +4574,6 @@ html/dom/idlharness.any.js:
   property'
 - 'External interface: operation AddSearchProvider()'
 - 'External interface: operation IsSearchProviderInstalled()'
-- 'FormDataEvent interface: attribute formData'
 - HTMLAllCollection interface object length
 - HTMLAllCollection interface object name
 - 'HTMLAllCollection interface: attribute length'
@@ -5308,9 +5298,6 @@ html/dom/idlharness.any.js:
 - 'HTMLVideoElement interface: attribute height'
 - 'HTMLVideoElement interface: attribute poster'
 - 'HTMLVideoElement interface: attribute width'
-- HashChangeEvent interface object length
-- 'HashChangeEvent interface: attribute newURL'
-- 'HashChangeEvent interface: attribute oldURL'
 - History interface object length
 - History interface object name
 - 'History interface: attribute length'
@@ -5785,16 +5772,6 @@ html/dom/idlharness.any.js:
   "constructor" property'
 - 'PageSwapEvent interface: existence and properties of interface prototype object''s
   @@unscopables property'
-- PageTransitionEvent interface object length
-- PageTransitionEvent interface object name
-- 'PageTransitionEvent interface: attribute persisted'
-- 'PageTransitionEvent interface: existence and properties of interface object'
-- 'PageTransitionEvent interface: existence and properties of interface prototype
-  object'
-- 'PageTransitionEvent interface: existence and properties of interface prototype
-  object''s "constructor" property'
-- 'PageTransitionEvent interface: existence and properties of interface prototype
-  object''s @@unscopables property'
 - Path2D interface object length
 - 'Path2D interface: existence and properties of interface object'
 - 'Path2D interface: existence and properties of interface prototype object'
@@ -5844,11 +5821,6 @@ html/dom/idlharness.any.js:
 - 'PluginArray interface: operation item(unsigned long)'
 - 'PluginArray interface: operation namedItem(DOMString)'
 - 'PluginArray interface: operation refresh()'
-- PopStateEvent interface object length
-- 'PopStateEvent interface: attribute hasUAVisualTransition'
-- 'PopStateEvent interface: attribute state'
-- 'PromiseRejectionEvent interface: attribute promise'
-- 'PromiseRejectionEvent interface: attribute reason'
 - 'RadioNodeList interface: attribute value'
 - 'RadioNodeList interface: existence and properties of interface object'
 - 'Range interface: operation createContextualFragment((TrustedHTML or DOMString))'
@@ -5889,20 +5861,10 @@ html/dom/idlharness.any.js:
 - 'Storage interface: operation key(unsigned long)'
 - 'Storage interface: operation removeItem(DOMString)'
 - 'Storage interface: operation setItem(DOMString, DOMString)'
-- 'StorageEvent interface: attribute key'
-- 'StorageEvent interface: attribute newValue'
-- 'StorageEvent interface: attribute oldValue'
-- 'StorageEvent interface: attribute storageArea'
-- 'StorageEvent interface: attribute url'
-- 'StorageEvent interface: operation initStorageEvent(DOMString, optional boolean,
-  optional boolean, optional DOMString?, optional DOMString?, optional DOMString?,
-  optional USVString, optional Storage?)'
 - Stringification of new Origin()
 - Stringification of self
 - Stringification of self.location
 - Stringification of self.navigator
-- SubmitEvent interface object length
-- 'SubmitEvent interface: attribute submitter'
 - TextMetrics interface object length
 - TextMetrics interface object name
 - 'TextMetrics interface: attribute actualBoundingBoxAscent'
@@ -5991,17 +5953,6 @@ html/dom/idlharness.any.js:
   @@unscopables property'
 - 'TimeRanges interface: operation end(unsigned long)'
 - 'TimeRanges interface: operation start(unsigned long)'
-- ToggleEvent interface object length
-- ToggleEvent interface object name
-- 'ToggleEvent interface: attribute newState'
-- 'ToggleEvent interface: attribute oldState'
-- 'ToggleEvent interface: attribute source'
-- 'ToggleEvent interface: existence and properties of interface object'
-- 'ToggleEvent interface: existence and properties of interface prototype object'
-- 'ToggleEvent interface: existence and properties of interface prototype object''s
-  "constructor" property'
-- 'ToggleEvent interface: existence and properties of interface prototype object''s
-  @@unscopables property'
 - TrackEvent interface object length
 - TrackEvent interface object name
 - 'TrackEvent interface: attribute track'
@@ -6346,9 +6297,6 @@ html/dom/idlharness.https.html:
   property'
 - 'BarProp interface: existence and properties of interface prototype object''s @@unscopables
   property'
-- BeforeUnloadEvent interface object length
-- 'BeforeUnloadEvent interface: attribute returnValue'
-- 'BeforeUnloadEvent interface: existence and properties of interface object'
 - 'BroadcastChannel interface: attribute name'
 - 'BroadcastChannel interface: attribute onmessage'
 - 'BroadcastChannel interface: attribute onmessageerror'
@@ -6634,12 +6582,6 @@ html/dom/idlharness.https.html:
   optional (File or USVString or FormData)?)'
 - 'ElementInternals interface: operation setValidity(optional ValidityStateFlags,
   optional DOMString, optional HTMLElement)'
-- ErrorEvent interface object length
-- 'ErrorEvent interface: attribute colno'
-- 'ErrorEvent interface: attribute error'
-- 'ErrorEvent interface: attribute filename'
-- 'ErrorEvent interface: attribute lineno'
-- 'ErrorEvent interface: attribute message'
 - EventSource interface object length
 - 'EventSource interface: attribute onerror'
 - 'EventSource interface: attribute onmessage'
@@ -6677,9 +6619,6 @@ html/dom/idlharness.https.html:
 - 'External interface: operation AddSearchProvider()'
 - 'External interface: operation IsSearchProviderInstalled()'
 - External must be primary interface of window.external
-- 'FormDataEvent interface: attribute formData'
-- 'FormDataEvent interface: new FormDataEvent("formdata", { formData: new FormData()
-  }) must inherit property "formData" with the proper type'
 - HTMLAllCollection interface object length
 - HTMLAllCollection interface object name
 - 'HTMLAllCollection interface: attribute length'
@@ -7753,9 +7692,6 @@ html/dom/idlharness.https.html:
 - 'HTMLVideoElement interface: attribute height'
 - 'HTMLVideoElement interface: attribute poster'
 - 'HTMLVideoElement interface: attribute width'
-- HashChangeEvent interface object length
-- 'HashChangeEvent interface: attribute newURL'
-- 'HashChangeEvent interface: attribute oldURL'
 - History interface object length
 - History interface object name
 - 'History interface: attribute length'
@@ -8304,16 +8240,6 @@ html/dom/idlharness.https.html:
   "constructor" property'
 - 'PageSwapEvent interface: existence and properties of interface prototype object''s
   @@unscopables property'
-- PageTransitionEvent interface object length
-- PageTransitionEvent interface object name
-- 'PageTransitionEvent interface: attribute persisted'
-- 'PageTransitionEvent interface: existence and properties of interface object'
-- 'PageTransitionEvent interface: existence and properties of interface prototype
-  object'
-- 'PageTransitionEvent interface: existence and properties of interface prototype
-  object''s "constructor" property'
-- 'PageTransitionEvent interface: existence and properties of interface prototype
-  object''s @@unscopables property'
 - Path2D interface object length
 - 'Path2D interface: existence and properties of interface object'
 - 'Path2D interface: existence and properties of interface prototype object'
@@ -8363,15 +8289,6 @@ html/dom/idlharness.https.html:
 - 'PluginArray interface: operation item(unsigned long)'
 - 'PluginArray interface: operation namedItem(DOMString)'
 - 'PluginArray interface: operation refresh()'
-- PopStateEvent interface object length
-- 'PopStateEvent interface: attribute hasUAVisualTransition'
-- 'PopStateEvent interface: attribute state'
-- 'PopStateEvent interface: new PopStateEvent("popstate", { data: {} }) must inherit
-  property "hasUAVisualTransition" with the proper type'
-- 'PopStateEvent interface: new PopStateEvent("popstate", { data: {} }) must inherit
-  property "state" with the proper type'
-- 'PromiseRejectionEvent interface: attribute promise'
-- 'PromiseRejectionEvent interface: attribute reason'
 - 'RadioNodeList interface: attribute value'
 - 'RadioNodeList interface: existence and properties of interface object'
 - 'Range interface: operation createContextualFragment((TrustedHTML or DOMString))'
@@ -8499,24 +8416,6 @@ html/dom/idlharness.https.html:
 - 'Storage interface: operation key(unsigned long)'
 - 'Storage interface: operation removeItem(DOMString)'
 - 'Storage interface: operation setItem(DOMString, DOMString)'
-- 'StorageEvent interface: attribute key'
-- 'StorageEvent interface: attribute newValue'
-- 'StorageEvent interface: attribute oldValue'
-- 'StorageEvent interface: attribute storageArea'
-- 'StorageEvent interface: attribute url'
-- 'StorageEvent interface: new StorageEvent("storage") must inherit property "key"
-  with the proper type'
-- 'StorageEvent interface: new StorageEvent("storage") must inherit property "newValue"
-  with the proper type'
-- 'StorageEvent interface: new StorageEvent("storage") must inherit property "oldValue"
-  with the proper type'
-- 'StorageEvent interface: new StorageEvent("storage") must inherit property "storageArea"
-  with the proper type'
-- 'StorageEvent interface: new StorageEvent("storage") must inherit property "url"
-  with the proper type'
-- 'StorageEvent interface: operation initStorageEvent(DOMString, optional boolean,
-  optional boolean, optional DOMString?, optional DOMString?, optional DOMString?,
-  optional USVString, optional Storage?)'
 - Stringification of document.all
 - Stringification of document.createElement("canvas").getContext("2d")
 - Stringification of document.createElement("form").elements
@@ -8529,15 +8428,12 @@ html/dom/idlharness.https.html:
 - Stringification of document.createElement("xmp")
 - Stringification of location.ancestorOrigins
 - Stringification of new DOMParser()
-- Stringification of new ToggleEvent("beforetoggle")
 - Stringification of new TrackEvent("addtrack", {track:document.createElement("track").track})
 - Stringification of new XMLSerializer()
 - Stringification of window.external
 - Stringification of window.history
 - Stringification of window.location
 - Stringification of window.navigator
-- SubmitEvent interface object length
-- 'SubmitEvent interface: attribute submitter'
 - TextMetrics interface object length
 - TextMetrics interface object name
 - 'TextMetrics interface: attribute actualBoundingBoxAscent'
@@ -8684,24 +8580,6 @@ html/dom/idlharness.https.html:
 - 'TimeRanges interface: operation end(unsigned long)'
 - 'TimeRanges interface: operation start(unsigned long)'
 - TimeRanges must be primary interface of document.createElement("video").buffered
-- ToggleEvent interface object length
-- ToggleEvent interface object name
-- 'ToggleEvent interface: attribute newState'
-- 'ToggleEvent interface: attribute oldState'
-- 'ToggleEvent interface: attribute source'
-- 'ToggleEvent interface: existence and properties of interface object'
-- 'ToggleEvent interface: existence and properties of interface prototype object'
-- 'ToggleEvent interface: existence and properties of interface prototype object''s
-  "constructor" property'
-- 'ToggleEvent interface: existence and properties of interface prototype object''s
-  @@unscopables property'
-- 'ToggleEvent interface: new ToggleEvent("beforetoggle") must inherit property "newState"
-  with the proper type'
-- 'ToggleEvent interface: new ToggleEvent("beforetoggle") must inherit property "oldState"
-  with the proper type'
-- 'ToggleEvent interface: new ToggleEvent("beforetoggle") must inherit property "source"
-  with the proper type'
-- ToggleEvent must be primary interface of new ToggleEvent("beforetoggle")
 - TrackEvent interface object length
 - TrackEvent interface object name
 - 'TrackEvent interface: attribute track'

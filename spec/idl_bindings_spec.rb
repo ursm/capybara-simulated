@@ -891,6 +891,52 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  it "installs HTML's events' members as their IDL says" do
+    got = outcome(<<~JS)
+      (() => {
+        const t = (f) => { try { return JSON.stringify(f()) ?? 'undefined'; } catch (e) { return e.name + ': ' + e.message; } };
+        return [
+          t(() => { const p = new PopStateEvent('p', { state: 1 }); return [p.state, p.hasUAVisualTransition, new HashChangeEvent('h').oldURL, new PageTransitionEvent('p', { persisted: 1 }).persisted]; }),
+          t(() => new BeforeUnloadEvent('b')),
+          t(() => { const b = document.createEvent('BeforeUnloadEvent'); const before = b.returnValue; b.returnValue = 5; return [before, b.returnValue]; }),
+          t(() => { const e = new ErrorEvent('e'); return [e.message, e.lineno, e.error === undefined]; }),
+          t(() => new PromiseRejectionEvent('x', {})),
+          t(() => new FormDataEvent('f', { formData: 1 })),
+          t(() => new SubmitEvent('s', { submitter: document.body }).submitter === document.body),
+          t(() => { const e = new ToggleEvent('t', { oldState: 'open' }); return [e.oldState, e.newState, e.source]; }),
+          t(() => { const e = document.createEvent('StorageEvent'); e.initStorageEvent('storage', true, false, 'k', null, 'v', 'u', localStorage); return [e.type, e.bubbles, e.key, e.oldValue, e.newValue, e.url, e.storageArea === localStorage]; }),
+          t(() => ErrorEvent.prototype.message)
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      '[1,false,"",true]',
+      "TypeError: Failed to construct 'BeforeUnloadEvent': Illegal constructor",
+      '["","5"]',
+      '["",0,true]',
+      "TypeError: Failed to construct 'PromiseRejectionEvent': Failed to read the 'promise' property from 'PromiseRejectionEventInit': Required member is undefined.",
+      "TypeError: Failed to construct 'FormDataEvent': Failed to read the 'formData' property from 'FormDataEventInit': Failed to convert value to 'FormData'.",
+      'true',
+      '["open","",null]',
+      '["storage",true,"k",null,"v","u",true]',
+      'TypeError: Illegal invocation'
+    ])
+  end
+
+  # (…a details element's `open` changes, a run of them one `toggle` from a task: closed to closed after open-then-close)
+  it 'queues a details toggle per run of open changes' do
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const d = document.body.appendChild(document.createElement('details'));
+      const log = [];
+      d.addEventListener('toggle', (e) => log.push([e.constructor.name, e.isTrusted, e.oldState, e.newState].join(' ')));
+      d.open = true;
+      d.open = false;
+      setTimeout(() => { d.open = true; setTimeout(() => done(log), 10); }, 10);
+    JS
+    expect(got).to eq(['ToggleEvent true closed closed', 'ToggleEvent true closed open'])
+  end
+
   # (…the document element among them, and a name compared as it is, not as a selector)
   it "finds a document's elements by name, its root too" do
     got = outcome(<<~JS)
