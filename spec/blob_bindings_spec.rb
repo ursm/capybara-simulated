@@ -32,4 +32,32 @@ RSpec.describe 'Blob and File bindings' do
     JS
     expect(got).to eq([[[], 'a.txt', 6, 'text/plain', 7, '[object File]', 'TypeError'], true, 'frame', true, 'ra', ['fr.txt', 'frm']])
   end
+
+  it 'takes any realm’s blob wherever one is taken, and refuses what is none' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const F = frames[0], fb = new F.Blob(['fb']), fd = new FormData();
+        fd.append('a', fb, 'named');
+        fd.append('b', new F.File(['ff'], 'f.txt'));
+        const swapped = new F.Blob(['sw']);
+        Object.setPrototypeOf(swapped, Blob.prototype);
+        const buf = new ArrayBuffer(4), view = new Uint8Array(buf);
+        structuredClone(buf, { transfer: [buf] });
+        const thrown = (f) => { try { f(); return 'ok'; } catch (e) { return e.name; } };
+        return [
+          [fd.get('a') instanceof File, fd.get('a').name, fd.get('b').name],
+          new File([], 'n', { lastModified: -1 }).lastModified, new File([], 'n', { lastModified: -86400000 }).lastModified,
+          Object.prototype.toString.call(structuredClone(Object.create(Blob.prototype))),
+          Object.prototype.toString.call(structuredClone({ [Symbol.toStringTag]: 'Blob' })),
+          [swapped.slice(0, 1) instanceof F.Blob, swapped.slice(0, 1) instanceof Blob],
+          [new Blob([buf]).size, new Blob([view]).size],
+          thrown(() => URL.createObjectURL({})), thrown(() => new FileReader().readAsText({}))
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      [true, 'named', 'f.txt'], -1, -86_400_000, '[object Object]', '[object Object]', [true, false], [0, 0], 'TypeError', 'TypeError'
+    ])
+  end
 end

@@ -1426,7 +1426,9 @@ module Capybara
         end
         if coerced.is_a?(Array)
           paths = coerced.reject(&:empty?)
-          @file_picks[handle] = paths
+          # (…keyed by the handle as an Integer, as the reads look it up: a frame's handle arrives a Float, which
+          # a Hash keeps apart from the Integer it equals)
+          @file_picks[handle.to_i] = paths
           # Expose File-list metadata to the JS side BEFORE setting the
           # value: __csimSetValue fires input + change synchronously,
           # and Redmine's onchange="addInputFiles(this)" reads
@@ -1466,7 +1468,7 @@ module Capybara
       end
 
       def file_picks_for(handle)
-        (@file_picks && @file_picks[handle]) || []
+        (@file_picks && @file_picks[handle.to_i]) || []
       end
 
       # JS-side `__HostBackedFile.text()` / `arrayBuffer()` route through
@@ -1476,7 +1478,7 @@ module Capybara
       # the requested byte range as a BINARY String, which reaches JS
       # as a Uint8Array.
       def read_file_pick(handle, index, start = nil, finish = nil)
-        paths = file_picks_for(handle.to_i)
+        paths = file_picks_for(handle)
         path = paths && paths[index.to_i]
         return nil unless path && File.exist?(path)
         size = File.size(path)

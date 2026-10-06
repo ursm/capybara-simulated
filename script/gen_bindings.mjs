@@ -509,6 +509,11 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   const last = string || numeric || boolean;
   const steps = [];
   if (includesNullable) steps.push([`${expr} == null`, 'null']);
+  // (…a string the string type's at once — every test before its would fail on one: the common BlobPart, the common
+  // string-or-options argument, asks nothing else)
+  if (string && ifaces.length + buffers.length + sequences.length + callbacks.length + dicts.length) {
+    steps.push([`typeof ${expr} === 'string'`, convert(string)]);
+  }
   if (dict) steps.push([`${expr} == null`, convert(dict)]);
   for (const u of ifaces) {
     const check = u.idlType === 'WindowProxy' ? 'Window' : u.idlType;
