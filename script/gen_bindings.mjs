@@ -178,6 +178,7 @@ const INTERFACES = [
   ['orientation-event', 'DeviceMotionEvent', { install: true }],
   ['orientation-event', 'DeviceOrientationEvent', { install: true }],
   ['dom', 'MutationObserver', { install: true }],
+  ['cssom-view', 'MediaQueryList', { install: true }],
   ['dom', 'MutationRecord', { install: true }],
   ['dom', 'AbortController', { install: true }],
   ['dom', 'AbortSignal', { install: true }],

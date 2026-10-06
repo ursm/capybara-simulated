@@ -47,12 +47,6 @@ FileAPI/idlharness.any.js:
 - 'FileList interface: existence and properties of interface object'
 - 'FileList interface: operation item(unsigned long)'
 - 'FileReader interface: attribute error'
-- 'FileReader interface: attribute onabort'
-- 'FileReader interface: attribute onerror'
-- 'FileReader interface: attribute onload'
-- 'FileReader interface: attribute onloadend'
-- 'FileReader interface: attribute onloadstart'
-- 'FileReader interface: attribute onprogress'
 - 'FileReader interface: attribute readyState'
 - 'FileReader interface: attribute result'
 - 'FileReader interface: calling readAsArrayBuffer(Blob) on new FileReader() with
@@ -101,12 +95,6 @@ FileAPI/idlharness.html:
 - 'FileList interface: existence and properties of interface object'
 - 'FileList interface: operation item(unsigned long)'
 - 'FileReader interface: attribute error'
-- 'FileReader interface: attribute onabort'
-- 'FileReader interface: attribute onerror'
-- 'FileReader interface: attribute onload'
-- 'FileReader interface: attribute onloadend'
-- 'FileReader interface: attribute onloadstart'
-- 'FileReader interface: attribute onprogress'
 - 'FileReader interface: attribute readyState'
 - 'FileReader interface: attribute result'
 - 'FileReader interface: constant DONE on interface object'
@@ -932,9 +920,6 @@ css/css-font-loading/idlharness.https.html:
   @@unscopables property'
 - 'FontFacePalettes interface: iterable<FontFacePalette>'
 - FontFaceSet interface object length
-- 'FontFaceSet interface: attribute onloading'
-- 'FontFaceSet interface: attribute onloadingdone'
-- 'FontFaceSet interface: attribute onloadingerror'
 - 'FontFaceSet interface: attribute ready'
 - 'FontFaceSet interface: attribute status'
 - 'FontFaceSet interface: calling check(CSSOMString, optional CSSOMString) on document.fonts
@@ -3941,8 +3926,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
   ı")
 html/dom/idlharness.any.js:
 - 'BroadcastChannel interface: attribute name'
-- 'BroadcastChannel interface: attribute onmessage'
-- 'BroadcastChannel interface: attribute onmessageerror'
 - 'BroadcastChannel interface: operation close()'
 - 'BroadcastChannel interface: operation postMessage(any)'
 - CanvasGradient interface object length
@@ -3979,9 +3962,6 @@ html/dom/idlharness.any.js:
 - 'DedicatedWorkerGlobalScope interface: internal [[SetPrototypeOf]] method of interface
   prototype object - setting to a new value via __proto__ should throw a TypeError'
 - EventSource interface object length
-- 'EventSource interface: attribute onerror'
-- 'EventSource interface: attribute onmessage'
-- 'EventSource interface: attribute onopen'
 - 'EventSource interface: attribute readyState'
 - 'EventSource interface: attribute url'
 - 'EventSource interface: attribute withCredentials'
@@ -4029,8 +4009,6 @@ html/dom/idlharness.any.js:
 - 'MessageChannel interface: attribute port2'
 - MessagePort interface object name
 - 'MessagePort interface: attribute onclose'
-- 'MessagePort interface: attribute onmessage'
-- 'MessagePort interface: attribute onmessageerror'
 - 'MessagePort interface: existence and properties of interface object'
 - 'MessagePort interface: existence and properties of interface prototype object'
 - 'MessagePort interface: operation close()'
@@ -4251,9 +4229,6 @@ html/dom/idlharness.any.js:
 - 'TextMetrics interface: existence and properties of interface prototype object''s
   @@unscopables property'
 - Worker interface object length
-- 'Worker interface: attribute onerror'
-- 'Worker interface: attribute onmessage'
-- 'Worker interface: attribute onmessageerror'
 - 'Worker interface: existence and properties of interface object'
 - 'Worker interface: operation postMessage(any, optional StructuredSerializeOptions)'
 - 'Worker interface: operation postMessage(any, sequence<object>)'
@@ -4295,8 +4270,6 @@ html/dom/idlharness.https.html:
 - 'BarProp interface: existence and properties of interface prototype object''s @@unscopables
   property'
 - 'BroadcastChannel interface: attribute name'
-- 'BroadcastChannel interface: attribute onmessage'
-- 'BroadcastChannel interface: attribute onmessageerror'
 - 'BroadcastChannel interface: operation close()'
 - 'BroadcastChannel interface: operation postMessage(any)'
 - CanvasGradient interface object length
@@ -4579,9 +4552,6 @@ html/dom/idlharness.https.html:
 - 'ElementInternals interface: operation setValidity(optional ValidityStateFlags,
   optional DOMString, optional HTMLElement)'
 - EventSource interface object length
-- 'EventSource interface: attribute onerror'
-- 'EventSource interface: attribute onmessage'
-- 'EventSource interface: attribute onopen'
 - 'EventSource interface: attribute readyState'
 - 'EventSource interface: attribute url'
 - 'EventSource interface: attribute withCredentials'
@@ -5703,8 +5673,6 @@ html/dom/idlharness.https.html:
 - 'MessageChannel interface: attribute port2'
 - MessagePort interface object name
 - 'MessagePort interface: attribute onclose'
-- 'MessagePort interface: attribute onmessage'
-- 'MessagePort interface: attribute onmessageerror'
 - 'MessagePort interface: existence and properties of interface object'
 - 'MessagePort interface: existence and properties of interface prototype object'
 - 'MessagePort interface: operation close()'
@@ -6166,7 +6134,6 @@ html/dom/idlharness.https.html:
 - 'Sanitizer interface: operation setDataAttributes(boolean)'
 - 'ShadowRoot interface: operation setHTML(DOMString, optional SetHTMLOptions)'
 - SharedWorker interface object length
-- 'SharedWorker interface: attribute onerror'
 - 'SharedWorker interface: attribute port'
 - 'SharedWorker interface: existence and properties of interface object'
 - 'Storage interface: attribute length'
@@ -6461,9 +6428,6 @@ html/dom/idlharness.https.html:
 - 'Window interface: window must inherit property "navigation" with the proper type'
 - Window must be primary interface of window
 - Worker interface object length
-- 'Worker interface: attribute onerror'
-- 'Worker interface: attribute onmessage'
-- 'Worker interface: attribute onmessageerror'
 - 'Worker interface: existence and properties of interface object'
 - 'Worker interface: operation postMessage(any, optional StructuredSerializeOptions)'
 - 'Worker interface: operation postMessage(any, sequence<object>)'
@@ -7620,7 +7584,6 @@ resource-timing/event-source-timing.html:
 - ResourceTiming for EventSource should reflect number of re-connections to source
 - "[harness] TIMEOUT"
 resource-timing/idlharness.any.js:
-- 'Performance interface: attribute onresourcetimingbufferfull'
 - 'Performance interface: calling setResourceTimingBufferSize(unsigned long) on performance
   with too few arguments must throw TypeError'
 - 'Performance interface: operation clearResourceTimings()'
@@ -8358,9 +8321,6 @@ web-animations/idlharness.window.js:
 - 'Animation interface: attribute effect'
 - 'Animation interface: attribute finished'
 - 'Animation interface: attribute id'
-- 'Animation interface: attribute oncancel'
-- 'Animation interface: attribute onfinish'
-- 'Animation interface: attribute onremove'
 - 'Animation interface: attribute overallProgress'
 - 'Animation interface: attribute pending'
 - 'Animation interface: attribute playState'
@@ -8740,10 +8700,6 @@ websockets/idlharness.any.js:
 - 'WebSocket interface: attribute binaryType'
 - 'WebSocket interface: attribute bufferedAmount'
 - 'WebSocket interface: attribute extensions'
-- 'WebSocket interface: attribute onclose'
-- 'WebSocket interface: attribute onerror'
-- 'WebSocket interface: attribute onmessage'
-- 'WebSocket interface: attribute onopen'
 - 'WebSocket interface: attribute protocol'
 - 'WebSocket interface: attribute readyState'
 - 'WebSocket interface: attribute url'
@@ -8909,7 +8865,6 @@ xhr/idlharness.any.js:
 - Stringification of new FormData()
 - Stringification of new FormData(form)
 - Stringification of new FormData(form, submitter)
-- 'XMLHttpRequest interface: attribute onreadystatechange'
 - 'XMLHttpRequest interface: attribute readyState'
 - 'XMLHttpRequest interface: attribute response'
 - 'XMLHttpRequest interface: attribute responseText'
