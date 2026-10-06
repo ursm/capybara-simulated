@@ -172,6 +172,20 @@
   Well-known-Symbol enumeration over the Storage proxy spins past the harness timeout.
 "webstorage/storage_supported_property_names.window.js": >-
   Supported-property-name enumeration over the Storage proxy spins past the harness timeout.
+"resource-timing/buffered-flag.any.js": >-
+  Outcome depends on wall time, as `resource_timing.worker.js`'s below: the fetch's
+  entry must have `duration > 0`, and its duration is the real time the in-process
+  fetch took at `performance.now()`'s integer-ms resolution — it passes alone, and
+  reads 0 now and then under a loaded machine (regenerating the allowlists in
+  parallel). Rejoins the gate when `performance.now()` resolves below a millisecond.
+"resource-timing/resource_timing.worker.js": >-
+  Outcome depends on wall time. The worker's checks run before its virtual clock
+  has moved at all, so each entry's `duration` is real time at `performance.now()`'s
+  integer-ms resolution (the `performance_now_resolution` backlog): an XHR answered
+  in under a real millisecond reads 0, fails `duration > 0` inside `onload`, and the
+  file ends a harness ERROR instead of its TIMEOUT (`importScripts` files no
+  resource entry) — 2 or 3 runs in 8. Rejoins the gate when `performance.now()`
+  resolves below a millisecond.
 "resource-timing/response-status-code.html": >-
   Outcome depends on wall time. Ten `load.font` cases lead the file; the driver
   fetches no `@font-face` (web fonts are backlog), so each waits out its 2 s

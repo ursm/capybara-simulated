@@ -8187,7 +8187,7 @@ module Capybara
         # (`stop_worker_js` sets the flag; `terminate` handles the JS already in flight). Read
         # where the tick could otherwise commit to another long call.
         stopping = -> { !record.nil? && record[:stopping] }
-        # The worker's timers, run before the tick's message — a poll interval at least — and again after it, as far as
+        # The worker's timers, run before the tick's message — a poll interval at least — and again after one, as far as
         # the window has moved since: the message's own timers, and what its handler left in the microtask queue,
         # progress in the same tick. The stop is asked right before the drain: THIS is the call that can run for seconds — its 50 ms budget is
         # checked BETWEEN timer callbacks, and one callback is as long as it is — so a stop that arrived while we were
@@ -8738,7 +8738,9 @@ module Capybara
               rt.call('__csim_workerOnMessage', msg)
               drive_worker_to_quiescence(rt, stopping)
             end
-            run_worker_timers.call(0)
+            # (…a quiet tick's once: a second run at the same instant fired the 0 ms task a timer of the first queued — a
+            # network response, a fetch's or an XHR's, at the time it was sent, which no network answers in)
+            run_worker_timers.call(0) if msg
             # Whether the worker has a timer left, after the message, is told to the main thread, whose waits go on
             # while it does (`polling?`) — and how soon, for the window's event loop, whose page waits on it
             # (`worker_next_timer`).
@@ -11040,6 +11042,8 @@ module Capybara
         terminate_document_workers
         drop_document_websockets
         @runtime.rebuild_ctx
+        # The service workers that outlive the navigation follow the new page's clock (timers.js `followWindowClock`).
+        @runtime.call('__csimFollowWindowClock') unless @workers.empty?
         # A full page (re)build disposes every frame realm, so any active
         # `within_frame` scope is now stale — fall back to the main document.
         # Per-frame session histories are scoped to this document tree; drop them.

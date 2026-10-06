@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'capybara/simulated'
+require 'cgi'
 require 'json'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
@@ -68,6 +69,31 @@ RSpec.describe 'Worker clock' do
       session.driver.browser.advance_virtual_clock_ms(30_000)
       expect(waited(session)).to be >= 1500
     end
+  end
+
+  # …and a frame's: its tasks run after the window's in a step, and its post reads the step's end.
+  it "waits a timer set from a frame's post out on the window's clock" do
+    worker_js = <<~JS
+      setTimeout(() => postMessage('ready'), 100);
+      onmessage = () => setTimeout(() => postMessage('late'), 2000);
+    JS
+    frame = <<~HTML
+      <!doctype html><meta charset="utf-8"><script>
+      const w = new Worker(URL.createObjectURL(new Blob([#{worker_js.to_json}], {type: 'text/javascript'})));
+      w.onmessage = (e) => parent.log.push([e.data, parent.performance.now()]);
+      window.arm = () => setTimeout(() => { parent.posted = parent.performance.now(); w.postMessage(1); }, 30000);
+      </script>
+    HTML
+    html = <<~HTML
+      <!doctype html><meta charset="utf-8"><body><script>window.log = [];</script>
+      <iframe srcdoc="#{CGI.escapeHTML(frame)}"></iframe></body>
+    HTML
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    session.visit('/')
+    poll_until { session.evaluate_script('window.log.length') >= 1 }
+    session.execute_script('frames[0].arm()')
+    session.driver.browser.advance_virtual_clock_ms(30_000)
+    expect(waited(session)).to be >= 1500
   end
 
   it 'runs a pending timer no faster for a burst of messages' do

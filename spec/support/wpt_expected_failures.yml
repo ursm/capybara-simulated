@@ -8183,9 +8183,6 @@ resource-timing/resource_subframe_self_navigation.html:
 - Subsequent <iframe> navigations don't appear in the resource-timing buffer.
 - Subsequent <object> navigations don't appear in the resource-timing buffer.
 - "[harness] TIMEOUT"
-resource-timing/resource_timing.worker.js:
-- Performance Resource Entries in workers
-- "[harness] TIMEOUT"
 resource-timing/resource_timing_content_length.html:
 - encodedBodySize should be equal to the actual byte size of the content when header
   value is lower than actual content
