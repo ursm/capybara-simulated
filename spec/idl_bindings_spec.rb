@@ -923,6 +923,43 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  it "installs the other specs' events' members as their IDL says" do
+    got = outcome(<<~JS)
+      (() => {
+        const t = (f) => { try { return JSON.stringify(f()) ?? 'undefined'; } catch (e) { return e.name + ': ' + e.message; } };
+        const { port1 } = new MessageChannel();
+        return [
+          t(() => { const m = new MessageEvent('m', { data: undefined, ports: [port1], source: window }); return [m.data, Object.isFrozen(m.ports), m.ports === m.ports, m.ports[0] === port1, m.source === window]; }),
+          t(() => new MessageEvent('m', { source: {} })),
+          t(() => { const p = new ProgressEvent('p', { loaded: 3, total: 2 ** 53 }); return [p.lengthComputable, p.loaded, p.total]; }),
+          t(() => { const c = new CloseEvent('c', { code: 65537 }); return [c.code, c.reason, c.wasClean]; }),
+          t(() => new AnimationEvent('a', { elapsedTime: Infinity })),
+          t(() => [new TransitionEvent('t', { propertyName: null }).propertyName, new AnimationPlaybackEvent('p').currentTime]),
+          t(() => new ClipboardEvent('c').clipboardData),
+          t(() => [new MediaQueryListEvent('m', { matches: 1 }).matches, new IDBVersionChangeEvent('v', { newVersion: 2 }).newVersion]),
+          t(() => new GamepadEvent('g', { gamepad: {} })),
+          t(() => { const d = new DeviceMotionEvent('d', { acceleration: { x: 1 } }); return [d.acceleration instanceof DeviceMotionEventAcceleration, d.acceleration.x, d.acceleration.y, d.rotationRate]; }),
+          t(() => [typeof DeviceOrientationEvent.requestPermission, Object.isFrozen(new FontFaceSetLoadEvent('l').fontfaces)]),
+          t(() => ProgressEvent.prototype.loaded)
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      '[null,true,true,true,true]',
+      "TypeError: Failed to construct 'MessageEvent': Failed to read the 'source' property from 'MessageEventInit': Failed to convert value to '(WindowProxy or MessagePort or ServiceWorker)'.",
+      '[false,3,9007199254740992]',
+      '[1,"",false]',
+      "TypeError: Failed to construct 'AnimationEvent': Failed to read the 'elapsedTime' property from 'AnimationEventInit': The provided double value is non-finite.",
+      '["null",null]',
+      'null',
+      '[true,2]',
+      "TypeError: Failed to construct 'GamepadEvent': Failed to read the 'gamepad' property from 'GamepadEventInit': Failed to convert value to 'Gamepad'.",
+      '[true,1,null,null]',
+      '["function",true]',
+      'TypeError: Illegal invocation'
+    ])
+  end
+
   # (…a details element's `open` changes, a run of them one `toggle` from a task: closed to closed after open-then-close)
   it 'queues a details toggle per run of open changes' do
     got = session.evaluate_async_script(<<~JS)

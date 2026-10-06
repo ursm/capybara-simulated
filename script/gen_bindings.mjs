@@ -162,13 +162,28 @@ const INTERFACES = [
   ['html', 'FormDataEvent', { install: true }],
   ['html', 'ToggleEvent', { install: true }],
   ['html', 'StorageEvent', { install: true }],
+  ['html', 'MessageEvent', { install: true }],
+  ['xhr', 'ProgressEvent', { install: true }],
+  ['websockets', 'CloseEvent', { install: true }],
+  ['css-animations', 'AnimationEvent', { install: true }],
+  ['css-transitions', 'TransitionEvent', { install: true }],
+  ['web-animations-2', 'AnimationPlaybackEvent', { install: true }],
+  ['clipboard-apis', 'ClipboardEvent', { install: true }],
+  ['cssom-view', 'MediaQueryListEvent', { install: true }],
+  ['IndexedDB', 'IDBVersionChangeEvent', { install: true }],
+  ['css-font-loading', 'FontFaceSetLoadEvent', { install: true }],
+  ['gamepad', 'GamepadEvent', { install: true }],
+  ['orientation-event', 'DeviceMotionEventAcceleration'],
+  ['orientation-event', 'DeviceMotionEventRotationRate'],
+  ['orientation-event', 'DeviceMotionEvent', { install: true }],
+  ['orientation-event', 'DeviceOrientationEvent', { install: true }],
   ['dom', 'ShadowRoot', { install: true, omit: { 'sanitizer-api': 'setHTML: the Sanitizer API is not implemented' } }]
 ];
 
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
   'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
-  'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toEnforcedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
+  'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers'
@@ -267,6 +282,8 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
     case 'unsigned long': c = `toUnsignedLong(${expr}, ${failure(where)})`; break;
     case 'short': c = `toShort(${expr}, ${failure(where)})`; break;
     case 'long': c = `toLong(${expr}, ${failure(where)})`; break;
+    case 'unsigned long long': c = `toUnsignedLongLong(${expr}, ${failure(where)})`; break;
+    case 'long long': c = `toLongLong(${expr}, ${failure(where)})`; break;
     case 'double': c = `toDouble(${expr}, ${failure(where)})`; break;
     case 'unrestricted double': c = `toUnrestrictedDouble(${expr}, ${failure(where)})`; break;
     case 'float': c = `toFloat(${expr}, ${failure(where)})`; break;
@@ -340,7 +357,7 @@ function flattenUnion(t) {
 // string type's conversion, else the numeric type's, else boolean's — and with none of them, a TypeError. A union
 // that is one type once its absent interfaces are dropped is that type's conversion. Its extended attributes, and the
 // argument's, are each member's.
-const NUMERIC_TYPES = new Set(['unsigned short', 'short', 'unsigned long', 'long', 'double', 'unrestricted double', 'float', 'unrestricted float']);
+const NUMERIC_TYPES = new Set(['unsigned short', 'short', 'unsigned long', 'long', 'unsigned long long', 'long long', 'double', 'unrestricted double', 'float', 'unrestricted float']);
 function unionConversion(t, expr, where, checks, argExtAttrs) {
   const label = `${where.iface ?? where.dictionary}.${where.member}`;
   const { members, includesNullable } = flattenUnion(t);
@@ -350,7 +367,8 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   const unsupported = () => new Error(`${label}: no binding converts ${name} yet`);
   if (members.some((u) => u.generic)) throw unsupported();
   const of = (test) => members.filter(test);
-  const ifaces = of((u) => definitions.get(u.idlType)?.type === 'interface');
+  // (…a WindowProxy among them the Window it is a proxy of: the Window's test, as for one alone)
+  const ifaces = of((u) => u.idlType === 'WindowProxy' || definitions.get(u.idlType)?.type === 'interface');
   const dicts = of((u) => dictionaries.has(u.idlType));
   const strings = of((u) => ['DOMString', 'USVString'].includes(u.idlType));
   const numerics = of((u) => NUMERIC_TYPES.has(u.idlType));
@@ -366,8 +384,9 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   if (includesNullable) steps.push([`${expr} == null`, 'null']);
   if (dict) steps.push([`${expr} == null`, convert(dict)]);
   for (const u of ifaces) {
-    checks.add(u.idlType);
-    steps.push([`IS_${u.idlType}(${expr})`, expr]);
+    const check = u.idlType === 'WindowProxy' ? 'Window' : u.idlType;
+    checks.add(check);
+    steps.push([`IS_${check}(${expr})`, expr]);
   }
   // (…a callable one the callback function type's, before a dictionary would take it)
   if (callbacks.length) steps.push([`typeof ${expr} === 'function'`, expr]);
@@ -473,7 +492,7 @@ function membersOf(def, omit = {}, omitMembers = {}) {
 function generateInterface(def, options = {}) {
   const name = def.name;
   if (def.inheritance && !options.install) throw new Error(`${name}: an inherited interface is not generated yet`);
-  const members = [], constants = [], body = [], unforgeables = [], checks = new Set(), unscopables = [], handlers = [];
+  const members = [], constants = [], body = [], statics = [], unforgeables = [], checks = new Set(), unscopables = [], handlers = [];
   // (…`this` checked: by its brand where the binding makes the object, by the test its class registered where it is
   // installed on that class)
   // (…a null or undefined `this` the realm's global — Web IDL's operation and attribute steps: a bare
@@ -542,6 +561,13 @@ function generateInterface(def, options = {}) {
         // (…a named property getter the installing class's objects answer themselves: `namedProperties` says how)
         continue;
       }
+      if (m.special === 'static') {
+        // (…a static operation the interface object's own, of no object: `DeviceMotionEvent.requestPermission()`)
+        if (!options.install) throw new Error(`${label}: a static operation of an interface the binding makes is not generated yet`);
+        if (statics.some((line) => line.startsWith(`    ${m.name}(`))) continue;
+        statics.push(`    ${operation(name, m, checks, () => 'null')}`);
+        continue;
+      }
       if (m.special === 'getter') {
         if (m.arguments.length !== 1 || m.arguments[0].idlType.idlType !== 'unsigned long') throw new Error(`${label}: only an indexed getter is generated`);
         indexed = m.name;
@@ -563,7 +589,7 @@ function generateInterface(def, options = {}) {
   const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
   if (options.install) {
     if (indexed || valueIterator) throw new Error(`${name}: an installed interface with an indexed getter or an iterator is not generated yet`);
-    return installInterface(def, { body, unforgeables, checks, unscopables, constructor, constants, handlers });
+    return installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers });
   }
   if (unforgeables.length) throw new Error(`${name}: [LegacyUnforgeable] members of an interface the binding makes are not generated yet`);
   if (handlers.length) throw new Error(`${name}: event handlers of an interface the binding makes are not generated yet`);
@@ -613,7 +639,7 @@ function generateInterface(def, options = {}) {
 // …a [Global] interface's (Window's) on the global object itself (Web IDL §3.7.5), its [LegacyUnforgeable] ones too —
 // by the two functions it returns, which define them on a global: its members (configurable, made once where the
 // snapshot is, which a realm made from it has already), and its [LegacyUnforgeable] ones, as each realm is made.
-function installInterface(def, { body, unforgeables, checks, unscopables, constructor, constants, handlers }) {
+function installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers }) {
   const name = def.name;
   const global = (def.extAttrs || []).some((e) => e.name === 'Global');
   const holder = global ? 'members' : 'iface.prototype';
@@ -630,6 +656,7 @@ function installInterface(def, { body, unforgeables, checks, unscopables, constr
   lines.push(`  }`);
   if (global) lines.push(`  const members = {};`);
   lines.push(`  installMembers(${holder}, Members.prototype);`);
+  if (statics.length) lines.push(`  class Statics {`, ...statics, `  }`, `  installMembers(iface, Statics.prototype);`);
   if (handlers.length) lines.push(`  impl.installEventHandlers(${holder}, ${JSON.stringify(handlers)});`);
   if (constants.length) {
     const list = JSON.stringify(constants.map(([n]) => n));
