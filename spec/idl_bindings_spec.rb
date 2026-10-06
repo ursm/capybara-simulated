@@ -113,7 +113,8 @@ RSpec.describe 'IDL bindings' do
   end
 
   # (…what tells an installed interface's objects apart is the node itself — its own type, fixed when it was made — not
-  # what it inherits; and an interface with no constructor of its own makes none for a script)
+  # what it inherits; and an interface with no constructor of its own makes none for a script — a ProcessingInstruction
+  # has one, its global's document's)
   it "checks an installed member's `this` by the node's own fixed type, and constructs only what IDL lets a script" do
     got = outcome(<<~JS)
       (() => {
@@ -129,7 +130,8 @@ RSpec.describe 'IDL bindings' do
           thrown(() => Object.create(document.createTextNode('abc')).data),
           p.firstChild.nodeName,
           thrown(() => new CharacterData('x')), thrown(() => new DocumentType('x')),
-          thrown(() => new ProcessingInstruction('x', 'y')), thrown(() => new CDATASection('x')),
+          [new ProcessingInstruction('x', 'y').target, new ProcessingInstruction('x').ownerDocument === document],
+          thrown(() => new CDATASection('x')),
           Object.prototype.toString.call(cdata), Object.prototype.toString.call(cdata.splitText(1)),
           xml.createProcessingInstruction('x', 'y').sheet
         ];
@@ -138,7 +140,7 @@ RSpec.describe 'IDL bindings' do
     expect(got).to eq([
       [3, 'z'], 'Illegal invocation', '#text',
       "Failed to construct 'CharacterData': Illegal constructor", "Failed to construct 'DocumentType': Illegal constructor",
-      "Failed to construct 'ProcessingInstruction': Illegal constructor", "Failed to construct 'CDATASection': Illegal constructor",
+      ['x', true], "Failed to construct 'CDATASection': Illegal constructor",
       '[object CDATASection]', '[object CDATASection]', nil
     ])
   end

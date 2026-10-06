@@ -2921,6 +2921,27 @@ dom/nodes/moveBefore/selection-preserve.html:
 - moveBefore should not reset selection with preceding text
 dom/nodes/remove-from-shadow-host-and-adopt-into-iframe.html:
 - "== dom/nodes/remove-from-shadow-host-and-adopt-into-iframe-ref.html"
+dom/processing-instruction-attributes.html:
+- 'Distinct attribute name (source: html-parser): ABC and abc'
+- 'Distinct attribute name (source: html-parser): abC and abc'
+- 'Distinct attribute name (source: html-parser): x123A and x123a'
+- Processing instruction attribute mutation from html-parser
+- Processing instruction attribute parsing allows _ in attribute names from html-parser
+- Processing instruction attribute parsing rejects unquoted attributes from html-parser
+- Processing instruction in main parser
+- Processing instruction toggleAttribute from html-parser
+- 'Valid attribute name: $ (source: html-parser)'
+- 'Valid attribute name: $foo (source: html-parser)'
+- 'Valid attribute name: _ (source: html-parser)'
+- 'Valid attribute name: _bar (source: html-parser)'
+- 'Valid attribute name: a$b (source: html-parser)'
+- 'Valid attribute name: a_b (source: html-parser)'
+- 'check attribute value: "''""''" (source: "html-parser")'
+- 'check attribute value: "=" (source: "html-parser")'
+- 'check attribute value: "aa"aa"" (source: "html-parser")'
+- 'check attribute value: "axx"" (source: "html-parser")'
+- 'check attribute value: "axx>" (source: "html-parser")'
+- 'check attribute value: "some<>" (source: "html-parser")'
 dom/ranges/Range-cloneContents.html:
 - "[harness] ERROR"
 dom/ranges/Range-deleteContents.html:
@@ -3085,8 +3106,6 @@ fetch/api/idlharness.https.any.js:
 - 'Request interface: attribute referrerPolicy'
 - 'Request interface: attribute signal'
 - 'Request interface: attribute url'
-- 'Request interface: new Request(''about:blank'') must inherit property "textStream()"
-  with the proper type'
 - 'Request interface: operation arrayBuffer()'
 - 'Request interface: operation blob()'
 - 'Request interface: operation bytes()'
@@ -3094,7 +3113,6 @@ fetch/api/idlharness.https.any.js:
 - 'Request interface: operation formData()'
 - 'Request interface: operation json()'
 - 'Request interface: operation text()'
-- 'Request interface: operation textStream()'
 - Response interface object length
 - 'Response interface: attribute body'
 - 'Response interface: attribute bodyUsed'
@@ -3117,8 +3135,6 @@ fetch/api/idlharness.https.any.js:
 - 'Response interface: new Response() must inherit property "status" with the proper
   type'
 - 'Response interface: new Response() must inherit property "statusText" with the
-  proper type'
-- 'Response interface: new Response() must inherit property "textStream()" with the
   proper type'
 - 'Response interface: new Response() must inherit property "type" with the proper
   type'

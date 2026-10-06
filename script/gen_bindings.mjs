@@ -47,21 +47,20 @@ const INTERFACES = [
   ['dom', 'Element', {
     install: true,
     omit: {
-      'container-timing': 'containertiming / containertimingIgnore: Container Timing is not implemented',
       'css-nav': 'spatial navigation is not implemented',
       'css-pseudo': 'pseudo(): CSSPseudoElement is not implemented',
       'css-typed-om': 'computedStyleMap(): the Typed OM is not implemented',
       'css-view-transitions': 'startViewTransition / activeViewTransition: View Transitions are not implemented',
       'element-timing': 'elementTiming: Element Timing is not implemented',
       pointerlock: 'requestPointerLock: Pointer Lock is not implemented',
-      'sanitizer-api': 'setHTML: the Sanitizer API is not implemented',
       Region: 'regionOverset / getRegionFlowRanges: CSS Regions are not implemented',
       GeometryUtils: 'getBoxQuads / convert*FromNode (cssom-view) are not implemented',
       ARIANotifyMixin: 'ariaNotify: no accessibility tree to announce to'
     },
     omitMembers: {
       currentCSSZoom: 'the effective zoom is not computed',
-      requestFullscreen: 'no fullscreen'
+      requestFullscreen: 'no fullscreen',
+      setHTML: 'the Sanitizer API is not implemented'
     }
   }],
   ['dom', 'Document', {
@@ -75,15 +74,16 @@ const INTERFACES = [
       GeometryUtils: 'getBoxQuads / convert*FromNode (cssom-view) are not implemented',
       'font-metrics-api': 'measureElement / measureText: the Font Metrics API is not implemented',
       'permissions-policy': 'permissionsPolicy: Permissions Policy is not implemented',
-      'sanitizer-api': 'parseHTML: the Sanitizer API is not implemented',
       'scroll-to-text-fragment': 'fragmentDirective: text fragments are not implemented',
       'trust-token-api': 'hasPrivateToken / hasRedemptionRecord: Private State Tokens are not implemented',
+      webmcp: 'modelContext: WebMCP is not implemented',
       ARIANotifyMixin: 'ariaNotify: no accessibility tree to announce to'
     },
     omitMembers: {
       caretPositionFromPoint: 'CaretPosition is not implemented',
       fullscreenEnabled: 'no fullscreen',
       fullscreen: 'no fullscreen',
+      parseHTML: 'the Sanitizer API is not implemented',
       parseHTMLUnsafe: 'a static operation: not generated yet',
       all: 'HTMLAllCollection is not implemented',
       wasDiscarded: 'no discarding is modelled (Page Lifecycle)',
@@ -95,6 +95,7 @@ const INTERFACES = [
     install: true,
     omit: {
       ...NO_TOUCH,
+      'container-timing': 'containerTiming / containerTimingIgnore: Container Timing is not implemented (a WICG proposal)',
       'css-typed-om': 'attributeStyleMap: the Typed OM is not implemented',
       'edit-context': 'editContext: EditContext is not implemented'
     },
@@ -189,7 +190,7 @@ const INTERFACES = [
   ['dom', 'MutationRecord', { install: true }],
   ['dom', 'AbortController', { install: true }],
   ['dom', 'AbortSignal', { install: true }],
-  ['dom', 'ShadowRoot', { install: true, omit: { 'sanitizer-api': 'setHTML: the Sanitizer API is not implemented' } }],
+  ['dom', 'ShadowRoot', { install: true, omitMembers: { setHTML: 'the Sanitizer API is not implemented' } }],
   ['html', 'WorkerGlobalScope', {
     install: true,
     omit: {
@@ -209,12 +210,15 @@ const INTERFACES = [
       NavigatorBadge: 'setAppBadge / clearAppBadge: the Badging API is not implemented',
       'battery-status': 'getBattery: the Battery Status API is not implemented',
       'contact-picker': 'contacts: the Contact Picker API is not implemented',
+      NavigatorCrossOriginStorage: 'crossOriginStorage: Cross-Origin Storage is not implemented (a WICG proposal)',
+      'cpu-performance': 'cpuPerformance: the CPU Performance API is not implemented (a WICG proposal)',
       'device-posture': 'devicePosture: not implemented',
       'encrypted-media': 'requestMediaKeySystemAccess: Encrypted Media Extensions are not implemented',
       'fenced-frame': 'deprecatedReplaceInURN / adAuctionComponents: fenced frames are not implemented',
       'get-installed-related-apps': 'getInstalledRelatedApps: not implemented',
       'handwriting-recognition': 'createHandwritingRecognizer: not implemented',
       'ink-enhancement': 'ink: not implemented',
+      'install-element': 'install: Web Install is not implemented (a WICG proposal)',
       'is-input-pending': 'scheduling: not implemented',
       'keyboard-lock': 'keyboard: the Keyboard Lock API is not implemented',
       'login-status': 'login: not implemented',
@@ -228,15 +232,14 @@ const INTERFACES = [
       NavigatorStorage: 'storage: the Storage API is not implemented',
       NavigatorUA: 'userAgentData: User-Agent Client Hints are not implemented',
       'virtual-keyboard': 'virtualKeyboard: not implemented',
-      'web-bluetooth': 'bluetooth: Web Bluetooth is not implemented',
+      bluetooth: 'bluetooth: Web Bluetooth is not implemented',
       NavigatorAutomationInformation: 'webdriver: no WebDriver drives the page',
       NavigatorGPU: 'gpu: WebGPU is not implemented',
-      webhid: 'hid: WebHID is not implemented',
-      webmcp: 'modelContext: not implemented',
+      hid: 'hid: WebHID is not implemented',
       webmidi: 'requestMIDIAccess: Web MIDI is not implemented',
       NavigatorML: 'ml: WebNN is not implemented',
       'web-share': 'share / canShare: Web Share is not implemented',
-      webusb: 'usb: WebUSB is not implemented',
+      usb: 'usb: WebUSB is not implemented',
       webxr: 'xr: WebXR is not implemented',
       'window-controls-overlay': 'windowControlsOverlay: not implemented'
     },
@@ -264,14 +267,15 @@ const INTERFACES = [
     install: true,
     omit: {
       NavigatorBadge: 'setAppBadge / clearAppBadge: the Badging API is not implemented',
+      NavigatorCrossOriginStorage: 'crossOriginStorage: Cross-Origin Storage is not implemented (a WICG proposal)',
       serial: 'serial: Web Serial is not implemented',
       NavigatorStorageBuckets: 'storageBuckets: not implemented',
       NavigatorStorage: 'storage: the Storage API is not implemented',
       NavigatorUA: 'userAgentData: User-Agent Client Hints are not implemented',
       NavigatorGPU: 'gpu: WebGPU is not implemented',
-      webhid: 'hid: WebHID is not implemented',
+      hid: 'hid: WebHID is not implemented',
       NavigatorML: 'ml: WebNN is not implemented',
-      webusb: 'usb: WebUSB is not implemented'
+      usb: 'usb: WebUSB is not implemented'
     }
   }],
   ['html', 'WorkerLocation', { install: true }]
@@ -434,8 +438,10 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
 // VideoFrame, and InputDeviceCapabilities (a UI event init's `sourceCapabilities` no member, as in Firefox).
 const ABSENT_INTERFACES = new Set([
   'TrustedHTML', 'TrustedScript', 'TrustedScriptURL', 'CSSNumericValue', 'CSSKeywordValue', 'AnimationTrigger', 'VideoFrame',
-  'InputDeviceCapabilities'
+  'InputDeviceCapabilities', 'Sanitizer'
 ]);
+// …and the dictionaries and enums of an API none answers, which a member names beside its interface: the Sanitizer's.
+const ABSENT_TYPES = new Set(['SanitizerConfig', 'SanitizerPresets']);
 
 // The type `t` names `u` as: `u`, with `t`'s extended attributes besides its own and nullable if either is. (Its
 // fields read off it: webidl2's types answer them by getters, which a spread would drop.)
@@ -537,10 +543,12 @@ function dictionaryConverter(name) {
   const head = lines.length;
   lines.push(`  const dict = {};`);
   for (const d of chain) {
-    // (…its partials' members among its own — but one whose type is an interface no implementation here answers, which is
-    // no member here: `{trigger: x}` ignored, as in a browser without Animation Triggers)
+    // (…its partials' members among its own — but one whose type is of an API no implementation here answers, every one
+    // of a union's, which is no member here: `{trigger: x}` ignored, as in a browser without Animation Triggers;
+    // `{sanitizer: x}`, without the Sanitizer API)
+    const absent = (t) => (t.union ? t.idlType.every(absent) : ABSENT_INTERFACES.has(t.idlType) || ABSENT_TYPES.has(t.idlType));
     const members = [...d.members, ...(additions.get(d.name) || []).flatMap((a) => a.def.members)]
-      .filter((m) => !(!m.idlType.union && ABSENT_INTERFACES.has(m.idlType.idlType)));
+      .filter((m) => !absent(m.idlType));
     for (const m of members.sort((a, b) => (a.name < b.name ? -1 : 1))) {
       const where = { dictionary: d.name, member: m.name };
       lines.push(`  {`);

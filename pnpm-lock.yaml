@@ -16,8 +16,8 @@ importers:
         version: 4.3.0
     devDependencies:
       '@webref/idl':
-        specifier: ^3.79.0
-        version: 3.79.0(webidl2@24.5.0)
+        specifier: ^3.85.0
+        version: 3.85.0(webidl2@24.5.0)
       acorn:
         specifier: ^8.18.0
         version: 8.18.0
@@ -192,8 +192,8 @@ packages:
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
-  '@webref/idl@3.79.0':
-    resolution: {integrity: sha512-4wZ6d0xY3JQZY1vHOCk8Z1jEPq9YVzds0VGAJtv6hJAwnxmePP20KQqETp7vXYvx/auqldLYTEHiAsAfosgMVQ==}
+  '@webref/idl@3.85.0':
+    resolution: {integrity: sha512-pUflhFMSsZ+uwjxiyFwvzs1q/Y+1a4xps0toQbHgyNXvE9QMC+BpQZxhdX3VAS+OF0349XIezNHUE0V4NWFffw==}
     peerDependencies:
       webidl2: ^24.5.0
 
@@ -314,7 +314,7 @@ snapshots:
 
   '@types/estree@1.0.9': {}
 
-  '@webref/idl@3.79.0(webidl2@24.5.0)':
+  '@webref/idl@3.85.0(webidl2@24.5.0)':
     dependencies:
       webidl2: 24.5.0
 

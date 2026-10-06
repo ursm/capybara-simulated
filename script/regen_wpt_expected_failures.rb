@@ -61,14 +61,7 @@ TENTATIVE_REASON = 'Unratified `.tentative` spec — auto-classified out-of-scop
 # check scans for, so the writer and reader can't drift) — that check re-surfaces the
 # entry when the test's <link rel=help> stops referencing WICG, i.e. it standardized,
 # the signal a missing `.tentative` suffix can't give. Map: rel => reason.
-WICG_OUT = {
-  'dom/processing-instruction-attributes.html' =>
-    "#{WptRunner::WICG_REASON_TAG} declarative-partial-updates (ProcessingInstruction " \
-    'attributes) — pre-standard, no browser ships it and no app depends on it; treated ' \
-    'like `.tentative`. Has NO `.tentative` filename signal, so the wpt_spec WICG-drift ' \
-    'check re-surfaces this when its <link rel=help> stops referencing WICG (it ' \
-    'standardized). CLAUDE.md rule 1.'
-}.freeze
+WICG_OUT = {}.freeze
 
 # Unratified proposals that are morally `.tentative` (an in-flux spec no browser ships and
 # no app depends on) but carry NEITHER a `tentative` path NOR a WICG `<link rel=help>` — a
@@ -76,13 +69,7 @@ WICG_OUT = {
 # file's failing subtests out-of-scope. Unlike WICG_OUT there's no `<link>` drift signal, so
 # a re-audit is manual — revisit when the feature lands in the published spec. CLAUDE.md
 # rule 1 ("Unratified specs default OUT"). Map: rel => reason.
-PROPOSAL_OUT = {
-  'fetch/api/body/textstream.any.js' =>
-    'Unratified proposal: Request/Response.textStream() is a whatwg/fetch proposal not in ' \
-    'the published Fetch Standard — no browser ships it (absent from MDN + the Body IDL) ' \
-    'and no app depends on it. No `.tentative` path and no WICG link, so listed explicitly; ' \
-    're-audit when it lands in the spec. CLAUDE.md rule 1.'
-}.freeze
+PROPOSAL_OUT = {}.freeze
 
 files = WptRunner.test_files
 warn "Running #{files.size} WPT files…"
