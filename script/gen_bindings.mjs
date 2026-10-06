@@ -177,6 +177,9 @@ const INTERFACES = [
   ['orientation-event', 'DeviceMotionEventRotationRate'],
   ['orientation-event', 'DeviceMotionEvent', { install: true }],
   ['orientation-event', 'DeviceOrientationEvent', { install: true }],
+  ['dom', 'AbstractRange', { install: true }],
+  ['dom', 'StaticRange', { install: true }],
+  ['dom', 'Range', { install: true }],
   ['dom', 'MutationObserver', { install: true }],
   ['cssom-view', 'MediaQueryList', { install: true }],
   ['dom', 'MutationRecord', { install: true }],
@@ -685,6 +688,13 @@ function generateInterface(def, options = {}) {
         statics.push(`    ${operation(name, m, checks, () => 'null')}`);
         continue;
       }
+      if (m.special === 'stringifier') {
+        // (…`stringifier;`: a toString the implementation's `stringify` answers — Range's text)
+        if (m.name || m.arguments.length) throw new Error(`${label}: only an anonymous stringifier operation is generated`);
+        body.push(`    toString() { return impl.stringify(${self}); }`);
+        stringifier = 'toString';
+        continue;
+      }
       if (m.special === 'getter') {
         if (m.arguments.length !== 1 || m.arguments[0].idlType.idlType !== 'unsigned long') throw new Error(`${label}: only an indexed getter is generated`);
         indexed = m.name;
@@ -702,7 +712,7 @@ function generateInterface(def, options = {}) {
     throw new Error(`${label}: a ${m.type} member is not generated yet`);
   }
   if (indexed && !members.includes('length')) throw new Error(`${name}: an indexed getter with no \`length\` is not generated yet`);
-  if (stringifier) body.push(`    toString() { return impl.get_${stringifier}(${self}); }`);
+  if (stringifier && stringifier !== 'toString') body.push(`    toString() { return impl.get_${stringifier}(${self}); }`);
   const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
   if (options.install) {
     if (indexed || valueIterator) throw new Error(`${name}: an installed interface with an indexed getter or an iterator is not generated yet`);
