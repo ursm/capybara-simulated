@@ -178,6 +178,8 @@ const INTERFACES = [
   ['orientation-event', 'DeviceMotionEventRotationRate'],
   ['orientation-event', 'DeviceMotionEvent', { install: true }],
   ['orientation-event', 'DeviceOrientationEvent', { install: true }],
+  ['webidl', 'DOMException', { install: true }],
+  ['webidl', 'QuotaExceededError', { install: true }],
   ['dom', 'DOMImplementation', { install: true }],
   ['dom', 'XPathResult', { install: true }],
   ['dom', 'XPathExpression', { install: true }],
@@ -316,7 +318,8 @@ for (const [spec, defs] of Object.entries(all)) {
 // interface object is put on — and, of a member, whether its interface's has it at all (membersOf). [SecureContext]: exposed, every realm here being a secure context
 // (`isSecureContext`, platform-globals.js). The rest the generator makes as Web IDL says.
 const HANDLED = {
-  interface: ['Exposed', 'SecureContext', 'Global', 'LegacyUnenumerableNamedProperties'],
+  // ([Serializable] / [Transferable]: the structured clone's to honour — platform-globals.js `cloneInto` — no member's)
+  interface: ['Exposed', 'SecureContext', 'Global', 'LegacyUnenumerableNamedProperties', 'Serializable', 'Transferable'],
   member: [
     'SameObject', 'NewObject', 'CEReactions', 'Unscopable', 'PutForwards', 'Reflect', 'SecureContext', 'LegacyLenientSetter',
     'LegacyUnforgeable', 'LegacyLenientThis', 'Replaceable', 'HTMLConstructor', 'ReflectSetter', 'ReflectURL', 'ReflectNonNegative',
