@@ -177,6 +177,8 @@ const INTERFACES = [
   ['orientation-event', 'DeviceMotionEventRotationRate'],
   ['orientation-event', 'DeviceMotionEvent', { install: true }],
   ['orientation-event', 'DeviceOrientationEvent', { install: true }],
+  ['dom', 'AbortController', { install: true }],
+  ['dom', 'AbortSignal', { install: true }],
   ['dom', 'ShadowRoot', { install: true, omit: { 'sanitizer-api': 'setHTML: the Sanitizer API is not implemented' } }],
   ['html', 'WorkerGlobalScope', {
     install: true,
@@ -364,7 +366,7 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
   checkExtAttrs(extAttrs, 'type', label);
   const legacyNull = extAttrs.some((e) => e.name === 'LegacyNullToEmptyString');
   const enforceRange = extAttrs.some((e) => e.name === 'EnforceRange');
-  if (enforceRange && !['unsigned short', 'unsigned long', 'long'].includes(t.idlType)) throw new Error(`${label}: no binding enforces the range of ${t.idlType} yet`);
+  if (enforceRange && !['unsigned short', 'unsigned long', 'long', 'unsigned long long', 'long long'].includes(t.idlType)) throw new Error(`${label}: no binding enforces the range of ${t.idlType} yet`);
   let c;
   switch (enforceRange ? 'EnforceRange' : t.idlType) {
     case 'EnforceRange': c = `toEnforcedInteger(${expr}, ${JSON.stringify(t.idlType)}, ${failure(where)})`; break;
@@ -769,7 +771,7 @@ function installInterface(def, { body, statics, unforgeables, checks, unscopable
   if (global) lines.push(`  const members = {};`);
   lines.push(`  installMembers(${holder}, Members.prototype);`);
   if (statics.length) lines.push(`  class Statics {`, ...statics, `  }`, `  installMembers(iface, Statics.prototype);`);
-  if (handlers.length) lines.push(`  impl.installEventHandlers(${holder}, ${JSON.stringify(handlers)});`);
+  if (handlers.length) lines.push(`  impl.installEventHandlers(${holder}, ${JSON.stringify(handlers)}, IS_SELF);`);
   if (constants.length) {
     const list = JSON.stringify(constants.map(([n]) => n));
     lines.push(`  defineConstants(iface, ${list}, [${constants.map(([, v]) => v).join(', ')}]);`);
