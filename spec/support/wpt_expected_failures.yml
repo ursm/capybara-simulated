@@ -22,16 +22,12 @@ FileAPI/idlharness.any.js:
 - 'FileList interface: attribute length'
 - 'FileList interface: existence and properties of interface object'
 - 'FileList interface: operation item(unsigned long)'
-- 'URL interface: operation createObjectURL((Blob or MediaSource))'
-- 'URL interface: operation revokeObjectURL(DOMString)'
 FileAPI/idlharness.html:
 - 'FileList interface: attribute length'
 - 'FileList interface: calling item(unsigned long) on document.querySelector("#fileChooser").files
   with too few arguments must throw TypeError'
 - 'FileList interface: existence and properties of interface object'
 - 'FileList interface: operation item(unsigned long)'
-- 'URL interface: operation createObjectURL((Blob or MediaSource))'
-- 'URL interface: operation revokeObjectURL(DOMString)'
 FileAPI/url/sandboxed-iframe.html:
 - Blob URL fragment is implemented.
 - "[harness] TIMEOUT"
@@ -8676,9 +8672,6 @@ xhr/idlharness.any.js:
 - 'FormData interface: operation has(USVString)'
 - 'FormData interface: operation set(USVString, Blob, optional USVString)'
 - 'FormData interface: operation set(USVString, USVString)'
-- Stringification of new FormData()
-- Stringification of new FormData(form)
-- Stringification of new FormData(form, submitter)
 - 'XMLHttpRequest interface: attribute readyState'
 - 'XMLHttpRequest interface: attribute response'
 - 'XMLHttpRequest interface: attribute responseText'
