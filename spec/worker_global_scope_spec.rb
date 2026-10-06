@@ -99,6 +99,17 @@ RSpec.describe 'Worker global scope' do
     expect(session.evaluate_script('[navigator.userAgent, frames[0].navigator.userAgent]')).to eq(['Other/2.0', 'Other/2.0'])
   end
 
+  it "tells every window the session's device, a pop-up too" do
+    Capybara.register_driver(:simulated_device) {|a| Capybara::Simulated::Driver.new(a, viewport: [425, 694], user_agent: 'MyUA/1.0') }
+    s = simulated_session(app, mode: :simulated_device)
+    s.visit '/'
+    probe = '[navigator.userAgent, innerWidth]'
+    expect(s.evaluate_script(probe)).to eq(['MyUA/1.0', 425])
+    s.within_window(s.window_opened_by { s.execute_script("window.open('/frame')") }) do
+      expect(s.evaluate_script(probe)).to eq(['MyUA/1.0', 425])
+    end
+  end
+
   it "makes a window's navigator a Navigator" do
     session.visit '/'
     expect(session.evaluate_script(<<~JS)).to eq([true, [], 'Mozilla', 'Gecko', true, 'undefined', false, true, 'Linux x86_64', true, 'TypeError'])
