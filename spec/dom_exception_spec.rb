@@ -10,6 +10,7 @@ RSpec.describe 'DOMException' do
       [200, {'content-type' => 'text/html'}, [<<~HTML]]
         <!doctype html><meta charset=utf-8><p>x
         <script>function hostThrow() { document.createElement('1'); }</script>
+        <button onclick="document.createElement('2')">b</button>
         <iframe srcdoc="<script>boom = () => { throw new DOMException('fx', 'NotFoundError'); };</script>"></iframe>
       HTML
     end
@@ -37,6 +38,16 @@ RSpec.describe 'DOMException' do
       const done = arguments[0];
       window.addEventListener('error', (ev) => { ev.preventDefault(); done([ev.message.split(':')[0], ev.filename === location.href, ev.lineno > 0]); }, { once: true });
       setTimeout(hostThrow);
+    JS
+    expect(got).to eq(['InvalidCharacterError', true, true])
+  end
+
+  it "reports one an event handler content attribute's code threw as the document's" do
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      window.addEventListener('error', (ev) => { ev.preventDefault(); done([ev.message.split(':')[0], ev.filename === location.href, ev.lineno > 0]); }, { once: true });
+      setTimeout(() => document.querySelector('button').click());
     JS
     expect(got).to eq(['InvalidCharacterError', true, true])
   end
