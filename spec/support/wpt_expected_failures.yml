@@ -99,10 +99,6 @@ WebCryptoAPI/derive_bits_keys/derive_key_and_encrypt.https.any.js:
 - HKDF derivation of a ECDH key 2
 - PBKDF2 derivation of a ECDH key 1
 - PBKDF2 derivation of a ECDH key 2
-WebCryptoAPI/historical.any.js:
-- "[dedicatedworker] Non-secure context window does not have access to CryptoKey"
-- "[dedicatedworker] Non-secure context window does not have access to SubtleCrypto"
-- "[dedicatedworker] Non-secure context window does not have access to crypto.subtle"
 WebCryptoAPI/idlharness.https.any.js:
 - 'Crypto interface: attribute subtle'
 - 'Crypto interface: calling getRandomValues(ArrayBufferView) on crypto with too few
@@ -3218,39 +3214,8 @@ encoding/streams/realms.window.js:
 - the result object when write is called with a pending read should come from the
   same realm as the constructor of TextDecoderStream
 fetch/api/abort/general.any.js:
-- "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
-  response.arrayBuffer()"
-- "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
-  response.blob()"
-- "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
-  response.bytes()"
-- "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
-  response.formData()"
-- "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
-  response.json()"
-- "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
-  response.text()"
-- "[dedicatedworker] Stream errors once aborted, after reading. Underlying connection
-  closed."
-- "[dedicatedworker] Stream errors once aborted. Underlying connection closed."
-- "[dedicatedworker] Underlying connection is closed when aborting after receiving
-  response"
-- "[dedicatedworker] Underlying connection is closed when aborting after receiving
-  response - no-cors"
 - "[dedicatedworker] [harness] ERROR"
 - "[harness] ERROR"
-- "[serviceworker] Fetch aborted & connection closed when aborted after calling response.arrayBuffer()"
-- "[serviceworker] Fetch aborted & connection closed when aborted after calling response.blob()"
-- "[serviceworker] Fetch aborted & connection closed when aborted after calling response.bytes()"
-- "[serviceworker] Fetch aborted & connection closed when aborted after calling response.formData()"
-- "[serviceworker] Fetch aborted & connection closed when aborted after calling response.json()"
-- "[serviceworker] Fetch aborted & connection closed when aborted after calling response.text()"
-- "[serviceworker] Stream errors once aborted, after reading. Underlying connection
-  closed."
-- "[serviceworker] Stream errors once aborted. Underlying connection closed."
-- "[serviceworker] Underlying connection is closed when aborting after receiving response"
-- "[serviceworker] Underlying connection is closed when aborting after receiving response
-  - no-cors"
 - "[serviceworker] [harness] ERROR"
 fetch/api/abort/keepalive.html:
 - aborting a keepalive fetch should work
@@ -3367,17 +3332,6 @@ fetch/api/basic/stream-safe-creation.any.js:
 - throwing Object.prototype.type accessor should not affect stream creation by 'response'
 fetch/api/cors/cors-keepalive.any.js:
 - "[harness] ERROR"
-fetch/api/cors/cors-preflight-redirect.any.js:
-- "[dedicatedworker] Redirection 301 after preflight failed"
-- "[dedicatedworker] Redirection 302 after preflight failed"
-- "[dedicatedworker] Redirection 303 after preflight failed"
-- "[dedicatedworker] Redirection 307 after preflight failed"
-- "[dedicatedworker] Redirection 308 after preflight failed"
-- "[serviceworker] Redirection 301 after preflight failed"
-- "[serviceworker] Redirection 302 after preflight failed"
-- "[serviceworker] Redirection 303 after preflight failed"
-- "[serviceworker] Redirection 307 after preflight failed"
-- "[serviceworker] Redirection 308 after preflight failed"
 fetch/api/cors/data-url-iframe.html:
 - fetching "top.txt" without ACAO should be rejected.
 fetch/api/cors/data-url-shared-worker.html:
@@ -7947,10 +7901,6 @@ html/webappapis/scripting/events/onerroreventhandler.html:
 - onerror + ErrorEvent + Window
 html/webappapis/scripting/events/uncompiled_event_handler_with_scripting_disabled.html:
 - when scripting is disabled, the handler is never compiled
-html/webappapis/structured-clone/structured-clone.any.js:
-- "[dedicatedworker] Growable SharedArrayBuffer"
-- "[dedicatedworker] Serializing OOB TypedArray throws"
-- "[dedicatedworker] Transferring OOB TypedArray throws"
 input-events/input-events-arrow-key-on-number-input-delete-document.html:
 - Number input should not crash and not fire subsequent events when event handler
   removes document

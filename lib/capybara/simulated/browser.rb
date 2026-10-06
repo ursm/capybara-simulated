@@ -358,6 +358,7 @@ module Capybara
         @websocket_threads    = {}
         @websocket_sockets    = {}   # id → csim's socket end
         @websocket_app_sockets = {}  # id → the app's hijack end (closed on teardown)
+        @websocket_workers    = {}   # id → the handle of the worker that opened it (none: the window's)
         @websocket_lock       = Mutex.new
         @websocket_queue      = Thread::Queue.new
         @websocket_queue_head = nil   # one-slot buffer for an event hold_for_ws_close parked ahead of the queue
@@ -626,10 +627,10 @@ module Capybara
       # can't hang settle — the outer poll loop re-drives across calls.
       WORKER_ROUND_TRIP_BUDGET = 1.0
       WORKER_TERMINATE_GRACE   = 0.05
-      # Max timer-draining rounds `drive_worker_to_quiescence` runs before yielding back
-      # to the poll loop. A message handler's async bring-up (Emscripten WASM init) settles
-      # in a handful of microtask/timer rounds; the cap only bites a worker that keeps
-      # rescheduling timers (a setInterval), which the poll loop then continues to advance.
+      # Max rounds `drive_worker_to_quiescence` runs before yielding back to the poll loop.
+      # A message handler's async bring-up (Emscripten WASM init) settles in a handful of
+      # microtask / 0 ms timer rounds; the cap only bites a worker that keeps rescheduling
+      # a due timer, which the poll loop then continues to advance.
       WORKER_QUIESCE_MAX_ROUNDS = 256
       # Per-frame GVL yield (run_event_loop_frame) while a worker thread is alive, so it gets a clean
       # slice for cross-isolate work (transferIn / message replies) instead of being starved by the
@@ -3926,16 +3927,18 @@ module Capybara
       # the main thread — events drain into the VM at `settle`, like SSE).
       WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
       private_constant :WS_GUID
-      # A worker's WebSocket: its reader's events go to the worker's inbox, which the worker's own loop delivers into its
-      # isolate (`run_worker`) — the main thread's queue is the window's alone.
-      WsWorkerSink = Struct.new(:inbox) do
+      # The worker a WebSocket was opened in: its reader's events go to the worker's inbox, which the worker's own loop
+      # delivers into its isolate (`run_worker`) — the main thread's queue is the window's alone — and its handshake
+      # comes from the worker's URL.
+      WsWorker = Struct.new(:handle, :inbox, :url) do
         def <<(event) = (inbox << {kind: 'ws', event: event})
       end
-      private_constant :WsWorkerSink
+      private_constant :WsWorker
 
-      # (`sink`: where its events go — a worker's WsWorkerSink, or the main thread's queue)
-      def ws_open(url, protocols = nil, sink = nil)
-        queue    = sink || @websocket_queue
+      # (`worker`: the WsWorker that opens it — none for the window's)
+      def ws_open(url, protocols = nil, worker = nil)
+        queue    = worker || @websocket_queue
+        client   = worker ? worker.url : @current_url
         id       = @websocket_lock.synchronize { @websocket_seq += 1 }
         # ws:// → http://, wss:// → https:// for the Rack env; resolve relative
         # against the current document (Action Cable's consumer builds an
@@ -3945,15 +3948,16 @@ module Capybara
         key      = SecureRandom.base64(16)
         csim_io, app_io = Socket.pair(:UNIX, :STREAM, 0)
         env = rack_env_for(target, method: 'GET')
-        apply_default_request_env(env, referer: @current_url)
+        apply_default_request_env(env, referer: client)
         env['HTTP_UPGRADE']               = 'websocket'
         env['HTTP_CONNECTION']            = 'Upgrade'
         env['HTTP_SEC_WEBSOCKET_KEY']     = key
         env['HTTP_SEC_WEBSOCKET_VERSION'] = '13'
-        # The opening handshake always carries the initiating document's origin (the UA owns this
-        # header) — server handlers echo it back (websockets/opening-handshake origin test).
-        doc_origin = url_origin(@current_url)
-        env['HTTP_ORIGIN'] = doc_origin if doc_origin
+        # The opening handshake always carries its client's origin — the document's, or the worker's (the UA owns this
+        # header) — server handlers echo it back (websockets/opening-handshake origin test). A blob: client's is the
+        # origin its URL carries inside; a data: worker's is opaque, and goes unsent.
+        client_origin = url_origin(client.to_s.delete_prefix('blob:'))
+        env['HTTP_ORIGIN'] = client_origin if client_origin
         list = Array(protocols).map(&:to_s).reject(&:empty?)
         env['HTTP_SEC_WEBSOCKET_PROTOCOL'] = list.join(', ') unless list.empty?
         env['rack.hijack?']  = true
@@ -3962,15 +3966,16 @@ module Capybara
         # The app hijacks + writes the 101 (synchronously, or on its own event
         # loop thread — Action Cable handles the upgrade on a separate thread, so
         # `@app.call` may return before the handshake bytes appear; the reader
-        # blocks until they do). Run it on the main thread like the long-poll
-        # hijack so we don't race a second concurrent `@app.call`. (No handshake
-        # timeout: a server that never writes the 101 leaks the reader+socket
-        # until `reset_websockets` — acceptable, real servers always respond.)
+        # blocks until they do). Called on the opener's thread — the main thread's
+        # for the window, a worker's own for its sockets, as its `fetch` calls the app.
+        # (No handshake timeout: a server that never writes the 101 leaks the
+        # reader+socket until its teardown — acceptable, real servers always respond.)
         @app.call(env)
         accept = Digest::SHA1.base64digest(key + WS_GUID)
         @websocket_lock.synchronize do
           @websocket_sockets[id]     = csim_io
           @websocket_app_sockets[id] = app_io
+          @websocket_workers[id]     = worker.handle if worker
           @websocket_threads[id] = Thread.new do
             Thread.current.report_on_exception = false
             run_websocket_reader(id, csim_io, accept, queue, target)
@@ -4070,16 +4075,49 @@ module Capybara
           @websocket_app_sockets.each_value {|s| s.close rescue nil }
           @websocket_sockets.clear
           @websocket_app_sockets.clear
+          @websocket_workers.clear
         end
+        forget_window_websocket_events
+      end
+
+      # The window's sockets, as its document goes (a navigation commits another): each made to disappear, and what
+      # its readers had queued for the document gone with it.
+      private def drop_document_websockets
+        ws_drop_client
+        forget_window_websocket_events
+      end
+
+      private def forget_window_websocket_events
         @websocket_queue.clear
         @websocket_queue_head   = nil
         @ws_close_pending       = 0
         @ws_close_wait_deadline = nil
       end
 
+      # The sockets of a client that went away — a worker that ended, or the window's document a navigation replaced:
+      # each made to disappear (HTML "unloading document cleanup steps" / a worker's teardown), its closing handshake
+      # started as Going Away. Its reader finishes the handshake — torn down here, the app's reply raced csim's
+      # closing end — but unheard: the socket is no longer its client's (WsHeard). (`worker`: the handle; none for the
+      # window's)
+      private def ws_drop_client(worker = nil)
+        @websocket_lock.synchronize do
+          @websocket_sockets.keys.select {|id| @websocket_workers[id] == worker }.each do |id|
+            @websocket_workers.delete(id)
+            ws_write_frame(@websocket_sockets.delete(id), 0x8, [1001].pack('n')) rescue nil
+          end
+        end
+      end
+
+      # A reader's events, while its socket is its client's (`ws_drop_client`).
+      WsHeard = Struct.new(:queue, :heard) do
+        def <<(event) = (queue << event if heard.call)
+      end
+      private_constant :WsHeard
+
       # Background-thread frame reader: verify the 101 handshake, then loop
       # decoding server→client frames into queue events until close / EOF.
-      private def run_websocket_reader(id, sock, expected_accept, queue, target)
+      private def run_websocket_reader(id, sock, expected_accept, client_queue, target)
+        queue = WsHeard.new(client_queue, -> { @websocket_lock.synchronize { @websocket_sockets.key?(id) } })
         ok, protocol, cookies = ws_read_handshake(sock, expected_accept)
         unless ok
           queue << {id: id, type: '__error', message: 'websocket handshake failed'}
@@ -4120,9 +4158,9 @@ module Capybara
       rescue StandardError => e
         queue << {id: id, type: '__close', code: 1006, reason: e.message.to_s[0, 120]}
       ensure
-        # Only the socket (a local) is closed here — the `@websocket_*` hashes
-        # are mutated solely on the main thread (`reset_websockets`) to avoid a
-        # cross-thread Hash race; a closed entry just no-ops on the next access.
+        # Only the socket (a local) is closed here — the `@websocket_*` hashes are
+        # its opener's and its teardown's, under `@websocket_lock`; a closed entry
+        # just no-ops on the next access.
         sock.close rescue nil
       end
 
@@ -8121,18 +8159,18 @@ module Capybara
         # this handle and revoked on terminate (see blob_register / revoke_worker_blobs).
         Thread.current[:csim_worker_handle] = handle
         rt = nil
-        # The worker's clock follows the window's (one agent cluster's time): each tick it advances a poll interval, or
-        # as far as the window's clock has moved since the worker began, whichever is more — a window fast-forwarding
-        # to its next timer moves the worker's timers with it, where a worker on its own clock waited out a
-        # multi-second `setTimeout` in real time while the page's harness timed out.
-        # (…the window's clock less the worker's, taken at its first tick — the window's as its page has it, which a
-        # step before the worker began, of the page before, does not say)
-        clock_base = nil
+        # The worker's clock follows the window's (one agent cluster's time): a tick with a timer pending advances it a
+        # poll interval, or as far as the window's clock has moved since the last tick, whichever is more — a window
+        # fast-forwarding to its next timer moves the worker's timers with it, where a worker on its own clock waited
+        # out a multi-second `setTimeout` in real time while the page's harness timed out. Asked EVERY tick, so what
+        # the window moved while the worker had no timer is spent then, not owed to the next timer it sets; and a
+        # window's clock that went back (a navigation's page starts its own at 0) moved nothing.
+        window_was = nil
         worker_clock_step = lambda do
-          main = @runtime ? @runtime.clock : 0.0
-          own  = rt.call('__virtualNow').to_f
-          clock_base ||= main - own
-          [WORKER_POLL_INTERVAL * 1000, main - clock_base - own].max
+          window = @runtime ? @runtime.clock : 0.0
+          moved  = window_was && window > window_was ? window - window_was : 0.0
+          window_was = window
+          [WORKER_POLL_INTERVAL * 1000, moved].max
         end
         # "Has the session boundary asked this worker to stop?" — the Ruby-side half of that ask
         # (`stop_worker_js` sets the flag; `terminate` handles the JS already in flight). Read
@@ -8159,7 +8197,7 @@ module Capybara
         sw_race_dropped_streams = {}
         sw_hooks = {
           # The worker's WebSockets: opened and written from this thread, their events into this worker's inbox.
-          ws_open:        ->(url, protocols) { ws_open(url, protocols, WsWorkerSink.new(inbox)) },
+          ws_open:        ->(ws_url, protocols) { ws_open(ws_url, protocols, WsWorker.new(handle, inbox, url)) },
           ws_close:       ->(id, code, reason) { ws_close(id, code, reason, hold: false) },
           # A script exception the worker's global left unhandled, for its Worker's `error` (workers.js).
           report_error:   ->(message, filename, lineno, colno) { outbox << {handle: handle, kind: '__scripterror', message: message.to_s, filename: filename.to_s, lineno: lineno.to_i, colno: colno.to_i} },
@@ -8688,9 +8726,10 @@ module Capybara
               # (…and how soon, for the window's event loop, whose page waits on it: `worker_next_timer`)
               record[:next_timer] = next_timer
             end
+            clock_step = worker_clock_step.call
             if timers_due
               rt.drain_microtasks
-              rt.drain_timers(worker_clock_step.call)
+              rt.drain_timers(clock_step)
             end
             # A lifecycle phase whose `waitUntil` was parked at boot may have settled off
             # the message dispatch / timer drain above (the extendable-event SYN/ACK, the
@@ -8734,6 +8773,8 @@ module Capybara
         # counter; balance it here so worker_pending? can't stick true after this thread dies.
         @worker_init_lock.synchronize { @worker_busy -= 1 } if busy_held
         release_init.call   # guarantee the init count is released on an early raise
+        # Its WebSockets go with it (HTML "worker event loop" teardown: each made to disappear).
+        ws_drop_client(handle)
         # Take the runtime back from the boundary BEFORE destroying it, and destroy it while
         # holding the lock: terminating a disposed isolate is a use-after-free, and the two calls
         # are on different threads. Whoever holds the lock owns the pointer for that moment.
@@ -8803,25 +8844,26 @@ module Capybara
         end
       end
 
-      # Run a worker isolate's own event loop until it goes idle: drain microtasks,
-      # then — if a timer is pending — advance the worker clock to fire it and loop, so
-      # the microtasks that timer's callback queues get drained in turn. A single
-      # `drain_microtasks; drain_timers` pair strands whatever the last-fired timer
-      # queued, which is exactly how Emscripten's WASM bring-up stalls
-      # (`removeRunDependency` runs only after the binary-read setTimeout, and its
-      # `run()` → `onRuntimeInitialized` continuation is a bare microtask with no further
-      # timer to re-trigger a gated drain). Bounded by WORKER_QUIESCE_MAX_ROUNDS so a
-      # self-perpetuating timer (setInterval) yields back to the poll loop rather than
-      # pinning the thread.
+      # Run a worker isolate's own event loop until it goes idle NOW: drain microtasks,
+      # then — if a timer is already due — fire it and loop, so the microtasks that
+      # timer's callback queues get drained in turn. A single `drain_microtasks;
+      # drain_timers` pair strands whatever the last-fired timer queued, which is exactly
+      # how Emscripten's WASM bring-up stalls (`removeRunDependency` runs only after the
+      # binary-read setTimeout(0), and its `run()` → `onRuntimeInitialized` continuation
+      # is a bare microtask with no further timer to re-trigger a gated drain). Only
+      # what is due: the worker's clock is the window's (`worker_clock_step`), so a
+      # later timer waits for the window's clock to reach it rather than firing with
+      # none of it gone by. Bounded by WORKER_QUIESCE_MAX_ROUNDS so a self-perpetuating
+      # 0 ms timer yields back to the poll loop rather than pinning the thread.
       # `stopping`: asked between rounds, because this loop is the other place a worker can spend
       # seconds — 256 rounds, each a drain whose budget one long timer callback can overrun.
       # `terminate` ends whichever round is running; this check ends the loop between rounds.
       private def drive_worker_to_quiescence(rt, stopping = nil)
         WORKER_QUIESCE_MAX_ROUNDS.times do
           rt.drain_microtasks
-          break if rt.call('__nextTimerDelay').to_f < 0
+          break unless rt.call('__nextTimerDelay').to_f.zero?
           break if stopping&.call
-          rt.drain_timers
+          rt.drain_timers(0)
         end
       end
 
@@ -10979,6 +11021,7 @@ module Capybara
         # a leg delivering after this point would resolve the NEW page's same-
         # numbered fetch with the old page's response.
         reset_sw_race_state
+        drop_document_websockets
         @runtime.rebuild_ctx
         # A full page (re)build disposes every frame realm, so any active
         # `within_frame` scope is now stale — fall back to the main document.

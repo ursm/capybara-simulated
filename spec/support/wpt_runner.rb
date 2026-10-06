@@ -1074,7 +1074,14 @@ module WptRunner
       <script>
       fetch_tests_from_worker(new Worker(#{"/#{js_rel}".to_json} + location.search));
       </script>
+      #{timeout_meta(js_rel)}
     HTML
+  end
+
+  # The `<meta name=timeout>` of a JS test's wrapper, as wptserve writes one for its `// META: timeout=long` — read by
+  # the window's harness, whose timeout a worker's tests run under too.
+  def timeout_meta(js_rel)
+    any_js_meta(js_rel, 'timeout').first == 'long' ? '<meta name="timeout" content="long">' : ''
   end
 
   # A `.any.js` test's `// META: <key>=…` values, from its leading comment block.
@@ -1107,6 +1114,7 @@ module WptRunner
     tags = any_js_deps(js_rel).map {|url| %{<script src="#{url}"></script>} }
     <<~HTML
       <!doctype html><meta charset="utf-8">
+      #{timeout_meta(js_rel)}
       <script src="/resources/testharness.js"></script>
       <script src="/resources/testharnessreport.js"></script>
       <script>
@@ -1140,6 +1148,7 @@ module WptRunner
       <!doctype html><meta charset="utf-8">
       <script src="/resources/testharness.js"></script>
       <script src="/resources/testharnessreport.js"></script>
+      #{timeout_meta(js_rel)}
       <div id=log></div>
       <script>
       #{start}</script>
@@ -1225,7 +1234,13 @@ module WptRunner
       name = i.zero? ? ->(n) { n } : ->(n) { "[#{global}] #{n}" }
       queries.each do |q|
         r = run_one(rel, q, page)
-        return {completed: false, error: r[:error]} unless r[:completed]
+        unless r[:completed]
+          # (…a later global's run that never completed is a failing pseudo-subtest of its own, and the first's
+          # results stand — a worker's harness error hid every regression of the window's run of the file)
+          return {completed: false, error: r[:error]} if i.zero?
+          merged << name.(HARNESS_ERROR)
+          next
+        end
         merged.concat(r[:failing].map(&name))
         merged_tests.concat(r[:tests].map {|t| t.merge('name' => name.(t['name'])) })
       end

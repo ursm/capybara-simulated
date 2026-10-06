@@ -16,7 +16,10 @@ RSpec.describe 'WebSocket' do
     def write(bytes) = @io.write(bytes)
   end
 
+  # The close codes the server hears, as its connections close.
+  let(:closes) { Thread::Queue.new }
   let(:app) {
+    closes = self.closes
     lambda do |env|
       if env['HTTP_UPGRADE'].to_s.downcase == 'websocket'
         io     = env['rack.hijack'].call
@@ -33,6 +36,7 @@ RSpec.describe 'WebSocket' do
             driver.text("echo:#{e.data}")
           end
         end
+        driver.on(:close) {|e| closes << e.code }
         driver.start                                              # writes the 101
         Thread.new do
           Thread.current.report_on_exception = false
@@ -43,6 +47,22 @@ RSpec.describe 'WebSocket' do
           end
         end
         [101, {}, []]   # ignored — the connection is hijacked
+      elsif env['PATH_INFO'] == '/worker'
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><html><head><title>start</title></head><body>
+            <script>
+              window.w = new Worker('/w.js');
+              window.w.onmessage = function (e) { document.title = e.data; };
+            </script>
+          </body></html>
+        HTML
+      elsif env['PATH_INFO'] == '/w.js'
+        [200, {'content-type' => 'text/javascript'}, [<<~JS]]
+          const ws = new WebSocket('ws://' + location.host + '/cable');
+          ws.onopen    = () => ws.send('ping');
+          ws.onmessage = (e) => { if (e.data.startsWith('echo:')) postMessage(e.data); };
+          onmessage    = () => close();
+        JS
       else
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
           <!doctype html><html><head><title>start</title></head><body>
@@ -87,5 +107,34 @@ RSpec.describe 'WebSocket' do
     session.execute_script('window.ws.close()')
     expect(session).to have_title('closed:1000')                       # close handshake completed
     expect(session.evaluate_script('window.ws.readyState')).to eq(3)   # CLOSED
+  end
+
+  # HTML: a document's WebSockets are made to disappear as it is unloaded, and a worker's as it ends — the server hears
+  # Going Away, rather than a connection that lives on until the session's reset.
+  describe 'closing with its client' do
+    it 'closes the document\'s sockets as a navigation replaces it' do
+      expect(session).to have_title(/echo:ping/)
+      expect(closes).to be_empty
+      session.visit('/?next')
+      expect(closes.pop(timeout: 5)).to eq(1001)
+    end
+
+    it 'runs a worker\'s socket, and closes it as the worker is terminated' do
+      expect(session).to have_title(/echo:ping/)
+      session.visit('/worker')
+      expect(session).to have_title('echo:ping')
+      expect(closes.pop(timeout: 5)).to eq(1001)   # (the first page's, which the visit replaced)
+      session.execute_script('window.w.terminate()')
+      expect(closes.pop(timeout: 5)).to eq(1001)
+    end
+
+    it 'closes a worker\'s socket as the worker closes itself' do
+      expect(session).to have_title(/echo:ping/)
+      session.visit('/worker')
+      expect(session).to have_title('echo:ping')
+      expect(closes.pop(timeout: 5)).to eq(1001)   # (the first page's, which the visit replaced)
+      session.execute_script('window.w.postMessage("close")')
+      expect(closes.pop(timeout: 5)).to eq(1001)
+    end
   end
 end

@@ -17713,6 +17713,21 @@ WebCryptoAPI/historical.any.js:
     real browsers for http://localhost), so crypto.subtle / SubtleCrypto / CryptoKey
     are always exposed. This test asserts their ABSENCE in a non-secure context, which
     the driver deliberately does not model. CLAUDE.md rule 1.
+- name: "[dedicatedworker] Non-secure context window does not have access to CryptoKey"
+  reason: Driver models localhost as a secure context (isSecureContext = true, matching
+    real browsers for http://localhost), so crypto.subtle / SubtleCrypto / CryptoKey
+    are always exposed. This test asserts their ABSENCE in a non-secure context, which
+    the driver deliberately does not model. CLAUDE.md rule 1.
+- name: "[dedicatedworker] Non-secure context window does not have access to SubtleCrypto"
+  reason: Driver models localhost as a secure context (isSecureContext = true, matching
+    real browsers for http://localhost), so crypto.subtle / SubtleCrypto / CryptoKey
+    are always exposed. This test asserts their ABSENCE in a non-secure context, which
+    the driver deliberately does not model. CLAUDE.md rule 1.
+- name: "[dedicatedworker] Non-secure context window does not have access to crypto.subtle"
+  reason: Driver models localhost as a secure context (isSecureContext = true, matching
+    real browsers for http://localhost), so crypto.subtle / SubtleCrypto / CryptoKey
+    are always exposed. This test asserts their ABSENCE in a non-secure context, which
+    the driver deliberately does not model. CLAUDE.md rule 1.
 WebCryptoAPI/idlharness.tentative.https.any.js:
 - name: 'Crypto interface: attribute subtle'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -37763,6 +37778,94 @@ fetch/api/abort/general.any.js:
 - name: Underlying connection is closed when aborting after receiving response - no-cors
   reason: Server-side connection-close detection on abort; no persistent connection
     in the in-process Rack model (rule 1).
+- name: "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
+    response.arrayBuffer()"
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
+    response.blob()"
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
+    response.bytes()"
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
+    response.formData()"
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
+    response.json()"
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
+    response.text()"
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: "[dedicatedworker] Stream errors once aborted, after reading. Underlying connection
+    closed."
+  reason: Aborting mid-stream must error the body AND have the server observe the
+    connection close; both need a real streaming connection the in-process Rack model
+    lacks (rule 1).
+- name: "[dedicatedworker] Stream errors once aborted. Underlying connection closed."
+  reason: Aborting mid-stream must error the body AND have the server observe the
+    connection close; both need a real streaming connection the in-process Rack model
+    lacks (rule 1).
+- name: "[dedicatedworker] Underlying connection is closed when aborting after receiving
+    response"
+  reason: Needs SERVER-SIDE detection of the client closing the connection on abort
+    (the test aborts a fetch, then reads a stash the server writes when the connection
+    drops). Our in-process fetch is a synchronous Rack call with no persistent connection
+    to close, so the server can never observe the disconnect. Real connection lifecycle
+    not modeled (rule 1).
+- name: "[dedicatedworker] Underlying connection is closed when aborting after receiving
+    response - no-cors"
+  reason: Server-side connection-close detection on abort; no persistent connection
+    in the in-process Rack model (rule 1).
+- name: "[serviceworker] Fetch aborted & connection closed when aborted after calling
+    response.arrayBuffer()"
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: "[serviceworker] Fetch aborted & connection closed when aborted after calling
+    response.blob()"
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: "[serviceworker] Fetch aborted & connection closed when aborted after calling
+    response.bytes()"
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: "[serviceworker] Fetch aborted & connection closed when aborted after calling
+    response.formData()"
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: "[serviceworker] Fetch aborted & connection closed when aborted after calling
+    response.json()"
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: "[serviceworker] Fetch aborted & connection closed when aborted after calling
+    response.text()"
+  reason: Server-side connection-close detection on abort (infinite-slow-response.py
+    + stash); no persistent connection in the in-process Rack model (rule 1).
+- name: "[serviceworker] Stream errors once aborted, after reading. Underlying connection
+    closed."
+  reason: Aborting mid-stream must error the body AND have the server observe the
+    connection close; both need a real streaming connection the in-process Rack model
+    lacks (rule 1).
+- name: "[serviceworker] Stream errors once aborted. Underlying connection closed."
+  reason: Aborting mid-stream must error the body AND have the server observe the
+    connection close; both need a real streaming connection the in-process Rack model
+    lacks (rule 1).
+- name: "[serviceworker] Underlying connection is closed when aborting after receiving
+    response"
+  reason: Needs SERVER-SIDE detection of the client closing the connection on abort
+    (the test aborts a fetch, then reads a stash the server writes when the connection
+    drops). Our in-process fetch is a synchronous Rack call with no persistent connection
+    to close, so the server can never observe the disconnect. Real connection lifecycle
+    not modeled (rule 1).
+- name: "[serviceworker] Underlying connection is closed when aborting after receiving
+    response - no-cors"
+  reason: Server-side connection-close detection on abort; no persistent connection
+    in the in-process Rack model (rule 1).
 fetch/api/cors/cors-preflight-redirect.any.js:
 - name: Redirection 301 after preflight failed
   reason: 'Asserts a TypeError — the pre-2018 "no redirect after a CORS-preflight"
@@ -37795,6 +37898,80 @@ fetch/api/cors/cors-preflight-redirect.any.js:
     does not emit this TypeError either. The driver matches Chromium (follows + re-preflights).
     CLAUDE.md rule 1/2.'
 - name: Redirection 308 after preflight failed
+  reason: 'Asserts a TypeError — the pre-2018 "no redirect after a CORS-preflight"
+    rule. Current Fetch ALLOWS redirects after a preflight (whatwg/fetch#204, commit
+    0d9a4db): the redirect re-triggers a preflight on the target. Traced in google-chrome-stable:
+    Chrome re-preflights the redirect target and the fetch SUCCEEDS, so real Chrome
+    does not emit this TypeError either. The driver matches Chromium (follows + re-preflights).
+    CLAUDE.md rule 1/2.'
+- name: "[dedicatedworker] Redirection 301 after preflight failed"
+  reason: 'Asserts a TypeError — the pre-2018 "no redirect after a CORS-preflight"
+    rule. Current Fetch ALLOWS redirects after a preflight (whatwg/fetch#204, commit
+    0d9a4db): the redirect re-triggers a preflight on the target. Traced in google-chrome-stable
+    (a minimal two-origin repro): Chrome re-preflights the redirect target and the
+    fetch SUCCEEDS, so real Chrome does not emit this TypeError either — it fails
+    this stale subtest too. The driver already matches Chromium (follows + re-preflights);
+    satisfying the assertion would require diverging from real-browser behavior. CLAUDE.md
+    rule 1/2.'
+- name: "[dedicatedworker] Redirection 302 after preflight failed"
+  reason: 'Asserts a TypeError — the pre-2018 "no redirect after a CORS-preflight"
+    rule. Current Fetch ALLOWS redirects after a preflight (whatwg/fetch#204, commit
+    0d9a4db): the redirect re-triggers a preflight on the target. Traced in google-chrome-stable:
+    Chrome re-preflights the redirect target and the fetch SUCCEEDS, so real Chrome
+    does not emit this TypeError either. The driver matches Chromium (follows + re-preflights).
+    CLAUDE.md rule 1/2.'
+- name: "[dedicatedworker] Redirection 303 after preflight failed"
+  reason: 'Asserts a TypeError — the pre-2018 "no redirect after a CORS-preflight"
+    rule. Current Fetch ALLOWS redirects after a preflight (whatwg/fetch#204, commit
+    0d9a4db): the redirect re-triggers a preflight on the target. Traced in google-chrome-stable:
+    Chrome re-preflights the redirect target and the fetch SUCCEEDS, so real Chrome
+    does not emit this TypeError either. The driver matches Chromium (follows + re-preflights).
+    CLAUDE.md rule 1/2.'
+- name: "[dedicatedworker] Redirection 307 after preflight failed"
+  reason: 'Asserts a TypeError — the pre-2018 "no redirect after a CORS-preflight"
+    rule. Current Fetch ALLOWS redirects after a preflight (whatwg/fetch#204, commit
+    0d9a4db): the redirect re-triggers a preflight on the target. Traced in google-chrome-stable:
+    Chrome re-preflights the redirect target and the fetch SUCCEEDS, so real Chrome
+    does not emit this TypeError either. The driver matches Chromium (follows + re-preflights).
+    CLAUDE.md rule 1/2.'
+- name: "[dedicatedworker] Redirection 308 after preflight failed"
+  reason: 'Asserts a TypeError — the pre-2018 "no redirect after a CORS-preflight"
+    rule. Current Fetch ALLOWS redirects after a preflight (whatwg/fetch#204, commit
+    0d9a4db): the redirect re-triggers a preflight on the target. Traced in google-chrome-stable:
+    Chrome re-preflights the redirect target and the fetch SUCCEEDS, so real Chrome
+    does not emit this TypeError either. The driver matches Chromium (follows + re-preflights).
+    CLAUDE.md rule 1/2.'
+- name: "[serviceworker] Redirection 301 after preflight failed"
+  reason: 'Asserts a TypeError — the pre-2018 "no redirect after a CORS-preflight"
+    rule. Current Fetch ALLOWS redirects after a preflight (whatwg/fetch#204, commit
+    0d9a4db): the redirect re-triggers a preflight on the target. Traced in google-chrome-stable
+    (a minimal two-origin repro): Chrome re-preflights the redirect target and the
+    fetch SUCCEEDS, so real Chrome does not emit this TypeError either — it fails
+    this stale subtest too. The driver already matches Chromium (follows + re-preflights);
+    satisfying the assertion would require diverging from real-browser behavior. CLAUDE.md
+    rule 1/2.'
+- name: "[serviceworker] Redirection 302 after preflight failed"
+  reason: 'Asserts a TypeError — the pre-2018 "no redirect after a CORS-preflight"
+    rule. Current Fetch ALLOWS redirects after a preflight (whatwg/fetch#204, commit
+    0d9a4db): the redirect re-triggers a preflight on the target. Traced in google-chrome-stable:
+    Chrome re-preflights the redirect target and the fetch SUCCEEDS, so real Chrome
+    does not emit this TypeError either. The driver matches Chromium (follows + re-preflights).
+    CLAUDE.md rule 1/2.'
+- name: "[serviceworker] Redirection 303 after preflight failed"
+  reason: 'Asserts a TypeError — the pre-2018 "no redirect after a CORS-preflight"
+    rule. Current Fetch ALLOWS redirects after a preflight (whatwg/fetch#204, commit
+    0d9a4db): the redirect re-triggers a preflight on the target. Traced in google-chrome-stable:
+    Chrome re-preflights the redirect target and the fetch SUCCEEDS, so real Chrome
+    does not emit this TypeError either. The driver matches Chromium (follows + re-preflights).
+    CLAUDE.md rule 1/2.'
+- name: "[serviceworker] Redirection 307 after preflight failed"
+  reason: 'Asserts a TypeError — the pre-2018 "no redirect after a CORS-preflight"
+    rule. Current Fetch ALLOWS redirects after a preflight (whatwg/fetch#204, commit
+    0d9a4db): the redirect re-triggers a preflight on the target. Traced in google-chrome-stable:
+    Chrome re-preflights the redirect target and the fetch SUCCEEDS, so real Chrome
+    does not emit this TypeError either. The driver matches Chromium (follows + re-preflights).
+    CLAUDE.md rule 1/2.'
+- name: "[serviceworker] Redirection 308 after preflight failed"
   reason: 'Asserts a TypeError — the pre-2018 "no redirect after a CORS-preflight"
     rule. Current Fetch ALLOWS redirects after a preflight (whatwg/fetch#204, commit
     0d9a4db): the redirect re-triggers a preflight on the target. Traced in google-chrome-stable:
@@ -42650,6 +42827,21 @@ html/webappapis/structured-clone/structured-clone.any.js:
     V8 exposes for DataView (its getter throws — those cases pass) but NOT for a TypedArray.
     Engine introspection not available from JS (rule 1).
 - name: Transferring OOB TypedArray throws
+  reason: Same as "Serializing OOB TypedArray throws" — an out-of-bounds TypedArray's
+    original offset is not observable from JS (V8 reports 0), so it can't be distinguished
+    from an empty length-tracking view. Engine introspection not available (rule 1).
+- name: "[dedicatedworker] Growable SharedArrayBuffer"
+  reason: Needs a GROWABLE SharedArrayBuffer, which this V8 build does not expose
+    (a `new SharedArrayBuffer(n, {maxByteLength})` is not growable — `.growable` is
+    undefined and it tags as `[object ArrayBuffer]`); the test's own `assert_true(sab.growable)`
+    can't pass. Engine feature not available (rule 1).
+- name: "[dedicatedworker] Serializing OOB TypedArray throws"
+  reason: An out-of-bounds TypedArray (its resizable buffer shrank below the view's
+    offset) reports byteOffset/length 0 from JS — indistinguishable from an empty
+    length-tracking view. Detecting it needs the internal [[ByteOffset]] slot, which
+    V8 exposes for DataView (its getter throws — those cases pass) but NOT for a TypedArray.
+    Engine introspection not available from JS (rule 1).
+- name: "[dedicatedworker] Transferring OOB TypedArray throws"
   reason: Same as "Serializing OOB TypedArray throws" — an out-of-bounds TypedArray's
     original offset is not observable from JS (V8 reports 0), so it can't be distinguished
     from an empty length-tracking view. Engine introspection not available (rule 1).

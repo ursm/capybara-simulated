@@ -258,12 +258,18 @@ files.each do |rel|
     # must be recorded with its multiplicity, or the gate's multiset comparison
     # under-counts it and a later same-named regression slips through green.
     pool = out_existing[rel]
+    # A later global's run of a subtest (`[dedicatedworker] X`) is out of scope for the reason X is — the reasons
+    # taken before the loop below spends them.
+    earned   = pool&.transform_values(&:first) || {}
     in_list  = []
     out_list = []
     result[:failing].sort.each do |name|
+      global_twin = name[/\A\[[\w-]+\] (.*)\z/m, 1]
       if pool && pool[name] && !pool[name].empty?
         reason = pool[name].shift
         out_list << { 'name' => name, 'reason' => reason.to_s }
+      elsif global_twin && earned[global_twin]
+        out_list << { 'name' => name, 'reason' => earned[global_twin].to_s }
       elsif tentative_path?(rel)
         out_list << { 'name' => name, 'reason' => TENTATIVE_REASON }
       elsif WICG_OUT.key?(rel)
