@@ -175,8 +175,8 @@
 "resource-timing/buffered-flag.any.js": >-
   Outcome depends on wall time, as `resource_timing.worker.js`'s below: the fetch's
   entry must have `duration > 0`, and its duration is the real time the in-process
-  fetch took at `performance.now()`'s integer-ms resolution — it passes alone, and
-  reads 0 now and then under a loaded machine (regenerating the allowlists in
+  fetch took at `performance.now()`'s integer-ms resolution, which reads 0 now and
+  then — 1 run in 8 alone, more under load (regenerating the allowlists in
   parallel). Rejoins the gate when `performance.now()` resolves below a millisecond.
 "resource-timing/resource_timing.worker.js": >-
   Outcome depends on wall time. The worker's checks run before its virtual clock
