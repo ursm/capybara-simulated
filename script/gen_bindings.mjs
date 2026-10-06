@@ -177,6 +177,7 @@ const INTERFACES = [
   ['orientation-event', 'DeviceMotionEventRotationRate'],
   ['orientation-event', 'DeviceMotionEvent', { install: true }],
   ['orientation-event', 'DeviceOrientationEvent', { install: true }],
+  ['dom', 'DOMImplementation', { install: true }],
   ['dom', 'AbstractRange', { install: true }],
   ['dom', 'StaticRange', { install: true }],
   ['dom', 'Range', { install: true }],
