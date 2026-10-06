@@ -183,7 +183,9 @@ const INTERFACES = [
   ['dom', 'DOMImplementation', { install: true }],
   ['FileAPI', 'Blob', { install: true }],
   ['FileAPI', 'File', { install: true }],
+  ['FileAPI', 'FileList'],
   ['FileAPI', 'FileReader', { install: true }],
+  ['FileAPI', 'FileReaderSync', { install: true }],
   ['dom', 'XPathResult', { install: true }],
   ['dom', 'XPathExpression', { install: true }],
   ['dom', 'XPathEvaluator', { install: true }],
@@ -291,7 +293,7 @@ const RUNTIME = [
   'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
-  'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineClassString', 'enumerable', 'installMembers',
+  'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineIndexedIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers'
 ];
 
@@ -774,6 +776,8 @@ function generateInterface(def, options = {}) {
   if (valueIterator) {
     if (!indexed) throw new Error(`${name}: a value iterator with no indexed getter is not generated yet`);
     lines.push(`  defineValueIterator(${name}.prototype);`);
+  } else if (indexed) {
+    lines.push(`  defineIndexedIterator(${name}.prototype);`);
   }
   // …and its objects, as the platform makes them (`create(...state)`), exotic where it has an indexed getter.
   const make = indexed
