@@ -183,6 +183,7 @@ const INTERFACES = [
   ['dom', 'DOMImplementation', { install: true }],
   ['FileAPI', 'Blob', { install: true }],
   ['FileAPI', 'File', { install: true }],
+  ['FileAPI', 'FileReader', { install: true }],
   ['dom', 'XPathResult', { install: true }],
   ['dom', 'XPathExpression', { install: true }],
   ['dom', 'XPathEvaluator', { install: true }],
