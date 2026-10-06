@@ -177,6 +177,8 @@ const INTERFACES = [
   ['orientation-event', 'DeviceMotionEventRotationRate'],
   ['orientation-event', 'DeviceMotionEvent', { install: true }],
   ['orientation-event', 'DeviceOrientationEvent', { install: true }],
+  ['dom', 'MutationObserver', { install: true }],
+  ['dom', 'MutationRecord', { install: true }],
   ['dom', 'AbortController', { install: true }],
   ['dom', 'AbortSignal', { install: true }],
   ['dom', 'ShadowRoot', { install: true, omit: { 'sanitizer-api': 'setHTML: the Sanitizer API is not implemented' } }],
