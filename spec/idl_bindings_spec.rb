@@ -960,6 +960,59 @@ RSpec.describe 'IDL bindings' do
     ])
   end
 
+  # (…activation reaches the nearest activatable element on a script's click's path; the toggle tasks re-queue; a dialog
+  # toggles as a popover does; a parsed or cloned open details toggles; a page's own window storage takes no event)
+  it "toggles and activates as HTML's steps say" do
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const log = [];
+      document.body.insertAdjacentHTML('beforeend', `
+        <details id=d1><summary><span id=s1>s</span></summary>x</details>
+        <details id=d2><summary id=sm2>s</summary>x</details>
+        <a id=link href="#hit"><span id=inlink>l</span></a>
+        <div id=pa popover>a</div><div id=pb popover>b</div>
+        <dialog id=dlg>d</dialog>
+        <details id=d3 open>p</details>`);
+      const $ = (id) => document.getElementById(id);
+      for (const id of ['pa', 'pb', 'dlg', 'd3']) {
+        $(id).addEventListener('beforetoggle', (e) => log.push(`${id} before ${e.oldState}>${e.newState}`));
+        $(id).addEventListener('toggle', (e) => log.push(`${id} toggle ${e.oldState}>${e.newState}`));
+      }
+      $('d3').cloneNode(true).addEventListener('toggle', (e) => log.push(`clone toggle ${e.oldState}>${e.newState}`));
+      $('s1').click();
+      $('sm2').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      $('inlink').click();
+      log.push(`open ${$('d1').open} ${$('d2').open} ${location.hash}`);
+      $('pa').showPopover(); $('pb').showPopover(); $('pa').hidePopover(); $('pa').showPopover();
+      $('dlg').show(); $('dlg').close();
+      $('dlg').showModal();
+      try { $('dlg').show(); } catch (e) { log.push(e.name); }
+      $('dlg').close();
+      log.push(Object.prototype.toString.call(new DataTransfer()), new DeviceMotionEvent('m', { acceleration: {} }).acceleration !== null);
+      setTimeout(() => done(log), 20);
+    JS
+    expect(got).to eq([
+      'open true true #hit',
+      'pa before closed>open', 'pb before closed>open', 'pa before open>closed', 'pa before closed>open',
+      'dlg before closed>open', 'dlg before open>closed',
+      'dlg before closed>open', 'InvalidStateError', 'dlg before open>closed',
+      '[object DataTransfer]', true,
+      'd3 toggle closed>open', 'clone toggle closed>open', 'pb toggle closed>open', 'pa toggle closed>open', 'dlg toggle closed>closed'
+    ])
+  end
+
+  # (…a page's `pageshow` after its `load`; a rejection handled after it was reported, `rejectionhandled`)
+  it 'fires pageshow and rejectionhandled' do
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const log = [];
+      addEventListener('unhandledrejection', (e) => { log.push('unhandled'); e.preventDefault(); setTimeout(() => e.promise.catch(() => {}), 0); });
+      addEventListener('rejectionhandled', (e) => { log.push(e.constructor.name + ' ' + e.reason); done(log); });
+      Promise.reject('r');
+    JS
+    expect(got).to eq(['unhandled', 'PromiseRejectionEvent r'])
+  end
+
   # (…a details element's `open` changes, a run of them one `toggle` from a task: closed to closed after open-then-close)
   it 'queues a details toggle per run of open changes' do
     got = session.evaluate_async_script(<<~JS)

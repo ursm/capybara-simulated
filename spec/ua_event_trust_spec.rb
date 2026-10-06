@@ -25,6 +25,7 @@ RSpec.describe 'UA-fired events' do
             window.dispatchEvent = () => { throw new Error('the page\\'s dispatchEvent'); };
             addEventListener('hashchange', (e) => { __trust.hashchange = e.isTrusted; });
             addEventListener('popstate', (e) => { __trust.popstate = e.isTrusted; });
+            addEventListener('pageshow', (e) => { __trust.pageshow = e.isTrusted && e instanceof PageTransitionEvent && e.persisted === false; });
             document.getElementById('f').addEventListener('load', (e) => { __trust.frameLoad = e.isTrusted; });
             document.getElementById('i').addEventListener('error', (e) => { __trust.imageError = e.isTrusted; });
             __trust.unhandled = 0;
@@ -58,7 +59,7 @@ RSpec.describe 'UA-fired events' do
     session.visit '/'
     session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 200))')
     expect(session.evaluate_script('window.__trust')).to eq(
-      'hashchange' => true, 'popstate' => true, 'frameLoad' => true, 'imageError' => true, 'unhandled' => 1,
+      'hashchange' => true, 'popstate' => true, 'pageshow' => true, 'frameLoad' => true, 'imageError' => true, 'unhandled' => 1,
       'focus' => true, 'invalid' => true, 'toggle' => true
     )
   end

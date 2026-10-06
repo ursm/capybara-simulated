@@ -1658,9 +1658,9 @@ RSpec.describe 'cascade invalidation' do
     expect(got[1] - got[0]).to eq(100)
   end
 
-  it 'drops :modal styling on show() after showModal()' do
-    # `:modal` is internal state: with `open` already set, show()'s setAttribute is
-    # value-identical and nothing else said the state flipped.
+  it 'drops :modal styling on show() after showModal() and close()' do
+    # `:modal` is internal state with no attribute behind it: closing has to say it flipped. (A show() while it is
+    # still open as a modal is an InvalidStateError — Chrome's, measured — so the dialog is closed between.)
     css = '#t { height: 20px } #t:modal { height: 120px }'
     s = simulated_session(styled_page('<dialog id="t">x</dialog>', css: css))
     s.visit '/'
@@ -1669,6 +1669,7 @@ RSpec.describe 'cascade invalidation' do
         const t = document.getElementById('t');
         t.showModal();
         const modal = t.getBoundingClientRect().height;
+        t.close();
         t.show();
         return [modal, t.getBoundingClientRect().height];
       })()

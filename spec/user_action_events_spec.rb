@@ -23,7 +23,7 @@ RSpec.describe 'User action events' do
           <script>
             window.__log = [];
             const host = document.getElementById('host');
-            host.attachShadow({mode: 'open'}).innerHTML = '<button id=inner>inner</button>';
+            host.attachShadow({mode: 'open'}).innerHTML = '<button id=inner>inner</button><textarea id=sta></textarea>';
             const describe = (e) => {
               const parts = [e.type, e.constructor.name, e.isTrusted, e.view === window, e.composed, e.detail];
               if (e instanceof MouseEvent) parts.push(e.button, e.buttons);
@@ -160,6 +160,9 @@ RSpec.describe 'User action events' do
       'insertFromPaste P',
       'later ""'
     ])
+    # (…into the focused element itself, inside a shadow tree too)
+    session.find('#host').shadow_root.find('#sta').send_keys([:control, 'v'])
+    expect(session.evaluate_script("document.getElementById('host').shadowRoot.getElementById('sta').value")).to eq('P')
   end
 
   it "keeps a pressed button's page position after its dispatch, on a scrolled page" do
