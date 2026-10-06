@@ -17,7 +17,7 @@ RSpec.describe 'User action events' do
       [200, {'content-type' => 'text/html'}, [<<~HTML]]
         <!doctype html><html><body>
           <div id=host></div>
-          <input id=t><textarea id=ta></textarea><button id=btn>btn</button><input id=cb type=checkbox><input id=sub type=submit><div id=z style="width: 100px; height: 40px">z</div>
+          <input id=t><textarea id=ta></textarea><button id=btn>btn</button><input id=cb type=checkbox><input id=sub type=submit><details id=d><summary id=sm>s</summary>x</details><div id=z style="width: 100px; height: 40px">z</div>
           <div style="height: 3000px"></div>
           <div id=far>far</div>
           <script>
@@ -127,6 +127,11 @@ RSpec.describe 'User action events' do
     session.find('#cb').send_keys(:space)
     expect(log.grep(/click/)).to eq([])
     expect(session.find('#cb')).to be_checked
+    # (…a summary's toggling its details, either key)
+    session.find('#sm').send_keys(:enter)
+    expect(session.evaluate_script("document.getElementById('d').open")).to be(true)
+    session.find('#sm').send_keys(:space)
+    expect(session.evaluate_script("document.getElementById('d').open")).to be(false)
   end
 
   it "runs a chord's default unless its keydown was canceled, a paste a ClipboardEvent the document sees" do
@@ -134,7 +139,11 @@ RSpec.describe 'User action events' do
     session.execute_script(<<~JS)
       document.getElementById('ta').addEventListener('keydown', (e) => { if (e.ctrlKey && e.key === 'a') e.preventDefault(); });
       window.__paste = [];
-      document.addEventListener('paste', (e) => __paste.push([e.constructor.name, e.isTrusted, e.clipboardData instanceof DataTransfer, e.clipboardData.getData('text/plain')].join(' ')));
+      document.addEventListener('paste', (e) => {
+        const dt = e.clipboardData;
+        __paste.push([e.constructor.name, e.isTrusted, dt instanceof DataTransfer, dt.getData('text/plain')].join(' '));
+        setTimeout(() => __paste.push('later ' + JSON.stringify(dt.getData('text/plain'))));
+      });
       document.addEventListener('beforeinput', (e) => { if (e.inputType === 'insertFromPaste') __paste.push(e.inputType + ' ' + e.data); });
     JS
     session.find('#ta').send_keys('abc', [:control, 'a'], 'Z')
@@ -143,10 +152,13 @@ RSpec.describe 'User action events' do
     session.find('#host').shadow_root.find('#inner').send_keys([:control, 'v'])
     session.find('#ta').send_keys([:control, 'v'])
     expect(session.find('#ta').value).to eq('abcZP')
+    session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 10))')
     expect(session.evaluate_script('__paste')).to eq([
       'ClipboardEvent true true P',
+      'later ""',
       'ClipboardEvent true true P',
-      'insertFromPaste P'
+      'insertFromPaste P',
+      'later ""'
     ])
   end
 
