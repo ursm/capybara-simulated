@@ -230,19 +230,32 @@ const INTERFACES = [
     },
     omitMembers: {
       plugins: 'the PluginArray interface is not implemented',
-      mimeTypes: 'the MimeTypeArray interface is not implemented'
+      mimeTypes: 'the MimeTypeArray interface is not implemented',
+      oscpu: "NavigatorID's Gecko compatibility mode: the navigator answers in Chrome's (HTML §8.9.1.1)",
+      taintEnabled: "NavigatorID's Gecko compatibility mode: the navigator answers in Chrome's (HTML §8.9.1.1)"
+    }
+  }],
+  ['service-workers', 'ServiceWorkerGlobalScope', {
+    install: true,
+    omit: {
+      'background-fetch': 'onbackgroundfetch*: Background Fetch is not implemented',
+      'background-sync': 'onsync: Background Sync is not implemented',
+      'content-index': 'oncontentdelete: the Content Index API is not implemented',
+      cookiestore: 'cookieStore / oncookiechange: the Cookie Store API is not implemented',
+      notifications: 'onnotification*: notifications are not implemented',
+      'periodic-background-sync': 'onperiodicsync: Periodic Background Sync is not implemented',
+      'push-api': 'onpush*: the Push API is not implemented',
+      'web-based-payment-handler': 'oncanmakepayment / onpaymentrequest: payment handlers are not implemented'
     }
   }],
   ['html', 'WorkerNavigator', {
     install: true,
     omit: {
       NavigatorBadge: 'setAppBadge / clearAppBadge: the Badging API is not implemented',
-      'media-capabilities': 'mediaCapabilities: none in a worker here',
       serial: 'serial: Web Serial is not implemented',
       NavigatorStorageBuckets: 'storageBuckets: not implemented',
       NavigatorStorage: 'storage: the Storage API is not implemented',
       NavigatorUA: 'userAgentData: User-Agent Client Hints are not implemented',
-      permissions: 'permissions: none in a worker here',
       NavigatorGPU: 'gpu: WebGPU is not implemented',
       webhid: 'hid: WebHID is not implemented',
       NavigatorML: 'ml: WebNN is not implemented',

@@ -89,6 +89,9 @@ HTMLInputElement:
 Location:
   - ancestorOrigins
 Navigator:
+  # (…NavigatorID's Gecko compatibility mode, which a navigator answering in Chrome's has not: HTML §8.9.1.1)
+  - oscpu
+  - taintEnabled
   - adAuctionComponents
   - attribution
   - audioSession

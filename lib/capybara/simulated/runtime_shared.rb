@@ -151,7 +151,7 @@ module Capybara
         # a[3] is the CREATING realm (the worker dies when it is discarded); a[4] that context's
         # CURRENT controller handle, which a DEDICATED worker inherits rather than scope-matching
         # its own — often opaque (blob:/data:) — script URL. 0 when the creator is uncontrolled.
-        '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0], shared: !!a[1], creator_key: a[2], realm_id: a[3].to_i, controller_handle: a[4].to_i, script_type: a[5]) },
+        '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0], shared: !!a[1], creator_key: a[2], realm_id: a[3].to_i, controller_handle: a[4].to_i, script_type: a[5], name: a[6].to_s) },
         # navigator.serviceWorker.register (universal-server only) — spawn a worker
         # running the SW script as an executor context. Returns its handle.
         '__csim_serviceWorkerRegister' => ->(b, *a) { b.worker_spawn(a[0], service: true, creator_key: a[1], sw_scope: a[2], script_type: a[3]) },

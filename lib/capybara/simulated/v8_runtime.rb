@@ -1576,7 +1576,7 @@ module Capybara
       # snapshot, host fns attached, `__csim_isWorker` flag set, +
       # the per-worker postMessage host fn closed over `post_back`.
       # Returns the `WorkerRuntime` that `Browser#run_worker` drives.
-      def self.build_worker(browser, post_back, broadcast_out = nil, sw_hooks = {}, kind: 'dedicated')
+      def self.build_worker(browser, post_back, broadcast_out = nil, sw_hooks = {}, kind:, name: '')
         c = Ctx.new(snapshot: snapshot)
         attach_host_fns(c, browser)
         c.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
@@ -1617,10 +1617,12 @@ module Capybara
         # `(0, eval)` would block-scope them to the eval and they'd vanish. `c.eval` is
         # the top-level-script path (same as the worker's own body eval).
         c.attach('__csim_workerImportEval', ->(src) { c.eval_void(src.to_s) })
-        # The worker's KIND — 'dedicated', 'shared' or 'service' — before its global is made one of that kind's scope
-        # (worker-globals.js).
-        c.eval_void("globalThis.__csimWorkerKind = #{JSON.generate(kind)};")
+        # The worker's KIND — 'dedicated', 'shared' or 'service' — and its name, before its global is made one of that
+        # kind's scope (worker-globals.js).
+        c.eval_void("globalThis.__csimWorkerKind = #{JSON.generate(kind)}; globalThis.__csimWorkerName = #{JSON.generate(name.to_s)};")
         c.eval_void('__csim_installWorkerScope();')
+        # …and the user agent a test set, which its navigator answers as its requests send it.
+        c.call('__csimSetUserAgent', browser.default_user_agent) if browser.default_user_agent
         WorkerRuntime.new(c)
       end
     end

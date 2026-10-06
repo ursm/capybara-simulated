@@ -2085,7 +2085,7 @@ module Capybara
       def push_user_agent_to_js
         ua = @default_user_agent or return
         return unless @runtime
-        @runtime.eval_void("try { Object.defineProperty(navigator, 'userAgent', { value: #{ua.to_json}, configurable: true }); } catch (_) {}")
+        @runtime.call('__csimSetUserAgent', ua)
       end
 
       def set_viewport(w, h)
@@ -4415,7 +4415,7 @@ module Capybara
       # worker's `__csim_workerPostMessage` host fn closes over its
       # handle and routes outgoing messages onto a shared outbox the
       # main settle drains.
-      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil)
+      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil, name: '')
         # A NEGATIVE realm_id is the worker-parent convention (a NESTED worker — `new
         # Worker` inside a worker isolate tags -(its own handle)): the spawn runs on the
         # PARENT WORKER's thread, so record the creator, route the child's messages back
@@ -4534,6 +4534,7 @@ module Capybara
             # discarded in that window to leave the lookup empty. A worker whose record it never
             # found could publish no runtime and would never see the stop flag.
             record:      record,
+            name:        name,
             shared:      shared,
             service:     service,
             creator_key: creator_key,
@@ -8084,7 +8085,7 @@ module Capybara
       # Worker thread entry. Builds an isolate via `V8Runtime.build_worker`,
       # evaluates the worker script, then loops draining microtasks + timers +
       # inbox until `:terminate` lands or an exception propagates.
-      private def run_worker(handle, url, body, inbox, outbox, record: nil, shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil, module_worker: false, sw_uvc: nil, sw_imports_map: nil, sw_prev_active: nil)
+      private def run_worker(handle, url, body, inbox, outbox, record: nil, name: '', shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil, module_worker: false, sw_uvc: nil, sw_imports_map: nil, sw_prev_active: nil)
         # Release the spawn-time `@worker_initializing` count exactly once, however
         # this method exits (normal start, `self.close()`, or an exception), so
         # worker_pending? doesn't stay stuck true forever.
@@ -8204,7 +8205,8 @@ module Capybara
           port_endpoint:  ->(channel)       { outbox << {handle: handle, kind: 'port_endpoint', channel: channel.to_s} },
           port_post:      ->(channel, data) { outbox << {handle: handle, kind: 'port_msg', channel: channel.to_s, data: data.to_s} }
         }
-        rt        = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks, kind: service ? 'service' : shared ? 'shared' : 'dedicated')
+        worker_kind = if service then 'service' elsif shared then 'shared' else 'dedicated' end
+        rt          = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks, kind: worker_kind, name: name)
         # Hand the runtime to the session boundary (`stop_worker_js`) the moment it exists.
         record[:rt_lock].synchronize { record[:rt] = rt } if record
         # A worker isolate loads the same snapshot as the main realm, so its `console.*`

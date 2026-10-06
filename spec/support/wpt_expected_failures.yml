@@ -4352,8 +4352,6 @@ html/dom/idlharness.any.js:
 - 'WorkerGlobalScope interface: attribute ononline'
 - 'WorkerGlobalScope interface: attribute onrejectionhandled'
 - 'WorkerGlobalScope interface: attribute onunhandledrejection'
-- 'WorkerNavigator interface: self.navigator must inherit property "languages" with
-  the proper type'
 html/dom/idlharness.https.html:
 - AudioTrack interface object length
 - AudioTrack interface object name
@@ -6033,13 +6031,17 @@ html/dom/idlharness.https.html:
 - 'NavigationTransition interface: existence and properties of interface prototype
   object''s @@unscopables property'
 - 'Navigator interface: attribute mimeTypes'
+- 'Navigator interface: attribute oscpu'
 - 'Navigator interface: attribute plugins'
-- 'Navigator interface: window.navigator must inherit property "languages" with the
-  proper type'
+- 'Navigator interface: operation taintEnabled()'
 - 'Navigator interface: window.navigator must inherit property "mimeTypes" with the
   proper type'
+- 'Navigator interface: window.navigator must inherit property "oscpu" with the proper
+  type'
 - 'Navigator interface: window.navigator must inherit property "plugins" with the
   proper type'
+- 'Navigator interface: window.navigator must inherit property "taintEnabled()" with
+  the proper type'
 - NotRestoredReasonDetails interface object length
 - NotRestoredReasonDetails interface object name
 - 'NotRestoredReasonDetails interface: attribute reason'
