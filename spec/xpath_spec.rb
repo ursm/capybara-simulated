@@ -177,9 +177,10 @@ RSpec.describe 'XPath' do
         const fd = frames[0].document, r = fd.evaluate('//p', fd, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
         const valid = Object.getOwnPropertyDescriptor(XPathResult.prototype, 'invalidIteratorState').get.call(r);
         return [valid, XPathResult.prototype.iterateNext.call(r).textContent, Reflect.ownKeys(r).filter((k) => typeof k === 'string'),
-                (() => { try { return Object.create(XPathEvaluator.prototype).evaluate('1', document).numberValue; } catch (e) { return e.name; } })()];
+                (() => { try { return Object.create(XPathEvaluator.prototype).evaluate('1', document).numberValue; } catch (e) { return e.name; } })(),
+                (() => { try { structuredClone(r); return 'cloned'; } catch (e) { return e.name; } })()];
       })()
     JS
-    expect(got).to eq([false, 'x', [], 'TypeError'])
+    expect(got).to eq([false, 'x', [], 'TypeError', 'DataCloneError'])
   end
 end
