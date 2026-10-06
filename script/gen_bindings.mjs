@@ -739,7 +739,12 @@ function generateInterface(def, options = {}) {
     }
     throw new Error(`${label}: a ${m.type} member is not generated yet`);
   }
-  if (indexed && !members.includes('length')) throw new Error(`${name}: an indexed getter with no \`length\` is not generated yet`);
+  // (…and an integer-typed `length` beside it, which the exotic object's indices and its @@iterator read — Web IDL §3.9,
+  // §3.7.10)
+  const lengthAttr = indexed && def.members.find((m) => m.type === 'attribute' && m.name === 'length');
+  if (indexed && !(lengthAttr && /^(?:unsigned )?(?:short|long|long long)$/.test(lengthAttr.idlType.idlType))) {
+    throw new Error(`${name}: an indexed getter with no integer-typed \`length\` is not generated yet`);
+  }
   if (stringifier && stringifier !== 'toString') body.push(`    toString() { return impl.get_${stringifier}(${self}); }`);
   const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
   if (options.install) {
