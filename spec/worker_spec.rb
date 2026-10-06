@@ -148,4 +148,38 @@ RSpec.describe 'Web Worker' do
     expect(got['hasKey']).to be(true)
     expect(got['keyType']).to eq('undefined')
   end
+
+  # HTML: `postMessage(message, transfer)` carries the transferred ports — a MessagePort handed to a worker (a
+  # Comlink-style RPC channel) arrives as `event.ports`, both ways, and talks across. They went as data alone: the
+  # worker's `event.ports` was empty.
+  it 'carries transferred MessagePorts to a worker and back' do
+    worker_js = <<~JS
+      onmessage = (e) => {
+        const [port] = e.ports;
+        port.onmessage = (ev) => port.postMessage('echo:' + ev.data);
+        const back = new MessageChannel();
+        back.port1.onmessage = (ev) => back.port1.postMessage('back:' + ev.data);
+        postMessage('ports:' + e.ports.length, [back.port2]);
+      };
+    JS
+    html = <<~HTML
+      <!doctype html><meta charset="utf-8"><body><script>
+      window.log = [];
+      const w = new Worker(URL.createObjectURL(new Blob([#{worker_js.to_json}], {type: 'text/javascript'})));
+      const ch = new MessageChannel();
+      ch.port1.onmessage = (e) => window.log.push(e.data);
+      w.onmessage = (e) => {
+        window.log.push(e.data + '/' + e.ports.length);
+        e.ports[0].onmessage = (ev) => window.log.push(ev.data);
+        e.ports[0].postMessage(2);
+        ch.port1.postMessage(1);
+      };
+      w.postMessage('port', [ch.port2]);
+      </script></body>
+    HTML
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    session.visit('/')
+    poll_until(timeout: 5) { session.evaluate_script('window.log.length') >= 3 }
+    expect(session.evaluate_script('window.log')).to contain_exactly('ports:1/1', 'echo:1', 'back:2')
+  end
 end

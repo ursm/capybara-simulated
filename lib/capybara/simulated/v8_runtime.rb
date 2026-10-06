@@ -431,8 +431,8 @@ module Capybara
       # The window's virtual clock as its last event-loop step left it (ms), which a worker's clock follows — read from
       # the worker's own thread (Browser#run_worker).
       def clock = @clock || 0.0
-      # …or as a post to a worker in the middle of a step saw it, later than the last step's: the worker reads the time
-      # its message was sent at, and not the time before it.
+      # …or as the step has moved it since, where the tab has a worker to follow it (timers.js `moveClock`): a worker
+      # reads the time a message posted in the middle of a step was sent at, and not the time before it.
       def clock_at_least(ms) = (@clock = [clock, ms.to_f].max)
 
       # Per-iframe realms (`Isolate#create_context`): a separate V8 context —
@@ -826,6 +826,8 @@ module Capybara
 
       def attach_host_fns(c)
         self.class.attach_host_fns(c, @browser)
+        # The window's clock as a step moves it, where the tab has a worker to follow it (`clock_at_least`).
+        c.attach('__csim_windowClockAt', ->(ms) { clock_at_least(ms); nil })
         attach_run_script_with_cache(c)
         attach_native_module_loader(c)
         attach_frame_realm_loader(c)

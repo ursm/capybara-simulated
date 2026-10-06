@@ -4632,8 +4632,7 @@ module Capybara
         handle
       end
 
-      # (`sent_at`: the window's clock as a window's post left it — `V8Runtime#clock_at_least`; none from a worker's)
-      def worker_post_to_worker(handle, data, sent_at = nil)
+      def worker_post_to_worker(handle, data)
         w = @workers[handle.to_i]
         # A worker whose thread died (script blocked / load raise → __error → onerror) keeps
         # its registry entry until an explicit terminate; a post to it must be a NO-OP (as in
@@ -4645,7 +4644,6 @@ module Capybara
         # the LAST worker goes — which never happens while a service worker is registered.
         @worker_in_flight += 1
         w[:in_flight] = w[:in_flight].to_i + 1
-        @runtime.clock_at_least(sent_at) if sent_at
         w[:inbox] << data.to_s
       end
 
@@ -8563,7 +8561,9 @@ module Capybara
             # thread by the drain. Gated on a PENDING timer (any, not just due-now — the clock must advance to fire a
             # future randomDelay) so an idle message-driven worker with no timers stays lazy. Host CALLS, not string
             # `eval`, keep the per-tick cost off the V8 compile path (rule 3).
-            run_worker_timers.call(WORKER_POLL_INTERVAL * 1000)
+            # (…a poll interval at least on a quiet tick, the one real time passed in: a tick of a message, however many
+            # come, moves it only as far as the window has moved)
+            run_worker_timers.call(msg.nil? ? WORKER_POLL_INTERVAL * 1000 : 0)
             # A main-side BroadcastChannel post to this worker arrives as a {kind:'broadcast'} hash;
             # deliver it to the worker's channels (the receiver's own origin gate drops cross-origin).
             # A plain string is a postMessage to the worker.
