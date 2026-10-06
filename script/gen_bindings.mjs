@@ -181,6 +181,8 @@ const INTERFACES = [
   ['webidl', 'DOMException', { install: true }],
   ['webidl', 'QuotaExceededError', { install: true }],
   ['dom', 'DOMImplementation', { install: true }],
+  ['FileAPI', 'Blob', { install: true }],
+  ['FileAPI', 'File', { install: true }],
   ['dom', 'XPathResult', { install: true }],
   ['dom', 'XPathExpression', { install: true }],
   ['dom', 'XPathEvaluator', { install: true }],
@@ -286,7 +288,7 @@ const INTERFACES = [
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
   'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
-  'isBufferOf', 'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
+  'isBufferOf', 'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers'
@@ -325,7 +327,7 @@ const HANDLED = {
     'LegacyUnforgeable', 'LegacyLenientThis', 'Replaceable', 'HTMLConstructor', 'ReflectSetter', 'ReflectURL', 'ReflectNonNegative',
     'ReflectRange', 'ReflectDefault', 'Exposed'
   ],
-  type: ['LegacyNullToEmptyString', 'EnforceRange']
+  type: ['LegacyNullToEmptyString', 'EnforceRange', 'Clamp']
 };
 // The globals a definition or member is [Exposed] in — a worker's three where it names Worker — or null where it names
 // none (a member then exposed wherever its interface is).
@@ -383,10 +385,13 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
   checkExtAttrs(extAttrs, 'type', label);
   const legacyNull = extAttrs.some((e) => e.name === 'LegacyNullToEmptyString');
   const enforceRange = extAttrs.some((e) => e.name === 'EnforceRange');
-  if (enforceRange && !['unsigned short', 'unsigned long', 'long', 'unsigned long long', 'long long'].includes(t.idlType)) throw new Error(`${label}: no binding enforces the range of ${t.idlType} yet`);
+  const clamp = extAttrs.some((e) => e.name === 'Clamp');
+  const ranged = ['unsigned short', 'unsigned long', 'long', 'unsigned long long', 'long long'];
+  if ((enforceRange || clamp) && !ranged.includes(t.idlType)) throw new Error(`${label}: no binding enforces or clamps the range of ${t.idlType} yet`);
   let c;
-  switch (enforceRange ? 'EnforceRange' : t.idlType) {
+  switch (enforceRange ? 'EnforceRange' : clamp ? 'Clamp' : t.idlType) {
     case 'EnforceRange': c = `toEnforcedInteger(${expr}, ${JSON.stringify(t.idlType)}, ${failure(where)})`; break;
+    case 'Clamp': c = `toClampedInteger(${expr}, ${JSON.stringify(t.idlType)}, ${failure(where)})`; break;
     // (…CSSOMString, which CSSOM lets an implementation make either string type, DOMString — as Chrome does)
     case 'CSSOMString':
     case 'DOMString': c = `toDOMString(${expr}, ${legacyNull}, ${failure(where)})`; break;

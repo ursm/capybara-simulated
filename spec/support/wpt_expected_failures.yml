@@ -19,30 +19,6 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition service worker
 - Blob URL shouldn't be fetched from a cross-partition shared worker
 FileAPI/idlharness.any.js:
-- 'Blob interface: attribute size'
-- 'Blob interface: attribute type'
-- 'Blob interface: new Blob(["TEST"]) must inherit property "size" with the proper
-  type'
-- 'Blob interface: new Blob(["TEST"]) must inherit property "type" with the proper
-  type'
-- 'Blob interface: new File(["myFileBits"], "myFileName") must inherit property "size"
-  with the proper type'
-- 'Blob interface: new File(["myFileBits"], "myFileName") must inherit property "type"
-  with the proper type'
-- 'Blob interface: operation arrayBuffer()'
-- 'Blob interface: operation bytes()'
-- 'Blob interface: operation slice(optional long long, optional long long, optional
-  DOMString)'
-- 'Blob interface: operation stream()'
-- 'Blob interface: operation text()'
-- 'Blob interface: operation textStream()'
-- File interface object length
-- 'File interface: attribute lastModified'
-- 'File interface: attribute name'
-- 'File interface: new File(["myFileBits"], "myFileName") must inherit property "lastModified"
-  with the proper type'
-- 'File interface: new File(["myFileBits"], "myFileName") must inherit property "name"
-  with the proper type'
 - 'FileList interface: attribute length'
 - 'FileList interface: existence and properties of interface object'
 - 'FileList interface: operation item(unsigned long)'
@@ -77,18 +53,6 @@ FileAPI/idlharness.any.js:
 - 'URL interface: operation createObjectURL((Blob or MediaSource))'
 - 'URL interface: operation revokeObjectURL(DOMString)'
 FileAPI/idlharness.html:
-- 'Blob interface: attribute size'
-- 'Blob interface: attribute type'
-- 'Blob interface: operation arrayBuffer()'
-- 'Blob interface: operation bytes()'
-- 'Blob interface: operation slice(optional long long, optional long long, optional
-  DOMString)'
-- 'Blob interface: operation stream()'
-- 'Blob interface: operation text()'
-- 'Blob interface: operation textStream()'
-- File interface object length
-- 'File interface: attribute lastModified'
-- 'File interface: attribute name'
 - 'FileList interface: attribute length'
 - 'FileList interface: calling item(unsigned long) on document.querySelector("#fileChooser").files
   with too few arguments must throw TypeError'
