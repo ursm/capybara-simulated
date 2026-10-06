@@ -422,8 +422,15 @@ module Capybara
         # `__runLoopStep` steps child iframe realms itself (timers.js
         # `drainChildRealms`), folding their fired/dirtied into the result.
         r = ctx.call('__runLoopStep', max_ms.to_i, max_iter.to_i, !!yield_on_gen)
-        r.is_a?(Hash) ? r : { 'fired' => 0, 'gen' => 0, 'dirtied' => false }
+        return { 'fired' => 0, 'gen' => 0, 'dirtied' => false } unless r.is_a?(Hash)
+
+        @clock = r['now'].to_f
+        r
       end
+
+      # The window's virtual clock as its last event-loop step left it (ms), which a worker's clock follows — read from
+      # the worker's own thread (Browser#run_worker).
+      def clock = @clock || 0.0
 
       # Per-iframe realms (`Isolate#create_context`): a separate V8 context —
       # own global + intrinsics (Function/Error/DOMParser/onerror) — per
@@ -597,6 +604,8 @@ module Capybara
       # reset falls back to the cold route: dispose the isolate and build a
       # fresh one (synchronously, on this thread).
       def rebuild_ctx
+        # (…a new page's clock starting where its realm's does, not where the last page's left it)
+        @clock = nil
         # Produce any queued bytecode-cache blobs while every queued target
         # (frame realms included) is still alive — a job queued by the last
         # activity of a test (e.g. a timer-fired dynamic import in a lazy
@@ -1596,6 +1605,9 @@ module Capybara
         c.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
         # An exception the worker's script left unhandled, reported out to its Worker object (workers.js).
         c.attach('__csim_workerReportError', ->(message, filename, lineno, colno) { sw_hooks[:report_error]&.call(message, filename, lineno, colno); nil })
+        # …its WebSockets, whose events are its own inbox's (Browser#run_worker) — `__csim_wsSend` is the window's as it is
+        c.attach('__csim_wsOpen',  ->(url, protocols) { sw_hooks[:ws_open].call(url, protocols) }) if sw_hooks[:ws_open]
+        c.attach('__csim_wsClose', ->(id, code, reason) { sw_hooks[:ws_close].call(id, code, reason); nil }) if sw_hooks[:ws_close]
         # Service-worker → main-thread signals route through the thread-safe outbox (delivered by
         # deliver_worker_messages): client.postMessage, clients.claim (set the client's controller),
         # and a controlled fetch's respondWith result. See run_worker for the closures.

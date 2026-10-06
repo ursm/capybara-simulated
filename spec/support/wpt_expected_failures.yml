@@ -18,16 +18,71 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition iframe
 - Blob URL shouldn't be fetched from a cross-partition service worker
 - Blob URL shouldn't be fetched from a cross-partition shared worker
+FileAPI/FileReaderSync.worker.js:
+- "[harness] ERROR"
+- "[harness] no subtests"
 FileAPI/idlharness.any.js:
 - 'FileList interface: attribute length'
 - 'FileList interface: existence and properties of interface object'
 - 'FileList interface: operation item(unsigned long)'
+- "[dedicatedworker] FileList interface: attribute length"
+- "[dedicatedworker] FileList interface: existence and properties of interface object"
+- "[dedicatedworker] FileList interface: operation item(unsigned long)"
+- "[dedicatedworker] FileReaderSync interface object length"
+- "[dedicatedworker] FileReaderSync interface object name"
+- "[dedicatedworker] FileReaderSync interface: existence and properties of interface
+  object"
+- "[dedicatedworker] FileReaderSync interface: existence and properties of interface
+  prototype object"
+- '[dedicatedworker] FileReaderSync interface: existence and properties of interface
+  prototype object''s "constructor" property'
+- "[dedicatedworker] FileReaderSync interface: existence and properties of interface
+  prototype object's @@unscopables property"
+- "[dedicatedworker] FileReaderSync interface: operation readAsArrayBuffer(Blob)"
+- "[dedicatedworker] FileReaderSync interface: operation readAsBinaryString(Blob)"
+- "[dedicatedworker] FileReaderSync interface: operation readAsDataURL(Blob)"
+- "[dedicatedworker] FileReaderSync interface: operation readAsText(Blob, optional
+  DOMString)"
 FileAPI/idlharness.html:
 - 'FileList interface: attribute length'
 - 'FileList interface: calling item(unsigned long) on document.querySelector("#fileChooser").files
   with too few arguments must throw TypeError'
 - 'FileList interface: existence and properties of interface object'
 - 'FileList interface: operation item(unsigned long)'
+FileAPI/idlharness.worker.js:
+- 'FileList interface: attribute length'
+- 'FileList interface: existence and properties of interface object'
+- 'FileList interface: operation item(unsigned long)'
+- FileReaderSync interface object length
+- FileReaderSync interface object name
+- 'FileReaderSync interface: calling readAsArrayBuffer(Blob) on new FileReaderSync()
+  with too few arguments must throw TypeError'
+- 'FileReaderSync interface: calling readAsBinaryString(Blob) on new FileReaderSync()
+  with too few arguments must throw TypeError'
+- 'FileReaderSync interface: calling readAsDataURL(Blob) on new FileReaderSync() with
+  too few arguments must throw TypeError'
+- 'FileReaderSync interface: calling readAsText(Blob, optional DOMString) on new FileReaderSync()
+  with too few arguments must throw TypeError'
+- 'FileReaderSync interface: existence and properties of interface object'
+- 'FileReaderSync interface: existence and properties of interface prototype object'
+- 'FileReaderSync interface: existence and properties of interface prototype object''s
+  "constructor" property'
+- 'FileReaderSync interface: existence and properties of interface prototype object''s
+  @@unscopables property'
+- 'FileReaderSync interface: new FileReaderSync() must inherit property "readAsArrayBuffer(Blob)"
+  with the proper type'
+- 'FileReaderSync interface: new FileReaderSync() must inherit property "readAsBinaryString(Blob)"
+  with the proper type'
+- 'FileReaderSync interface: new FileReaderSync() must inherit property "readAsDataURL(Blob)"
+  with the proper type'
+- 'FileReaderSync interface: new FileReaderSync() must inherit property "readAsText(Blob,
+  optional DOMString)" with the proper type'
+- 'FileReaderSync interface: operation readAsArrayBuffer(Blob)'
+- 'FileReaderSync interface: operation readAsBinaryString(Blob)'
+- 'FileReaderSync interface: operation readAsDataURL(Blob)'
+- 'FileReaderSync interface: operation readAsText(Blob, optional DOMString)'
+- FileReaderSync must be primary interface of new FileReaderSync()
+- Stringification of new FileReaderSync()
 FileAPI/url/sandboxed-iframe.html:
 - Blob URL fragment is implemented.
 - "[harness] TIMEOUT"
@@ -44,6 +99,10 @@ WebCryptoAPI/derive_bits_keys/derive_key_and_encrypt.https.any.js:
 - HKDF derivation of a ECDH key 2
 - PBKDF2 derivation of a ECDH key 1
 - PBKDF2 derivation of a ECDH key 2
+WebCryptoAPI/historical.any.js:
+- "[dedicatedworker] Non-secure context window does not have access to CryptoKey"
+- "[dedicatedworker] Non-secure context window does not have access to SubtleCrypto"
+- "[dedicatedworker] Non-secure context window does not have access to crypto.subtle"
 WebCryptoAPI/idlharness.https.any.js:
 - 'Crypto interface: attribute subtle'
 - 'Crypto interface: calling getRandomValues(ArrayBufferView) on crypto with too few
@@ -74,6 +133,42 @@ WebCryptoAPI/idlharness.https.any.js:
 - 'SubtleCrypto interface: operation verify(AlgorithmIdentifier, CryptoKey, BufferSource,
   BufferSource)'
 - 'SubtleCrypto interface: operation wrapKey(KeyFormat, CryptoKey, CryptoKey, AlgorithmIdentifier)'
+- "[dedicatedworker] Crypto interface: attribute subtle"
+- "[dedicatedworker] Crypto interface: calling getRandomValues(ArrayBufferView) on
+  crypto with too few arguments must throw TypeError"
+- "[dedicatedworker] Crypto interface: existence and properties of interface object"
+- "[dedicatedworker] Crypto interface: operation getRandomValues(ArrayBufferView)"
+- "[dedicatedworker] Crypto interface: operation randomUUID()"
+- "[dedicatedworker] CryptoKey interface object length"
+- "[dedicatedworker] CryptoKey interface: attribute algorithm"
+- "[dedicatedworker] CryptoKey interface: attribute extractable"
+- "[dedicatedworker] CryptoKey interface: attribute type"
+- "[dedicatedworker] CryptoKey interface: attribute usages"
+- "[dedicatedworker] SubtleCrypto interface: existence and properties of interface
+  object"
+- "[dedicatedworker] SubtleCrypto interface: operation decrypt(AlgorithmIdentifier,
+  CryptoKey, BufferSource)"
+- "[dedicatedworker] SubtleCrypto interface: operation deriveBits(AlgorithmIdentifier,
+  CryptoKey, optional unsigned long?)"
+- "[dedicatedworker] SubtleCrypto interface: operation deriveKey(AlgorithmIdentifier,
+  CryptoKey, AlgorithmIdentifier, boolean, sequence<KeyUsage>)"
+- "[dedicatedworker] SubtleCrypto interface: operation digest(AlgorithmIdentifier,
+  BufferSource)"
+- "[dedicatedworker] SubtleCrypto interface: operation encrypt(AlgorithmIdentifier,
+  CryptoKey, BufferSource)"
+- "[dedicatedworker] SubtleCrypto interface: operation exportKey(KeyFormat, CryptoKey)"
+- "[dedicatedworker] SubtleCrypto interface: operation generateKey(AlgorithmIdentifier,
+  boolean, sequence<KeyUsage>)"
+- "[dedicatedworker] SubtleCrypto interface: operation importKey(KeyFormat, (BufferSource
+  or JsonWebKey), AlgorithmIdentifier, boolean, sequence<KeyUsage>)"
+- "[dedicatedworker] SubtleCrypto interface: operation sign(AlgorithmIdentifier, CryptoKey,
+  BufferSource)"
+- "[dedicatedworker] SubtleCrypto interface: operation unwrapKey(KeyFormat, BufferSource,
+  CryptoKey, AlgorithmIdentifier, AlgorithmIdentifier, boolean, sequence<KeyUsage>)"
+- "[dedicatedworker] SubtleCrypto interface: operation verify(AlgorithmIdentifier,
+  CryptoKey, BufferSource, BufferSource)"
+- "[dedicatedworker] SubtleCrypto interface: operation wrapKey(KeyFormat, CryptoKey,
+  CryptoKey, AlgorithmIdentifier)"
 WebCryptoAPI/import_export/ec_importKey.https.any.js:
 - 'Good parameters: P-256 bits (spki, buffer(59, compressed), {name: ECDH, namedCurve:
   P-256}, true, [])'
@@ -99,6 +194,30 @@ WebCryptoAPI/import_export/ec_importKey.https.any.js:
   P-521}, true, [verify, verify])'
 - 'Good parameters: P-521 bits (spki, buffer(90, compressed), {name: ECDSA, namedCurve:
   P-521}, true, [verify])'
+- "[dedicatedworker] Good parameters: P-256 bits (spki, buffer(59, compressed), {name:
+  ECDH, namedCurve: P-256}, true, [])"
+- "[dedicatedworker] Good parameters: P-256 bits (spki, buffer(59, compressed), {name:
+  ECDSA, namedCurve: P-256}, true, [])"
+- "[dedicatedworker] Good parameters: P-256 bits (spki, buffer(59, compressed), {name:
+  ECDSA, namedCurve: P-256}, true, [verify, verify])"
+- "[dedicatedworker] Good parameters: P-256 bits (spki, buffer(59, compressed), {name:
+  ECDSA, namedCurve: P-256}, true, [verify])"
+- "[dedicatedworker] Good parameters: P-384 bits (spki, buffer(72, compressed), {name:
+  ECDH, namedCurve: P-384}, true, [])"
+- "[dedicatedworker] Good parameters: P-384 bits (spki, buffer(72, compressed), {name:
+  ECDSA, namedCurve: P-384}, true, [])"
+- "[dedicatedworker] Good parameters: P-384 bits (spki, buffer(72, compressed), {name:
+  ECDSA, namedCurve: P-384}, true, [verify, verify])"
+- "[dedicatedworker] Good parameters: P-384 bits (spki, buffer(72, compressed), {name:
+  ECDSA, namedCurve: P-384}, true, [verify])"
+- "[dedicatedworker] Good parameters: P-521 bits (spki, buffer(90, compressed), {name:
+  ECDH, namedCurve: P-521}, true, [])"
+- "[dedicatedworker] Good parameters: P-521 bits (spki, buffer(90, compressed), {name:
+  ECDSA, namedCurve: P-521}, true, [])"
+- "[dedicatedworker] Good parameters: P-521 bits (spki, buffer(90, compressed), {name:
+  ECDSA, namedCurve: P-521}, true, [verify, verify])"
+- "[dedicatedworker] Good parameters: P-521 bits (spki, buffer(90, compressed), {name:
+  ECDSA, namedCurve: P-521}, true, [verify])"
 WebCryptoAPI/sign_verify/eddsa_small_order_points.https.any.js:
 - Ed25519 Verification checks with small-order key of order - Test 0
 - Ed25519 Verification checks with small-order key of order - Test 1
@@ -106,6 +225,18 @@ WebCryptoAPI/sign_verify/eddsa_small_order_points.https.any.js:
 - Ed25519 Verification checks with small-order key of order - Test 12
 - Ed25519 Verification checks with small-order key of order - Test 13
 - Ed25519 Verification checks with small-order key of order - Test 2
+- "[dedicatedworker] Ed25519 Verification checks with small-order key of order - Test
+  0"
+- "[dedicatedworker] Ed25519 Verification checks with small-order key of order - Test
+  1"
+- "[dedicatedworker] Ed25519 Verification checks with small-order key of order - Test
+  11"
+- "[dedicatedworker] Ed25519 Verification checks with small-order key of order - Test
+  12"
+- "[dedicatedworker] Ed25519 Verification checks with small-order key of order - Test
+  13"
+- "[dedicatedworker] Ed25519 Verification checks with small-order key of order - Test
+  2"
 css/css-animations/animate-with-background-color-oklch-002.html:
 - Animate from legacy rgb to color-mix oklch
 - Animate from legacy rgb to oklch
@@ -2221,6 +2352,14 @@ css/cssom/stylesheet-same-origin.sub.html:
 - Origin-clean check in loading error CSSOM Stylesheets
 css/cssom/ttwf-cssom-doc-ext-load-count.html:
 - stylesheet.css should be unloaded and styleSheets.length === 0
+css/geometry/DOMMatrix-css-string.worker.js:
+- DOMMatrix setMatrixValue in worker
+- DOMMatrix stringifier in worker (2d identity)
+- DOMMatrix stringifier in worker (3d identity)
+- DOMMatrix stringifier in worker (non-finite values)
+- DOMMatrixReadOnly stringifier in worker (2d identity)
+- DOMMatrixReadOnly stringifier in worker (3d identity)
+- DOMMatrixReadOnly stringifier in worker (non-finite values)
 css/geometry/idlharness.any.js:
 - 'DOMMatrix interface: attribute a'
 - 'DOMMatrix interface: attribute b'
@@ -2362,6 +2501,148 @@ css/geometry/idlharness.any.js:
 - 'DOMRectReadOnly interface: attribute y'
 - 'DOMRectReadOnly interface: operation fromRect(optional DOMRectInit)'
 - 'DOMRectReadOnly interface: operation toJSON()'
+- "[dedicatedworker] DOMMatrix interface: attribute a"
+- "[dedicatedworker] DOMMatrix interface: attribute b"
+- "[dedicatedworker] DOMMatrix interface: attribute c"
+- "[dedicatedworker] DOMMatrix interface: attribute d"
+- "[dedicatedworker] DOMMatrix interface: attribute e"
+- "[dedicatedworker] DOMMatrix interface: attribute f"
+- "[dedicatedworker] DOMMatrix interface: attribute m11"
+- "[dedicatedworker] DOMMatrix interface: attribute m12"
+- "[dedicatedworker] DOMMatrix interface: attribute m13"
+- "[dedicatedworker] DOMMatrix interface: attribute m14"
+- "[dedicatedworker] DOMMatrix interface: attribute m21"
+- "[dedicatedworker] DOMMatrix interface: attribute m22"
+- "[dedicatedworker] DOMMatrix interface: attribute m23"
+- "[dedicatedworker] DOMMatrix interface: attribute m24"
+- "[dedicatedworker] DOMMatrix interface: attribute m31"
+- "[dedicatedworker] DOMMatrix interface: attribute m32"
+- "[dedicatedworker] DOMMatrix interface: attribute m33"
+- "[dedicatedworker] DOMMatrix interface: attribute m34"
+- "[dedicatedworker] DOMMatrix interface: attribute m41"
+- "[dedicatedworker] DOMMatrix interface: attribute m42"
+- "[dedicatedworker] DOMMatrix interface: attribute m43"
+- "[dedicatedworker] DOMMatrix interface: attribute m44"
+- "[dedicatedworker] DOMMatrix interface: member setMatrixValue"
+- '[dedicatedworker] DOMMatrix interface: new DOMMatrix() must not have property "setMatrixValue"'
+- "[dedicatedworker] DOMMatrix interface: operation fromFloat32Array(Float32Array)"
+- "[dedicatedworker] DOMMatrix interface: operation fromFloat64Array(Float64Array)"
+- "[dedicatedworker] DOMMatrix interface: operation fromMatrix(optional DOMMatrixInit)"
+- "[dedicatedworker] DOMMatrix interface: operation invertSelf()"
+- "[dedicatedworker] DOMMatrix interface: operation multiplySelf(optional DOMMatrixInit)"
+- "[dedicatedworker] DOMMatrix interface: operation preMultiplySelf(optional DOMMatrixInit)"
+- "[dedicatedworker] DOMMatrix interface: operation rotateAxisAngleSelf(optional unrestricted
+  double, optional unrestricted double, optional unrestricted double, optional unrestricted
+  double)"
+- "[dedicatedworker] DOMMatrix interface: operation rotateFromVectorSelf(optional
+  unrestricted double, optional unrestricted double)"
+- "[dedicatedworker] DOMMatrix interface: operation rotateSelf(optional unrestricted
+  double, optional unrestricted double, optional unrestricted double)"
+- "[dedicatedworker] DOMMatrix interface: operation scale3dSelf(optional unrestricted
+  double, optional unrestricted double, optional unrestricted double, optional unrestricted
+  double)"
+- "[dedicatedworker] DOMMatrix interface: operation scaleSelf(optional unrestricted
+  double, optional unrestricted double, optional unrestricted double, optional unrestricted
+  double, optional unrestricted double, optional unrestricted double)"
+- "[dedicatedworker] DOMMatrix interface: operation skewXSelf(optional unrestricted
+  double)"
+- "[dedicatedworker] DOMMatrix interface: operation skewYSelf(optional unrestricted
+  double)"
+- "[dedicatedworker] DOMMatrix interface: operation translateSelf(optional unrestricted
+  double, optional unrestricted double, optional unrestricted double)"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute a"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute b"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute c"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute d"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute e"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute f"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute is2D"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute isIdentity"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m11"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m12"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m13"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m14"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m21"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m22"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m23"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m24"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m31"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m32"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m33"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m34"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m41"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m42"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m43"
+- "[dedicatedworker] DOMMatrixReadOnly interface: attribute m44"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation flipX()"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation flipY()"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation fromFloat32Array(Float32Array)"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation fromFloat64Array(Float64Array)"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation fromMatrix(optional DOMMatrixInit)"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation inverse()"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation multiply(optional DOMMatrixInit)"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation rotate(optional unrestricted
+  double, optional unrestricted double, optional unrestricted double)"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation rotateAxisAngle(optional
+  unrestricted double, optional unrestricted double, optional unrestricted double,
+  optional unrestricted double)"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation rotateFromVector(optional
+  unrestricted double, optional unrestricted double)"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation scale(optional unrestricted
+  double, optional unrestricted double, optional unrestricted double, optional unrestricted
+  double, optional unrestricted double, optional unrestricted double)"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation scale3d(optional unrestricted
+  double, optional unrestricted double, optional unrestricted double, optional unrestricted
+  double)"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation scaleNonUniform(optional
+  unrestricted double, optional unrestricted double)"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation skewX(optional unrestricted
+  double)"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation skewY(optional unrestricted
+  double)"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation toFloat32Array()"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation toFloat64Array()"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation toJSON()"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation transformPoint(optional
+  DOMPointInit)"
+- "[dedicatedworker] DOMMatrixReadOnly interface: operation translate(optional unrestricted
+  double, optional unrestricted double, optional unrestricted double)"
+- "[dedicatedworker] DOMPoint interface: attribute w"
+- "[dedicatedworker] DOMPoint interface: attribute x"
+- "[dedicatedworker] DOMPoint interface: attribute y"
+- "[dedicatedworker] DOMPoint interface: attribute z"
+- "[dedicatedworker] DOMPoint interface: operation fromPoint(optional DOMPointInit)"
+- "[dedicatedworker] DOMPointReadOnly interface: attribute w"
+- "[dedicatedworker] DOMPointReadOnly interface: attribute x"
+- "[dedicatedworker] DOMPointReadOnly interface: attribute y"
+- "[dedicatedworker] DOMPointReadOnly interface: attribute z"
+- "[dedicatedworker] DOMPointReadOnly interface: operation fromPoint(optional DOMPointInit)"
+- "[dedicatedworker] DOMPointReadOnly interface: operation matrixTransform(optional
+  DOMMatrixInit)"
+- "[dedicatedworker] DOMPointReadOnly interface: operation toJSON()"
+- "[dedicatedworker] DOMQuad interface: attribute p1"
+- "[dedicatedworker] DOMQuad interface: attribute p2"
+- "[dedicatedworker] DOMQuad interface: attribute p3"
+- "[dedicatedworker] DOMQuad interface: attribute p4"
+- "[dedicatedworker] DOMQuad interface: operation fromQuad(optional DOMQuadInit)"
+- "[dedicatedworker] DOMQuad interface: operation fromRect(optional DOMRectInit)"
+- "[dedicatedworker] DOMQuad interface: operation getBounds()"
+- "[dedicatedworker] DOMQuad interface: operation toJSON()"
+- "[dedicatedworker] DOMRect interface: attribute height"
+- "[dedicatedworker] DOMRect interface: attribute width"
+- "[dedicatedworker] DOMRect interface: attribute x"
+- "[dedicatedworker] DOMRect interface: attribute y"
+- "[dedicatedworker] DOMRect interface: operation fromRect(optional DOMRectInit)"
+- "[dedicatedworker] DOMRectReadOnly interface: attribute bottom"
+- "[dedicatedworker] DOMRectReadOnly interface: attribute height"
+- "[dedicatedworker] DOMRectReadOnly interface: attribute left"
+- "[dedicatedworker] DOMRectReadOnly interface: attribute right"
+- "[dedicatedworker] DOMRectReadOnly interface: attribute top"
+- "[dedicatedworker] DOMRectReadOnly interface: attribute width"
+- "[dedicatedworker] DOMRectReadOnly interface: attribute x"
+- "[dedicatedworker] DOMRectReadOnly interface: attribute y"
+- "[dedicatedworker] DOMRectReadOnly interface: operation fromRect(optional DOMRectInit)"
+- "[dedicatedworker] DOMRectReadOnly interface: operation toJSON()"
 custom-elements/CustomElementRegistry-constructor-and-callbacks-are-held-strongly.html:
 - adoptedCallback
 - attributeChangedCallback
@@ -2886,10 +3167,44 @@ encoding/idlharness.any.js:
 - 'TextEncoder interface: operation encode(optional USVString)'
 - 'TextEncoder interface: operation encodeInto(USVString, Uint8Array)'
 - 'TextEncoderStream interface: attribute encoding'
+- "[dedicatedworker] Stringification of new TextDecoder()"
+- "[dedicatedworker] Stringification of new TextEncoder()"
+- "[dedicatedworker] TextDecoder interface object length"
+- "[dedicatedworker] TextDecoder interface: attribute encoding"
+- "[dedicatedworker] TextDecoder interface: attribute fatal"
+- "[dedicatedworker] TextDecoder interface: attribute ignoreBOM"
+- "[dedicatedworker] TextDecoder interface: operation decode(optional AllowSharedBufferSource,
+  optional TextDecodeOptions)"
+- "[dedicatedworker] TextDecoderStream interface: attribute encoding"
+- "[dedicatedworker] TextDecoderStream interface: attribute fatal"
+- "[dedicatedworker] TextDecoderStream interface: attribute ignoreBOM"
+- "[dedicatedworker] TextEncoder interface: attribute encoding"
+- "[dedicatedworker] TextEncoder interface: operation encode(optional USVString)"
+- "[dedicatedworker] TextEncoder interface: operation encodeInto(USVString, Uint8Array)"
+- "[dedicatedworker] TextEncoderStream interface: attribute encoding"
+- "[serviceworker] Stringification of new TextDecoder()"
+- "[serviceworker] Stringification of new TextEncoder()"
+- "[serviceworker] TextDecoder interface object length"
+- "[serviceworker] TextDecoder interface: attribute encoding"
+- "[serviceworker] TextDecoder interface: attribute fatal"
+- "[serviceworker] TextDecoder interface: attribute ignoreBOM"
+- "[serviceworker] TextDecoder interface: operation decode(optional AllowSharedBufferSource,
+  optional TextDecodeOptions)"
+- "[serviceworker] TextDecoderStream interface: attribute encoding"
+- "[serviceworker] TextDecoderStream interface: attribute fatal"
+- "[serviceworker] TextDecoderStream interface: attribute ignoreBOM"
+- "[serviceworker] TextEncoder interface: attribute encoding"
+- "[serviceworker] TextEncoder interface: operation encode(optional USVString)"
+- "[serviceworker] TextEncoder interface: operation encodeInto(USVString, Uint8Array)"
+- "[serviceworker] TextEncoderStream interface: attribute encoding"
 encoding/streams/decode-bad-chunks.any.js:
+- "[dedicatedworker] [harness] ERROR"
 - "[harness] ERROR"
+- "[serviceworker] [harness] ERROR"
 encoding/streams/decode-non-utf8.any.js:
+- "[dedicatedworker] [harness] ERROR"
 - "[harness] ERROR"
+- "[serviceworker] [harness] ERROR"
 encoding/streams/realms.window.js:
 - TypeError for chunk with the wrong type should come from constructor realm of TextDecoderStream
 - TypeError for incomplete input should come from constructor realm of TextDecoderStream
@@ -2903,7 +3218,40 @@ encoding/streams/realms.window.js:
 - the result object when write is called with a pending read should come from the
   same realm as the constructor of TextDecoderStream
 fetch/api/abort/general.any.js:
+- "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
+  response.arrayBuffer()"
+- "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
+  response.blob()"
+- "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
+  response.bytes()"
+- "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
+  response.formData()"
+- "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
+  response.json()"
+- "[dedicatedworker] Fetch aborted & connection closed when aborted after calling
+  response.text()"
+- "[dedicatedworker] Stream errors once aborted, after reading. Underlying connection
+  closed."
+- "[dedicatedworker] Stream errors once aborted. Underlying connection closed."
+- "[dedicatedworker] Underlying connection is closed when aborting after receiving
+  response"
+- "[dedicatedworker] Underlying connection is closed when aborting after receiving
+  response - no-cors"
+- "[dedicatedworker] [harness] ERROR"
 - "[harness] ERROR"
+- "[serviceworker] Fetch aborted & connection closed when aborted after calling response.arrayBuffer()"
+- "[serviceworker] Fetch aborted & connection closed when aborted after calling response.blob()"
+- "[serviceworker] Fetch aborted & connection closed when aborted after calling response.bytes()"
+- "[serviceworker] Fetch aborted & connection closed when aborted after calling response.formData()"
+- "[serviceworker] Fetch aborted & connection closed when aborted after calling response.json()"
+- "[serviceworker] Fetch aborted & connection closed when aborted after calling response.text()"
+- "[serviceworker] Stream errors once aborted, after reading. Underlying connection
+  closed."
+- "[serviceworker] Stream errors once aborted. Underlying connection closed."
+- "[serviceworker] Underlying connection is closed when aborting after receiving response"
+- "[serviceworker] Underlying connection is closed when aborting after receiving response
+  - no-cors"
+- "[serviceworker] [harness] ERROR"
 fetch/api/abort/keepalive.html:
 - aborting a keepalive fetch should work
 fetch/api/abort/serviceworker-intercepted.https.html:
@@ -2935,37 +3283,101 @@ fetch/api/basic/block-mime-as-script.html:
 - Should fail loading non-empty script with video/whatever MIME type
 fetch/api/basic/conditional-get.any.js:
 - Testing conditional GET with ETags
+- "[dedicatedworker] Testing conditional GET with ETags"
+- "[serviceworker] Testing conditional GET with ETags"
 fetch/api/basic/error-after-response.any.js:
 - Response reader closed promise should reject after a network error happening after
   resolving fetch promise
 - Response reader read() promise should reject after a network error happening after
   resolving fetch promise
+- "[dedicatedworker] Response reader closed promise should reject after a network
+  error happening after resolving fetch promise"
+- "[dedicatedworker] Response reader read() promise should reject after a network
+  error happening after resolving fetch promise"
+- "[serviceworker] Response reader closed promise should reject after a network error
+  happening after resolving fetch promise"
+- "[serviceworker] Response reader read() promise should reject after a network error
+  happening after resolving fetch promise"
 fetch/api/basic/http-response-code.any.js:
 - Fetch on 425 response should not be retried for non TLS early data.
+- "[dedicatedworker] Fetch on 425 response should not be retried for non TLS early
+  data."
+- "[serviceworker] Fetch on 425 response should not be retried for non TLS early data."
 fetch/api/basic/mediasource.window.js:
 - 'Cannot fetch blob: URL from a MediaSource'
 fetch/api/basic/request-headers-nonascii.any.js:
 - Non-ascii bytes in request headers
+- "[dedicatedworker] Non-ascii bytes in request headers"
+- "[serviceworker] Non-ascii bytes in request headers"
 fetch/api/basic/request-upload.any.js:
 - Fetch with POST with ReadableStream containing ArrayBuffer
 - Fetch with POST with text body on 421 response should be retried once on new connection.
 - Streaming upload shouldn't work on Http/1.1.
+- "[dedicatedworker] Fetch with POST with ReadableStream containing ArrayBuffer"
+- "[dedicatedworker] Fetch with POST with text body on 421 response should be retried
+  once on new connection."
+- "[dedicatedworker] Streaming upload shouldn't work on Http/1.1."
+- "[serviceworker] Fetch with POST with ReadableStream containing ArrayBuffer"
+- "[serviceworker] Fetch with POST with text body on 421 response should be retried
+  once on new connection."
+- "[serviceworker] Streaming upload shouldn't work on Http/1.1."
 fetch/api/basic/request-upload.h2.any.js:
 - Fetch with POST with ReadableStream on 421 response should return the response and
   not retry.
 - ReadbleStream should be closed on signal.abort
 - Streaming upload should fail on a 401 response
+- "[dedicatedworker] Fetch with POST with ReadableStream on 421 response should return
+  the response and not retry."
+- "[dedicatedworker] ReadbleStream should be closed on signal.abort"
+- "[dedicatedworker] Streaming upload should fail on a 401 response"
+- "[dedicatedworker] [harness] TIMEOUT"
 - "[harness] TIMEOUT"
+- "[serviceworker] Fetch with POST with ReadableStream on 421 response should return
+  the response and not retry."
+- "[serviceworker] ReadbleStream should be closed on signal.abort"
+- "[serviceworker] Streaming upload should fail on a 401 response"
+- "[serviceworker] [harness] TIMEOUT"
 fetch/api/basic/stream-response.any.js:
 - Stream response's body when content-type is not present
 - Stream response's body when content-type is present
+- "[dedicatedworker] Stream response's body when content-type is not present"
+- "[dedicatedworker] Stream response's body when content-type is present"
+- "[serviceworker] Stream response's body when content-type is not present"
+- "[serviceworker] Stream response's body when content-type is present"
 fetch/api/basic/stream-safe-creation.any.js:
+- "[dedicatedworker] throwing Object.prototype.type accessor should not affect stream
+  creation by 'consumeEmptyResponse'"
+- "[dedicatedworker] throwing Object.prototype.type accessor should not affect stream
+  creation by 'consumeNonEmptyResponse'"
+- "[dedicatedworker] throwing Object.prototype.type accessor should not affect stream
+  creation by 'fetch'"
+- "[dedicatedworker] throwing Object.prototype.type accessor should not affect stream
+  creation by 'response'"
+- "[serviceworker] throwing Object.prototype.type accessor should not affect stream
+  creation by 'consumeEmptyResponse'"
+- "[serviceworker] throwing Object.prototype.type accessor should not affect stream
+  creation by 'consumeNonEmptyResponse'"
+- "[serviceworker] throwing Object.prototype.type accessor should not affect stream
+  creation by 'fetch'"
+- "[serviceworker] throwing Object.prototype.type accessor should not affect stream
+  creation by 'response'"
 - throwing Object.prototype.type accessor should not affect stream creation by 'consumeEmptyResponse'
 - throwing Object.prototype.type accessor should not affect stream creation by 'consumeNonEmptyResponse'
 - throwing Object.prototype.type accessor should not affect stream creation by 'fetch'
 - throwing Object.prototype.type accessor should not affect stream creation by 'response'
 fetch/api/cors/cors-keepalive.any.js:
 - "[harness] ERROR"
+fetch/api/cors/cors-preflight-redirect.any.js:
+- "[dedicatedworker] Redirection 301 after preflight failed"
+- "[dedicatedworker] Redirection 302 after preflight failed"
+- "[dedicatedworker] Redirection 303 after preflight failed"
+- "[dedicatedworker] Redirection 307 after preflight failed"
+- "[dedicatedworker] Redirection 308 after preflight failed"
+- "[serviceworker] Redirection 301 after preflight failed"
+- "[serviceworker] Redirection 302 after preflight failed"
+- "[serviceworker] Redirection 303 after preflight failed"
+- "[serviceworker] Redirection 307 after preflight failed"
+- "[serviceworker] Redirection 308 after preflight failed"
 fetch/api/cors/data-url-iframe.html:
 - fetching "top.txt" without ACAO should be rejected.
 fetch/api/cors/data-url-shared-worker.html:
@@ -2976,6 +3388,8 @@ fetch/api/cors/sandboxed-iframe.html:
 - CORS with sandboxed iframe
 fetch/api/headers/header-values.any.js:
 - XMLHttpRequest with all valid values
+- "[dedicatedworker] fetch() with all valid values"
+- "[serviceworker] fetch() with all valid values"
 - fetch() with all valid values
 fetch/api/idlharness.https.any.js:
 - FetchLaterResult interface object length
@@ -3077,6 +3491,188 @@ fetch/api/idlharness.https.any.js:
 - 'Window interface: operation fetchLater(RequestInfo, optional DeferredRequestInit)'
 - 'Window interface: window must inherit property "fetchLater(RequestInfo, optional
   DeferredRequestInit)" with the proper type'
+- "[dedicatedworker] Headers interface object length"
+- "[dedicatedworker] Headers interface: calling append(ByteString, ByteString) on
+  new Headers() with too few arguments must throw TypeError"
+- "[dedicatedworker] Headers interface: calling delete(ByteString) on new Headers()
+  with too few arguments must throw TypeError"
+- "[dedicatedworker] Headers interface: calling get(ByteString) on new Headers() with
+  too few arguments must throw TypeError"
+- "[dedicatedworker] Headers interface: calling has(ByteString) on new Headers() with
+  too few arguments must throw TypeError"
+- "[dedicatedworker] Headers interface: calling set(ByteString, ByteString) on new
+  Headers() with too few arguments must throw TypeError"
+- "[dedicatedworker] Headers interface: iterable<ByteString, ByteString>"
+- "[dedicatedworker] Headers interface: operation append(ByteString, ByteString)"
+- "[dedicatedworker] Headers interface: operation delete(ByteString)"
+- "[dedicatedworker] Headers interface: operation get(ByteString)"
+- "[dedicatedworker] Headers interface: operation getSetCookie()"
+- "[dedicatedworker] Headers interface: operation has(ByteString)"
+- "[dedicatedworker] Headers interface: operation set(ByteString, ByteString)"
+- "[dedicatedworker] Request interface object length"
+- "[dedicatedworker] Request interface: attribute body"
+- "[dedicatedworker] Request interface: attribute bodyUsed"
+- "[dedicatedworker] Request interface: attribute cache"
+- "[dedicatedworker] Request interface: attribute credentials"
+- "[dedicatedworker] Request interface: attribute destination"
+- "[dedicatedworker] Request interface: attribute duplex"
+- "[dedicatedworker] Request interface: attribute headers"
+- "[dedicatedworker] Request interface: attribute integrity"
+- "[dedicatedworker] Request interface: attribute isHistoryNavigation"
+- "[dedicatedworker] Request interface: attribute isReloadNavigation"
+- "[dedicatedworker] Request interface: attribute keepalive"
+- "[dedicatedworker] Request interface: attribute method"
+- "[dedicatedworker] Request interface: attribute mode"
+- "[dedicatedworker] Request interface: attribute redirect"
+- "[dedicatedworker] Request interface: attribute referrer"
+- "[dedicatedworker] Request interface: attribute referrerPolicy"
+- "[dedicatedworker] Request interface: attribute signal"
+- "[dedicatedworker] Request interface: attribute url"
+- "[dedicatedworker] Request interface: operation arrayBuffer()"
+- "[dedicatedworker] Request interface: operation blob()"
+- "[dedicatedworker] Request interface: operation bytes()"
+- "[dedicatedworker] Request interface: operation clone()"
+- "[dedicatedworker] Request interface: operation formData()"
+- "[dedicatedworker] Request interface: operation json()"
+- "[dedicatedworker] Request interface: operation text()"
+- "[dedicatedworker] Response interface object length"
+- "[dedicatedworker] Response interface: attribute body"
+- "[dedicatedworker] Response interface: attribute bodyUsed"
+- "[dedicatedworker] Response interface: attribute headers"
+- "[dedicatedworker] Response interface: attribute ok"
+- "[dedicatedworker] Response interface: attribute redirected"
+- "[dedicatedworker] Response interface: attribute status"
+- "[dedicatedworker] Response interface: attribute statusText"
+- "[dedicatedworker] Response interface: attribute type"
+- "[dedicatedworker] Response interface: attribute url"
+- "[dedicatedworker] Response interface: calling redirect(USVString, optional unsigned
+  short) on new Response() with too few arguments must throw TypeError"
+- "[dedicatedworker] Response interface: existence and properties of interface object"
+- "[dedicatedworker] Response interface: existence and properties of interface prototype
+  object"
+- '[dedicatedworker] Response interface: new Response() must inherit property "headers"
+  with the proper type'
+- '[dedicatedworker] Response interface: new Response() must inherit property "ok"
+  with the proper type'
+- '[dedicatedworker] Response interface: new Response() must inherit property "redirected"
+  with the proper type'
+- '[dedicatedworker] Response interface: new Response() must inherit property "status"
+  with the proper type'
+- '[dedicatedworker] Response interface: new Response() must inherit property "statusText"
+  with the proper type'
+- '[dedicatedworker] Response interface: new Response() must inherit property "type"
+  with the proper type'
+- '[dedicatedworker] Response interface: new Response() must inherit property "url"
+  with the proper type'
+- "[dedicatedworker] Response interface: operation arrayBuffer()"
+- "[dedicatedworker] Response interface: operation blob()"
+- "[dedicatedworker] Response interface: operation bytes()"
+- "[dedicatedworker] Response interface: operation clone()"
+- "[dedicatedworker] Response interface: operation error()"
+- "[dedicatedworker] Response interface: operation formData()"
+- "[dedicatedworker] Response interface: operation json()"
+- "[dedicatedworker] Response interface: operation json(any, optional ResponseInit)"
+- "[dedicatedworker] Response interface: operation redirect(USVString, optional unsigned
+  short)"
+- "[dedicatedworker] Response interface: operation text()"
+- "[dedicatedworker] Response interface: operation textStream()"
+- "[dedicatedworker] WorkerGlobalScope interface: calling fetch(RequestInfo, optional
+  RequestInit) on self with too few arguments must throw TypeError"
+- "[dedicatedworker] WorkerGlobalScope interface: operation fetch(RequestInfo, optional
+  RequestInit)"
+- '[dedicatedworker] WorkerGlobalScope interface: self must inherit property "fetch(RequestInfo,
+  optional RequestInit)" with the proper type'
+- "[serviceworker] Headers interface object length"
+- "[serviceworker] Headers interface: calling append(ByteString, ByteString) on new
+  Headers() with too few arguments must throw TypeError"
+- "[serviceworker] Headers interface: calling delete(ByteString) on new Headers()
+  with too few arguments must throw TypeError"
+- "[serviceworker] Headers interface: calling get(ByteString) on new Headers() with
+  too few arguments must throw TypeError"
+- "[serviceworker] Headers interface: calling has(ByteString) on new Headers() with
+  too few arguments must throw TypeError"
+- "[serviceworker] Headers interface: calling set(ByteString, ByteString) on new Headers()
+  with too few arguments must throw TypeError"
+- "[serviceworker] Headers interface: iterable<ByteString, ByteString>"
+- "[serviceworker] Headers interface: operation append(ByteString, ByteString)"
+- "[serviceworker] Headers interface: operation delete(ByteString)"
+- "[serviceworker] Headers interface: operation get(ByteString)"
+- "[serviceworker] Headers interface: operation getSetCookie()"
+- "[serviceworker] Headers interface: operation has(ByteString)"
+- "[serviceworker] Headers interface: operation set(ByteString, ByteString)"
+- "[serviceworker] Request interface object length"
+- "[serviceworker] Request interface: attribute body"
+- "[serviceworker] Request interface: attribute bodyUsed"
+- "[serviceworker] Request interface: attribute cache"
+- "[serviceworker] Request interface: attribute credentials"
+- "[serviceworker] Request interface: attribute destination"
+- "[serviceworker] Request interface: attribute duplex"
+- "[serviceworker] Request interface: attribute headers"
+- "[serviceworker] Request interface: attribute integrity"
+- "[serviceworker] Request interface: attribute isHistoryNavigation"
+- "[serviceworker] Request interface: attribute isReloadNavigation"
+- "[serviceworker] Request interface: attribute keepalive"
+- "[serviceworker] Request interface: attribute method"
+- "[serviceworker] Request interface: attribute mode"
+- "[serviceworker] Request interface: attribute redirect"
+- "[serviceworker] Request interface: attribute referrer"
+- "[serviceworker] Request interface: attribute referrerPolicy"
+- "[serviceworker] Request interface: attribute signal"
+- "[serviceworker] Request interface: attribute url"
+- "[serviceworker] Request interface: operation arrayBuffer()"
+- "[serviceworker] Request interface: operation blob()"
+- "[serviceworker] Request interface: operation bytes()"
+- "[serviceworker] Request interface: operation clone()"
+- "[serviceworker] Request interface: operation formData()"
+- "[serviceworker] Request interface: operation json()"
+- "[serviceworker] Request interface: operation text()"
+- "[serviceworker] Response interface object length"
+- "[serviceworker] Response interface: attribute body"
+- "[serviceworker] Response interface: attribute bodyUsed"
+- "[serviceworker] Response interface: attribute headers"
+- "[serviceworker] Response interface: attribute ok"
+- "[serviceworker] Response interface: attribute redirected"
+- "[serviceworker] Response interface: attribute status"
+- "[serviceworker] Response interface: attribute statusText"
+- "[serviceworker] Response interface: attribute type"
+- "[serviceworker] Response interface: attribute url"
+- "[serviceworker] Response interface: calling redirect(USVString, optional unsigned
+  short) on new Response() with too few arguments must throw TypeError"
+- "[serviceworker] Response interface: existence and properties of interface object"
+- "[serviceworker] Response interface: existence and properties of interface prototype
+  object"
+- '[serviceworker] Response interface: new Response() must inherit property "headers"
+  with the proper type'
+- '[serviceworker] Response interface: new Response() must inherit property "ok" with
+  the proper type'
+- '[serviceworker] Response interface: new Response() must inherit property "redirected"
+  with the proper type'
+- '[serviceworker] Response interface: new Response() must inherit property "status"
+  with the proper type'
+- '[serviceworker] Response interface: new Response() must inherit property "statusText"
+  with the proper type'
+- '[serviceworker] Response interface: new Response() must inherit property "type"
+  with the proper type'
+- '[serviceworker] Response interface: new Response() must inherit property "url"
+  with the proper type'
+- "[serviceworker] Response interface: operation arrayBuffer()"
+- "[serviceworker] Response interface: operation blob()"
+- "[serviceworker] Response interface: operation bytes()"
+- "[serviceworker] Response interface: operation clone()"
+- "[serviceworker] Response interface: operation error()"
+- "[serviceworker] Response interface: operation formData()"
+- "[serviceworker] Response interface: operation json()"
+- "[serviceworker] Response interface: operation json(any, optional ResponseInit)"
+- "[serviceworker] Response interface: operation redirect(USVString, optional unsigned
+  short)"
+- "[serviceworker] Response interface: operation text()"
+- "[serviceworker] Response interface: operation textStream()"
+- "[serviceworker] WorkerGlobalScope interface: calling fetch(RequestInfo, optional
+  RequestInit) on self with too few arguments must throw TypeError"
+- "[serviceworker] WorkerGlobalScope interface: operation fetch(RequestInfo, optional
+  RequestInit)"
+- '[serviceworker] WorkerGlobalScope interface: self must inherit property "fetch(RequestInfo,
+  optional RequestInit)" with the proper type'
 fetch/api/policies/csp-blocked-worker.html:
 - Fetch is blocked by CSP, got a TypeError
 fetch/api/policies/csp-blocked.html:
@@ -3092,6 +3688,9 @@ fetch/api/policies/referrer-origin-worker.html:
 fetch/api/policies/referrer-origin.html:
 - Cross-origin referrer is overridden by client origin
 - Request's referrer is origin
+fetch/api/redirect/redirect-count.any.js:
+- "[serviceworker] [harness] TIMEOUT"
+- "[serviceworker] [harness] no subtests"
 fetch/api/redirect/redirect-keepalive.any.js:
 - "[harness] ERROR"
 fetch/api/redirect/redirect-keepalive.https.any.js:
@@ -3099,15 +3698,27 @@ fetch/api/redirect/redirect-keepalive.https.any.js:
 fetch/api/redirect/redirect-origin.any.js:
 - "[POST] Redirect 307 Same origin to same origin"
 - "[POST] Redirect 308 Same origin to same origin"
+- "[dedicatedworker] [POST] Redirect 307 Same origin to same origin"
+- "[dedicatedworker] [POST] Redirect 308 Same origin to same origin"
 fetch/api/redirect/redirect-upload.h2.any.js:
 - Fetch upload streaming should fail on 301
 - Fetch upload streaming should fail on 302
 - Fetch upload streaming should fail on 307
 - Fetch upload streaming should fail on 308
+- "[dedicatedworker] Fetch upload streaming should fail on 301"
+- "[dedicatedworker] Fetch upload streaming should fail on 302"
+- "[dedicatedworker] Fetch upload streaming should fail on 307"
+- "[dedicatedworker] Fetch upload streaming should fail on 308"
+- "[serviceworker] Fetch upload streaming should fail on 301"
+- "[serviceworker] Fetch upload streaming should fail on 302"
+- "[serviceworker] Fetch upload streaming should fail on 307"
+- "[serviceworker] Fetch upload streaming should fail on 308"
 fetch/api/request/destination/fetch-destination.https.html:
 - AudioWorklet module fetches with a "audioworklet" Request.destination
 fetch/api/request/request-consume-empty.any.js:
 - Consume empty FormData request body as text
+- "[dedicatedworker] Consume empty FormData request body as text"
+- "[serviceworker] Consume empty FormData request body as text"
 fetch/api/request/request-keepalive-quota.html:
 - A Keep-Alive fetch() should return only its allocated Quota upon promise resolution.
 fetch/api/response/multi-globals/url-parsing.html:
@@ -3118,6 +3729,8 @@ fetch/api/response/response-blob-realm.any.js:
 - realm of the Uint8Array from Response bytes()
 fetch/api/response/response-consume-empty.any.js:
 - Consume empty FormData response body as text
+- "[dedicatedworker] Consume empty FormData response body as text"
+- "[serviceworker] Consume empty FormData response body as text"
 fetch/api/response/response-consume.html:
 - 'Consume response''s body: from multipart form data blob to formData'
 - "[harness] ERROR"
@@ -3126,6 +3739,14 @@ fetch/api/response/response-stream-with-broken-then.any.js:
 - Attempt to inject undefined via Object.prototype.then.
 - 'Attempt to inject value: undefined via Object.prototype.then.'
 - 'Attempt to inject {done: false, value: bye} via Object.prototype.then.'
+- "[dedicatedworker] Attempt to inject 8.2 via Object.prototype.then."
+- "[dedicatedworker] Attempt to inject undefined via Object.prototype.then."
+- "[dedicatedworker] Attempt to inject value: undefined via Object.prototype.then."
+- "[dedicatedworker] Attempt to inject {done: false, value: bye} via Object.prototype.then."
+- "[serviceworker] Attempt to inject 8.2 via Object.prototype.then."
+- "[serviceworker] Attempt to inject undefined via Object.prototype.then."
+- "[serviceworker] Attempt to inject value: undefined via Object.prototype.then."
+- "[serviceworker] Attempt to inject {done: false, value: bye} via Object.prototype.then."
 fetch/h1-parsing/lone-cr.window.js:
 - "Parsing response with a lone CR before message-body (HTTP/1.1\r200 OK\n\nBODY)"
 - "Parsing response with a lone CR before message-body (HTTP/1.1 200\rOK\n\nBODY)"
@@ -3166,6 +3787,15 @@ hr-time/idlharness.any.js:
 - 'Performance interface: existence and properties of interface object'
 - 'Performance interface: operation now()'
 - 'Performance interface: operation toJSON()'
+- "[dedicatedworker] Performance interface: attribute timeOrigin"
+- "[dedicatedworker] Performance interface: existence and properties of interface
+  object"
+- "[dedicatedworker] Performance interface: operation now()"
+- "[dedicatedworker] Performance interface: operation toJSON()"
+- "[serviceworker] Performance interface: attribute timeOrigin"
+- "[serviceworker] Performance interface: existence and properties of interface object"
+- "[serviceworker] Performance interface: operation now()"
+- "[serviceworker] Performance interface: operation toJSON()"
 hr-time/navigation-start-post-before-unload.html:
 - timeOrigin should be set after beforeunload
 hr-time/performance-tojson.html:
@@ -7317,6 +7947,10 @@ html/webappapis/scripting/events/onerroreventhandler.html:
 - onerror + ErrorEvent + Window
 html/webappapis/scripting/events/uncompiled_event_handler_with_scripting_disabled.html:
 - when scripting is disabled, the handler is never compiled
+html/webappapis/structured-clone/structured-clone.any.js:
+- "[dedicatedworker] Growable SharedArrayBuffer"
+- "[dedicatedworker] Serializing OOB TypedArray throws"
+- "[dedicatedworker] Transferring OOB TypedArray throws"
 input-events/input-events-arrow-key-on-number-input-delete-document.html:
 - Number input should not crash and not fire subsequent events when event handler
   removes document
@@ -7438,6 +8072,52 @@ resource-timing/idlharness.any.js:
 - 'PerformanceResourceTiming interface: resource must inherit property "workerRouterEvaluationStart"
   with the proper type'
 - Stringification of resource
+- "[dedicatedworker] Performance interface: calling setResourceTimingBufferSize(unsigned
+  long) on performance with too few arguments must throw TypeError"
+- "[dedicatedworker] Performance interface: operation clearResourceTimings()"
+- "[dedicatedworker] Performance interface: operation setResourceTimingBufferSize(unsigned
+  long)"
+- "[dedicatedworker] PerformanceResourceTiming interface object length"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute connectEnd"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute connectStart"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute contentEncoding"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute contentType"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute decodedBodySize"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute deliveryType"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute domainLookupEnd"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute domainLookupStart"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute encodedBodySize"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute fetchStart"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute finalResponseHeadersStart"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute firstInterimResponseStart"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute initiatorType"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute nextHopProtocol"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute redirectEnd"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute redirectStart"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute renderBlockingStatus"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute requestStart"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute responseEnd"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute responseStart"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute responseStatus"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute secureConnectionStart"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute transferSize"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute workerCacheLookupStart"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute workerFinalRouterSource"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute workerMatchedRouterSource"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute workerRouterEvaluationStart"
+- "[dedicatedworker] PerformanceResourceTiming interface: attribute workerStart"
+- "[dedicatedworker] PerformanceResourceTiming interface: default toJSON operation
+  on resource"
+- "[dedicatedworker] PerformanceResourceTiming interface: operation toJSON()"
+- '[dedicatedworker] PerformanceResourceTiming interface: resource must inherit property
+  "workerCacheLookupStart" with the proper type'
+- '[dedicatedworker] PerformanceResourceTiming interface: resource must inherit property
+  "workerFinalRouterSource" with the proper type'
+- '[dedicatedworker] PerformanceResourceTiming interface: resource must inherit property
+  "workerMatchedRouterSource" with the proper type'
+- '[dedicatedworker] PerformanceResourceTiming interface: resource must inherit property
+  "workerRouterEvaluationStart" with the proper type'
+- "[dedicatedworker] Stringification of resource"
 resource-timing/iframe-failed-commit.html:
 - Same-origin empty iframe with a 200 status gets reported
 - Same-origin empty iframe with a 204 status gets reported
@@ -7543,6 +8223,8 @@ resource-timing/resource_connection_reuse_mixed_content.html:
 - "[harness] TIMEOUT"
 resource-timing/resource_connection_reuse_mixed_content_redirect.html:
 - "[harness] TIMEOUT"
+resource-timing/resource_nested_dedicated_worker.worker.js:
+- Resource timing for nested dedicated workers
 resource-timing/resource_reparenting.html:
 - Testing resource entries
 resource-timing/resource_subframe_self_navigation.html:
@@ -7550,6 +8232,9 @@ resource-timing/resource_subframe_self_navigation.html:
 - Subsequent <frame> navigations don't appear in the resource-timing buffer.
 - Subsequent <iframe> navigations don't appear in the resource-timing buffer.
 - Subsequent <object> navigations don't appear in the resource-timing buffer.
+- "[harness] TIMEOUT"
+resource-timing/resource_timing.worker.js:
+- Performance Resource Entries in workers
 - "[harness] TIMEOUT"
 resource-timing/resource_timing_content_length.html:
 - encodedBodySize should be equal to the actual byte size of the content when header
@@ -7563,13 +8248,22 @@ resource-timing/secure-iframe-in-insecure-context.html:
   context
 resource-timing/sizes-cache.any.js:
 - PerformanceResourceTiming sizes caching test
+- "[dedicatedworker] PerformanceResourceTiming sizes caching test"
+- "[serviceworker] PerformanceResourceTiming sizes caching test"
 resource-timing/workerStart-tao-protected.https.html:
 - A resource from a cross-origin service worker must expose workerStart when there
   is a TAO match
 resource-timing/worklet-rt-entries.https.html:
 - Worklets should generate Resource Timing Entries
+service-workers/cache-storage/cache-storage-buckets.https.any.js:
+- "[dedicatedworker] [harness] ERROR"
+- "[dedicatedworker] [harness] no subtests"
+- "[serviceworker] [harness] ERROR"
+- "[serviceworker] [harness] no subtests"
 service-workers/cache-storage/cache-storage.https.any.js:
 - CacheStorage names are DOMStrings not USVStrings
+- "[dedicatedworker] CacheStorage names are DOMStrings not USVStrings"
+- "[serviceworker] CacheStorage names are DOMStrings not USVStrings"
 service-workers/cache-storage/credentials.https.html:
 - Cache API matching includes credentials
 service-workers/service-worker/Service-Worker-Allowed-header.https.html:
@@ -8101,6 +8795,53 @@ url/idlharness.any.js:
 - 'URLSearchParams interface: operation set(USVString, USVString)'
 - 'URLSearchParams interface: operation sort()'
 - 'URLSearchParams interface: stringifier'
+- "[dedicatedworker] URL interface object length"
+- "[dedicatedworker] URL interface: attribute hash"
+- "[dedicatedworker] URL interface: attribute host"
+- "[dedicatedworker] URL interface: attribute hostname"
+- "[dedicatedworker] URL interface: attribute href"
+- "[dedicatedworker] URL interface: attribute origin"
+- "[dedicatedworker] URL interface: attribute password"
+- "[dedicatedworker] URL interface: attribute pathname"
+- "[dedicatedworker] URL interface: attribute port"
+- "[dedicatedworker] URL interface: attribute protocol"
+- "[dedicatedworker] URL interface: attribute search"
+- "[dedicatedworker] URL interface: attribute searchParams"
+- "[dedicatedworker] URL interface: attribute username"
+- '[dedicatedworker] URL interface: calling canParse(USVString, optional USVString)
+  on new URL("http://foo") with too few arguments must throw TypeError'
+- '[dedicatedworker] URL interface: calling parse(USVString, optional USVString) on
+  new URL("http://foo") with too few arguments must throw TypeError'
+- "[dedicatedworker] URL interface: operation canParse(USVString, optional USVString)"
+- "[dedicatedworker] URL interface: operation parse(USVString, optional USVString)"
+- "[dedicatedworker] URL interface: operation toJSON()"
+- "[dedicatedworker] URL interface: stringifier"
+- "[dedicatedworker] URLSearchParams interface object length"
+- "[dedicatedworker] URLSearchParams interface: attribute size"
+- '[dedicatedworker] URLSearchParams interface: calling append(USVString, USVString)
+  on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError'
+- '[dedicatedworker] URLSearchParams interface: calling delete(USVString, optional
+  USVString) on new URLSearchParams("hi=there&thank=you") with too few arguments must
+  throw TypeError'
+- '[dedicatedworker] URLSearchParams interface: calling get(USVString) on new URLSearchParams("hi=there&thank=you")
+  with too few arguments must throw TypeError'
+- '[dedicatedworker] URLSearchParams interface: calling getAll(USVString) on new URLSearchParams("hi=there&thank=you")
+  with too few arguments must throw TypeError'
+- '[dedicatedworker] URLSearchParams interface: calling has(USVString, optional USVString)
+  on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError'
+- '[dedicatedworker] URLSearchParams interface: calling set(USVString, USVString)
+  on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError'
+- "[dedicatedworker] URLSearchParams interface: iterable<USVString, USVString>"
+- "[dedicatedworker] URLSearchParams interface: operation append(USVString, USVString)"
+- "[dedicatedworker] URLSearchParams interface: operation delete(USVString, optional
+  USVString)"
+- "[dedicatedworker] URLSearchParams interface: operation get(USVString)"
+- "[dedicatedworker] URLSearchParams interface: operation getAll(USVString)"
+- "[dedicatedworker] URLSearchParams interface: operation has(USVString, optional
+  USVString)"
+- "[dedicatedworker] URLSearchParams interface: operation set(USVString, USVString)"
+- "[dedicatedworker] URLSearchParams interface: operation sort()"
+- "[dedicatedworker] URLSearchParams interface: stringifier"
 web-animations/animation-model/animation-types/accumulation-per-property-002.html:
 - 'list-style: "outside url("http://localhost/test-2") square" onto "inside url("http://localhost/test-1")
   circle"'
@@ -8462,7 +9203,12 @@ webmessaging/event.origin.sub.htm:
 - 'Test Description: event.origin returns the origin of the message.'
 - "[harness] ERROR"
 webmessaging/message-channels/worker-post-after-close.any.js:
+- "[dedicatedworker] MessageChannel/MessagePort should not work after a worker self.close()"
+- "[dedicatedworker] [harness] TIMEOUT"
 - "[harness] ERROR"
+webmessaging/message-channels/worker.any.js:
+- "[dedicatedworker] MessageChannel/MessagePort created and used after a worker self.close()"
+- "[dedicatedworker] [harness] TIMEOUT"
 webmessaging/multi-globals/broadcastchannel-current.sub.html:
 - The current page being cross-origin must prevent the BroadcastChannel message from
   being seen
@@ -8478,6 +9224,12 @@ websockets/Close-Reason-124Bytes.any.js:
   - SYNTAX_ERR is thrown
 - Create WebSocket - Close the Connection - close(code, 'reason more than 123 bytes')
   - SYNTAX_ERR is thrown
+- "[dedicatedworker] Create WebSocket - Close the Connection - close(code, 'reason
+  more than 123 bytes') - SYNTAX_ERR is thrown"
+- "[dedicatedworker] Create WebSocket - Close the Connection - close(code, 'reason
+  more than 123 bytes') - SYNTAX_ERR is thrown"
+- "[dedicatedworker] Create WebSocket - Close the Connection - close(code, 'reason
+  more than 123 bytes') - SYNTAX_ERR is thrown"
 websockets/Close-delayed.any.js:
 - Create WebSocket - Close the Connection - close should not emit until handshake
   completes - Connection should be closed
@@ -8485,12 +9237,29 @@ websockets/Close-delayed.any.js:
   completes - Connection should be closed
 - Create WebSocket - Close the Connection - close should not emit until handshake
   completes - Connection should be closed
+- "[dedicatedworker] Create WebSocket - Close the Connection - close should not emit
+  until handshake completes - Connection should be closed"
+- "[dedicatedworker] Create WebSocket - Close the Connection - close should not emit
+  until handshake completes - Connection should be closed"
+- "[dedicatedworker] Create WebSocket - Close the Connection - close should not emit
+  until handshake completes - Connection should be closed"
 websockets/Create-invalid-urls.any.js:
+- '[dedicatedworker] new WebSocket("http://www.example.com/#") should throw a "SyntaxError"
+  DOMException'
 - new WebSocket("http://www.example.com/#") should throw a "SyntaxError" DOMException
+websockets/Create-on-worker-shutdown.any.js:
+- "[dedicatedworker] WebSocket created after a worker self.close()"
+- "[dedicatedworker] [harness] TIMEOUT"
 websockets/Send-binary-blob.any.js:
 - Send binary data on a WebSocket - Blob - Connection should be closed
 - Send binary data on a WebSocket - Blob - Connection should be closed
 - Send binary data on a WebSocket - Blob - Connection should be closed
+- "[dedicatedworker] Send binary data on a WebSocket - Blob - Connection should be
+  closed"
+- "[dedicatedworker] Send binary data on a WebSocket - Blob - Connection should be
+  closed"
+- "[dedicatedworker] Send binary data on a WebSocket - Blob - Connection should be
+  closed"
 websockets/back-forward-cache-with-closed-websocket-connection.window.js:
 - back-forward-cache-with-closed-websocket-connection
 websockets/back-forward-cache-with-open-websocket-connection-and-close-it-in-pagehide.window.js:
@@ -8515,7 +9284,24 @@ websockets/idlharness.any.js:
 - 'WebSocket interface: attribute url'
 - 'WebSocket interface: operation close(optional unsigned short, optional USVString)'
 - 'WebSocket interface: operation send((BufferSource or Blob or USVString))'
+- "[dedicatedworker] WebSocket interface object length"
+- "[dedicatedworker] WebSocket interface: attribute binaryType"
+- "[dedicatedworker] WebSocket interface: attribute bufferedAmount"
+- "[dedicatedworker] WebSocket interface: attribute extensions"
+- "[dedicatedworker] WebSocket interface: attribute protocol"
+- "[dedicatedworker] WebSocket interface: attribute readyState"
+- "[dedicatedworker] WebSocket interface: attribute url"
+- "[dedicatedworker] WebSocket interface: operation close(optional unsigned short,
+  optional USVString)"
+- "[dedicatedworker] WebSocket interface: operation send((BufferSource or Blob or
+  USVString))"
 websockets/interfaces/WebSocket/close/close-connecting-async.any.js:
+- "[dedicatedworker] close event should be fired asynchronously when WebSocket is
+  connecting"
+- "[dedicatedworker] close event should be fired asynchronously when WebSocket is
+  connecting"
+- "[dedicatedworker] close event should be fired asynchronously when WebSocket is
+  connecting"
 - close event should be fired asynchronously when WebSocket is connecting
 - close event should be fired asynchronously when WebSocket is connecting
 - close event should be fired asynchronously when WebSocket is connecting
@@ -8523,6 +9309,8 @@ websockets/interfaces/WebSocket/close/close-connecting.html:
 - 'WebSockets: close() when connecting'
 - 'WebSockets: close() when connecting'
 websockets/mixed-content.https.any.js:
+- "[dedicatedworker] opening an insecure WebSocket in a secure context should fail"
+- "[serviceworker] opening an insecure WebSocket in a secure context should fail"
 - opening an insecure WebSocket in a secure context should fail
 websockets/multi-globals/message-received.html:
 - ArrayBuffer should be created in the relevant realm of the WebSocket
@@ -8530,6 +9318,8 @@ websockets/multi-globals/message-received.html:
 - "[harness] TIMEOUT"
 websockets/referrer.any.js:
 - Ensure no Referer header is included
+- "[dedicatedworker] Ensure no Referer header is included"
+- "[dedicatedworker] [harness] TIMEOUT"
 - "[harness] TIMEOUT"
 websockets/remove-own-iframe-during-onerror.window.js:
 - "[harness] TIMEOUT"
@@ -8539,6 +9329,18 @@ websockets/remove-own-iframe-during-onerror.window.js:
 - removing an iframe from within an onerror handler should work
 - removing an iframe from within an onerror handler should work
 websockets/send-many-64K-messages-with-backpressure.any.js:
+- "[dedicatedworker] sending 50 messages of size 65536 with backpressure applied should
+  not hang"
+- "[dedicatedworker] sending 50 messages of size 65536 with backpressure applied should
+  not hang"
+- "[dedicatedworker] sending 50 messages of size 65536 with backpressure applied should
+  not hang"
+- "[serviceworker] sending 50 messages of size 65536 with backpressure applied should
+  not hang"
+- "[serviceworker] sending 50 messages of size 65536 with backpressure applied should
+  not hang"
+- "[serviceworker] sending 50 messages of size 65536 with backpressure applied should
+  not hang"
 - sending 50 messages of size 65536 with backpressure applied should not hang
 - sending 50 messages of size 65536 with backpressure applied should not hang
 - sending 50 messages of size 65536 with backpressure applied should not hang
@@ -8592,6 +9394,7 @@ xhr/access-control-basic-allow-access-control-origin-header-data-url.htm:
 - Access granted to null-origin iframe
 xhr/access-control-basic-allow-preflight-cache-timeout.any.js:
 - Preflight cache should be invalidated on timeout
+- "[dedicatedworker] Preflight cache should be invalidated on timeout"
 xhr/access-control-preflight-credential-async.htm:
 - CORS async request with URL credentials
 xhr/access-control-preflight-credential-sync.htm:
@@ -8601,15 +9404,22 @@ xhr/access-control-sandboxed-iframe-denied-without-wildcard.htm:
 xhr/access-control-sandboxed-iframe-denied.htm:
 - Sandboxed iframe is denied access to path
 xhr/event-error.sub.any.js:
+- "[dedicatedworker] error while reading body should report zeros for loaded and total"
 - error while reading body should report zeros for loaded and total
 xhr/event-readystatechange-loaded.any.js:
+- "[dedicatedworker] [harness] TIMEOUT"
+- "[dedicatedworker] event-readystatechange-loaded"
 - event-readystatechange-loaded
 xhr/event-upload-progress-crossorigin.any.js:
 - Upload events registered too late (http://www1.www.example.com/xhr/resources/corsenabled.py)
 - Upload events registered too late (resources/redirect.py?code=307&location=http://www1.www.example.com/xhr/resources/corsenabled.py)
+- "[dedicatedworker] Upload events registered too late (http://www1.www.example.com/xhr/resources/corsenabled.py)"
+- "[dedicatedworker] Upload events registered too late (resources/redirect.py?code=307&location=http://www1.www.example.com/xhr/resources/corsenabled.py)"
 xhr/event-upload-progress.any.js:
 - Upload events registered too late (http://www1.www.example.com/xhr/resources/corsenabled.py)
 - Upload events registered too late (resources/redirect.py?code=307&location=http://www1.www.example.com/xhr/resources/corsenabled.py)
+- "[dedicatedworker] Upload events registered too late (http://www1.www.example.com/xhr/resources/corsenabled.py)"
+- "[dedicatedworker] Upload events registered too late (resources/redirect.py?code=307&location=http://www1.www.example.com/xhr/resources/corsenabled.py)"
 xhr/formdata/constructor-submitter-coordinate.html:
 - The constructed FormData object should contain correct entries for Image Button
   submitter's dispatched coordinate
@@ -8744,6 +9554,119 @@ xhr/idlharness.any.js:
 - 'XMLHttpRequestUpload interface: existence and properties of interface object'
 - 'XMLHttpRequestUpload interface: existence and properties of interface prototype
   object'
+- "[dedicatedworker] FormData interface object length"
+- "[dedicatedworker] FormData interface: calling append(USVString, Blob, optional
+  USVString) on new FormData() with too few arguments must throw TypeError"
+- "[dedicatedworker] FormData interface: calling append(USVString, USVString) on new
+  FormData() with too few arguments must throw TypeError"
+- "[dedicatedworker] FormData interface: calling delete(USVString) on new FormData()
+  with too few arguments must throw TypeError"
+- "[dedicatedworker] FormData interface: calling get(USVString) on new FormData()
+  with too few arguments must throw TypeError"
+- "[dedicatedworker] FormData interface: calling getAll(USVString) on new FormData()
+  with too few arguments must throw TypeError"
+- "[dedicatedworker] FormData interface: calling has(USVString) on new FormData()
+  with too few arguments must throw TypeError"
+- "[dedicatedworker] FormData interface: calling set(USVString, Blob, optional USVString)
+  on new FormData() with too few arguments must throw TypeError"
+- "[dedicatedworker] FormData interface: calling set(USVString, USVString) on new
+  FormData() with too few arguments must throw TypeError"
+- "[dedicatedworker] FormData interface: iterable<USVString, FormDataEntryValue>"
+- "[dedicatedworker] FormData interface: operation append(USVString, Blob, optional
+  USVString)"
+- "[dedicatedworker] FormData interface: operation append(USVString, USVString)"
+- "[dedicatedworker] FormData interface: operation delete(USVString)"
+- "[dedicatedworker] FormData interface: operation get(USVString)"
+- "[dedicatedworker] FormData interface: operation getAll(USVString)"
+- "[dedicatedworker] FormData interface: operation has(USVString)"
+- "[dedicatedworker] FormData interface: operation set(USVString, Blob, optional USVString)"
+- "[dedicatedworker] FormData interface: operation set(USVString, USVString)"
+- "[dedicatedworker] XMLHttpRequest interface: attribute readyState"
+- "[dedicatedworker] XMLHttpRequest interface: attribute response"
+- "[dedicatedworker] XMLHttpRequest interface: attribute responseText"
+- "[dedicatedworker] XMLHttpRequest interface: attribute responseType"
+- "[dedicatedworker] XMLHttpRequest interface: attribute responseURL"
+- "[dedicatedworker] XMLHttpRequest interface: attribute status"
+- "[dedicatedworker] XMLHttpRequest interface: attribute statusText"
+- "[dedicatedworker] XMLHttpRequest interface: attribute timeout"
+- "[dedicatedworker] XMLHttpRequest interface: attribute upload"
+- "[dedicatedworker] XMLHttpRequest interface: attribute withCredentials"
+- "[dedicatedworker] XMLHttpRequest interface: calling getResponseHeader(ByteString)
+  on new XMLHttpRequest() with too few arguments must throw TypeError"
+- "[dedicatedworker] XMLHttpRequest interface: calling open(ByteString, USVString)
+  on new XMLHttpRequest() with too few arguments must throw TypeError"
+- "[dedicatedworker] XMLHttpRequest interface: calling open(ByteString, USVString,
+  boolean, optional USVString?, optional USVString?) on new XMLHttpRequest() with
+  too few arguments must throw TypeError"
+- "[dedicatedworker] XMLHttpRequest interface: calling overrideMimeType(DOMString)
+  on new XMLHttpRequest() with too few arguments must throw TypeError"
+- "[dedicatedworker] XMLHttpRequest interface: constant DONE on interface object"
+- "[dedicatedworker] XMLHttpRequest interface: constant DONE on interface prototype
+  object"
+- "[dedicatedworker] XMLHttpRequest interface: constant HEADERS_RECEIVED on interface
+  object"
+- "[dedicatedworker] XMLHttpRequest interface: constant HEADERS_RECEIVED on interface
+  prototype object"
+- "[dedicatedworker] XMLHttpRequest interface: constant LOADING on interface object"
+- "[dedicatedworker] XMLHttpRequest interface: constant LOADING on interface prototype
+  object"
+- "[dedicatedworker] XMLHttpRequest interface: constant OPENED on interface object"
+- "[dedicatedworker] XMLHttpRequest interface: constant OPENED on interface prototype
+  object"
+- "[dedicatedworker] XMLHttpRequest interface: constant UNSENT on interface object"
+- "[dedicatedworker] XMLHttpRequest interface: constant UNSENT on interface prototype
+  object"
+- "[dedicatedworker] XMLHttpRequest interface: existence and properties of interface
+  object"
+- "[dedicatedworker] XMLHttpRequest interface: existence and properties of interface
+  prototype object"
+- "[dedicatedworker] XMLHttpRequest interface: member responseXML"
+- '[dedicatedworker] XMLHttpRequest interface: new XMLHttpRequest() must inherit property
+  "readyState" with the proper type'
+- '[dedicatedworker] XMLHttpRequest interface: new XMLHttpRequest() must inherit property
+  "response" with the proper type'
+- '[dedicatedworker] XMLHttpRequest interface: new XMLHttpRequest() must inherit property
+  "responseURL" with the proper type'
+- '[dedicatedworker] XMLHttpRequest interface: new XMLHttpRequest() must inherit property
+  "status" with the proper type'
+- '[dedicatedworker] XMLHttpRequest interface: new XMLHttpRequest() must inherit property
+  "statusText" with the proper type'
+- '[dedicatedworker] XMLHttpRequest interface: new XMLHttpRequest() must inherit property
+  "upload" with the proper type'
+- '[dedicatedworker] XMLHttpRequest interface: new XMLHttpRequest() must not have
+  property "responseXML"'
+- "[dedicatedworker] XMLHttpRequest interface: operation abort()"
+- "[dedicatedworker] XMLHttpRequest interface: operation getAllResponseHeaders()"
+- "[dedicatedworker] XMLHttpRequest interface: operation getResponseHeader(ByteString)"
+- "[dedicatedworker] XMLHttpRequest interface: operation open(ByteString, USVString)"
+- "[dedicatedworker] XMLHttpRequest interface: operation open(ByteString, USVString,
+  boolean, optional USVString?, optional USVString?)"
+- "[dedicatedworker] XMLHttpRequest interface: operation overrideMimeType(DOMString)"
+- "[dedicatedworker] XMLHttpRequest interface: operation send(optional (Document or
+  XMLHttpRequestBodyInit)?)"
+- "[dedicatedworker] XMLHttpRequest interface: operation setRequestHeader(ByteString,
+  ByteString)"
+- "[dedicatedworker] XMLHttpRequestEventTarget interface object length"
+- "[dedicatedworker] XMLHttpRequestEventTarget interface object name"
+- "[dedicatedworker] XMLHttpRequestEventTarget interface: attribute onabort"
+- "[dedicatedworker] XMLHttpRequestEventTarget interface: attribute onerror"
+- "[dedicatedworker] XMLHttpRequestEventTarget interface: attribute onload"
+- "[dedicatedworker] XMLHttpRequestEventTarget interface: attribute onloadend"
+- "[dedicatedworker] XMLHttpRequestEventTarget interface: attribute onloadstart"
+- "[dedicatedworker] XMLHttpRequestEventTarget interface: attribute onprogress"
+- "[dedicatedworker] XMLHttpRequestEventTarget interface: attribute ontimeout"
+- "[dedicatedworker] XMLHttpRequestEventTarget interface: existence and properties
+  of interface object"
+- "[dedicatedworker] XMLHttpRequestEventTarget interface: existence and properties
+  of interface prototype object"
+- '[dedicatedworker] XMLHttpRequestEventTarget interface: existence and properties
+  of interface prototype object''s "constructor" property'
+- "[dedicatedworker] XMLHttpRequestEventTarget interface: existence and properties
+  of interface prototype object's @@unscopables property"
+- "[dedicatedworker] XMLHttpRequestUpload interface: existence and properties of interface
+  object"
+- "[dedicatedworker] XMLHttpRequestUpload interface: existence and properties of interface
+  prototype object"
 xhr/open-after-stop.window.js:
 - open() after window.stop()
 xhr/open-url-multi-window-2.htm:
@@ -8774,6 +9697,8 @@ xhr/progress-events-response-data-gzip.htm:
 xhr/response-body-errors.any.js:
 - Asynchronous XMLHttpRequest should clear response on bad chunk
 - Synchronous XMLHttpRequest should throw on bad chunk
+- "[dedicatedworker] Asynchronous XMLHttpRequest should clear response on bad chunk"
+- "[dedicatedworker] Synchronous XMLHttpRequest should throw on bad chunk"
 xhr/response-data-progress.htm:
 - 'XMLHttpRequest: progress events grow response body size, known content-length'
 - 'XMLHttpRequest: progress events grow response body size, unknown content-length'
@@ -8781,6 +9706,16 @@ xhr/responseType-document-in-worker.html:
 - Setting XMLHttpRequest responseType to 'document' in a worker should have no effect.
 xhr/responseXML-unavailable-in-worker.html:
 - XMLHttpRequest's responseXML property should not be exposed in workers.
+xhr/responsetype.any.js:
+- '[dedicatedworker] Set responseType to "document" when readyState is DONE and the
+  sync flag is set.'
+- '[dedicatedworker] Set responseType to "document" when readyState is DONE.'
+- '[dedicatedworker] Set responseType to "document" when readyState is HEADERS_RECEIVED.'
+- '[dedicatedworker] Set responseType to "document" when readyState is LOADING.'
+- '[dedicatedworker] Set responseType to "document" when readyState is OPENED and
+  the sync flag is set.'
+- '[dedicatedworker] Set responseType to "document" when readyState is OPENED.'
+- '[dedicatedworker] Set responseType to "document" when readyState is UNSENT.'
 xhr/responsexml-document-properties.htm:
 - "[harness] ERROR"
 - "[harness] no subtests"
@@ -8795,38 +9730,7 @@ xhr/xmlhttprequest-timeout-worker-aborted.html:
 - "[harness] TIMEOUT"
 - "[harness] TIMEOUT"
 - "[harness] TIMEOUT"
-- "[harness] no subtests"
-- "[harness] no subtests"
-- "[harness] no subtests"
-xhr/xmlhttprequest-timeout-worker-overrides.html:
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] no subtests"
-- "[harness] no subtests"
-- "[harness] no subtests"
 xhr/xmlhttprequest-timeout-worker-overridesexpires.html:
 - "[harness] TIMEOUT"
 - "[harness] TIMEOUT"
 - "[harness] TIMEOUT"
-- "[harness] no subtests"
-- "[harness] no subtests"
-- "[harness] no subtests"
-xhr/xmlhttprequest-timeout-worker-simple.html:
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] no subtests"
-- "[harness] no subtests"
-- "[harness] no subtests"
-xhr/xmlhttprequest-timeout-worker-synconworker.html:
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-xhr/xmlhttprequest-timeout-worker-twice.html:
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] no subtests"
-- "[harness] no subtests"
-- "[harness] no subtests"

@@ -48,6 +48,15 @@ module Capybara
       @@live_lock = Mutex.new
       @@live      = []  # [WeakRef<Driver>] — dead refs filtered on read.
 
+      # Every driver still live at exit is disposed — its windows', workers' and sockets' threads stopped the way a
+      # dropped session's are — before V8Runtime's sweep disposes the isolates (this hook, registered after that one,
+      # runs first). A worker's isolate disposed from the main thread while its own thread still waits on its inbox
+      # hung the process's exit.
+      at_exit do
+        drivers = @@live_lock.synchronize { @@live.filter_map {|ref| ref.__getobj__ rescue nil } }
+        drivers.each {|d| d.dispose rescue nil }
+      end
+
       def self.each_live_on_thread(thread)
         drivers = @@live_lock.synchronize {
           @@live.select!(&:weakref_alive?)

@@ -352,10 +352,13 @@ module Capybara
         # `settle` and dispatches via `__csim_deliverWebSocketEvents`. The
         # connection rides the in-process `rack.hijack` socket Action Cable
         # (and any Rack WebSocket middleware) takes over.
+        # A worker's WebSocket rides the same machinery from its own thread, its reader's events into the worker's inbox
+        # (WsWorkerSink) — so the id counter and the registries below are taken under `@websocket_lock`.
         @websocket_seq        = 0
         @websocket_threads    = {}
-        @websocket_sockets    = {}   # id → csim's socket end (main thread owns this hash)
+        @websocket_sockets    = {}   # id → csim's socket end
         @websocket_app_sockets = {}  # id → the app's hijack end (closed on teardown)
+        @websocket_lock       = Mutex.new
         @websocket_queue      = Thread::Queue.new
         @websocket_queue_head = nil   # one-slot buffer for an event hold_for_ws_close parked ahead of the queue
         # In-flight `ws.close()` handshakes: hold the virtual clock until the reader surfaces the
@@ -2794,7 +2797,7 @@ module Capybara
           # ms until the nearest scheduled timer (-1 = none). Lets a caller keep
           # advancing while a near-future `setTimeout` is parked (a `step_timeout`-
           # style wait) instead of declaring the page idle — see `__csimEventLoopProbe`.
-          'next_timer' => probe['nextTimer'].to_f,
+          'next_timer' => [probe['nextTimer'].to_f, worker_next_timer].select {|t| t >= 0 }.min || -1.0,
           # `turns > 1` ⇒ phase 1's quiescence did work (the trailing no-progress
           # turn that ends the loop is the +1); OR phase 2's advance did.
           'progressed' => turns > 1 || frame_progressed
@@ -3923,9 +3926,17 @@ module Capybara
       # the main thread — events drain into the VM at `settle`, like SSE).
       WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
       private_constant :WS_GUID
+      # A worker's WebSocket: its reader's events go to the worker's inbox, which the worker's own loop delivers into its
+      # isolate (`run_worker`) — the main thread's queue is the window's alone.
+      WsWorkerSink = Struct.new(:inbox) do
+        def <<(event) = (inbox << {kind: 'ws', event: event})
+      end
+      private_constant :WsWorkerSink
 
-      def ws_open(url, protocols = nil)
-        id       = (@websocket_seq += 1)
+      # (`sink`: where its events go — a worker's WsWorkerSink, or the main thread's queue)
+      def ws_open(url, protocols = nil, sink = nil)
+        queue    = sink || @websocket_queue
+        id       = @websocket_lock.synchronize { @websocket_seq += 1 }
         # ws:// → http://, wss:// → https:// for the Rack env; resolve relative
         # against the current document (Action Cable's consumer builds an
         # absolute ws URL, but be tolerant).
@@ -3956,13 +3967,14 @@ module Capybara
         # timeout: a server that never writes the 101 leaks the reader+socket
         # until `reset_websockets` — acceptable, real servers always respond.)
         @app.call(env)
-        @websocket_sockets[id]     = csim_io
-        @websocket_app_sockets[id] = app_io
         accept = Digest::SHA1.base64digest(key + WS_GUID)
-        queue  = @websocket_queue
-        @websocket_threads[id] = Thread.new do
-          Thread.current.report_on_exception = false
-          run_websocket_reader(id, csim_io, accept, queue, target)
+        @websocket_lock.synchronize do
+          @websocket_sockets[id]     = csim_io
+          @websocket_app_sockets[id] = app_io
+          @websocket_threads[id] = Thread.new do
+            Thread.current.report_on_exception = false
+            run_websocket_reader(id, csim_io, accept, queue, target)
+          end
         end
         id
       rescue StandardError => e
@@ -3970,7 +3982,7 @@ module Capybara
         # a failed upgrade (mis-routed URL, app error) doesn't leak fds.
         csim_io.close rescue nil
         app_io.close  rescue nil
-        @websocket_queue << {id: id, type: '__error', message: "#{e.class}: #{e.message}"}
+        queue << {id: id, type: '__error', message: "#{e.class}: #{e.message}"}
         id
       end
 
@@ -3978,15 +3990,16 @@ module Capybara
       # string or an ArrayBuffer/view) → opcode 0x2 vs the text 0x1. Action
       # Cable is text-only (JSON).
       def ws_send(id, data, binary = false)
-        sock = @websocket_sockets[id.to_i] or return
+        sock = @websocket_lock.synchronize { @websocket_sockets[id.to_i] } or return
         ws_write_frame(sock, binary ? 0x2 : 0x1, data.to_s.b)
         nil
       rescue StandardError
         nil
       end
 
-      def ws_close(id, code = nil, reason = '')
-        sock = @websocket_sockets[id.to_i] or return
+      # (`hold`: the window's close holds the clock — a worker's, delivered by its own loop, does not)
+      def ws_close(id, code = nil, reason = '', hold: true)
+        sock = @websocket_lock.synchronize { @websocket_sockets[id.to_i] } or return
         # Send the close frame and let the close HANDSHAKE complete: the server
         # replies with its own close frame, which the reader thread surfaces as
         # the `__close` event (carrying the agreed code) before tearing the
@@ -3998,7 +4011,7 @@ module Capybara
         ws_write_frame(sock, 0x8, payload) rescue nil
         # A close handshake is now in flight — hold the clock until the reader's `__close` lands
         # (bounded by the deadline in hold_for_ws_close if the peer never replies → EOF 1006).
-        @ws_close_pending += 1
+        @ws_close_pending += 1 if hold
         nil
       end
 
@@ -4014,7 +4027,7 @@ module Capybara
       # `sleep(0.001) if async`), feeding the reader instead of spinning it into starvation — a
       # binary echo that only lands AFTER the idle-bail is exactly the flake this prevents. Zero-alloc
       # on the common no-WS path (the `empty?` short-circuit); a handful of threads otherwise.
-      def websocket_reader_active? = !@websocket_threads.empty? && @websocket_threads.each_value.any?(&:alive?)
+      def websocket_reader_active? = !@websocket_threads.empty? && @websocket_lock.synchronize { @websocket_threads.each_value.any?(&:alive?) }
 
       # Any live cross-thread actor (a worker / service-worker thread, or a WebSocket
       # reader) — the only things that can revive an apparently-idle page from OUTSIDE
@@ -4047,15 +4060,17 @@ module Capybara
       end
 
       def reset_websockets
-        @websocket_threads.each_value(&:kill)
-        @websocket_threads.clear
-        # Close BOTH pair ends: csim's read/write end and the app's hijack end
-        # (the app may abandon its end without closing it — e.g. its connection
-        # thread was just killed), so neither leaks across tests.
-        @websocket_sockets.each_value     {|s| s.close rescue nil }
-        @websocket_app_sockets.each_value {|s| s.close rescue nil }
-        @websocket_sockets.clear
-        @websocket_app_sockets.clear
+        @websocket_lock.synchronize do
+          @websocket_threads.each_value(&:kill)
+          @websocket_threads.clear
+          # Close BOTH pair ends: csim's read/write end and the app's hijack end
+          # (the app may abandon its end without closing it — e.g. its connection
+          # thread was just killed), so neither leaks across tests.
+          @websocket_sockets.each_value     {|s| s.close rescue nil }
+          @websocket_app_sockets.each_value {|s| s.close rescue nil }
+          @websocket_sockets.clear
+          @websocket_app_sockets.clear
+        end
         @websocket_queue.clear
         @websocket_queue_head   = nil
         @ws_close_pending       = 0
@@ -6880,6 +6895,12 @@ module Capybara
       end
 
       def worker_timers_pending? = @workers.each_value.any? {|r| r[:timers_due] && !r[:stopping] }
+      # The ms until the soonest timer any live worker has parked (-1 = none) — a page waiting on a worker's `setTimeout`
+      # waits on it as on its own (the WPT drain's parked-timer progress): the worker's clock follows the window's, so the
+      # window moving on is what brings it due.
+      def worker_next_timer
+        @workers.each_value.filter_map {|r| r[:next_timer] if r[:timers_due] && !r[:stopping] && r[:next_timer] }.min || -1.0
+      end
 
       def worker_pending? = !@worker_outbox.empty? || !@worker_outbox_head.nil? || @worker_in_flight > 0 || @worker_broadcast_pending > 0 || @sw_message_pending > 0 || @sw_fetch_pending > 0 || @worker_init_lock.synchronize { @worker_initializing + @worker_busy } > 0
 
@@ -8100,6 +8121,19 @@ module Capybara
         # this handle and revoked on terminate (see blob_register / revoke_worker_blobs).
         Thread.current[:csim_worker_handle] = handle
         rt = nil
+        # The worker's clock follows the window's (one agent cluster's time): each tick it advances a poll interval, or
+        # as far as the window's clock has moved since the worker began, whichever is more — a window fast-forwarding
+        # to its next timer moves the worker's timers with it, where a worker on its own clock waited out a
+        # multi-second `setTimeout` in real time while the page's harness timed out.
+        # (…the window's clock less the worker's, taken at its first tick — the window's as its page has it, which a
+        # step before the worker began, of the page before, does not say)
+        clock_base = nil
+        worker_clock_step = lambda do
+          main = @runtime ? @runtime.clock : 0.0
+          own  = rt.call('__virtualNow').to_f
+          clock_base ||= main - own
+          [WORKER_POLL_INTERVAL * 1000, main - clock_base - own].max
+        end
         # "Has the session boundary asked this worker to stop?" — the Ruby-side half of that ask
         # (`stop_worker_js` sets the flag; `terminate` handles the JS already in flight). Read
         # where the tick could otherwise commit to another long call.
@@ -8124,6 +8158,9 @@ module Capybara
         # swallowed by the fetch_stream hook (this worker's thread only).
         sw_race_dropped_streams = {}
         sw_hooks = {
+          # The worker's WebSockets: opened and written from this thread, their events into this worker's inbox.
+          ws_open:        ->(url, protocols) { ws_open(url, protocols, WsWorkerSink.new(inbox)) },
+          ws_close:       ->(id, code, reason) { ws_close(id, code, reason, hold: false) },
           # A script exception the worker's global left unhandled, for its Worker's `error` (workers.js).
           report_error:   ->(message, filename, lineno, colno) { outbox << {handle: handle, kind: '__scripterror', message: message.to_s, filename: filename.to_s, lineno: lineno.to_i, colno: colno.to_i} },
           post_to_client: ->(client_id, data) { outbox << {handle: handle, kind: 'sw_client_msg', client: client_id, data: data.to_s} },
@@ -8506,6 +8543,15 @@ module Capybara
                 end
                 outbox << {handle: handle, kind: 'swack'}
               end
+            elsif msg.is_a?(Hash) && msg[:kind] == 'ws'
+              # One of this worker's WebSockets: its event delivered here, as the window's are at settle — a handshake
+              # cookie stored in the jar, not handed to the script.
+              ev = msg[:event]
+              if ev[:type] == '__setcookie'
+                merge_set_cookie({'set-cookie' => ev[:cookies]}, ev[:url])
+              else
+                rt.call('__csim_deliverWebSocketEvents', [ev])
+              end
             elsif msg.is_a?(Hash) && msg[:kind] == 'port_msg'
               # A client-realm port → its remote peer in THIS worker: deliver to the channel endpoint
               # port. Counted like an sw_message (client_port_post incremented @sw_message_pending), so
@@ -8635,11 +8681,16 @@ module Capybara
             # were deciding must not buy another one. What lands once the call is already running
             # is `terminate`'s job; between the two, the window is a few instructions wide.
             # (…and whether it has one is told to the main thread, whose waits go on while it does: `polling?`.)
-            timers_due = !stopping.call && rt.call('__nextTimerDelay').to_f >= 0
-            record[:timers_due] = timers_due if record
+            next_timer = stopping.call ? -1.0 : rt.call('__nextTimerDelay').to_f
+            timers_due = next_timer >= 0
+            if record
+              record[:timers_due] = timers_due
+              # (…and how soon, for the window's event loop, whose page waits on it: `worker_next_timer`)
+              record[:next_timer] = next_timer
+            end
             if timers_due
               rt.drain_microtasks
-              rt.drain_timers
+              rt.drain_timers(worker_clock_step.call)
             end
             # A lifecycle phase whose `waitUntil` was parked at boot may have settled off
             # the message dispatch / timer drain above (the extendable-event SYN/ACK, the

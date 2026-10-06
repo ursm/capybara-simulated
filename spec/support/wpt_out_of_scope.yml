@@ -53188,10 +53188,6 @@ resource-timing/tentative/initiator-url/direct.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: "[harness] TIMEOUT"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 resource-timing/tentative/initiator-url/event-handler-overwritten.html:
 - name: The initiator Url for /images/red.png?initiator_url_eventhandler initiatorUrl
     from event handlers must be 'http://www.example.com/resource-timing/tentative/initiator-url/event-handler-overwritten.html'

@@ -818,6 +818,10 @@ module WptRunner
           global = m[2] == 'worker' ? 'dedicatedworker' : m[2]
           next [200, {'content-type' => 'text/html'}, [WptRunner.any_js_worker_page("#{m[1].sub(%r{\A/}, '')}.js", global)]]
         end
+        # …and a `.worker.js` test's page, which runs the test file itself in a dedicated worker.
+        if (m = path.match(%r{\A(/.+\.worker)\.html\z})) && !m[1].end_with?('.any.worker') && File.file?(File.expand_path(File.join(WptRunner::ROOT, "#{m[1]}.js")))
+          next [200, {'content-type' => 'text/html'}, [WptRunner.worker_js_page("#{m[1].sub(%r{\A/}, '')}.js")]]
+        end
         if (m = path.match(%r{\A(/.+\.any)\.worker(-module)?\.js\z})) && File.file?(File.expand_path(File.join(WptRunner::ROOT, "#{m[1]}.js")))
           next [200, {'content-type' => 'text/javascript'}, [WptRunner.any_js_worker_script("#{m[1].sub(%r{\A/}, '')}.js", as_module: !m[2].nil?)]]
         end
@@ -994,10 +998,11 @@ module WptRunner
     }
   end
 
-  # `.any.js` / `.window.js` multi-global tests (run via the synthesized
-  # window-variant wrapper, see `app` / `any_js_wrapper`); scope = JS_TREES.
+  # `.any.js` / `.window.js` multi-global tests (run via the synthesized wrapper of each of their globals, see `app` /
+  # `any_js_wrapper` / `any_js_worker_page`) and `.worker.js` dedicated-worker tests (`worker_js_page`); scope =
+  # JS_TREES.
   def js_files
-    @js_files ||= Dir.glob("#{JS_TREES}/**/*.{any,window}.js", base: ROOT).reject {|rel|
+    @js_files ||= Dir.glob("#{JS_TREES}/**/*.{any,window,worker}.js", base: ROOT).reject {|rel|
       (rel.split('/') & %w[support resources]).any? || skipped?(rel)
     }
   end
@@ -1022,27 +1027,54 @@ module WptRunner
   # dedicated worker; `worker` is every kind of worker. A `.window.js` test is a window's alone.
   def any_js_globals(js_rel)
     return %w[window] if js_rel.end_with?('.window.js')
+    return %w[dedicatedworker] if worker_js?(js_rel)
     list = any_js_meta(js_rel, 'global').first
     return %w[window dedicatedworker] unless list
     list.split(',').flat_map {|g| g == 'worker' ? %w[dedicatedworker sharedworker serviceworker] : [g] }
   end
 
-  # The page a `.any.js` / `.window.js` test is run at: the wrapper wptserve makes for one of its globals — the
-  # window's where it has one (what every global shares is measured there), else a dedicated worker's, else a
-  # service worker's. A test whose only global is none of those is an error, not a window run it never asks for: a
-  # worker-only test run in a window measured a context WPT never runs (`html/dom/idlharness.any.js` is a dedicated
-  # worker's IDL).
+  # The pages a `.any.js` / `.window.js` / `.worker.js` test is run at, [global, page] each: the wrapper wptserve makes
+  # for each of its globals that has one — a window's, a dedicated worker's, a service worker's (a shared worker has
+  # none here). The first is the one its results are named by as they are; another's are named after its global
+  # (`[dedicatedworker] …`), so the allowlists tell a subtest failing in a worker from the same one in a window. A
+  # test whose globals have no wrapper is an error, not a window run it never asks for: a worker-only test run in a
+  # window measured a context WPT never runs (`html/dom/idlharness.any.js` is a dedicated worker's IDL).
   WRAPPER_GLOBALS = {
     'window'               => 'html',
     'dedicatedworker'      => 'worker.html',
     'serviceworker'        => 'serviceworker.html',
     'serviceworker-module' => 'serviceworker-module.html'
   }.freeze
-  def any_js_page(js_rel)
+  # (…a `.tentative` test's first alone: out of scope, its results measured once are measured enough —
+  # `regen_wpt_expected_failures.rb` routes them out — and a worker's run of each would only copy them)
+  def any_js_pages(js_rel)
+    return [['dedicatedworker', js_rel.sub(/\.js\z/, '.html')]] if worker_js?(js_rel)
     globals = any_js_globals(js_rel)
-    global  = WRAPPER_GLOBALS.keys.find {|g| globals.include?(g) }
-    raise "#{js_rel}: no wrapper for its globals (#{globals.join(', ')})" unless global
-    js_rel.sub(/\.js\z/, ".#{WRAPPER_GLOBALS[global]}")
+    pages = WRAPPER_GLOBALS.filter_map {|g, suffix| [g, js_rel.sub(/\.js\z/, ".#{suffix}")] if globals.include?(g) }
+    raise "#{js_rel}: no wrapper for its globals (#{globals.join(', ')})" if pages.empty?
+    tentative = js_rel.match?(%r{(?:\A|/)tentative/}) || js_rel.match?(/\.tentative\./)
+    tentative ? pages.first(1) : pages
+  end
+
+  # Whether `rel` is a multi-global or a worker test (the JS source alone, which WPT wraps at serve time).
+  def js_test?(rel)
+    rel.end_with?('.any.js', '.window.js') || worker_js?(rel)
+  end
+  # …a `.worker.js` dedicated-worker test: a worker script of its own (its own importScripts of testharness, its own
+  # `done()`), which wptserve runs from `X.worker.html` — not a `.any.js` test's generated worker script.
+  def worker_js?(rel)
+    rel.end_with?('.worker.js') && !rel.end_with?('.any.worker.js')
+  end
+  def worker_js_page(js_rel)
+    <<~HTML
+      <!doctype html><meta charset="utf-8">
+      <script src="/resources/testharness.js"></script>
+      <script src="/resources/testharnessreport.js"></script>
+      <div id=log></div>
+      <script>
+      fetch_tests_from_worker(new Worker(#{"/#{js_rel}".to_json} + location.search));
+      </script>
+    HTML
   end
 
   # A `.any.js` test's `// META: <key>=…` values, from its leading comment block.
@@ -1180,17 +1212,23 @@ module WptRunner
     nil
   end
 
+  # (…and a JS test in each of its globals, every variant in each: the first global's results named as they are,
+  # another's after it — `any_js_pages`)
   def run_variants(rel)
     return run_reftest(rel) if reftest?(rel)
-    variants = variant_queries(rel)
-    return run_one(rel) if variants.empty?
+    queries = variant_queries(rel)
+    queries = [''] if queries.empty?
+    pages   = js_test?(rel) ? any_js_pages(rel) : [[nil, rel]]
     merged       = []
     merged_tests = []
-    variants.each do |q|
-      r = run_one(rel, q)
-      return {completed: false, error: r[:error]} unless r[:completed]
-      merged.concat(r[:failing])
-      merged_tests.concat(r[:tests])
+    pages.each_with_index do |(global, page), i|
+      name = i.zero? ? ->(n) { n } : ->(n) { "[#{global}] #{n}" }
+      queries.each do |q|
+        r = run_one(rel, q, page)
+        return {completed: false, error: r[:error]} unless r[:completed]
+        merged.concat(r[:failing].map(&name))
+        merged_tests.concat(r[:tests].map {|t| t.merge('name' => name.(t['name'])) })
+      end
     end
     {completed: true, failing: merged, tests: merged_tests}
   end
@@ -1210,11 +1248,11 @@ module WptRunner
   end
 
   # A file's declared variant query strings: `<meta name=variant content="?…">`
-  # (HTML) or `// META: variant=?…` (`.any.js` / `.window.js`). Empty → no variants.
+  # (HTML) or `// META: variant=?…` (a JS test's). Empty → no variants.
   def variant_queries(rel)
     head = source_of(rel)
     return [] if head.empty?
-    qs = if rel.end_with?('.any.js', '.window.js')
+    qs = if js_test?(rel)
       head.scan(%r{^\s*//\s*META:\s*variant=(\S+)}).flatten
     else
       head.scan(/<meta\s+name=["']?variant["']?\s+content=["']([^"']*)["']/i).flatten
@@ -1283,16 +1321,15 @@ module WptRunner
   end
 
   # Run a SINGLE (rel, variant-query) pair. `query` is '' for a no-variant file.
-  def run_one(rel, query = '')
+  # (`page` the one it is visited at — a JS test's wrapper for one of its globals)
+  def run_one(rel, query = '', page = js_test?(rel) ? any_js_pages(rel).first.last : rel)
     origin  = origin_for(rel, query)
     cross   = !origin.nil?
     drop_session! if cross
     prepare_session!
     s = session
-    # `.any.js` / `.window.js` tests run through their synthesized HTML wrapper;
-    # a variant query (if any) is appended to the visited URL.
-    visit = rel.end_with?('.any.js', '.window.js') ? any_js_page(rel) : rel
-    visit = "#{visit}#{query}"
+    # A variant query (if any) is appended to the visited URL.
+    visit = "#{page}#{query}"
     s.visit(origin ? "#{origin}/#{visit}" : "/#{visit}")
     fire_window_load(s)
 

@@ -15,7 +15,8 @@ module Capybara
       def eval_void(src)    = @ctx.eval_void(src.to_s)
       def call(name, *args) = @ctx.call(name.to_s, *args)
       def drain_microtasks  = @ctx.perform_microtask_checkpoint
-      def drain_timers      = @ctx.call('__drainTimers', 50)
+      # (…its clock advanced `ms` — a poll tick's, or as far as the window's clock went meanwhile: Browser#run_worker)
+      def drain_timers(ms = 50) = @ctx.call('__drainTimers', ms.to_i)
       def has_ready_timer?  = !!@ctx.call('__hasReadyTimer')
       def dispose           = (@ctx.dispose rescue nil)
 
