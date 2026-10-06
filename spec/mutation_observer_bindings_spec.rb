@@ -29,4 +29,19 @@ RSpec.describe 'MutationObserver bindings' do
       true, true, false, true
     ])
   end
+
+  # (…a doctype `createDocument` takes appended to the new document as any node is: removed from its old one first, its
+  # observers told)
+  it "tells the old document's observers of a doctype createDocument takes" do
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0], dt = document.implementation.createDocumentType('x', '', '');
+      const holder = document.implementation.createHTMLDocument('');
+      holder.replaceChild(dt, holder.doctype);
+      new MutationObserver((records) => done([records.length, records[0].removedNodes[0] === dt, dt.ownerDocument === made, made.doctype === dt]))
+        .observe(holder, { childList: true });
+      const made = document.implementation.createDocument(null, 'r', dt);
+    JS
+    expect(got).to eq([1, true, true, true])
+  end
 end

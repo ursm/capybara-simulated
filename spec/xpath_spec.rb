@@ -167,4 +167,19 @@ RSpec.describe 'XPath' do
     JS
     expect(got).to eq(['SyntaxError', 'SyntaxError', 'NotSupportedError', 'expr', 'TypeError', '[object XPathResult]', 'TypeError,SyntaxError'])
   end
+
+  # A result is any realm's to read, its iterator state told by the clock of the realm that made it — each realm counts
+  # its own tree generations — and no own property of it shows its state.
+  it "reads a frame's result through this realm's members" do
+    s = session_with('<p>a<iframe srcdoc="<p>x<p>y"></iframe>')
+    got = s.evaluate_script(<<~'JS')
+      (() => {
+        const fd = frames[0].document, r = fd.evaluate('//p', fd, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+        const valid = Object.getOwnPropertyDescriptor(XPathResult.prototype, 'invalidIteratorState').get.call(r);
+        return [valid, XPathResult.prototype.iterateNext.call(r).textContent, Reflect.ownKeys(r).filter((k) => typeof k === 'string'),
+                (() => { try { return Object.create(XPathEvaluator.prototype).evaluate('1', document).numberValue; } catch (e) { return e.name; } })()];
+      })()
+    JS
+    expect(got).to eq([false, 'x', [], 'TypeError'])
+  end
 end
