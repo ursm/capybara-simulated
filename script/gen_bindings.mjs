@@ -177,13 +177,85 @@ const INTERFACES = [
   ['orientation-event', 'DeviceMotionEventRotationRate'],
   ['orientation-event', 'DeviceMotionEvent', { install: true }],
   ['orientation-event', 'DeviceOrientationEvent', { install: true }],
-  ['dom', 'ShadowRoot', { install: true, omit: { 'sanitizer-api': 'setHTML: the Sanitizer API is not implemented' } }]
+  ['dom', 'ShadowRoot', { install: true, omit: { 'sanitizer-api': 'setHTML: the Sanitizer API is not implemented' } }],
+  ['html', 'WorkerGlobalScope', {
+    install: true,
+    omit: {
+      fetch: 'fetch: the Fetch polyfill converts its own arguments',
+      'scheduling-apis': 'scheduler: the Prioritized Task Scheduling API is not implemented',
+      'trusted-types': 'trustedTypes: Trusted Types are not implemented'
+    }
+  }],
+  ['html', 'DedicatedWorkerGlobalScope', { install: true, omit: { 'webrtc-encoded-transform': 'onrtctransform: WebRTC encoded transforms are not implemented' } }],
+  ['html', 'SharedWorkerGlobalScope', { install: true }],
+  ['html', 'Navigator', {
+    install: true,
+    omit: {
+      attribution: 'attribution: the Attribution Reporting API is not implemented',
+      'audio-session': 'audioSession: the Audio Session API is not implemented',
+      'autoplay-detection': 'getAutoplayPolicy: autoplay detection is not implemented',
+      NavigatorBadge: 'setAppBadge / clearAppBadge: the Badging API is not implemented',
+      'battery-status': 'getBattery: the Battery Status API is not implemented',
+      'contact-picker': 'contacts: the Contact Picker API is not implemented',
+      'device-posture': 'devicePosture: not implemented',
+      'encrypted-media': 'requestMediaKeySystemAccess: Encrypted Media Extensions are not implemented',
+      'fenced-frame': 'deprecatedReplaceInURN / adAuctionComponents: fenced frames are not implemented',
+      'get-installed-related-apps': 'getInstalledRelatedApps: not implemented',
+      'handwriting-recognition': 'createHandwritingRecognizer: not implemented',
+      'ink-enhancement': 'ink: not implemented',
+      'is-input-pending': 'scheduling: not implemented',
+      'keyboard-lock': 'keyboard: the Keyboard Lock API is not implemented',
+      'login-status': 'login: not implemented',
+      'managed-configuration': 'managed: not implemented',
+      'mediaqueries-5': 'preferences: not implemented',
+      mediasession: 'mediaSession: the Media Session API is not implemented',
+      'presentation-api': 'presentation: the Presentation API is not implemented',
+      'screen-wake-lock': 'wakeLock: the Screen Wake Lock API is not implemented',
+      serial: 'serial: Web Serial is not implemented',
+      NavigatorStorageBuckets: 'storageBuckets: not implemented',
+      NavigatorStorage: 'storage: the Storage API is not implemented',
+      NavigatorUA: 'userAgentData: User-Agent Client Hints are not implemented',
+      'virtual-keyboard': 'virtualKeyboard: not implemented',
+      'web-bluetooth': 'bluetooth: Web Bluetooth is not implemented',
+      NavigatorAutomationInformation: 'webdriver: no WebDriver drives the page',
+      NavigatorGPU: 'gpu: WebGPU is not implemented',
+      webhid: 'hid: WebHID is not implemented',
+      webmcp: 'modelContext: not implemented',
+      webmidi: 'requestMIDIAccess: Web MIDI is not implemented',
+      NavigatorML: 'ml: WebNN is not implemented',
+      'web-share': 'share / canShare: Web Share is not implemented',
+      webusb: 'usb: WebUSB is not implemented',
+      webxr: 'xr: WebXR is not implemented',
+      'window-controls-overlay': 'windowControlsOverlay: not implemented'
+    },
+    omitMembers: {
+      plugins: 'the PluginArray interface is not implemented',
+      mimeTypes: 'the MimeTypeArray interface is not implemented'
+    }
+  }],
+  ['html', 'WorkerNavigator', {
+    install: true,
+    omit: {
+      NavigatorBadge: 'setAppBadge / clearAppBadge: the Badging API is not implemented',
+      'media-capabilities': 'mediaCapabilities: none in a worker here',
+      serial: 'serial: Web Serial is not implemented',
+      NavigatorStorageBuckets: 'storageBuckets: not implemented',
+      NavigatorStorage: 'storage: the Storage API is not implemented',
+      NavigatorUA: 'userAgentData: User-Agent Client Hints are not implemented',
+      permissions: 'permissions: none in a worker here',
+      NavigatorGPU: 'gpu: WebGPU is not implemented',
+      webhid: 'hid: WebHID is not implemented',
+      NavigatorML: 'ml: WebNN is not implemented',
+      webusb: 'usb: WebUSB is not implemented'
+    }
+  }],
+  ['html', 'WorkerLocation', { install: true }]
 ];
 
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
   'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
-  'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
+  'isBufferOf', 'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers'
@@ -212,17 +284,27 @@ for (const [spec, defs] of Object.entries(all)) {
 // [CEReactions]: an implementation's writes run their reactions as each returns (handleAttributeChanges) — which is
 // the operation's return where it writes once, as every one generated here does. [Reflect]: the implementation reflects
 // the content attribute. [SameObject] / [NewObject]: what the implementation returns. [Exposed]: the global the
-// interface object is put on, the Window's here. [SecureContext]: exposed, every realm here being a secure context
+// interface object is put on — and, of a member, whether its interface's has it at all (membersOf). [SecureContext]: exposed, every realm here being a secure context
 // (`isSecureContext`, platform-globals.js). The rest the generator makes as Web IDL says.
 const HANDLED = {
   interface: ['Exposed', 'SecureContext', 'Global', 'LegacyUnenumerableNamedProperties'],
   member: [
     'SameObject', 'NewObject', 'CEReactions', 'Unscopable', 'PutForwards', 'Reflect', 'SecureContext', 'LegacyLenientSetter',
     'LegacyUnforgeable', 'LegacyLenientThis', 'Replaceable', 'HTMLConstructor', 'ReflectSetter', 'ReflectURL', 'ReflectNonNegative',
-    'ReflectRange', 'ReflectDefault'
+    'ReflectRange', 'ReflectDefault', 'Exposed'
   ],
   type: ['LegacyNullToEmptyString', 'EnforceRange']
 };
+// The globals a definition or member is [Exposed] in — a worker's three where it names Worker — or null where it names
+// none (a member then exposed wherever its interface is).
+const WORKER_GLOBALS = ['DedicatedWorker', 'SharedWorker', 'ServiceWorker'];
+function exposureOf(d) {
+  const e = (d.extAttrs || []).find((x) => x.name === 'Exposed');
+  if (!e) return null;
+  const names = e.rhs.type === '*' ? ['*'] : e.rhs.type === 'identifier' ? [e.rhs.value] : e.rhs.value.map((v) => v.value);
+  const set = new Set(names.flatMap((n) => (n === 'Worker' ? WORKER_GLOBALS : n === '*' ? ['Window', ...WORKER_GLOBALS] : [n])));
+  return set;
+}
 function checkExtAttrs(extAttrs, where, label) {
   for (const e of extAttrs || []) {
     if (!HANDLED[where].includes(e.name)) throw new Error(`${label}: no binding makes [${e.name}] yet`);
@@ -357,6 +439,10 @@ function flattenUnion(t) {
 // string type's conversion, else the numeric type's, else boolean's — and with none of them, a TypeError. A union
 // that is one type once its absent interfaces are dropped is that type's conversion. Its extended attributes, and the
 // argument's, are each member's.
+const BUFFER_TYPES = new Set([
+  'ArrayBuffer', 'SharedArrayBuffer', 'DataView', 'Int8Array', 'Int16Array', 'Int32Array', 'Uint8Array', 'Uint16Array',
+  'Uint32Array', 'Uint8ClampedArray', 'BigInt64Array', 'BigUint64Array', 'Float16Array', 'Float32Array', 'Float64Array'
+]);
 const NUMERIC_TYPES = new Set(['unsigned short', 'short', 'unsigned long', 'long', 'unsigned long long', 'long long', 'double', 'unrestricted double', 'float', 'unrestricted float']);
 function unionConversion(t, expr, where, checks, argExtAttrs) {
   const label = `${where.iface ?? where.dictionary}.${where.member}`;
@@ -365,7 +451,7 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   if (members.length === 1) return conversion({ ...typeOf(members[0], { extAttrs }), nullable: includesNullable }, expr, where, checks);
   const name = `(${members.map((u) => u.generic ? `${u.generic}<…>` : u.idlType).join(' or ')})`;
   const unsupported = () => new Error(`${label}: no binding converts ${name} yet`);
-  if (members.some((u) => u.generic)) throw unsupported();
+  if (members.some((u) => u.generic && u.generic !== 'sequence')) throw unsupported();
   const of = (test) => members.filter(test);
   // (…a WindowProxy among them the Window it is a proxy of: the Window's test, as for one alone)
   const ifaces = of((u) => u.idlType === 'WindowProxy' || definitions.get(u.idlType)?.type === 'interface');
@@ -374,8 +460,10 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   const numerics = of((u) => NUMERIC_TYPES.has(u.idlType));
   const booleans = of((u) => u.idlType === 'boolean');
   const callbacks = of((u) => definitions.get(u.idlType)?.type === 'callback');
-  if (dicts.length > 1 || strings.length > 1 || numerics.length > 1 || callbacks.length > 1 ||
-      ifaces.length + dicts.length + strings.length + numerics.length + booleans.length + callbacks.length !== members.length) throw unsupported();
+  const buffers = of((u) => BUFFER_TYPES.has(u.idlType));
+  const sequences = of((u) => u.generic === 'sequence');
+  if (dicts.length > 1 || strings.length > 1 || numerics.length > 1 || callbacks.length > 1 || sequences.length > 1 ||
+      ifaces.length + buffers.length + sequences.length + dicts.length + strings.length + numerics.length + booleans.length + callbacks.length !== members.length) throw unsupported();
   const [dict] = dicts, [string] = strings, [numeric] = numerics, [boolean] = booleans;
   const convert = (u) => conversion(u, expr, where, checks, extAttrs);
   // (…the last conversion, which takes what no step before it did — so no step of its own)
@@ -387,6 +475,12 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
     const check = u.idlType === 'WindowProxy' ? 'Window' : u.idlType;
     checks.add(check);
     steps.push([`IS_${check}(${expr})`, expr]);
+  }
+  // (…a buffer source of one of its types as it is: an ArrayBuffer, a DataView, a typed array)
+  for (const u of buffers) steps.push([`isBufferOf(${expr}, ${JSON.stringify(u.idlType)})`, expr]);
+  // (…an object with an @@iterator the sequence's)
+  for (const u of sequences) {
+    steps.push([`(${expr} !== null && (typeof ${expr} === 'object' || typeof ${expr} === 'function') && typeof ${expr}[Symbol.iterator] === 'function')`, convert(u)]);
   }
   // (…a callable one the callback function type's, before a dictionary would take it)
   if (callbacks.length) steps.push([`typeof ${expr} === 'function'`, expr]);
@@ -478,7 +572,12 @@ function membersOf(def, omit = {}, omitMembers = {}) {
     }
     return found;
   };
+  // (…but a member exposed only where the interface is not — a WorkerNavigator's NavigatorID members of a Window's)
+  const exposedIn = exposureOf(def) && [...exposureOf(def)];
   const members = gather(def).filter((m) => {
+    const own = exposureOf(m);
+    if (own && exposedIn && !exposedIn.some((g) => own.has(g))) return false;
+    if (own && exposedIn && exposedIn.some((g) => !own.has(g))) throw new Error(`${def.name}.${m.name}: a member exposed in fewer of its interface's globals is not generated yet`);
     if (!Object.hasOwn(omitMembers, m.name)) return true;
     omitted.add(m.name);
     return false;
@@ -791,6 +890,13 @@ function overloadedOperation(iface, group, checks, selfCheck) {
       lines.push(`    ${call(m.other)}`);
       return;
     }
+    if (m.sequence) {
+      // (…or an object with an @@iterator the sequence's, anything else the dictionary's)
+      const v = `arguments[${m.index}]`;
+      lines.push(`  case ${n}: if (${v} !== null && (typeof ${v} === 'object' || typeof ${v} === 'function') && typeof ${v}[Symbol.iterator] === 'function') ${call(m.sequence)}`);
+      lines.push(`    ${call(m.other)}`);
+      return;
+    }
     lines.push(`  case ${n}: ${call(m)}`);
   });
   // (…a count of arguments no overload takes: Chrome's message)
@@ -804,16 +910,19 @@ function overloadedOperation(iface, group, checks, selfCheck) {
 }
 
 // Web IDL's overload resolution (§3.6.3) for two overloads taking the same count, where it is generated: the first
-// argument whose types differ — a dictionary's in one, a string's in the other — tells them apart.
+// argument whose types differ — a dictionary's in one and a string's or a sequence's in the other — tells them apart.
 const STRING_TYPES = new Set(['DOMString', 'USVString', 'ByteString']);
 function distinguished(iface, name, [a, b]) {
   const index = a.arguments.findIndex((arg, i) => !b.arguments[i] || arg.idlType.idlType !== b.arguments[i].idlType.idlType);
   const typeOf = (m) => m.arguments[index] && m.arguments[index].idlType;
   const isDictionary = (t) => t && !t.union && dictionaries.has(t.idlType);
   const isString = (t) => t && !t.union && STRING_TYPES.has(t.idlType);
+  const isSequence = (t) => t && t.generic === 'sequence';
   if (isDictionary(typeOf(a)) && isString(typeOf(b))) return { index, dictionary: a, other: b };
   if (isDictionary(typeOf(b)) && isString(typeOf(a))) return { index, dictionary: b, other: a };
-  throw new Error(`${iface}.${name}: overloads told apart by other than a dictionary and a string are not generated yet`);
+  if (isSequence(typeOf(a)) && isDictionary(typeOf(b))) return { index, sequence: a, other: b };
+  if (isSequence(typeOf(b)) && isDictionary(typeOf(a))) return { index, sequence: b, other: a };
+  throw new Error(`${iface}.${name}: overloads told apart by other than a dictionary and a string or a sequence are not generated yet`);
 }
 
 function defaultValue(d, where) {

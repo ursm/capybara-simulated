@@ -8204,7 +8204,7 @@ module Capybara
           port_endpoint:  ->(channel)       { outbox << {handle: handle, kind: 'port_endpoint', channel: channel.to_s} },
           port_post:      ->(channel, data) { outbox << {handle: handle, kind: 'port_msg', channel: channel.to_s, data: data.to_s} }
         }
-        rt        = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks)
+        rt        = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks, kind: service ? 'service' : shared ? 'shared' : 'dedicated')
         # Hand the runtime to the session boundary (`stop_worker_js`) the moment it exists.
         record[:rt_lock].synchronize { record[:rt] = rt } if record
         # A worker isolate loads the same snapshot as the main realm, so its `console.*`
@@ -8225,8 +8225,6 @@ module Capybara
         # worker isolate today — that's the controlled-worker follow-up, not this line.)
         # A SERVICE worker is not a client.
         rt.eval_void("globalThis.__csimClientId = #{JSON.generate(sw_worker_client_id(handle))};") unless service
-        # The worker KIND, for the global-scope brand checks (workers.js Symbol.hasInstance).
-        rt.eval_void("globalThis.__csimWorkerKind = #{JSON.generate(service ? 'service' : shared ? 'shared' : 'dedicated')};")
         # A MODULE worker ({type: 'module'}): the flag drives the classic-only surface
         # (importScripts throws a TypeError). A SERVICE worker's module script evaluates
         # as a real module graph below (eval_module_graph); a dedicated/shared

@@ -90,7 +90,6 @@ Location:
   - ancestorOrigins
 Navigator:
   - adAuctionComponents
-  - appCodeName
   - attribution
   - audioSession
   - bluetooth
@@ -114,12 +113,9 @@ Navigator:
   - mimeTypes
   - ml
   - modelContext
-  - oscpu
   - plugins
   - preferences
   - presentation
-  - product
-  - productSub
   - queryHandwritingRecognizer
   - requestMIDIAccess
   - requestMediaKeySystemAccess
@@ -131,8 +127,6 @@ Navigator:
   - storageBuckets
   - usb
   - userAgentData
-  - vendor
-  - vendorSub
   - virtualKeyboard
   - wakeLock
   - webdriver
