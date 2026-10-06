@@ -60,6 +60,28 @@ RSpec.describe 'User action events' do
     ])
   end
 
+  # (…a click lands where the pointer is, on what is inside the clicked element: a closed details' summary; and its
+  # activation reaches the nearest activatable element on its composed path, through a shadow tree. The details has
+  # nothing but its summary: a closed one's content still takes height here — no size containment is laid out — so
+  # its centre would miss the summary, which Chrome's does not)
+  it "lands a click where the pointer is, and activates up its composed path" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend', '<details id=dc><summary>sum</summary></details><details id=ds><summary><span id=sh></span></summary>x</details>');
+      document.getElementById('sh').attachShadow({ mode: 'open' }).innerHTML = '<b id=in>in</b>';
+    JS
+    session.find('#dc').click
+    session.evaluate_script("document.getElementById('sh').shadowRoot.getElementById('in').click()")
+    expect(session.evaluate_script("[document.getElementById('dc').open, document.getElementById('ds').open]")).to eq([true, true])
+    # (…a delayed click's release at what its press was at)
+    session.find('#dc').click(delay: 0.01)
+    expect(session.evaluate_script("document.getElementById('dc').open")).to be(false)
+    # (…and a press on nothing focusable takes the focus off the focused element)
+    session.find('#t').click
+    session.find('#z').click
+    expect(session.evaluate_script('document.activeElement.localName')).to eq('body')
+  end
+
   it "fires a right click's and a double click's" do
     session.visit '/'
     session.find('#z').hover

@@ -8733,11 +8733,6 @@ shadow-dom/dragenter-related-target.html:
   DOM
 shadow-dom/execcommand-insertList-in-shadow.html:
 - Toggle off List for all the child nodes in the ShadowRoot
-shadow-dom/focus/click-focus-delegatesFocus-click.html:
-- click on the host with no delegatesFocus with another host with delegatesFocus and
-  a focusable child
-- click on the host with no delegatesFocus with another host with no delegatesFocus
-  and a focusable child
 shadow-dom/focus/click-focus-slot-ancestor.html:
 - Clicking on non-focusable slot inside focusable div will make the flat-tree focusable
   ancestor get focused

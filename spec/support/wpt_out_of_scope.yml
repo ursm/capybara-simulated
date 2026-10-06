@@ -54187,7 +54187,7 @@ resource-timing/tentative/initiator-url/post-message-worker.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 resource-timing/tentative/initiator-url/post-task.any.js:
-- name: "[harness] TIMEOUT"
+- name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

@@ -1580,6 +1580,8 @@ module Capybara
         c = Ctx.new(snapshot: snapshot)
         attach_host_fns(c, browser)
         c.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
+        # An exception the worker's script left unhandled, reported out to its Worker object (workers.js).
+        c.attach('__csim_workerReportError', ->(message, filename, lineno, colno) { sw_hooks[:report_error]&.call(message, filename, lineno, colno); nil })
         # Service-worker → main-thread signals route through the thread-safe outbox (delivered by
         # deliver_worker_messages): client.postMessage, clients.claim (set the client's controller),
         # and a controlled fetch's respondWith result. See run_worker for the closures.

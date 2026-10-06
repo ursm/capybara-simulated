@@ -1222,11 +1222,12 @@ module Capybara
             # An intercepted click never dispatched its mousedown — surface it
             # here rather than letting clickFinish fire the up/click half against
             # the covered target.
-            if partial.is_a?(Hash) && partial['kind'] == 'intercepted'
+            # (…and the release is the press's own: the page holds what it pressed, `__csimClickFinish`)
+            if !partial.is_a?(Hash) || partial['kind'] != 'partial'
               partial
             else
               sleep delay
-              dom_call('__csimClickFinish', handle, partial.is_a?(Hash) ? partial['base'] : init)
+              dom_call('__csimClickFinish')
             end
           else
             dom_call('__csimClickResolve', handle, init, {'interceptCheck' => true})
@@ -8126,6 +8127,8 @@ module Capybara
         # swallowed by the fetch_stream hook (this worker's thread only).
         sw_race_dropped_streams = {}
         sw_hooks = {
+          # A script exception the worker's global left unhandled, for its Worker's `error` (workers.js).
+          report_error:   ->(message, filename, lineno, colno) { outbox << {handle: handle, kind: '__scripterror', message: message.to_s, filename: filename.to_s, lineno: lineno.to_i, colno: colno.to_i} },
           post_to_client: ->(client_id, data) { outbox << {handle: handle, kind: 'sw_client_msg', client: client_id, data: data.to_s} },
           # WindowClient.focus() — moving the focus chain is cross-realm browser state, so the
           # worker asks rather than does. Delivered by deliver_worker_messages, which echoes the
@@ -8365,7 +8368,7 @@ module Capybara
           end
           outbox << {handle: handle, kind: 'sw_eval', ok: true}
         else
-          rt.eval_void(body)
+          run_worker_script(rt, body, url.to_s)
         end
         rt.drain_microtasks
         # Drive the service worker's lifecycle: fire `install`, then `activate`, each phase
@@ -8700,6 +8703,19 @@ module Capybara
       # `new Worker(blobURL)`. Rack can't parse `blob:` so short-
       # circuit to the JS-side blob registry instead. Http(s) URLs
       # fall through to the regular Rack path.
+      # A worker's script, run as a top-level Script; an exception it throws is the worker's to report (HTML "report an
+      # exception": workers.js __csimReportWorkerScriptError) — its message and the place of its top frame, what the
+      # host's evaluation keeps of it — and the worker runs on.
+      private def run_worker_script(rt, body, url)
+        rt.eval_void("#{body}\n//# sourceURL=#{url.tr("\n", ' ')}")
+      rescue RustyRacer::ParseError => e
+        message, line = e.message.match(/\A(.*) at \S+?:(\d+)\z/m)&.captures
+        rt.call('__csimReportWorkerScriptError', message || e.message, url, line.to_i, 0)
+      rescue RustyRacer::RuntimeError => e
+        file, line, col = e.backtrace.to_a.first.to_s.match(/\(?([^\s()]+):(\d+):(\d+)\)?\z/)&.captures
+        rt.call('__csimReportWorkerScriptError', e.message, file || url, line.to_i, col.to_i)
+      end
+
       private def fetch_worker_script(url)
         u = url.to_s
         if u.start_with?('blob:')
