@@ -215,3 +215,46 @@ RSpec.describe 'BroadcastChannel' do
     expect(session.evaluate_script('window.log')).to eq(%w[poster timer bc:1 microtask bc:2 microtask])
   end
 end
+
+# A message no structured clone takes is the poster's DataCloneError on a service worker's postMessage paths too —
+# the client's to its worker, the worker's to its client: one was dropped silently, the other delivered as `null`.
+RSpec.describe 'a service worker message no structured clone takes' do
+  around do |example|
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
+    example.run
+  ensure
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+  end
+
+  it "is the poster's DataCloneError, both ways" do
+    sw = <<~JS
+      onmessage = (e) => {
+        let outcome;
+        try { e.source.postMessage(() => {}); outcome = 'posted'; } catch (x) { outcome = x.name; }
+        e.source.postMessage('worker:' + outcome);
+      };
+    JS
+    app = lambda do |env|
+      case env['PATH_INFO']
+      when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [sw]]
+      else [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body></body>']]
+      end
+    end
+    session = simulated_session(app)
+    session.visit('/')
+    session.execute_script(<<~JS)
+      window.log = [];
+      navigator.serviceWorker.onmessage = (e) => log.push(e.data);
+      (async () => {
+        const reg = await navigator.serviceWorker.register('/sw.js');
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise((res) => { if (w.state === 'activated') res(); else w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        try { w.postMessage(() => {}); log.push('client:posted'); } catch (x) { log.push('client:' + x.name); }
+        w.postMessage('go');
+      })();
+    JS
+    poll_until(timeout: 5) { session.evaluate_script('window.log.length') >= 2 }
+    expect(session.evaluate_script('window.log')).to eq(%w[client:DataCloneError worker:DataCloneError])
+  end
+end

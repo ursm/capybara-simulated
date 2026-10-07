@@ -6187,8 +6187,10 @@ module Capybara
         end
         nil
       end
-      # (`from`: the end it is posted at)
+      # (`from`: the end it is posted at — none where that end is closed, or forgotten: a worker's post and its close
+      # in one turn reach here after the close, its signals about ends being handled ahead of its messages)
       def port_post(from, data)
+        return if @port_ends.fetch(from.to_s, {})[:closed] || !@port_ends.key?(from.to_s)
         to = port_other_end(from)
         port_receive(to, (@port_ends[to] ||= {}), data.to_s)
         nil
