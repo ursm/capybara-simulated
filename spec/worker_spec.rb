@@ -182,4 +182,18 @@ RSpec.describe 'Web Worker' do
     poll_until(timeout: 5) { session.evaluate_script('window.log.length') >= 3 }
     expect(session.evaluate_script('window.log')).to contain_exactly('ports:1/1', 'echo:1', 'back:2')
   end
+
+  # A BigInt is a structured-clone value: it arrives as itself. JSON has no form for one, and the post threw.
+  it 'carries a BigInt to a worker and back' do
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8">']] })
+    session.visit('/')
+    session.execute_script(<<~JS)
+      window.got = null;
+      const w = new Worker(URL.createObjectURL(new Blob(['onmessage = (e) => postMessage(e.data * 2n);'], {type: 'text/javascript'})));
+      w.onmessage = (e) => { window.got = typeof e.data + ':' + e.data; };
+      w.postMessage(2n ** 64n);
+    JS
+    poll_until { session.evaluate_script('window.got') }
+    expect(session.evaluate_script('window.got')).to eq('bigint:36893488147419103232')
+  end
 end
