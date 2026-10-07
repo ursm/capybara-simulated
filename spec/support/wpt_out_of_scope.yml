@@ -40792,6 +40792,26 @@ html/dom/historical.html:
     it so `if (document.all)` / `typeof document.all` feature-detection takes the
     modern path. The subtest reads document.all.war, which requires document.all to
     exist. (CLAUDE.md rule 2.)
+html/dom/idlharness.any.js:
+- name: 'MessagePort interface: attribute onclose'
+  reason: 'Withdrawn text (CLAUDE.md rule 1(3)). The test''s interfaces/html.idl still
+    has the close event''s attribute: "attribute EventHandler onclose;" in `interface
+    MessagePort`. The current HTML Standard (§9.4.4, fetched 2026-10-08) has no `onclose`
+    in it and fires no close event; its disentangle steps are only "Let otherPort
+    be the MessagePort which initiatorPort was entangled with. Assert: otherPort exists.
+    Disentangle initiatorPort and otherPort, so that they are no longer entangled
+    or associated with each other." Chrome 154 and Firefox 157 expose no `onclose` on
+    MessagePort.prototype either (measured 2026-10-08); the close-event tests are `.tentative`.'
+html/dom/idlharness.https.html:
+- name: 'MessagePort interface: attribute onclose'
+  reason: 'Withdrawn text (CLAUDE.md rule 1(3)). The test''s interfaces/html.idl still
+    has the close event''s attribute: "attribute EventHandler onclose;" in `interface
+    MessagePort`. The current HTML Standard (§9.4.4, fetched 2026-10-08) has no `onclose`
+    in it and fires no close event; its disentangle steps are only "Let otherPort
+    be the MessagePort which initiatorPort was entangled with. Assert: otherPort exists.
+    Disentangle initiatorPort and otherPort, so that they are no longer entangled
+    or associated with each other." Chrome 154 and Firefox 157 expose no `onclose` on
+    MessagePort.prototype either (measured 2026-10-08); the close-event tests are `.tentative`.'
 html/dom/partial-updates/tentative/stream-append-has-invalidation.html:
 - name: HTML partial updates - :has invalidation with streaming
   reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);

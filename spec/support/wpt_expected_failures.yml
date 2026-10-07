@@ -9047,12 +9047,6 @@ web-animations/timing-model/timelines/update-and-send-events-replacement.html:
 - Removes an animation when another covers the same properties
 - Updates ALL timelines before checking for replacement
 - "[harness] TIMEOUT"
-webmessaging/Channel_postMessage_transfer_xsite_incoming_messages.window.js:
-- |-
-  Tasks enqueued on the port-message-queue of an enabled port,
-    are transferred along with the port, when the transfer happens in the same task
-    during which postMessage is called
-- "[harness] TIMEOUT"
 webmessaging/broadcastchannel/blobs.html:
 - Blobs work with workers on BroadcastChannel
 webmessaging/event.origin.sub.htm:

@@ -167,10 +167,11 @@ module Capybara
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         # ServiceWorker.postMessage from a client window → the SW's `message` event (source = client).
         '__csim_serviceWorkerPostMessage' => ->(b, *a) { b.service_worker_post_message(a[0], a[1], a[2], a[3]); nil },
-        # Cross-isolate MessagePort channel (client-realm side): register this realm's endpoint, and
-        # relay a client-realm port's postMessage to its remote (worker/SW) peer.
-        '__csimClientPortEndpoint' => ->(b, *a) { b.port_channel_endpoint_realm(a[0], a[1]); nil },
-        '__csimClientPortPost'     => ->(b, *a) { b.client_port_post(a[0], a[1]); nil },
+        # Cross-isolate MessagePort channels (a window or frame realm's side): the ends its ports take and give up, and
+        # what they post.
+        '__csimClientPortEndHere'  => ->(b, *a) { b.port_end_here(a[0], [:realm, a[1].to_i]); nil },
+        '__csimClientPortEndGone'  => ->(b, *a) { b.port_end_gone(a[0], a[1]); nil },
+        '__csimClientPortPost'     => ->(b, *a) { b.port_post(a[0], a[1]); nil },
         # The focus chain moved into this realm's browsing context (a focus() commit, or an
         # <iframe> focused in its container, which hands focus to the nested context).
         '__csimNoteFocusedRealm'   => ->(b, *a) { b.note_focused_realm(a[0]); nil },

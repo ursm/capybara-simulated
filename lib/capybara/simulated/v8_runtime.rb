@@ -1627,9 +1627,10 @@ module Capybara
         c.attach('__csim_swExtendedChanged',    ->(n)          { sw_hooks[:extended]&.call(n); nil }) if sw_hooks[:extended]
         c.attach('__csim_swFetchRespond', ->(fetch_id, resp, realm_id) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id); nil }) if sw_hooks[:fetch_respond]
         c.attach('__csim_swFetchStream',  ->(fetch_id, kind, payload, realm_id) { sw_hooks[:fetch_stream]&.call(fetch_id, kind, payload, realm_id); nil }) if sw_hooks[:fetch_stream]
-        # Cross-isolate MessagePort channel signals (a worker/SW port endpoint + its outbound messages).
-        c.attach('__csim_workerPortPost',     ->(channel, data) { sw_hooks[:port_post]&.call(channel, data); nil }) if sw_hooks[:port_post]
-        c.attach('__csim_workerPortEndpoint', ->(channel)       { sw_hooks[:port_endpoint]&.call(channel); nil }) if sw_hooks[:port_endpoint]
+        # Cross-isolate MessagePort channels: the ends a worker's ports take and give up, and what they post.
+        c.attach('__csim_workerPortPost',    ->(end_id, data) { sw_hooks[:port_post]&.call(end_id, data); nil }) if sw_hooks[:port_post]
+        c.attach('__csim_workerPortEndHere', ->(end_id)       { sw_hooks[:port_here]&.call(end_id); nil }) if sw_hooks[:port_here]
+        c.attach('__csim_workerPortEndGone', ->(end_id, held) { sw_hooks[:port_gone]&.call(end_id, held); nil }) if sw_hooks[:port_gone]
         # A worker is a SEPARATE isolate: its BroadcastChannel fan-out to the main + frame realms +
         # other workers can't run `browser.broadcast_to_windows` inline (that would mutate the main
         # browser's inbox from the worker thread). Route it through the thread-safe outbox instead

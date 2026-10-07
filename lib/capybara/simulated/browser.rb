@@ -539,10 +539,9 @@ module Capybara
         @sw_realm_controller = {}
         # The realm holding the focus chain (`note_focused_realm`); nil until a first focus.
         @focused_realm_id    = nil
-        # Cross-isolate MessagePort channels: channel id → {realm:, sw:} endpoints. A port
-        # transferred between a client realm and a worker/SW isolate registers both ends here;
-        # the browser relays each side's postMessage to the other. Cleared with the workers.
-        @port_channels       = {}
+        # Cross-isolate MessagePort channels: each end's holder and the messages waiting for one
+        # (`port_end_here`). Cleared with the workers.
+        @port_ends           = {}
         # Workers whose initial script hasn't finished running yet. A worker that
         # posts immediately on spawn (no main->worker message first) would leave
         # `@worker_in_flight` at 0, so `worker_pending?` would be false in the gap
@@ -6143,50 +6142,47 @@ module Capybara
         (m = /\Aclient-worker-(\d+)\z/.match(client_id.to_s)) ? m[1].to_i : nil
       end
 
-      # ── Cross-isolate MessagePort channel relay (client realm ↔ worker/SW isolate) ──
-      # Each endpoint self-registers when it (de)serializes the transferred port.
-      def port_channel_endpoint_realm(channel, realm_id)
-        ch = (@port_channels[channel.to_s] ||= {})
-        ch[:realm] = realm_id.to_i
-        # Flush anything the worker posted before this endpoint was known (deliver_worker_messages).
-        if (pending = ch.delete(:pending_realm))
-          pending.each {|d| deliver_port_to_realm(realm_id.to_i, channel.to_s, d) }
-        end
+      # ── Cross-isolate MessagePort channels ──
+      # A channel's two ends, `<channel>/0` and `<channel>/1`, each held by a realm of this window (`[:realm, id]`) or by
+      # a worker (`[:worker, handle]`) — whichever isolate holds the port at that end, which says so as it takes it
+      # (`port_end_here`) and as it gives it up to another (`port_end_gone`). A message posted at one end goes to the
+      # other's holder; one for an end no isolate holds yet waits for its next holder (HTML's port message queue) — the
+      # messages its last holder had received and not delivered first.
+      def port_end_here(end_id, at)
+        port_end = (@port_ends[end_id.to_s] ||= {})
+        port_end[:at] = at
+        (port_end.delete(:pending) || []).each {|data| deliver_port_message(at, end_id.to_s, data) }
         nil
       end
-      # Deliver a channel message into a client realm's endpoint port (realm 0 = the main realm).
-      private def deliver_port_to_realm(rid, channel, data)
-        if rid.zero?
-          @runtime.call('__csimPortChannelDeliver', channel, data)
-        elsif @runtime.frame_realm_alive?(rid)
-          @runtime.realm_call(rid, '__csimPortChannelDeliver', channel, data)
-        end
-      end
-      def port_channel_endpoint_sw(channel, handle)
-        ch = (@port_channels[channel.to_s] ||= {})
-        ch[:sw] = handle.to_i
-        # Flush anything the client posted before this endpoint was known (see client_port_post).
-        if (pending = ch.delete(:pending_sw)) && (w = @workers[handle.to_i])
-          pending.each {|d| @sw_message_pending += 1; w[:inbox] << {kind: 'port_msg', channel: channel.to_s, data: d} }
-        end
+      def port_end_gone(end_id, held)
+        port_end = (@port_ends[end_id.to_s] ||= {})
+        port_end[:at] = nil
+        port_end[:pending] = Array(held).map(&:to_s) + port_end.fetch(:pending, [])
         nil
       end
-      # A client-realm port posts to its remote (worker/SW) peer: relay to the isolate's inbox.
-      # Counted like an sw_message so settle waits for the worker to process it (and any reply it
-      # posts straight back on the same or another channel). A message posted BEFORE the peer endpoint
-      # is registered (a port used right after transfer, before the worker decoded it — the Comlink
-      # handshake) is BUFFERED on the channel and flushed by port_channel_endpoint_sw, per HTML's port
-      # message queue, rather than dropped.
-      def client_port_post(channel, data)
-        ch = (@port_channels[channel.to_s] ||= {})
-        handle = ch[:sw]
-        if handle && (w = @workers[handle])
-          @sw_message_pending += 1
-          w[:inbox] << {kind: 'port_msg', channel: channel.to_s, data: data.to_s}
+      # (`from`: the end it is posted at)
+      def port_post(from, data)
+        to = from.to_s.sub(%r{/(\d)\z}) { "/#{1 - $1.to_i}" }
+        port_end = (@port_ends[to] ||= {})
+        if port_end[:at]
+          deliver_port_message(port_end[:at], to, data.to_s)
         else
-          (ch[:pending_sw] ||= []) << data.to_s
+          (port_end[:pending] ||= []) << data.to_s
         end
         nil
+      end
+      # …into its holder: a realm's port (realm 0 the main one; a discarded frame's, nowhere), or a worker's by its inbox —
+      # counted like an sw_message, which the worker acks once its handler ran, so a settle waits out its reply.
+      private def deliver_port_message((kind, id), end_id, data)
+        if kind == :worker
+          w = @workers[id] or return
+          @sw_message_pending += 1
+          w[:inbox] << {kind: 'port_msg', end: end_id, data: data}
+        elsif id.zero?
+          @runtime.call('__csimPortEndDeliver', end_id, data)
+        elsif @runtime.frame_realm_alive?(id)
+          @runtime.realm_call(id, '__csimPortEndDeliver', end_id, data)
+        end
       end
 
       # Whether THIS browser hosts the registration controlling a navigation to `url`
@@ -6690,7 +6686,7 @@ module Capybara
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
-        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @sw_clients = {}; @sw_realm_controller = {}; @port_channels = {}; @sw_pending_claims = []; @sw_navpreload = {}; @sw_open_streams.clear) if @workers.empty?
+        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @sw_clients = {}; @sw_realm_controller = {}; @port_ends = {}; @sw_pending_claims = []; @sw_navpreload = {}; @sw_open_streams.clear) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
         # A dead SERVICE worker's holds are cleared with its record (extended / sw_msgs read
@@ -6712,7 +6708,7 @@ module Capybara
         # is NOT a reply. A 'bcack' acknowledges a broadcast the worker just delivered → release one
         # broadcast-pending. Everything else ('message'/'__error') is a postMessage reply.
         broadcasts,  rest0  = events.partition {|e| e[:kind] == 'broadcast' }
-        port_ends,   rest0b = rest0.partition  {|e| e[:kind] == 'port_endpoint' }
+        port_ends,   rest0b = rest0.partition  {|e| e[:kind] == 'port_here' || e[:kind] == 'port_gone' }
         port_msgs,   rest0c = rest0b.partition {|e| e[:kind] == 'port_msg' }
         sw_focuses,  rest0c2 = rest0c.partition {|e| e[:kind] == 'sw_client_focus' }
         sw_navs,     rest0c3 = rest0c2.partition {|e| e[:kind] == 'sw_client_navigate' }
@@ -6729,9 +6725,15 @@ module Capybara
         stream_frames, rest4b = rest4.partition  {|e| e[:kind].to_s.start_with?('fr_') }
         acks,          msgs   = rest4b.partition {|e| e[:kind] == 'bcack' }
         broadcasts.each {|e| broadcast_to_windows(e[:name], e[:data], nil, e[:origin], from_worker: e[:handle]) }
-        # A worker/SW registering its end of a cross-isolate MessagePort channel — record it BEFORE
+        # A worker taking a MessagePort channel's end, or giving one up — in the order it did — BEFORE
         # the message events below, so a port message carried in the same drain can already route.
-        port_ends.each {|e| port_channel_endpoint_sw(e[:channel], e[:handle]) }
+        port_ends.each do |e|
+          if e[:kind] == 'port_here'
+            port_end_here(e[:end], [:worker, e[:handle]])
+          else
+            port_end_gone(e[:end], e[:held])
+          end
+        end
         # `WindowClient.focus()` — the worker asked to move the focus chain to a client. Applied
         # BEFORE the messages below, so a SW that focuses a client and then reports its own
         # matchAll() in the same turn sees the move it just made.
@@ -6840,18 +6842,9 @@ module Capybara
         broadcast_to_realms('__csim_swTryActivate') if try_acts.any? && @sw_activation_parked
         # The drained work may also have been the last hold on a deferred unregister's clear.
         try_clear_uninstalls if try_acts.any?
-        # A worker/SW port → its remote (client-realm) peer: relay to that realm's channel endpoint.
-        # If the client hasn't registered its endpoint yet (it decodes the transferred port in the
-        # sw_client_msg processed just below), BUFFER until port_channel_endpoint_realm flushes.
-        port_msgs.each do |e|
-          ch  = (@port_channels[e[:channel].to_s] ||= {})
-          rid = ch[:realm]
-          if rid.nil?
-            (ch[:pending_realm] ||= []) << e[:data]
-          else
-            deliver_port_to_realm(rid, e[:channel].to_s, e[:data])
-          end
-        end
+        # A worker's port → the other end of its channel: a realm's, a worker's, or none yet (held for it —
+        # a client decodes a transferred port in the sw_client_msg processed just below).
+        port_msgs.each {|e| port_post(e[:end], e[:data]) }
         # A service worker → client message: deliver to the POSTING client's realm. The client id
         # encodes it — `client-<realm>` for a frame/window realm, 'client-window' for the main realm.
         # A `client.postMessage` to a controlled IFRAME must reach THAT frame's navigator.service-
@@ -7939,7 +7932,7 @@ module Capybara
         @sw_client_aliases   = {}
         @sw_realm_aliases    = {}
         @focused_realm_id    = nil
-        @port_channels       = {}
+        @port_ends           = {}
         @sw_nav_outbox.clear
         @transfer_buffer_lock.synchronize {
           @transfer_buffers.clear
@@ -8295,10 +8288,11 @@ module Capybara
             end
             outbox << {handle: handle, kind: "fr_#{kind}", fetch_id: fid, payload: payload.to_s, realm_id: realm_id.to_i}
           },
-          # Cross-isolate MessagePort channel: this worker's port endpoint + its outbound messages
-          # ride the outbox (delivered by deliver_worker_messages → the peer client realm).
-          port_endpoint:  ->(channel)       { outbox << {handle: handle, kind: 'port_endpoint', channel: channel.to_s} },
-          port_post:      ->(channel, data) { outbox << {handle: handle, kind: 'port_msg', channel: channel.to_s, data: data.to_s} }
+          # Cross-isolate MessagePort channels: the ends this worker takes and gives up, and what its ports post, ride
+          # the outbox (deliver_worker_messages relays them).
+          port_here:      ->(end_id)       { outbox << {handle: handle, kind: 'port_here', end: end_id.to_s} },
+          port_gone:      ->(end_id, held) { outbox << {handle: handle, kind: 'port_gone', end: end_id.to_s, held: Array(held).map(&:to_s)} },
+          port_post:      ->(end_id, data) { outbox << {handle: handle, kind: 'port_msg', end: end_id.to_s, data: data.to_s} }
         }
         worker_kind = if service then 'service' elsif shared then 'shared' else 'dedicated' end
         rt          = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks, kind: worker_kind, name: name)
@@ -8626,12 +8620,12 @@ module Capybara
                 rt.call('__csim_deliverWebSocketEvents', [ev])
               end
             elsif msg.is_a?(Hash) && msg[:kind] == 'port_msg'
-              # A client-realm port → its remote peer in THIS worker: deliver to the channel endpoint
-              # port. Counted like an sw_message (client_port_post incremented @sw_message_pending), so
-              # ack AFTER dispatch under `ensure` — a synchronous reply the port handler posts back
-              # (another port_msg on the outbox) is FIFO-guaranteed to precede this swack.
+              # A message for a channel end THIS worker holds: deliver it to that port. Counted like an
+              # sw_message (deliver_port_message incremented @sw_message_pending), so ack AFTER dispatch
+              # under `ensure` — a synchronous reply the port handler posts back (another port_msg on the
+              # outbox) is FIFO-guaranteed to precede this swack.
               begin
-                rt.call('__csimPortChannelDeliver', msg[:channel], msg[:data])
+                rt.call('__csimPortEndDeliver', msg[:end], msg[:data])
               ensure
                 outbox << {handle: handle, kind: 'swack'}
               end

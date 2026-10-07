@@ -153,7 +153,10 @@ const INTERFACES = [
   ['uievents', 'CompositionEvent', { install: true }],
   ['pointerevents', 'PointerEvent', { install: true }],
   ['html', 'MessageChannel', { install: true }],
-  ['html', 'MessagePort', { install: true }],
+  ['html', 'MessagePort', {
+    install: true,
+    omitMembers: { onclose: 'withdrawn from the HTML Standard — no close event is fired at a port; Chrome and Firefox have none' }
+  }],
   ['html', 'BroadcastChannel', { install: true }],
   ['html', 'DragEvent', { install: true }],
   ['html', 'PopStateEvent', { install: true }],
