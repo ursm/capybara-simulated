@@ -89,6 +89,68 @@ RSpec.describe 'MessagePort' do
     expect(logged(1)).to eq(['in-flight'])
   end
 
+  it 'keeps the order of a message already queued to a port and one posted after a transfer moved it' do
+    session.execute_script(<<~JS)
+      const a = new MessageChannel(), carrier = new MessageChannel();
+      a.port1.onmessage = (e) => log.push('old:' + e.data);
+      a.port2.postMessage('x');
+      carrier.port2.onmessage = (c) => { c.ports[0].onmessage = (m) => log.push('moved:' + m.data); };
+      carrier.port1.postMessage('carry', [a.port1]);
+      a.port2.postMessage('y');
+    JS
+    expect(logged(2)).to eq(%w[moved:x moved:y])
+  end
+
+  it 'carries a message already queued to an enabled port into the worker it is transferred to' do
+    session.execute_script(<<~JS)
+      const ch = new MessageChannel();
+      ch.port1.onmessage = (e) => log.push(e.data);
+      ch.port2.onmessage = () => log.push('kept');
+      ch.port1.postMessage('in-flight');
+      worker().postMessage('port', [ch.port2]);
+    JS
+    expect(logged(1)).to eq(['echo:in-flight'])
+  end
+
+  # A message on its way to a worker as it gives the port's end away reaches the end's next holder — once.
+  it 'delivers each message once while a worker hands a port back' do
+    session.execute_script(<<~JS)
+      const w = new Worker(URL.createObjectURL(new Blob([
+        "onmessage = (e) => { const p = e.ports[0]; p.onmessage = (m) => postMessage('worker:' + m.data); setTimeout(() => postMessage('back', [p]), 0); };"
+      ], {type: 'text/javascript'})));
+      const ch = new MessageChannel();
+      w.onmessage = (e) => {
+        if (e.data !== 'back') return log.push(e.data);
+        e.ports[0].onmessage = (m) => log.push('page:' + m.data);
+        setTimeout(() => log.push('done'), 300);
+      };
+      w.postMessage('take', [ch.port2]);
+      ch.port1.postMessage('m1');
+      setTimeout(() => ch.port1.postMessage('m2'), 100);
+    JS
+    poll_until(timeout: 5) { session.evaluate_script('window.log.includes("done")') }
+    got = session.evaluate_script('window.log') - ['done']
+    expect(got.map { _1.split(':').last }.sort).to eq(%w[m1 m2])
+  end
+
+  # StructuredSerializeWithTransfer: the transfer list checked before anything moves, and a port only by transfer.
+  it "refuses a worker message's bad transfer list and untransferred port, moving no port" do
+    expect(session.evaluate_script(<<~JS)).to eq(%w[DataCloneError DataCloneError DataCloneError DataCloneError open])
+      (() => {
+        const w = worker(), ch = new MessageChannel(), closed = new MessageChannel().port1, out = [];
+        closed.close();
+        const attempt = (f) => { try { f(); out.push('posted'); } catch (e) { out.push(e.name); } };
+        attempt(() => w.postMessage(1, [closed]));
+        attempt(() => w.postMessage(1, [ch.port1, ch.port1]));
+        attempt(() => w.postMessage({p: ch.port1}));
+        attempt(() => w.postMessage({p: ch.port1, f: () => {}}, [ch.port1]));
+        ch.port1.postMessage('still here');
+        out.push(new MessageChannel() && 'open');
+        return out;
+      })()
+    JS
+  end
+
   it 'sends nothing from a closed port to its peer in a worker' do
     session.execute_script(<<~JS)
       const w = new Worker(URL.createObjectURL(new Blob([

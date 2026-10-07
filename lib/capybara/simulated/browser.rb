@@ -639,13 +639,16 @@ module Capybara
       # Client-realm handler for each streaming respondWith frame kind (see deliver_worker_messages
       # + sw-client.js). `fr_start` builds a ReadableStream-backed Response; `fr_chunk` enqueues;
       # `fr_close` / `fr_error` close / error the body stream.
+      # A worker's MessagePort channel signals about an END — handled in the order the worker sent them, ahead of its
+      # port messages (deliver_worker_messages).
+      PORT_END_KINDS = %w[port_here port_gone port_closed port_redeliver].freeze
       STREAM_FRAME_FNS = {
         'fr_start' => '__csim_swFetchStreamStart',
         'fr_chunk' => '__csim_swFetchStreamChunk',
         'fr_close' => '__csim_swFetchStreamClose',
         'fr_error' => '__csim_swFetchStreamError'
       }.freeze
-      private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_TERMINATE_GRACE, :WORKER_GVL_YIELD, :WORKER_QUIESCE_MAX_ROUNDS, :STREAM_FRAME_FNS
+      private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_TERMINATE_GRACE, :WORKER_GVL_YIELD, :WORKER_QUIESCE_MAX_ROUNDS, :PORT_END_KINDS, :STREAM_FRAME_FNS
 
       # ── Capybara DSL surface ────────────────────────────────────
 
@@ -6150,26 +6153,55 @@ module Capybara
       # messages its last holder had received and not delivered first.
       def port_end_here(end_id, at)
         port_end = (@port_ends[end_id.to_s] ||= {})
+        return if port_end[:closed]
         port_end[:at] = at
         (port_end.delete(:pending) || []).each {|data| deliver_port_message(at, end_id.to_s, data) }
         nil
       end
-      def port_end_gone(end_id, held)
+      # (`from`: the holder giving it up — which is no longer the holder where its next one has taken it already: what
+      # it held then goes to that one)
+      def port_end_gone(end_id, held, from)
         port_end = (@port_ends[end_id.to_s] ||= {})
-        port_end[:at] = nil
-        port_end[:pending] = Array(held).map(&:to_s) + port_end.fetch(:pending, [])
+        held = Array(held).map(&:to_s)
+        if port_end[:at] == from
+          port_end[:at] = nil
+          port_end[:pending] = held + port_end.fetch(:pending, [])
+        else
+          held.each {|data| port_receive(end_id.to_s, port_end, data) }
+        end
+        nil
+      end
+      # A message that reached an end's holder after it had given the end up — it was on its way — for the holder now.
+      def port_redeliver(end_id, data)
+        port_end = @port_ends[end_id.to_s] or return
+        port_receive(end_id.to_s, port_end, data.to_s)
+        nil
+      end
+      # A port closed at its end: nothing more is delivered to it, and an end whose other is closed too is forgotten.
+      def port_end_closed(end_id)
+        @port_ends[end_id.to_s] = {closed: true}
+        other = port_other_end(end_id)
+        if @port_ends.dig(other, :closed)
+          @port_ends.delete(end_id.to_s)
+          @port_ends.delete(other)
+        end
         nil
       end
       # (`from`: the end it is posted at)
       def port_post(from, data)
-        to = from.to_s.sub(%r{/(\d)\z}) { "/#{1 - $1.to_i}" }
-        port_end = (@port_ends[to] ||= {})
-        if port_end[:at]
-          deliver_port_message(port_end[:at], to, data.to_s)
-        else
-          (port_end[:pending] ||= []) << data.to_s
-        end
+        to = port_other_end(from)
+        port_receive(to, (@port_ends[to] ||= {}), data.to_s)
         nil
+      end
+      private def port_other_end(end_id) = end_id.to_s.sub(%r{/(\d)\z}) { "/#{1 - $1.to_i}" }
+      # (…to its holder, or held for its next one — or nowhere, at a closed end)
+      private def port_receive(end_id, port_end, data)
+        return if port_end[:closed]
+        if port_end[:at]
+          deliver_port_message(port_end[:at], end_id, data)
+        else
+          (port_end[:pending] ||= []) << data
+        end
       end
       # …into its holder: a realm's port (realm 0 the main one; a discarded frame's, nowhere), or a worker's by its inbox —
       # counted like an sw_message, which the worker acks once its handler ran, so a settle waits out its reply.
@@ -6708,7 +6740,7 @@ module Capybara
         # is NOT a reply. A 'bcack' acknowledges a broadcast the worker just delivered → release one
         # broadcast-pending. Everything else ('message'/'__error') is a postMessage reply.
         broadcasts,  rest0  = events.partition {|e| e[:kind] == 'broadcast' }
-        port_ends,   rest0b = rest0.partition  {|e| e[:kind] == 'port_here' || e[:kind] == 'port_gone' }
+        port_ends,   rest0b = rest0.partition  {|e| PORT_END_KINDS.include?(e[:kind]) }
         port_msgs,   rest0c = rest0b.partition {|e| e[:kind] == 'port_msg' }
         sw_focuses,  rest0c2 = rest0c.partition {|e| e[:kind] == 'sw_client_focus' }
         sw_navs,     rest0c3 = rest0c2.partition {|e| e[:kind] == 'sw_client_navigate' }
@@ -6728,10 +6760,11 @@ module Capybara
         # A worker taking a MessagePort channel's end, or giving one up — in the order it did — BEFORE
         # the message events below, so a port message carried in the same drain can already route.
         port_ends.each do |e|
-          if e[:kind] == 'port_here'
-            port_end_here(e[:end], [:worker, e[:handle]])
-          else
-            port_end_gone(e[:end], e[:held])
+          case e[:kind]
+          when 'port_here'      then port_end_here(e[:end], [:worker, e[:handle]])
+          when 'port_gone'      then port_end_gone(e[:end], e[:held], [:worker, e[:handle]])
+          when 'port_closed'    then port_end_closed(e[:end])
+          when 'port_redeliver' then port_redeliver(e[:end], e[:data])
           end
         end
         # `WindowClient.focus()` — the worker asked to move the focus chain to a client. Applied
@@ -8292,6 +8325,8 @@ module Capybara
           # the outbox (deliver_worker_messages relays them).
           port_here:      ->(end_id)       { outbox << {handle: handle, kind: 'port_here', end: end_id.to_s} },
           port_gone:      ->(end_id, held) { outbox << {handle: handle, kind: 'port_gone', end: end_id.to_s, held: Array(held).map(&:to_s)} },
+          port_closed:    ->(end_id)       { outbox << {handle: handle, kind: 'port_closed', end: end_id.to_s} },
+          port_redeliver: ->(end_id, data) { outbox << {handle: handle, kind: 'port_redeliver', end: end_id.to_s, data: data.to_s} },
           port_post:      ->(end_id, data) { outbox << {handle: handle, kind: 'port_msg', end: end_id.to_s, data: data.to_s} }
         }
         worker_kind = if service then 'service' elsif shared then 'shared' else 'dedicated' end

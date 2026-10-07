@@ -170,7 +170,9 @@ module Capybara
         # Cross-isolate MessagePort channels (a window or frame realm's side): the ends its ports take and give up, and
         # what they post.
         '__csimClientPortEndHere'  => ->(b, *a) { b.port_end_here(a[0], [:realm, a[1].to_i]); nil },
-        '__csimClientPortEndGone'  => ->(b, *a) { b.port_end_gone(a[0], a[1]); nil },
+        '__csimClientPortEndGone'  => ->(b, *a) { b.port_end_gone(a[0], a[1], [:realm, a[2].to_i]); nil },
+        '__csimClientPortEndClosed' => ->(b, *a) { b.port_end_closed(a[0]); nil },
+        '__csimClientPortRedeliver' => ->(b, *a) { b.port_redeliver(a[0], a[1]); nil },
         '__csimClientPortPost'     => ->(b, *a) { b.port_post(a[0], a[1]); nil },
         # The focus chain moved into this realm's browsing context (a focus() commit, or an
         # <iframe> focused in its container, which hands focus to the nested context).

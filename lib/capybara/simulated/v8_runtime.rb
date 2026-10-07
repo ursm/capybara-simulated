@@ -1631,6 +1631,8 @@ module Capybara
         c.attach('__csim_workerPortPost',    ->(end_id, data) { sw_hooks[:port_post]&.call(end_id, data); nil }) if sw_hooks[:port_post]
         c.attach('__csim_workerPortEndHere', ->(end_id)       { sw_hooks[:port_here]&.call(end_id); nil }) if sw_hooks[:port_here]
         c.attach('__csim_workerPortEndGone', ->(end_id, held) { sw_hooks[:port_gone]&.call(end_id, held); nil }) if sw_hooks[:port_gone]
+        c.attach('__csim_workerPortEndClosed', ->(end_id)     { sw_hooks[:port_closed]&.call(end_id); nil }) if sw_hooks[:port_closed]
+        c.attach('__csim_workerPortRedeliver', ->(end_id, data) { sw_hooks[:port_redeliver]&.call(end_id, data); nil }) if sw_hooks[:port_redeliver]
         # A worker is a SEPARATE isolate: its BroadcastChannel fan-out to the main + frame realms +
         # other workers can't run `browser.broadcast_to_windows` inline (that would mutate the main
         # browser's inbox from the worker thread). Route it through the thread-safe outbox instead
