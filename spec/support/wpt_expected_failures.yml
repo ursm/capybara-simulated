@@ -4255,9 +4255,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - text-transform handles Turkish casing ("<div><div lang='tr' style='text-transform:uppercase'>i
   ı")
 html/dom/idlharness.any.js:
-- 'BroadcastChannel interface: attribute name'
-- 'BroadcastChannel interface: operation close()'
-- 'BroadcastChannel interface: operation postMessage(any)'
 - CanvasGradient interface object length
 - 'CanvasGradient interface: existence and properties of interface object'
 - 'CanvasGradient interface: operation addColorStop(double, DOMString)'
@@ -4335,16 +4332,6 @@ html/dom/idlharness.any.js:
 - 'ImageData interface: attribute height'
 - 'ImageData interface: attribute pixelFormat'
 - 'ImageData interface: attribute width'
-- 'MessageChannel interface: attribute port1'
-- 'MessageChannel interface: attribute port2'
-- MessagePort interface object name
-- 'MessagePort interface: attribute onclose'
-- 'MessagePort interface: existence and properties of interface object'
-- 'MessagePort interface: existence and properties of interface prototype object'
-- 'MessagePort interface: operation close()'
-- 'MessagePort interface: operation postMessage(any, optional StructuredSerializeOptions)'
-- 'MessagePort interface: operation postMessage(any, sequence<object>)'
-- 'MessagePort interface: operation start()'
 - 'OffscreenCanvas interface: attribute height'
 - 'OffscreenCanvas interface: attribute oncontextlost'
 - 'OffscreenCanvas interface: attribute oncontextrestored'
@@ -4599,9 +4586,6 @@ html/dom/idlharness.https.html:
   property'
 - 'BarProp interface: existence and properties of interface prototype object''s @@unscopables
   property'
-- 'BroadcastChannel interface: attribute name'
-- 'BroadcastChannel interface: operation close()'
-- 'BroadcastChannel interface: operation postMessage(any)'
 - CanvasGradient interface object length
 - 'CanvasGradient interface: existence and properties of interface object'
 - 'CanvasGradient interface: operation addColorStop(double, DOMString)'
@@ -5999,16 +5983,6 @@ html/dom/idlharness.https.html:
 - Location must be primary interface of window.location
 - 'MediaError interface: attribute code'
 - 'MediaError interface: attribute message'
-- 'MessageChannel interface: attribute port1'
-- 'MessageChannel interface: attribute port2'
-- MessagePort interface object name
-- 'MessagePort interface: attribute onclose'
-- 'MessagePort interface: existence and properties of interface object'
-- 'MessagePort interface: existence and properties of interface prototype object'
-- 'MessagePort interface: operation close()'
-- 'MessagePort interface: operation postMessage(any, optional StructuredSerializeOptions)'
-- 'MessagePort interface: operation postMessage(any, sequence<object>)'
-- 'MessagePort interface: operation start()'
 - MimeType interface object length
 - MimeType interface object name
 - 'MimeType interface: attribute description'
