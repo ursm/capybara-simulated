@@ -632,11 +632,12 @@ RSpec.describe 'web fonts' do
 
   it 'errors a face built with an invalid descriptor at construction, rejecting loaded without load()' do
     s = session
-    # Chrome errors it synchronously: status 'error' at once, the bad value discarded, and
+    # Errored synchronously: status 'error' at once, the bad value's attribute the empty string — CSS Font Loading's
+    # constructor "set font face's corresponding attributes to the empty string" (Chrome keeps the default) — and
     # `loaded` already rejected whether or not `load()` is called.
     s.execute_script("window.__r = []; window.__st = null; window.__av = null; var f = new FontFace('Bad', 'url(/ahem.ttf)', { ascentOverride: '-50%' }); __st = f.status; __av = f.ascentOverride; f.loaded.then(function () { __r.push('ok'); }, function (e) { __r.push(e.name); });")
     expect(s.evaluate_script('window.__st')).to eq('error')
-    expect(s.evaluate_script('window.__av')).to eq('normal')                  # the invalid value is discarded
+    expect(s.evaluate_script('window.__av')).to eq('')                        # the invalid value is discarded
     Timeout.timeout(5) { sleep 0.05 until s.evaluate_script('window.__r.length >= 1') }
     expect(s.evaluate_script('window.__r')).to eq(['SyntaxError'])            # loaded rejected, no load() call
   end

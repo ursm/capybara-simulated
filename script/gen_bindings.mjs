@@ -812,7 +812,10 @@ function generateInterface(def, options = {}) {
       // (…a setlike declaration, Web IDL §3.7.12: the members over the implementation's backing set, `impl.setOf(self)`
       // — a JS Set — add / delete / clear only where it is not readonly and the interface declares none of its own)
       if (!options.install) throw new Error(`${label}: a setlike interface the binding makes is not generated yet`);
-      setlike = { readonly: !!m.readonly };
+      const valueType = m.idlType[0].idlType;
+      if (definitions.get(valueType)?.type !== 'interface') throw new Error(`${label}: a setlike of other than an interface type is not generated yet`);
+      checks.add(valueType);
+      setlike = { readonly: !!m.readonly, valueType };
       continue;
     }
     if (m.type === 'iterable') {
@@ -847,7 +850,9 @@ function generateInterface(def, options = {}) {
       members.push(m.name);
       // (…[LegacyLenientThis] only an event handler's here, whose accessors the installing class's are)
       if ((m.extAttrs || []).some((e) => e.name === 'LegacyLenientThis')) throw new Error(`${label}: a [LegacyLenientThis] attribute is not generated yet`);
-      out.push(`    get ${m.name}() { return impl.get_${m.name}(${self}); }`);
+      // (…a promise-typed one's exception its promise's rejection, as its getter steps say)
+      const getter = `return impl.get_${m.name}(${self});`;
+      out.push(`    get ${m.name}() { ${promiseOf(m) ? rejecting(getter) : getter} }`);
       const forwards = (m.extAttrs || []).find((e) => e.name === 'PutForwards');
       if (forwards) {
         // [PutForwards=x] (Web IDL §3.7.6): a write to the attribute is a write of `x` on the object it answers
@@ -1026,7 +1031,7 @@ function installInterface(def, { body, statics, unforgeables, checks, unscopable
   if (pairIterator) lines.push(`  definePairIterator(iface.prototype, '${name}', (self) => impl.pairs(self), IS_SELF);`);
   if (setlike) {
     const own = setlike.readonly ? [] : ['add', 'delete', 'clear'].filter((n) => !setlike.declared.includes(n));
-    lines.push(`  defineSetlike(iface.prototype, '${name}', (self) => impl.setOf(self), IS_SELF, ${JSON.stringify(own)});`);
+    lines.push(`  defineSetlike(iface.prototype, '${name}', (self) => impl.setOf(self), IS_SELF, ${JSON.stringify(own)}, IS_${setlike.valueType}, '${setlike.valueType}');`);
   }
   if (constants.length) {
     const list = JSON.stringify(constants.map(([n]) => n));

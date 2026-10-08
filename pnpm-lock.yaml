@@ -27,6 +27,9 @@ importers:
       eslint-scope:
         specifier: ^9.1.2
         version: 9.1.2
+      webidl2:
+        specifier: ^24.5.0
+        version: 24.5.0
 
 packages:
 

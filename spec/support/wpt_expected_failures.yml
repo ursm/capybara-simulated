@@ -848,7 +848,6 @@ css/css-font-loading/fontface-font-variation-settings-persisted-js-api.html:
 - Test FontFace variationSettings property
 css/css-font-loading/idlharness.https.html:
 - 'FontFace interface: attribute features'
-- 'FontFace interface: attribute loaded'
 - 'FontFace interface: attribute palettes'
 - 'FontFace interface: attribute variations'
 - 'FontFace interface: fontFace must inherit property "features" with the proper type'
@@ -885,7 +884,6 @@ css/css-font-loading/idlharness.https.html:
 - 'FontFacePalettes interface: existence and properties of interface prototype object''s
   @@unscopables property'
 - 'FontFacePalettes interface: iterable<FontFacePalette>'
-- 'FontFaceSet interface: attribute ready'
 - FontFaceVariationAxis interface object length
 - FontFaceVariationAxis interface object name
 - 'FontFaceVariationAxis interface: attribute axisTag'

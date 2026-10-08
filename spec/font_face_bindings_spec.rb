@@ -68,4 +68,60 @@ RSpec.describe 'FontFace bindings' do
       "SyntaxError: Could not resolve 'foo' as a font."
     )
   end
+
+  # A promise-typed attribute's getter rejects rather than throws (Web IDL; Chrome); `has` converts its argument; a
+  # src that does not parse errors the face in Chrome's words; a rule whose src names no usable source is no face of
+  # the set (Chrome).
+  it 'converts and rejects as Web IDL says' do
+    session.execute_script(<<~JS)
+      const style = document.createElement('style');
+      style.textContent = '@font-face { font-family: Eot; src: url(x.eot) format("embedded-opentype"); }';
+      document.head.append(style);
+    JS
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const error = (f) => { try { f(); return 'none'; } catch (e) { return e.name + ': ' + e.message; } };
+        const loaded = Object.getOwnPropertyDescriptor(FontFace.prototype, 'loaded').get.call({});
+        loaded.catch(() => {});
+        return [
+          Object.prototype.toString.call(loaded),
+          error(() => document.fonts.has({})),
+          error(() => document.fonts.has()),
+          [...document.fonts].some((f) => f.family === 'Eot')
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      '[object Promise]',
+      "TypeError: Failed to execute 'has' on 'FontFaceSet': parameter 1 is not of type 'FontFace'.",
+      "TypeError: Failed to execute 'has' on 'FontFaceSet': 1 argument required, but only 0 present.",
+      false
+    ])
+    expect(session.evaluate_async_script("new FontFace('a', 'garbage').loaded.then(() => 'none', (e) => e.name + ': ' + e.message).then(arguments[0])")).to eq(
+      "SyntaxError: The source provided ('garbage') could not be parsed as a value list."
+    )
+  end
+
+  # A frame's set answers for the frame, whichever realm's method is called (Chrome): its CSS-connected faces, the same
+  # objects each time.
+  it "answers for a frame's set from another realm" do
+    session.execute_script(<<~JS)
+      const frame = document.createElement('iframe');
+      frame.srcdoc = '<style>@font-face { font-family: FrA; src: url(/a.ttf); }</style><p style="font-family: FrA">x</p>';
+      document.body.append(frame);
+    JS
+    sleep 0.1
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const fonts = frames[0].document.fonts;
+        const face = [...fonts][0];
+        return [
+          FontFaceSet.prototype.has.call(fonts, face),
+          [...FontFaceSet.prototype.values.call(fonts)].length,
+          [...fonts][0] === face
+        ];
+      })()
+    JS
+    expect(got).to eq([true, 1, true])
+  end
 end
