@@ -153,4 +153,34 @@ RSpec.describe 'MediaError and SVGAnimatedString bindings' do
       'TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError'
     ])
   end
+
+  # Validity is told by value, so a frame's getter or method answers for this realm's objects (Chrome: `valid` true);
+  # setValidity sets the flags and the message, its newlines normalized, before refusing an anchor (HTML's step order,
+  # Firefox's); and `:state()` reads the set by the intrinsic iterator, whatever a page put on Set.prototype.
+  it "answers validity across realms, as setValidity's steps go, whatever a page does to Set" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const frame = document.body.appendChild(document.createElement('iframe')).contentWindow;
+        class G extends HTMLElement {
+          static formAssociated = true;
+          constructor() { super(); this.i = this.attachInternals(); }
+        }
+        customElements.define('x-g', G);
+        const el = document.body.appendChild(new G());
+        const valid = Object.getOwnPropertyDescriptor(frame.ValidityState.prototype, 'valid').get.call(document.createElement('input').validity);
+        let invalids = 0;
+        el.addEventListener('invalid', () => invalids++);
+        const checked = frame.ElementInternals.prototype.checkValidity.call(el.i);
+        let refused;
+        try { el.i.setValidity({valueMissing: true}, 'a\\r\\nb\\rc', document.body); } catch (e) { refused = e.name; }
+        const after = [el.i.validity.valueMissing, el.i.validationMessage];
+        const iterator = Set.prototype[Symbol.iterator];
+        Set.prototype[Symbol.iterator] = function* () { yield 'hacked'; };
+        el.i.states.add('p');
+        Set.prototype[Symbol.iterator] = iterator;
+        return [valid, checked, invalids, refused, after, el.matches(':state(p)'), el.matches(':state(hacked)')];
+      })()
+    JS
+    expect(got).to eq([true, true, 0, 'NotFoundError', [true, "a\nb\nc"], true, false])
+  end
 end
