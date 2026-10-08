@@ -252,6 +252,9 @@ const INTERFACES = [
   ['xhr', 'FormData', { install: true }],
   ['html', 'Storage', { install: true, namedProperties: 'the Proxy each storage area is (storage.js)' }],
   ['dom', 'XMLDocument', { install: true }],
+  ['webcrypto', 'CryptoKey', { install: true }],
+  ['webcrypto', 'SubtleCrypto', { install: true }],
+  ['webcrypto', 'Crypto', { install: true }],
   ['html', 'DOMParser', { install: true }],
   ['html', 'XMLSerializer', { install: true }],
   ['intersection-observer', 'IntersectionObserver', { install: true }],
@@ -403,6 +406,22 @@ const RUNTIME = [
 ];
 
 const all = await parseAll();
+// The specs whose IDL is not loaded at all — an unratified proposal that redefines what a standard defines (an enum's
+// values, not only partials an `omit` could leave out), whose members no implementation here answers; each with why.
+const UNADOPTED_SPECS = {
+  'webcrypto-modern-algos': '[WICG] Modern Algorithms in the Web Cryptography API: a WICG proposal — its KeyFormat ' +
+    'enum redefines the standard one, its encapsulate / decapsulate / getPublicKey members are unimplemented'
+};
+for (const spec of Object.keys(UNADOPTED_SPECS)) delete all[spec];
+// …and what such a file carries of the standard it extends — definitions @webref/idl moved there, out of the standard's
+// own — the standard's text, word for word, with where it is.
+const STANDARD_TEXT_MOVED = {
+  // https://w3c.github.io/webcrypto/#dfn-KeyFormat, https://w3c.github.io/webcrypto/#dfn-KeyUsage
+  'webcrypto-standard': `
+    enum KeyFormat { "raw", "spki", "pkcs8", "jwk" };
+    enum KeyUsage { "encrypt", "decrypt", "sign", "verify", "deriveKey", "deriveBits", "wrapKey", "unwrapKey" };`
+};
+for (const [spec, text] of Object.entries(STANDARD_TEXT_MOVED)) all[spec] = parseIdl(text);
 // What an editor's draft says that @webref/idl's snapshot of it does not yet — each its draft's IDL, word for word, with
 // the draft it is from; one a later @webref/idl has too is an error (below), and the entry goes.
 const EDITORS_DRAFT_ADDITIONS = {
@@ -674,9 +693,11 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   const buffers = of((u) => BUFFER_TYPES.has(u.idlType));
   const sequences = of((u) => u.generic === 'sequence');
   const records = of((u) => u.generic === 'record');
+  const objects = of((u) => u.idlType === 'object');
   if (dicts.length > 1 || strings.length > 1 || numerics.length > 1 || callbacks.length > 1 || sequences.length > 1 || records.length > 1 ||
-      (records.length && dicts.length) ||
-      ifaces.length + buffers.length + sequences.length + records.length + dicts.length + strings.length + numerics.length + booleans.length + callbacks.length !== members.length) throw unsupported();
+      (records.length && dicts.length) || (objects.length && (dicts.length || records.length)) ||
+      ifaces.length + buffers.length + sequences.length + records.length + dicts.length + strings.length + numerics.length + booleans.length +
+        callbacks.length + objects.length !== members.length) throw unsupported();
   const [dict] = dicts, [string] = strings, [numeric] = numerics, [boolean] = booleans, [record] = records;
   const convert = (u) => conversion(u, expr, where, checks, extAttrs);
   // (…the last conversion, which takes what no step before it did — so no step of its own)
@@ -685,7 +706,7 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   if (includesNullable) steps.push([`${expr} == null`, 'null']);
   // (…a string the string type's at once — every test before its would fail on one: the common BlobPart, the common
   // string-or-options argument, asks nothing else)
-  if (string && ifaces.length + buffers.length + sequences.length + records.length + callbacks.length + dicts.length) {
+  if (string && ifaces.length + buffers.length + sequences.length + records.length + callbacks.length + dicts.length + objects.length) {
     steps.push([`typeof ${expr} === 'string'`, convert(string)]);
   }
   if (dict) steps.push([`${expr} == null`, convert(dict)]);
@@ -706,6 +727,8 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   // (…a callable one the callback function type's, before a dictionary would take it)
   if (callbacks.length) steps.push([`typeof ${expr} === 'function'`, expr]);
   if (dict) steps.push([`(typeof ${expr} === 'object' || typeof ${expr} === 'function')`, convert(dict)]);
+  // (…any other object the `object` type's, as it is — Web IDL's union step after a dictionary's: AlgorithmIdentifier)
+  if (objects.length) steps.push([`(${expr} !== null && (typeof ${expr} === 'object' || typeof ${expr} === 'function'))`, expr]);
   if (boolean && boolean !== last) steps.push([`typeof ${expr} === 'boolean'`, expr]);
   if (numeric && numeric !== last) steps.push([`typeof ${expr} === 'number'`, convert(numeric)]);
   const otherwise = last ? convert(last) : `(() => { throw new TypeError(${failure(where, `The provided value is not of type '${name}'.`)}); })()`;

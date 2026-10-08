@@ -93,10 +93,6 @@ WebCryptoAPI/derive_bits_keys/cfrg_curves_bits_curve448.tentative.https.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: X448 missing public property
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: X448 mixed case parameters
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -106,10 +102,6 @@ WebCryptoAPI/derive_bits_keys/cfrg_curves_bits_curve448.tentative.https.any.js:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: X448 non-multiple of 8 bits
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: X448 public property of algorithm is not a CryptoKey
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -165,19 +157,11 @@ WebCryptoAPI/derive_bits_keys/cfrg_curves_keys_curve448.tentative.https.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: X448 missing public property
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: X448 mixed case parameters
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: X448 no deriveKey usage for base key
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: X448 public property of algorithm is not a CryptoKey
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -17729,47 +17713,6 @@ WebCryptoAPI/historical.any.js:
     are always exposed. This test asserts their ABSENCE in a non-secure context, which
     the driver deliberately does not model. CLAUDE.md rule 1.
 WebCryptoAPI/idlharness.tentative.https.any.js:
-- name: 'Crypto interface: attribute subtle'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'Crypto interface: calling getRandomValues(ArrayBufferView) on crypto with
-    too few arguments must throw TypeError'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'Crypto interface: existence and properties of interface object'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'Crypto interface: operation getRandomValues(ArrayBufferView)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'Crypto interface: operation randomUUID()'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: CryptoKey interface object length
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'CryptoKey interface: attribute algorithm'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'CryptoKey interface: attribute extractable'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'CryptoKey interface: attribute type'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'CryptoKey interface: attribute usages'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: 'SubtleCrypto interface: calling decapsulateBits(AlgorithmIdentifier, CryptoKey,
     BufferSource) on crypto.subtle with too few arguments must throw TypeError'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -17834,10 +17777,6 @@ WebCryptoAPI/idlharness.tentative.https.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: 'SubtleCrypto interface: existence and properties of interface object'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: 'SubtleCrypto interface: operation decapsulateBits(AlgorithmIdentifier, CryptoKey,
     BufferSource)'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -17845,25 +17784,6 @@ WebCryptoAPI/idlharness.tentative.https.any.js:
     path/suffix. CLAUDE.md rule 1.
 - name: 'SubtleCrypto interface: operation decapsulateKey(AlgorithmIdentifier, CryptoKey,
     BufferSource, AlgorithmIdentifier, boolean, sequence<KeyUsage>)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'SubtleCrypto interface: operation decrypt(AlgorithmIdentifier, CryptoKey,
-    BufferSource)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'SubtleCrypto interface: operation deriveBits(AlgorithmIdentifier, CryptoKey,
-    optional unsigned long?)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'SubtleCrypto interface: operation deriveKey(AlgorithmIdentifier, CryptoKey,
-    AlgorithmIdentifier, boolean, sequence<KeyUsage>)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'SubtleCrypto interface: operation digest(AlgorithmIdentifier, BufferSource)'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -17876,30 +17796,7 @@ WebCryptoAPI/idlharness.tentative.https.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: 'SubtleCrypto interface: operation encrypt(AlgorithmIdentifier, CryptoKey,
-    BufferSource)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'SubtleCrypto interface: operation exportKey(KeyFormat, CryptoKey)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'SubtleCrypto interface: operation generateKey(AlgorithmIdentifier, boolean,
-    sequence<KeyUsage>)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: 'SubtleCrypto interface: operation getPublicKey(CryptoKey, sequence<KeyUsage>)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'SubtleCrypto interface: operation importKey(KeyFormat, (BufferSource or JsonWebKey),
-    AlgorithmIdentifier, boolean, sequence<KeyUsage>)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'SubtleCrypto interface: operation sign(AlgorithmIdentifier, CryptoKey, BufferSource)'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -17910,21 +17807,6 @@ WebCryptoAPI/idlharness.tentative.https.any.js:
     path/suffix. CLAUDE.md rule 1.
 - name: 'SubtleCrypto interface: operation supports(DOMString, AlgorithmIdentifier,
     optional unsigned long?)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'SubtleCrypto interface: operation unwrapKey(KeyFormat, BufferSource, CryptoKey,
-    AlgorithmIdentifier, AlgorithmIdentifier, boolean, sequence<KeyUsage>)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'SubtleCrypto interface: operation verify(AlgorithmIdentifier, CryptoKey,
-    BufferSource, BufferSource)'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'SubtleCrypto interface: operation wrapKey(KeyFormat, CryptoKey, CryptoKey,
-    AlgorithmIdentifier)'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
