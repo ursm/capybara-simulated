@@ -134,8 +134,9 @@ RSpec.describe 'WebSocket' do
     expect(session).to have_title(/hello/)
     got = session.evaluate_script(<<~JS)
       (() => {
-        const buffer = new ArrayBuffer(4), view = new Uint8Array(buffer);
+        const buffer = new ArrayBuffer(4), view = new Uint8Array(buffer), dataView = new DataView(buffer);
         structuredClone(buffer, {transfer: [buffer]});
+        window.ws.send(dataView);
         window.ws.send('ab');
         window.ws.send(buffer);
         window.ws.close(undefined, 'bye');
