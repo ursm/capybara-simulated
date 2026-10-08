@@ -55718,6 +55718,20 @@ websockets/stream/tentative/write.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+xhr/send-data-sharedarraybuffer.any.js:
+- name: "[dedicatedworker] sending a SharedArrayBuffer"
+  reason: The same as "sending a SharedArrayBuffer", in a dedicated worker.
+- name: sending a SharedArrayBuffer
+  reason: 'The test asserts a TypeError for a raw SharedArrayBuffer body, which a
+    union conversion whose ArrayBuffer step took every object with an [[ArrayBufferData]]
+    slot gave. Web IDL''s union conversion (webidl.spec.whatwg.org, convert to a union)
+    no longer does: its ArrayBuffer step is "If V is an Object, V has an [[ArrayBufferData]]
+    internal slot, and IsSharedArrayBuffer(V) is false", and the shared one "If types
+    includes SharedArrayBuffer" — XMLHttpRequestBodyInit has neither SharedArrayBuffer
+    nor object, so the value reaches "If types includes a string type, then return
+    the result of converting V to that type" and is stringified. Chrome and Firefox
+    still throw; an explicit spec rule wins (CLAUDE.md rule 1, case 3). The views
+    backed by one are still refused (not [AllowShared]).'
 xhr/sync-xhr-supported-by-permissions-policy.tentative.html:
 - name: document.permissionsPolicy.features should advertise sync-xhr.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
