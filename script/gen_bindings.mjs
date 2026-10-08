@@ -251,6 +251,7 @@ const INTERFACES = [
   ['fetch', 'Headers', { install: true }],
   ['xhr', 'FormData', { install: true }],
   ['html', 'Storage', { install: true, namedProperties: 'the Proxy each storage area is (storage.js)' }],
+  ['dom', 'XMLDocument', { install: true }],
   ['html', 'DOMParser', { install: true }],
   ['html', 'XMLSerializer', { install: true }],
   ['intersection-observer', 'IntersectionObserver', { install: true }],

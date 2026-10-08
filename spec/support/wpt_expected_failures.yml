@@ -2628,7 +2628,6 @@ dom/idlharness.window.js:
 - 'NodeList interface: operation item(unsigned long)'
 - Stringification of document.querySelectorAll("script")
 - Stringification of new XSLTProcessor()
-- 'XMLDocument interface: existence and properties of interface object'
 - XSLTProcessor interface object length
 - XSLTProcessor interface object name
 - 'XSLTProcessor interface: calling getParameter(DOMString, DOMString) on new XSLTProcessor()

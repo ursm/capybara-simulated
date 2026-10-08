@@ -283,4 +283,26 @@ RSpec.describe 'Small interface bindings' do
       [true, %w[0 Baz]]
     ])
   end
+
+  # An XMLDocument is made by the platform alone — createDocument, a clone of one — never by a page's `new` (Chrome:
+  # TypeError); an XML DOMParser parse is a Document (HTML's parseFromString: "a new Document"; Chrome: XMLDocument).
+  it 'makes XMLDocuments' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const t = (o) => Object.prototype.toString.call(o);
+        const created = document.implementation.createDocument(null, 'a');
+        let made;
+        try { new XMLDocument(); made = 'none'; } catch (e) { made = e.name; }
+        return [
+          t(created), t(new DOMParser().parseFromString('<a/>', 'application/xml')),
+          t(new DOMParser().parseFromString('<a/>', 'text/html')), t(created.cloneNode(true)), t(new Document()),
+          made, created instanceof XMLDocument, new Document() instanceof XMLDocument
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      '[object XMLDocument]', '[object Document]', '[object Document]', '[object XMLDocument]', '[object Document]',
+      'TypeError', true, false
+    ])
+  end
 end
