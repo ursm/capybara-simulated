@@ -16,6 +16,14 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "utf8Encode", utf8_encode, context_id);
     register(scope, ns, "utf8EncodeInto", utf8_encode_into, context_id);
     register(scope, ns, "legacyEncode", legacy_encode, context_id);
+    register(scope, ns, "isSharedArrayBuffer", is_shared_array_buffer, context_id);
+}
+
+// __dom.isSharedArrayBuffer(value) -> whether it is a SharedArrayBuffer, any realm's (Web IDL's IsSharedArrayBuffer):
+// the bindings' buffer-source conversions ask (webidl.js), which a realm with no SharedArrayBuffer constructor — every
+// one here, none being cross-origin isolated — has no getter of its own to brand-check one with.
+fn is_shared_array_buffer(_scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(args.get(0).is_shared_array_buffer());
 }
 
 // An encoding by its name (every name is one of its own labels).

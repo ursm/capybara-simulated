@@ -299,7 +299,7 @@ const INTERFACES = [
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
   'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
-  'isBufferOf', 'toBuffer', 'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
+  'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineIndexedIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers'
@@ -405,7 +405,10 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
   if (BUFFER_TYPES.has(t.idlType)) {
     const allowShared = extAttrs.some((e) => e.name === 'AllowShared');
     const allowResizable = extAttrs.some((e) => e.name === 'AllowResizable');
-    c = `toBuffer(${expr}, ${JSON.stringify(t.idlType)}, ${allowShared}, ${allowResizable}, ${conversionError(where, t.idlType)}, ${failure(where)})`;
+    // (…`checked`: a union's step has found it of the type)
+    c = t.checked
+      ? `checkBuffer(${expr}, ${JSON.stringify(t.idlType)}, ${allowShared}, ${allowResizable}, ${failure(where)})`
+      : `toBuffer(${expr}, ${JSON.stringify(t.idlType)}, ${allowShared}, ${allowResizable}, ${conversionError(where, t.idlType)}, ${failure(where)})`;
     return t.nullable ? `(${expr} == null ? null : ${c})` : c;
   }
   switch (enforceRange ? 'EnforceRange' : clamp ? 'Clamp' : t.idlType) {
@@ -542,7 +545,7 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   }
   // (…a buffer source of one of its types its conversion: an ArrayBuffer, a SharedArrayBuffer, a DataView, a typed
   // array — whose sharing and resizing that refuses)
-  for (const u of buffers) steps.push([`isBufferOf(${expr}, ${JSON.stringify(u.idlType)})`, convert(u)]);
+  for (const u of buffers) steps.push([`isBufferOf(${expr}, ${JSON.stringify(u.idlType)})`, convert({ ...u, checked: true })]);
   // (…an object with an @@iterator the sequence's)
   for (const u of sequences) {
     steps.push([`(${expr} !== null && (typeof ${expr} === 'object' || typeof ${expr} === 'function') && typeof ${expr}[Symbol.iterator] === 'function')`, convert(u)]);
