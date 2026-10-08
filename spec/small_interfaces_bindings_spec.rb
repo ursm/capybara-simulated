@@ -52,4 +52,27 @@ RSpec.describe 'MediaError and SVGAnimatedString bindings' do
       'TypeError: Illegal invocation'
     ])
   end
+
+  # BarProp and External are interfaces of their own, made by the platform alone: each bar of the window one BarProp
+  # ([SameObject]), visible; External's two operations doing nothing.
+  it 'gives the window its BarProps and its External' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const error = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
+        return [
+          [typeof BarProp, typeof External, locationbar instanceof BarProp, locationbar === window.locationbar, toolbar.visible],
+          [Object.prototype.toString.call(statusbar), Object.prototype.toString.call(external), external instanceof External],
+          [external.AddSearchProvider(), external.IsSearchProviderInstalled()],
+          error(() => new BarProp()), error(() => new External()),
+          error(() => Object.getOwnPropertyDescriptor(BarProp.prototype, 'visible').get.call({}))
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      ['function', 'function', true, true, true],
+      ['[object BarProp]', '[object External]', true],
+      [nil, nil],
+      'TypeError', 'TypeError', 'TypeError'
+    ])
+  end
 end

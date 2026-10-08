@@ -179,6 +179,8 @@ const INTERFACES = [
   ['html', 'MediaError'],
   ['html', 'ImageData', { install: true }],
   ['html', 'ImageBitmap'],
+  ['html', 'BarProp'],
+  ['html', 'External'],
   ['html', 'CanvasGradient'],
   ['html', 'CanvasPattern'],
   ['html', 'Path2D', { install: true }],

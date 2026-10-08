@@ -3667,15 +3667,6 @@ html/dom/idlharness.https.html:
 - 'AudioTrackList interface: existence and properties of interface prototype object''s
   @@unscopables property'
 - 'AudioTrackList interface: operation getTrackById(DOMString)'
-- BarProp interface object length
-- BarProp interface object name
-- 'BarProp interface: attribute visible'
-- 'BarProp interface: existence and properties of interface object'
-- 'BarProp interface: existence and properties of interface prototype object'
-- 'BarProp interface: existence and properties of interface prototype object''s "constructor"
-  property'
-- 'BarProp interface: existence and properties of interface prototype object''s @@unscopables
-  property'
 - CloseWatcher interface object length
 - CloseWatcher interface object name
 - 'CloseWatcher interface: attribute oncancel'
@@ -3786,17 +3777,6 @@ html/dom/idlharness.https.html:
   optional (File or USVString or FormData)?)'
 - 'ElementInternals interface: operation setValidity(optional ValidityStateFlags,
   optional DOMString, optional HTMLElement)'
-- External interface object length
-- External interface object name
-- 'External interface: existence and properties of interface object'
-- 'External interface: existence and properties of interface prototype object'
-- 'External interface: existence and properties of interface prototype object''s "constructor"
-  property'
-- 'External interface: existence and properties of interface prototype object''s @@unscopables
-  property'
-- 'External interface: operation AddSearchProvider()'
-- 'External interface: operation IsSearchProviderInstalled()'
-- External must be primary interface of window.external
 - HTMLAllCollection interface object length
 - HTMLAllCollection interface object name
 - 'HTMLAllCollection interface: attribute length'
@@ -5170,7 +5150,6 @@ html/dom/idlharness.https.html:
 - Stringification of document.createElement("xmp")
 - Stringification of location.ancestorOrigins
 - Stringification of new TrackEvent("addtrack", {track:document.createElement("track").track})
-- Stringification of window.external
 - Stringification of window.history
 - Stringification of window.location
 - TextMetrics interface object length
