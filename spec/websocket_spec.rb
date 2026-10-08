@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'websocket/driver'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # WebSocket transport: `new WebSocket(url)` rides the in-process `rack.hijack`
 # socket (Browser#ws_open) — the same substrate Action Cable uses. This spec
@@ -18,8 +19,11 @@ RSpec.describe 'WebSocket' do
 
   # The close codes the server hears, as its connections close.
   let(:closes) { Thread::Queue.new }
+  # …and the reasons they close with.
+  let(:reasons) { Thread::Queue.new }
   let(:app) {
     closes = self.closes
+    reasons = self.reasons
     lambda do |env|
       if env['HTTP_UPGRADE'].to_s.downcase == 'websocket'
         io     = env['rack.hijack'].call
@@ -36,7 +40,10 @@ RSpec.describe 'WebSocket' do
             driver.text("echo:#{e.data}")
           end
         end
-        driver.on(:close) {|e| closes << e.code }
+        driver.on(:close) do |e|
+          closes << e.code
+          reasons << e.reason
+        end
         driver.start                                              # writes the 101
         Thread.new do
           Thread.current.report_on_exception = false
@@ -47,6 +54,10 @@ RSpec.describe 'WebSocket' do
           end
         end
         [101, {}, []]   # ignored — the connection is hijacked
+      elsif env['PATH_INFO'] == '/framed'
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><base href="/sub/dir/"><body><iframe src="/blank"></iframe>']]
+      elsif env['PATH_INFO'] == '/blank'
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><body>']]
       elsif env['PATH_INFO'] == '/worker'
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
           <!doctype html><html><head><title>start</title></head><body>
@@ -115,6 +126,53 @@ RSpec.describe 'WebSocket' do
     expect(session.evaluate_script("(() => { window.ws.close(); window.ws.send('abc'); return window.ws.bufferedAmount; })()")).to eq(3)
     expect(session).to have_title('closed:1000')
     expect(session.evaluate_script('window.ws.bufferedAmount')).to eq(3)
+  end
+
+  # What was sent while open is gone from bufferedAmount once the event loop turns, a close() in the same task or not;
+  # a detached buffer sends nothing, without throwing; a reason with no code closes with 1000 and the reason.
+  it 'drains bufferedAmount, takes a detached buffer, and closes with a reason' do
+    expect(session).to have_title(/hello/)
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const buffer = new ArrayBuffer(4), view = new Uint8Array(buffer);
+        structuredClone(buffer, {transfer: [buffer]});
+        window.ws.send('ab');
+        window.ws.send(buffer);
+        window.ws.close(undefined, 'bye');
+        window.ws.send(view);
+        return window.ws.bufferedAmount;
+      })()
+    JS
+    expect(got).to eq(2)
+    expect(session).to have_title('closed:1000')
+    expect(session.evaluate_script('window.ws.bufferedAmount')).to eq(0)
+    expect([closes.pop(timeout: 5), reasons.pop(timeout: 5)]).to eq([1000, 'bye'])
+  end
+
+  # A close() while connecting fails the connection: an `error`, then an abnormal close.
+  it 'fires error and then close for a close() while connecting' do
+    expect(session).to have_title(/hello/)
+    session.execute_script(<<~JS)
+      window.order = [];
+      const early = new WebSocket('ws://' + location.host + '/cable');
+      early.onerror = () => window.order.push('error');
+      early.onclose = (e) => window.order.push('close:' + e.code + ':' + e.wasClean);
+      early.onopen = () => window.order.push('open');
+      early.close();
+    JS
+    expect(poll_until { session.evaluate_script('window.order.length >= 2 && window.order') }).to eq(['error', 'close:1006:false'])
+  end
+
+  # A frame's sockets and sources get their events, as the top window's do; a source's URL is resolved against the
+  # document's base URL.
+  it 'delivers to a frame\'s socket, and resolves a source against the base URL' do
+    session.visit('/framed')
+    session.execute_script(<<~JS)
+      window.frameWs = new frames[0].WebSocket('ws://' + location.host + '/cable');
+      window.frameWs.onmessage = (e) => { document.title = 'frame:' + e.data; };
+    JS
+    expect(session).to have_title('frame:hello')
+    expect(session.evaluate_script("new EventSource('x').url === location.origin + '/sub/dir/x'")).to be(true)
   end
 
   # Generated from its IDL: arguments converted, the constructor's and close()'s checks in Chrome's words, the

@@ -7689,9 +7689,6 @@ service-workers/service-worker/update-recovery.https.html:
 service-workers/service-worker/websocket-in-service-worker.https.html:
 - Verify WebSockets can be created in a Service Worker
 - "[harness] TIMEOUT"
-service-workers/service-worker/websocket.https.html:
-- Verify WebSocket handshake channel does not get intercepted
-- "[harness] TIMEOUT"
 service-workers/service-worker/webvtt-cross-origin.https.html:
 - cross-origin text track with approved cors request should not load
 - cross-origin text track with no-cors request should not load
@@ -8212,16 +8209,6 @@ websockets/cookies/005.html:
 - 'WebSockets: setting HttpOnly cookies in ws response, checking ws request'
 websockets/cookies/third-party-cookie-accepted.https.html:
 - Test that third-party cookies are accepted for WebSockets.
-websockets/interfaces/WebSocket/close/close-connecting-async.any.js:
-- "[dedicatedworker] close event should be fired asynchronously when WebSocket is
-  connecting"
-- "[dedicatedworker] close event should be fired asynchronously when WebSocket is
-  connecting"
-- "[dedicatedworker] close event should be fired asynchronously when WebSocket is
-  connecting"
-- close event should be fired asynchronously when WebSocket is connecting
-- close event should be fired asynchronously when WebSocket is connecting
-- close event should be fired asynchronously when WebSocket is connecting
 websockets/interfaces/WebSocket/close/close-connecting.html:
 - 'WebSockets: close() when connecting'
 - 'WebSockets: close() when connecting'
@@ -8232,19 +8219,11 @@ websockets/mixed-content.https.any.js:
 websockets/multi-globals/message-received.html:
 - ArrayBuffer should be created in the relevant realm of the WebSocket
 - Blob should be created in the relevant realm of the WebSocket
-- "[harness] TIMEOUT"
 websockets/referrer.any.js:
 - Ensure no Referer header is included
 - "[dedicatedworker] Ensure no Referer header is included"
 - "[dedicatedworker] [harness] TIMEOUT"
 - "[harness] TIMEOUT"
-websockets/remove-own-iframe-during-onerror.window.js:
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- removing an iframe from within an onerror handler should work
-- removing an iframe from within an onerror handler should work
-- removing an iframe from within an onerror handler should work
 websockets/send-many-64K-messages-with-backpressure.any.js:
 - "[dedicatedworker] sending 50 messages of size 65536 with backpressure applied should
   not hang"
@@ -8277,10 +8256,6 @@ websockets/unload-a-document/002.html:
 - "[harness] ERROR"
 websockets/unload-a-document/003.html:
 - 'WebSockets: navigating nested browsing context'
-- "[harness] TIMEOUT"
-websockets/unload-a-document/004.html:
-- 'WebSockets: navigating nested browsing context with closed websocket'
-- "[harness] TIMEOUT"
 websockets/unload-a-document/005.html:
 - 'WebSockets: navigating nested browsing context with a websocket in top-level'
 - 'WebSockets: navigating nested browsing context with a websocket in top-level'
