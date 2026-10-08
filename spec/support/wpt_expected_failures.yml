@@ -3668,29 +3668,6 @@ html/dom/idlharness.any.js:
   false'
 - 'DedicatedWorkerGlobalScope interface: internal [[SetPrototypeOf]] method of interface
   prototype object - setting to a new value via __proto__ should throw a TypeError'
-- EventSource interface object length
-- 'EventSource interface: attribute readyState'
-- 'EventSource interface: attribute url'
-- 'EventSource interface: attribute withCredentials'
-- 'EventSource interface: constant CLOSED on interface object'
-- 'EventSource interface: constant CLOSED on interface prototype object'
-- 'EventSource interface: constant CONNECTING on interface object'
-- 'EventSource interface: constant CONNECTING on interface prototype object'
-- 'EventSource interface: constant OPEN on interface object'
-- 'EventSource interface: constant OPEN on interface prototype object'
-- 'EventSource interface: new EventSource("http://invalid") must inherit property
-  "CLOSED" with the proper type'
-- 'EventSource interface: new EventSource("http://invalid") must inherit property
-  "CONNECTING" with the proper type'
-- 'EventSource interface: new EventSource("http://invalid") must inherit property
-  "OPEN" with the proper type'
-- 'EventSource interface: new EventSource("http://invalid") must inherit property
-  "readyState" with the proper type'
-- 'EventSource interface: new EventSource("http://invalid") must inherit property
-  "url" with the proper type'
-- 'EventSource interface: new EventSource("http://invalid") must inherit property
-  "withCredentials" with the proper type'
-- 'EventSource interface: operation close()'
 - 'ImageBitmap interface: attribute height'
 - 'ImageBitmap interface: attribute width'
 - 'ImageBitmap interface: existence and properties of interface object'
@@ -4242,29 +4219,6 @@ html/dom/idlharness.https.html:
   optional (File or USVString or FormData)?)'
 - 'ElementInternals interface: operation setValidity(optional ValidityStateFlags,
   optional DOMString, optional HTMLElement)'
-- EventSource interface object length
-- 'EventSource interface: attribute readyState'
-- 'EventSource interface: attribute url'
-- 'EventSource interface: attribute withCredentials'
-- 'EventSource interface: constant CLOSED on interface object'
-- 'EventSource interface: constant CLOSED on interface prototype object'
-- 'EventSource interface: constant CONNECTING on interface object'
-- 'EventSource interface: constant CONNECTING on interface prototype object'
-- 'EventSource interface: constant OPEN on interface object'
-- 'EventSource interface: constant OPEN on interface prototype object'
-- 'EventSource interface: new EventSource("http://invalid") must inherit property
-  "CLOSED" with the proper type'
-- 'EventSource interface: new EventSource("http://invalid") must inherit property
-  "CONNECTING" with the proper type'
-- 'EventSource interface: new EventSource("http://invalid") must inherit property
-  "OPEN" with the proper type'
-- 'EventSource interface: new EventSource("http://invalid") must inherit property
-  "readyState" with the proper type'
-- 'EventSource interface: new EventSource("http://invalid") must inherit property
-  "url" with the proper type'
-- 'EventSource interface: new EventSource("http://invalid") must inherit property
-  "withCredentials" with the proper type'
-- 'EventSource interface: operation close()'
 - External interface object length
 - External interface object name
 - 'External interface: existence and properties of interface object'
@@ -8247,19 +8201,6 @@ webmessaging/multi-globals/broadcastchannel-incumbent.sub.html:
   from being seen
 webmessaging/postMessage_CryptoKey_insecure.sub.html:
 - insecure context should not receive an object for secure contexts only
-websockets/Close-Reason-124Bytes.any.js:
-- Create WebSocket - Close the Connection - close(code, 'reason more than 123 bytes')
-  - SYNTAX_ERR is thrown
-- Create WebSocket - Close the Connection - close(code, 'reason more than 123 bytes')
-  - SYNTAX_ERR is thrown
-- Create WebSocket - Close the Connection - close(code, 'reason more than 123 bytes')
-  - SYNTAX_ERR is thrown
-- "[dedicatedworker] Create WebSocket - Close the Connection - close(code, 'reason
-  more than 123 bytes') - SYNTAX_ERR is thrown"
-- "[dedicatedworker] Create WebSocket - Close the Connection - close(code, 'reason
-  more than 123 bytes') - SYNTAX_ERR is thrown"
-- "[dedicatedworker] Create WebSocket - Close the Connection - close(code, 'reason
-  more than 123 bytes') - SYNTAX_ERR is thrown"
 websockets/Close-delayed.any.js:
 - Create WebSocket - Close the Connection - close should not emit until handshake
   completes - Connection should be closed
@@ -8280,16 +8221,6 @@ websockets/Create-invalid-urls.any.js:
 websockets/Create-on-worker-shutdown.any.js:
 - "[dedicatedworker] WebSocket created after a worker self.close()"
 - "[dedicatedworker] [harness] TIMEOUT"
-websockets/Send-binary-blob.any.js:
-- Send binary data on a WebSocket - Blob - Connection should be closed
-- Send binary data on a WebSocket - Blob - Connection should be closed
-- Send binary data on a WebSocket - Blob - Connection should be closed
-- "[dedicatedworker] Send binary data on a WebSocket - Blob - Connection should be
-  closed"
-- "[dedicatedworker] Send binary data on a WebSocket - Blob - Connection should be
-  closed"
-- "[dedicatedworker] Send binary data on a WebSocket - Blob - Connection should be
-  closed"
 websockets/back-forward-cache-with-closed-websocket-connection.window.js:
 - back-forward-cache-with-closed-websocket-connection
 websockets/back-forward-cache-with-open-websocket-connection-and-close-it-in-pagehide.window.js:
@@ -8304,27 +8235,6 @@ websockets/cookies/005.html:
 - 'WebSockets: setting HttpOnly cookies in ws response, checking ws request'
 websockets/cookies/third-party-cookie-accepted.https.html:
 - Test that third-party cookies are accepted for WebSockets.
-websockets/idlharness.any.js:
-- WebSocket interface object length
-- 'WebSocket interface: attribute binaryType'
-- 'WebSocket interface: attribute bufferedAmount'
-- 'WebSocket interface: attribute extensions'
-- 'WebSocket interface: attribute protocol'
-- 'WebSocket interface: attribute readyState'
-- 'WebSocket interface: attribute url'
-- 'WebSocket interface: operation close(optional unsigned short, optional USVString)'
-- 'WebSocket interface: operation send((BufferSource or Blob or USVString))'
-- "[dedicatedworker] WebSocket interface object length"
-- "[dedicatedworker] WebSocket interface: attribute binaryType"
-- "[dedicatedworker] WebSocket interface: attribute bufferedAmount"
-- "[dedicatedworker] WebSocket interface: attribute extensions"
-- "[dedicatedworker] WebSocket interface: attribute protocol"
-- "[dedicatedworker] WebSocket interface: attribute readyState"
-- "[dedicatedworker] WebSocket interface: attribute url"
-- "[dedicatedworker] WebSocket interface: operation close(optional unsigned short,
-  optional USVString)"
-- "[dedicatedworker] WebSocket interface: operation send((BufferSource or Blob or
-  USVString))"
 websockets/interfaces/WebSocket/close/close-connecting-async.any.js:
 - "[dedicatedworker] close event should be fired asynchronously when WebSocket is
   connecting"

@@ -102,6 +102,74 @@ RSpec.describe 'WebSocket' do
     expect(session.evaluate_script('window.wsBin')).to eq([5, 200, 7])
   end
 
+  # A Blob is a binary frame of its bytes (WebSockets §3: send(Blob)), not its string form.
+  it 'sends a Blob as a binary frame' do
+    expect(session).to have_title(/hello/)
+    session.execute_script("window.ws.send(new Blob([new Uint8Array([9, 250])]))")
+    expect(session).to have_title('bin:9,250')
+  end
+
+  # What send() is given once closing never leaves, so it stays counted in bufferedAmount (Chrome: 3 after close()).
+  it 'counts what is sent once closing in bufferedAmount' do
+    expect(session).to have_title(/hello/)
+    expect(session.evaluate_script("(() => { window.ws.close(); window.ws.send('abc'); return window.ws.bufferedAmount; })()")).to eq(3)
+    expect(session).to have_title('closed:1000')
+    expect(session.evaluate_script('window.ws.bufferedAmount')).to eq(3)
+  end
+
+  # Generated from its IDL: arguments converted, the constructor's and close()'s checks in Chrome's words, the
+  # subprotocols compared case-insensitively (the WPT's reading; Chrome takes ['a', 'A']), binaryType an enumeration
+  # that ignores what it has not.
+  it 'is what its IDL says' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const error = (f) => { try { f(); return 'none'; } catch (e) { return e.name + ': ' + e.message; } };
+        const ws = new WebSocket('ws://' + location.host + '/other');
+        ws.binaryType = 'x';
+        return [
+          error(() => new WebSocket()),
+          error(() => new WebSocket('http://[')),
+          error(() => new WebSocket('ftp://x')),
+          error(() => new WebSocket('ws://x/#a')),
+          error(() => new WebSocket('ws://x/', 'a b')),
+          error(() => new WebSocket('ws://x/', ['a', 'a'])),
+          error(() => new WebSocket('ws://x/', ['a', 'A'])),
+          error(() => ws.send()),
+          error(() => ws.send('x')),
+          error(() => ws.close(1001)),
+          error(() => ws.close(1000, 'x'.repeat(124))),
+          error(() => WebSocket.prototype.close.call({})),
+          [ws.url === 'ws://' + location.host + '/other', ws.readyState, ws.bufferedAmount, ws.extensions, ws.protocol, ws.binaryType],
+          [WebSocket.CONNECTING, WebSocket.prototype.CLOSED],
+          error(() => new EventSource()),
+          error(() => new EventSource('http://[')),
+          [new EventSource('/es', {withCredentials: true}).withCredentials, EventSource.CLOSED],
+          error(() => EventSource.prototype.close.call({}))
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      "TypeError: Failed to construct 'WebSocket': 1 argument required, but only 0 present.",
+      "SyntaxError: Failed to construct 'WebSocket': The URL 'http://[' is invalid.",
+      "SyntaxError: Failed to construct 'WebSocket': The URL's scheme must be either 'http', 'https', 'ws', or 'wss'. 'ftp' is not allowed.",
+      "SyntaxError: Failed to construct 'WebSocket': The URL contains a fragment identifier ('a'). Fragment identifiers are not allowed in WebSocket URLs.",
+      "SyntaxError: Failed to construct 'WebSocket': The subprotocol 'a b' is invalid.",
+      "SyntaxError: Failed to construct 'WebSocket': The subprotocol 'a' is duplicated.",
+      "SyntaxError: Failed to construct 'WebSocket': The subprotocol 'A' is duplicated.",
+      "TypeError: Failed to execute 'send' on 'WebSocket': 1 argument required, but only 0 present.",
+      "InvalidStateError: Failed to execute 'send' on 'WebSocket': Still in CONNECTING state.",
+      "InvalidAccessError: Failed to execute 'close' on 'WebSocket': The close code must be either 1000, or between 3000 and 4999. 1001 is neither.",
+      "SyntaxError: Failed to execute 'close' on 'WebSocket': The close reason must not be greater than 123 UTF-8 bytes.",
+      'TypeError: Illegal invocation',
+      [true, 0, 0, '', '', 'blob'],
+      [0, 3],
+      "TypeError: Failed to construct 'EventSource': 1 argument required, but only 0 present.",
+      "SyntaxError: Failed to construct 'EventSource': Cannot open an EventSource to 'http://['. The URL is invalid.",
+      [true, 2],
+      'TypeError: Illegal invocation'
+    ])
+  end
+
   it 'reports readyState transitions and fires close' do
     expect(session).to have_title(/hello/)
     session.execute_script('window.ws.close()')
