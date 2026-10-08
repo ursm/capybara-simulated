@@ -200,6 +200,8 @@ const INTERFACES = [
   ['fetch', 'Headers', { install: true }],
   ['xhr', 'FormData', { install: true }],
   ['html', 'Storage', { install: true, namedProperties: 'the Proxy each storage area is (storage.js)' }],
+  ['html', 'DOMParser', { install: true }],
+  ['html', 'XMLSerializer', { install: true }],
   ['xhr', 'XMLHttpRequestEventTarget', { install: true }],
   ['xhr', 'XMLHttpRequestUpload', { install: true }],
   ['xhr', 'XMLHttpRequest', { install: true, omit: { 'trust-token-api': 'setPrivateToken: Private State Tokens are not implemented (a WICG proposal)' } }],

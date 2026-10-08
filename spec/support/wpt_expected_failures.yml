@@ -4162,9 +4162,6 @@ html/dom/idlharness.https.html:
 - 'CustomStateSet interface: existence and properties of interface prototype object''s
   @@unscopables property'
 - 'CustomStateSet interface: setlike<DOMString>'
-- 'DOMParser interface: calling parseFromString((TrustedHTML or DOMString), DOMParserSupportedType)
-  on new DOMParser() with too few arguments must throw TypeError'
-- 'DOMParser interface: operation parseFromString((TrustedHTML or DOMString), DOMParserSupportedType)'
 - DOMStringList interface object length
 - DOMStringList interface object name
 - 'DOMStringList interface: attribute length'
@@ -5844,9 +5841,7 @@ html/dom/idlharness.https.html:
 - Stringification of document.createElement("video").textTracks
 - Stringification of document.createElement("xmp")
 - Stringification of location.ancestorOrigins
-- Stringification of new DOMParser()
 - Stringification of new TrackEvent("addtrack", {track:document.createElement("track").track})
-- Stringification of new XMLSerializer()
 - Stringification of window.external
 - Stringification of window.history
 - Stringification of window.location
@@ -6132,7 +6127,6 @@ html/dom/idlharness.https.html:
 - 'Worklet interface: existence and properties of interface prototype object''s @@unscopables
   property'
 - 'Worklet interface: operation addModule(USVString, optional WorkletOptions)'
-- 'XMLSerializer interface: operation serializeToString(Node)'
 html/dom/render-blocking/element-render-blocking-002.html:
 - blocking defers until needed element is parsed
 html/dom/render-blocking/element-render-blocking-004.html:
