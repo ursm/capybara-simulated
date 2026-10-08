@@ -3365,7 +3365,8 @@ module Capybara
         @cookie_flags.clear
         @auth_cache.clear
         @local_storage.clear
-        @clipboard.delete('entries')   # (…its change count rising on: a realm's cache keyed on it is never the next session's)
+        # (…emptied as a write would — its change count moved on, so no realm's cache keyed on it is the next session's)
+        clipboard_write([])
         @cache_storage.clear
         @session_storage.clear
         @sticky_headers.clear
