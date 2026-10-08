@@ -199,6 +199,11 @@ const INTERFACES = [
   ['url', 'URLSearchParams', { install: true }],
   ['fetch', 'Headers', { install: true }],
   ['xhr', 'FormData', { install: true }],
+  ['fetch', 'Request', {
+    install: true,
+    omit: { 'local-network-access': 'targetAddressSpace: Local Network Access is not implemented (a WICG proposal)' }
+  }],
+  ['fetch', 'Response', { install: true }],
   ['encoding', 'TextEncoder', { install: true }],
   ['encoding', 'TextDecoder', { install: true }],
   ['FileAPI', 'Blob', { install: true }],
@@ -500,8 +505,10 @@ const ABSENT_INTERFACES = new Set([
   'TrustedHTML', 'TrustedScript', 'TrustedScriptURL', 'CSSNumericValue', 'CSSKeywordValue', 'AnimationTrigger', 'VideoFrame',
   'InputDeviceCapabilities', 'Sanitizer', 'MediaSource'
 ]);
-// …and the dictionaries and enums of an API none answers, which a member names beside its interface: the Sanitizer's.
-const ABSENT_TYPES = new Set(['SanitizerConfig', 'SanitizerPresets']);
+// …and the dictionaries and enums of an API none answers, which a member names beside its interface: the Sanitizer's,
+// and two WICG proposals' a RequestInit names — Private State Tokens' `privateToken`, Local Network Access's
+// `targetAddressSpace`.
+const ABSENT_TYPES = new Set(['SanitizerConfig', 'SanitizerPresets', 'PrivateToken', 'IPAddressSpace']);
 
 // The type `t` names `u` as: `u`, with `t`'s extended attributes besides its own and nullable if either is. (Its
 // fields read off it: webidl2's types answer them by getters, which a spread would drop.)
@@ -782,7 +789,9 @@ function generateInterface(def, options = {}) {
         // (…a static operation the interface object's own, of no object: `DeviceMotionEvent.requestPermission()`)
         if (!options.install) throw new Error(`${label}: a static operation of an interface the binding makes is not generated yet`);
         if (statics.some((line) => line.startsWith(`    ${m.name}(`))) continue;
-        statics.push(`    ${operation(name, m, checks, () => 'null')}`);
+        // (…its implementation `static_<name>` where an object's member has the name: Response's json())
+        const shared = memberList.some((o) => o.name === m.name && o.special !== 'static');
+        statics.push(`    ${operation(name, m, checks, () => 'null', shared ? `static_${m.name}` : m.name)}`);
         continue;
       }
       if (m.special === 'stringifier') {
@@ -816,7 +825,7 @@ function generateInterface(def, options = {}) {
       // (…an overloaded one written once, where its first overload stands)
       if (members.includes(m.name)) continue;
       members.push(m.name);
-      const group = memberList.filter((o) => o.type === 'operation' && o.name === m.name);
+      const group = memberList.filter((o) => o.type === 'operation' && o.name === m.name && o.special !== 'static');
       body.push(`    ${group.length > 1 ? overloadedOperation(name, group, checks, selfCheck) : operation(name, m, checks, selfCheck)}`);
       continue;
     }
@@ -964,7 +973,7 @@ function argName(a) {
 
 // An operation: its required arguments its parameters (so its `length` is their count, Web IDL §3.7.7), the optional
 // ones read from `arguments`, a variadic one the rest — each converted, and handed to the implementation.
-function operation(iface, m, checks, selfCheck) {
+function operation(iface, m, checks, selfCheck, implName = m.name) {
   const args = m.arguments;
   const requiredCount = args.filter((a) => !a.optional && !a.variadic).length;
   if (args.some((a, i) => (a.optional || a.variadic) && i < requiredCount)) throw new Error(`${iface}.${m.name}: a required argument after an optional one`);
@@ -974,7 +983,7 @@ function operation(iface, m, checks, selfCheck) {
   const converted = convertArguments(iface, m, checks, (a) => ((a.variadic && rest) || (!a.optional && !a.variadic) ? argName(a) : null));
   // (…`this` checked first, then the arguments counted — Web IDL's order, as Chrome's)
   const check = requiredCount ? `required(arguments, ${requiredCount}, '${m.name}', '${iface}'); ` : '';
-  const steps = `const self = ${selfCheck(promiseOf(m) && `Failed to execute '${m.name}' on '${iface}': `)}; ${check}return impl.${m.name}(${['self', ...converted].join(', ')});`;
+  const steps = `const self = ${selfCheck(promiseOf(m) && `Failed to execute '${m.name}' on '${iface}': `)}; ${check}return impl.${implName}(${['self', ...converted].join(', ')});`;
   return `${m.name}(${params}) { ${promiseOf(m) ? rejecting(steps) : steps} }`;
 }
 
