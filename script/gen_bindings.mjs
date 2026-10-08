@@ -181,6 +181,8 @@ const INTERFACES = [
   ['html', 'CanvasGradient'],
   ['html', 'CanvasPattern'],
   ['html', 'Path2D', { install: true }],
+  ['html', 'CanvasRenderingContext2D', { install: true }],
+  ['html', 'OffscreenCanvasRenderingContext2D', { install: true }],
   ['SVG', 'SVGAnimatedString'],
   ['clipboard-apis', 'ClipboardItem', { install: true }],
   ['clipboard-apis', 'Clipboard', { install: true }],
@@ -1226,7 +1228,7 @@ function overloadSwitch(iface, name, { cases, most, required }, source, checks, 
       return;
     }
     if (m.platformObject) {
-      // (…an object the interface's the interface's overload — anything else the string's)
+      // (…an object of the interface the interface's overload — anything else the string's or the number's)
       checks.add(m.type);
       lines.push(`  case ${n}: if (IS_${m.type}(${v})) ${call(m.platformObject)}`);
       lines.push(`    ${call(m.other)}`);
@@ -1250,13 +1252,14 @@ function overloadSwitch(iface, name, { cases, most, required }, source, checks, 
 }
 
 // Web IDL's overload resolution (§3.6.3) for two overloads taking the same count, where it is generated: the first
-// argument whose types differ — a dictionary's in one and a string's or a sequence's in the other, an interface's in
-// one and a string's in the other, or a buffer source's in one and a numeric type's in the other — tells them apart.
+// argument whose types differ — a dictionary's in one and a string's (an enumeration's too) or a sequence's in the other,
+// an interface's in one and a string's or a numeric type's in the other, or a buffer source's in one and a numeric
+// type's in the other — tells them apart.
 function distinguished(iface, name, [a, b]) {
   const index = a.arguments.findIndex((arg, i) => !b.arguments[i] || arg.idlType.idlType !== b.arguments[i].idlType.idlType);
   const typeOf = (m) => m.arguments[index] && m.arguments[index].idlType;
   const isDictionary = (t) => t && !t.union && dictionaries.has(t.idlType);
-  const isString = (t) => t && !t.union && STRING_TYPES.has(t.idlType);
+  const isString = (t) => t && !t.union && (STRING_TYPES.has(t.idlType) || enums.has(t.idlType));
   const isSequence = (t) => t && t.generic === 'sequence';
   // (…not a nullable one, whose overload null and undefined would choose — which the interface's test does not ask)
   const isInterface = (t) => t && !t.union && !t.nullable && definitions.get(t.idlType)?.type === 'interface';
@@ -1264,8 +1267,11 @@ function distinguished(iface, name, [a, b]) {
   if (isDictionary(typeOf(b)) && isString(typeOf(a))) return { index, dictionary: b, other: a };
   if (isSequence(typeOf(a)) && isDictionary(typeOf(b))) return { index, sequence: a, other: b };
   if (isSequence(typeOf(b)) && isDictionary(typeOf(a))) return { index, sequence: b, other: a };
-  if (isInterface(typeOf(a)) && isString(typeOf(b))) return { index, platformObject: a, other: b, type: typeOf(a).idlType };
-  if (isInterface(typeOf(b)) && isString(typeOf(a))) return { index, platformObject: b, other: a, type: typeOf(b).idlType };
+  const isNumeric = (t) => t && !t.union && !t.nullable && NUMERIC_TYPES.has(t.idlType);
+  // (…an object of the interface the interface's overload, anything else the string's or the number's, which converts it)
+  const stringOrNumber = (t) => isString(t) || isNumeric(t);
+  if (isInterface(typeOf(a)) && stringOrNumber(typeOf(b))) return { index, platformObject: a, other: b, type: typeOf(a).idlType };
+  if (isInterface(typeOf(b)) && stringOrNumber(typeOf(a))) return { index, platformObject: b, other: a, type: typeOf(b).idlType };
   // (…a buffer source type, or a union of them — ImageData's ImageDataArray — and a numeric type)
   const bufferTypes = (t) => {
     if (!t) return null;
@@ -1273,10 +1279,9 @@ function distinguished(iface, name, [a, b]) {
     const members = flattenUnion({ ...t, union: true, idlType: [t] }).members;
     return members.every((u) => !u.union && BUFFER_TYPES.has(u.idlType)) ? members.map((u) => u.idlType) : null;
   };
-  const isNumeric = (t) => t && !t.union && !t.nullable && NUMERIC_TYPES.has(t.idlType);
   if (bufferTypes(typeOf(a)) && isNumeric(typeOf(b))) return { index, buffer: a, other: b, bufferTypes: bufferTypes(typeOf(a)) };
   if (bufferTypes(typeOf(b)) && isNumeric(typeOf(a))) return { index, buffer: b, other: a, bufferTypes: bufferTypes(typeOf(b)) };
-  throw new Error(`${iface}.${name}: overloads told apart by other than a dictionary and a string or a sequence, an interface and a string, or a buffer source and a number, are not generated yet`);
+  throw new Error(`${iface}.${name}: overloads told apart by other than a dictionary and a string or a sequence, an interface and a string or a number, or a buffer source and a number, are not generated yet`);
 }
 
 function defaultValue(d, where) {

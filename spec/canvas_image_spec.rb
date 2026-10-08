@@ -1295,18 +1295,17 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['top']).to eq([0, 255, 0, 255])            # green from the self-copy, not corrupted
   end
 
-  it 'fillStyle accepts colour objects, coerces via toString, and rejects bare hex' do
+  # A colour object ({r, g, b[, a]}) is no fillStyle: HTML's is `(DOMString or CanvasGradient or CanvasPattern)`, the
+  # object a string ("[object Object]", ignored) — the proposal the colorObject WPT files test was abandoned
+  # (whatwg/html#6609); Chrome ignores it (measured: `#000000`, nothing painted).
+  it 'fillStyle ignores a colour object, coerces via toString, and rejects bare hex' do
     session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
       const ctx = new OffscreenCanvas(2, 2).getContext('2d');
-      ctx.fillStyle = {r: 0, g: 1, b: 0, a: 0.5};        // colour object, components in [0,1]
+      ctx.fillStyle = {r: 0, g: 1, b: 0, a: 0.5};
       ctx.fillRect(0, 0, 2, 2);
       const obj = Array.from(ctx.getImageData(0, 0, 1, 1).data);
-      ctx.clearRect(0, 0, 2, 2);
-      ctx.fillStyle = {r: 0, g: 1, b: 0, a: -1};         // alpha clamps to 0 → transparent
-      ctx.fillRect(0, 0, 2, 2);
-      const clamped = ctx.getImageData(0, 0, 1, 1).data[3];
       ctx.fillStyle = '#008000';
       ctx.fillStyle = { toString: () => '#0000ff' };     // toString → parsed as a colour
       const viaToString = ctx.fillStyle;
@@ -1316,11 +1315,10 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
       const keptNum = ctx.fillStyle;
       let threw = null;
       try { ctx.fillStyle = { toString() { throw new TypeError('x'); } }; } catch (e) { threw = e.name; }
-      JSON.stringify({ obj, clamped, viaToString, keptObj, keptNum, threw });
+      JSON.stringify({ obj, viaToString, keptObj, keptNum, threw });
     JS
     r = JSON.parse(out)
-    expect(r['obj']).to eq([0, 255, 0, 128])           # 0.5 alpha over transparent
-    expect(r['clamped']).to eq(0)
+    expect(r['obj']).to eq([0, 0, 0, 255])             # the default black: the object ignored
     expect(r['viaToString']).to eq('#0000ff')
     expect(r['keptObj']).to eq('#0000ff')              # invalid object ignored
     expect(r['keptNum']).to eq('#0000ff')              # bare-hex number ignored
