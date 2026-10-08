@@ -55,6 +55,7 @@ RSpec.describe 'DataTransfer bindings' do
         dt.effectAllowed = 'copyMove';
         out.push([dropBefore, dt.dropEffect, allowedBefore, dt.effectAllowed]);
         out.push(Object.getOwnPropertyNames(DataTransferItemList.prototype).sort());
+        out.push([Object.getOwnPropertyDescriptor(dt.items, '5'), Object.hasOwn(dt.items, 5), Object.keys(dt.items)]);
         return out;
       })()
     JS
@@ -71,7 +72,8 @@ RSpec.describe 'DataTransfer bindings' do
       [['Files'], 1],
       ['', '', nil, 0],
       ['none', 'move', 'none', 'copyMove'],
-      %w[add clear constructor length remove]
+      %w[add clear constructor length remove],
+      [nil, false, []]
     ])
   end
 

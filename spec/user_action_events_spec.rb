@@ -224,4 +224,44 @@ RSpec.describe 'User action events' do
       'after 0 0'
     ])
   end
+
+  # A drop from outside the page: its effects "uninitialized" (HTML's start for any drag) and its dropEffect set per
+  # event — "copy" over the page, the drag operation at the drop; getAsFile() a new File over the pick's data, read
+  # only when read; a format given twice the last one, as setData has it.
+  it "runs a drop's drag operation, and gives its files unread" do
+    session.visit '/'
+    file = File.expand_path(__FILE__)
+    session.execute_script(<<~JS)
+      window.__drop = [];
+      window.__reads = 0;
+      const read = globalThis.__csimReadFilePick;
+      globalThis.__csimReadFilePick = function () { __reads++; return read.apply(this, arguments); };
+      const z = document.getElementById('z');
+      for (const type of ['dragenter', 'dragover', 'drop']) {
+        z.addEventListener(type, (e) => {
+          const dt = e.dataTransfer;
+          __drop.push([type, dt.effectAllowed, dt.dropEffect].join(' '));
+          if (type === 'dragover') e.preventDefault();
+          if (type === 'drop') {
+            const copy = dt.items[0].getAsFile();
+            __drop.push([copy === dt.files[0], copy.name === dt.files[0].name, copy.size === dt.files[0].size, __reads].join(' '));
+          }
+        });
+      }
+    JS
+    session.find('#z').drop(file)
+    expect(session.evaluate_script('__drop')).to eq([
+      'dragenter uninitialized copy',
+      'dragover uninitialized copy',
+      'drop uninitialized copy',
+      'false true true 0'
+    ])
+  end
+
+  it 'drops a format given twice as its last value' do
+    session.visit '/'
+    session.execute_script("document.getElementById('z').addEventListener('drop', (e) => { window.__got = [e.dataTransfer.types, e.dataTransfer.getData('text/plain')]; }); document.getElementById('z').addEventListener('dragover', (e) => e.preventDefault())")
+    session.find('#z').drop({'text/plain' => 'a'}, {'TEXT/PLAIN' => 'b'})
+    expect(session.evaluate_script('__got')).to eq([['text/plain'], 'b'])
+  end
 end
