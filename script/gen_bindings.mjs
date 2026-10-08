@@ -199,6 +199,9 @@ const INTERFACES = [
   ['url', 'URLSearchParams', { install: true }],
   ['fetch', 'Headers', { install: true }],
   ['xhr', 'FormData', { install: true }],
+  ['xhr', 'XMLHttpRequestEventTarget', { install: true }],
+  ['xhr', 'XMLHttpRequestUpload', { install: true }],
+  ['xhr', 'XMLHttpRequest', { install: true, omit: { 'trust-token-api': 'setPrivateToken: Private State Tokens are not implemented (a WICG proposal)' } }],
   ['fetch', 'Request', {
     install: true,
     omit: { 'local-network-access': 'targetAddressSpace: Local Network Access is not implemented (a WICG proposal)' }
@@ -587,6 +590,11 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   // (…a buffer source of one of its types its conversion: an ArrayBuffer, a SharedArrayBuffer, a DataView, a typed
   // array — whose sharing and resizing that refuses)
   for (const u of buffers) steps.push([`isBufferOf(${expr}, ${JSON.stringify(u.idlType)})`, convert({ ...u, checked: true })]);
+  // (…a SharedArrayBuffer, where only ArrayBuffer is among them, the ArrayBuffer step's too — which converts it to one,
+  // a TypeError: it is shared — not a string's)
+  if (buffers.some((u) => u.idlType === 'ArrayBuffer') && !buffers.some((u) => u.idlType === 'SharedArrayBuffer')) {
+    steps.push([`isBufferOf(${expr}, "SharedArrayBuffer")`, `(() => { throw new TypeError(${failure(where, "Failed to convert value to 'ArrayBuffer'.")}); })()`]);
+  }
   // (…an object with an @@iterator the sequence's)
   for (const u of sequences) {
     steps.push([`isIterable(${expr}, ${failure(where)})`, convert(u)]);

@@ -69,7 +69,7 @@ RSpec.describe 'AbortSignal' do
     expect(session.evaluate_script(<<~JS)).to eq([true, nil])
       (() => {
         const x = new frames[0].XMLHttpRequest(), f = () => {};
-        Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'onload').set.call(x, f);
+        Object.getOwnPropertyDescriptor(XMLHttpRequestEventTarget.prototype, 'onload').set.call(x, f);
         return [x.onload === f, Object.getOwnPropertyDescriptor(BroadcastChannel.prototype, 'onmessage').get.call(new frames[0].BroadcastChannel('q'))];
       })()
     JS
