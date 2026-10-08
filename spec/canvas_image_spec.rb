@@ -1296,8 +1296,8 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   end
 
   # A colour object ({r, g, b[, a]}) is no fillStyle: HTML's is `(DOMString or CanvasGradient or CanvasPattern)`, the
-  # object a string ("[object Object]", ignored) — the proposal the colorObject WPT files test was abandoned
-  # (whatwg/html#6609); Chrome ignores it (measured: `#000000`, nothing painted).
+  # object a string ("[object Object]", ignored). The colorObject WPT files test a 2021 Chromium experiment that never
+  # shipped; Chrome and Firefox ignore the object (measured).
   it 'fillStyle ignores a colour object, coerces via toString, and rejects bare hex' do
     session = simulated_session(app)
     session.visit('/')

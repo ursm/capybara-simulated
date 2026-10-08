@@ -38768,40 +38768,40 @@ html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSRGB.html:
     / relative colour) ARE supported.
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.colorObject.html:
 - name: ctx.fillStyle works with color objects
-  reason: 'A colour object ({r, g, b[, a]}) as a fill or stroke style is a 2021 Chromium
-    proposal (crbug.com/1187575, whatwg/html#6609) that was abandoned: the issue closed
-    with "it looks like this is being abandoned in favor of the stringifying approach".
-    HTML''s IDL is `attribute (DOMString or CanvasGradient or CanvasPattern) fillStyle`
-    (and strokeStyle), so the object is converted to the string "[object Object]",
-    which is no colour and is ignored. Chrome ignores it too (measured: `#000000`,
-    nothing painted).'
+  reason: 'A colour object ({r, g, b[, a]}) as a fill or stroke style is in no spec:
+    the tests came with a 2021 Chromium experiment (WPT 979eaf1a39, "Make tests for
+    color object input on canvas 2d", Bug: 1187575) that never shipped. HTML''s IDL
+    is `attribute (DOMString or CanvasGradient or CanvasPattern) fillStyle` (and strokeStyle),
+    so the object is converted to the string "[object Object]", which is no colour
+    and is ignored. Chrome and Firefox both ignore it (measured: the previous style
+    kept, nothing painted in the object''s colour).'
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.colorObject.transparency.html:
 - name: ctx.fillStyle with color objects has transparency
-  reason: 'A colour object ({r, g, b[, a]}) as a fill or stroke style is a 2021 Chromium
-    proposal (crbug.com/1187575, whatwg/html#6609) that was abandoned: the issue closed
-    with "it looks like this is being abandoned in favor of the stringifying approach".
-    HTML''s IDL is `attribute (DOMString or CanvasGradient or CanvasPattern) fillStyle`
-    (and strokeStyle), so the object is converted to the string "[object Object]",
-    which is no colour and is ignored. Chrome ignores it too (measured: `#000000`,
-    nothing painted).'
+  reason: 'A colour object ({r, g, b[, a]}) as a fill or stroke style is in no spec:
+    the tests came with a 2021 Chromium experiment (WPT 979eaf1a39, "Make tests for
+    color object input on canvas 2d", Bug: 1187575) that never shipped. HTML''s IDL
+    is `attribute (DOMString or CanvasGradient or CanvasPattern) fillStyle` (and strokeStyle),
+    so the object is converted to the string "[object Object]", which is no colour
+    and is ignored. Chrome and Firefox both ignore it (measured: the previous style
+    kept, nothing painted in the object''s colour).'
 html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.colorObject.html:
 - name: ctx.strokeStyle works with color objects
-  reason: 'A colour object ({r, g, b[, a]}) as a fill or stroke style is a 2021 Chromium
-    proposal (crbug.com/1187575, whatwg/html#6609) that was abandoned: the issue closed
-    with "it looks like this is being abandoned in favor of the stringifying approach".
-    HTML''s IDL is `attribute (DOMString or CanvasGradient or CanvasPattern) fillStyle`
-    (and strokeStyle), so the object is converted to the string "[object Object]",
-    which is no colour and is ignored. Chrome ignores it too (measured: `#000000`,
-    nothing painted).'
+  reason: 'A colour object ({r, g, b[, a]}) as a fill or stroke style is in no spec:
+    the tests came with a 2021 Chromium experiment (WPT 979eaf1a39, "Make tests for
+    color object input on canvas 2d", Bug: 1187575) that never shipped. HTML''s IDL
+    is `attribute (DOMString or CanvasGradient or CanvasPattern) fillStyle` (and strokeStyle),
+    so the object is converted to the string "[object Object]", which is no colour
+    and is ignored. Chrome and Firefox both ignore it (measured: the previous style
+    kept, nothing painted in the object''s colour).'
 html/canvas/element/fill-and-stroke-styles/2d.strokeStyle.colorObject.transparency.html:
 - name: ctx.strokeStyle with color objects has transparency
-  reason: 'A colour object ({r, g, b[, a]}) as a fill or stroke style is a 2021 Chromium
-    proposal (crbug.com/1187575, whatwg/html#6609) that was abandoned: the issue closed
-    with "it looks like this is being abandoned in favor of the stringifying approach".
-    HTML''s IDL is `attribute (DOMString or CanvasGradient or CanvasPattern) fillStyle`
-    (and strokeStyle), so the object is converted to the string "[object Object]",
-    which is no colour and is ignored. Chrome ignores it too (measured: `#000000`,
-    nothing painted).'
+  reason: 'A colour object ({r, g, b[, a]}) as a fill or stroke style is in no spec:
+    the tests came with a 2021 Chromium experiment (WPT 979eaf1a39, "Make tests for
+    color object input on canvas 2d", Bug: 1187575) that never shipped. HTML''s IDL
+    is `attribute (DOMString or CanvasGradient or CanvasPattern) fillStyle` (and strokeStyle),
+    so the object is converted to the string "[object Object]", which is no colour
+    and is ignored. Chrome and Firefox both ignore it (measured: the previous style
+    kept, nothing painted in the object''s colour).'
 html/canvas/element/filters/2d.filter.canvasFilterObject.blur.exceptions.tentative.html:
 - name: Test exceptions on gaussianBlur filter
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

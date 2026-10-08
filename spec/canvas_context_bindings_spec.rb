@@ -66,4 +66,34 @@ RSpec.describe 'Canvas context bindings' do
     JS
     expect(got).to eq(%w[TypeError] * 12 + %w[none none none])
   end
+
+  # An image source is one by its slots — a forged OffscreenCanvas or ImageBitmap none (Chrome: TypeError) — and a
+  # canvas source is never asked for its context through the page's `getContext` (Chrome: not called), which would
+  # make one with default settings; getContextAttributes' dictionary has its members in their name's order.
+  it 'takes its image sources by what they are' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const ctx = document.createElement('canvas').getContext('2d');
+        const source = document.createElement('canvas');
+        let asked = 0;
+        const own = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function (...args) { asked++; return own.apply(this, args); };
+        ctx.drawImage(source, 0, 0);
+        ctx.createPattern(source, 'repeat');
+        HTMLCanvasElement.prototype.getContext = own;
+        const later = source.getContext('2d', {alpha: false});
+        return [
+          #{error('ctx.drawImage(Object.create(OffscreenCanvas.prototype), 0, 0)')},
+          #{error('ctx.drawImage(Object.create(ImageBitmap.prototype), 0, 0)')},
+          #{error("ctx.createPattern(Object.create(OffscreenCanvas.prototype), 'repeat')")},
+          asked, later.getContextAttributes().alpha,
+          Object.keys(ctx.getContextAttributes())
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      'TypeError', 'TypeError', 'TypeError', 0, false,
+      %w[alpha colorSpace colorType desynchronized willReadFrequently]
+    ])
+  end
 end

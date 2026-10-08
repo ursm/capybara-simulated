@@ -1270,6 +1270,12 @@ function distinguished(iface, name, [a, b]) {
   const isNumeric = (t) => t && !t.union && !t.nullable && NUMERIC_TYPES.has(t.idlType);
   // (…an object of the interface the interface's overload, anything else the string's or the number's, which converts it)
   const stringOrNumber = (t) => isString(t) || isNumeric(t);
+  // (…the interface's argument required: an optional one would take undefined, which §3.6.3 resolves first and the
+  // interface's test does not ask)
+  const optionalAt = (m) => m.arguments[index]?.optional;
+  if ((isInterface(typeOf(a)) && optionalAt(a)) || (isInterface(typeOf(b)) && optionalAt(b))) {
+    throw new Error(`${iface}.${name}: overloads told apart by an optional interface argument are not generated yet`);
+  }
   if (isInterface(typeOf(a)) && stringOrNumber(typeOf(b))) return { index, platformObject: a, other: b, type: typeOf(a).idlType };
   if (isInterface(typeOf(b)) && stringOrNumber(typeOf(a))) return { index, platformObject: b, other: a, type: typeOf(b).idlType };
   // (…a buffer source type, or a union of them — ImageData's ImageDataArray — and a numeric type)
