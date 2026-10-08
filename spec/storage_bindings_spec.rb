@@ -46,4 +46,27 @@ RSpec.describe 'Storage bindings' do
       'v', true, ['k']
     ])
   end
+
+  # Web IDL's legacy platform object steps (§3.9): Chrome's figures, but for a defineProperty of `{}` (no data
+  # descriptor — refused; Chrome stores "undefined") and a hidden name in getOwnPropertyNames (only visible names are
+  # own keys; Chrome lists it).
+  it 'answers its named properties as a legacy platform object' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        localStorage.clear();
+        localStorage.setItem('getItem', 'x');
+        const out = [delete localStorage.getItem, localStorage.getItem('getItem'), Reflect.preventExtensions(localStorage), Object.isExtensible(localStorage)];
+        const derived = Object.create(localStorage);
+        derived.z = 'w';
+        out.push(localStorage.getItem('z'), Object.hasOwn(derived, 'z'));
+        out.push(Reflect.defineProperty(localStorage, 'y', {writable: true}), localStorage.getItem('y'));
+        out.push(Reflect.defineProperty(localStorage, 'e', {}), localStorage.getItem('e'));
+        localStorage[Symbol('s')] = 1;
+        out.push(Object.getOwnPropertySymbols(localStorage).length, Object.getOwnPropertyNames(localStorage).sort());
+        localStorage.clear();
+        return out;
+      })()
+    JS
+    expect(got).to eq([true, 'x', false, true, nil, true, true, 'undefined', false, nil, 1, ['y']])
+  end
 end
