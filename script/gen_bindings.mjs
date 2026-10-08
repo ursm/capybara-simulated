@@ -187,6 +187,8 @@ const INTERFACES = [
   ['webidl', 'DOMException', { install: true }],
   ['webidl', 'QuotaExceededError', { install: true }],
   ['dom', 'DOMImplementation', { install: true }],
+  ['encoding', 'TextEncoder', { install: true }],
+  ['encoding', 'TextDecoder', { install: true }],
   ['FileAPI', 'Blob', { install: true }],
   ['FileAPI', 'File', { install: true }],
   ['FileAPI', 'FileList'],
@@ -297,7 +299,7 @@ const INTERFACES = [
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
   'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
-  'isBufferOf', 'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
+  'isBufferOf', 'toBuffer', 'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineIndexedIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers'
@@ -336,7 +338,7 @@ const HANDLED = {
     'LegacyUnforgeable', 'LegacyLenientThis', 'Replaceable', 'HTMLConstructor', 'ReflectSetter', 'ReflectURL', 'ReflectNonNegative',
     'ReflectRange', 'ReflectDefault', 'Exposed'
   ],
-  type: ['LegacyNullToEmptyString', 'EnforceRange', 'Clamp']
+  type: ['LegacyNullToEmptyString', 'EnforceRange', 'Clamp', 'AllowShared', 'AllowResizable']
 };
 // The globals a definition or member is [Exposed] in — a worker's three where it names Worker — or null where it names
 // none (a member then exposed wherever its interface is).
@@ -398,6 +400,14 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
   const ranged = ['unsigned short', 'unsigned long', 'long', 'unsigned long long', 'long long'];
   if ((enforceRange || clamp) && !ranged.includes(t.idlType)) throw new Error(`${label}: no binding enforces or clamps the range of ${t.idlType} yet`);
   let c;
+  // (…a buffer source type (Web IDL §3.2.26): an object of the type, its buffer not shared but where [AllowShared], not
+  // resizable but where [AllowResizable])
+  if (BUFFER_TYPES.has(t.idlType)) {
+    const allowShared = extAttrs.some((e) => e.name === 'AllowShared');
+    const allowResizable = extAttrs.some((e) => e.name === 'AllowResizable');
+    c = `toBuffer(${expr}, ${JSON.stringify(t.idlType)}, ${allowShared}, ${allowResizable}, ${conversionError(where, t.idlType)}, ${failure(where)})`;
+    return t.nullable ? `(${expr} == null ? null : ${c})` : c;
+  }
   switch (enforceRange ? 'EnforceRange' : clamp ? 'Clamp' : t.idlType) {
     case 'EnforceRange': c = `toEnforcedInteger(${expr}, ${JSON.stringify(t.idlType)}, ${failure(where)})`; break;
     case 'Clamp': c = `toClampedInteger(${expr}, ${JSON.stringify(t.idlType)}, ${failure(where)})`; break;
@@ -474,7 +484,8 @@ function flattenUnion(t) {
     const def = !u.union && typedefs.get(u.idlType);
     const type = def ? typeOf(def, u) : u;
     if (type.nullable) includesNullable = true;
-    return type.union ? type.idlType.flatMap(flatten) : [{ ...typeOf(type, {}), nullable: false }];
+    // (…a union's extended attributes each member's: `[AllowShared] ArrayBufferView` is each typed array's)
+    return type.union ? type.idlType.flatMap((m) => flatten(typeOf(m, { extAttrs: type.extAttrs }))) : [{ ...typeOf(type, {}), nullable: false }];
   };
   const members = t.idlType.flatMap(flatten).filter((u) => !ABSENT_INTERFACES.has(u.idlType));
   return { members, includesNullable };
@@ -529,8 +540,9 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
     checks.add(check);
     steps.push([`IS_${check}(${expr})`, expr]);
   }
-  // (…a buffer source of one of its types as it is: an ArrayBuffer, a DataView, a typed array)
-  for (const u of buffers) steps.push([`isBufferOf(${expr}, ${JSON.stringify(u.idlType)})`, expr]);
+  // (…a buffer source of one of its types its conversion: an ArrayBuffer, a SharedArrayBuffer, a DataView, a typed
+  // array — whose sharing and resizing that refuses)
+  for (const u of buffers) steps.push([`isBufferOf(${expr}, ${JSON.stringify(u.idlType)})`, convert(u)]);
   // (…an object with an @@iterator the sequence's)
   for (const u of sequences) {
     steps.push([`(${expr} !== null && (typeof ${expr} === 'object' || typeof ${expr} === 'function') && typeof ${expr}[Symbol.iterator] === 'function')`, convert(u)]);
