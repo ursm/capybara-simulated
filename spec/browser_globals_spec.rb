@@ -314,23 +314,4 @@ RSpec.describe 'browser global surface' do
       expect(session.evaluate_script('window.__lock')).to eq('NotSupportedError')
     end
   end
-
-  describe 'observer stubs' do
-    it 'IntersectionObserver / ResizeObserver / PerformanceObserver construct cleanly and have spec methods' do
-      # `unobserve` is on Intersection / Resize / Mutation observers
-      # but NOT on PerformanceObserver per spec.
-      shape = session.evaluate_script(<<~JS)
-        const probe = (Cls, methods) => {
-          const o = new Cls(() => {});
-          return methods.every(m => typeof o[m] === 'function');
-        };
-        ({
-          io: probe(IntersectionObserver, ['observe', 'unobserve', 'disconnect', 'takeRecords']),
-          ro: probe(ResizeObserver,       ['observe', 'unobserve', 'disconnect', 'takeRecords']),
-          po: probe(PerformanceObserver,  ['observe', 'disconnect', 'takeRecords'])
-        })
-      JS
-      expect(shape).to eq('io' => true, 'ro' => true, 'po' => true)
-    end
-  end
 end

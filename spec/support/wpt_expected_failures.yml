@@ -6535,7 +6535,6 @@ html/rendering/replaced-elements/images/img-fallback-baseline-alignment.html:
 - "[harness] TIMEOUT"
 html/rendering/replaced-elements/images/img-represents-image-size-before-partially-available.html:
 - "<img> representing image: Natural size before partially available"
-- "[harness] TIMEOUT"
 html/rendering/replaced-elements/images/img-represents-nothing-style-mutation.html:
 - "<img> representing nothing and image related style mutation"
 html/rendering/replaced-elements/images/img-sizes-auto.html:

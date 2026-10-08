@@ -812,6 +812,22 @@ pub(crate) fn client_box(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
     Some([round(e[7]), round(e[4]), round(w.max(0.0)), round(h.max(0.0))])
 }
 
+// The sizes a ResizeObserver observes of `id` (Resize Observer §3.4.8), `[border width, border height, content width,
+// content height, padding-left, padding-top, vertical]`: its border area and content area as the layout sized them —
+// unrounded, and no `transform` changes them ("observations will not be triggered by CSS transforms") — and whether its
+// writing mode is vertical, whose inline size is a height. None where it has none: no box, a box-less one, and a
+// non-replaced inline one ("non-replaced inline Elements will always have an empty content rect").
+pub(crate) fn observed_sizes(arena: &RealmArena, id: NodeId) -> Option<[f64; 7]> {
+    let style = box_style(arena, id)?;
+    if is_boxless(arena, id, &style) || non_replaced_inline(arena, id, &style) {
+        return None;
+    }
+    let [_, _, w, h] = placed_box(arena, id)?;
+    let e = edges(arena, id).unwrap_or([0.0; 12]);
+    let [cw, ch] = [(w - e[1] - e[3] - e[5] - e[7]).max(0.0), (h - e[0] - e[2] - e[4] - e[6]).max(0.0)];
+    Some([w, h, cw, ch, e[3], e[0], f64::from(u8::from(style.writing_mode.is_vertical()))])
+}
+
 // The VIEWPORT a frame element gives the document inside it, `[x, y, w, h]` in this one's viewport: its box less its
 // borders and padding — HTML draws a 2px frame round an `<iframe>`, and the document inside a `width: 200px` one sees a
 // viewport 200 wide, not the 204 its border box measures — as the layout sized it: a `transform` draws the frame
@@ -1321,6 +1337,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "scrollSize", scroll_size_op, context_id);
     register(scope, ns, "scrollRange", scroll_range_op, context_id);
     register(scope, ns, "clientBox", client_box_op, context_id);
+    register(scope, ns, "observedSizes", observed_sizes_op, context_id);
     register(scope, ns, "frameViewport", frame_viewport_op, context_id);
     register(scope, ns, "usedInsets", used_insets_op, context_id);
     register(scope, ns, "clientRects", client_rects_op, context_id);
@@ -1420,6 +1437,11 @@ fn used_insets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // viewport a frame element gives the document inside it (`frame_viewport`) — written to the Float64Array `out`.
 fn client_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, client_box);
+}
+// __dom.observedSizes(nid, out) -> whether `nid` has a box a ResizeObserver measures: its sizes (`observed_sizes`)
+// written to the Float64Array `out`.
+fn observed_sizes_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, observed_sizes);
 }
 fn frame_viewport_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, frame_viewport);

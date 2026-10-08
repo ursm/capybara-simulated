@@ -4,14 +4,28 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
-# IntersectionObserver and PerformanceObserver, with their entries and entry lists, generated from their IDL: arguments
-# required and converted, brands checked, state in slots. The figures are headless Chrome's, but for two the spec
+# IntersectionObserver, ResizeObserver and PerformanceObserver, with their entries, sizes and entry lists, generated from
+# their IDL: arguments required and converted, brands checked, state in slots. The figures are headless Chrome's, but for two the spec
 # decides: IntersectionObserverEntry has a constructor (the IDL's; Chrome's is illegal), and trackVisibility clamps a
 # delay below 100 to 100 (the spec's "set delay to 100"; Chrome throws NotSupportedError).
 RSpec.describe 'Observer bindings' do
   let(:app) {
-    lambda do |_env|
-      [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>']]
+    lambda do |env|
+      if env['PATH_INFO'] == '/boxes'
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><meta charset="utf-8"><style>
+            #a { width: 100px; height: 50px; padding: 3px 5px; border: 2px solid; }
+            #v { writing-mode: vertical-rl; width: 30px; height: 70px; padding: 1px; }
+            #n { display: none; }
+            #z { width: 0; height: 0; }
+            #t { display: table; width: 40px; height: 20px; padding: 2px; border: 1px solid; }
+            #x { width: 10px; height: 10px; transform: scale(3); }
+          </style>
+          <body><div id=a></div><span id=s>text here</span><div id=v></div><div id=n></div><div id=z></div><div id=t></div><div id=x></div>
+        HTML
+      else
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>']]
+      end
     end
   }
   let(:session) {
@@ -121,6 +135,98 @@ RSpec.describe 'Observer bindings' do
     expect(poll_until { session.evaluate_script('window.got.length === 2 && window.got') }).to eq([
       [['m1'], true, true, {'droppedEntriesCount' => 0}, '[object PerformanceObserverEntryList]'],
       [['m2'], true, true, {}, '[object PerformanceObserverEntryList]']
+    ])
+  end
+
+  it 'is what the ResizeObserver IDL says' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const error = (f) => { try { f(); return 'none'; } catch (e) { return e.name + ': ' + e.message; } };
+        return [
+          error(() => new ResizeObserver()),
+          error(() => new ResizeObserver(1)),
+          error(() => new ResizeObserver(() => {}).observe(document.body, {box: 'x'})),
+          error(() => new ResizeObserver(() => {}).observe(document)),
+          error(() => new ResizeObserverEntry()),
+          error(() => new ResizeObserverSize()),
+          error(() => ResizeObserver.prototype.disconnect.call({})),
+          Object.getOwnPropertyNames(ResizeObserver.prototype).sort(),
+          Object.getOwnPropertyNames(ResizeObserverEntry.prototype).sort()
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      "TypeError: Failed to construct 'ResizeObserver': 1 argument required, but only 0 present.",
+      "TypeError: Failed to construct 'ResizeObserver': parameter 1 is not of type 'Function'.",
+      "TypeError: Failed to execute 'observe' on 'ResizeObserver': Failed to read the 'box' property from 'ResizeObserverOptions': The provided value 'x' is not a valid enum value of type ResizeObserverBoxOptions.",
+      "TypeError: Failed to execute 'observe' on 'ResizeObserver': parameter 1 is not of type 'Element'.",
+      "TypeError: Failed to construct 'ResizeObserverEntry': Illegal constructor",
+      "TypeError: Failed to construct 'ResizeObserverSize': Illegal constructor",
+      'TypeError: Illegal invocation',
+      %w[constructor disconnect observe unobserve],
+      %w[borderBoxSize constructor contentBoxSize contentRect devicePixelContentBoxSize target]
+    ])
+  end
+
+  # The first observation of each target, at the rendering update after the animation frame callbacks — a size of 0 too,
+  # the last one reported starting at (-1, -1) — in the order observed, a target observed again at the end: its content
+  # rect at its padding edge, its sizes in its writing mode's axes, a non-replaced inline's and an unrendered one's 0, a
+  # table's its table box's, a transform none of it. Chrome's figures.
+  it 'reports the sizes a ResizeObserver observes' do
+    session.visit('/boxes')
+    session.execute_script(<<~JS)
+      window.got = [];
+      const sizes = (list) => list.map((s) => [s.inlineSize, s.blockSize]);
+      const ro = new ResizeObserver(function (entries, observer) {
+        for (const e of entries) {
+          const r = e.contentRect;
+          window.got.push([e.target.id, [r.x, r.y, r.width, r.height], sizes(e.contentBoxSize), sizes(e.borderBoxSize),
+            sizes(e.devicePixelContentBoxSize), e.contentBoxSize === e.contentBoxSize, Object.isFrozen(e.borderBoxSize),
+            this === ro && observer === ro]);
+        }
+      });
+      for (const id of ['a', 's', 'v', 'n', 'z', 't', 'x']) ro.observe(document.getElementById(id));
+      ro.observe(document.getElementById('a'), {box: 'border-box'});
+      requestAnimationFrame(() => window.got.push('raf'));
+      window.synchronous = window.got.length;
+    JS
+    expect(session.evaluate_script('window.synchronous')).to eq(0)
+    expect(poll_until { session.evaluate_script('window.got.length === 8 && window.got') }).to eq([
+      'raf',
+      ['s', [0, 0, 0, 0], [[0, 0]], [[0, 0]], [[0, 0]], true, true, true],
+      ['v', [1, 1, 30, 70], [[70, 30]], [[72, 32]], [[70, 30]], true, true, true],
+      ['n', [0, 0, 0, 0], [[0, 0]], [[0, 0]], [[0, 0]], true, true, true],
+      ['z', [0, 0, 0, 0], [[0, 0]], [[0, 0]], [[0, 0]], true, true, true],
+      ['t', [2, 2, 40, 20], [[40, 20]], [[46, 26]], [[40, 20]], true, true, true],
+      ['x', [0, 0, 10, 10], [[10, 10]], [[10, 10]], [[10, 10]], true, true, true],
+      ['a', [5, 3, 100, 50], [[100, 50]], [[114, 60]], [[100, 50]], true, true, true]
+    ])
+  end
+
+  # The loop (HTML "update the rendering"): a callback that resizes what it observes is called again in the same update
+  # only for observations deeper than the shallowest it was given — the child the parent's width carries — and the
+  # parent's, skipped, is reported as an ErrorEvent with no error, at the document's 0:0 (Chrome).
+  it 'reports a ResizeObserver loop it cannot finish' do
+    session.execute_script(<<~JS)
+      document.body.innerHTML = '<div id=a style="width: 10px; height: 10px"><div id=b style="height: 5px"></div></div>';
+      window.got = [];
+      window.addEventListener('error', (e) => {
+        window.got.push([e.message, e.error, e.filename === location.href, e.lineno, e.colno, e.cancelable, e.isTrusted]);
+        e.preventDefault();
+      });
+      let n = 0;
+      const ro = new ResizeObserver((entries) => {
+        window.got.push(entries.map((e) => e.target.id + ':' + e.contentRect.width).join(','));
+        if (++n === 1) document.getElementById('a').style.width = '11px';
+      });
+      ro.observe(document.getElementById('a'));
+      ro.observe(document.getElementById('b'));
+    JS
+    expect(poll_until { session.evaluate_script('window.got.length >= 4 && window.got') }).to eq([
+      'a:10,b:10',
+      'b:11',
+      ['ResizeObserver loop completed with undelivered notifications.', nil, true, 0, 0, true, true],
+      'a:11'
     ])
   end
 end
