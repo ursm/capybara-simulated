@@ -1126,4 +1126,22 @@ RSpec.describe 'IDL bindings' do
     JS
     expect(got).to eq([true, 2, 'a'])
   end
+
+  # A platform object's internal slots are no property of it — Reflect.ownKeys finds none, as Chrome's — and every realm
+  # of the page reads the others': the private name the slots are stamped under is one, the snapshot's, so a frame's
+  # DOMPoint answers the window's getter and the window's the frame's.
+  it "keeps a platform object's slots out of its keys, and reads them across realms" do
+    session.visit '/'
+    session.execute_script("document.body.append(Object.assign(document.createElement('iframe'), {srcdoc: '<p>f</p>'}))")
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const x = Object.getOwnPropertyDescriptor(DOMPointReadOnly.prototype, 'x').get;
+        const theirX = Object.getOwnPropertyDescriptor(frames[0].DOMPointReadOnly.prototype, 'x').get;
+        return [Reflect.ownKeys(new DOMRect(1, 2, 3, 4)).length, Reflect.ownKeys(new AbortController().signal).length,
+                x.call(new frames[0].DOMPoint(7)), theirX.call(new DOMPoint(8)),
+                frames[0].DOMRectList.prototype.item.call(document.body.getClientRects(), 0) !== null];
+      })()
+    JS
+    expect(got).to eq([0, 0, 7, 8, true])
+  end
 end

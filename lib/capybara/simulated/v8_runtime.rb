@@ -924,9 +924,6 @@ module Capybara
         realm.eval_void(RuntimeShared.snapshot_src) unless has_bridge
         attach_run_script_with_cache(realm)
         attach_realm_esm_entry(realm)
-        # (…and the agent's internal-slots store, its top-level realm's, ahead of anything the realm makes: one realm's
-        # platform objects are another's to brand-check — webidl.js `__csimAdoptSlotsStore`)
-        ctx.eval_void("RustyRacer.contextGlobal(#{realm.id}).__csimAdoptSlotsStore(__csimSlotsStore());")
         reseed_realm_js(realm)
         realm
       end
