@@ -199,6 +199,7 @@ const INTERFACES = [
   ['url', 'URLSearchParams', { install: true }],
   ['fetch', 'Headers', { install: true }],
   ['xhr', 'FormData', { install: true }],
+  ['html', 'Storage', { install: true, namedProperties: 'the Proxy each storage area is (storage.js)' }],
   ['xhr', 'XMLHttpRequestEventTarget', { install: true }],
   ['xhr', 'XMLHttpRequestUpload', { install: true }],
   ['xhr', 'XMLHttpRequest', { install: true, omit: { 'trust-token-api': 'setPrivateToken: Private State Tokens are not implemented (a WICG proposal)' } }],
@@ -784,10 +785,11 @@ function generateInterface(def, options = {}) {
       continue;
     }
     if (m.type === 'operation') {
-      if (m.special === 'getter' && m.arguments.length === 1 && m.arguments[0].idlType.idlType === 'DOMString' && options.namedProperties) {
-        // (…a named property getter the installing class's objects answer themselves: `namedProperties` says how)
-        continue;
-      }
+      // (…a named property getter / setter / deleter the installing class's objects answer themselves: `namedProperties`
+      // says how — but one with a name is an ordinary operation too: Storage's getItem / setItem / removeItem)
+      const namedProperty = options.namedProperties && ['getter', 'setter', 'deleter'].includes(m.special) &&
+        m.arguments.length >= 1 && m.arguments[0].idlType.idlType === 'DOMString';
+      if (namedProperty && !m.name) continue;
       if (m.special === 'static') {
         // (…a static operation the interface object's own, of no object: `DeviceMotionEvent.requestPermission()`)
         if (!options.install) throw new Error(`${label}: a static operation of an interface the binding makes is not generated yet`);
@@ -818,7 +820,9 @@ function generateInterface(def, options = {}) {
         body.push(`    toJSON() { const self = ${self}; return { ${attrs.map((a) => `${a.name}: impl.get_${a.name}(self)`).join(', ')} }; }`);
         continue;
       }
-      if (m.special === 'getter') {
+      if (namedProperty) {
+        // (…its ordinary operation below)
+      } else if (m.special === 'getter') {
         if (m.arguments.length !== 1 || m.arguments[0].idlType.idlType !== 'unsigned long') throw new Error(`${label}: only an indexed getter is generated`);
         indexed = m.name;
       } else if (m.special) {

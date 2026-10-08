@@ -5833,12 +5833,6 @@ html/dom/idlharness.https.html:
 - SharedWorker interface object length
 - 'SharedWorker interface: attribute port'
 - 'SharedWorker interface: existence and properties of interface object'
-- 'Storage interface: attribute length'
-- 'Storage interface: operation clear()'
-- 'Storage interface: operation getItem(DOMString)'
-- 'Storage interface: operation key(unsigned long)'
-- 'Storage interface: operation removeItem(DOMString)'
-- 'Storage interface: operation setItem(DOMString, DOMString)'
 - Stringification of document.all
 - Stringification of document.createElement("canvas").getContext("2d")
 - Stringification of document.createElement("form").elements
@@ -8531,9 +8525,6 @@ webstorage/localstorage-basic-partitioned.sub.html:
 webstorage/localstorage-share-data-unrelated-origins.html:
 - Ensure two about:srcdoc origins cannot share localstorage
 - "[harness] TIMEOUT"
-webstorage/storage_key.window.js:
-- localStorage.key() should return null for out-of-range arguments.
-- sessionStorage.key() should return null for out-of-range arguments.
 webstorage/storage_session_window_open.window.js:
 - A new window to make sure there is a copy of the previous window's sessionStorage,
   and that they diverge after a change
