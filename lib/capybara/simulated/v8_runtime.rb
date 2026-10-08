@@ -431,6 +431,10 @@ module Capybara
       # The window's virtual clock as its last event-loop step left it (ms), which a worker's clock follows — read from
       # the worker's own thread (Browser#run_worker).
       def clock = @clock || 0.0
+
+      # Whether the page's realms are cross-origin isolated (its top-level document's COOP + COEP — `init_realm`), which
+      # the browser sets as a document commits, ahead of the realm it builds for it.
+      attr_accessor :cross_origin_isolated
       # …or as the step has moved it since, where the tab has a worker to follow it (timers.js `moveClock`): a worker
       # reads the time a message posted in the middle of a step was sent at, and not the time before it.
       def clock_at_least(ms) = (@clock = [clock, ms.to_f].max)
@@ -811,8 +815,10 @@ module Capybara
 
       # A window realm's own state (`__csimInitRealm()`: its document, the Worker constructors) and the user agent a test
       # set, which its navigator answers — the top-level window's and every frame's and pop-up's alike.
+      # …and whether it is cross-origin isolated: its top-level document's, which a frame's shares (`cross_origin_isolated`,
+      # the browser's to set as a document commits).
       def init_realm(c)
-        c.eval_void('__csimInitRealm();')
+        c.call('__csimInitRealm', @cross_origin_isolated == true)
         c.call('__csimSetUserAgent', @browser.default_user_agent) if @browser.default_user_agent
       end
 
@@ -1652,7 +1658,8 @@ module Capybara
         # the top-level-script path (same as the worker's own body eval).
         c.attach('__csim_workerImportEval', ->(src) { c.eval_void(src.to_s) })
         # The worker's scope, of its KIND — 'dedicated', 'shared' or 'service' — and name (worker-globals.js).
-        c.call('__csim_installWorkerScope', kind, name.to_s)
+        # (…cross-origin isolated as its window is — a service worker by no document's headers: not)
+        c.call('__csim_installWorkerScope', kind, name.to_s, kind != 'service' && browser.cross_origin_isolated?)
         # …and the user agent a test set, which its navigator answers as its requests send it.
         c.call('__csimSetUserAgent', browser.default_user_agent) if browser.default_user_agent
         WorkerRuntime.new(c)

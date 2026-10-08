@@ -2061,6 +2061,9 @@ module Capybara
         @last_response_status  = status
         @last_response_headers = headers.to_h
       end
+      # Whether the page is cross-origin isolated (`cross_origin_isolated_response?`, as its document committed) — which its
+      # workers are too.
+      def cross_origin_isolated? = @runtime&.cross_origin_isolated == true
 
       def set_header(name, value)         ; @sticky_headers[name.to_s] = value.to_s ; end
       # Capybara's `current_window.resize_to(w, h)` lands here; the
@@ -11061,6 +11064,14 @@ module Capybara
       # (e.g. Avo's `redirect_to main_app.hey_path` → static view). Kept
       # small (~10 retry intervals) so failing-assertion paths don't pay
       # for the wait.
+      # Whether the document's response makes it cross-origin isolated (HTML "obtain a cross-origin opener policy" and
+      # "obtain an embedder policy"): `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy:
+      # require-corp` or `credentialless` — every document here is in a secure context.
+      private def cross_origin_isolated_response?
+        policy = ->(name) { (@last_response_headers || {}).find {|k, _| k.to_s.casecmp?(name) }&.last.then { Array(_1).first.to_s.split(';').first.to_s.strip } }
+        policy.('cross-origin-opener-policy') == 'same-origin' && %w[require-corp credentialless].include?(policy.('cross-origin-embedder-policy'))
+      end
+
       def boot_response_into_ctx(html)
         # (The outgoing page's due-now init ran back at the navigation's entry
         # point — `flush_outgoing_page_init`, called before anything commits.)
@@ -11072,6 +11083,7 @@ module Capybara
         reset_sw_race_state
         terminate_document_workers
         drop_document_websockets
+        @runtime.cross_origin_isolated = cross_origin_isolated_response?
         @runtime.rebuild_ctx
         # The service workers that outlive the navigation follow the new page's clock (timers.js `followWindowClock`).
         @runtime.call('__csimFollowWindowClock') unless @workers.empty?

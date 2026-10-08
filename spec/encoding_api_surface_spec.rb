@@ -105,4 +105,32 @@ RSpec.describe 'Encoding API surface' do
     poll_until { session.evaluate_script('window.got') }
     expect(session.evaluate_script('window.got')).to eq([true])
   end
+
+  # A realm that is not cross-origin isolated has no SharedArrayBuffer constructor — Chrome 154's and Firefox 157's
+  # have none (measured) — a window's, a frame's, a worker's. A snapshot stub's alias (ArrayBuffer itself) sat over the
+  # engine's own one, so a page found a "SharedArrayBuffer" either way.
+  it 'exposes no SharedArrayBuffer in a realm that is not cross-origin isolated' do
+    session.execute_script(<<~JS)
+      window.got = null;
+      const w = new Worker(URL.createObjectURL(new Blob(['postMessage(typeof SharedArrayBuffer)'], {type: 'text/javascript'})));
+      w.onmessage = (e) => { window.got = [crossOriginIsolated, typeof SharedArrayBuffer, typeof frames[1].SharedArrayBuffer, e.data]; };
+    JS
+    poll_until { session.evaluate_script('window.got') }
+    expect(session.evaluate_script('window.got')).to eq([false, 'undefined', 'undefined', 'undefined'])
+  end
+
+  # …and one whose top-level document is served COOP same-origin + COEP require-corp is: `crossOriginIsolated`, and its
+  # SharedArrayBuffer — its frames' and its dedicated workers' too.
+  it 'is cross-origin isolated, SharedArrayBuffer and all, where its document is served COOP and COEP' do
+    headers = {'content-type' => 'text/html', 'cross-origin-opener-policy' => 'same-origin', 'cross-origin-embedder-policy' => 'require-corp'}
+    isolated = simulated_session(->(env) { [200, headers, [env['PATH_INFO'] == '/' ? '<iframe src="/child"></iframe>' : '<p>child</p>']] })
+    isolated.visit '/'
+    isolated.execute_script(<<~JS)
+      window.got = null;
+      const w = new Worker(URL.createObjectURL(new Blob(['postMessage([crossOriginIsolated, typeof SharedArrayBuffer])'], {type: 'text/javascript'})));
+      w.onmessage = (e) => { window.got = [crossOriginIsolated, typeof SharedArrayBuffer, typeof frames[0].SharedArrayBuffer, ...e.data]; };
+    JS
+    poll_until { isolated.evaluate_script('window.got') }
+    expect(isolated.evaluate_script('window.got')).to eq([true, 'function', 'function', true, 'function'])
+  end
 end
