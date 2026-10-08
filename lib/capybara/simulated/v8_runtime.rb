@@ -597,11 +597,6 @@ module Capybara
         ctx.call('__nextTimerDelay').to_i
       end
 
-      def reset_timers
-        return if @ctx.nil?
-        ctx.call('__resetTimers')
-      end
-
       # Brings up a snapshot-fresh realm for the next page via the warm path:
       # `Context#reset` swaps in a brand-new global on the long-lived isolate —
       # a FULL fresh realm, not a partial in-context reset (those are unsafe per
@@ -1600,8 +1595,8 @@ module Capybara
         # attached-fn cross-thread round-trip.
         c.eval_void("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
         # Register the bridge's recorder for V8's promise-reject notifications
-        # — the one channel that surfaces rejections no handler sees by the
-        # checkpoint (fire-and-forget async functions, bare `Promise.reject`,
+        # — the one channel that surfaces rejections no handler sees by HTML's
+        # notify task (fire-and-forget async functions, bare `Promise.reject`,
         # a throwing `then` callback with nothing downstream). Post-snapshot: the host
         # namespace doesn't exist while the snapshot is built, which is why
         # unhandled-rejection.js leaves registration to us. Main realm only —
