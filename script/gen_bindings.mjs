@@ -178,6 +178,8 @@ const INTERFACES = [
   ['css-font-loading', 'FontFaceSet', { install: true }],
   ['html', 'MediaError'],
   ['html', 'ImageData', { install: true }],
+  ['html', 'CanvasGradient'],
+  ['html', 'CanvasPattern'],
   ['SVG', 'SVGAnimatedString'],
   ['clipboard-apis', 'ClipboardItem', { install: true }],
   ['clipboard-apis', 'Clipboard', { install: true }],

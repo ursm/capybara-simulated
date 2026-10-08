@@ -3576,12 +3576,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - text-transform handles Turkish casing ("<div><div lang='tr' style='text-transform:uppercase'>i
   ı")
 html/dom/idlharness.any.js:
-- CanvasGradient interface object length
-- 'CanvasGradient interface: existence and properties of interface object'
-- 'CanvasGradient interface: operation addColorStop(double, DOMString)'
-- CanvasPattern interface object length
-- 'CanvasPattern interface: existence and properties of interface object'
-- 'CanvasPattern interface: operation setTransform(optional DOMMatrix2DInit)'
 - DOMStringList interface object length
 - DOMStringList interface object name
 - 'DOMStringList interface: attribute length'
@@ -3878,12 +3872,6 @@ html/dom/idlharness.https.html:
   property'
 - 'BarProp interface: existence and properties of interface prototype object''s @@unscopables
   property'
-- CanvasGradient interface object length
-- 'CanvasGradient interface: existence and properties of interface object'
-- 'CanvasGradient interface: operation addColorStop(double, DOMString)'
-- CanvasPattern interface object length
-- 'CanvasPattern interface: existence and properties of interface object'
-- 'CanvasPattern interface: operation setTransform(optional DOMMatrix2DInit)'
 - CanvasRenderingContext2D interface object length
 - 'CanvasRenderingContext2D interface: attribute canvas'
 - 'CanvasRenderingContext2D interface: attribute direction'
