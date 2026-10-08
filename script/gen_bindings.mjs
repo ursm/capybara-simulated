@@ -412,7 +412,11 @@ const UNADOPTED_SPECS = {
   'webcrypto-modern-algos': '[WICG] Modern Algorithms in the Web Cryptography API: a WICG proposal — its KeyFormat ' +
     'enum redefines the standard one, its encapsulate / decapsulate / getPublicKey members are unimplemented'
 };
-for (const spec of Object.keys(UNADOPTED_SPECS)) delete all[spec];
+// (…one @webref/idl no longer has — renamed, merged, adopted — is an error: the entry is re-checked)
+for (const spec of Object.keys(UNADOPTED_SPECS)) {
+  if (!(spec in all)) throw new Error(`${spec}: @webref/idl has no such spec now — re-check it in UNADOPTED_SPECS`);
+  delete all[spec];
+}
 // …and what such a file carries of the standard it extends — definitions @webref/idl moved there, out of the standard's
 // own — the standard's text, word for word, with where it is.
 const STANDARD_TEXT_MOVED = {
@@ -421,7 +425,16 @@ const STANDARD_TEXT_MOVED = {
     enum KeyFormat { "raw", "spki", "pkcs8", "jwk" };
     enum KeyUsage { "encrypt", "decrypt", "sign", "verify", "deriveKey", "deriveBits", "wrapKey", "unwrapKey" };`
 };
-for (const [spec, text] of Object.entries(STANDARD_TEXT_MOVED)) all[spec] = parseIdl(text);
+// (…a definition @webref/idl gives again, in any spec, is an error: the entry goes)
+for (const [spec, text] of Object.entries(STANDARD_TEXT_MOVED)) {
+  const moved = parseIdl(text);
+  for (const d of moved) {
+    if (Object.values(all).some((defs) => defs.some((o) => o.name === d.name && !o.partial))) {
+      throw new Error(`${d.name}: @webref/idl defines it again — remove it from STANDARD_TEXT_MOVED`);
+    }
+  }
+  all[spec] = moved;
+}
 // What an editor's draft says that @webref/idl's snapshot of it does not yet — each its draft's IDL, word for word, with
 // the draft it is from; one a later @webref/idl has too is an error (below), and the entry goes.
 const EDITORS_DRAFT_ADDITIONS = {

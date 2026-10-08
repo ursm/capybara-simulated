@@ -29,11 +29,6 @@ FileAPI/url/url-in-tags.window.js:
 - "[harness] TIMEOUT"
 FileAPI/url/url_xmlhttprequest_img.html:
 - "== FileAPI/url/url_xmlhttprequest_img-ref.html (never ready to capture)"
-WebCryptoAPI/derive_bits_keys/derive_key_and_encrypt.https.any.js:
-- HKDF derivation of a ECDH key 1
-- HKDF derivation of a ECDH key 2
-- PBKDF2 derivation of a ECDH key 1
-- PBKDF2 derivation of a ECDH key 2
 WebCryptoAPI/import_export/ec_importKey.https.any.js:
 - 'Good parameters: P-256 bits (spki, buffer(59, compressed), {name: ECDH, namedCurve:
   P-256}, true, [])'
