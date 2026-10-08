@@ -183,4 +183,26 @@ RSpec.describe 'MediaError and SVGAnimatedString bindings' do
     JS
     expect(got).to eq([true, true, 0, 'NotFoundError', [true, "a\nb\nc"], true, false])
   end
+
+  # An element's dataset is a DOMStringMap by its slots — any realm's — made by the platform alone, its named setter's
+  # value a DOMString (a Symbol a TypeError, as Web IDL's conversion, where String() would have written "Symbol()").
+  it "gives an element its DOMStringMap" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const error = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
+        const el = document.createElement('div');
+        el.dataset.fooBar = {toString: () => 'x'};
+        const frame = document.body.appendChild(document.createElement('iframe')).contentWindow;
+        return [
+          [Object.prototype.toString.call(el.dataset), el.dataset === el.dataset, el.getAttribute('data-foo-bar'), Object.keys(el.dataset)],
+          el.dataset instanceof DOMStringMap,
+          frame.Object.prototype.toString.call(frame.document.createElement('p').dataset),
+          error(() => new DOMStringMap()),
+          error(() => { el.dataset.sym = Symbol(); }),
+          el.hasAttribute('data-sym')
+        ];
+      })()
+    JS
+    expect(got).to eq([['[object DOMStringMap]', true, 'x', ['fooBar']], true, '[object DOMStringMap]', 'TypeError', 'TypeError', false])
+  end
 end

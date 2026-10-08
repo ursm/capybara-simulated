@@ -185,6 +185,7 @@ const INTERFACES = [
   ['html', 'ValidityState'],
   ['html', 'CustomStateSet', { install: true }],
   ['html', 'ElementInternals', { install: true }],
+  ['html', 'DOMStringMap', { install: true, namedProperties: 'the Proxy each element\'s dataset is (dom-nodes.js)' }],
   ['html', 'CanvasGradient'],
   ['html', 'CanvasPattern'],
   ['html', 'Path2D', { install: true }],
@@ -442,8 +443,13 @@ for (const spec of Object.keys(EDITORS_DRAFT_ADDITIONS)) {
 // (`isSecureContext`, platform-globals.js). The rest the generator makes as Web IDL says.
 const HANDLED = {
   // ([Serializable] / [Transferable]: the structured clone's to honour — platform-globals.js `cloneInto` — no member's;
-  // [LegacyWindowAlias]: the Window's other names for the interface object, its implementation's to put there)
-  interface: ['Exposed', 'SecureContext', 'Global', 'LegacyUnenumerableNamedProperties', 'Serializable', 'Transferable', 'LegacyWindowAlias'],
+  // [LegacyWindowAlias]: the Window's other names for the interface object, its implementation's to put there;
+  // [LegacyOverrideBuiltIns]: its named properties answered over the prototype chain, by the implementation that
+  // answers them — `namedProperties`)
+  interface: [
+    'Exposed', 'SecureContext', 'Global', 'LegacyUnenumerableNamedProperties', 'Serializable', 'Transferable', 'LegacyWindowAlias',
+    'LegacyOverrideBuiltIns'
+  ],
   member: [
     'SameObject', 'NewObject', 'CEReactions', 'Unscopable', 'PutForwards', 'Reflect', 'SecureContext', 'LegacyLenientSetter',
     'LegacyUnforgeable', 'LegacyLenientThis', 'Replaceable', 'HTMLConstructor', 'ReflectSetter', 'ReflectURL', 'ReflectNonNegative',
