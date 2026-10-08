@@ -5,7 +5,7 @@ require_relative 'support/session_teardown'
 
 # MediaError and SVGAnimatedString, generated from their IDL: made by the platform alone, brands checked, state in
 # slots. Headless Chrome's figures.
-RSpec.describe 'MediaError and SVGAnimatedString bindings' do
+RSpec.describe 'Small interface bindings' do
   let(:app) {
     lambda do |_env|
       [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body><svg><circle id=c class="a b"/></svg>']]
@@ -186,7 +186,7 @@ RSpec.describe 'MediaError and SVGAnimatedString bindings' do
 
   # An element's dataset is a DOMStringMap by its slots — any realm's — made by the platform alone, its named setter's
   # value a DOMString (a Symbol a TypeError, as Web IDL's conversion, where String() would have written "Symbol()").
-  it "gives an element its DOMStringMap" do
+  it 'gives an element its DOMStringMap' do
     got = session.evaluate_script(<<~JS)
       (() => {
         const error = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
@@ -237,6 +237,50 @@ RSpec.describe 'MediaError and SVGAnimatedString bindings' do
       ['[object NamedNodeMap]', true, 1, %w[0], '1'],
       [true, %w[a], nil, 'b', false],
       'TypeError', 'NotFoundError', 'TypeError', 'TypeError'
+    ])
+  end
+
+  # Both are legacy platform objects as Web IDL §3.9 says (Chrome and Firefox where they agree): a dataset's named
+  # setter converts its value before it checks the name, [[DefineOwnProperty]] runs it, a symbol expando is the map's
+  # own, and an object inheriting from it gets a property of its own; a NamedNodeMap's indices are read-only to an
+  # inheriting object too and in strict code; neither is made non-extensible; a map's uppercase names follow its
+  # element into an XML document.
+  it 'are legacy platform objects as Web IDL says' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        'use strict';
+        const error = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
+        const el = document.createElement('div');
+        const ds = el.dataset;
+        const order = error(() => { ds['a-b'] = {toString() { throw new RangeError(); }}; });
+        const defined = Reflect.defineProperty(ds, 'qq', {value: 'v'});
+        const accessor = Reflect.defineProperty(ds, 'acc', {get() {}});
+        const sym = Symbol();
+        ds[sym] = 1;
+        const child = Object.create(ds);
+        child.bar = 'x';
+        el.setAttribute('a', '1');
+        const map = el.attributes;
+        const mapChild = Object.create(map);
+        const n = document.createElement('p');
+        const nmap = n.attributes;
+        n.setAttributeNS(null, 'Baz', '1');
+        document.implementation.createDocument(null, 'r').documentElement.append(n);
+        return [
+          [order, defined, el.getAttribute('data-qq'), accessor, Object.keys(ds)],
+          [Object.getOwnPropertySymbols(ds).length, Object.hasOwn(ds, sym), el.hasAttribute('data-bar'), Object.hasOwn(child, 'bar')],
+          [Reflect.preventExtensions(ds), Reflect.preventExtensions(map), Object.keys(ds).length],
+          [Reflect.set(mapChild, '0', 'x', mapChild), error(() => { map.length = 5; }), error(() => { map[0] = 1; })],
+          ['Baz' in nmap, Object.getOwnPropertyNames(nmap)]
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      ['RangeError', true, 'v', false, ['qq']],
+      [1, true, false, true],
+      [false, false, 1],
+      [false, 'TypeError', 'TypeError'],
+      [true, %w[0 Baz]]
     ])
   end
 end

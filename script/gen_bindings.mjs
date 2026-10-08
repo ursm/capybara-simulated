@@ -25,8 +25,8 @@ const OUT = join(ROOT, 'lib', 'capybara', 'simulated', 'js', 'src', 'generated',
 // makes stay the hand-written code's, which registers the test that tells its objects apart. `omit`: what another spec
 // adds to it that no implementation here answers yet, and why — a mixin it includes, by name; a partial interface of
 // it, or a partial of a mixin it includes, by the spec's name. Anything else added is merged. `omitMembers`: single
-// members no implementation answers, by name (and why). `namedProperties`: how an installed interface's objects answer
-// its named property getter themselves (a Proxy of the class's).
+// members no implementation answers, by name (and why). `namedProperties` / `indexedProperties`: how an installed
+// interface's objects answer its named / indexed property getter themselves (a Proxy of the class's).
 // GlobalEventHandlers' touch handlers, which a desktop with no touch screen — headless Chrome's and Firefox's, measured —
 // exposes on no object: feature detection reads them (flatpickr binds `touchstart` instead of `mousedown` where
 // `window.ontouchstart` is defined).
@@ -186,7 +186,11 @@ const INTERFACES = [
   ['html', 'CustomStateSet', { install: true }],
   ['html', 'ElementInternals', { install: true }],
   ['html', 'DOMStringMap', { install: true, namedProperties: 'the Proxy each element\'s dataset is (dom-nodes.js)' }],
-  ['dom', 'NamedNodeMap', { install: true, namedProperties: 'the Proxy each element\'s attributes are (dom-collections.js)' }],
+  ['dom', 'NamedNodeMap', {
+    install: true,
+    namedProperties: 'the Proxy each element\'s attributes are (dom-collections.js)',
+    indexedProperties: 'the same Proxy'
+  }],
   ['html', 'CanvasGradient'],
   ['html', 'CanvasPattern'],
   ['html', 'Path2D', { install: true }],
@@ -994,9 +998,9 @@ function generateInterface(def, options = {}) {
   if (stringifier && stringifier !== 'toString') body.push(`    toString() { return impl.get_${stringifier}(${self}); }`);
   const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
   if (options.install) {
-    // (…an indexed getter the implementation's exotic object answers — its `namedProperties`' Proxy, which answers its
-    // indices too: NamedNodeMap — its @@iterator the interface's)
-    if (valueIterator || (indexed && typeof options.namedProperties !== 'string')) {
+    // (…an indexed getter the implementation's exotic object answers — `indexedProperties`, NamedNodeMap's Proxy — its
+    // @@iterator, %Array.prototype.values% over the integer `length` checked above, the interface's)
+    if (valueIterator || (indexed && !options.indexedProperties)) {
       throw new Error(`${name}: an installed interface with an indexed getter or an iterator is not generated yet`);
     }
     if (setlike) setlike.declared = memberList.filter((o) => o.type === 'operation' && ['add', 'delete', 'clear'].includes(o.name)).map((o) => o.name);
