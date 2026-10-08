@@ -104,8 +104,9 @@ RSpec.describe 'Fetch bindings' do
         out.push(source.bodyUsed, await copy.text());
         const bytes = new ReadableStream({type: 'bytes', start(c) { c.enqueue(new Uint8Array([120, 121, 122])); c.close(); }});
         const reader = new Request(new Request('http://x/', {method: 'POST', body: bytes, duplex: 'half'})).body.getReader({mode: 'byob'});
-        const {value} = await reader.read(new Uint8Array(8));
-        out.push(String.fromCharCode(...value));
+        let read = '';
+        for (let r = await reader.read(new Uint8Array(1)); !r.done; r = await reader.read(new Uint8Array(1))) read += String.fromCharCode(...r.value);
+        out.push(read);
         const a = new Response('x');
         await a.text();
         out.push(await err(() => a.json()));
