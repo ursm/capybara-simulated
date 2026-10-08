@@ -40223,11 +40223,26 @@ html/canvas/element/pixel-manipulation/2d.imageData.createImageBitmap.srgb.rgba.
   reason: The rgba-float16 ImageData pixel format is a high-bit-depth / half-float
     pixel buffer (Float16Array-backed), part of the wide-gamut / HDR colour subsystem
     we deliberately do not model (rule 1); no library or app uses it.
+html/canvas/element/pixel-manipulation/2d.imageData.object.ctor.basics.html:
+- name: Testing different type of ImageData constructor
+  reason: 'Holds `new ImageData(1 << 31, 1 << 31)` to an IndexSizeError (Chrome''s and
+    Firefox''s), where HTML has said since whatwg/html#520 (2016, fixing #197) that "initialize
+    an ImageData" rethrows the RangeError its pixel array''s allocation throws ("If the
+    storage ArrayBuffer could not be allocated, then rethrow the RangeError thrown by
+    JavaScript"); no step throws an IndexSizeError for a size. Every other assertion of the
+    subtest is held in spec/image_data_bindings_spec.rb.'
 html/canvas/element/pixel-manipulation/2d.imageData.object.ctor.pixelFormat.html:
 - name: Testing ImageData constructor pixelFormat behaviors
-  reason: The rgba-float16 ImageData pixel format is a high-bit-depth / half-float
-    pixel buffer (Float16Array-backed), part of the wide-gamut / HDR colour subsystem
-    we deliberately do not model (rule 1); no library or app uses it.
+  reason: 'Holds `new ImageData(new Float16Array(200), 10, 5, {pixelFormat: "rgba-unorm8"})`
+    (and a Uint8ClampedArray(200) under "rgba-float16") to an InvalidStateError — the array
+    of the other format''s type, checked first, as Chrome does — where HTML''s constructor
+    steps check the lengths first: bytesPerPixel is the settings'' format''s (4 for
+    "rgba-unorm8", otherwise 8), "Let length be the buffer source byte length of data",
+    then "If sh was given and its value is not equal to height, then throw an
+    IndexSizeError" — 400 bytes are 100 pixels, 10 rows of 10 — and only "initialize an
+    ImageData" refuses the type ("If settings[pixelFormat] equals rgba-unorm8 and source
+    is not a Uint8ClampedArray, then throw an InvalidStateError"). Firefox has no float16
+    ImageData. The subtest''s other assertions are held in spec/image_data_bindings_spec.rb.'
 html/canvas/element/pixel-manipulation/2d.imageData.put.basic.rgba.float16.html:
 - name: putImageData() puts 16-bit floating point image data from getImageData() onto
     the canvas

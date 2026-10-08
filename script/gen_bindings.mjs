@@ -177,6 +177,7 @@ const INTERFACES = [
   }],
   ['css-font-loading', 'FontFaceSet', { install: true }],
   ['html', 'MediaError'],
+  ['html', 'ImageData', { install: true }],
   ['SVG', 'SVGAnimatedString'],
   ['clipboard-apis', 'ClipboardItem', { install: true }],
   ['clipboard-apis', 'Clipboard', { install: true }],
@@ -811,12 +812,13 @@ function generateInterface(def, options = {}) {
     return options.install ? `thisIs(this ?? globalThis, IS_SELF${message})` : `thisOf(this ?? globalThis, KEY${message})`;
   };
   const self = selfCheck();
-  let indexed = null, valueIterator = false, pairIterator = false, setlike = null, stringifier = null, constructor = null;
+  let indexed = null, valueIterator = false, pairIterator = false, setlike = null, stringifier = null;
+  const constructors = [];
   const memberList = membersOf(def, options.omit, options.omitMembers);
   for (const m of memberList) {
     const label = `${name}.${m.name || m.type}`;
     if ((m.extAttrs || []).some((e) => e.name === 'Unscopable')) unscopables.push(m.name);
-    if (m.type === 'constructor') { constructor = m; continue; }
+    if (m.type === 'constructor') { constructors.push(m); continue; }
     if (m.type === 'const') { constants.push([m.name, constantValue(m, label)]); continue; }
     if (m.type === 'setlike') {
       // (…a setlike declaration, Web IDL §3.7.12: the members over the implementation's backing set, `impl.setOf(self)`
@@ -966,11 +968,11 @@ function generateInterface(def, options = {}) {
   if (options.install) {
     if (indexed || valueIterator) throw new Error(`${name}: an installed interface with an indexed getter or an iterator is not generated yet`);
     if (setlike) setlike.declared = memberList.filter((o) => o.type === 'operation' && ['add', 'delete', 'clear'].includes(o.name)).map((o) => o.name);
-    return installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers, pairIterator, setlike, preamble });
+    return installInterface(def, { body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, preamble });
   }
   if (unforgeables.length) throw new Error(`${name}: [LegacyUnforgeable] members of an interface the binding makes are not generated yet`);
   if (handlers.length) throw new Error(`${name}: event handlers of an interface the binding makes are not generated yet`);
-  if (constructor) throw new Error(`${name}: a constructor is not generated yet`);
+  if (constructors.length) throw new Error(`${name}: a constructor is not generated yet`);
 
   const lines = [];
   lines.push(`// interface ${name} (${def.spec})`);
@@ -1018,11 +1020,11 @@ function generateInterface(def, options = {}) {
 // …a [Global] interface's (Window's) on the global object itself (Web IDL §3.7.5), its [LegacyUnforgeable] ones too —
 // by the two functions it returns, which define them on a global: its members (configurable, made once where the
 // snapshot is, which a realm made from it has already), and its [LegacyUnforgeable] ones, as each realm is made.
-function installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers, pairIterator, setlike, preamble }) {
+function installInterface(def, { body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, preamble }) {
   const name = def.name;
   const global = (def.extAttrs || []).some((e) => e.name === 'Global');
   const holder = global ? 'members' : 'iface.prototype';
-  const length = constructor ? constructor.arguments.filter((a) => !a.optional && !a.variadic).length : 0;
+  const length = constructors.length ? Math.min(...constructors.map((m) => m.arguments.filter((a) => !a.optional && !a.variadic).length)) : 0;
   const lines = [];
   lines.push(global
     ? `// interface ${name}${def.inheritance ? ` : ${def.inheritance}` : ''} (${def.spec}), [Global]: installed on the global object`
@@ -1052,7 +1054,8 @@ function installInterface(def, { body, statics, unforgeables, checks, unscopable
   lines.push(`  defineClassString(iface.prototype, '${name}');`);
   if (unscopables.length) lines.push(`  defineUnscopables(iface.prototype, ${JSON.stringify(unscopables)});`);
   if (unforgeables.length) lines.push(`  class Unforgeables {`, ...unforgeables, `  }`);
-  if (constructor && constructor.arguments.length) lines.unshift(constructorArguments(name, constructor), '');
+  if (constructors.length > 1) lines.unshift(overloadedConstructorArguments(name, constructors), '');
+  else if (constructors.length && constructors[0].arguments.length) lines.unshift(constructorArguments(name, constructors[0]), '');
   if (global) {
     lines.push(`  const descriptors = Object.getOwnPropertyDescriptors(members);`);
     lines.push(`  return {`);
@@ -1080,6 +1083,24 @@ function constructorArguments(name, m) {
   }
   for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
   lines.push(`  return [${converted.join(', ')}];`, `}`);
+  return lines.join('\n');
+}
+
+// …and an overloaded constructor's (Web IDL §3.6 overload resolution, as an overloaded operation's): the overload's
+// name — its arguments', `sw_sh_settings` / `data_sw_sh_settings` — then its arguments converted to its own types.
+function overloadedConstructorArguments(name, group) {
+  const checks = new Set();
+  const overloads = overloadsOf(name, 'constructor', group);
+  const implName = (m) => m.arguments.map((a) => a.name).join('_') || 'none';
+  const call = (m) => `return [${[`'${implName(m)}'`, ...convertArguments(name, m, checks, () => null, 'args')].join(', ')}];`;
+  const lines = [`export function convert${name}Arguments(args) {`];
+  if (overloads.required) {
+    const message = `Failed to construct '${name}': ${overloads.required} argument${overloads.required === 1 ? '' : 's'} required, but only `;
+    lines.push(`  if (args.length < ${overloads.required}) throw new TypeError(${JSON.stringify(message)} + args.length + ' present.');`);
+  }
+  const body = overloadSwitch(name, 'constructor', overloads, 'args', checks, call, `Failed to construct '${name}': `);
+  for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
+  lines.push(...body.map((l) => `  ${l}`), `}`);
   return lines.join('\n');
 }
 
@@ -1141,37 +1162,55 @@ function convertArguments(iface, m, checks, named, source = 'arguments') {
 
 // An overloaded operation (Web IDL §3.6 overload resolution): the overload chosen by how many arguments were passed
 // (no more than the longest takes), each one's arguments converted to its own types and handed to an implementation
-// of its own — named for its arguments, `scroll_options` / `scroll_x_y`. Overloads that one count of arguments could
-// call more than one of (told apart by their arguments' types) are not generated yet. Its `length` is the shortest
-// overload's required arguments.
+// of its own — named for its arguments, `scroll_options` / `scroll_x_y` — where one count of arguments could call two,
+// the one their distinguishing argument's type chooses (`distinguished`). Its `length` is the shortest overload's
+// required arguments.
 function overloadedOperation(iface, group, checks, selfCheck) {
   const name = group[0].name;
   const promise = group.some(promiseOf);
   if (promise && !group.every(promiseOf)) throw new Error(`${iface}.${name}: overloads returning a promise and not are not generated`);
+  const overloads = overloadsOf(iface, name, group);
+  const params = overloads.shortest.arguments.slice(0, overloads.required).map(argName).join(', ');
+  const implName = (m) => `${name}_${m.arguments.length ? m.arguments.map((a) => a.name).join('_') : 'none'}`;
+  const lines = [`const self = ${selfCheck(promise && `Failed to execute '${name}' on '${iface}': `)};`];
+  if (overloads.required) lines.push(`required(arguments, ${overloads.required}, '${name}', '${iface}');`);
+  const call = (m) => `return impl.${implName(m)}(${['self', ...convertArguments(iface, m, checks, () => null)].join(', ')});`;
+  lines.push(...overloadSwitch(iface, name, overloads, 'arguments', checks, call, `Failed to execute '${name}' on '${iface}': `));
+  const body = promise ? ['try {', ...lines.map((l) => `  ${l}`), '} catch (e) {', '  return rejectedPromise(e);', '}'] : lines;
+  return [`${name}(${params}) {`, ...body.map((l) => `      ${l}`), `    }`].join('\n');
+}
+
+// An overload set's cases: for each count of arguments up to the longest overload's, the one overload that count
+// calls, or the two it is told apart between (`distinguished`); and its shortest overload, whose required arguments
+// are the set's.
+function overloadsOf(iface, name, group) {
   if (group.some((m) => m.arguments.some((a) => a.variadic))) throw new Error(`${iface}.${name}: an overload with a variadic argument is not generated yet`);
   const least = (m) => m.arguments.filter((a) => !a.optional).length;
   const most = Math.max(...group.map((m) => m.arguments.length));
   const cases = [];
+  let pair = null;   // (…the same two at successive counts the same case, which falls through)
   for (let n = 0; n <= most; n++) {
     const takers = group.filter((m) => least(m) <= n && n <= m.arguments.length);
     if (takers.length > 2) throw new Error(`${iface}.${name}: more than two overloads of one count are not generated yet`);
-    if (takers.length === 2) cases.push([n, distinguished(iface, name, takers)]);
-    else if (takers.length) cases.push([n, takers[0]]);
+    if (takers.length === 2) {
+      if (!pair || pair.takers.some((m, i) => m !== takers[i])) pair = { takers, resolved: distinguished(iface, name, takers) };
+      cases.push([n, pair.resolved]);
+    } else if (takers.length) cases.push([n, takers[0]]);
   }
   const shortest = group.reduce((a, b) => (least(b) < least(a) ? b : a));
-  const required = least(shortest);
-  const params = shortest.arguments.slice(0, required).map(argName).join(', ');
-  const implName = (m) => `${name}_${m.arguments.length ? m.arguments.map((a) => a.name).join('_') : 'none'}`;
-  const lines = [`const self = ${selfCheck(promise && `Failed to execute '${name}' on '${iface}': `)};`];
-  if (required) lines.push(`required(arguments, ${required}, '${name}', '${iface}');`);
-  lines.push(`switch (Math.min(arguments.length, ${most})) {`);
+  return { cases, most, required: least(shortest), shortest };
+}
+
+// …and the switch that resolves it over `source` (`arguments`, or a constructor's `args`), `call(m)` the statement
+// that runs overload `m`: a count of arguments no overload takes a TypeError after `prefix` (Chrome's message).
+function overloadSwitch(iface, name, { cases, most, required }, source, checks, call, prefix) {
+  const lines = [`switch (Math.min(${source}.length, ${most})) {`];
   // (…the counts one overload takes falling through to its one call)
-  const call = (m) => `return impl.${implName(m)}(${['self', ...convertArguments(iface, m, checks, () => null)].join(', ')});`;
   cases.forEach(([n, m], i) => {
     if (i + 1 < cases.length && cases[i + 1][1] === m) { lines.push(`  case ${n}:`); return; }
+    const v = `${source}[${m.index}]`;
     if (m.dictionary) {
       // (…two of the count told apart by the distinguishing argument: undefined, null or an object the dictionary's)
-      const v = `arguments[${m.index}]`;
       lines.push(`  case ${n}: if (${v} == null || typeof ${v} === 'object' || typeof ${v} === 'function') ${call(m.dictionary)}`);
       lines.push(`    ${call(m.other)}`);
       return;
@@ -1179,34 +1218,37 @@ function overloadedOperation(iface, group, checks, selfCheck) {
     if (m.sequence) {
       // (…or an object with an @@iterator the sequence's — GetMethod's word, as a union's step takes it: one whose
       // @@iterator is no function a TypeError — anything else the dictionary's)
-      const v = `arguments[${m.index}]`;
-      const prefix = failure({ iface, member: name, index: m.index });
-      lines.push(`  case ${n}: if (isIterable(${v}, ${prefix})) ${call(m.sequence)}`);
+      lines.push(`  case ${n}: if (isIterable(${v}, ${failure({ iface, member: name, index: m.index })})) ${call(m.sequence)}`);
       lines.push(`    ${call(m.other)}`);
       return;
     }
     if (m.platformObject) {
       // (…an object the interface's the interface's overload — anything else the string's)
       checks.add(m.type);
-      lines.push(`  case ${n}: if (IS_${m.type}(arguments[${m.index}])) ${call(m.platformObject)}`);
+      lines.push(`  case ${n}: if (IS_${m.type}(${v})) ${call(m.platformObject)}`);
+      lines.push(`    ${call(m.other)}`);
+      return;
+    }
+    if (m.buffer) {
+      // (…an object of one of the buffer types the buffer's overload — anything else, another object too, the numeric
+      // type's, which converts it)
+      lines.push(`  case ${n}: if (${m.bufferTypes.map((t) => `isBufferOf(${v}, ${JSON.stringify(t)})`).join(' || ')}) ${call(m.buffer)}`);
       lines.push(`    ${call(m.other)}`);
       return;
     }
     lines.push(`  case ${n}: ${call(m)}`);
   });
-  // (…a count of arguments no overload takes: Chrome's message)
   if (cases.length < most - required + 1) {
-    const arities = `Failed to execute '${name}' on '${iface}': Valid arities are: [${cases.map(([n]) => n).join(', ')}], but `;
-    lines.push(`  default: throw new TypeError(${JSON.stringify(arities)} + arguments.length + ' arguments provided.');`);
+    const arities = `${prefix}Valid arities are: [${cases.map(([n]) => n).join(', ')}], but `;
+    lines.push(`  default: throw new TypeError(${JSON.stringify(arities)} + ${source}.length + ' arguments provided.');`);
   }
   lines.push(`}`);
-  const body = promise ? ['try {', ...lines.map((l) => `  ${l}`), '} catch (e) {', '  return rejectedPromise(e);', '}'] : lines;
-  return [`${name}(${params}) {`, ...body.map((l) => `      ${l}`), `    }`].join('\n');
+  return lines;
 }
 
 // Web IDL's overload resolution (§3.6.3) for two overloads taking the same count, where it is generated: the first
-// argument whose types differ — a dictionary's in one and a string's or a sequence's in the other, or an interface's in
-// one and a string's in the other — tells them apart.
+// argument whose types differ — a dictionary's in one and a string's or a sequence's in the other, an interface's in
+// one and a string's in the other, or a buffer source's in one and a numeric type's in the other — tells them apart.
 function distinguished(iface, name, [a, b]) {
   const index = a.arguments.findIndex((arg, i) => !b.arguments[i] || arg.idlType.idlType !== b.arguments[i].idlType.idlType);
   const typeOf = (m) => m.arguments[index] && m.arguments[index].idlType;
@@ -1221,7 +1263,16 @@ function distinguished(iface, name, [a, b]) {
   if (isSequence(typeOf(b)) && isDictionary(typeOf(a))) return { index, sequence: b, other: a };
   if (isInterface(typeOf(a)) && isString(typeOf(b))) return { index, platformObject: a, other: b, type: typeOf(a).idlType };
   if (isInterface(typeOf(b)) && isString(typeOf(a))) return { index, platformObject: b, other: a, type: typeOf(b).idlType };
-  throw new Error(`${iface}.${name}: overloads told apart by other than a dictionary and a string or a sequence, or an interface and a string, are not generated yet`);
+  // (…a buffer source type, or a union of them — ImageData's ImageDataArray — and a numeric type)
+  const bufferTypes = (t) => {
+    if (!t) return null;
+    const members = flattenUnion({ ...t, union: true, idlType: [t] }).members;
+    return members.every((u) => !u.union && BUFFER_TYPES.has(u.idlType)) ? members.map((u) => u.idlType) : null;
+  };
+  const isNumeric = (t) => t && !t.union && !t.nullable && NUMERIC_TYPES.has(t.idlType);
+  if (bufferTypes(typeOf(a)) && isNumeric(typeOf(b))) return { index, buffer: a, other: b, bufferTypes: bufferTypes(typeOf(a)) };
+  if (bufferTypes(typeOf(b)) && isNumeric(typeOf(a))) return { index, buffer: b, other: a, bufferTypes: bufferTypes(typeOf(b)) };
+  throw new Error(`${iface}.${name}: overloads told apart by other than a dictionary and a string or a sequence, an interface and a string, or a buffer source and a number, are not generated yet`);
 }
 
 function defaultValue(d, where) {

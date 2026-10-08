@@ -2191,9 +2191,11 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
         const ctx = new OffscreenCanvas(10, 10).getContext('2d');
         const errs = {};
         // A ~2^31-pixel region can't be backed. Rather than aborting the process on
-        // the huge allocation, getImageData throws TypeError and the ImageData
-        // constructor throws IndexSizeError (matching real browsers / WPT).
-        try { ctx.getImageData(10, 0xffffffff, 2147483647, 10); } catch (e) { errs.get = e.name; }
+        // the huge allocation, the ImageData constructor and getImageData throw the
+        // RangeError HTML's "initialize an ImageData" rethrows (Chrome and Firefox: an
+        // IndexSizeError); an argument out of long's range is [EnforceRange]'s TypeError.
+        try { ctx.getImageData(10, 0xffffffff, 2147483647, 10); } catch (e) { errs.range = e.name; }
+        try { ctx.getImageData(0, 0, 2147483647, 10); } catch (e) { errs.get = e.name; }
         try { new ImageData(2147483647, 10); } catch (e) { errs.ctor = e.name; }
         // A normal region still works.
         const ok = ctx.getImageData(0, 0, 4, 4).data.length;
@@ -2201,8 +2203,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
       JS
     end
     r = JSON.parse(out)
-    expect(r['errs']['get']).to eq('TypeError')
-    expect(r['errs']['ctor']).to eq('IndexSizeError')
+    expect(r['errs']).to eq('range' => 'TypeError', 'get' => 'RangeError', 'ctor' => 'RangeError')
     expect(r['ok']).to eq(64)   # 4×4×4 — normal getImageData unaffected
   end
 

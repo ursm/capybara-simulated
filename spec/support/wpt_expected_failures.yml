@@ -3624,12 +3624,6 @@ html/dom/idlharness.any.js:
 - 'ImageBitmapRenderingContext interface: existence and properties of interface prototype
   object''s @@unscopables property'
 - 'ImageBitmapRenderingContext interface: operation transferFromImageBitmap(ImageBitmap?)'
-- ImageData interface object length
-- 'ImageData interface: attribute colorSpace'
-- 'ImageData interface: attribute data'
-- 'ImageData interface: attribute height'
-- 'ImageData interface: attribute pixelFormat'
-- 'ImageData interface: attribute width'
 - 'OffscreenCanvas interface: attribute height'
 - 'OffscreenCanvas interface: attribute oncontextlost'
 - 'OffscreenCanvas interface: attribute oncontextrestored'
@@ -5201,12 +5195,6 @@ html/dom/idlharness.https.html:
 - 'ImageBitmapRenderingContext interface: existence and properties of interface prototype
   object''s @@unscopables property'
 - 'ImageBitmapRenderingContext interface: operation transferFromImageBitmap(ImageBitmap?)'
-- ImageData interface object length
-- 'ImageData interface: attribute colorSpace'
-- 'ImageData interface: attribute data'
-- 'ImageData interface: attribute height'
-- 'ImageData interface: attribute pixelFormat'
-- 'ImageData interface: attribute width'
 - Location interface object length
 - Location interface object name
 - 'Location interface: existence and properties of interface object'
