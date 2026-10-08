@@ -676,7 +676,11 @@ module Capybara
       # Capybara calls `Driver#reset!` between tests; Browser delegates
       # here. With per-visit rebuild already running, the inter-test
       # path is the same operation.
-      def reset_page = rebuild_ctx
+      # (…the session's next page in a realm no document has made cross-origin isolated)
+      def reset_page
+        @cross_origin_isolated = false
+        rebuild_ctx
+      end
 
       # Memory-pressure threshold (MB) above which `rebuild_ctx` forces a full
       # GC to reclaim dead per-frame realms (see the call site). Measured

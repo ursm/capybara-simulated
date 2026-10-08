@@ -2064,6 +2064,8 @@ module Capybara
       # Whether the page is cross-origin isolated (`cross_origin_isolated_response?`, as its document committed) — which its
       # workers are too.
       def cross_origin_isolated? = @runtime&.cross_origin_isolated == true
+      # …which a pop-up its opener keeps takes from it, ahead of its initial about:blank document (`boot_response_into_ctx`).
+      def inherit_cross_origin_isolation(opener) = (@runtime.cross_origin_isolated = opener.cross_origin_isolated?)
 
       def set_header(name, value)         ; @sticky_headers[name.to_s] = value.to_s ; end
       # Capybara's `current_window.resize_to(w, h)` lands here; the
@@ -11066,7 +11068,10 @@ module Capybara
       # for the wait.
       # Whether the document's response makes it cross-origin isolated (HTML "obtain a cross-origin opener policy" and
       # "obtain an embedder policy"): `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy:
-      # require-corp` or `credentialless` — every document here is in a secure context.
+      # require-corp` or `credentialless` — every document here being in a secure context, as `isSecureContext` says
+      # (a real browser's http://www.example.com would not be; its http://127.0.0.1 would). Not modelled: a cross-origin
+      # frame's own `allow="cross-origin-isolated"` permission (it shares the top-level document's here), nor a service
+      # worker's own COEP (it is never isolated here).
       private def cross_origin_isolated_response?
         policy = ->(name) { (@last_response_headers || {}).find {|k, _| k.to_s.casecmp?(name) }&.last.then { Array(_1).first.to_s.split(';').first.to_s.strip } }
         policy.('cross-origin-opener-policy') == 'same-origin' && %w[require-corp credentialless].include?(policy.('cross-origin-embedder-policy'))
@@ -11083,7 +11088,9 @@ module Capybara
         reset_sw_race_state
         terminate_document_workers
         drop_document_websockets
-        @runtime.cross_origin_isolated = cross_origin_isolated_response?
+        # (…an about:blank document's its creator's — the document that navigated to it, or a pop-up's opener: it takes
+        # its creator's policy container, the policies with it)
+        @runtime.cross_origin_isolated = cross_origin_isolated_response? unless @current_url.to_s.match?(%r{\Aabout:blank(?:[?#]|\z)}i)
         @runtime.rebuild_ctx
         # The service workers that outlive the navigation follow the new page's clock (timers.js `followWindowClock`).
         @runtime.call('__csimFollowWindowClock') unless @workers.empty?

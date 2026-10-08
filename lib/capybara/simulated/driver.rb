@@ -496,6 +496,8 @@ module Capybara
         # `window.opener`, which resolves through this entry — so the entry
         # (with its opener) must exist before `visit` runs those scripts.
         @aux_windows << {handle: handle, browser: aux, name: name, opener: opener_handle}
+        # (…in its opener's browsing context group, where it has one: its about:blank, cross-origin isolated as it is)
+        aux.inherit_cross_origin_isolation(source) if opener_handle && source
         if url && !url.empty?
           if post
             # A `<form target=_blank method=post>` loads the new window via POST,

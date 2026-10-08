@@ -133,4 +133,17 @@ RSpec.describe 'Encoding API surface' do
     poll_until { isolated.evaluate_script('window.got') }
     expect(isolated.evaluate_script('window.got')).to eq([true, 'function', 'function', true, 'function'])
   end
+
+  # An about:blank pop-up its opener keeps is in its browsing context group, cross-origin isolated as it is (its
+  # creator's policy container; Chrome 154 too, measured) — and the session's next page, after a reset, is not.
+  it "isolates an about:blank pop-up as its opener, and forgets it at the session's reset" do
+    headers = {'content-type' => 'text/html', 'cross-origin-opener-policy' => 'same-origin', 'cross-origin-embedder-policy' => 'require-corp'}
+    isolated = simulated_session(->(_env) { [200, headers, ['<p>isolated</p>']] })
+    isolated.visit '/'
+    popup = isolated.window_opened_by { isolated.execute_script("window.open('about:blank', 'p')") }
+    got = isolated.within_window(popup) { isolated.evaluate_script('[crossOriginIsolated, typeof SharedArrayBuffer]') }
+    expect(got).to eq([true, 'function'])
+    isolated.reset!
+    expect(isolated.evaluate_script('[crossOriginIsolated, typeof SharedArrayBuffer]')).to eq([false, 'undefined'])
+  end
 end
