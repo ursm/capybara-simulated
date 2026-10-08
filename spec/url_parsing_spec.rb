@@ -83,13 +83,17 @@ RSpec.describe 'URLSearchParams' do
   it 'decodes its pairs whatever a page does to TextDecoder' do
     got = session.evaluate_script(<<~JS)
       (() => {
+        const decode = TextDecoder.prototype.decode;
+        TextDecoder.prototype.decode = () => 'PWNED';
+        const patched = new URLSearchParams('a=%C3%A9').get('a');
+        TextDecoder.prototype.decode = decode;
         window.TextDecoder = class { decode() { return 'PWNED'; } };
         const replaced = new URLSearchParams('a=%C3%A9').get('a');
         delete window.TextDecoder;
-        return [replaced, new URL('http://a.test/?b=%C3%A9').searchParams.get('b')];
+        return [patched, replaced, new URL('http://a.test/?b=%C3%A9').searchParams.get('b')];
       })()
     JS
-    expect(got).to eq(%w[é é])
+    expect(got).to eq(%w[é é é])
   end
 
   it "throws Chrome's errors: an invalid base, a forEach with nothing, an @@iterator that is no function" do
@@ -97,13 +101,15 @@ RSpec.describe 'URLSearchParams' do
       (() => {
         const error = (f) => { try { f(); return 'none'; } catch (e) { return e.message; } };
         return [error(() => new URL('/x', 'nope')), error(() => new URLSearchParams().forEach()),
-                error(() => new URLSearchParams({[Symbol.iterator]: 1}))];
+                error(() => new URLSearchParams({[Symbol.iterator]: 1})),
+                error(() => new MessageChannel().port1.postMessage('x', {[Symbol.iterator]: 1}))];
       })()
     JS
     expect(got).to eq([
       "Failed to construct 'URL': Invalid base URL",
       "Failed to execute 'forEach' on 'URLSearchParams': 1 argument required, but only 0 present.",
-      "Failed to construct 'URLSearchParams': The object must have a callable @@iterator property."
+      "Failed to construct 'URLSearchParams': The object must have a callable @@iterator property.",
+      "Failed to execute 'postMessage' on 'MessagePort': The object must have a callable @@iterator property."
     ])
   end
 end

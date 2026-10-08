@@ -1026,9 +1026,11 @@ function overloadedOperation(iface, group, checks, selfCheck) {
       return;
     }
     if (m.sequence) {
-      // (…or an object with an @@iterator the sequence's, anything else the dictionary's)
+      // (…or an object with an @@iterator the sequence's — GetMethod's word, as a union's step takes it: one whose
+      // @@iterator is no function a TypeError — anything else the dictionary's)
       const v = `arguments[${m.index}]`;
-      lines.push(`  case ${n}: if (${v} !== null && (typeof ${v} === 'object' || typeof ${v} === 'function') && typeof ${v}[Symbol.iterator] === 'function') ${call(m.sequence)}`);
+      const prefix = failure({ iface, member: name, index: m.index });
+      lines.push(`  case ${n}: if (isIterable(${v}, ${prefix})) ${call(m.sequence)}`);
       lines.push(`    ${call(m.other)}`);
       return;
     }
