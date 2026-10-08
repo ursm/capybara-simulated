@@ -205,4 +205,38 @@ RSpec.describe 'MediaError and SVGAnimatedString bindings' do
     JS
     expect(got).to eq([['[object DOMStringMap]', true, 'x', ['fooBar']], true, '[object DOMStringMap]', 'TypeError', 'TypeError', false])
   end
+
+  # An element's attributes are a NamedNodeMap by its slots, made by the platform alone: its operations run the
+  # element's attribute steps, not members a page replaced on Element.prototype; its @@iterator %Array.prototype.values%;
+  # a frame's members work on it.
+  it 'gives an element its NamedNodeMap' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const error = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
+        const el = document.createElement('div');
+        el.setAttribute('a', '1');
+        el.setAttribute('b', '2');
+        const map = el.attributes;
+        const own = Element.prototype.getAttributeNode;
+        Element.prototype.getAttributeNode = () => 'page';
+        const named = map.getNamedItem('a');
+        Element.prototype.getAttributeNode = own;
+        const frame = document.body.appendChild(document.createElement('iframe')).contentWindow;
+        const removed = frame.NamedNodeMap.prototype.removeNamedItem.call(map, 'b');
+        return [
+          [Object.prototype.toString.call(map), map === el.attributes, map.length, Object.keys(map), named && named.value],
+          [map[Symbol.iterator] === Array.prototype.values, [...map].map((a) => a.name), map.item(-1), removed.name, el.hasAttribute('b')],
+          error(() => new NamedNodeMap()),
+          error(() => map.removeNamedItem('nope')),
+          error(() => Object.getOwnPropertyDescriptor(NamedNodeMap.prototype, 'length').get.call({})),
+          error(() => map.setNamedItem({}))
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      ['[object NamedNodeMap]', true, 1, %w[0], '1'],
+      [true, %w[a], nil, 'b', false],
+      'TypeError', 'NotFoundError', 'TypeError', 'TypeError'
+    ])
+  end
 end

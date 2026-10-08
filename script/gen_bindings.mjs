@@ -186,6 +186,7 @@ const INTERFACES = [
   ['html', 'CustomStateSet', { install: true }],
   ['html', 'ElementInternals', { install: true }],
   ['html', 'DOMStringMap', { install: true, namedProperties: 'the Proxy each element\'s dataset is (dom-nodes.js)' }],
+  ['dom', 'NamedNodeMap', { install: true, namedProperties: 'the Proxy each element\'s attributes are (dom-collections.js)' }],
   ['html', 'CanvasGradient'],
   ['html', 'CanvasPattern'],
   ['html', 'Path2D', { install: true }],
@@ -993,9 +994,13 @@ function generateInterface(def, options = {}) {
   if (stringifier && stringifier !== 'toString') body.push(`    toString() { return impl.get_${stringifier}(${self}); }`);
   const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
   if (options.install) {
-    if (indexed || valueIterator) throw new Error(`${name}: an installed interface with an indexed getter or an iterator is not generated yet`);
+    // (…an indexed getter the implementation's exotic object answers — its `namedProperties`' Proxy, which answers its
+    // indices too: NamedNodeMap — its @@iterator the interface's)
+    if (valueIterator || (indexed && typeof options.namedProperties !== 'string')) {
+      throw new Error(`${name}: an installed interface with an indexed getter or an iterator is not generated yet`);
+    }
     if (setlike) setlike.declared = memberList.filter((o) => o.type === 'operation' && ['add', 'delete', 'clear'].includes(o.name)).map((o) => o.name);
-    return installInterface(def, { body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, preamble });
+    return installInterface(def, { body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, preamble, indexed });
   }
   if (unforgeables.length) throw new Error(`${name}: [LegacyUnforgeable] members of an interface the binding makes are not generated yet`);
   if (handlers.length) throw new Error(`${name}: event handlers of an interface the binding makes are not generated yet`);
@@ -1047,7 +1052,7 @@ function generateInterface(def, options = {}) {
 // …a [Global] interface's (Window's) on the global object itself (Web IDL §3.7.5), its [LegacyUnforgeable] ones too —
 // by the two functions it returns, which define them on a global: its members (configurable, made once where the
 // snapshot is, which a realm made from it has already), and its [LegacyUnforgeable] ones, as each realm is made.
-function installInterface(def, { body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, preamble }) {
+function installInterface(def, { body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, preamble, indexed }) {
   const name = def.name;
   const global = (def.extAttrs || []).some((e) => e.name === 'Global');
   const holder = global ? 'members' : 'iface.prototype';
@@ -1068,6 +1073,7 @@ function installInterface(def, { body, statics, unforgeables, checks, unscopable
   if (statics.length) lines.push(`  class Statics {`, ...statics, `  }`, `  installMembers(iface, Statics.prototype);`);
   if (handlers.length) lines.push(`  impl.installEventHandlers(${holder}, ${JSON.stringify(handlers)}, IS_SELF);`);
   if (pairIterator) lines.push(`  definePairIterator(iface.prototype, '${name}', (self) => impl.pairs(self), IS_SELF);`);
+  if (indexed) lines.push(`  defineIndexedIterator(iface.prototype);`);
   if (setlike) {
     const own = setlike.readonly ? [] : ['add', 'delete', 'clear'].filter((n) => !setlike.declared.includes(n));
     lines.push(`  defineSetlike(iface.prototype, '${name}', (self) => impl.setOf(self), IS_SELF, ${JSON.stringify(own)}, ${setlike.convert}, impl.setChanged);`);
