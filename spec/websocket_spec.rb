@@ -189,12 +189,14 @@ RSpec.describe 'WebSocket' do
     expect(closes.pop(timeout: 5)).to eq(1001)
   end
 
-  # What a buffer source is is its internal slots', whatever a page puts on the object (a shadowing `byteLength`).
+  # What a buffer source is is its internal slots', whatever a page puts on the object or its prototype (a shadowing
+  # `byteLength`, a replaced `slice`).
   it 'sends a buffer source by its slots' do
     expect(session).to have_title(/hello/)
     session.execute_script(<<~JS)
       const bytes = new Uint8Array([7, 8, 9]);
       Object.defineProperty(bytes, 'byteLength', {value: 1});
+      Uint8Array.prototype.slice = () => new Uint8Array([1]);
       window.ws.send(bytes);
     JS
     expect(session).to have_title('bin:7,8,9')
