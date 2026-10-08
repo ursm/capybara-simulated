@@ -190,6 +190,25 @@ RSpec.describe 'Observer bindings' do
     expect(session.evaluate_script('window.consecutive')).to be(true)
   end
 
+  # An idle callback's identifier is its own count: clearTimeout reaches no idle callback, nor cancelIdleCallback a
+  # timer. Chrome: both count from 1, and each runs.
+  it 'keeps idle callback identifiers apart from timer ids' do
+    session.execute_script(<<~JS)
+      window.got = [];
+      const r = requestIdleCallback(() => window.got.push('idle'));
+      clearTimeout(r);
+      window.ids = [r];
+    JS
+    expect(poll_until { session.evaluate_script('window.got.length === 1 && window.got') }).to eq(['idle'])
+    session.execute_script(<<~JS)
+      const t = setTimeout(() => window.got.push('timer'), 10);
+      cancelIdleCallback(t);
+      window.ids.push(t);
+    JS
+    expect(poll_until { session.evaluate_script('window.got.length === 2 && window.got') }).to eq(%w[idle timer])
+    expect(session.evaluate_script('window.ids')).to eq([1, 1])
+  end
+
   # An exception a callback throws is reported — the window's `error` event — not swallowed.
   it 'reports what an observer callback throws' do
     session.execute_script(<<~JS)
