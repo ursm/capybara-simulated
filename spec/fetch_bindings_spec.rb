@@ -102,6 +102,10 @@ RSpec.describe 'Fetch bindings' do
         const source = new Request('http://x/', {method: 'POST', body: stream(), duplex: 'half'});
         const copy = new Request(source);
         out.push(source.bodyUsed, await copy.text());
+        const bytes = new ReadableStream({type: 'bytes', start(c) { c.enqueue(new Uint8Array([120, 121, 122])); c.close(); }});
+        const reader = new Request(new Request('http://x/', {method: 'POST', body: bytes, duplex: 'half'})).body.getReader({mode: 'byob'});
+        const {value} = await reader.read(new Uint8Array(8));
+        out.push(String.fromCharCode(...value));
         const a = new Response('x');
         await a.text();
         out.push(await err(() => a.json()));
@@ -114,7 +118,7 @@ RSpec.describe 'Fetch bindings' do
     JS
     poll_until { session.evaluate_script('window.got') }
     expect(session.evaluate_script('window.got')).to eq([
-      true, 'a',
+      true, 'a', 'xyz',
       "TypeError: Failed to execute 'json' on 'Response': body stream already read",
       "TypeError: Failed to execute 'text' on 'Response': body stream is locked",
       1, '[object Object]'
