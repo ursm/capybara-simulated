@@ -184,9 +184,13 @@ RSpec.describe 'OffscreenCanvas and ImageBitmap bindings' do
         const a = await reply();
         let refused;
         try { worker.postMessage(new OffscreenCanvas(1, 1)); refused = 'none'; } catch (e) { refused = e.name; }
-        return [a.point[0], String(a.point[1]), a.point[2] === -Infinity, a.canvas, canvas.width, refused];
+        // (…a getter read once, as a structured clone reads it)
+        let gets = 0;
+        try { worker.postMessage({get g() { gets++; return 1; }, point: new DOMPoint(), canvas: {width: 0}}); } catch (_) {}
+        await reply();
+        return [a.point[0], String(a.point[1]), a.point[2] === -Infinity, a.canvas, canvas.width, refused, gets];
       })().then(done, (e) => done(String(e)));
     JS
-    expect(got).to eq([true, 'NaN', true, [true, 5], 0, 'DataCloneError'])
+    expect(got).to eq([true, 'NaN', true, [true, 5], 0, 'DataCloneError', 1])
   end
 end
