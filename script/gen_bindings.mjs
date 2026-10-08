@@ -204,6 +204,19 @@ const INTERFACES = [
   ['html', 'XMLSerializer', { install: true }],
   ['intersection-observer', 'IntersectionObserver', { install: true }],
   ['intersection-observer', 'IntersectionObserverEntry', { install: true }],
+  ['hr-time', 'Performance', {
+    install: true,
+    omit: {
+      'navigation-timing': 'timing, navigation: Navigation Timing is not modelled (performance.js says why a partial one is worse)',
+      'event-timing': 'eventCounts, interactionCount: Event Timing is not implemented',
+      'performance-measure-memory': 'measureUserAgentSpecificMemory: memory measurement is not implemented'
+    }
+  }],
+  ['performance-timeline', 'PerformanceEntry', { install: true }],
+  ['user-timing', 'PerformanceMark', { install: true }],
+  ['user-timing', 'PerformanceMeasure', { install: true }],
+  ['server-timing', 'PerformanceServerTiming', { install: true }],
+  ['resource-timing', 'PerformanceResourceTiming', { install: true }],
   ['performance-timeline', 'PerformanceObserver', { install: true }],
   ['performance-timeline', 'PerformanceObserverEntryList', { install: true }],
   ['resize-observer', 'ResizeObserver', { install: true }],
@@ -332,7 +345,7 @@ const RUNTIME = [
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
-  'defineLength', 'defineUnscopables', 'unforgeableMembers'
+  'defineLength', 'defineUnscopables', 'unforgeableMembers', 'defaultJSONOf'
 ];
 
 const all = await parseAll();
@@ -686,6 +699,12 @@ function constantValue(m, where) {
 // The members, of an interface a worker has too, exposed in a Window alone — which a worker's realm takes off its
 // prototype (worker-globals.js): DOMMatrixReadOnly's stringifier, which parses CSS.
 const windowOnlyMembers = {};
+// The options the table gives an interface ({} for one it does not list).
+function interfaceOptions(name) {
+  const entry = INTERFACES.find(([, n]) => n === name);
+  return (entry && entry[2]) || {};
+}
+
 function membersOf(def, omit = {}, omitMembers = {}) {
   const omitted = new Set();
   const gather = (d) => {
@@ -723,7 +742,7 @@ function membersOf(def, omit = {}, omitMembers = {}) {
 function generateInterface(def, options = {}) {
   const name = def.name;
   if (def.inheritance && !options.install) throw new Error(`${name}: an inherited interface is not generated yet`);
-  const members = [], constants = [], body = [], statics = [], unforgeables = [], checks = new Set(), unscopables = [], handlers = [];
+  const members = [], constants = [], body = [], statics = [], unforgeables = [], checks = new Set(), unscopables = [], handlers = [], preamble = [];
   // (…`this` checked: by its brand where the binding makes the object, by the test its class registered where it is
   // installed on that class)
   // (…a null or undefined `this` the realm's global — Web IDL's operation and attribute steps: a bare
@@ -827,14 +846,23 @@ function generateInterface(def, options = {}) {
         // [Default] toJSON (Web IDL "default toJSON steps"): an object of the interface's regular attributes, each its
         // getter's value — an interface type's the object, which JSON.stringify asks its own toJSON
         if (m.name !== 'toJSON') throw new Error(`${label}: only a [Default] toJSON is generated`);
+        // (…every inherited interface's with a [Default] toJSON first, the topmost first — "collect attribute values of
+        // an inheritance stack" — each read by its own getter, as the install found it)
+        const stack = [];
         for (let d = definitions.get(def.inheritance); d; d = definitions.get(d.inheritance)) {
-          if (d.members.some((x) => x.name === 'toJSON' && (x.extAttrs || []).some((e) => e.name === 'Default'))) {
-            throw new Error(`${label}: a [Default] toJSON taking an inherited one's attributes is not generated yet`);
-          }
+          if (d.members.some((x) => x.name === 'toJSON' && (x.extAttrs || []).some((e) => e.name === 'Default'))) stack.unshift(d);
         }
-        const attrs = memberList.filter((a) => a.type === 'attribute' && (!a.special || a.special === 'inherit') && !EVENT_HANDLER_TYPES.has(a.idlType.idlType));
+        if (stack.length && !options.install) throw new Error(`${label}: an inherited [Default] toJSON of an interface the binding makes is not generated yet`);
+        const regular = (list) => list.filter((a) => a.type === 'attribute' && (!a.special || a.special === 'inherit') && !EVENT_HANDLER_TYPES.has(a.idlType.idlType));
+        const inherited = stack.flatMap((d) => {
+          const o = interfaceOptions(d.name);
+          return regular(membersOf(d, o.omit, o.omitMembers)).map((a) => a.name);
+        });
+        if (inherited.length) preamble.push(`  const inheritedJSON = defaultJSONOf(Object.getPrototypeOf(iface.prototype), ${JSON.stringify(inherited)});`);
+        const attrs = regular(memberList);
         members.push('toJSON');
-        body.push(`    toJSON() { const self = ${self}; return { ${attrs.map((a) => `${a.name}: impl.get_${a.name}(self)`).join(', ')} }; }`);
+        const own = attrs.map((a) => `${a.name}: impl.get_${a.name}(self)`);
+        body.push(`    toJSON() { const self = ${self}; return { ${(inherited.length ? ['...inheritedJSON(self)'] : []).concat(own).join(', ')} }; }`);
         continue;
       }
       if (namedProperty) {
@@ -865,7 +893,7 @@ function generateInterface(def, options = {}) {
   const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
   if (options.install) {
     if (indexed || valueIterator) throw new Error(`${name}: an installed interface with an indexed getter or an iterator is not generated yet`);
-    return installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers, pairIterator });
+    return installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers, pairIterator, preamble });
   }
   if (unforgeables.length) throw new Error(`${name}: [LegacyUnforgeable] members of an interface the binding makes are not generated yet`);
   if (handlers.length) throw new Error(`${name}: event handlers of an interface the binding makes are not generated yet`);
@@ -917,7 +945,7 @@ function generateInterface(def, options = {}) {
 // …a [Global] interface's (Window's) on the global object itself (Web IDL §3.7.5), its [LegacyUnforgeable] ones too —
 // by the two functions it returns, which define them on a global: its members (configurable, made once where the
 // snapshot is, which a realm made from it has already), and its [LegacyUnforgeable] ones, as each realm is made.
-function installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers, pairIterator }) {
+function installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers, pairIterator, preamble }) {
   const name = def.name;
   const global = (def.extAttrs || []).some((e) => e.name === 'Global');
   const holder = global ? 'members' : 'iface.prototype';
@@ -929,6 +957,7 @@ function installInterface(def, { body, statics, unforgeables, checks, unscopable
   lines.push(`export function install${name}(iface, impl) {`);
   lines.push(`  const IS_SELF = interfaceCheck('${name}');`);
   for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
+  lines.push(...preamble);
   lines.push(`  class Members {`);
   lines.push(...body);
   lines.push(`  }`);
