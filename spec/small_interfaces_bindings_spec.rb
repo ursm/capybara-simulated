@@ -7,8 +7,12 @@ require_relative 'support/session_teardown'
 # slots. Headless Chrome's figures.
 RSpec.describe 'Small interface bindings' do
   let(:app) {
-    lambda do |_env|
-      [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body><svg><circle id=c class="a b"/></svg>']]
+    lambda do |env|
+      if env['PATH_INFO'] == '/a.xml'
+        [200, {'content-type' => 'application/xml'}, ['<a/>']]
+      else
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body><svg><circle id=c class="a b"/></svg>']]
+      end
     end
   }
   let(:session) {
@@ -285,7 +289,8 @@ RSpec.describe 'Small interface bindings' do
   end
 
   # An XMLDocument is made by the platform alone — createDocument, a clone of one — never by a page's `new` (Chrome:
-  # TypeError); an XML DOMParser parse is a Document (HTML's parseFromString: "a new Document"; Chrome: XMLDocument).
+  # TypeError); an XML DOMParser parse is a Document (HTML's parseFromString: "a new Document"; Chrome and Firefox:
+  # XMLDocument), an XHR's XML response an XMLDocument (XHR: "a document"; Chrome and Firefox).
   it 'makes XMLDocuments' do
     got = session.evaluate_script(<<~JS)
       (() => {
@@ -303,6 +308,41 @@ RSpec.describe 'Small interface bindings' do
     expect(got).to eq([
       '[object XMLDocument]', '[object Document]', '[object Document]', '[object XMLDocument]', '[object Document]',
       'TypeError', true, false
+    ])
+
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', '/a.xml', false);
+        xhr.send();
+        return Object.prototype.toString.call(xhr.responseXML);
+      })()
+    JS
+    expect(got).to eq('[object XMLDocument]')
+  end
+
+  # A clone is of the node's own interface — never by the `constructor` a page replaced or subclassed, nor a document
+  # by a named element its brand's name would read on into (Chrome).
+  it 'clones of their own interface' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const t = (o) => Object.prototype.toString.call(o);
+        const form = document.createElement('form');
+        form.name = '_xmlDocument';
+        document.body.append(form);
+        let ran = 0;
+        class F extends DocumentFragment { constructor() { super(); ran++; } }
+        const sub = new F().cloneNode();
+        const replaced = document.createDocumentFragment();
+        replaced.constructor = function X() {};
+        return [
+          t(document.cloneNode()), ran, sub instanceof F, t(sub), t(replaced.cloneNode()),
+          t(new DOMParser().parseFromString('<form name="_xmlDocument">', 'text/html').cloneNode(true))
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      '[object Document]', 1, false, '[object DocumentFragment]', '[object DocumentFragment]', '[object Document]'
     ])
   end
 end
