@@ -7886,9 +7886,6 @@ service-workers/service-worker/windowclient-ancestorOrigins.sub.https.html:
 service-workers/service-worker/windowclient-navigate.https.html:
 - "[harness] ERROR"
 - navigate on a top-level window client worker side
-service-workers/service-worker/xhr-response-url.https.html:
-- XHR Document should use the response URL
-- XHR Document should use the response URL (generated response)
 service-workers/service-worker/xsl-base-url.https.html:
 - base URL when service worker does respondWith(fetch(responseUrl))
 shadow-dom/DocumentOrShadowRoot-prototype-elementFromPoint.html:
@@ -8587,18 +8584,6 @@ xhr/response-body-errors.any.js:
 xhr/response-data-progress.htm:
 - 'XMLHttpRequest: progress events grow response body size, known content-length'
 - 'XMLHttpRequest: progress events grow response body size, unknown content-length'
-xhr/responseType-document-in-worker.html:
-- Setting XMLHttpRequest responseType to 'document' in a worker should have no effect.
-xhr/responsetype.any.js:
-- '[dedicatedworker] Set responseType to "document" when readyState is DONE and the
-  sync flag is set.'
-- '[dedicatedworker] Set responseType to "document" when readyState is DONE.'
-- '[dedicatedworker] Set responseType to "document" when readyState is HEADERS_RECEIVED.'
-- '[dedicatedworker] Set responseType to "document" when readyState is LOADING.'
-- '[dedicatedworker] Set responseType to "document" when readyState is OPENED and
-  the sync flag is set.'
-- '[dedicatedworker] Set responseType to "document" when readyState is OPENED.'
-- '[dedicatedworker] Set responseType to "document" when readyState is UNSENT.'
 xhr/responsexml-document-properties.htm:
 - "[harness] ERROR"
 - "[harness] no subtests"
