@@ -2259,10 +2259,6 @@ custom-elements/CustomElementRegistry-constructor-and-callbacks-are-held-strongl
 - attributeChangedCallback
 - connectedCallback
 - disconnectedCallback
-custom-elements/CustomElementRegistry-getName.html:
-- customElements.getName must throw when the element interface is not a constructor
-- customElements.getName returns the name of the entry with the given constructor
-  when there is a matching entry.
 custom-elements/attribute-changed-callback.html:
 - Mutating attributeChangedCallback after calling customElements.define must not affect
   the callback being invoked
@@ -3690,13 +3686,6 @@ html/dom/idlharness.https.html:
   "constructor" property'
 - 'CommandEvent interface: existence and properties of interface prototype object''s
   @@unscopables property'
-- 'CustomElementRegistry interface: operation define(DOMString, CustomElementConstructor,
-  optional ElementDefinitionOptions)'
-- 'CustomElementRegistry interface: operation get(DOMString)'
-- 'CustomElementRegistry interface: operation getName(CustomElementConstructor)'
-- 'CustomElementRegistry interface: operation initialize(Node)'
-- 'CustomElementRegistry interface: operation upgrade(Node)'
-- 'CustomElementRegistry interface: operation whenDefined(DOMString)'
 - CustomStateSet interface object length
 - CustomStateSet interface object name
 - 'CustomStateSet interface: existence and properties of interface object'

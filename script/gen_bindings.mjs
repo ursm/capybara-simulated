@@ -181,6 +181,7 @@ const INTERFACES = [
   ['html', 'ImageBitmap'],
   ['html', 'BarProp'],
   ['html', 'External'],
+  ['html', 'CustomElementRegistry', { install: true }],
   ['html', 'CanvasGradient'],
   ['html', 'CanvasPattern'],
   ['html', 'Path2D', { install: true }],
