@@ -11,7 +11,9 @@ require_relative 'support/poll_until'
 RSpec.describe 'DOMParser bindings' do
   let(:app) {
     lambda do |env|
-      if env['PATH_INFO'] == '/sub/doc.xml'
+      if env['PATH_INFO'] == '/moved'
+        [302, {'location' => '/sub/doc.xml#loc'}, []]
+      elsif env['PATH_INFO'] == '/sub/doc.xml'
         [200, {'content-type' => 'text/xml'}, ['<a><b/></a>']]
       elsif env['REQUEST_METHOD'] == 'POST'
         [200, {'content-type' => 'text/plain'}, [env['rack.input'].read]]
@@ -89,5 +91,17 @@ RSpec.describe 'DOMParser bindings' do
       })()
     JS
     expect(got).to eq([false, true, 'http://www.example.com/'])
+  end
+
+  # A redirect's Location fragment is the response URL's, which the document takes — responseURL drops it (Chrome).
+  it "gives a redirected document response the Location's fragment, and responseURL none" do
+    session.execute_script(<<~JS)
+      const x = new XMLHttpRequest();
+      x.open('GET', '/moved#req');
+      x.onload = () => { window.got = [x.responseURL, x.responseXML.URL]; };
+      x.send();
+    JS
+    poll_until { session.evaluate_script('window.got') }
+    expect(session.evaluate_script('window.got')).to eq(%w[http://www.example.com/sub/doc.xml http://www.example.com/sub/doc.xml#loc])
   end
 end
