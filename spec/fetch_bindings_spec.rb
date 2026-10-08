@@ -93,6 +93,34 @@ RSpec.describe 'Fetch bindings' do
     ])
   end
 
+  it "takes a stream body from its source Request, and says a used body is Chrome's way" do
+    session.execute_script(<<~JS)
+      (async () => {
+        const err = async (f) => { try { await f(); return 'resolved'; } catch (e) { return e.name + ': ' + e.message; } };
+        const stream = () => new ReadableStream({start(c) { c.enqueue(new Uint8Array([97])); c.close(); }});
+        const out = [];
+        const source = new Request('http://x/', {method: 'POST', body: stream(), duplex: 'half'});
+        const copy = new Request(source);
+        out.push(source.bodyUsed, await copy.text());
+        const a = new Response('x');
+        await a.text();
+        out.push(await err(() => a.json()));
+        const b = new Response('x');
+        b.body.getReader();
+        out.push(await err(() => b.text()));
+        out.push(fetch.length, await new Response({_readableStreamController: 1}).text());
+        window.got = out;
+      })();
+    JS
+    poll_until { session.evaluate_script('window.got') }
+    expect(session.evaluate_script('window.got')).to eq([
+      true, 'a',
+      "TypeError: Failed to execute 'json' on 'Response': body stream already read",
+      "TypeError: Failed to execute 'text' on 'Response': body stream is locked",
+      1, '[object Object]'
+    ])
+  end
+
   it 'reads a body through its own FormData, Blob and decoder, whatever a page does to the globals' do
     session.execute_script(<<~JS)
       (async () => {

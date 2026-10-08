@@ -8567,7 +8567,7 @@ module Capybara
           rt.drain_microtasks
         end
         # Fire any timer the initial script parked BEFORE releasing the init hold — the
-        # same gated drain the poll loop runs per tick. `__csimFetch` defers its body to a
+        # same gated drain the poll loop runs per tick. `fetch()` defers its body to a
         # setTimeout(0), so a fetch() issued by the initial script / connect handler is,
         # at this point, ONLY a due timer: once the init hold drops, nothing pending-
         # visible remains until the first poll tick (50 ms away), and a runner that
