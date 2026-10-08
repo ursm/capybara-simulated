@@ -264,4 +264,47 @@ RSpec.describe 'User action events' do
     session.find('#z').drop({'text/plain' => 'a'}, {'TEXT/PLAIN' => 'b'})
     expect(session.evaluate_script('__got')).to eq([['text/plain'], 'b'])
   end
+
+  # The drop-to-upload pattern: an input given a drop's FileList keeps its selection whatever is read of the
+  # DataTransfer later.
+  it 'keeps a dropped selection, and reports the drop\'s operation' do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      const input = document.createElement('input');
+      input.type = 'file';
+      document.body.append(input);
+      const z = document.getElementById('z');
+      z.addEventListener('dragover', (e) => e.preventDefault());
+      z.addEventListener('drop', (e) => {
+        e.preventDefault();
+        input.files = e.dataTransfer.files;
+        setTimeout(() => { window.__later = [e.dataTransfer.files.length, input.files.length]; });
+      });
+    JS
+    session.find('#z').drop(File.expand_path(__FILE__))
+    session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 10))')
+    expect(session.evaluate_script('__later')).to eq([0, 1])
+  end
+
+  # An in-page drag's dropEffect per event: "none" at dragstart, "copy" over the target, and at dragend the operation
+  # the drop left — its own dropEffect where it was canceled.
+  it "reports an in-page drag's dropEffect, the drop's at dragend" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.__fx = [];
+      const src = document.createElement('div');
+      src.id = 'src';
+      src.draggable = true;
+      src.textContent = 'drag me';
+      document.body.prepend(src);
+      const z = document.getElementById('z');
+      const log = (e) => __fx.push(e.type + ' ' + e.dataTransfer.dropEffect);
+      src.addEventListener('dragstart', log);
+      src.addEventListener('dragend', log);
+      z.addEventListener('dragover', (e) => { log(e); e.preventDefault(); });
+      z.addEventListener('drop', (e) => { log(e); e.dataTransfer.dropEffect = 'move'; e.preventDefault(); });
+    JS
+    session.find('#src').drag_to(session.find('#z'), html5: true)
+    expect(session.evaluate_script('__fx')).to eq(['dragstart none', 'dragover copy', 'dragover copy', 'drop copy', 'dragend move'])
+  end
 end

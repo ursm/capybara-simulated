@@ -95,4 +95,22 @@ RSpec.describe 'DataTransfer bindings' do
       ['zz', false]
     ])
   end
+
+  # `files` is live: a FileList read before an item is added lists it, and an input given it follows a clear (Chrome).
+  it 'keeps its FileList live' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const dt = new DataTransfer(), input = document.createElement('input');
+        input.type = 'file';
+        dt.items.add(new File(['a'], 'a'));
+        const list = dt.files;
+        dt.items.add(new File(['b'], 'b'));
+        const added = list.length;
+        input.files = dt.files;
+        dt.items.clear();
+        return [added, list === dt.files, input.files.length];
+      })()
+    JS
+    expect(got).to eq([2, true, 0])
+  end
 end
