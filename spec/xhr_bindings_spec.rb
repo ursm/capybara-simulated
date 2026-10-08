@@ -83,28 +83,46 @@ RSpec.describe 'XMLHttpRequest bindings' do
     expect(session.evaluate_script('window.got.join(" ")')).to eq('rsc1 rsc4 rsc1 rsc2 rsc3 rsc4 load:second')
   end
 
-  # S7 is Chrome's sequence; in S3 Chrome lets one stale `progress` through after the open() inside the rsc3 handler,
-  # where XHR's open() "terminates this's fetch controller" — nothing of the first send fires after it.
+  # Chrome's sequences (measured over a local echo server) — but for S3, where Chrome lets one stale `progress` through
+  # after the open() inside the rsc3 handler, where XHR's open() "terminates this's fetch controller": nothing of the
+  # first send fires after it. A load / error handler's open() leaves its loadend, which the end-of-body and
+  # request-error steps fire straight after it.
   it "answers a send whose handler opens it again only with the new send's events" do
     session.execute_script(<<~JS)
       window.got = {};
-      const runCase = (name, hook) => {
+      const runCase = (name, url, method, hook) => {
         const x = new XMLHttpRequest(), events = [];
         x.onreadystatechange = () => { events.push('rsc' + x.readyState); hook(x, 'rsc' + x.readyState); };
         for (const t of ['loadstart', 'progress', 'abort', 'error']) x.addEventListener(t, () => { events.push(t); hook(x, t); });
-        x.onload = () => events.push('load:' + x.responseText);
-        x.onloadend = () => { events.push('loadend'); if (x.responseText === 'second') window.got[name] = events.join(' '); };
-        x.open('POST', '/echo');
-        x.send('first');
+        x.onload = () => { events.push('load:' + x.responseText); hook(x, 'load'); };
+        x.onloadend = () => events.push('loadend');
+        x.open(method, url);
+        x.send(method === 'POST' ? 'first' : null);
+        setTimeout(() => { window.got[name] = events.join(' '); }, 500);
       };
-      let s7 = true, s3 = true;
-      runCase('s7', (x, ev) => { if (ev === 'loadstart' && s7) { s7 = false; x.abort(); x.open('POST', '/echo'); x.send('second'); } });
-      runCase('s3', (x, ev) => { if (ev === 'rsc3' && s3) { s3 = false; x.open('POST', '/echo'); x.send('second'); } });
+      const reopen = (event, send) => {
+        let once = true;
+        return (x, ev) => {
+          if (ev !== event || !once) return;
+          once = false;
+          if (event === 'loadstart') x.abort();
+          x.open('POST', '/echo');
+          if (send) x.send('second');
+        };
+      };
+      runCase('s7', '/echo', 'POST', reopen('loadstart', true));
+      runCase('s3', '/echo', 'POST', reopen('rsc3', true));
+      runCase('s6', '/echo', 'POST', reopen('load', true));
+      runCase('s8', 'data:bad', 'POST', reopen('error', false));
+      runCase('s9', URL.createObjectURL(new Blob(['bb'])), 'GET', reopen('load', false));
     JS
-    poll_until { session.evaluate_script('window.got.s7 && window.got.s3') }
-    expect(session.evaluate_script('[window.got.s7, window.got.s3]')).to eq([
-      'rsc1 loadstart rsc4 abort loadend rsc1 loadstart rsc2 rsc3 progress rsc4 load:second loadend',
-      'rsc1 loadstart rsc2 rsc3 rsc1 loadstart rsc2 rsc3 progress rsc4 load:second loadend'
-    ])
+    poll_until { session.evaluate_script('window.got.s9') }
+    expect(session.evaluate_script('window.got')).to eq(
+      's7' => 'rsc1 loadstart rsc4 abort loadend rsc1 loadstart rsc2 rsc3 progress rsc4 load:second loadend',
+      's3' => 'rsc1 loadstart rsc2 rsc3 rsc1 loadstart rsc2 rsc3 progress rsc4 load:second loadend',
+      's6' => 'rsc1 loadstart rsc2 rsc3 progress rsc4 load:first rsc1 loadstart loadend rsc2 rsc3 progress rsc4 load:second loadend',
+      's8' => 'rsc1 loadstart rsc4 error rsc1 loadend',
+      's9' => 'rsc1 loadstart rsc2 rsc3 progress rsc4 load:bb rsc1 loadend'
+    )
   end
 end
