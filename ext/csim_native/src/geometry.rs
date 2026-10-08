@@ -599,17 +599,31 @@ pub(crate) fn transform_chain(arena: &RealmArena, id: NodeId) -> Option<M4> {
 }
 // …and the same map UNFLATTENED — each step and each perspective composed as it is, no z dropped at a crossing — which
 // is what Intersection Observer v2's "effective transformation matrix" is: a `translateZ(10px)` that flattening makes a
-// no-op still moves the box off its plane (Chrome: not visible). None where nothing transforms it.
+// no-op still moves the box off its plane (Chrome: not visible). A perspective projects only what is transformed under
+// it, an identity transform too (Chrome: a plain child of a `perspective` box is visible, a `translateZ(0)` one is not).
+// None where nothing transforms it.
 pub(crate) fn unflattened_chain(arena: &RealmArena, id: NodeId) -> Option<M4> {
     let mut m = transform_step(arena, id);
+    let mut transformed = declares_transform(arena, id);
     let mut at = id;
     while let Some(up) = flat_parent(arena, at).filter(|&n| arena.get(n).is_some_and(|n| n.kind == NodeKind::Element)) {
-        for step in [perspective_step(arena, up), transform_step(arena, up)].into_iter().flatten() {
+        let perspective = if transformed { perspective_step(arena, up) } else { None };
+        for step in [perspective, transform_step(arena, up)].into_iter().flatten() {
             m = Some(m.map_or(step, |inner| multiply(&step, &inner)));
         }
+        transformed |= declares_transform(arena, up);
         at = up;
     }
     m
+}
+// Whether `node` declares a transform that applies to it — `transform`, `translate`, `rotate` or `scale`, an identity
+// one too — on a box a transform applies to.
+fn declares_transform(arena: &RealmArena, node: NodeId) -> bool {
+    let Some(style) = box_style(arena, node) else { return false };
+    let b = style.get_box();
+    (!individual_transforms(b).is_empty() || !b.transform.0.is_empty())
+        && !is_boxless(arena, node, &style)
+        && !non_replaced_inline(arena, node, &style)
 }
 fn cross_into(arena: &RealmArena, node: NodeId, m: Option<M4>) -> Option<M4> {
     let mut m = m?;
