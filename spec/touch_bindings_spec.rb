@@ -46,4 +46,23 @@ RSpec.describe 'Touch bindings' do
       "TypeError: Failed to construct 'TouchList': Illegal constructor"
     ])
   end
+
+  # TouchInit gives altitudeAngle / azimuthAngle as `double`, the attributes answer `float`: rounded to one, as radiusX
+  # is, and a double no float holds refused.
+  it 'answers its angles as floats' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const error = (f) => { try { f(); return 'none'; } catch (e) { return e.name + ': ' + e.message; } };
+        const touch = new Touch({identifier: 1, target: document.body, altitudeAngle: 0.1, azimuthAngle: 0.1, radiusX: 0.1});
+        return [
+          [touch.altitudeAngle, touch.azimuthAngle, touch.radiusX],
+          error(() => new Touch({identifier: 1, target: document.body, altitudeAngle: 1e40}))
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      [0.10000000149011612] * 3,
+      "TypeError: Failed to construct 'Touch': Failed to read the 'altitudeAngle' property from 'TouchInit': The provided float value is non-finite."
+    ])
+  end
 end
