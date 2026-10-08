@@ -30,4 +30,39 @@ RSpec.describe 'BroadcastChannel delivery' do
     poll_until { session.evaluate_script('window.got') }
     expect(session.evaluate_script('window.got')).to eq(%w[a:true b:true])
   end
+
+  # Chrome's order (measured): each message to every channel in creation order — a frame's channel made first, then the
+  # window's two — before the next message.
+  it "delivers another isolate's posts to this one's channels in creation order, each its own data" do
+    session.execute_script(<<~JS)
+      window.got = [];
+      const frame = document.createElement('iframe');
+      document.body.append(frame);
+      const fc = new frame.contentWindow.BroadcastChannel('o');
+      fc.onmessage = (e) => window.got.push('frame:' + e.data.v);
+      const c1 = new BroadcastChannel('o'), c2 = new BroadcastChannel('o');
+      c1.onmessage = (e) => { window.got.push('main:' + e.data.v); e.data.v = 'changed'; };
+      c2.onmessage = (e) => window.got.push('main2:' + e.data.v);
+      new Worker(URL.createObjectURL(new Blob(["const c = new BroadcastChannel('o'); c.postMessage({v: 'a'}); c.postMessage({v: 'b'});"], {type: 'text/javascript'})));
+    JS
+    poll_until { session.evaluate_script('window.got.length === 6') }
+    expect(session.evaluate_script('window.got')).to eq(%w[frame:a main:a main2:a frame:b main:b main2:b])
+  end
+
+  it "settles only once a worker's channel has answered a post" do
+    session.execute_script(<<~JS)
+      window.reply = null;
+      const w = new Worker(URL.createObjectURL(new Blob(["const c = new BroadcastChannel('r'); c.onmessage = (e) => postMessage('re:' + e.data); postMessage('ready');"], {type: 'text/javascript'})));
+      w.onmessage = (e) => { window.reply = e.data; };
+    JS
+    poll_until { session.evaluate_script('window.reply') == 'ready' }
+    session.execute_script(<<~JS)
+      const button = document.createElement('button');
+      button.textContent = 'ping';
+      button.onclick = () => new BroadcastChannel('r').postMessage('x');
+      document.body.append(button);
+    JS
+    session.click_button('ping')
+    expect(session.evaluate_script('window.reply')).to eq('re:x')
+  end
 end

@@ -3772,7 +3772,8 @@ module Capybara
         return 0 if @event_source_threads.empty? && @event_source_queue.empty?
         events = event_source_poll
         return 0 if events.empty?
-        @runtime.call('__csim_deliverEventSourceEvents', events)
+        # (…each a task of its own — see deliver_window_messages)
+        events.each {|event| @runtime.call('__csim_deliverEventSourceEvents', [event]) }
         events.size
       end
 
@@ -4064,7 +4065,8 @@ module Capybara
             true
           end
         end
-        @runtime.call('__csim_deliverWebSocketEvents', js_events) unless js_events.empty?
+        # (…each a task of its own — see deliver_window_messages)
+        js_events.each {|event| @runtime.call('__csim_deliverWebSocketEvents', [event]) }
         # A terminal event (`__close` / `__error`) completes a close handshake — release the clock
         # hold. Clamp: a server-INITIATED close arrives without a matching ws_close increment.
         terminals = events.count {|e| e[:type] == '__close' || e[:type] == '__error' }
@@ -6955,22 +6957,12 @@ module Capybara
         nested.group_by {|e| @workers.dig(e[:handle].to_i, :parent_worker) }.each do |pw, evs|
           @workers.dig(pw, :inbox)&.push({kind: 'nested_worker_msgs', events: evs})
         end
-        # Each worker→parent message fires from its OWN task, with a microtask
-        # checkpoint between (HTML: the message event is fired from a queued task).
-        # The awaited-receive pattern — resolve a promise, re-assign onmessage in the
-        # continuation — depends on that checkpoint running between two messages;
-        # dispatching a batch in one call fires the second message before the
-        # continuation re-attached the handler and silently drops it. The common
-        # single-message delivery keeps its one-call shape (the drain that follows
-        # this method covers its checkpoint).
-        if direct.size == 1
-          @runtime.call('__csim_deliverWorkerMessages', direct)
-        else
-          direct.each do |e|
-            @runtime.call('__csim_deliverWorkerMessages', [e])
-            @runtime.drain_microtasks
-          end
-        end
+        # Each worker→parent message fires from its OWN task — one host call, whose end runs the microtask checkpoint
+        # (kAuto; HTML: the message event is fired from a queued task). The awaited-receive pattern — resolve a promise,
+        # re-assign onmessage in the continuation — depends on that checkpoint running between two messages;
+        # dispatching a batch in one call fires the second message before the continuation re-attached the handler and
+        # silently drops it.
+        direct.each {|e| @runtime.call('__csim_deliverWorkerMessages', [e]) }
         events.size
       end
 
@@ -7225,50 +7217,38 @@ module Capybara
         @storage_inbox << {'kind' => kind.to_s, 'key' => key, 'old' => old, 'new' => new, 'url' => url.to_s, 'source' => source_realm_id}
       end
 
-      # Fire queued cross-window messages (postMessage + BroadcastChannel).
+      # Fire queued cross-window messages (postMessage, BroadcastChannel, `storage`) — each a task of its own: one per
+      # host call, whose end runs the microtask checkpoint (kAuto), so a promise reaction that re-arms a listener between
+      # two messages sees the second.
       def deliver_window_messages
         n = 0
         unless @window_inbox.empty?
           events = @window_inbox.slice!(0, @window_inbox.length)
-          @runtime.call('__csim_deliverWindowMessages', events)
+          events.each {|event| @runtime.call('__csim_deliverWindowMessages', [event]) }
           n += events.size
         end
         unless @broadcast_inbox.empty?
-          events = @broadcast_inbox.slice!(0, @broadcast_inbox.length)
-          # A BroadcastChannel reaches every same-origin browsing context EXCEPT the
-          # poster. Within this isolate each browsing context is a realm, so deliver to
-          # the main realm (0) and every live frame/window realm, skipping the realm
-          # that posted (it already delivered to itself in-VM via `_bcChannels`). A nil
-          # source (cross-isolate) is excluded from no realm.
-          [0, *@runtime.frame_realm_ids].each do |target_id|
-            batch = events.reject {|e| e['source'] == target_id }
-            next if batch.empty?
-            if target_id.zero?
-              @runtime.call('__csim_deliverBroadcasts', batch)
-            elsif @runtime.frame_realm_alive?(target_id)
-              @runtime.realm_call(target_id, '__csim_deliverBroadcasts', batch)
+          # A BroadcastChannel post from another window or a worker reaches this isolate's channels of its name and
+          # origin — the posting realm's excepted — as one of this isolate's own does: one queue, in creation order
+          # (HTML "postMessage" sorts its destinations by creation), which `deliver_broadcast_queue` drains below.
+          @broadcast_inbox.slice!(0, @broadcast_inbox.length).each do |event|
+            enqueue_broadcast_targets(event['name'], event['source'], nil, event['origin']) do |rid, lid|
+              {realm_id: rid, local_id: lid, data: event['data'], origin_key: event['origin']}
             end
+            n += 1
           end
-          n += events.size
         end
         unless @storage_inbox.empty?
           events = @storage_inbox.slice!(0, @storage_inbox.length)
-          # The `storage` event fires at every same-origin document EXCEPT the one that changed
-          # the area — deliver to the main realm (0) and every live frame realm, skipping the
-          # source realm. A nil source (a cross-window fan-out) is excluded from no realm. Each
-          # is a task of its own (HTML "broadcast"), its microtasks run before the next — a
-          # promise reaction that re-arms a listener between two changes sees the second.
+          # The `storage` event fires at every same-origin document EXCEPT the one that changed the area: the main realm
+          # (0) and every live frame realm as they are now, the source realm skipped. A nil source (a cross-window
+          # fan-out) is excluded from no realm.
+          realms = [0, *@runtime.frame_realm_ids]
           events.each do |event|
-            [0, *@runtime.frame_realm_ids].each do |target_id|
+            realms.each do |target_id|
               next if event['source'] == target_id
-              if target_id.zero?
-                @runtime.call('__csim_deliverStorageEvents', [event])
-              elsif @runtime.frame_realm_alive?(target_id)
-                @runtime.realm_call(target_id, '__csim_deliverStorageEvents', [event])
-              else
-                next
-              end
-              @runtime.drain_microtasks
+              next unless target_id.zero? || @runtime.frame_realm_alive?(target_id)
+              @runtime.realm_call(target_id, '__csim_deliverStorageEvents', event)
             end
           end
           n += events.size
@@ -7356,15 +7336,23 @@ module Capybara
         # realm not yet registered in `frame_realms`, so a same-realm sibling would be wrongly excluded.
         # `deliver_broadcast_queue` re-checks realm liveness at delivery time (by then it's registered),
         # and a genuinely-dead realm's stale entry just yields a skipped delivery.
-        targets  = @bc_registry.reject {|(rid, lid), e|
-          e[:closed] || e[:name] != name || e[:origin_key] != origin_key ||
-            (rid == realm_id && lid == local_id)
-        }.sort_by {|_k, e| e[:seq] }
         # `origin` (serialized, e.g. "null") is the MessageEvent.origin the same-isolate delivery
         # exposes; `origin_key` (e.g. "opaque:…") is the SCOPING token workers / other windows match on.
-        targets.each {|(rid, lid), _e| @bc_queue << {realm_id: rid, local_id: lid, data: data, origin: origin} }
+        enqueue_broadcast_targets(name, realm_id, local_id, origin_key) do |rid, lid|
+          {realm_id: rid, local_id: lid, data: data, origin: origin}
+        end
         broadcast_external(name, data, origin_key)
         nil
+      end
+
+      # Queue a post to every open channel of `name` and `origin_key` in this isolate — but the posting one
+      # (`realm_id`, `local_id`; a nil `local_id` every channel of that realm, as a realm another window's or a worker's
+      # post came through) — in creation order, each item the block's.
+      def enqueue_broadcast_targets(name, realm_id, local_id, origin_key)
+        @bc_registry.reject {|(rid, lid), e|
+          e[:closed] || e[:name] != name || e[:origin_key] != origin_key ||
+            (rid == realm_id && (local_id.nil? || lid == local_id))
+        }.sort_by {|_k, e| e[:seq] }.each {|(rid, lid), _e| @bc_queue << yield(rid, lid) }
       end
 
       # Drain the ordered BroadcastChannel queue, delivering one message to one channel at a time in
@@ -7381,9 +7369,11 @@ module Capybara
           item = @bc_queue.shift
           e = @bc_registry[[item[:realm_id], item[:local_id]]]
           next if e.nil? || e[:closed]   # closed after being queued → gets nothing
-          if item[:realm_id].zero?
-            @runtime.call('__csim_bcDeliverOne', item[:local_id], item[:data], item[:origin])
-          elsif @runtime.frame_realm_alive?(item[:realm_id])
+          next unless item[:realm_id].zero? || @runtime.frame_realm_alive?(item[:realm_id])
+          # (…another window's or a worker's post its origin's KEY, which the receiving realm serializes)
+          if item.key?(:origin_key)
+            @runtime.realm_call(item[:realm_id], '__csim_bcDeliverInbound', item[:local_id], item[:data], item[:origin_key])
+          else
             @runtime.realm_call(item[:realm_id], '__csim_bcDeliverOne', item[:local_id], item[:data], item[:origin])
           end
           n += 1
@@ -8614,8 +8604,11 @@ module Capybara
               # (a listen-only worker never posts back — the ack is the only signal it processed
               # it). Under `ensure`: the ack is CONTRACTUAL (settle's bounded wait relies on it —
               # see worker_reply_pending?), so a raising channel handler must not leak it.
+              # (…each channel's delivery a task of the worker's: run, a handler's synchronous postback with it, BEFORE the
+              # ack — the outbox is FIFO, so the reply precedes the ack settle waits on)
               begin
                 rt.call('__csim_deliverBroadcasts', [{'name' => msg[:name], 'data' => msg[:data], 'origin' => msg[:origin]}])
+                run_worker_timers.call(0)
               ensure
                 outbox << {handle: handle, kind: 'bcack'}
               end

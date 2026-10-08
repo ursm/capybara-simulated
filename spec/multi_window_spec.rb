@@ -36,6 +36,7 @@ RSpec.describe 'multi-window' do
         <<~HTML
           <!doctype html><html><head><title>popup</title></head><body>
             <h1 id="pop">POPUP</h1>
+            <iframe id="inner" src="/other"></iframe>
             <button id="back" onclick="window.opener && window.opener.postMessage('pong','*')">reply</button>
             <script>
               if (window.opener) { var d = document.createElement('div'); d.id = 'has-opener'; document.body.appendChild(d); }
@@ -103,6 +104,33 @@ RSpec.describe 'multi-window' do
     win = session.window_opened_by { session.find(:css, '#open').click }
     session.within_window(win) { session.find(:css, '#back').click }
     expect(session).to have_title('MAIN_GOT:pong')
+  end
+
+  # Each message another window posts is a task of its own (HTML "postMessage" queues one): a promise reaction that
+  # re-arms between two of them sees the second.
+  it "delivers another window's posts one task each" do
+    session.execute_script(<<~JS)
+      window.seen = [];
+      let armed = true;
+      window.addEventListener('message', (e) => {
+        window.seen.push(e.data + ':' + armed);
+        armed = false;
+        Promise.resolve().then(() => { armed = true; });
+      });
+    JS
+    win = session.window_opened_by { session.find(:css, '#open').click }
+    session.within_window(win) { session.execute_script("opener.postMessage('a', '*'); opener.postMessage('b', '*')") }
+    expect(session.evaluate_script('window.seen')).to eq(%w[a:true b:true])
+  end
+
+  # A frame's browsing context has no opener (HTML §7.2.2.1) — not its top-level window's: a frame of a popup posting to
+  # `opener` as well as to its parent would deliver twice.
+  it "gives a popup's frame no opener" do
+    win = session.window_opened_by { session.find(:css, '#open').click }
+    session.within_window(win) do
+      expect(session).to have_css('#has-opener')
+      expect(session.evaluate_script('[window.opener !== null, frames[0].opener]')).to eq([true, nil])
+    end
   end
 
   it 'reuses a window by name (second window.open with the same name navigates it)' do
