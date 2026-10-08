@@ -184,6 +184,7 @@ const INTERFACES = [
   ['html', 'CustomElementRegistry', { install: true }],
   ['html', 'ValidityState'],
   ['html', 'CustomStateSet', { install: true }],
+  ['html', 'ElementInternals', { install: true }],
   ['html', 'CanvasGradient'],
   ['html', 'CanvasPattern'],
   ['html', 'Path2D', { install: true }],

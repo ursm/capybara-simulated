@@ -111,4 +111,46 @@ RSpec.describe 'MediaError and SVGAnimatedString bindings' do
       'TypeError', 'TypeError', 'TypeError'
     ])
   end
+
+  # ElementInternals keeps its state in its slots: its validity and message (a form reads them, not a page's
+  # checkValidity), its submission value, and its ARIA default semantics; the binding converts setValidity's flags and
+  # anchor and setFormValue's value.
+  it 'gives a custom element its ElementInternals' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const error = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
+        class F extends HTMLElement {
+          static formAssociated = true;
+          constructor() { super(); this.i = this.attachInternals(); }
+        }
+        customElements.define('x-face', F);
+        const form = document.body.appendChild(document.createElement('form'));
+        const el = form.appendChild(new F());
+        el.setAttribute('name', 'f');
+        const i = el.i;
+        i.setFormValue(5);
+        i.setValidity({valueMissing: 1}, 'need');
+        ElementInternals.prototype.checkValidity = () => true;
+        const formValid = form.checkValidity();
+        i.role = 'button';
+        i.ariaLabelledByElements = [el];
+        return [
+          [Object.prototype.toString.call(i), Object.keys(i), i.validity.valueMissing, i.validationMessage, formValid],
+          [...new FormData(form)].map(([k, v]) => [k, v]),
+          [i.role, i.ariaLabelledByElements === i.ariaLabelledByElements, i.ariaLabelledByElements[0] === el, i.ariaLabel],
+          error(() => new ElementInternals()),
+          error(() => i.setValidity({customError: true}, 'x', document.createElementNS('http://www.w3.org/2000/svg', 'g'))),
+          error(() => i.setValidity({customError: true})),
+          error(() => { i.ariaOwnsElements = [{}]; }),
+          error(() => Object.getOwnPropertyDescriptor(ElementInternals.prototype, 'role').get.call({}))
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      ['[object ElementInternals]', [], true, 'need', false],
+      [%w[f 5]],
+      ['button', true, true, nil],
+      'TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError'
+    ])
+  end
 end
