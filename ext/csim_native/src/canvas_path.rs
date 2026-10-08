@@ -1056,11 +1056,11 @@ fn finish(scope: &mut v8::PinScope<'_, '_>, b: Builder<'_>, rv: &mut v8::ReturnV
 }
 
 // __dom.canvasPath(path, op, baked, a, b, c, d, e, f, …args) -> a building op on the path array (`Builder::op`; the ops
-// are its `OP_` constants, in the order of `CanvasPath`'s methods, then a reset), each point baked through the CTM `a`
-// to `f` where `baked`: nothing where it wrote in place, the array that replaces it where it outgrew it (or was none),
-// or a refusal `[exception, message]` — "RangeError", or the DOMException's name. Every number is one already (the page
-// side converts them as WebIDL does), read as such: an op is made a point at a time, and a ToNumber for each costs more
-// than the op.
+// are its `OP_` constants, in the order of the CanvasPath mixin's methods, then a reset), each point baked through the
+// CTM `a` to `f` where `baked`: nothing where it wrote in place, the array that replaces it where it outgrew it (or was
+// none), or a refusal `[exception, message]` — "RangeError", or the DOMException's name. Every number is one already
+// (the page side converts them as WebIDL does), read as such: an op is made a point at a time, and a ToNumber for each
+// costs more than the op.
 fn canvas_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let num = |k: i32| v8::Local::<v8::Number>::try_from(args.get(k)).map_or(f64::NAN, |n| n.value());
     let op = num(1) as i32;
