@@ -195,6 +195,8 @@ const INTERFACES = [
   ['geometry', 'DOMQuad', { install: true }],
   ['geometry', 'DOMMatrixReadOnly', { install: true }],
   ['geometry', 'DOMMatrix', { install: true }],
+  ['url', 'URL', { install: true }],
+  ['url', 'URLSearchParams', { install: true }],
   ['encoding', 'TextEncoder', { install: true }],
   ['encoding', 'TextDecoder', { install: true }],
   ['FileAPI', 'Blob', { install: true }],
@@ -308,8 +310,8 @@ const INTERFACES = [
 const RUNTIME = [
   'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
-  'toUnrestrictedDouble', 'toSequence', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
-  'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineIndexedIterator', 'defineClassString', 'enumerable', 'installMembers',
+  'toUnrestrictedDouble', 'toSequence', 'toRecord', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
+  'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers'
 ];
 
@@ -400,6 +402,14 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
     const value = t.generic === 'FrozenArray' ? `Object.freeze(${c})` : c;
     return t.nullable ? `(${expr} == null ? null : ${value})` : value;
   }
+  if (t.generic === 'record') {
+    // (Web IDL §3.2.24: the object's own enumerable keys, each converted — a symbol one a TypeError — with its value,
+    // an ordered map of them: the implementation's an array of [key, value] pairs)
+    const k = conversion(t.idlType[0], 'k', where, checks);
+    const v = conversion(t.idlType[1], 'x', where, checks);
+    const c = `toRecord(${expr}, (k) => ${k}, (x) => ${v}, ${failure(where)})`;
+    return t.nullable ? `(${expr} == null ? null : ${c})` : c;
+  }
   if (t.generic) throw new Error(`${label}: no binding converts ${JSON.stringify(t.idlType)} yet`);
   const extAttrs = [...(t.extAttrs || []), ...argExtAttrs];
   checkExtAttrs(extAttrs, 'type', label);
@@ -474,10 +484,11 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
 // Interfaces of specs no implementation here answers, which no value is an object of — a union member of one is
 // none (Trusted Types: with no policy, the string a page passes is what the API takes), a dictionary member of one
 // no member, and anything else converted to one no such object: the Typed OM's values, Animation Triggers', WebCodecs'
-// VideoFrame, and InputDeviceCapabilities (a UI event init's `sourceCapabilities` no member, as in Firefox).
+// VideoFrame, InputDeviceCapabilities (a UI event init's `sourceCapabilities` no member, as in Firefox), and Media Source
+// Extensions' MediaSource (`URL.createObjectURL` takes a Blob alone).
 const ABSENT_INTERFACES = new Set([
   'TrustedHTML', 'TrustedScript', 'TrustedScriptURL', 'CSSNumericValue', 'CSSKeywordValue', 'AnimationTrigger', 'VideoFrame',
-  'InputDeviceCapabilities', 'Sanitizer'
+  'InputDeviceCapabilities', 'Sanitizer', 'MediaSource'
 ]);
 // …and the dictionaries and enums of an API none answers, which a member names beside its interface: the Sanitizer's.
 const ABSENT_TYPES = new Set(['SanitizerConfig', 'SanitizerPresets']);
@@ -522,7 +533,7 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   if (members.length === 1) return conversion({ ...typeOf(members[0], { extAttrs }), nullable: includesNullable }, expr, where, checks);
   const name = `(${members.map((u) => u.generic ? `${u.generic}<…>` : u.idlType).join(' or ')})`;
   const unsupported = () => new Error(`${label}: no binding converts ${name} yet`);
-  if (members.some((u) => u.generic && u.generic !== 'sequence')) throw unsupported();
+  if (members.some((u) => u.generic && u.generic !== 'sequence' && u.generic !== 'record')) throw unsupported();
   const of = (test) => members.filter(test);
   // (…a WindowProxy among them the Window it is a proxy of: the Window's test, as for one alone)
   const ifaces = of((u) => u.idlType === 'WindowProxy' || definitions.get(u.idlType)?.type === 'interface');
@@ -533,9 +544,11 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   const callbacks = of((u) => definitions.get(u.idlType)?.type === 'callback');
   const buffers = of((u) => BUFFER_TYPES.has(u.idlType));
   const sequences = of((u) => u.generic === 'sequence');
-  if (dicts.length > 1 || strings.length > 1 || numerics.length > 1 || callbacks.length > 1 || sequences.length > 1 ||
-      ifaces.length + buffers.length + sequences.length + dicts.length + strings.length + numerics.length + booleans.length + callbacks.length !== members.length) throw unsupported();
-  const [dict] = dicts, [string] = strings, [numeric] = numerics, [boolean] = booleans;
+  const records = of((u) => u.generic === 'record');
+  if (dicts.length > 1 || strings.length > 1 || numerics.length > 1 || callbacks.length > 1 || sequences.length > 1 || records.length > 1 ||
+      (records.length && dicts.length) ||
+      ifaces.length + buffers.length + sequences.length + records.length + dicts.length + strings.length + numerics.length + booleans.length + callbacks.length !== members.length) throw unsupported();
+  const [dict] = dicts, [string] = strings, [numeric] = numerics, [boolean] = booleans, [record] = records;
   const convert = (u) => conversion(u, expr, where, checks, extAttrs);
   // (…the last conversion, which takes what no step before it did — so no step of its own)
   const last = string || numeric || boolean;
@@ -543,7 +556,7 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   if (includesNullable) steps.push([`${expr} == null`, 'null']);
   // (…a string the string type's at once — every test before its would fail on one: the common BlobPart, the common
   // string-or-options argument, asks nothing else)
-  if (string && ifaces.length + buffers.length + sequences.length + callbacks.length + dicts.length) {
+  if (string && ifaces.length + buffers.length + sequences.length + records.length + callbacks.length + dicts.length) {
     steps.push([`typeof ${expr} === 'string'`, convert(string)]);
   }
   if (dict) steps.push([`${expr} == null`, convert(dict)]);
@@ -559,6 +572,8 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   for (const u of sequences) {
     steps.push([`(${expr} !== null && (typeof ${expr} === 'object' || typeof ${expr} === 'function') && typeof ${expr}[Symbol.iterator] === 'function')`, convert(u)]);
   }
+  // (…any other object the record type's — Web IDL's union step after the sequence's)
+  if (record) steps.push([`(${expr} !== null && (typeof ${expr} === 'object' || typeof ${expr} === 'function'))`, convert(record)]);
   // (…a callable one the callback function type's, before a dictionary would take it)
   if (callbacks.length) steps.push([`typeof ${expr} === 'function'`, expr]);
   if (dict) steps.push([`(typeof ${expr} === 'object' || typeof ${expr} === 'function')`, convert(dict)]);
@@ -687,7 +702,7 @@ function generateInterface(def, options = {}) {
     return options.install ? `thisIs(this ?? globalThis, IS_SELF${message})` : `thisOf(this ?? globalThis, KEY${message})`;
   };
   const self = selfCheck();
-  let indexed = null, valueIterator = false, stringifier = null, constructor = null;
+  let indexed = null, valueIterator = false, pairIterator = false, stringifier = null, constructor = null;
   const memberList = membersOf(def, options.omit, options.omitMembers);
   for (const m of memberList) {
     const label = `${name}.${m.name || m.type}`;
@@ -695,7 +710,12 @@ function generateInterface(def, options = {}) {
     if (m.type === 'constructor') { constructor = m; continue; }
     if (m.type === 'const') { constants.push([m.name, constantValue(m, label)]); continue; }
     if (m.type === 'iterable') {
-      if (m.idlType.length !== 1) throw new Error(`${label}: a pair iterator is not generated yet`);
+      // (…a pair iterator, Web IDL §3.7.10: the implementation's pairs, `impl.pairs(self)`, read live)
+      if (m.idlType.length === 2) {
+        if (!options.install) throw new Error(`${label}: a pair iterator of an interface the binding makes is not generated yet`);
+        pairIterator = true;
+        continue;
+      }
       valueIterator = true;
       continue;
     }
@@ -800,7 +820,7 @@ function generateInterface(def, options = {}) {
   const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
   if (options.install) {
     if (indexed || valueIterator) throw new Error(`${name}: an installed interface with an indexed getter or an iterator is not generated yet`);
-    return installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers });
+    return installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers, pairIterator });
   }
   if (unforgeables.length) throw new Error(`${name}: [LegacyUnforgeable] members of an interface the binding makes are not generated yet`);
   if (handlers.length) throw new Error(`${name}: event handlers of an interface the binding makes are not generated yet`);
@@ -852,7 +872,7 @@ function generateInterface(def, options = {}) {
 // …a [Global] interface's (Window's) on the global object itself (Web IDL §3.7.5), its [LegacyUnforgeable] ones too —
 // by the two functions it returns, which define them on a global: its members (configurable, made once where the
 // snapshot is, which a realm made from it has already), and its [LegacyUnforgeable] ones, as each realm is made.
-function installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers }) {
+function installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers, pairIterator }) {
   const name = def.name;
   const global = (def.extAttrs || []).some((e) => e.name === 'Global');
   const holder = global ? 'members' : 'iface.prototype';
@@ -871,6 +891,7 @@ function installInterface(def, { body, statics, unforgeables, checks, unscopable
   lines.push(`  installMembers(${holder}, Members.prototype);`);
   if (statics.length) lines.push(`  class Statics {`, ...statics, `  }`, `  installMembers(iface, Statics.prototype);`);
   if (handlers.length) lines.push(`  impl.installEventHandlers(${holder}, ${JSON.stringify(handlers)}, IS_SELF);`);
+  if (pairIterator) lines.push(`  definePairIterator(iface.prototype, '${name}', (self) => impl.pairs(self), IS_SELF);`);
   if (constants.length) {
     const list = JSON.stringify(constants.map(([n]) => n));
     lines.push(`  defineConstants(iface, ${list}, [${constants.map(([, v]) => v).join(', ')}]);`);
