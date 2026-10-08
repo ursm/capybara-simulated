@@ -1074,7 +1074,8 @@ function distinguished(iface, name, [a, b]) {
   const isDictionary = (t) => t && !t.union && dictionaries.has(t.idlType);
   const isString = (t) => t && !t.union && STRING_TYPES.has(t.idlType);
   const isSequence = (t) => t && t.generic === 'sequence';
-  const isInterface = (t) => t && !t.union && definitions.get(t.idlType)?.type === 'interface';
+  // (…not a nullable one, whose overload null and undefined would choose — which the interface's test does not ask)
+  const isInterface = (t) => t && !t.union && !t.nullable && definitions.get(t.idlType)?.type === 'interface';
   if (isDictionary(typeOf(a)) && isString(typeOf(b))) return { index, dictionary: a, other: b };
   if (isDictionary(typeOf(b)) && isString(typeOf(a))) return { index, dictionary: b, other: a };
   if (isSequence(typeOf(a)) && isDictionary(typeOf(b))) return { index, sequence: a, other: b };

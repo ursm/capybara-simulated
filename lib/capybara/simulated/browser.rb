@@ -11558,7 +11558,11 @@ module Capybara
         {
           'status'     => status,
           'statusText' => RuntimeShared.utf8_text(Rack::Utils::HTTP_STATUS_CODES[status.to_i] || ''),
-          'headers'    => headers.to_h,
+          # A network response's headers as every other's cross (`stringify`), less the forbidden response
+          # headers no script sees (set-cookie / set-cookie2 — which Rack 2 joins with a newline).
+          'headers'    => stringify(headers).reject {|k, _| %w[set-cookie set-cookie2].include?(k.downcase) },
+          'url'        => url,
+          'type'       => 'basic',
           # The UA transparently decodes a Content-Encoding'd body (gzip/deflate) before the SW's
           # `event.preloadResponse.text()` sees it — the header stays, the bytes are inflated (as the
           # regular fetch path does).

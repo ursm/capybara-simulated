@@ -62,4 +62,33 @@ RSpec.describe 'Headers' do
     JS
     expect(got).to eq(['1', 'TypeError'])
   end
+
+  it "reads a Request's init headers once, and a copy, a JSON response's or a clone's not through the iterator" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        let reads = 0;
+        new Request('/x', {get headers() { reads++; return {a: '1'}; }});
+        Headers.prototype[Symbol.iterator] = Headers.prototype.entries = function () { return [][Symbol.iterator](); };
+        const req = new Request('/x', {headers: [['x-a', '1']]});
+        const json = Response.json(1, {headers: [['x-a', '1']]});
+        return [reads, new Request(req).headers.get('x-a'), new Request(req, {method: 'POST'}).headers.get('x-a'),
+                req.clone().headers.get('x-a'), json.headers.get('content-type'), json.headers.get('x-a')];
+      })()
+    JS
+    expect(got).to eq([1, '1', '1', '1', 'application/json', '1'])
+  end
+
+  it "refuses a structured clone with Chrome's message" do
+    got = session.evaluate_script(<<~JS)
+      [new Headers(), new FormData(), new AbortController(), window].map((v) => {
+        try { structuredClone(v); return 'cloned'; } catch (e) { return e.name + ': ' + e.message; }
+      })
+    JS
+    expect(got).to eq([
+      "DataCloneError: Failed to execute 'structuredClone' on 'Window': Headers object could not be cloned.",
+      "DataCloneError: Failed to execute 'structuredClone' on 'Window': FormData object could not be cloned.",
+      "DataCloneError: Failed to execute 'structuredClone' on 'Window': AbortController object could not be cloned.",
+      "DataCloneError: Failed to execute 'structuredClone' on 'Window': #<Window> could not be cloned."
+    ])
+  end
 end
