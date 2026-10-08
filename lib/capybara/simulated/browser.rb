@@ -7255,14 +7255,20 @@ module Capybara
           events = @storage_inbox.slice!(0, @storage_inbox.length)
           # The `storage` event fires at every same-origin document EXCEPT the one that changed
           # the area — deliver to the main realm (0) and every live frame realm, skipping the
-          # source realm. A nil source (a cross-window fan-out) is excluded from no realm.
-          [0, *@runtime.frame_realm_ids].each do |target_id|
-            batch = events.reject {|e| e['source'] == target_id }
-            next if batch.empty?
-            if target_id.zero?
-              @runtime.call('__csim_deliverStorageEvents', batch)
-            elsif @runtime.frame_realm_alive?(target_id)
-              @runtime.realm_call(target_id, '__csim_deliverStorageEvents', batch)
+          # source realm. A nil source (a cross-window fan-out) is excluded from no realm. Each
+          # is a task of its own (HTML "broadcast"), its microtasks run before the next — a
+          # promise reaction that re-arms a listener between two changes sees the second.
+          events.each do |event|
+            [0, *@runtime.frame_realm_ids].each do |target_id|
+              next if event['source'] == target_id
+              if target_id.zero?
+                @runtime.call('__csim_deliverStorageEvents', [event])
+              elsif @runtime.frame_realm_alive?(target_id)
+                @runtime.realm_call(target_id, '__csim_deliverStorageEvents', [event])
+              else
+                next
+              end
+              @runtime.drain_microtasks
             end
           end
           n += events.size

@@ -8513,11 +8513,6 @@ websockets/unload-a-document/005.html:
 - 'WebSockets: navigating nested browsing context with a websocket in top-level'
 - 'WebSockets: navigating nested browsing context with a websocket in top-level'
 - 'WebSockets: navigating nested browsing context with a websocket in top-level'
-webstorage/event_no_duplicates.html:
-- Clearing empty storage does not trigger event for localStorage
-- Clearing empty storage does not trigger event for sessionStorage
-- Setting to same value does not trigger event for localStorage
-- Setting to same value does not trigger event for sessionStorage
 webstorage/localstorage-about-blank-3P-iframe-opens-3P-window.partitioned.html:
 - 'StorageKey: test 3P about:blank window opened from a 3P iframe'
 webstorage/localstorage-basic-partitioned.sub.html:
