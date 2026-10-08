@@ -2410,8 +2410,6 @@ custom-elements/reactions/Selection.html:
 custom-elements/reactions/ShadowRoot.html:
 - innerHTML on ShadowRoot must enqueue disconnectedCallback when removing a custom
   element
-custom-elements/registries/CustomElementRegistry-upgrade.html:
-- upgrade is a no-op when called on an element associated with a different registry
 custom-elements/registries/Element-customElementRegistry-exceptions.html:
 - customElementRegistry on a failed custom element created by parser should return
   the specified custom regsitry
@@ -2425,7 +2423,6 @@ custom-elements/registries/global.window.js:
 - createElement() should throw with global registry from another document
 - createElementNS() should throw with global registry from another document
 - importNode() should throw with global registry from another document
-- initialize() of global registry should throw for nodes from another document
 custom-elements/registries/initial-about-blank.window.js:
 - Each navigable document has its own registry
 custom-elements/registries/per-document.html:

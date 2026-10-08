@@ -46,4 +46,48 @@ RSpec.describe 'CustomElementRegistry bindings' do
       'TypeError'
     ])
   end
+
+  # HTML's steps: upgrade() upgrades only this registry's elements (Chrome: the same); whenDefined's promises are the
+  # realm's own, whatever a page put in Promise's place (Chrome, Firefox: native); a scoped registry defines no
+  # customized built-in; the global one initializes only a tree of its own document; initialize reads a shadow root's
+  # registry as it is, not through a page's getter (Chrome: not run); and a frame's registry, called through this
+  # realm's interface, upgrades the frame's elements.
+  it "follows HTML's registry steps" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const div = document.createElement('div');
+        div.innerHTML = '<x-h></x-h>';
+        class H extends HTMLElement {}
+        customElements.define('x-h', H);
+        new CustomElementRegistry().upgrade(div);
+        const otherUpgraded = div.firstChild instanceof H;
+        customElements.upgrade(div);
+        const ownUpgraded = div.firstChild instanceof H;
+        const own = window.Promise;
+        window.Promise = function Fake() {};
+        window.Promise.resolve = () => 'fake';
+        const promises = [customElements.whenDefined('x-zz'), customElements.whenDefined('nope'), customElements.whenDefined('x-h')];
+        window.Promise = own;
+        promises[1].catch(() => {});
+        const host = document.createElement('div');
+        const root = host.attachShadow({mode: 'open', customElementRegistry: null});
+        let ran = false;
+        Object.defineProperty(root, 'customElementRegistry', {get() { ran = true; return null; }});
+        new CustomElementRegistry().initialize(root);
+        const frame = frames[0];
+        const el = frame.document.createElement('x-f');
+        frame.document.body.append(el);
+        CustomElementRegistry.prototype.define.call(frame.customElements, 'x-f', class extends frame.HTMLElement {});
+        return [
+          otherUpgraded, ownUpgraded,
+          promises.map((p) => p instanceof own),
+          #{error("new CustomElementRegistry().define('x-s', class extends HTMLButtonElement {}, {extends: 'button'})")},
+          #{error("customElements.initialize(document.implementation.createHTMLDocument('').createElement('div'))")},
+          ran,
+          el.constructor !== frame.HTMLElement
+        ];
+      })()
+    JS
+    expect(got).to eq([false, true, [true, true, true], 'NotSupportedError', 'NotSupportedError', false, true])
+  end
 end
