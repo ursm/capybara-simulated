@@ -50,4 +50,18 @@ RSpec.describe 'unhandled promise rejections' do
     JS
     expect(session.evaluate_script('[window.__seen, Promise.prototype.then.toString().includes("[native code]")]')).to eq([[], true])
   end
+
+  # HTML's "notify about rejected promises" runs as a task, skipping a promise handled by then: one an `await` chain
+  # reaches a few microtasks later is no unhandled rejection (Chrome: none), where one no handler ever reaches is.
+  it 'does not fire for a rejection handled a few microtasks later, in the same task' do
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0], seen = [];
+      addEventListener('unhandledrejection', (e) => seen.push(e.reason.message));
+      const late = Promise.reject(new Error('late'));
+      (async () => { await null; await null; await null; late.catch(() => {}); })();
+      Promise.reject(new Error('never'));
+      setTimeout(() => done(seen), 0);
+    JS
+    expect(got).to eq(['never'])
+  end
 end

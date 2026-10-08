@@ -2762,14 +2762,6 @@ dom/ranges/Range-insertNode.html:
 - "[harness] ERROR"
 dom/ranges/Range-surroundContents.html:
 - "[harness] ERROR"
-encoding/streams/decode-bad-chunks.any.js:
-- "[dedicatedworker] [harness] ERROR"
-- "[harness] ERROR"
-- "[serviceworker] [harness] ERROR"
-encoding/streams/decode-non-utf8.any.js:
-- "[dedicatedworker] [harness] ERROR"
-- "[harness] ERROR"
-- "[serviceworker] [harness] ERROR"
 encoding/streams/realms.window.js:
 - TypeError for chunk with the wrong type should come from constructor realm of TextDecoderStream
 - TypeError for incomplete input should come from constructor realm of TextDecoderStream
@@ -2782,10 +2774,6 @@ encoding/streams/realms.window.js:
   as the constructor of TextDecoderStream
 - the result object when write is called with a pending read should come from the
   same realm as the constructor of TextDecoderStream
-fetch/api/abort/general.any.js:
-- "[dedicatedworker] [harness] ERROR"
-- "[harness] ERROR"
-- "[serviceworker] [harness] ERROR"
 fetch/api/abort/keepalive.html:
 - aborting a keepalive fetch should work
 fetch/api/abort/serviceworker-intercepted.https.html:
@@ -2878,8 +2866,6 @@ fetch/api/basic/stream-safe-creation.any.js:
 - "[serviceworker] throwing Object.prototype.type accessor should not affect stream
   creation by 'fetch'"
 - throwing Object.prototype.type accessor should not affect stream creation by 'fetch'
-fetch/api/cors/cors-keepalive.any.js:
-- "[harness] ERROR"
 fetch/api/cors/data-url-iframe.html:
 - fetching "top.txt" without ACAO should be rejected.
 fetch/api/cors/data-url-shared-worker.html:
@@ -2939,8 +2925,6 @@ fetch/api/policies/referrer-origin.html:
 fetch/api/redirect/redirect-count.any.js:
 - "[serviceworker] [harness] TIMEOUT"
 - "[serviceworker] [harness] no subtests"
-fetch/api/redirect/redirect-keepalive.any.js:
-- "[harness] ERROR"
 fetch/api/redirect/redirect-keepalive.https.any.js:
 - "[keepalive][iframe][load] mixed content redirect"
 fetch/api/redirect/redirect-origin.any.js:
@@ -2979,7 +2963,6 @@ fetch/api/response/response-consume-empty.any.js:
 - "[serviceworker] Consume empty FormData response body as text"
 fetch/api/response/response-consume.html:
 - 'Consume response''s body: from multipart form data blob to formData'
-- "[harness] ERROR"
 fetch/api/response/response-stream-with-broken-then.any.js:
 - Attempt to inject 8.2 via Object.prototype.then.
 - Attempt to inject undefined via Object.prototype.then.
@@ -7515,8 +7498,6 @@ service-workers/service-worker/referrer-policy-header.https.html:
   (origin) should only have origin.
 service-workers/service-worker/register-default-scope.https.html:
 - null scope
-service-workers/service-worker/register-same-scope-different-script-url.https.html:
-- "[harness] ERROR"
 service-workers/service-worker/registration-iframe.https.html:
 - A scope url should start with the given script url
 service-workers/service-worker/registration-script-module.https.html:
@@ -7529,8 +7510,6 @@ service-workers/service-worker/registration-security-error.https.html:
 - Registration scope outside the script directory
 - Scope including parent-reference and not under the script directory
 - Script URL including consecutive slashes
-service-workers/service-worker/registration-updateviacache.https.html:
-- "[harness] ERROR"
 service-workers/service-worker/resource-timing-bodySize.https.html:
 - 'Response body size: constructed, cors, TAO fail'
 - 'Response body size: constructed, cors, TAO pass'
@@ -7611,7 +7590,6 @@ service-workers/service-worker/skip-waiting-using-registration.https.html:
 - "[harness] TIMEOUT"
 service-workers/service-worker/skip-waiting-without-using-registration.https.html:
 - Test skipWaiting while a client is not being controlled
-- "[harness] ERROR"
 service-workers/service-worker/svg-target-reftest.https.html:
 - "== service-workers/service-worker/resources/svg-target-reftest-001.html (a frame
   the painter never enters)"
@@ -7662,7 +7640,6 @@ service-workers/service-worker/windowclient-ancestorOrigins.sub.https.html:
 - iframe referrerpolicy="same-origin", origin A
 - iframe referrerpolicy="same-origin", origin B
 service-workers/service-worker/windowclient-navigate.https.html:
-- "[harness] ERROR"
 - navigate on a top-level window client worker side
 service-workers/service-worker/xsl-base-url.https.html:
 - base URL when service worker does respondWith(fetch(responseUrl))
@@ -8279,7 +8256,6 @@ xhr/open-url-worker-origin.htm:
 - Referer header
 xhr/overridemimetype-blob.html:
 - Loading data…
-- "[harness] ERROR"
 xhr/overridemimetype-headers-received-state-force-shiftjis.htm:
 - 'XMLHttpRequest: overrideMimeType() in HEADERS RECEIVED state, enforcing Shift-JIS
   encoding'

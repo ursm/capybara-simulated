@@ -53712,34 +53712,18 @@ service-workers/service-worker/tentative/fetch-event-download-fallback.https.htm
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: "[harness] ERROR"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 service-workers/service-worker/tentative/fetch-event-download-out-of-scope.https.html:
 - name: Download FetchEvent fires only for URLs within the SW registration scope.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: "[harness] ERROR"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 service-workers/service-worker/tentative/fetch-event-download-respond-with.https.html:
-- name: "[harness] ERROR"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: event.respondWith() is accepted for a download FetchEvent.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 service-workers/service-worker/tentative/fetch-event-download.https.html:
 - name: FetchEvent fires for <a download> with destination "".
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -55001,10 +54985,6 @@ webmessaging/message-channels/close-event/document-destroyed.tentative.window.js
     path/suffix. CLAUDE.md rule 1.
 webmessaging/message-channels/close-event/entangled-after-back-forward-cache-restore.https.tentative.window.js:
 - name: MessagePort still works after the page is restored from BFCache
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
