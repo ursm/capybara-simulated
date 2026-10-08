@@ -2445,8 +2445,6 @@ custom-elements/registries/scoped-registry-define-upgrade-order.html:
 - Upgrade in association order across documents, then tree order in each document
 - Upgrade order is affected by shadow tree adoption across documents
 - Upgrade order is not affected by DOM order between child frames
-custom-elements/state/ElementInternals-states.html:
-- 'CustomStateSet behavior of ElementInternals.states: Initial state'
 custom-elements/upgrading.html:
 - If definition's disable shadow is true and element's shadow root is non-null, then
   throw a "NotSupportedError" DOMException.
@@ -3683,15 +3681,6 @@ html/dom/idlharness.https.html:
   "constructor" property'
 - 'CommandEvent interface: existence and properties of interface prototype object''s
   @@unscopables property'
-- CustomStateSet interface object length
-- CustomStateSet interface object name
-- 'CustomStateSet interface: existence and properties of interface object'
-- 'CustomStateSet interface: existence and properties of interface prototype object'
-- 'CustomStateSet interface: existence and properties of interface prototype object''s
-  "constructor" property'
-- 'CustomStateSet interface: existence and properties of interface prototype object''s
-  @@unscopables property'
-- 'CustomStateSet interface: setlike<DOMString>'
 - DOMStringList interface object length
 - DOMStringList interface object name
 - 'DOMStringList interface: attribute length'
@@ -5306,48 +5295,6 @@ html/dom/idlharness.https.html:
   "constructor" property'
 - 'UserActivation interface: existence and properties of interface prototype object''s
   @@unscopables property'
-- ValidityState interface object length
-- ValidityState interface object name
-- 'ValidityState interface: attribute badInput'
-- 'ValidityState interface: attribute customError'
-- 'ValidityState interface: attribute patternMismatch'
-- 'ValidityState interface: attribute rangeOverflow'
-- 'ValidityState interface: attribute rangeUnderflow'
-- 'ValidityState interface: attribute stepMismatch'
-- 'ValidityState interface: attribute tooLong'
-- 'ValidityState interface: attribute tooShort'
-- 'ValidityState interface: attribute typeMismatch'
-- 'ValidityState interface: attribute valid'
-- 'ValidityState interface: attribute valueMissing'
-- 'ValidityState interface: document.createElement("input").validity must inherit
-  property "badInput" with the proper type'
-- 'ValidityState interface: document.createElement("input").validity must inherit
-  property "customError" with the proper type'
-- 'ValidityState interface: document.createElement("input").validity must inherit
-  property "patternMismatch" with the proper type'
-- 'ValidityState interface: document.createElement("input").validity must inherit
-  property "rangeOverflow" with the proper type'
-- 'ValidityState interface: document.createElement("input").validity must inherit
-  property "rangeUnderflow" with the proper type'
-- 'ValidityState interface: document.createElement("input").validity must inherit
-  property "stepMismatch" with the proper type'
-- 'ValidityState interface: document.createElement("input").validity must inherit
-  property "tooLong" with the proper type'
-- 'ValidityState interface: document.createElement("input").validity must inherit
-  property "tooShort" with the proper type'
-- 'ValidityState interface: document.createElement("input").validity must inherit
-  property "typeMismatch" with the proper type'
-- 'ValidityState interface: document.createElement("input").validity must inherit
-  property "valid" with the proper type'
-- 'ValidityState interface: document.createElement("input").validity must inherit
-  property "valueMissing" with the proper type'
-- 'ValidityState interface: existence and properties of interface object'
-- 'ValidityState interface: existence and properties of interface prototype object'
-- 'ValidityState interface: existence and properties of interface prototype object''s
-  "constructor" property'
-- 'ValidityState interface: existence and properties of interface prototype object''s
-  @@unscopables property'
-- ValidityState must be primary interface of document.createElement("input").validity
 - VideoTrack interface object length
 - VideoTrack interface object name
 - 'VideoTrack interface: attribute id'

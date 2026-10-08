@@ -182,6 +182,8 @@ const INTERFACES = [
   ['html', 'BarProp'],
   ['html', 'External'],
   ['html', 'CustomElementRegistry', { install: true }],
+  ['html', 'ValidityState'],
+  ['html', 'CustomStateSet', { install: true }],
   ['html', 'CanvasGradient'],
   ['html', 'CanvasPattern'],
   ['html', 'Path2D', { install: true }],
@@ -832,12 +834,20 @@ function generateInterface(def, options = {}) {
     if (m.type === 'const') { constants.push([m.name, constantValue(m, label)]); continue; }
     if (m.type === 'setlike') {
       // (…a setlike declaration, Web IDL §3.7.12: the members over the implementation's backing set, `impl.setOf(self)`
-      // — a JS Set — add / delete / clear only where it is not readonly and the interface declares none of its own)
+      // — a JS Set — add / delete / clear only where it is not readonly and the interface declares none of its own; its
+      // values an interface's objects or strings, each converted)
       if (!options.install) throw new Error(`${label}: a setlike interface the binding makes is not generated yet`);
       const valueType = m.idlType[0].idlType;
-      if (definitions.get(valueType)?.type !== 'interface') throw new Error(`${label}: a setlike of other than an interface type is not generated yet`);
-      checks.add(valueType);
-      setlike = { readonly: !!m.readonly, valueType };
+      let convert;
+      if (definitions.get(valueType)?.type === 'interface') {
+        checks.add(valueType);
+        convert = `(v, prefix) => toInterface(v, IS_${valueType}, prefix + ${JSON.stringify(`parameter 1 is not of type '${valueType}'.`)})`;
+      } else if (valueType === 'DOMString') {
+        convert = '(v, prefix) => toDOMString(v, false, prefix)';
+      } else {
+        throw new Error(`${label}: a setlike of other than an interface type or a DOMString is not generated yet`);
+      }
+      setlike = { readonly: !!m.readonly, convert };
       continue;
     }
     if (m.type === 'iterable') {
@@ -1053,7 +1063,7 @@ function installInterface(def, { body, statics, unforgeables, checks, unscopable
   if (pairIterator) lines.push(`  definePairIterator(iface.prototype, '${name}', (self) => impl.pairs(self), IS_SELF);`);
   if (setlike) {
     const own = setlike.readonly ? [] : ['add', 'delete', 'clear'].filter((n) => !setlike.declared.includes(n));
-    lines.push(`  defineSetlike(iface.prototype, '${name}', (self) => impl.setOf(self), IS_SELF, ${JSON.stringify(own)}, IS_${setlike.valueType}, '${setlike.valueType}');`);
+    lines.push(`  defineSetlike(iface.prototype, '${name}', (self) => impl.setOf(self), IS_SELF, ${JSON.stringify(own)}, ${setlike.convert}, impl.setChanged);`);
   }
   if (constants.length) {
     const list = JSON.stringify(constants.map(([n]) => n));

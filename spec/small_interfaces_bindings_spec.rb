@@ -75,4 +75,40 @@ RSpec.describe 'MediaError and SVGAnimatedString bindings' do
       'TypeError', 'TypeError', 'TypeError'
     ])
   end
+
+  # ValidityState and CustomStateSet are interfaces of their own, made by the platform alone: a control's validity a
+  # live view ([SameObject]); a custom element's states a setlike<DOMString> (each value converted to a string) whose
+  # mutations reach `:state()`.
+  it 'gives a control its ValidityState and a custom element its CustomStateSet' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const error = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
+        const input = document.createElement('input');
+        input.required = true;
+        const validity = input.validity;
+        const before = [validity.valueMissing, validity.valid];
+        input.value = 'x';
+        class S extends HTMLElement { constructor() { super(); this.i = this.attachInternals(); } }
+        customElements.define('x-states', S);
+        const el = document.body.appendChild(new S());
+        const states = el.i.states;
+        states.add({toString: () => 'on'});
+        const matched = el.matches(':state(on)');
+        states.delete('on');
+        return [
+          [Object.prototype.toString.call(validity), validity === input.validity, before, validity.valueMissing, validity.valid, Object.keys(validity)],
+          [Object.prototype.toString.call(states), states === el.i.states, matched, el.matches(':state(on)'), states.size, Object.keys(states)],
+          [states.add('a') === states, [...states], states.has({toString: () => 'a'})],
+          error(() => new ValidityState()), error(() => new CustomStateSet()),
+          error(() => CustomStateSet.prototype.add.call(new Set(), 'x'))
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      ['[object ValidityState]', true, [true, false], false, true, []],
+      ['[object CustomStateSet]', true, true, false, 0, []],
+      [true, ['a'], true],
+      'TypeError', 'TypeError', 'TypeError'
+    ])
+  end
 end
