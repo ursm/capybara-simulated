@@ -104,7 +104,8 @@ RSpec.describe 'Observer bindings' do
   end
 
   # "Compute the visibility" (Intersection Observer v2): a covered corner, a rotation (by `rotate` as much as by
-  # `transform`) are not visible; a box partly off the viewport and a proportional upscaling are. Chrome's figures.
+  # `transform`) are not visible; a box partly off the viewport, a proportional upscaling, one under a wholly transparent
+  # box and one beside what an `overflow: hidden` box clips away are. Chrome's figures.
   it 'computes an IntersectionObserver target visible as the spec does' do
     session.execute_script(<<~JS)
       document.body.innerHTML = `
@@ -112,15 +113,21 @@ RSpec.describe 'Observer bindings' do
         <div style="position: absolute; left: 100px; top: 100px; width: 20px; height: 20px"></div>
         <div id=b style="position: absolute; left: -60px; top: 200px; width: 100px; height: 100px"></div>
         <div id=c style="position: absolute; left: 200px; top: 10px; width: 100px; height: 100px; rotate: 45deg"></div>
-        <div id=d style="position: absolute; left: 400px; top: 200px; width: 50px; height: 50px; transform: scale(2)"></div>`;
+        <div id=d style="position: absolute; left: 400px; top: 200px; width: 50px; height: 50px; transform: scale(2)"></div>
+        <div id=e style="position: absolute; left: 10px; top: 400px; width: 50px; height: 50px"></div>
+        <div style="position: absolute; left: 10px; top: 400px; width: 50px; height: 50px; opacity: 0"></div>
+        <div id=f style="position: absolute; left: 100px; top: 400px; width: 50px; height: 50px"></div>
+        <div style="position: absolute; left: 160px; top: 400px; width: 10px; height: 10px; overflow: hidden">
+          <div style="margin-left: -100px; width: 200px; height: 200px"></div>
+        </div>`;
       window.got = {};
       const io = new IntersectionObserver((entries) => {
         for (const e of entries) window.got[e.target.id] = e.isVisible;
       }, {trackVisibility: true, delay: 100});
-      for (const id of ['a', 'b', 'c', 'd']) io.observe(document.getElementById(id));
+      for (const id of ['a', 'b', 'c', 'd', 'e', 'f']) io.observe(document.getElementById(id));
     JS
-    expect(poll_until { session.evaluate_script('Object.keys(window.got).length === 4 && window.got') })
-      .to eq('a' => false, 'b' => true, 'c' => false, 'd' => true)
+    expect(poll_until { session.evaluate_script('Object.keys(window.got).length === 6 && window.got') })
+      .to eq('a' => false, 'b' => true, 'c' => false, 'd' => true, 'e' => true, 'f' => true)
   end
 
   # A change of visibility alone notifies — an overlay laid over a target and taken away — and no update of a target
@@ -145,6 +152,21 @@ RSpec.describe 'Observer bindings' do
     got = poll_until { session.evaluate_script('window.got.length === 3 && window.got') }
     expect(got.map(&:first)).to eq([true, false, true])
     expect(got.each_cons(2).map {|a, b| b[1] - a[1] }).to all(be >= 1000)
+  end
+
+  # The notify list is every observer with entries queued: one disconnected between the update and the task — by a timer
+  # an animation frame callback set, which runs before it — still gets the entries it had (the spec; Chrome drops them),
+  # and never again with a later update's.
+  it 'notifies an IntersectionObserver of the entries it had when it was disconnected' do
+    session.execute_script(<<~JS)
+      window.got = [];
+      window.io = new IntersectionObserver((entries) => window.got.push(entries.length));
+      io.observe(document.body);
+      requestAnimationFrame(() => setTimeout(() => { io.disconnect(); window.got.push('disconnected'); }, 0));
+    JS
+    expect(poll_until { session.evaluate_script('window.got.length === 2 && window.got') }).to eq(['disconnected', 1])
+    session.execute_script('window.got = []; io.observe(document.body);')
+    expect(poll_until { session.evaluate_script('window.got.length === 1 && window.got') }).to eq([1])
   end
 
   # An exception a callback throws is reported — the window's `error` event — not swallowed.
@@ -183,6 +205,7 @@ RSpec.describe 'Observer bindings' do
           error(() => { const p = observer(); p.observe({entryTypes: ['mark']}); p.observe({type: 'mark'}); }),
           error(() => { const p = observer(); p.observe({type: 'mark'}); p.observe({entryTypes: ['mark']}); }),
           error(() => observer().observe({entryTypes: ['mark'], buffered: true})),
+          error(() => observer().observe({entryTypes: ['mark'], durationThreshold: 16})),
           error(() => new PerformanceObserverEntryList()),
           error(() => PerformanceObserver.prototype.takeRecords.call({})),
           [Object.isFrozen(PerformanceObserver.supportedEntryTypes), PerformanceObserver.supportedEntryTypes === PerformanceObserver.supportedEntryTypes],
@@ -198,7 +221,8 @@ RSpec.describe 'Observer bindings' do
       "TypeError: Failed to execute 'observe' on 'PerformanceObserver': An observe() call must not include both entryTypes and type arguments.",
       "InvalidModificationError: Failed to execute 'observe' on 'PerformanceObserver': This observer has performed observe({entryTypes:...}, therefore it cannot perform observe({type:...})",
       "InvalidModificationError: Failed to execute 'observe' on 'PerformanceObserver': This PerformanceObserver has performed observe({type:...}, therefore it cannot perform observe({entryTypes:...})",
-      "TypeError: Failed to execute 'observe' on 'PerformanceObserver': An observe() call must not include both entryTypes and buffered arguments.",
+      "TypeError: Failed to execute 'observe' on 'PerformanceObserver': An observe() call must not include both entryTypes and other arguments.",
+      "TypeError: Failed to execute 'observe' on 'PerformanceObserver': An observe() call must not include both entryTypes and other arguments.",
       "TypeError: Failed to construct 'PerformanceObserverEntryList': Illegal constructor",
       'TypeError: Illegal invocation',
       [true, true],
