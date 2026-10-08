@@ -2762,19 +2762,6 @@ dom/ranges/Range-insertNode.html:
 - "[harness] ERROR"
 dom/ranges/Range-surroundContents.html:
 - "[harness] ERROR"
-encoding/idlharness.any.js:
-- 'TextDecoderStream interface: attribute encoding'
-- 'TextDecoderStream interface: attribute fatal'
-- 'TextDecoderStream interface: attribute ignoreBOM'
-- 'TextEncoderStream interface: attribute encoding'
-- "[dedicatedworker] TextDecoderStream interface: attribute encoding"
-- "[dedicatedworker] TextDecoderStream interface: attribute fatal"
-- "[dedicatedworker] TextDecoderStream interface: attribute ignoreBOM"
-- "[dedicatedworker] TextEncoderStream interface: attribute encoding"
-- "[serviceworker] TextDecoderStream interface: attribute encoding"
-- "[serviceworker] TextDecoderStream interface: attribute fatal"
-- "[serviceworker] TextDecoderStream interface: attribute ignoreBOM"
-- "[serviceworker] TextEncoderStream interface: attribute encoding"
 encoding/streams/decode-bad-chunks.any.js:
 - "[dedicatedworker] [harness] ERROR"
 - "[harness] ERROR"

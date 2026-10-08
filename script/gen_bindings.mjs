@@ -263,6 +263,8 @@ const INTERFACES = [
   ['fetch', 'Response', { install: true }],
   ['encoding', 'TextEncoder', { install: true }],
   ['encoding', 'TextDecoder', { install: true }],
+  ['encoding', 'TextDecoderStream', { install: true }],
+  ['encoding', 'TextEncoderStream', { install: true }],
   ['FileAPI', 'Blob', { install: true }],
   ['FileAPI', 'File', { install: true }],
   ['FileAPI', 'FileList'],
