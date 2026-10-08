@@ -279,7 +279,11 @@ RSpec.describe 'resource timing' do
       fetch('/d.json');
     JS
     expect(s.evaluate_script('__seen')).to eq(['.json'])
-    s.execute_script("new PerformanceObserver(function () {}).observe({ entryTypes: ['resource'], buffered: true })")   # ignored, not an error
+    # entryTypes with any other member is a TypeError (Performance Timeline observe() step 3), where Chrome and Firefox
+    # ignore `buffered`.
+    expect(s.evaluate_script(<<~JS)).to eq('TypeError')
+      (() => { try { new PerformanceObserver(() => {}).observe({entryTypes: ['resource'], buffered: true}); } catch (e) { return e.name; } })()
+    JS
     expect(s.evaluate_script('__buffered[0]')).to be >= 4                # everything the page loaded, replayed
     expect(s.evaluate_script('PerformanceObserver.supportedEntryTypes')).to include('resource')
   end

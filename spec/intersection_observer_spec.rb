@@ -105,22 +105,27 @@ RSpec.describe 'IntersectionObserver' do
     observe(s, "new IntersectionObserver(window.__rec, {threshold: 0.75}).observe(document.getElementById('below'));")
     expect(entries(s)).to eq(['below:false:0.00'])
 
-    # Half visible — below the 0.75 threshold, so no notification. (1400 leaves the viewport at
-    # 1400..2168 against `below` at 2050..2150: 118 of its 100px… so scroll to where exactly half
-    # shows, 2000, and stay under the threshold.)
+    # Half visible — below the 0.75 threshold, but intersecting where it was not, which the spec
+    # notifies too ("or if isIntersecting does not equal previousIsIntersecting"; Chrome does not).
     s.execute_script('window.scrollTo(0, 1332)')
     pump(s)
-    expect(entries(s)).to eq(['below:false:0.00'])
+    expect(entries(s)).to eq(['below:false:0.00', 'below:true:0.50'])
+
+    # A little more of it, still under the threshold and still intersecting: nothing.
+    s.execute_script('window.scrollTo(0, 1350)')
+    pump(s)
+    expect(entries(s)).to eq(['below:false:0.00', 'below:true:0.50'])
 
     # Fully visible — crosses it. (Clamped to 1482, which shows all of it.)
     s.execute_script('window.scrollTo(0, 2050)')
     pump(s)
-    expect(entries(s)).to eq(['below:false:0.00', 'below:true:1.00'])
+    expect(entries(s)).to eq(['below:false:0.00', 'below:true:0.50', 'below:true:1.00'])
   end
 
   # The delivery model is FRAME-PACED: every producer (observe()'s initial
-  # notification included) only raises a pending flag, and the render phase of
-  # the next event-loop step is the one delivery site. An app whose callback
+  # notification included) only raises a pending flag, the render phase of the
+  # next event-loop step queues the entries, and a task of the step after
+  # notifies them. An app whose callback
   # re-observes its target (Discourse's composer-image-node) therefore advances
   # one round per step — in the eager-microtask model it looped unboundedly
   # inside a single step, spinning thousands of layout passes (the ProseMirror
@@ -141,8 +146,15 @@ RSpec.describe 'IntersectionObserver' do
       reobserve();
     JS
     pump(s, 8)
-    rounds = s.evaluate_script('window.__rounds')
-    expect(rounds).to be_between(1, 30)
+    # (…one step inside one script, so no frame the driver runs between scripts adds to it)
+    rounds = s.evaluate_script(<<~JS)
+      (() => {
+        const before = window.__rounds;
+        __runLoopStep(50, 50, false);
+        return [before > 0, window.__rounds - before];
+      })()
+    JS
+    expect(rounds).to eq([true, 1])
   end
 
   it 'exposes the spec-shaped surface' do

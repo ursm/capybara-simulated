@@ -7,7 +7,9 @@ require_relative 'support/poll_until'
 # IntersectionObserver, ResizeObserver and PerformanceObserver, with their entries, sizes and entry lists, generated from
 # their IDL: arguments required and converted, brands checked, state in slots. The figures are headless Chrome's, but for two the spec
 # decides: IntersectionObserverEntry has a constructor (the IDL's; Chrome's is illegal), and trackVisibility clamps a
-# delay below 100 to 100 (the spec's "set delay to 100"; Chrome throws NotSupportedError).
+# delay below 100 to 100 (the spec's "set delay to 100"; Chrome throws NotSupportedError); and so do a margin's absolute
+# units, an entry for an intersecting state that changed alone, and observe({entryTypes, buffered}) refused — each where
+# its test says.
 RSpec.describe 'Observer bindings' do
   let(:app) {
     lambda do |env|
@@ -75,6 +77,89 @@ RSpec.describe 'Observer bindings' do
     ])
   end
 
+  # "Parse a margin": CSS tokens — a comment dropped, a unit case-insensitive, an absolute one converted (the spec's
+  # "absolute length dimension token"; Chrome takes px alone), a bare number refused — and none at all 0px. Chrome's
+  # figures, but for `1in` and `.5px`, which Chrome truncates to 0px.
+  it 'parses a margin as CSS tokens' do
+    got = session.evaluate_script(<<~JS)
+      ['', ' ', '10PX', '+5px', '.5px', '1e1px', '-0px', '5px/**/6px', '1in', '10', '0', '5px,6px', '1px 2px 3px 4px 5px'].map((m) => {
+        try { return new IntersectionObserver(() => {}, {rootMargin: m, scrollMargin: m}).rootMargin; } catch (e) { return e.name; }
+      })
+    JS
+    expect(got).to eq([
+      '0px 0px 0px 0px',
+      '0px 0px 0px 0px',
+      '10px 10px 10px 10px',
+      '5px 5px 5px 5px',
+      '0.5px 0.5px 0.5px 0.5px',
+      '10px 10px 10px 10px',
+      '0px 0px 0px 0px',
+      '5px 6px 5px 6px',
+      '96px 96px 96px 96px',
+      'SyntaxError',
+      'SyntaxError',
+      'SyntaxError',
+      'SyntaxError'
+    ])
+  end
+
+  # "Compute the visibility" (Intersection Observer v2): a covered corner, a rotation (by `rotate` as much as by
+  # `transform`) are not visible; a box partly off the viewport and a proportional upscaling are. Chrome's figures.
+  it 'computes an IntersectionObserver target visible as the spec does' do
+    session.execute_script(<<~JS)
+      document.body.innerHTML = `
+        <div id=a style="position: absolute; left: 10px; top: 10px; width: 100px; height: 100px"></div>
+        <div style="position: absolute; left: 100px; top: 100px; width: 20px; height: 20px"></div>
+        <div id=b style="position: absolute; left: -60px; top: 200px; width: 100px; height: 100px"></div>
+        <div id=c style="position: absolute; left: 200px; top: 10px; width: 100px; height: 100px; rotate: 45deg"></div>
+        <div id=d style="position: absolute; left: 400px; top: 200px; width: 50px; height: 50px; transform: scale(2)"></div>`;
+      window.got = {};
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) window.got[e.target.id] = e.isVisible;
+      }, {trackVisibility: true, delay: 100});
+      for (const id of ['a', 'b', 'c', 'd']) io.observe(document.getElementById(id));
+    JS
+    expect(poll_until { session.evaluate_script('Object.keys(window.got).length === 4 && window.got') })
+      .to eq('a' => false, 'b' => true, 'c' => false, 'd' => true)
+  end
+
+  # A change of visibility alone notifies — an overlay laid over a target and taken away — and no update of a target
+  # comes within its observer's delay of the last.
+  it 'notifies an IntersectionObserver of visibility, no more often than its delay' do
+    session.execute_script(<<~JS)
+      document.body.innerHTML = '<div id=t style="width: 100px; height: 100px"></div>';
+      window.got = [];
+      new IntersectionObserver((entries) => {
+        for (const e of entries) window.got.push([e.isVisible, Math.round(e.time)]);
+      }, {trackVisibility: true, delay: 1000}).observe(document.getElementById('t'));
+    JS
+    expect(poll_until { session.evaluate_script('window.got.length === 1 && window.got.map((g) => g[0])') }).to eq([true])
+    session.execute_script(<<~JS)
+      const cover = document.createElement('div');
+      cover.id = 'cover';
+      cover.style.cssText = 'position: absolute; left: 0; top: 0; width: 50px; height: 50px';
+      document.body.append(cover);
+    JS
+    expect(poll_until { session.evaluate_script('window.got.length === 2 && window.got.map((g) => g[0])') }).to eq([true, false])
+    session.execute_script("document.getElementById('cover').remove()")
+    got = poll_until { session.evaluate_script('window.got.length === 3 && window.got') }
+    expect(got.map(&:first)).to eq([true, false, true])
+    expect(got.each_cons(2).map {|a, b| b[1] - a[1] }).to all(be >= 1000)
+  end
+
+  # An exception a callback throws is reported — the window's `error` event — not swallowed.
+  it 'reports what an observer callback throws' do
+    session.execute_script(<<~JS)
+      window.got = [];
+      window.addEventListener('error', (e) => { window.got.push(e.error.message); e.preventDefault(); });
+      new IntersectionObserver(() => { throw new Error('io'); }).observe(document.body);
+      new ResizeObserver(() => { throw new Error('ro'); }).observe(document.body);
+      new PerformanceObserver(() => { throw new Error('po'); }).observe({type: 'mark'});
+      performance.mark('m');
+    JS
+    expect(poll_until { session.evaluate_script('window.got.length === 3 && window.got.sort()') }).to eq(%w[io po ro])
+  end
+
   it 'calls an IntersectionObserver back with the observer as this' do
     session.execute_script(<<~JS)
       const o = new IntersectionObserver(function (entries, observer) {
@@ -97,6 +182,7 @@ RSpec.describe 'Observer bindings' do
           error(() => observer().observe({entryTypes: ['mark'], type: 'mark'})),
           error(() => { const p = observer(); p.observe({entryTypes: ['mark']}); p.observe({type: 'mark'}); }),
           error(() => { const p = observer(); p.observe({type: 'mark'}); p.observe({entryTypes: ['mark']}); }),
+          error(() => observer().observe({entryTypes: ['mark'], buffered: true})),
           error(() => new PerformanceObserverEntryList()),
           error(() => PerformanceObserver.prototype.takeRecords.call({})),
           [Object.isFrozen(PerformanceObserver.supportedEntryTypes), PerformanceObserver.supportedEntryTypes === PerformanceObserver.supportedEntryTypes],
@@ -112,6 +198,7 @@ RSpec.describe 'Observer bindings' do
       "TypeError: Failed to execute 'observe' on 'PerformanceObserver': An observe() call must not include both entryTypes and type arguments.",
       "InvalidModificationError: Failed to execute 'observe' on 'PerformanceObserver': This observer has performed observe({entryTypes:...}, therefore it cannot perform observe({type:...})",
       "InvalidModificationError: Failed to execute 'observe' on 'PerformanceObserver': This PerformanceObserver has performed observe({type:...}, therefore it cannot perform observe({entryTypes:...})",
+      "TypeError: Failed to execute 'observe' on 'PerformanceObserver': An observe() call must not include both entryTypes and buffered arguments.",
       "TypeError: Failed to construct 'PerformanceObserverEntryList': Illegal constructor",
       'TypeError: Illegal invocation',
       [true, true],
@@ -227,6 +314,41 @@ RSpec.describe 'Observer bindings' do
       'b:11',
       ['ResizeObserver loop completed with undelivered notifications.', nil, true, 0, 0, true, true],
       'a:11'
+    ])
+  end
+
+  # The entryTypes form replaces what an observer observes, the type form adds to it; a buffered type delivers the
+  # entries already recorded; disconnect() forgets them all; an entry list is in startTime order, filtered by name and
+  # type; takeRecords() takes what is queued.
+  it 'observes the entry types a PerformanceObserver is given' do
+    session.execute_script(<<~JS)
+      window.got = [];
+      performance.mark('early', {startTime: 5});
+      const names = (list) => list.map((e) => e.name);
+      const multiple = new PerformanceObserver((list) => window.got.push(['multiple', names(list.getEntries())]));
+      multiple.observe({entryTypes: ['mark']});
+      multiple.observe({entryTypes: ['measure']});
+      const single = new PerformanceObserver((list) => window.got.push([
+        'single', names(list.getEntries()), names(list.getEntriesByName('b')), names(list.getEntriesByName('b', 'measure')),
+        names(list.getEntriesByType('measure'))
+      ]));
+      single.observe({type: 'mark', buffered: true});
+      single.observe({type: 'measure'});
+      const dropped = new PerformanceObserver(() => window.got.push(['dropped']));
+      dropped.observe({type: 'mark'});
+      dropped.disconnect();
+      const taken = new PerformanceObserver(() => window.got.push(['taken']));
+      taken.observe({type: 'mark'});
+      performance.mark('b', {startTime: 1});
+      performance.measure('b', {start: 0, end: 2});
+      window.records = names(taken.takeRecords());
+    JS
+    expect(poll_until { session.evaluate_script('window.got.length === 2 && [window.got, window.records]') }).to eq([
+      [
+        ['multiple', ['b']],
+        ['single', %w[b b early], %w[b b], ['b'], ['b']]
+      ],
+      ['b']
     ])
   end
 end
