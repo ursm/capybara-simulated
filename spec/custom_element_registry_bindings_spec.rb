@@ -83,11 +83,12 @@ RSpec.describe 'CustomElementRegistry bindings' do
           promises.map((p) => p instanceof own),
           #{error("new CustomElementRegistry().define('x-s', class extends HTMLButtonElement {}, {extends: 'button'})")},
           #{error("customElements.initialize(document.implementation.createHTMLDocument('').createElement('div'))")},
+          #{error('customElements.initialize(frames[0].document.body)')},
           ran,
           el.constructor !== frame.HTMLElement
         ];
       })()
     JS
-    expect(got).to eq([false, true, [true, true, true], 'NotSupportedError', 'NotSupportedError', false, true])
+    expect(got).to eq([false, true, [true, true, true], 'NotSupportedError', 'NotSupportedError', 'NotSupportedError', false, true])
   end
 end
