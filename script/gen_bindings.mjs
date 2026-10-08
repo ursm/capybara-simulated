@@ -178,11 +178,13 @@ const INTERFACES = [
   ['css-font-loading', 'FontFaceSet', { install: true }],
   ['html', 'MediaError'],
   ['html', 'ImageData', { install: true }],
+  ['html', 'ImageBitmap'],
   ['html', 'CanvasGradient'],
   ['html', 'CanvasPattern'],
   ['html', 'Path2D', { install: true }],
   ['html', 'CanvasRenderingContext2D', { install: true }],
   ['html', 'OffscreenCanvasRenderingContext2D', { install: true }],
+  ['html', 'OffscreenCanvas', { install: true }],
   ['SVG', 'SVGAnimatedString'],
   ['clipboard-apis', 'ClipboardItem', { install: true }],
   ['clipboard-apis', 'Clipboard', { install: true }],
@@ -1383,6 +1385,9 @@ export const HTML_INTERFACE_PARENTS = {
 ${htmlParents.map(([n, p]) => `  ${n}: '${p}'`).join(',\n')}
 };`;
 
+// The dictionaries an implementation converts itself — an `any` argument's, as the type its steps name: a canvas's
+// getContext('2d') options a CanvasRenderingContext2DSettings.
+for (const name of ['CanvasRenderingContext2DSettings']) dictionaryConverter(name);
 const dictionaryParts = [...dictionaryConverters.values()];
 const body = [...dictionaryParts, ...parts, parentTable].join('\n\n');
 // (…every interface whose test some binding asks for, which the runtime holds registered once the bundle has run:

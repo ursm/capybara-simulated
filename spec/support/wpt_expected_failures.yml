@@ -3186,42 +3186,15 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-origin.sub.html:
 - 'unclean HTMLCanvasElement: origin unclear bitmaprenderer.transferFromImageBitmap'
 - 'unclean ImageBitmap: origin unclear bitmaprenderer.transferFromImageBitmap'
 html/canvas/element/manual/imagebitmap/createImageBitmap-serializable.html:
-- Serialize ImageBitmap created from a Blob
-- Serialize ImageBitmap created from a bitmap HTMLImageElement
-- Serialize ImageBitmap created from a bitmap SVGImageElement
-- Serialize ImageBitmap created from a vector HTMLImageElement
-- Serialize ImageBitmap created from a vector SVGImageElement
-- Serialize ImageBitmap created from an HTMLCanvasElement
-- Serialize ImageBitmap created from an HTMLVideoElement
-- Serialize ImageBitmap created from an HTMLVideoElement from a data URL
-- Serialize ImageBitmap created from an ImageBitmap
-- Serialize ImageBitmap created from an ImageData
-- Serialize ImageBitmap created from an OffscreenCanvas
 - Serializing a non-origin-clean ImageBitmap throws.
 html/canvas/element/manual/imagebitmap/createImageBitmap-svg-resize.html:
 - "== html/canvas/element/manual/imagebitmap/createImageBitmap-svg-resize-ref.html"
 html/canvas/element/manual/imagebitmap/createImageBitmap-transfer.html:
-- Transfer ImageBitmap created from a Blob
-- Transfer ImageBitmap created from a bitmap HTMLImageElement
-- Transfer ImageBitmap created from a bitmap SVGImageElement
-- Transfer ImageBitmap created from a vector HTMLImageElement
-- Transfer ImageBitmap created from a vector SVGImageElement
-- Transfer ImageBitmap created from an HTMLCanvasElement
-- Transfer ImageBitmap created from an HTMLVideoElement
-- Transfer ImageBitmap created from an HTMLVideoElement from a data URL
-- Transfer ImageBitmap created from an ImageBitmap
-- Transfer ImageBitmap created from an ImageData
-- Transfer ImageBitmap created from an OffscreenCanvas
 - Transferring a non-origin-clean ImageBitmap throws.
 html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap-flipped.html:
 - "== html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap-flipped-expected.html"
 html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap.html:
 - "== html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap-expected.html"
-html/canvas/element/manual/imagebitmap/imagebitmap-replication-exif-orientation.html:
-- ImageBitmap from file with EXIF rotation, duplicated via worker serialization round-trip
-- ImageBitmap from file with EXIF rotation, duplicated via worker transfer round-trip
-- ImageBitmap from file with EXIF rotation, duplicated via worker transfer round-trip,
-  while referenced by a CanvasPattern
 html/canvas/element/manual/shadows/canvas_shadows_system_colors.html:
 - "== html/canvas/element/manual/shadows/canvas_shadows_system_colors-expected.html"
 html/canvas/element/manual/shadows/shadowBlur_gaussian_tolerance.1.html:
@@ -3608,10 +3581,6 @@ html/dom/idlharness.any.js:
   false'
 - 'DedicatedWorkerGlobalScope interface: internal [[SetPrototypeOf]] method of interface
   prototype object - setting to a new value via __proto__ should throw a TypeError'
-- 'ImageBitmap interface: attribute height'
-- 'ImageBitmap interface: attribute width'
-- 'ImageBitmap interface: existence and properties of interface object'
-- 'ImageBitmap interface: operation close()'
 - ImageBitmapRenderingContext interface object length
 - ImageBitmapRenderingContext interface object name
 - 'ImageBitmapRenderingContext interface: attribute canvas'
@@ -3623,16 +3592,6 @@ html/dom/idlharness.any.js:
 - 'ImageBitmapRenderingContext interface: existence and properties of interface prototype
   object''s @@unscopables property'
 - 'ImageBitmapRenderingContext interface: operation transferFromImageBitmap(ImageBitmap?)'
-- 'OffscreenCanvas interface: attribute height'
-- 'OffscreenCanvas interface: attribute oncontextlost'
-- 'OffscreenCanvas interface: attribute oncontextrestored'
-- 'OffscreenCanvas interface: attribute width'
-- 'OffscreenCanvas interface: existence and properties of interface object'
-- 'OffscreenCanvas interface: existence and properties of interface prototype object'
-- 'OffscreenCanvas interface: operation convertToBlob(optional ImageEncodeOptions)'
-- 'OffscreenCanvas interface: operation getContext(OffscreenRenderingContextId, optional
-  any)'
-- 'OffscreenCanvas interface: operation transferToImageBitmap()'
 - Origin interface object length
 - Origin interface object name
 - 'Origin interface: attribute opaque'
@@ -4880,10 +4839,6 @@ html/dom/idlharness.https.html:
 - 'History interface: window.history must inherit property "state" with the proper
   type'
 - History must be primary interface of window.history
-- 'ImageBitmap interface: attribute height'
-- 'ImageBitmap interface: attribute width'
-- 'ImageBitmap interface: existence and properties of interface object'
-- 'ImageBitmap interface: operation close()'
 - ImageBitmapRenderingContext interface object length
 - ImageBitmapRenderingContext interface object name
 - 'ImageBitmapRenderingContext interface: attribute canvas'
@@ -5106,16 +5061,6 @@ html/dom/idlharness.https.html:
 - 'NotRestoredReasons interface: existence and properties of interface prototype object''s
   @@unscopables property'
 - 'NotRestoredReasons interface: operation toJSON()'
-- 'OffscreenCanvas interface: attribute height'
-- 'OffscreenCanvas interface: attribute oncontextlost'
-- 'OffscreenCanvas interface: attribute oncontextrestored'
-- 'OffscreenCanvas interface: attribute width'
-- 'OffscreenCanvas interface: existence and properties of interface object'
-- 'OffscreenCanvas interface: existence and properties of interface prototype object'
-- 'OffscreenCanvas interface: operation convertToBlob(optional ImageEncodeOptions)'
-- 'OffscreenCanvas interface: operation getContext(OffscreenRenderingContextId, optional
-  any)'
-- 'OffscreenCanvas interface: operation transferToImageBitmap()'
 - Origin interface object length
 - Origin interface object name
 - 'Origin interface: attribute opaque'
