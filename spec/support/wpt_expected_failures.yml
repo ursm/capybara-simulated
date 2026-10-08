@@ -3416,6 +3416,11 @@ html/canvas/element/path-objects/2d.path.isPointInPath.basic.html:
 - Verify the winding rule in isPointInPath works for for rect path.
 html/canvas/element/pixel-manipulation/2d.imageData.createImageBitmap.p3.rgba.unorm8.html:
 - Verify round-trip of 8-bit P3 data ImageData through ImageBitmap
+html/canvas/element/pixel-manipulation/2d.imageData.createImageBitmap.srgb.rgba.float16.html:
+- Verify round-trip of 16-bit float sRGB data ImageData through ImageBitmap
+html/canvas/element/pixel-manipulation/2d.imageData.put.basic.rgba.float16.html:
+- putImageData() puts 16-bit floating point image data from getImageData() onto the
+  canvas
 html/canvas/element/text/2d.text.fontVariantCaps.after.reset.font.html:
 - "== html/canvas/element/text/2d.text.fontVariantCaps.after.reset.font-expected.html"
 html/canvas/element/text/2d.text.measure.actualBoundingBox.small-font.html:

@@ -117,4 +117,70 @@ RSpec.describe 'ImageData bindings' do
     JS
     expect(got).to eq([true, true, [1, 2, 3, 255], 'display-p3', 'rgba-unorm8', [255, 128, 0, 255], 'TypeError'])
   end
+
+  # getImageData and createImageData initialize theirs with the settings given (Chrome: float16 ones Float16Arrays, an
+  # unknown format a TypeError); createImageData(imageData) with that one's colour space and pixel format; a clone's
+  # array of its pixel format's type whatever prototype the page gave it (Chrome: the page's constructor not called).
+  it 'is made by a context as its settings say' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const ctx = document.createElement('canvas').getContext('2d');
+        ctx.fillStyle = '#ff0000';
+        ctx.fillRect(0, 0, 1, 1);
+        const read = ctx.getImageData(0, 0, 1, 1, {pixelFormat: 'rgba-float16'});
+        const made = ctx.createImageData(2, 2, {pixelFormat: 'rgba-float16', colorSpace: 'display-p3'});
+        const copy = ctx.createImageData(made);
+        const linear = ctx.getImageData(0, 0, 1, 1, {colorSpace: 'srgb-linear'});
+        ctx.fillStyle = '#808080';
+        ctx.fillRect(0, 0, 1, 1);
+        const grey = ctx.getImageData(0, 0, 1, 1, {colorSpace: 'srgb-linear'});
+        ctx.putImageData(grey, 1, 0);
+        let called = false;
+        class Foo extends Uint8ClampedArray { constructor(...a) { called = true; super(...a); } }
+        const image = new ImageData(1, 1);
+        Object.setPrototypeOf(image.data, Foo.prototype);
+        const clone = structuredClone(image);
+        return [
+          [Object.prototype.toString.call(read.data), [...read.data], read.pixelFormat, read.colorSpace],
+          [Object.prototype.toString.call(made.data), made.pixelFormat, made.colorSpace],
+          [Object.prototype.toString.call(copy.data), copy.pixelFormat, copy.colorSpace],
+          [[...linear.data], linear.colorSpace, [...grey.data], [...ctx.getImageData(1, 0, 1, 1).data]],
+          #{error("ctx.getImageData(0, 0, 1, 1, {pixelFormat: 'bogus'})")},
+          #{error("ctx.createImageData(1, 1, {pixelFormat: 'bogus'})")},
+          [called, Object.prototype.toString.call(clone.data), Object.getPrototypeOf(clone.data) === Uint8ClampedArray.prototype]
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      ['[object Float16Array]', [1, 0, 0, 1], 'rgba-float16', 'srgb'],
+      ['[object Float16Array]', 'rgba-float16', 'display-p3'],
+      ['[object Float16Array]', 'rgba-float16', 'display-p3'],
+      [[255, 0, 0, 255], 'srgb-linear', [55, 55, 55, 255], [128, 128, 128, 255]],
+      'TypeError',
+      'TypeError',
+      [false, '[object Uint8ClampedArray]', true]
+    ])
+  end
+
+  # putImageData's two overloads take 3 and 7 arguments, each an [EnforceRange] long (null 0, undefined a TypeError),
+  # and an ImageData whose buffer is detached is an InvalidStateError (Chrome: the same).
+  it 'puts as its overloads say' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const ctx = document.createElement('canvas').getContext('2d');
+        const image = new ImageData(new Uint8ClampedArray([255, 0, 0, 255]), 1, 1);
+        const detached = new ImageData(1, 1);
+        structuredClone(detached.data.buffer, {transfer: [detached.data.buffer]});
+        ctx.putImageData(image, 0, 0, 0, 0, null, 1);
+        return [
+          #{error('ctx.putImageData(image, 0, 0, 0)')},
+          #{error('ctx.putImageData(image, 0, 0, 0, 0, 1)')},
+          #{error('ctx.putImageData(image, 0, 0, 0, 0, 1, undefined)')},
+          #{error('ctx.putImageData(detached, 0, 0)')},
+          [...ctx.getImageData(0, 0, 1, 1).data]
+        ];
+      })()
+    JS
+    expect(got).to eq(['TypeError', 'TypeError', 'TypeError', 'InvalidStateError', [0, 0, 0, 0]])
+  end
 end

@@ -1268,6 +1268,7 @@ function distinguished(iface, name, [a, b]) {
   // (…a buffer source type, or a union of them — ImageData's ImageDataArray — and a numeric type)
   const bufferTypes = (t) => {
     if (!t) return null;
+    if (t.nullable) throw new Error(`${iface}.${name}: overloads told apart by a nullable buffer source type are not generated yet`);
     const members = flattenUnion({ ...t, union: true, idlType: [t] }).members;
     return members.every((u) => !u.union && BUFFER_TYPES.has(u.idlType)) ? members.map((u) => u.idlType) : null;
   };

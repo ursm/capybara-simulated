@@ -40218,11 +40218,6 @@ html/canvas/element/manual/wide-gamut-canvas/imagedata-no-color-settings-crash.h
   reason: Float-32 / uint-16 ImageData is a high-bit-depth pixel buffer in the wide-gamut
     / HDR colour subsystem we deliberately do not model (rule 1); the proposed createImageData(bufferSource,
     …) float form has no library/app use.
-html/canvas/element/pixel-manipulation/2d.imageData.createImageBitmap.srgb.rgba.float16.html:
-- name: Verify round-trip of 16-bit float sRGB data ImageData through ImageBitmap
-  reason: The rgba-float16 ImageData pixel format is a high-bit-depth / half-float
-    pixel buffer (Float16Array-backed), part of the wide-gamut / HDR colour subsystem
-    we deliberately do not model (rule 1); no library or app uses it.
 html/canvas/element/pixel-manipulation/2d.imageData.object.ctor.basics.html:
 - name: Testing different type of ImageData constructor
   reason: 'Holds `new ImageData(1 << 31, 1 << 31)` to an IndexSizeError (Chrome''s
@@ -40243,12 +40238,6 @@ html/canvas/element/pixel-manipulation/2d.imageData.object.ctor.pixelFormat.html
     an ImageData" refuses the type ("If settings[pixelFormat] equals rgba-unorm8 and
     source is not a Uint8ClampedArray, then throw an InvalidStateError"). Firefox
     has no float16 ImageData. The subtest''s other assertions are held in spec/image_data_bindings_spec.rb.'
-html/canvas/element/pixel-manipulation/2d.imageData.put.basic.rgba.float16.html:
-- name: putImageData() puts 16-bit floating point image data from getImageData() onto
-    the canvas
-  reason: The rgba-float16 ImageData pixel format is a high-bit-depth / half-float
-    pixel buffer (Float16Array-backed), part of the wide-gamut / HDR colour subsystem
-    we deliberately do not model (rule 1); no library or app uses it.
 html/canvas/element/text/2d.text.measure.fillTextCluster-align.tentative.html:
 - name: "== html/canvas/element/text/2d.text.measure.fillTextCluster-align.tentative-expected.html"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

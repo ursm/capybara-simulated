@@ -2192,8 +2192,9 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
         const errs = {};
         // A ~2^31-pixel region can't be backed. Rather than aborting the process on
         // the huge allocation, the ImageData constructor and getImageData throw the
-        // RangeError HTML's "initialize an ImageData" rethrows (Chrome and Firefox: an
-        // IndexSizeError); an argument out of long's range is [EnforceRange]'s TypeError.
+        // RangeError HTML's "initialize an ImageData" rethrows (Chrome: getImageData's
+        // the same, the constructor's an IndexSizeError); an argument out of long's
+        // range is [EnforceRange]'s TypeError.
         try { ctx.getImageData(10, 0xffffffff, 2147483647, 10); } catch (e) { errs.range = e.name; }
         try { ctx.getImageData(0, 0, 2147483647, 10); } catch (e) { errs.get = e.name; }
         try { new ImageData(2147483647, 10); } catch (e) { errs.ctor = e.name; }
