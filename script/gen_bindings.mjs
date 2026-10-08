@@ -180,6 +180,7 @@ const INTERFACES = [
   ['html', 'ImageData', { install: true }],
   ['html', 'CanvasGradient'],
   ['html', 'CanvasPattern'],
+  ['html', 'Path2D', { install: true }],
   ['SVG', 'SVGAnimatedString'],
   ['clipboard-apis', 'ClipboardItem', { install: true }],
   ['clipboard-apis', 'Clipboard', { install: true }],
