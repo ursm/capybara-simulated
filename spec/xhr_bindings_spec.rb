@@ -125,4 +125,24 @@ RSpec.describe 'XMLHttpRequest bindings' do
       's9' => 'rsc1 loadstart rsc2 rsc3 progress rsc4 load:bb rsc1 loadend'
     )
   end
+
+  it "reports the bytes a response's body carried as its progress, not its decoded characters" do
+    session.execute_script(<<~JS)
+      window.got = {};
+      const load = (name, blob, responseType, async = true) => {
+        const x = new XMLHttpRequest();
+        x.open('GET', URL.createObjectURL(blob), async);
+        if (responseType) x.responseType = responseType;
+        x.onload = (e) => { window.got[name] = [e.loaded, e.total, e.lengthComputable]; };
+        x.send();
+      };
+      load('text', new Blob(['hé€']));
+      load('arraybuffer', new Blob([new Uint8Array([0xC3, 0xA9])]), 'arraybuffer');
+      load('sync', new Blob(['sé']), '', false);
+    JS
+    poll_until { session.evaluate_script('Object.keys(window.got).length === 3') }
+    expect(session.evaluate_script('window.got')).to eq(
+      'text' => [6, 6, true], 'arraybuffer' => [2, 2, true], 'sync' => [3, 3, true]
+    )
+  end
 end
