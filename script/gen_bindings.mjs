@@ -187,6 +187,14 @@ const INTERFACES = [
   ['webidl', 'DOMException', { install: true }],
   ['webidl', 'QuotaExceededError', { install: true }],
   ['dom', 'DOMImplementation', { install: true }],
+  ['geometry', 'DOMPointReadOnly', { install: true }],
+  ['geometry', 'DOMPoint', { install: true }],
+  ['geometry', 'DOMRectReadOnly', { install: true }],
+  ['geometry', 'DOMRect', { install: true }],
+  ['geometry', 'DOMRectList'],
+  ['geometry', 'DOMQuad', { install: true }],
+  ['geometry', 'DOMMatrixReadOnly', { install: true }],
+  ['geometry', 'DOMMatrix', { install: true }],
   ['encoding', 'TextEncoder', { install: true }],
   ['encoding', 'TextDecoder', { install: true }],
   ['FileAPI', 'Blob', { install: true }],
@@ -331,12 +339,13 @@ for (const [spec, defs] of Object.entries(all)) {
 // interface object is put on — and, of a member, whether its interface's has it at all (membersOf). [SecureContext]: exposed, every realm here being a secure context
 // (`isSecureContext`, platform-globals.js). The rest the generator makes as Web IDL says.
 const HANDLED = {
-  // ([Serializable] / [Transferable]: the structured clone's to honour — platform-globals.js `cloneInto` — no member's)
-  interface: ['Exposed', 'SecureContext', 'Global', 'LegacyUnenumerableNamedProperties', 'Serializable', 'Transferable'],
+  // ([Serializable] / [Transferable]: the structured clone's to honour — platform-globals.js `cloneInto` — no member's;
+  // [LegacyWindowAlias]: the Window's other names for the interface object, its implementation's to put there)
+  interface: ['Exposed', 'SecureContext', 'Global', 'LegacyUnenumerableNamedProperties', 'Serializable', 'Transferable', 'LegacyWindowAlias'],
   member: [
     'SameObject', 'NewObject', 'CEReactions', 'Unscopable', 'PutForwards', 'Reflect', 'SecureContext', 'LegacyLenientSetter',
     'LegacyUnforgeable', 'LegacyLenientThis', 'Replaceable', 'HTMLConstructor', 'ReflectSetter', 'ReflectURL', 'ReflectNonNegative',
-    'ReflectRange', 'ReflectDefault', 'Exposed'
+    'ReflectRange', 'ReflectDefault', 'Exposed', 'Default'
   ],
   type: ['LegacyNullToEmptyString', 'EnforceRange', 'Clamp', 'AllowShared', 'AllowResizable']
 };
@@ -627,6 +636,9 @@ function constantValue(m, where) {
 // An interface's members: its own, those of the mixins it includes, and those of the partials of either — but what
 // `omit` and `omitMembers` name (and why). What no binding here makes of a definition yet, beside its members, is an
 // error, as is an omission of something nothing adds.
+// The members, of an interface a worker has too, exposed in a Window alone — which a worker's realm takes off its
+// prototype (worker-globals.js): DOMMatrixReadOnly's stringifier, which parses CSS.
+const windowOnlyMembers = {};
 function membersOf(def, omit = {}, omitMembers = {}) {
   const omitted = new Set();
   const gather = (d) => {
@@ -647,7 +659,10 @@ function membersOf(def, omit = {}, omitMembers = {}) {
   const members = gather(def).filter((m) => {
     const own = exposureOf(m);
     if (own && exposedIn && !exposedIn.some((g) => own.has(g))) return false;
-    if (own && exposedIn && exposedIn.some((g) => !own.has(g))) throw new Error(`${def.name}.${m.name}: a member exposed in fewer of its interface's globals is not generated yet`);
+    if (own && exposedIn && exposedIn.some((g) => !own.has(g))) {
+      if (own.size !== 1 || !own.has('Window')) throw new Error(`${def.name}.${m.name}: a member exposed in fewer of its interface's globals is not generated yet`);
+      (windowOnlyMembers[def.name] ||= []).push(m.special === 'stringifier' && !m.name ? 'toString' : m.name);
+    }
     if (!Object.hasOwn(omitMembers, m.name)) return true;
     omitted.add(m.name);
     return false;
@@ -692,8 +707,9 @@ function generateInterface(def, options = {}) {
     if (m.type === 'attribute') {
       // ([LegacyUnforgeable], Web IDL §3.4.10: an own property of each object, which cannot be reconfigured)
       const out = (m.extAttrs || []).some((e) => e.name === 'LegacyUnforgeable') ? unforgeables : body;
+      // (…an `inherit` one, Web IDL §2.5.2, its inherited getter's value and a setter of its own: DOMPoint's coordinates)
       if (m.special === 'stringifier') stringifier = m.name;
-      else if (m.special) throw new Error(`${label}: a ${m.special} attribute is not generated yet`);
+      else if (m.special && m.special !== 'inherit') throw new Error(`${label}: a ${m.special} attribute is not generated yet`);
       members.push(m.name);
       // (…[LegacyLenientThis] only an event handler's here, whose accessors the installing class's are)
       if ((m.extAttrs || []).some((e) => e.name === 'LegacyLenientThis')) throw new Error(`${label}: a [LegacyLenientThis] attribute is not generated yet`);
@@ -742,6 +758,20 @@ function generateInterface(def, options = {}) {
         if (m.name || m.arguments.length) throw new Error(`${label}: only an anonymous stringifier operation is generated`);
         body.push(`    toString() { return impl.stringify(${self}); }`);
         stringifier = 'toString';
+        continue;
+      }
+      if ((m.extAttrs || []).some((e) => e.name === 'Default')) {
+        // [Default] toJSON (Web IDL "default toJSON steps"): an object of the interface's regular attributes, each its
+        // getter's value — an interface type's the object, which JSON.stringify asks its own toJSON
+        if (m.name !== 'toJSON') throw new Error(`${label}: only a [Default] toJSON is generated`);
+        for (let d = definitions.get(def.inheritance); d; d = definitions.get(d.inheritance)) {
+          if (d.members.some((x) => x.name === 'toJSON' && (x.extAttrs || []).some((e) => e.name === 'Default'))) {
+            throw new Error(`${label}: a [Default] toJSON taking an inherited one's attributes is not generated yet`);
+          }
+        }
+        const attrs = memberList.filter((a) => a.type === 'attribute' && (!a.special || a.special === 'inherit') && !EVENT_HANDLER_TYPES.has(a.idlType.idlType));
+        members.push('toJSON');
+        body.push(`    toJSON() { const self = ${self}; return { ${attrs.map((a) => `${a.name}: impl.get_${a.name}(self)`).join(', ')} }; }`);
         continue;
       }
       if (m.special === 'getter') {
@@ -1077,6 +1107,12 @@ const windowOnly = [...definitions.values()].filter((d) => {
   const exposed = (d.extAttrs || []).find((e) => e.name === 'Exposed');
   return exposed && exposed.rhs.type === 'identifier' && exposed.rhs.value === 'Window';
 }).map((d) => d.name);
+// …and an interface's [LegacyWindowAlias] names.
+const legacyWindowAliases = Object.fromEntries([...definitions.values()].flatMap((d) => {
+  const alias = d.type === 'interface' && (d.extAttrs || []).find((e) => e.name === 'LegacyWindowAlias');
+  if (!alias) return [];
+  return [[d.name, alias.rhs.type === 'identifier' ? [alias.rhs.value] : alias.rhs.value.map((v) => v.value)]];
+}).sort(([a], [b]) => (a < b ? -1 : 1)));
 // The interface each HTML element interface inherits: what its interface object extends.
 const htmlParents = [...definitions.values()]
   .filter((d) => d.type === 'interface' && /^HTML\w*Element$/.test(d.name) && d.inheritance)
@@ -1116,6 +1152,12 @@ export const INTERFACES_TAKEN = ${JSON.stringify(taken)};
 
 // The interfaces exposed in a Window alone.
 export const WINDOW_ONLY_INTERFACES = ${JSON.stringify(windowOnly.sort())};
+
+// …and the members exposed in a Window alone, of an interface a worker has too.
+export const WINDOW_ONLY_MEMBERS = ${JSON.stringify(windowOnlyMembers)};
+
+// The Window's other names for an interface object ([LegacyWindowAlias]), of every spec.
+export const LEGACY_WINDOW_ALIASES = ${JSON.stringify(legacyWindowAliases)};
 `;
 
 if (process.argv.includes('--check')) {
