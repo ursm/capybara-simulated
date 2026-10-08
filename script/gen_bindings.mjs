@@ -153,6 +153,12 @@ const INTERFACES = [
   ['uievents', 'KeyboardEvent', { install: true }],
   ['uievents', 'CompositionEvent', { install: true }],
   ['pointerevents', 'PointerEvent', { install: true }],
+  ['touch-events', 'Touch', { install: true }],
+  ['touch-events', 'TouchList'],
+  ['touch-events', 'TouchEvent', {
+    install: true,
+    namedProperties: 'none: getModifierState is the plain operation Chrome and Firefox have, no named property of the event'
+  }],
   ['html', 'DataTransfer', { install: true }],
   ['html', 'DataTransferItemList'],
   ['html', 'DataTransferItem', {

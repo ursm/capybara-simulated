@@ -323,7 +323,7 @@
   function fireTouch(target, type) {
     if (!target) return;
     var c = chainHasNonPassive(target, type);
-    var pt = { identifier: 0, target: target, clientX: 0, clientY: 0, pageX: 0, pageY: 0, screenX: 0, screenY: 0 };
+    var pt = new W.Touch({ identifier: 0, target: target, clientX: 0, clientY: 0, pageX: 0, pageY: 0, screenX: 0, screenY: 0 });
     var live = (type === 'touchend') ? [] : [pt];
     dispatch(target, new W.TouchEvent(type, {
       bubbles: true, cancelable: c, composed: true,
