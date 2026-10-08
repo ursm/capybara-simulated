@@ -197,6 +197,8 @@ const INTERFACES = [
   ['geometry', 'DOMMatrix', { install: true }],
   ['url', 'URL', { install: true }],
   ['url', 'URLSearchParams', { install: true }],
+  ['fetch', 'Headers', { install: true }],
+  ['xhr', 'FormData', { install: true }],
   ['encoding', 'TextEncoder', { install: true }],
   ['encoding', 'TextDecoder', { install: true }],
   ['FileAPI', 'Blob', { install: true }],
@@ -309,7 +311,7 @@ const INTERFACES = [
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
   'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
-  'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
+  'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers'
@@ -380,6 +382,13 @@ function failure(where, text = '') {
       ? `Failed to construct '${where.iface}': `
       : `Failed to execute '${where.member}' on '${where.iface}': `) + text);
 }
+// An IDL type written out: `sequence<sequence<ByteString>>`, `(Blob or USVString)?`.
+function typeName(t) {
+  const name = t.union ? `(${t.idlType.map(typeName).join(' or ')})`
+    : t.generic ? `${t.generic}<${t.idlType.map(typeName).join(', ')}>`
+    : t.idlType;
+  return t.nullable ? `${name}?` : name;
+}
 function conversionError(where, what) {
   return failure(where, where.index === undefined
     ? `Failed to convert value to '${what}'.`
@@ -437,6 +446,7 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
     case 'CSSOMString':
     case 'DOMString': c = `toDOMString(${expr}, ${legacyNull}, ${failure(where)})`; break;
     case 'USVString': c = `toUSVString(${expr}, ${failure(where)})`; break;
+    case 'ByteString': c = `toByteString(${expr}, ${failure(where)})`; break;
     case 'boolean': c = `toBoolean(${expr})`; break;
     case 'unsigned short': c = `toUnsignedShort(${expr}, ${failure(where)})`; break;
     case 'unsigned long': c = `toUnsignedLong(${expr}, ${failure(where)})`; break;
@@ -525,20 +535,22 @@ const BUFFER_TYPES = new Set([
   'ArrayBuffer', 'SharedArrayBuffer', 'DataView', 'Int8Array', 'Int16Array', 'Int32Array', 'Uint8Array', 'Uint16Array',
   'Uint32Array', 'Uint8ClampedArray', 'BigInt64Array', 'BigUint64Array', 'Float16Array', 'Float32Array', 'Float64Array'
 ]);
+const STRING_TYPES = new Set(['DOMString', 'USVString', 'ByteString']);
 const NUMERIC_TYPES = new Set(['unsigned short', 'short', 'unsigned long', 'long', 'unsigned long long', 'long long', 'double', 'unrestricted double', 'float', 'unrestricted float']);
 function unionConversion(t, expr, where, checks, argExtAttrs) {
   const label = `${where.iface ?? where.dictionary}.${where.member}`;
   const { members, includesNullable } = flattenUnion(t);
   const extAttrs = [...(t.extAttrs || []), ...argExtAttrs];
   if (members.length === 1) return conversion({ ...typeOf(members[0], { extAttrs }), nullable: includesNullable }, expr, where, checks);
-  const name = `(${members.map((u) => u.generic ? `${u.generic}<…>` : u.idlType).join(' or ')})`;
+  // (…its name as Chrome writes it: each member's type in full, in alphabetical order)
+  const name = `(${members.map(typeName).sort().join(' or ')})`;
   const unsupported = () => new Error(`${label}: no binding converts ${name} yet`);
   if (members.some((u) => u.generic && u.generic !== 'sequence' && u.generic !== 'record')) throw unsupported();
   const of = (test) => members.filter(test);
   // (…a WindowProxy among them the Window it is a proxy of: the Window's test, as for one alone)
   const ifaces = of((u) => u.idlType === 'WindowProxy' || definitions.get(u.idlType)?.type === 'interface');
   const dicts = of((u) => dictionaries.has(u.idlType));
-  const strings = of((u) => ['DOMString', 'USVString'].includes(u.idlType));
+  const strings = of((u) => STRING_TYPES.has(u.idlType));
   const numerics = of((u) => NUMERIC_TYPES.has(u.idlType));
   const booleans = of((u) => u.idlType === 'boolean');
   const callbacks = of((u) => definitions.get(u.idlType)?.type === 'callback');
@@ -579,7 +591,7 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   if (dict) steps.push([`(typeof ${expr} === 'object' || typeof ${expr} === 'function')`, convert(dict)]);
   if (boolean && boolean !== last) steps.push([`typeof ${expr} === 'boolean'`, expr]);
   if (numeric && numeric !== last) steps.push([`typeof ${expr} === 'number'`, convert(numeric)]);
-  const otherwise = last ? convert(last) : `(() => { throw new TypeError(${conversionError(where, name)}); })()`;
+  const otherwise = last ? convert(last) : `(() => { throw new TypeError(${failure(where, `The provided value is not of type '${name}'.`)}); })()`;
   return `(${steps.map(([test, value]) => `${test} ? ${value} : `).join('')}${otherwise})`;
 }
 
@@ -1034,6 +1046,13 @@ function overloadedOperation(iface, group, checks, selfCheck) {
       lines.push(`    ${call(m.other)}`);
       return;
     }
+    if (m.platformObject) {
+      // (…an object the interface's the interface's overload — anything else the string's)
+      checks.add(m.type);
+      lines.push(`  case ${n}: if (IS_${m.type}(arguments[${m.index}])) ${call(m.platformObject)}`);
+      lines.push(`    ${call(m.other)}`);
+      return;
+    }
     lines.push(`  case ${n}: ${call(m)}`);
   });
   // (…a count of arguments no overload takes: Chrome's message)
@@ -1047,19 +1066,22 @@ function overloadedOperation(iface, group, checks, selfCheck) {
 }
 
 // Web IDL's overload resolution (§3.6.3) for two overloads taking the same count, where it is generated: the first
-// argument whose types differ — a dictionary's in one and a string's or a sequence's in the other — tells them apart.
-const STRING_TYPES = new Set(['DOMString', 'USVString', 'ByteString']);
+// argument whose types differ — a dictionary's in one and a string's or a sequence's in the other, or an interface's in
+// one and a string's in the other — tells them apart.
 function distinguished(iface, name, [a, b]) {
   const index = a.arguments.findIndex((arg, i) => !b.arguments[i] || arg.idlType.idlType !== b.arguments[i].idlType.idlType);
   const typeOf = (m) => m.arguments[index] && m.arguments[index].idlType;
   const isDictionary = (t) => t && !t.union && dictionaries.has(t.idlType);
   const isString = (t) => t && !t.union && STRING_TYPES.has(t.idlType);
   const isSequence = (t) => t && t.generic === 'sequence';
+  const isInterface = (t) => t && !t.union && definitions.get(t.idlType)?.type === 'interface';
   if (isDictionary(typeOf(a)) && isString(typeOf(b))) return { index, dictionary: a, other: b };
   if (isDictionary(typeOf(b)) && isString(typeOf(a))) return { index, dictionary: b, other: a };
   if (isSequence(typeOf(a)) && isDictionary(typeOf(b))) return { index, sequence: a, other: b };
   if (isSequence(typeOf(b)) && isDictionary(typeOf(a))) return { index, sequence: b, other: a };
-  throw new Error(`${iface}.${name}: overloads told apart by other than a dictionary and a string or a sequence are not generated yet`);
+  if (isInterface(typeOf(a)) && isString(typeOf(b))) return { index, platformObject: a, other: b, type: typeOf(a).idlType };
+  if (isInterface(typeOf(b)) && isString(typeOf(a))) return { index, platformObject: b, other: a, type: typeOf(b).idlType };
+  throw new Error(`${iface}.${name}: overloads told apart by other than a dictionary and a string or a sequence, or an interface and a string, are not generated yet`);
 }
 
 function defaultValue(d, where) {

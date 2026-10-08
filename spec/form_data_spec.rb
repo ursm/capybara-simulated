@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # `new FormData(form)` must mirror real-browser submission semantics:
 # the option's `value` attribute, NOT its visible text. Most apps put
@@ -400,5 +401,79 @@ RSpec.describe 'FormData select entries (option value falls back to the collapse
       ['scr',    'AB'],
       ['nested', 'Foo Bar']
     ])
+  end
+end
+
+# FormData, generated from its IDL: its overloads told apart (a Blob's and a string's), its arguments converted
+# (USVStrings), its pair iterator Web IDL's — and its entry list a slot, which a body and a submission encode as it is,
+# whatever a page does to the iterator. The figures are headless Chrome's.
+RSpec.describe 'FormData binding' do
+  let(:app) {
+    lambda do |env|
+      if env['REQUEST_METHOD'] == 'POST'
+        [200, {'content-type' => 'text/plain'}, [env['rack.input'].read]]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><meta charset="utf-8">
+          <form id="f" method="post" action="/echo"><input name="a" value="1"><button id="b" name="s" value="v">go</button></form>
+        HTML
+      end
+    end
+  }
+  let(:session) { simulated_session(app) }
+  before { session.visit '/' }
+
+  it "throws Chrome's errors" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const error = (f) => { try { f(); return 'none'; } catch (e) { return e.message; } };
+        return [
+          error(() => new FormData().append('a', 'b', 'c')),
+          error(() => new FormData(null)),
+          error(() => new FormData(document.getElementById('f'), document.createElement('div'))),
+          error(() => new FormData().append('a')),
+          error(() => new FormData().entries().next.call(new Headers().entries()))
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      "Failed to execute 'append' on 'FormData': parameter 2 is not of type 'Blob'.",
+      "Failed to construct 'FormData': parameter 1 is not of type 'HTMLFormElement'.",
+      "Failed to construct 'FormData': The specified element is not a submit button.",
+      "Failed to execute 'append' on 'FormData': 2 arguments required, but only 1 present.",
+      'Illegal invocation'
+    ])
+  end
+
+  it 'makes its entries of a Blob a File and its strings scalar values' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const fd = new FormData(document.getElementById('f'), document.getElementById('b'));
+        const file = new File(['x'], 'n.txt');
+        fd.append('file', file);
+        fd.append('blob', new Blob(['x']));
+        fd.append('named', new Blob(['x']), 'z.bin');
+        fd.append('a\\uD800', 'b\\uDC00');
+        return [[...fd].map(([k, v]) => [k, typeof v === 'string' ? v : v.name]), fd.get('file') === file,
+                Object.prototype.toString.call(fd.entries()), FormData.length, FormData.prototype.append.length];
+      })()
+    JS
+    expect(got).to eq([
+      [%w[a 1], %w[s v], %w[file n.txt], %w[blob blob], %w[named z.bin], ["a\u{FFFD}", "b\u{FFFD}"]],
+      true, '[object FormData Iterator]', 0, 2
+    ])
+  end
+
+  it 'encodes its entry list as it is, whatever a page does to its iterator' do
+    session.execute_script(<<~JS)
+      FormData.prototype.forEach = FormData.prototype.entries = FormData.prototype[Symbol.iterator] = function () { return [][Symbol.iterator](); };
+      const fd = new FormData();
+      fd.append('k', 'v');
+      fetch('/echo', {method: 'POST', body: fd}).then((r) => r.text()).then((t) => { window.got = t; });
+    JS
+    poll_until { session.evaluate_script('window.got') }
+    expect(session.evaluate_script('window.got')).to include("name=\"k\"\r\n\r\nv\r\n")
+    session.find(:css, '#b').click
+    expect(session.text).to eq('a=1&s=v')
   end
 end

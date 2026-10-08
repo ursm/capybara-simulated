@@ -948,7 +948,9 @@ RSpec.describe 'IDL bindings' do
     JS
     expect(got).to eq([
       '[null,true,true,true,true]',
-      "TypeError: Failed to construct 'MessageEvent': Failed to read the 'source' property from 'MessageEventInit': Failed to convert value to '(WindowProxy or MessagePort or ServiceWorker)'.",
+      # (…a union's message as Chrome writes one — its members in full, alphabetically, as in `new Headers(1)`'s; Chrome's
+      # own here names 'EventTarget', the type its IDL gives `source`)
+      "TypeError: Failed to construct 'MessageEvent': Failed to read the 'source' property from 'MessageEventInit': The provided value is not of type '(MessagePort or ServiceWorker or WindowProxy)'.",
       '[false,3,9007199254740992]',
       '[1,"",false]',
       "TypeError: Failed to construct 'AnimationEvent': Failed to read the 'elapsedTime' property from 'AnimationEventInit': The provided double value is non-finite.",
