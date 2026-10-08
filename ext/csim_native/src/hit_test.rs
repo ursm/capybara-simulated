@@ -336,6 +336,75 @@ impl<'a> Painting<'a> {
         }
         out
     }
+    // Intersection Observer v2's "compute the visibility" of a target that tracks it: false where its effective
+    // transformation matrix is more than a 2D translation or a proportional upscaling, where it or an element it is drawn
+    // through is translucent or filtered (the flat tree's ancestors, whose opacity and filters it is drawn under), or where
+    // anything may be painted over it (`overlapped`).
+    pub(crate) fn visible(&mut self, target: NodeId) -> bool {
+        if let Some(m) = transform_chain(self.arena, target) {
+            let flat = [m[2], m[3], m[6], m[7], m[8], m[9], m[11]].iter().all(|&v| v == 0.0) && m[10] == 1.0 && m[15] == 1.0;
+            if !(flat && m[1] == 0.0 && m[4] == 0.0 && m[0] == m[5] && m[0] >= 1.0) {
+                return false;
+            }
+        }
+        let mut at = Some(target);
+        while let Some(n) = at.filter(|&n| self.arena.get(n).is_some_and(|d| d.kind == NodeKind::Element)) {
+            if self.style(n).is_some_and(|s| s.get_effects().opacity < 1.0 || !s.get_effects().filter.0.is_empty()) {
+                return false;
+            }
+            at = flat_parent(self.arena, n);
+        }
+        !self.overlapped(target)
+    }
+    // Whether anything painted over `target` may cover any part of its box — Intersection Observer v2's "cannot
+    // guarantee that the target is completely unoccluded", answered conservatively: some box — visible, not drawn wholly
+    // transparent, as the clips above it leave it (one under a transform kept whole), neither `target`'s own content nor
+    // an ancestor it is drawn on — that overlaps its rendered box and paints above it. An empty box counts too, as it may
+    // (Chrome measures ink). True where it has no box.
+    pub(crate) fn overlapped(&mut self, target: NodeId) -> bool {
+        let Some([tx, ty, tw, th]) = crate::geometry::rendered_box(self.arena, target) else { return true };
+        let Some(&at) = self.order.get(&target).filter(|o| **o >= 0.0) else { return true };
+        let at = at as usize;
+        let tkey = self.key(target, false);
+        for k in 0..self.preorder.len() {
+            // (…its own subtree, and the boxes whose subtree it is in)
+            if (at..self.ends[at]).contains(&k) || (k < at && at < self.ends[k]) {
+                continue;
+            }
+            let id = self.preorder[k];
+            let Some(s) = self.style(id) else { continue };
+            if s.get_inherited_box().visibility != style::computed_values::visibility::T::Visible || self.transparent(id) {
+                continue;
+            }
+            let Some([x, y, w, h]) = crate::geometry::rendered_box(self.arena, id) else { continue };
+            let [mut x0, mut y0, mut x1, mut y1] = [x, y, x + w, y + h];
+            for c in crate::geometry::clip_boxes(self.arena, id, false) {
+                if c[4..10] != [1.0, 0.0, 0.0, 1.0, 0.0, 0.0] {
+                    continue;
+                }
+                [x0, y0, x1, y1] = [x0.max(c[0]), y0.max(c[1]), x1.min(c[0] + c[2]), y1.min(c[1] + c[3])];
+            }
+            if x1 <= x0 || y1 <= y0 || x0 >= tx + tw || x1 <= tx || y0 >= ty + th || y1 <= ty {
+                continue;
+            }
+            let key = self.key(id, false);
+            if self.above((id, false), &key, (target, false), &tkey) {
+                return true;
+            }
+        }
+        false
+    }
+    // …nothing of `id` drawn at all: it, or an element it is drawn through, at opacity 0.
+    fn transparent(&self, id: NodeId) -> bool {
+        let mut at = Some(id);
+        while let Some(n) = at.filter(|&n| self.arena.get(n).is_some_and(|d| d.kind == NodeKind::Element || d.generated_of.is_some())) {
+            if self.style(n).is_some_and(|s| s.get_effects().opacity == 0.0) {
+                return true;
+            }
+            at = flat_parent(self.arena, n);
+        }
+        false
+    }
     // The document's BODY: the root's first `<body>` or `<frameset>` child.
     fn body(&self, root: NodeId) -> Option<NodeId> {
         self.arena.get(root)?.children.iter().copied().find(|&c| self.arena.get(c).is_some_and(|n| n.is_html_named("body") || n.is_html_named("frameset")))
@@ -534,6 +603,7 @@ pub(crate) fn box_parent(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "hitTest", hit_test_op, context_id);
     crate::dom::register(scope, ns, "paintOrder", paint_order_op, context_id);
+    crate::dom::register(scope, ns, "observedVisible", observed_visible_op, context_id);
     crate::dom::register(scope, ns, "clippedAway", clipped_away_op, context_id);
 }
 
@@ -591,3 +661,9 @@ fn paint_order_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set(crate::dom::f64_array(scope, &order).into());
 }
 
+// __dom.observedVisible(nid, now) -> whether an intersection observer tracking visibility sees the element visible
+// (`Painting::visible`).
+fn observed_visible_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let visible = crate::dom::nid_arg(scope, &args, 0).and_then(|id| painting(scope, &args, 1, |p| p.visible(id))).unwrap_or(false);
+    rv.set(v8::Boolean::new(scope, visible).into());
+}
