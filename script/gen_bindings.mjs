@@ -310,7 +310,7 @@ const INTERFACES = [
 const RUNTIME = [
   'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
-  'toUnrestrictedDouble', 'toSequence', 'toRecord', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
+  'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers'
 ];
@@ -570,7 +570,7 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   for (const u of buffers) steps.push([`isBufferOf(${expr}, ${JSON.stringify(u.idlType)})`, convert({ ...u, checked: true })]);
   // (…an object with an @@iterator the sequence's)
   for (const u of sequences) {
-    steps.push([`(${expr} !== null && (typeof ${expr} === 'object' || typeof ${expr} === 'function') && typeof ${expr}[Symbol.iterator] === 'function')`, convert(u)]);
+    steps.push([`isIterable(${expr}, ${failure(where)})`, convert(u)]);
   }
   // (…any other object the record type's — Web IDL's union step after the sequence's)
   if (record) steps.push([`(${expr} !== null && (typeof ${expr} === 'object' || typeof ${expr} === 'function'))`, convert(record)]);

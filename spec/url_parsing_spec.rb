@@ -70,3 +70,40 @@ RSpec.describe 'URL parsing' do
     expect(r['ratio']).to be < 3
   end
 end
+
+# URLSearchParams decodes with the driver's own UTF-8 decoder — a page that replaces or deletes `TextDecoder` broke
+# every query with a percent-escape — and its surfaces say what Chrome says.
+RSpec.describe 'URLSearchParams' do
+  let(:session) {
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8">']] })
+    s.visit('/')
+    s
+  }
+
+  it 'decodes its pairs whatever a page does to TextDecoder' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        window.TextDecoder = class { decode() { return 'PWNED'; } };
+        const replaced = new URLSearchParams('a=%C3%A9').get('a');
+        delete window.TextDecoder;
+        return [replaced, new URL('http://a.test/?b=%C3%A9').searchParams.get('b')];
+      })()
+    JS
+    expect(got).to eq(%w[é é])
+  end
+
+  it "throws Chrome's errors: an invalid base, a forEach with nothing, an @@iterator that is no function" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const error = (f) => { try { f(); return 'none'; } catch (e) { return e.message; } };
+        return [error(() => new URL('/x', 'nope')), error(() => new URLSearchParams().forEach()),
+                error(() => new URLSearchParams({[Symbol.iterator]: 1}))];
+      })()
+    JS
+    expect(got).to eq([
+      "Failed to construct 'URL': Invalid base URL",
+      "Failed to execute 'forEach' on 'URLSearchParams': 1 argument required, but only 0 present.",
+      "Failed to construct 'URLSearchParams': The object must have a callable @@iterator property."
+    ])
+  end
+end
