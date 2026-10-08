@@ -1,0 +1,55 @@
+# frozen_string_literal: true
+
+require 'capybara/simulated'
+require_relative 'support/session_teardown'
+
+# MediaError and SVGAnimatedString, generated from their IDL: made by the platform alone, brands checked, state in
+# slots. Headless Chrome's figures.
+RSpec.describe 'MediaError and SVGAnimatedString bindings' do
+  let(:app) {
+    lambda do |_env|
+      [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body><svg><circle id=c class="a b"/></svg>']]
+    end
+  }
+  let(:session) {
+    s = simulated_session(app)
+    s.visit('/')
+    s
+  }
+
+  it 'is what their IDL says' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const error = (f) => { try { f(); return 'none'; } catch (e) { return e.name + ': ' + e.message; } };
+        const c = document.getElementById('c');
+        const name = c.className;
+        const read = [name.baseVal, name.animVal, name === c.className];
+        name.baseVal = 5;
+        const set = [c.getAttribute('class'), name.animVal];
+        name.animVal = 'x';
+        return [
+          error(() => new MediaError()),
+          [MediaError.MEDIA_ERR_DECODE, MediaError.prototype.MEDIA_ERR_SRC_NOT_SUPPORTED, Object.getOwnPropertyNames(MediaError.prototype).sort()],
+          error(() => Object.getOwnPropertyDescriptor(MediaError.prototype, 'code').get.call({})),
+          error(() => new SVGAnimatedString()),
+          read,
+          set,
+          c.getAttribute('class'),
+          Object.getOwnPropertyNames(SVGAnimatedString.prototype).sort(),
+          error(() => Object.getOwnPropertyDescriptor(SVGAnimatedString.prototype, 'baseVal').get.call({}))
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      "TypeError: Failed to construct 'MediaError': Illegal constructor",
+      [3, 4, %w[MEDIA_ERR_ABORTED MEDIA_ERR_DECODE MEDIA_ERR_NETWORK MEDIA_ERR_SRC_NOT_SUPPORTED code constructor message]],
+      'TypeError: Illegal invocation',
+      "TypeError: Failed to construct 'SVGAnimatedString': Illegal constructor",
+      ['a b', 'a b', true],
+      %w[5 5],
+      '5',
+      %w[animVal baseVal constructor],
+      'TypeError: Illegal invocation'
+    ])
+  end
+end

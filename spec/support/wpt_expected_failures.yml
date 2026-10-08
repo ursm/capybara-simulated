@@ -5260,8 +5260,6 @@ html/dom/idlharness.https.html:
 - 'Location interface: window.location must have own property "replace"'
 - 'Location interface: window.location must have own property "search"'
 - Location must be primary interface of window.location
-- 'MediaError interface: attribute code'
-- 'MediaError interface: attribute message'
 - MimeType interface object length
 - MimeType interface object name
 - 'MimeType interface: attribute description'

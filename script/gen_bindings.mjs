@@ -170,6 +170,8 @@ const INTERFACES = [
     }
   }],
   ['css-font-loading', 'FontFaceSet', { install: true }],
+  ['html', 'MediaError'],
+  ['SVG', 'SVGAnimatedString'],
   ['clipboard-apis', 'ClipboardItem', { install: true }],
   ['clipboard-apis', 'Clipboard', { install: true }],
   ['screen-orientation', 'ScreenOrientation', { install: true }],
