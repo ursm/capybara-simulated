@@ -144,7 +144,8 @@ RSpec.describe 'Web Crypto bindings' do
   # An operation's steps in their order (WebCrypto §14.3; Chrome alike): importKey's data must be of its format's kind
   # (a TypeError); an AlgorithmIdentifier is any object, a function too, its name converted to a string; deriveKey
   # normalizes the derived key's type — for its import and its length — before it checks the key, and gets the length
-  # after.
+  # after. A params dictionary's `length` converts as IDL says: a required AES one missing, or one out of its range, a
+  # TypeError.
   it 'follows the operations steps' do
     got = run(<<~JS)
       const s = crypto.subtle;
@@ -153,6 +154,8 @@ RSpec.describe 'Web Crypto bindings' do
       const ecdh = await s.generateKey({name: 'ECDH', namedCurve: 'P-256'}, false, ['deriveKey', 'deriveBits']);
       const signer = await s.importKey('raw', new Uint8Array(16), {name: 'HMAC', hash: 'SHA-256'}, false, ['sign']);
       const by = {name: 'ECDH', public: ecdh.publicKey};
+      const wrapper = await s.generateKey({name: 'AES-GCM', length: 128}, false, ['encrypt', 'unwrapKey']);
+      const iv = new Uint8Array(12);
       return [
         await t(s.importKey('raw', {kty: 'oct', k: 'AAAAAAAAAAAAAAAAAAAAAA'}, 'AES-GCM', true, ['encrypt'])),
         await t(s.importKey('jwk', new Uint8Array(16), 'AES-GCM', true, ['encrypt'])),
@@ -163,12 +166,17 @@ RSpec.describe 'Web Crypto bindings' do
         await t(s.deriveKey(by, signer, {name: 'ECDSA', namedCurve: 'P-256'}, false, ['sign'])),
         await t(s.deriveKey(by, signer, {name: 'AES-GCM', length: 100}, false, ['encrypt'])),
         await t(s.deriveKey(by, ecdh.privateKey, {name: 'AES-GCM', length: 100}, false, ['encrypt'])),
-        await t(s.deriveKey(by, ecdh.privateKey, {name: 'HMAC', hash: 'SHA-256', length: 0}, false, ['sign']))
+        await t(s.deriveKey(by, ecdh.privateKey, {name: 'HMAC', hash: 'SHA-256', length: 0}, false, ['sign'])),
+        await t(s.deriveKey(by, ecdh.privateKey, {name: 'AES-GCM', length: 1e9}, false, ['encrypt'])),
+        await t(s.generateKey({name: 'AES-GCM'}, false, ['encrypt'])),
+        await s.unwrapKey('jwk', await s.encrypt({name: 'AES-GCM', iv}, wrapper, new TextEncoder().encode('5')), wrapper,
+                          {name: 'AES-GCM', iv}, 'AES-GCM', false, ['encrypt']).catch((e) => e.message)
       ];
     JS
     expect(got).to eq([
       'TypeError', 'TypeError', '[object ArrayBuffer]', '[object ArrayBuffer]', 'TypeError', '[object CryptoKey]',
-      'NotSupportedError', 'InvalidAccessError', 'OperationError', 'TypeError'
+      'NotSupportedError', 'InvalidAccessError', 'OperationError', 'TypeError', 'TypeError', 'TypeError',
+      "Failed to execute 'unwrapKey' on 'SubtleCrypto': The provided value is not of type 'JsonWebKey'."
     ])
   end
 end
