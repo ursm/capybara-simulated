@@ -169,10 +169,35 @@ RSpec.describe 'WebSocket' do
     session.visit('/framed')
     session.execute_script(<<~JS)
       window.frameWs = new frames[0].WebSocket('ws://' + location.host + '/cable');
-      window.frameWs.onmessage = (e) => { document.title = 'frame:' + e.data; };
+      window.frameWs.onmessage = (e) => {
+        if (typeof e.data === 'string') {
+          window.frameText = [e instanceof frames[0].MessageEvent, e instanceof MessageEvent];
+          frameWs.send(new Uint8Array([1, 2]));
+        } else {
+          window.frameBlob = [e.data instanceof frames[0].Blob, e.data instanceof Blob];
+          document.title = 'frame:' + e.data.size;
+        }
+      };
     JS
-    expect(session).to have_title('frame:hello')
+    expect(session).to have_title('frame:2')
+    # (…the frame's events and data its own realm's)
+    expect(session.evaluate_script('[window.frameText, window.frameBlob]')).to eq([[true, false], [true, false]])
     expect(session.evaluate_script("new EventSource('x').url === location.origin + '/sub/dir/x'")).to be(true)
+    expect(closes.pop(timeout: 5)).to eq(1001)   # (the first page's, which the visit replaced)
+    # A removed frame's socket goes with its document: Going Away.
+    session.execute_script("document.querySelector('iframe').remove()")
+    expect(closes.pop(timeout: 5)).to eq(1001)
+  end
+
+  # What a buffer source is is its internal slots', whatever a page puts on the object (a shadowing `byteLength`).
+  it 'sends a buffer source by its slots' do
+    expect(session).to have_title(/hello/)
+    session.execute_script(<<~JS)
+      const bytes = new Uint8Array([7, 8, 9]);
+      Object.defineProperty(bytes, 'byteLength', {value: 1});
+      window.ws.send(bytes);
+    JS
+    expect(session).to have_title('bin:7,8,9')
   end
 
   # Generated from its IDL: arguments converted, the constructor's and close()'s checks in Chrome's words, the

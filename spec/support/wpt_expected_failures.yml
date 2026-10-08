@@ -8216,9 +8216,6 @@ websockets/mixed-content.https.any.js:
 - "[dedicatedworker] opening an insecure WebSocket in a secure context should fail"
 - "[serviceworker] opening an insecure WebSocket in a secure context should fail"
 - opening an insecure WebSocket in a secure context should fail
-websockets/multi-globals/message-received.html:
-- ArrayBuffer should be created in the relevant realm of the WebSocket
-- Blob should be created in the relevant realm of the WebSocket
 websockets/referrer.any.js:
 - Ensure no Referer header is included
 - "[dedicatedworker] Ensure no Referer header is included"
