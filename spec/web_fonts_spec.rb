@@ -630,6 +630,21 @@ RSpec.describe 'web fonts' do
     expect(out['json']).to eq('{}')
   end
 
+  # A face errored at construction, added to the set all the same, lays nothing out: the text takes the fallback (Chrome:
+  # 60px of `xxxxx` at 20px where Ahem would make it 100).
+  it 'lays no text out with an errored face' do
+    s = session
+    s.execute_script(<<~JS)
+      document.body.innerHTML = '<span id=e style="font: 20px Bad, monospace">xxxxx</span><span id=g style="font: 20px Good, monospace">xxxxx</span>';
+      document.fonts.add(new FontFace('Bad', 'url(/ahem.ttf)', { ascentOverride: 'bad' }));
+      const good = new FontFace('Good', 'url(/ahem.ttf)');
+      document.fonts.add(good);
+      good.load();
+    JS
+    Timeout.timeout(5) { sleep 0.05 until s.evaluate_script("document.getElementById('g').getBoundingClientRect().width") == 100 }
+    expect(s.evaluate_script("document.getElementById('e').getBoundingClientRect().width")).not_to eq(100)
+  end
+
   it 'errors a face built with an invalid descriptor at construction, rejecting loaded without load()' do
     s = session
     # Errored synchronously: status 'error' at once, the bad value's attribute the empty string — CSS Font Loading's
