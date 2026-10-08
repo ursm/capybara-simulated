@@ -82,4 +82,29 @@ RSpec.describe 'XMLHttpRequest bindings' do
     poll_until { session.evaluate_script('window.got') }
     expect(session.evaluate_script('window.got.join(" ")')).to eq('rsc1 rsc4 rsc1 rsc2 rsc3 rsc4 load:second')
   end
+
+  # S7 is Chrome's sequence; in S3 Chrome lets one stale `progress` through after the open() inside the rsc3 handler,
+  # where XHR's open() "terminates this's fetch controller" — nothing of the first send fires after it.
+  it "answers a send whose handler opens it again only with the new send's events" do
+    session.execute_script(<<~JS)
+      window.got = {};
+      const runCase = (name, hook) => {
+        const x = new XMLHttpRequest(), events = [];
+        x.onreadystatechange = () => { events.push('rsc' + x.readyState); hook(x, 'rsc' + x.readyState); };
+        for (const t of ['loadstart', 'progress', 'abort', 'error']) x.addEventListener(t, () => { events.push(t); hook(x, t); });
+        x.onload = () => events.push('load:' + x.responseText);
+        x.onloadend = () => { events.push('loadend'); if (x.responseText === 'second') window.got[name] = events.join(' '); };
+        x.open('POST', '/echo');
+        x.send('first');
+      };
+      let s7 = true, s3 = true;
+      runCase('s7', (x, ev) => { if (ev === 'loadstart' && s7) { s7 = false; x.abort(); x.open('POST', '/echo'); x.send('second'); } });
+      runCase('s3', (x, ev) => { if (ev === 'rsc3' && s3) { s3 = false; x.open('POST', '/echo'); x.send('second'); } });
+    JS
+    poll_until { session.evaluate_script('window.got.s7 && window.got.s3') }
+    expect(session.evaluate_script('[window.got.s7, window.got.s3]')).to eq([
+      'rsc1 loadstart rsc4 abort loadend rsc1 loadstart rsc2 rsc3 progress rsc4 load:second loadend',
+      'rsc1 loadstart rsc2 rsc3 rsc1 loadstart rsc2 rsc3 progress rsc4 load:second loadend'
+    ])
+  end
 end
