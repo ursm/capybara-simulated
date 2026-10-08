@@ -152,6 +152,14 @@ const INTERFACES = [
   ['uievents', 'KeyboardEvent', { install: true }],
   ['uievents', 'CompositionEvent', { install: true }],
   ['pointerevents', 'PointerEvent', { install: true }],
+  ['html', 'DataTransfer', { install: true }],
+  ['html', 'DataTransferItemList'],
+  ['html', 'DataTransferItem', {
+    omit: {
+      'entries-api': 'webkitGetAsEntry: the File and Directory Entries API is not implemented',
+      'file-system-access': 'getAsFileSystemHandle: the File System Access API is not implemented'
+    }
+  }],
   ['html', 'MessageChannel', { install: true }],
   ['html', 'MessagePort', {
     install: true,
@@ -871,7 +879,9 @@ function generateInterface(def, options = {}) {
         // (…its ordinary operation below)
       } else if (m.special === 'getter') {
         if (m.arguments.length !== 1 || m.arguments[0].idlType.idlType !== 'unsigned long') throw new Error(`${label}: only an indexed getter is generated`);
-        indexed = m.name;
+        // (…an anonymous one the object's indices alone, which the implementation's `getter` answers: DataTransferItemList)
+        indexed = m.name || 'getter';
+        if (!m.name) continue;
       } else if (m.special) {
         throw new Error(`${label}: a ${m.special} operation is not generated yet`);
       }
