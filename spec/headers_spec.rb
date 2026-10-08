@@ -78,6 +78,16 @@ RSpec.describe 'Headers' do
     expect(got).to eq([1, '1', '1', '1', 'application/json', '1'])
   end
 
+  it "copies a source Request's combined value as it is, where converting an init normalizes it" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const r = new Request('/x', {headers: [['a', 'x'], ['a', '']]});
+        return [r.headers.get('a'), new Request(r, {method: 'POST'}).headers.get('a'), Response.json(1, {headers: r.headers}).headers.get('a')];
+      })()
+    JS
+    expect(got).to eq(['x, ', 'x, ', 'x,'])
+  end
+
   it "refuses a structured clone with Chrome's message" do
     got = session.evaluate_script(<<~JS)
       [new Headers(), new FormData(), new AbortController(), window].map((v) => {
