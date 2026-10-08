@@ -133,4 +133,38 @@ RSpec.describe 'Performance bindings' do
     expect(keys.first(6)).to eq(%w[id name entryType startTime duration navigationId])
     expect(keys).to include('serverTiming', 'workerStart', 'responseStatus')
   end
+
+  # A Performance method answers with the timeline of the object it is called on — a frame's from this realm too — and
+  # takes no object that is no Performance (Chrome: the frame's marks; Illegal invocation).
+  it 'answers with the timeline it is called on' do
+    session.execute_script(<<~JS)
+      const frame = document.body.appendChild(document.createElement('iframe'));
+      window.fp = frame.contentWindow.performance;
+      fp.mark('fa');
+      performance.mark('top');
+    JS
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const error = (f) => { try { f(); return 'none'; } catch (e) { return e.name + ': ' + e.message; } };
+        return [
+          Performance.prototype.getEntriesByType.call(fp, 'mark').map((e) => e.name),
+          typeof Performance.prototype.now.call(fp),
+          error(() => Performance.prototype.now.call(Object.create(Performance.prototype)))
+        ];
+      })()
+    JS
+    expect(got).to eq([['fa'], 'number', 'TypeError: Illegal invocation'])
+  end
+
+  # An entry's id and navigation id are given it when it is queued: the navigation's first, so the smaller; a mark made
+  # with `new` is never queued and has neither.
+  it 'gives an entry its ids when it is queued' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const a = performance.mark('a'), b = performance.mark('b'), made = new PerformanceMark('made');
+        return [a.navigationId > 0, a.navigationId < a.id, b.id > a.id, b.navigationId === a.navigationId, made.id, made.navigationId];
+      })()
+    JS
+    expect(got).to eq([true, true, true, true, 0, 0])
+  end
 end
