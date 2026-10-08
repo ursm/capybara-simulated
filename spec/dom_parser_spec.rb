@@ -54,13 +54,14 @@ RSpec.describe 'DOMParser bindings' do
     ])
   end
 
-  # XHR "set a document response": its URL the response's, its content type the final MIME type — and parsed, as a
+  # XHR "set a document response": its URL the response's — the request's fragment too, which responseURL drops — its
+  # content type the final MIME type (Chrome) — and parsed, as a
   # document body serialized, by the driver's own parser and serializer, whatever a page does to the globals.
   it "makes an XMLHttpRequest's document response and document body its own way" do
     session.execute_script(<<~JS)
       window.DOMParser = window.XMLSerializer = function () { throw new Error('page'); };
       const x = new XMLHttpRequest();
-      x.open('GET', '/sub/doc.xml');
+      x.open('GET', '/sub/doc.xml#frag');
       x.onload = () => {
         const doc = x.responseXML;
         const post = new XMLHttpRequest();
@@ -72,7 +73,7 @@ RSpec.describe 'DOMParser bindings' do
     JS
     poll_until { session.evaluate_script('window.got') }
     expect(session.evaluate_script('window.got')).to eq(
-      ['a', 'http://www.example.com/sub/doc.xml', 'http://www.example.com/sub/doc.xml', 'text/xml', '<a><b/></a>']
+      ['a', 'http://www.example.com/sub/doc.xml#frag', 'http://www.example.com/sub/doc.xml#frag', 'text/xml', '<a><b/></a>']
     )
   end
 
