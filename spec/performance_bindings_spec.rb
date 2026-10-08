@@ -135,7 +135,9 @@ RSpec.describe 'Performance bindings' do
   end
 
   # A Performance method answers with the timeline of the object it is called on — a frame's from this realm too — and
-  # takes no object that is no Performance (Chrome: the frame's marks; Illegal invocation).
+  # takes no object that is no Performance (Chrome: the frame's marks; Illegal invocation); a measure is the frame's
+  # realm's ("this's relevant realm"), a mark this one's (the constructor's "current global object", where Chrome makes
+  # the frame's).
   it 'answers with the timeline it is called on' do
     session.execute_script(<<~JS)
       const frame = document.body.appendChild(document.createElement('iframe'));
@@ -149,11 +151,14 @@ RSpec.describe 'Performance bindings' do
         return [
           Performance.prototype.getEntriesByType.call(fp, 'mark').map((e) => e.name),
           typeof Performance.prototype.now.call(fp),
-          error(() => Performance.prototype.now.call(Object.create(Performance.prototype)))
+          error(() => Performance.prototype.now.call(Object.create(Performance.prototype))),
+          Performance.prototype.measure.call(fp, 'fm') instanceof fp.constructor.prototype.measure.call(fp, 'fm2').constructor,
+          Performance.prototype.measure.call(fp, 'fm3') instanceof PerformanceMeasure,
+          Performance.prototype.mark.call(fp, 'fk') instanceof PerformanceMark
         ];
       })()
     JS
-    expect(got).to eq([['fa'], 'number', 'TypeError: Illegal invocation'])
+    expect(got).to eq([['fa'], 'number', 'TypeError: Illegal invocation', true, false, true])
   end
 
   # An entry's id and navigation id are given it when it is queued: the navigation's first, so the smaller; a mark made
