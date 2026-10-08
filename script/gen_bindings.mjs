@@ -255,6 +255,8 @@ const INTERFACES = [
   ['webcrypto', 'CryptoKey', { install: true }],
   ['webcrypto', 'SubtleCrypto', { install: true }],
   ['webcrypto', 'Crypto', { install: true }],
+  ['service-workers', 'Cache', { install: true }],
+  ['service-workers', 'CacheStorage', { install: true }],
   ['html', 'DOMParser', { install: true }],
   ['html', 'XMLSerializer', { install: true }],
   ['intersection-observer', 'IntersectionObserver', { install: true }],

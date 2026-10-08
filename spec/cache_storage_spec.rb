@@ -221,4 +221,29 @@ RSpec.describe 'Cache Storage API' do
     expect(r['viaCaches']).to eq('ASSET BODY')
     expect(r['keyCount']).to eq(2)
   end
+
+  # Generated from their IDL: made by the platform alone, `this` checked, a Response required of put; a cache name is a
+  # DOMString — a lone surrogate kept, not replaced (cache-storage.https.any.js). The lists matchAll and keys resolve
+  # are FrozenArrays, as IDL says (Chrome resolves unfrozen ones).
+  it 'is what its IDL says' do
+    session = simulated_session(app)
+    session.visit '/'
+    got = run_async(session, <<~JS)
+      const err = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
+      const rej = (p) => p.then(() => 'ok', (e) => e.name);
+      const c = await caches.open('t');
+      await c.put('/a', new Response('x'));
+      const [all, keys, names] = [await c.matchAll(), await c.keys(), await caches.keys()];
+      await caches.open('\\ud800');
+      return [
+        err(() => new Cache()), err(() => new CacheStorage()), caches === caches,
+        Object.isFrozen(all), Object.isFrozen(keys), Object.isFrozen(names),
+        await rej(c.put('/b', {})), await rej(Cache.prototype.match.call({}, '/a')), await rej(c.match()),
+        (await caches.keys()).includes('\\ud800'), await caches.has('\\ud800'), await caches.has('\\ufffd')
+      ];
+    JS
+    expect(got).to eq([
+      'TypeError', 'TypeError', true, true, true, false, 'TypeError', 'TypeError', 'TypeError', true, true, false
+    ])
+  end
 end
