@@ -11,6 +11,10 @@ RSpec.describe 'OffscreenCanvas and ImageBitmap bindings' do
     <<~JS
       self.onmessage = async (e) => {
         const v = e.data;
+        if (v.point) {
+          self.postMessage({point: [v.point instanceof DOMPoint, v.point.x, v.point.w], canvas: [v.canvas instanceof OffscreenCanvas, v.canvas.width]});
+          return;
+        }
         const ctx = new OffscreenCanvas(1, 1).getContext('2d');
         if (v instanceof ImageBitmap) ctx.drawImage(v, 0, 0); else ctx.putImageData(v, 0, 0);
         const canvas = new OffscreenCanvas(4, 3);
@@ -124,5 +128,65 @@ RSpec.describe 'OffscreenCanvas and ImageBitmap bindings' do
       ['[object ImageBitmap]', 2, 2, [0, 0, 255, 255]], 0, ['[object ImageData]', [255, 0, 0, 255]],
       ['[object ImageBitmap]', 4, 3]
     ])
+  end
+
+  # A transfer detaches its sources only once the whole message is serialized, by the slots (not a page's `close`); an
+  # OffscreenCanvas transfers as one of its size, refused with a context (InvalidStateError) or detached already
+  # (DataCloneError), and the source detached; a closed bitmap is no image source (Chrome: each the same).
+  it 'transfers as HTML says' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const canvas = new OffscreenCanvas(2, 1);
+        canvas.getContext('2d').fillRect(0, 0, 2, 1);
+        const bitmap = canvas.transferToImageBitmap();
+        const failed = #{error('structuredClone({bitmap, f() {}}, {transfer: [bitmap]})')};
+        let called = 0;
+        const close = ImageBitmap.prototype.close;
+        ImageBitmap.prototype.close = function () { called++; };
+        const moved = structuredClone(bitmap, {transfer: [bitmap]});
+        ImageBitmap.prototype.close = close;
+        const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+        const bare = new OffscreenCanvas(3, 2);
+        const movedCanvas = structuredClone(bare, {transfer: [bare]});
+        return [
+          failed, [called, bitmap.width, moved.width],
+          #{error('ctx.drawImage(bitmap, 0, 0)')}, #{error("ctx.createPattern(bitmap, 'repeat')")},
+          [movedCanvas instanceof OffscreenCanvas, movedCanvas.width, movedCanvas.height, Object.keys(bare), bare.width],
+          #{error("bare.getContext('2d')")}, #{error('structuredClone(bare, {transfer: [bare]})')},
+          #{error('structuredClone(canvas, {transfer: [canvas]})')},
+          #{error('structuredClone(new OffscreenCanvas(1, 1))')},
+          document.createElement('canvas').getContext({toString: () => '2d'}) !== null
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      'DataCloneError', [0, 0, 2],
+      'InvalidStateError', 'InvalidStateError',
+      [true, 3, 2, [], 0],
+      'InvalidStateError', 'DataCloneError',
+      'InvalidStateError',
+      'DataCloneError',
+      true
+    ])
+  end
+
+  # Across isolates a geometry object arrives as itself (NaN and infinities with it), a transferred OffscreenCanvas as
+  # one of its size, and one not transferred — any platform object that is no structured-clone value — is a
+  # DataCloneError at postMessage, never a `{}` at the far end.
+  it 'posts geometry and a transferred OffscreenCanvas to a worker, and refuses what cannot be cloned' do
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      (async () => {
+        const worker = new Worker('/worker.js');
+        const reply = () => new Promise((resolve) => { worker.onmessage = (e) => resolve(e.data); });
+        const canvas = new OffscreenCanvas(5, 4);
+        worker.postMessage({point: new DOMPoint(NaN, 2, 3, -Infinity), canvas}, [canvas]);
+        const a = await reply();
+        let refused;
+        try { worker.postMessage(new OffscreenCanvas(1, 1)); refused = 'none'; } catch (e) { refused = e.name; }
+        return [a.point[0], String(a.point[1]), a.point[2] === -Infinity, a.canvas, canvas.width, refused];
+      })().then(done, (e) => done(String(e)));
+    JS
+    expect(got).to eq([true, 'NaN', true, [true, 5], 0, 'DataCloneError'])
   end
 end

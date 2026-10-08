@@ -3155,8 +3155,6 @@ html/canvas/element/manual/filters/svg-flood-filter-visited-color-taints.html:
 - Tainting check for visited link in SVG flood filter
 html/canvas/element/manual/filters/svg-specular-filter-visited-color-taints.html:
 - Tainting check for visited link in SVG specular lighting filter
-html/canvas/element/manual/imagebitmap/canvas-ImageBitmap-close.html:
-- canvas-ImageBitmap-close
 html/canvas/element/manual/imagebitmap/canvas-createImageBitmap-resize.html:
 - createImageBitmap from a Blob with resize option.
 - createImageBitmap from a HTMLCanvasElement with resize option.
@@ -3167,8 +3165,6 @@ html/canvas/element/manual/imagebitmap/canvas-createImageBitmap-resize.html:
 - createImageBitmap from an ImageData with resize option.
 html/canvas/element/manual/imagebitmap/canvas-createImageBitmap-video-resize.html:
 - "[harness] TIMEOUT"
-html/canvas/element/manual/imagebitmap/createImageBitmap-drawImage-closed.html:
-- attempt to draw a closed ImageBitmap to a 2d canvas throws INVALID_STATE_ERR
 html/canvas/element/manual/imagebitmap/createImageBitmap-exif-orientation_none.html:
 - "[harness] ERROR"
 html/canvas/element/manual/imagebitmap/createImageBitmap-origin.sub.html:

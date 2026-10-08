@@ -55,17 +55,19 @@ RSpec.describe 'canvas rasterizer' do
     expect(corner).to eq([0, 0, 0, 0])                                          # `copy` leaves nothing it did not draw
   end
 
-  it 'throws a RangeError where a clip mask cannot be had, rather than abort' do
+  # A canvas whose bitmap cannot be allocated has none: a clip or a fill of it does nothing, rather than abort the
+  # isolate or throw (Chrome: no throw for either).
+  it 'clips and fills nothing on a canvas too large for a bitmap, rather than abort' do
     s = simulated_session(app)
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (function () {
         var c = document.createElement('canvas'); c.width = c.height = 2147483647;
         var x = c.getContext('2d'); x.rect(0, 0, 1, 1);
-        try { x.clip(); return 'no throw'; } catch (e) { return e.name; }
+        try { x.clip(); x.fillRect(0, 0, 1, 1); return 'no throw'; } catch (e) { return e.name; }
       })()
     JS
-    expect(got).to eq('RangeError')
+    expect(got).to eq('no throw')
   end
 
   it 'draws nothing under a transform past what a double holds, and strokes a too-fine dash pattern whole' do
