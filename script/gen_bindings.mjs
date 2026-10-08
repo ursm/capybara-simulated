@@ -202,6 +202,10 @@ const INTERFACES = [
   ['html', 'Storage', { install: true, namedProperties: 'the Proxy each storage area is (storage.js)' }],
   ['html', 'DOMParser', { install: true }],
   ['html', 'XMLSerializer', { install: true }],
+  ['intersection-observer', 'IntersectionObserver', { install: true }],
+  ['intersection-observer', 'IntersectionObserverEntry', { install: true }],
+  ['performance-timeline', 'PerformanceObserver', { install: true }],
+  ['performance-timeline', 'PerformanceObserverEntryList', { install: true }],
   ['xhr', 'XMLHttpRequestEventTarget', { install: true }],
   ['xhr', 'XMLHttpRequestUpload', { install: true }],
   ['xhr', 'XMLHttpRequest', { install: true, omit: { 'trust-token-api': 'setPrivateToken: Private State Tokens are not implemented (a WICG proposal)' } }],
@@ -484,8 +488,8 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
         checks.add(t.idlType);
         c = `toInterface(${expr}, IS_${t.idlType}, ${conversionError(where, t.idlType)})`;
       } else if (def && def.type === 'callback') {
-        // (…a callback function type: a callable object, kept as it is — Web IDL §3.2.20)
-        c = `toCallbackFunction(${expr}, ${conversionError(where, t.idlType)})`;
+        // (…a callback function type: a callable object, kept as it is — Web IDL §3.2.20; not one a 'Function', Chrome)
+        c = `toCallbackFunction(${expr}, ${conversionError(where, 'Function')})`;
       } else if (def && def.type === 'callback interface') {
         c = `toCallbackInterface(${expr}, ${conversionError(where, 'Object')})`;
       } else if (enums.has(t.idlType)) {
@@ -747,6 +751,14 @@ function generateInterface(def, options = {}) {
     if (m.type === 'attribute' && EVENT_HANDLER_TYPES.has(m.idlType.idlType)) {
       // (…[LegacyLenientThis] or not: the installing class's accessors answer any `this`)
       handlers.push(m.name);
+      continue;
+    }
+    if (m.type === 'attribute' && m.special === 'static') {
+      // (…a static attribute the interface object's own accessor, of no object: PerformanceObserver.supportedEntryTypes)
+      if (!options.install) throw new Error(`${label}: a static attribute of an interface the binding makes is not generated yet`);
+      if (!m.readonly) throw new Error(`${label}: a writable static attribute is not generated yet`);
+      const shared = memberList.some((o) => o.name === m.name && o.special !== 'static');
+      statics.push(`    get ${m.name}() { return impl.${shared ? 'static_' : ''}get_${m.name}(null); }`);
       continue;
     }
     if (m.type === 'attribute') {
