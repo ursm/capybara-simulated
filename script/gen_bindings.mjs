@@ -354,7 +354,7 @@ const INTERFACES = [
 
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
-  'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'resolvedPromise', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
+  'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
@@ -464,9 +464,9 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
     return t.nullable ? `(${expr} == null ? null : ${c})` : c;
   }
   if (t.generic === 'Promise') {
-    // (Web IDL §3.2.23: the value made a promise — %Promise%'s resolve of it, the value itself where it is one — its
-    // resolution converted where it is used, not here)
-    return `resolvedPromise(${expr})`;
+    // (Web IDL §3.2.23: a new promise of %Promise% resolved with the value — its resolution converted to T where the
+    // implementation reacts to it, not here)
+    return `promiseResolvedWith(${expr})`;
   }
   if (t.generic) throw new Error(`${label}: no binding converts ${JSON.stringify(t.idlType)} yet`);
   const extAttrs = [...(t.extAttrs || []), ...argExtAttrs];

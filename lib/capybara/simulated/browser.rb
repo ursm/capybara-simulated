@@ -208,7 +208,7 @@ module Capybara
         Rack::Mime.mime_type(File.extname(path.to_s), '')
       end
 
-      def initialize(app, driver: nil, cookies: nil, cookie_flags: nil, auth_cache: nil, local_storage: nil, cache_storage: nil, all_hosts_local: nil)
+      def initialize(app, driver: nil, cookies: nil, cookie_flags: nil, auth_cache: nil, local_storage: nil, clipboard: nil, cache_storage: nil, all_hosts_local: nil)
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
@@ -257,6 +257,9 @@ module Capybara
         # session's auth state (a real browser shares the HTTP auth cache across a session's tabs).
         @auth_cache                   = auth_cache     || {}
         @local_storage                = local_storage || {}
+        # The system clipboard, the Driver's (one for the session, every window's): `entries` — [type, byte string] each —
+        # and the change count a ClipboardItem read from it checks.
+        @clipboard                    = clipboard || {}
         # Cache Storage is origin-shared like localStorage (the Driver owns the store
         # and injects it into every window Browser), origin-partitioned within.
         @cache_storage                = cache_storage || {}
@@ -3362,6 +3365,7 @@ module Capybara
         @cookie_flags.clear
         @auth_cache.clear
         @local_storage.clear
+        @clipboard.clear
         @cache_storage.clear
         @session_storage.clear
         @sticky_headers.clear
@@ -4011,6 +4015,14 @@ module Capybara
       end
 
       # (`hold`: the window's close holds the clock — a worker's, delivered by its own loop, does not)
+      # The system clipboard (clipboard.js): what is on it, with its change count — and a write of it, which counts.
+      def clipboard_read = {'entries' => @clipboard['entries'] || [], 'count' => @clipboard['count'] || 0}
+      def clipboard_write(entries)
+        @clipboard['entries'] = entries.to_a
+        @clipboard['count']   = (@clipboard['count'] || 0) + 1
+        nil
+      end
+
       def ws_close(id, code = nil, reason = '', hold: true)
         sock = @websocket_lock.synchronize { @websocket_sockets[id.to_i] } or return
         # Send the close frame and let the close HANDSHAKE complete: the server

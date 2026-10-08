@@ -97,6 +97,9 @@ module Capybara
         @cookie_flags    = {}   # (host \0 name) => {secure: true} — attribute sidecar for the shared jar
         @auth_cache      = {}
         @local_storage   = {}
+        # The system clipboard: one for the session, like a desktop's — what a page copies another window, frame or the
+        # next visit pastes (clipboard.js reads and writes it through the host).
+        @clipboard       = {}
         # Cache Storage (caches/Cache) is origin-shared like localStorage — owned at the
         # Driver level and injected, so a service worker and every same-origin window see
         # the same caches (partitioned by origin key within the store).
@@ -141,6 +144,7 @@ module Capybara
                     cookie_flags:    @cookie_flags,
                     auth_cache:      @auth_cache,
                     local_storage:   @local_storage,
+                    clipboard:       @clipboard,
                     cache_storage:   @cache_storage,
                     all_hosts_local: @all_hosts_local).tap do |b|
           b.touch_input        = @touch

@@ -11,8 +11,9 @@ require_relative 'support/poll_until'
 # NotFoundError; write() refuses a type no page may write.
 RSpec.describe 'Clipboard bindings' do
   let(:app) {
-    lambda do |_env|
-      [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>']]
+    lambda do |env|
+      body = env['PATH_INFO'] == '/framed' ? '<iframe src="/blank"></iframe>' : ''
+      [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=\"utf-8\"><body>#{body}"]]
     end
   }
   let(:session) {
@@ -97,5 +98,48 @@ RSpec.describe 'Clipboard bindings' do
       "NotFoundError: Failed to execute 'readText' on 'Clipboard': No text in the clipboard.",
       'done'
     ])
+  end
+
+  # A custom format read back as written; data converted to `(DOMString or Blob)` — a number its string; a rejected data
+  # promise a NotFoundError; a Blob whose type carries parameters taken by its essence; `write([])` writes nothing;
+  # a custom format no paste event's file.
+  it 'converts, keys and keeps what it writes as the spec says' do
+    session.execute_script(<<~JS)
+      window.got = [];
+      const settle = (p) => p.then((v) => v, (e) => e.name);
+      (async () => {
+        await navigator.clipboard.write([new ClipboardItem({'web text/custom': 'c', 'text/plain': 'p'})]);
+        got.push((await navigator.clipboard.read())[0].types);
+        got.push(__csimClipboardFiles().length);
+        const five = await new ClipboardItem({'text/plain': 5}).getType('text/plain');
+        got.push([five instanceof Blob, await five.text()]);
+        got.push(await settle(new ClipboardItem({'text/plain': Promise.reject(new Error('boom'))}).getType('text/plain')));
+        await navigator.clipboard.write([new ClipboardItem({'text/html': new Blob(['<b>h</b>'], {type: 'text/html;charset=utf-8'})})]);
+        got.push((await navigator.clipboard.read())[0].types);
+        await navigator.clipboard.write([]);
+        got.push((await navigator.clipboard.read())[0].types);
+        got.push('done');
+      })();
+    JS
+    expect(poll_until { session.evaluate_script("window.got.at(-1) === 'done' && window.got") }).to eq([
+      ['web text/custom', 'text/plain'],
+      0,
+      [true, '5'],
+      'NotFoundError',
+      ['text/html'],
+      ['text/html'],
+      'done'
+    ])
+  end
+
+  # The system clipboard is the session's: a frame reads what its top window wrote, and the next visit what this one
+  # wrote.
+  it 'shares one clipboard across frames and visits' do
+    session.visit('/framed')
+    session.execute_script("window.done = navigator.clipboard.writeText('top').then(() => frames[0].navigator.clipboard.readText()).then((t) => { window.got = t; })")
+    expect(poll_until { session.evaluate_script('window.got') }).to eq('top')
+    session.visit('/')
+    session.execute_script("navigator.clipboard.readText().then((t) => { window.got = t; })")
+    expect(poll_until { session.evaluate_script('window.got') }).to eq('top')
   end
 end
