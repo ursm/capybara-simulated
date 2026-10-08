@@ -847,28 +847,14 @@ css/css-font-loading/fontface-descriptor-updates-2.html:
 css/css-font-loading/fontface-font-variation-settings-persisted-js-api.html:
 - Test FontFace variationSettings property
 css/css-font-loading/idlharness.https.html:
-- 'FontFace interface: attribute ascentOverride'
-- 'FontFace interface: attribute descentOverride'
-- 'FontFace interface: attribute display'
-- 'FontFace interface: attribute family'
-- 'FontFace interface: attribute featureSettings'
 - 'FontFace interface: attribute features'
-- 'FontFace interface: attribute lineGapOverride'
 - 'FontFace interface: attribute loaded'
 - 'FontFace interface: attribute palettes'
-- 'FontFace interface: attribute status'
-- 'FontFace interface: attribute stretch'
-- 'FontFace interface: attribute style'
-- 'FontFace interface: attribute unicodeRange'
-- 'FontFace interface: attribute variationSettings'
 - 'FontFace interface: attribute variations'
-- 'FontFace interface: attribute weight'
 - 'FontFace interface: fontFace must inherit property "features" with the proper type'
 - 'FontFace interface: fontFace must inherit property "palettes" with the proper type'
-- 'FontFace interface: fontFace must inherit property "status" with the proper type'
 - 'FontFace interface: fontFace must inherit property "variations" with the proper
   type'
-- 'FontFace interface: operation load()'
 - FontFaceFeatures interface object length
 - FontFaceFeatures interface object name
 - 'FontFaceFeatures interface: existence and properties of interface object'
@@ -899,19 +885,7 @@ css/css-font-loading/idlharness.https.html:
 - 'FontFacePalettes interface: existence and properties of interface prototype object''s
   @@unscopables property'
 - 'FontFacePalettes interface: iterable<FontFacePalette>'
-- FontFaceSet interface object length
 - 'FontFaceSet interface: attribute ready'
-- 'FontFaceSet interface: attribute status'
-- 'FontFaceSet interface: calling check(CSSOMString, optional CSSOMString) on document.fonts
-  with too few arguments must throw TypeError'
-- 'FontFaceSet interface: calling delete(FontFace) on document.fonts with too few
-  arguments must throw TypeError'
-- 'FontFaceSet interface: operation add(FontFace)'
-- 'FontFaceSet interface: operation check(CSSOMString, optional CSSOMString)'
-- 'FontFaceSet interface: operation clear()'
-- 'FontFaceSet interface: operation delete(FontFace)'
-- 'FontFaceSet interface: operation load(CSSOMString, optional CSSOMString)'
-- 'FontFaceSet interface: setlike<FontFace>'
 - FontFaceVariationAxis interface object length
 - FontFaceVariationAxis interface object name
 - 'FontFaceVariationAxis interface: attribute axisTag'
@@ -935,7 +909,6 @@ css/css-font-loading/idlharness.https.html:
 - 'FontFaceVariations interface: existence and properties of interface prototype object''s
   @@unscopables property'
 - 'FontFaceVariations interface: setlike<FontFaceVariationAxis>'
-- "[harness] TIMEOUT"
 css/css-shadow/part/exportparts-layered.html:
 - "== css/css-shadow/part/exportparts-layered.ref.html"
 css/css-shadow/part/interaction-with-pseudo-elements.html:

@@ -12,6 +12,7 @@
 // silent gap.
 
 import { parseAll } from '@webref/idl';
+import { parse as parseIdl } from 'webidl2';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -160,6 +161,15 @@ const INTERFACES = [
       'file-system-access': 'getAsFileSystemHandle: the File System Access API is not implemented'
     }
   }],
+  ['css-font-loading', 'FontFace', {
+    install: true,
+    omitMembers: {
+      features: 'FontFaceFeatures is empty in the draft ("the CSSWG is still discussing what goes in here")',
+      variations: 'a face\'s variation axes are not read from its file',
+      palettes: 'a face\'s color palettes are not read from its file'
+    }
+  }],
+  ['css-font-loading', 'FontFaceSet', { install: true }],
   ['clipboard-apis', 'ClipboardItem', { install: true }],
   ['clipboard-apis', 'Clipboard', { install: true }],
   ['screen-orientation', 'ScreenOrientation', { install: true }],
@@ -358,10 +368,19 @@ const RUNTIME = [
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
-  'defineLength', 'defineUnscopables', 'unforgeableMembers', 'defaultJSONOf'
+  'defineLength', 'defineUnscopables', 'unforgeableMembers', 'defaultJSONOf', 'defineSetlike'
 ];
 
 const all = await parseAll();
+// What an editor's draft says that @webref/idl's snapshot of it does not yet — each its draft's IDL, word for word, with
+// the draft it is from; one a later @webref/idl has too is an error (below), and the entry goes.
+const EDITORS_DRAFT_ADDITIONS = {
+  // https://drafts.csswg.org/css-font-loading-3/#fontface-interface (and the WPT's fontface-size-adjust-descriptor)
+  'css-font-loading-ed': `
+    partial dictionary FontFaceDescriptors { CSSOMString sizeAdjust = "100%"; };
+    partial interface FontFace { attribute CSSOMString sizeAdjust; };`
+};
+for (const [spec, text] of Object.entries(EDITORS_DRAFT_ADDITIONS)) all[spec] = parseIdl(text);
 // Every interface, callback interface, mixin and dictionary of every spec, by name: what an interface type, an
 // `includes` or a dictionary type names. And what adds to one beside its definition — a mixin it includes, a partial
 // of it — by the name of the mixin, or the spec of the partial.
@@ -377,6 +396,17 @@ for (const [spec, defs] of Object.entries(all)) {
     if (d.type === 'enum') enums.set(d.name, d.values.map((v) => v.value));
     if (d.type === 'includes') add(d.target, { mixin: d.includes });
     if ((d.type === 'interface' || d.type === 'interface mixin' || d.type === 'dictionary') && d.partial) add(d.name, { partial: spec, def: d });
+  }
+}
+// (…an editor's-draft addition @webref/idl has caught up with is an error: the entry goes)
+for (const spec of Object.keys(EDITORS_DRAFT_ADDITIONS)) {
+  for (const d of all[spec]) {
+    const others = [definitions.get(d.name) || dictionaries.get(d.name), ...(additions.get(d.name) || []).filter((a) => a.partial && a.partial !== spec).map((a) => a.def)];
+    for (const m of d.members) {
+      if (others.some((o) => o && o.members.some((x) => x.name === m.name))) {
+        throw new Error(`${d.name}.${m.name}: @webref/idl has it now — remove it from EDITORS_DRAFT_ADDITIONS`);
+      }
+    }
   }
 }
 
@@ -586,7 +616,7 @@ const BUFFER_TYPES = new Set([
   'ArrayBuffer', 'SharedArrayBuffer', 'DataView', 'Int8Array', 'Int16Array', 'Int32Array', 'Uint8Array', 'Uint16Array',
   'Uint32Array', 'Uint8ClampedArray', 'BigInt64Array', 'BigUint64Array', 'Float16Array', 'Float32Array', 'Float64Array'
 ]);
-const STRING_TYPES = new Set(['DOMString', 'USVString', 'ByteString']);
+const STRING_TYPES = new Set(['DOMString', 'USVString', 'ByteString', 'CSSOMString']);
 const NUMERIC_TYPES = new Set(['unsigned short', 'short', 'unsigned long', 'long', 'unsigned long long', 'long long', 'double', 'unrestricted double', 'float', 'unrestricted float']);
 function unionConversion(t, expr, where, checks, argExtAttrs) {
   const label = `${where.iface ?? where.dictionary}.${where.member}`;
@@ -771,13 +801,20 @@ function generateInterface(def, options = {}) {
     return options.install ? `thisIs(this ?? globalThis, IS_SELF${message})` : `thisOf(this ?? globalThis, KEY${message})`;
   };
   const self = selfCheck();
-  let indexed = null, valueIterator = false, pairIterator = false, stringifier = null, constructor = null;
+  let indexed = null, valueIterator = false, pairIterator = false, setlike = null, stringifier = null, constructor = null;
   const memberList = membersOf(def, options.omit, options.omitMembers);
   for (const m of memberList) {
     const label = `${name}.${m.name || m.type}`;
     if ((m.extAttrs || []).some((e) => e.name === 'Unscopable')) unscopables.push(m.name);
     if (m.type === 'constructor') { constructor = m; continue; }
     if (m.type === 'const') { constants.push([m.name, constantValue(m, label)]); continue; }
+    if (m.type === 'setlike') {
+      // (…a setlike declaration, Web IDL §3.7.12: the members over the implementation's backing set, `impl.setOf(self)`
+      // — a JS Set — add / delete / clear only where it is not readonly and the interface declares none of its own)
+      if (!options.install) throw new Error(`${label}: a setlike interface the binding makes is not generated yet`);
+      setlike = { readonly: !!m.readonly };
+      continue;
+    }
     if (m.type === 'iterable') {
       // (…a pair iterator, Web IDL §3.7.10: the implementation's pairs, `impl.pairs(self)`, read live)
       if (m.idlType.length === 2) {
@@ -913,7 +950,8 @@ function generateInterface(def, options = {}) {
   const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
   if (options.install) {
     if (indexed || valueIterator) throw new Error(`${name}: an installed interface with an indexed getter or an iterator is not generated yet`);
-    return installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers, pairIterator, preamble });
+    if (setlike) setlike.declared = memberList.filter((o) => o.type === 'operation' && ['add', 'delete', 'clear'].includes(o.name)).map((o) => o.name);
+    return installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers, pairIterator, setlike, preamble });
   }
   if (unforgeables.length) throw new Error(`${name}: [LegacyUnforgeable] members of an interface the binding makes are not generated yet`);
   if (handlers.length) throw new Error(`${name}: event handlers of an interface the binding makes are not generated yet`);
@@ -965,7 +1003,7 @@ function generateInterface(def, options = {}) {
 // …a [Global] interface's (Window's) on the global object itself (Web IDL §3.7.5), its [LegacyUnforgeable] ones too —
 // by the two functions it returns, which define them on a global: its members (configurable, made once where the
 // snapshot is, which a realm made from it has already), and its [LegacyUnforgeable] ones, as each realm is made.
-function installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers, pairIterator, preamble }) {
+function installInterface(def, { body, statics, unforgeables, checks, unscopables, constructor, constants, handlers, pairIterator, setlike, preamble }) {
   const name = def.name;
   const global = (def.extAttrs || []).some((e) => e.name === 'Global');
   const holder = global ? 'members' : 'iface.prototype';
@@ -986,6 +1024,10 @@ function installInterface(def, { body, statics, unforgeables, checks, unscopable
   if (statics.length) lines.push(`  class Statics {`, ...statics, `  }`, `  installMembers(iface, Statics.prototype);`);
   if (handlers.length) lines.push(`  impl.installEventHandlers(${holder}, ${JSON.stringify(handlers)}, IS_SELF);`);
   if (pairIterator) lines.push(`  definePairIterator(iface.prototype, '${name}', (self) => impl.pairs(self), IS_SELF);`);
+  if (setlike) {
+    const own = setlike.readonly ? [] : ['add', 'delete', 'clear'].filter((n) => !setlike.declared.includes(n));
+    lines.push(`  defineSetlike(iface.prototype, '${name}', (self) => impl.setOf(self), IS_SELF, ${JSON.stringify(own)});`);
+  }
   if (constants.length) {
     const list = JSON.stringify(constants.map(([n]) => n));
     lines.push(`  defineConstants(iface, ${list}, [${constants.map(([, v]) => v).join(', ')}]);`);
