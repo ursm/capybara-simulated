@@ -169,6 +169,27 @@ RSpec.describe 'Observer bindings' do
     expect(poll_until { session.evaluate_script('window.got.length === 1 && window.got') }).to eq([1])
   end
 
+  # The platform's own tasks — an observer's notification, a timeout signal's abort — are no page timer: a page clearing
+  # every id it can count to clears none of them, and the ids it is given skip none for them. Chrome: the callbacks come.
+  it 'keeps the platform tasks out of reach of clearTimeout' do
+    session.execute_script(<<~JS)
+      window.got = [];
+      const div = document.body.appendChild(document.createElement('div'));
+      const signal = AbortSignal.timeout(50);
+      signal.onabort = () => window.got.push('aborted');
+      new PerformanceObserver(() => window.got.push('po')).observe({type: 'mark'});
+      new IntersectionObserver(() => window.got.push('io')).observe(div);
+      requestAnimationFrame(() => {
+        performance.mark('m');
+        const first = setTimeout(() => {}, 0);
+        for (let i = 0; i <= first + 50; i++) clearTimeout(i);
+        window.consecutive = setTimeout(() => {}, 0) === first + 1;
+      });
+    JS
+    expect(poll_until { session.evaluate_script('window.got.length === 3 && window.got.sort()') }).to eq(%w[aborted io po])
+    expect(session.evaluate_script('window.consecutive')).to be(true)
+  end
+
   # An exception a callback throws is reported — the window's `error` event — not swallowed.
   it 'reports what an observer callback throws' do
     session.execute_script(<<~JS)
