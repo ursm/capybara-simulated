@@ -130,6 +130,31 @@ RSpec.describe 'Observer bindings' do
       .to eq('a' => false, 'b' => true, 'c' => false, 'd' => true, 'e' => true, 'f' => true)
   end
 
+  # The effective transformation matrix unflattened: any z in it — a `translateZ`, a 3D scale, an ancestor's, a
+  # perspective — makes a target not visible, a z that comes to nothing does not; opacity on a box-less ancestor applies
+  # to nothing; the root element is visible. Chrome's figures.
+  it 'computes visibility from the unflattened matrix, boxes, and the root' do
+    session.execute_script(<<~JS)
+      document.body.innerHTML = `
+        <div id=z style="transform: translateZ(10px); width: 20px; height: 20px"></div>
+        <div id=s3 style="transform: scale3d(2, 2, 3); width: 20px; height: 20px; margin: 20px"></div>
+        <div style="transform: translateZ(5px)"><div id=up style="width: 20px; height: 20px"></div></div>
+        <div style="perspective: 100px"><div id=p style="transform: scale(2); width: 20px; height: 20px; margin: 20px"></div></div>
+        <div id=z0 style="transform: translateZ(0); width: 20px; height: 20px"></div>
+        <div id=t3 style="transform: translate3d(5px, 0, 0); width: 20px; height: 20px"></div>
+        <div style="display: contents; opacity: .5"><div id=dc style="width: 20px; height: 20px"></div></div>`;
+      window.got = {};
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) window.got[e.target.id || e.target.localName] = e.isVisible;
+      }, {trackVisibility: true, delay: 100});
+      for (const id of ['z', 's3', 'up', 'p', 'z0', 't3', 'dc']) io.observe(document.getElementById(id));
+      io.observe(document.documentElement);
+    JS
+    expect(poll_until { session.evaluate_script('Object.keys(window.got).length === 8 && window.got') }).to eq(
+      'z' => false, 's3' => false, 'up' => false, 'p' => false, 'z0' => true, 't3' => true, 'dc' => true, 'html' => true
+    )
+  end
+
   # A change of visibility alone notifies — an overlay laid over a target and taken away — and no update of a target
   # comes within its observer's delay of the last.
   it 'notifies an IntersectionObserver of visibility, no more often than its delay' do

@@ -597,6 +597,20 @@ pub(crate) fn transform_chain(arena: &RealmArena, id: NodeId) -> Option<M4> {
     memo(arena).chains.insert(id, chain);
     chain
 }
+// …and the same map UNFLATTENED — each step and each perspective composed as it is, no z dropped at a crossing — which
+// is what Intersection Observer v2's "effective transformation matrix" is: a `translateZ(10px)` that flattening makes a
+// no-op still moves the box off its plane (Chrome: not visible). None where nothing transforms it.
+pub(crate) fn unflattened_chain(arena: &RealmArena, id: NodeId) -> Option<M4> {
+    let mut m = transform_step(arena, id);
+    let mut at = id;
+    while let Some(up) = flat_parent(arena, at).filter(|&n| arena.get(n).is_some_and(|n| n.kind == NodeKind::Element)) {
+        for step in [perspective_step(arena, up), transform_step(arena, up)].into_iter().flatten() {
+            m = Some(m.map_or(step, |inner| multiply(&step, &inner)));
+        }
+        at = up;
+    }
+    m
+}
 fn cross_into(arena: &RealmArena, node: NodeId, m: Option<M4>) -> Option<M4> {
     let mut m = m?;
     if let Some(p) = perspective_step(arena, node) {
