@@ -8,7 +8,8 @@ require_relative 'support/poll_until'
 # the spec decides: a ClipboardItem's key is a MIME type (Chrome takes "bogus"), its options' presentationStyle an
 # enumeration ("unspecified" by default; Chrome has no attribute), its types the same frozen array each time; supports()
 # knows the optional text/uri-list this clipboard holds (Chrome: false); readText() of a clipboard with no text is a
-# NotFoundError; write() refuses a type no page may write.
+# NotFoundError; write() refuses a type no page may write — by its essence, so a key or a Blob type with parameters
+# (`text/plain;charset=utf-8`, writeText's own) writes, where Chrome refuses it.
 RSpec.describe 'Clipboard bindings' do
   let(:app) {
     lambda do |env|
@@ -141,5 +142,33 @@ RSpec.describe 'Clipboard bindings' do
     session.visit('/')
     session.execute_script("navigator.clipboard.readText().then((t) => { window.got = t; })")
     expect(poll_until { session.evaluate_script('window.got') }).to eq('top')
+  end
+
+  # A promise the page handled fires no unhandledrejection for being given to a ClipboardItem (Chrome); a Symbol is no
+  # string; two representations landing on one type are refused, not one dropped; a read item answers one promise per
+  # type.
+  it 'converts its data without reporting what the page handled' do
+    session.execute_script(<<~JS)
+      window.got = [];
+      window.unhandled = [];
+      window.addEventListener('unhandledrejection', (e) => unhandled.push(String(e.reason)));
+      const settle = (p) => p.then((v) => v, (e) => e.name);
+      (async () => {
+        const p = Promise.reject(new Error('own'));
+        p.catch(() => {});
+        new ClipboardItem({'text/plain': p});
+        await new Promise((r) => setTimeout(r, 0));
+        got.push(await settle(new ClipboardItem({'text/plain': Symbol('s')}).getType('text/plain')));
+        got.push(await settle(navigator.clipboard.write([new ClipboardItem({'text/html': new Blob(['x'], {type: 'text/plain'}), 'text/plain': 'P'})])));
+        await navigator.clipboard.writeText('t');
+        const [item] = await navigator.clipboard.read();
+        got.push(item.getType('text/plain') === item.getType('text/plain'));
+        got.push(unhandled);
+        got.push('done');
+      })();
+    JS
+    expect(poll_until { session.evaluate_script("window.got.at(-1) === 'done' && window.got") }).to eq([
+      'TypeError', 'NotAllowedError', true, [], 'done'
+    ])
   end
 end

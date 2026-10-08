@@ -3365,7 +3365,7 @@ module Capybara
         @cookie_flags.clear
         @auth_cache.clear
         @local_storage.clear
-        @clipboard.clear
+        @clipboard.delete('entries')   # (…its change count rising on: a realm's cache keyed on it is never the next session's)
         @cache_storage.clear
         @session_storage.clear
         @sticky_headers.clear
@@ -4016,7 +4016,8 @@ module Capybara
 
       # (`hold`: the window's close holds the clock — a worker's, delivered by its own loop, does not)
       # The system clipboard (clipboard.js): what is on it, with its change count — and a write of it, which counts.
-      def clipboard_read = {'entries' => @clipboard['entries'] || [], 'count' => @clipboard['count'] || 0}
+      def clipboard_read = {'entries' => @clipboard['entries'] || [], 'count' => clipboard_count}
+      def clipboard_count = @clipboard['count'] || 0
       def clipboard_write(entries)
         @clipboard['entries'] = entries.to_a
         @clipboard['count']   = (@clipboard['count'] || 0) + 1

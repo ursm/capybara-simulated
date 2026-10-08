@@ -111,6 +111,7 @@ module Capybara
         '__csim_wsSend'              => ->(b, *a) { b.ws_send(a[0], a[1], a[2]); nil },
         '__csim_wsClose'             => ->(b, *a) { b.ws_close(a[0], a[1], a[2]); nil },
         '__csim_clipboardRead'       => ->(b, *_) { b.clipboard_read },
+        '__csim_clipboardCount'      => ->(b, *_) { b.clipboard_count },
         '__csim_clipboardWrite'      => ->(b, *a) { b.clipboard_write(a[0]) },
         '__csim_rackFetchAsync'      => ->(b, *a) { b.rack_fetch_async(a[0], a[1], a[2], a[3]) },
         '__csim_rackFetchAsyncAbort' => ->(b, *a) { b.rack_fetch_async_abort(a[0]); nil },
