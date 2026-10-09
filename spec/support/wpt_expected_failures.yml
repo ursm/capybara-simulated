@@ -1873,7 +1873,6 @@ css/cssom/idlharness.html:
 - 'CSSImportRule interface: sheet.cssRules[0] must inherit property "supportsText"
   with the proper type'
 - 'HTMLLinkElement interface: attribute sheet'
-- 'HTMLStyleElement interface: attribute sheet'
 - 'SVGStyleElement interface: attribute sheet'
 css/cssom/page-descriptors.html:
 - CSSPageDescriptors properties tests
@@ -3937,13 +3936,6 @@ html/dom/idlharness.https.html:
   optional DOMString)'
 - 'HTMLMediaElement interface: operation fastSeek(double)'
 - 'HTMLMediaElement interface: operation getStartDate()'
-- 'HTMLMeterElement interface: attribute high'
-- 'HTMLMeterElement interface: attribute labels'
-- 'HTMLMeterElement interface: attribute low'
-- 'HTMLMeterElement interface: attribute max'
-- 'HTMLMeterElement interface: attribute min'
-- 'HTMLMeterElement interface: attribute optimum'
-- 'HTMLMeterElement interface: attribute value'
 - 'HTMLObjectElement interface: attribute align'
 - 'HTMLObjectElement interface: attribute archive'
 - 'HTMLObjectElement interface: attribute border'
@@ -3997,10 +3989,6 @@ html/dom/idlharness.https.html:
 - 'HTMLOutputElement interface: operation checkValidity()'
 - 'HTMLOutputElement interface: operation reportValidity()'
 - 'HTMLOutputElement interface: operation setCustomValidity(DOMString)'
-- 'HTMLProgressElement interface: attribute labels'
-- 'HTMLProgressElement interface: attribute max'
-- 'HTMLProgressElement interface: attribute position'
-- 'HTMLProgressElement interface: attribute value'
 - 'HTMLScriptElement interface: attribute async'
 - 'HTMLScriptElement interface: attribute blocking'
 - 'HTMLScriptElement interface: attribute charset'
@@ -4054,30 +4042,6 @@ html/dom/idlharness.https.html:
 - 'HTMLSelectElement interface: operation setCustomValidity(DOMString)'
 - 'HTMLSelectElement interface: operation showPicker()'
 - HTMLSelectElement must be primary interface of document.createElement("select")
-- HTMLSelectedContentElement interface object length
-- HTMLSelectedContentElement interface object name
-- 'HTMLSelectedContentElement interface: existence and properties of interface object'
-- 'HTMLSelectedContentElement interface: existence and properties of interface prototype
-  object'
-- 'HTMLSelectedContentElement interface: existence and properties of interface prototype
-  object''s "constructor" property'
-- 'HTMLSelectedContentElement interface: existence and properties of interface prototype
-  object''s @@unscopables property'
-- 'HTMLSlotElement interface: attribute name'
-- 'HTMLSlotElement interface: operation assign((Element or Text)...)'
-- 'HTMLSlotElement interface: operation assignedElements(optional AssignedNodesOptions)'
-- 'HTMLSlotElement interface: operation assignedNodes(optional AssignedNodesOptions)'
-- 'HTMLStyleElement interface: attribute blocking'
-- 'HTMLStyleElement interface: attribute disabled'
-- 'HTMLStyleElement interface: attribute media'
-- 'HTMLStyleElement interface: attribute type'
-- 'HTMLTemplateElement interface: attribute content'
-- 'HTMLTemplateElement interface: attribute shadowRootClonable'
-- 'HTMLTemplateElement interface: attribute shadowRootCustomElementRegistry'
-- 'HTMLTemplateElement interface: attribute shadowRootDelegatesFocus'
-- 'HTMLTemplateElement interface: attribute shadowRootMode'
-- 'HTMLTemplateElement interface: attribute shadowRootSerializable'
-- 'HTMLTemplateElement interface: attribute shadowRootSlotAssignment'
 - 'HTMLTextAreaElement interface: attribute autocomplete'
 - 'HTMLTextAreaElement interface: attribute cols'
 - 'HTMLTextAreaElement interface: attribute defaultValue'
@@ -4116,11 +4080,6 @@ html/dom/idlharness.https.html:
   unsigned long, optional SelectionMode)'
 - 'HTMLTextAreaElement interface: operation setSelectionRange(unsigned long, unsigned
   long, optional DOMString)'
-- 'HTMLTrackElement interface: attribute default'
-- 'HTMLTrackElement interface: attribute kind'
-- 'HTMLTrackElement interface: attribute label'
-- 'HTMLTrackElement interface: attribute src'
-- 'HTMLTrackElement interface: attribute srclang'
 - 'HTMLTrackElement interface: attribute track'
 - 'HTMLTrackElement interface: document.createElement("track") must inherit property
   "track" with the proper type'

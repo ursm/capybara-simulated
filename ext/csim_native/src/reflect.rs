@@ -1,13 +1,16 @@
 // The numeric IDL attributes that reflect a content attribute (HTML §2.6.1, "reflecting content attributes in IDL
 // attributes"), read off the element as the engine holds it: a `long`'s, an `unsigned long`'s and a `double`'s getter
-// steps, by the kind its [Reflect…] extended attributes make it. The setters stay the bindings' (reflect.js): writing
-// an attribute runs a page's reactions.
+// steps, by the kind its [Reflect…] extended attributes make it — and a `<meter>`'s and a `<progress>`'s numbers, which
+// their content attributes make the same way. The setters stay the bindings' (reflect.js): writing an attribute runs a
+// page's reactions.
 
 use crate::dom::{nid_arg, realm, realm_id, register};
 use crate::validity::{parse_html_integer, parse_non_negative};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "reflectNumber", reflect_number, context_id);
+    register(scope, ns, "meterValue", meter_value, context_id);
+    register(scope, ns, "progressValue", progress_value, context_id);
 }
 
 // The kinds, as reflect.js names them.
@@ -103,6 +106,51 @@ fn reflect_number(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set_double(reflected(value.as_deref(), kind, default, min, max));
 }
 
+// A `<meter>`'s values (HTML §4.10.14), by `which` — its actual value, minimum, maximum, low, high and optimum points:
+// each its content attribute parsed as a floating-point number, or its default, the minimum 0 and the maximum 1 (but
+// never below the minimum); the others clamped into the range — the high boundary above the low — the low defaulting to
+// the minimum, the high to the maximum, the optimum to the midpoint and the actual value to 0.
+fn meter_values(attr: impl Fn(&str) -> Option<f64>) -> [f64; 6] {
+    let min = attr("min").unwrap_or(0.0);
+    let max = attr("max").unwrap_or(1.0).max(min);
+    let clamp = |v: f64, lo: f64| v.max(lo).min(max);
+    let value = clamp(attr("value").unwrap_or(0.0), min);
+    let low = clamp(attr("low").unwrap_or(min), min);
+    let high = clamp(attr("high").unwrap_or(max), low);
+    let optimum = clamp(attr("optimum").unwrap_or((min + max) / 2.0), min);
+    [value, min, max, low, high, optimum]
+}
+
+// A `<progress>`'s values (HTML §4.10.13), by `which` — its current value, maximum value and position: the maximum its
+// `max` content attribute where that parses to a number above zero, else 1; the current value its `value` one where
+// that parses to a number not below zero, at most the maximum, else 0; the position −1 for an indeterminate progress
+// bar (no `value` attribute), else the current value over the maximum.
+fn progress_values(attr: impl Fn(&str) -> Option<f64>, determinate: bool) -> [f64; 3] {
+    let max = attr("max").filter(|&v| v > 0.0).unwrap_or(1.0);
+    let value = attr("value").filter(|&v| v >= 0.0).map_or(0.0, |v| v.min(max));
+    [value, max, if determinate { value / max } else { -1.0 }]
+}
+
+// __dom.meterValue(nid, which) / __dom.progressValue(nid, which) -> one of those values.
+fn meter_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let which = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
+    let realm = realm(scope, cid);
+    let Some(n) = realm.get(id) else { return };
+    let values = meter_values(|name| n.plain_attr(name).and_then(parse_float_value));
+    rv.set_double(values.get(which).copied().unwrap_or(f64::NAN));
+}
+fn progress_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let which = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
+    let realm = realm(scope, cid);
+    let Some(n) = realm.get(id) else { return };
+    let values = progress_values(|name| n.plain_attr(name).and_then(parse_float_value), n.plain_attr("value").is_some());
+    rv.set_double(values.get(which).copied().unwrap_or(f64::NAN));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +175,24 @@ mod tests {
         assert_eq!(reflected(Some("0"), UNSIGNED_RANGE, 1.0, 1.0, 1000.0), 1.0);
         assert_eq!(reflected(Some("-1"), DOUBLE_POSITIVE, 4.0, 0.0, 0.0), 4.0);
         assert_eq!(reflected(None, LONG, 1.0, 0.0, 0.0), 1.0);
+    }
+
+    fn attrs<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<f64> + 'a {
+        move |name| pairs.iter().find(|(n, _)| *n == name).and_then(|(_, v)| parse_float_value(v))
+    }
+
+    #[test]
+    fn meter() {
+        assert_eq!(meter_values(attrs(&[])), [0.0, 0.0, 1.0, 0.0, 1.0, 0.5]);
+        assert_eq!(meter_values(attrs(&[("min", "5"), ("max", "2"), ("value", "9")])), [5.0, 5.0, 5.0, 5.0, 5.0, 5.0]);
+        assert_eq!(meter_values(attrs(&[("max", "10"), ("low", "6"), ("high", "3"), ("optimum", "x")])), [0.0, 0.0, 10.0, 6.0, 6.0, 5.0]);
+    }
+
+    #[test]
+    fn progress() {
+        assert_eq!(progress_values(attrs(&[]), false), [0.0, 1.0, -1.0]);
+        assert_eq!(progress_values(attrs(&[("value", "3"), ("max", "4")]), true), [3.0, 4.0, 0.75]);
+        assert_eq!(progress_values(attrs(&[("value", "-1"), ("max", "0")]), true), [0.0, 1.0, 0.0]);
+        assert_eq!(progress_values(attrs(&[("value", "9")]), true), [1.0, 1.0, 1.0]);
     }
 }

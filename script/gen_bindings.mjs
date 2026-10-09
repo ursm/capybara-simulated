@@ -132,6 +132,13 @@ const INTERFACES = [
   ['html', 'HTMLEmbedElement', { install: true }],
   ['html', 'HTMLFrameElement', { install: true }],
   ['html', 'HTMLMarqueeElement', { install: true }],
+  ['html', 'HTMLMeterElement', { install: true }],
+  ['html', 'HTMLProgressElement', { install: true }],
+  ['html', 'HTMLTemplateElement', { install: true }],
+  ['html', 'HTMLSlotElement', { install: true }],
+  ['html', 'HTMLTrackElement', { install: true, omitMembers: { track: 'TextTrack is not implemented' } }],
+  ['html', 'HTMLStyleElement', { install: true }],
+  ['html', 'HTMLSelectedContentElement', { install: true }],
   ['html', 'HTMLTableElement', { install: true }],
   ['html', 'HTMLTableCaptionElement', { install: true }],
   ['html', 'HTMLTableColElement', { install: true }],
@@ -662,7 +669,7 @@ const HANDLED = {
   member: [
     'SameObject', 'NewObject', 'CEReactions', 'Unscopable', 'PutForwards', 'Reflect', 'SecureContext', 'LegacyLenientSetter',
     'LegacyUnforgeable', 'LegacyLenientThis', 'Replaceable', 'HTMLConstructor', 'ReflectSetter', 'ReflectURL', 'ReflectNonNegative',
-    'ReflectRange', 'ReflectDefault', 'Exposed', 'Default'
+    'ReflectRange', 'ReflectDefault', 'ReflectPositive', 'ReflectPositiveWithFallback', 'Exposed', 'Default'
   ],
   type: ['LegacyNullToEmptyString', 'EnforceRange', 'Clamp', 'AllowShared', 'AllowResizable']
 };
@@ -698,8 +705,16 @@ function checkExtAttrs(extAttrs, where, label) {
 // (…an enumerated one the HTML prose makes reflect, limited to only known values, its IDL saying no [Reflect] — the
 // table's entry makes it one)
 const REFLECT_ENUMS = {
-  'HTMLTableCellElement.scope': { keywords: ['row', 'col', 'rowgroup', 'colgroup'] }
+  'HTMLTableCellElement.scope': { keywords: ['row', 'col', 'rowgroup', 'colgroup'] },
+  'HTMLTemplateElement.shadowRootMode': { keywords: ['open', 'closed'] },
+  'HTMLTemplateElement.shadowRootSlotAssignment': { keywords: ['named', 'manual'], missing: 'named', invalid: 'named' },
+  'HTMLTrackElement.kind': {
+    keywords: ['subtitles', 'captions', 'descriptions', 'chapters', 'metadata'], missing: 'subtitles', invalid: 'metadata'
+  }
 };
+// (…and one whose number kind its IDL names alone — HTMLProgressElement's `max`, [ReflectPositive]; HTMLTextAreaElement's
+// `cols`, [ReflectPositiveWithFallback] — which the kind's definition makes one that reflects its own name)
+const REFLECT_IMPLIED_BY = ['ReflectNonNegative', 'ReflectPositive', 'ReflectPositiveWithFallback', 'ReflectRange'];
 // (…but the members of these the implementation's: ARIAMixin's, which reflect enumerated per the ARIA reflection and
 // which ElementInternals includes as state of its own, no content attribute)
 const REFLECTED_BY_IMPLEMENTATION = new Set(['ARIAMixin']);
@@ -709,7 +724,7 @@ function reflectionOf(iface, m, where) {
   if (REFLECTED_BY_IMPLEMENTATION.has(m.parent?.name)) return null;
   const ext = new Map((m.extAttrs || []).map((e) => [e.name, e]));
   const named = ext.get('Reflect') ?? ext.get('ReflectURL') ?? ext.get('ReflectSetter') ??
-    (REFLECT_ENUMS[`${iface}.${m.name}`] && { name: 'Reflect' });
+    (REFLECT_IMPLIED_BY.some((name) => ext.has(name)) || REFLECT_ENUMS[`${iface}.${m.name}`] ? { name: 'Reflect' } : null);
   if (!named) return null;
   const attr = JSON.stringify(named.rhs ? JSON.parse(named.rhs.value) : m.name.toLowerCase());
   const type = m.idlType.idlType, nullable = m.idlType.nullable;
