@@ -257,6 +257,22 @@ const INTERFACES = [
   ['webcrypto', 'Crypto', { install: true }],
   ['service-workers', 'Cache', { install: true }],
   ['service-workers', 'CacheStorage', { install: true }],
+  ['service-workers', 'ServiceWorker', { install: true }],
+  ['service-workers', 'ServiceWorkerRegistration', {
+    install: true,
+    omit: {
+      'background-fetch': 'backgroundFetch: Background Fetch is not implemented',
+      'background-sync': 'sync: Background Sync is not implemented',
+      'content-index': 'index: the Content Index API is not implemented',
+      cookiestore: 'cookies: the Cookie Store API is not implemented',
+      notifications: 'showNotification / getNotifications: notifications are not implemented',
+      'periodic-background-sync': 'periodicSync: Periodic Background Sync is not implemented',
+      'web-based-payment-handler': 'paymentManager: payment handlers are not implemented',
+      PushManagerAttribute: 'pushManager: the Push API is not implemented'
+    }
+  }],
+  ['service-workers', 'ServiceWorkerContainer', { install: true }],
+  ['service-workers', 'NavigationPreloadManager', { install: true }],
   ['web-animations', 'AnimationTimeline', {
     install: true,
     omitMembers: { play: 'AnimationTimeline.play(): a level-2 shorthand no engine ships (Chrome and Firefox have none)' }
