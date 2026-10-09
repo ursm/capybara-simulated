@@ -247,4 +247,14 @@ RSpec.describe 'HTML element bindings' do
     JS
     expect(got).to eq(['button', false, false, true, ''])
   end
+
+  it "loads a media element's resource however its src is set" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.v = document.createElement('video');
+      v.setAttribute('src', '/missing.mp4');
+    JS
+    got = session.evaluate_script('[!!v.error, v.currentSrc.endsWith("/missing.mp4"), v.buffered.length, v.preload]')
+    expect(got).to eq([true, true, 0, 'metadata'])
+  end
 end

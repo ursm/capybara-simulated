@@ -3345,39 +3345,9 @@ html/dom/idlharness.https.html:
   "headingOffset" with the proper type'
 - 'HTMLElement interface: document.createElement("noscript") must inherit property
   "headingReset" with the proper type'
-- 'HTMLFormElement interface: attribute acceptCharset'
-- 'HTMLFormElement interface: attribute action'
-- 'HTMLFormElement interface: attribute autocomplete'
-- 'HTMLFormElement interface: attribute elements'
-- 'HTMLFormElement interface: attribute encoding'
-- 'HTMLFormElement interface: attribute enctype'
-- 'HTMLFormElement interface: attribute length'
-- 'HTMLFormElement interface: attribute method'
-- 'HTMLFormElement interface: attribute name'
-- 'HTMLFormElement interface: attribute noValidate'
-- 'HTMLFormElement interface: attribute rel'
-- 'HTMLFormElement interface: attribute relList'
-- 'HTMLFormElement interface: attribute target'
-- 'HTMLFormElement interface: operation checkValidity()'
-- 'HTMLFormElement interface: operation reportValidity()'
-- 'HTMLFormElement interface: operation requestSubmit(optional HTMLElement?)'
-- 'HTMLFormElement interface: operation reset()'
-- 'HTMLFormElement interface: operation submit()'
 - 'HTMLIFrameElement interface: document.createElement("iframe") must inherit property
   "srcdoc" with the proper type'
 - 'HTMLMediaElement interface: attribute audioTracks'
-- 'HTMLMediaElement interface: attribute buffered'
-- 'HTMLMediaElement interface: attribute crossOrigin'
-- 'HTMLMediaElement interface: attribute currentSrc'
-- 'HTMLMediaElement interface: attribute defaultPlaybackRate'
-- 'HTMLMediaElement interface: attribute loading'
-- 'HTMLMediaElement interface: attribute playbackRate'
-- 'HTMLMediaElement interface: attribute played'
-- 'HTMLMediaElement interface: attribute preload'
-- 'HTMLMediaElement interface: attribute preservesPitch'
-- 'HTMLMediaElement interface: attribute seekable'
-- 'HTMLMediaElement interface: attribute seeking'
-- 'HTMLMediaElement interface: attribute src'
 - 'HTMLMediaElement interface: attribute srcObject'
 - 'HTMLMediaElement interface: attribute textTracks'
 - 'HTMLMediaElement interface: attribute videoTracks'
@@ -3389,43 +3359,11 @@ html/dom/idlharness.https.html:
   throw TypeError'
 - 'HTMLMediaElement interface: calling addTextTrack(TextTrackKind, optional DOMString,
   optional DOMString) on new Audio() with too few arguments must throw TypeError'
-- 'HTMLMediaElement interface: calling canPlayType(DOMString) on document.createElement("audio")
-  with too few arguments must throw TypeError'
-- 'HTMLMediaElement interface: calling canPlayType(DOMString) on document.createElement("video")
-  with too few arguments must throw TypeError'
-- 'HTMLMediaElement interface: calling canPlayType(DOMString) on new Audio() with
-  too few arguments must throw TypeError'
-- 'HTMLMediaElement interface: calling fastSeek(double) on document.createElement("audio")
-  with too few arguments must throw TypeError'
-- 'HTMLMediaElement interface: calling fastSeek(double) on document.createElement("video")
-  with too few arguments must throw TypeError'
-- 'HTMLMediaElement interface: calling fastSeek(double) on new Audio() with too few
-  arguments must throw TypeError'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "addTextTrack(TextTrackKind, optional DOMString, optional DOMString)" with the proper
   type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "audioTracks" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "buffered" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "currentSrc" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "defaultPlaybackRate" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "fastSeek(double)" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "getStartDate()" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "playbackRate" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "played" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "preservesPitch" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "seekable" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("audio") must inherit property
-  "seeking" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
   "srcObject" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("audio") must inherit property
@@ -3437,26 +3375,6 @@ html/dom/idlharness.https.html:
   type'
 - 'HTMLMediaElement interface: document.createElement("video") must inherit property
   "audioTracks" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "buffered" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "currentSrc" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "defaultPlaybackRate" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "fastSeek(double)" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "getStartDate()" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "playbackRate" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "played" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "preservesPitch" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "seekable" with the proper type'
-- 'HTMLMediaElement interface: document.createElement("video") must inherit property
-  "seeking" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("video") must inherit property
   "srcObject" with the proper type'
 - 'HTMLMediaElement interface: document.createElement("video") must inherit property
@@ -3467,26 +3385,6 @@ html/dom/idlharness.https.html:
   optional DOMString, optional DOMString)" with the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "audioTracks" with
   the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "buffered" with the
-  proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "currentSrc" with
-  the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "defaultPlaybackRate"
-  with the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "fastSeek(double)"
-  with the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "getStartDate()"
-  with the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "playbackRate" with
-  the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "played" with the
-  proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "preservesPitch"
-  with the proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "seekable" with the
-  proper type'
-- 'HTMLMediaElement interface: new Audio() must inherit property "seeking" with the
-  proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "srcObject" with
   the proper type'
 - 'HTMLMediaElement interface: new Audio() must inherit property "textTracks" with
@@ -3495,37 +3393,6 @@ html/dom/idlharness.https.html:
   the proper type'
 - 'HTMLMediaElement interface: operation addTextTrack(TextTrackKind, optional DOMString,
   optional DOMString)'
-- 'HTMLMediaElement interface: operation fastSeek(double)'
-- 'HTMLMediaElement interface: operation getStartDate()'
-- 'HTMLSelectElement interface: attribute autocomplete'
-- 'HTMLSelectElement interface: attribute disabled'
-- 'HTMLSelectElement interface: attribute form'
-- 'HTMLSelectElement interface: attribute labels'
-- 'HTMLSelectElement interface: attribute length'
-- 'HTMLSelectElement interface: attribute multiple'
-- 'HTMLSelectElement interface: attribute name'
-- 'HTMLSelectElement interface: attribute options'
-- 'HTMLSelectElement interface: attribute required'
-- 'HTMLSelectElement interface: attribute selectedIndex'
-- 'HTMLSelectElement interface: attribute selectedOptions'
-- 'HTMLSelectElement interface: attribute size'
-- 'HTMLSelectElement interface: attribute type'
-- 'HTMLSelectElement interface: attribute validationMessage'
-- 'HTMLSelectElement interface: attribute validity'
-- 'HTMLSelectElement interface: attribute value'
-- 'HTMLSelectElement interface: attribute willValidate'
-- 'HTMLSelectElement interface: calling item(unsigned long) on document.createElement("select")
-  with too few arguments must throw TypeError'
-- 'HTMLSelectElement interface: calling namedItem(DOMString) on document.createElement("select")
-  with too few arguments must throw TypeError'
-- 'HTMLSelectElement interface: operation add((HTMLOptionElement or HTMLOptGroupElement),
-  optional (HTMLElement or long)?)'
-- 'HTMLSelectElement interface: operation checkValidity()'
-- 'HTMLSelectElement interface: operation item(unsigned long)'
-- 'HTMLSelectElement interface: operation namedItem(DOMString)'
-- 'HTMLSelectElement interface: operation reportValidity()'
-- 'HTMLSelectElement interface: operation setCustomValidity(DOMString)'
-- 'HTMLSelectElement interface: operation showPicker()'
 - HTMLSelectElement must be primary interface of document.createElement("select")
 - 'HTMLTrackElement interface: attribute track'
 - 'HTMLTrackElement interface: document.createElement("track") must inherit property
@@ -3891,7 +3758,6 @@ html/dom/idlharness.https.html:
 - Stringification of document.all
 - Stringification of document.createElement("track").track
 - Stringification of document.createElement("video").addTextTrack("subtitles").cues
-- Stringification of document.createElement("video").buffered
 - Stringification of document.createElement("video").textTracks
 - Stringification of location.ancestorOrigins
 - Stringification of new TrackEvent("addtrack", {track:document.createElement("track").track})
@@ -4021,28 +3887,6 @@ html/dom/idlharness.https.html:
   @@unscopables property'
 - 'TextTrackList interface: operation getTrackById(DOMString)'
 - TextTrackList must be primary interface of document.createElement("video").textTracks
-- TimeRanges interface object length
-- TimeRanges interface object name
-- 'TimeRanges interface: attribute length'
-- 'TimeRanges interface: calling end(unsigned long) on document.createElement("video").buffered
-  with too few arguments must throw TypeError'
-- 'TimeRanges interface: calling start(unsigned long) on document.createElement("video").buffered
-  with too few arguments must throw TypeError'
-- 'TimeRanges interface: document.createElement("video").buffered must inherit property
-  "end(unsigned long)" with the proper type'
-- 'TimeRanges interface: document.createElement("video").buffered must inherit property
-  "length" with the proper type'
-- 'TimeRanges interface: document.createElement("video").buffered must inherit property
-  "start(unsigned long)" with the proper type'
-- 'TimeRanges interface: existence and properties of interface object'
-- 'TimeRanges interface: existence and properties of interface prototype object'
-- 'TimeRanges interface: existence and properties of interface prototype object''s
-  "constructor" property'
-- 'TimeRanges interface: existence and properties of interface prototype object''s
-  @@unscopables property'
-- 'TimeRanges interface: operation end(unsigned long)'
-- 'TimeRanges interface: operation start(unsigned long)'
-- TimeRanges must be primary interface of document.createElement("video").buffered
 - TrackEvent interface object length
 - TrackEvent interface object name
 - 'TrackEvent interface: attribute track'

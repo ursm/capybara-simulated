@@ -154,6 +154,23 @@ const INTERFACES = [
     }
   }],
   ['html', 'HTMLObjectElement', { install: true }],
+  ['html', 'TimeRanges'],
+  ['html', 'HTMLMediaElement', {
+    install: true,
+    omit: {
+      'audio-output': 'sinkId / setSinkId: audio output devices are not modelled (nothing plays)',
+      'encrypted-media': 'Encrypted Media Extensions are not implemented',
+      'mediacapture-fromelement': 'captureStream: media capture from an element is not implemented',
+      'remote-playback': 'the Remote Playback API is not implemented'
+    },
+    omitMembers: {
+      srcObject: 'a media provider object (MediaStream, MediaSource, Blob) is not modelled',
+      audioTracks: 'AudioTrackList is not implemented',
+      videoTracks: 'VideoTrackList is not implemented',
+      textTracks: 'TextTrackList is not implemented',
+      addTextTrack: 'TextTrack is not implemented'
+    }
+  }],
   ['html', 'HTMLVideoElement', {
     install: true,
     omit: {
@@ -793,6 +810,10 @@ const REFLECT_ENUMS = {
   'HTMLScriptElement.fetchPriority': FETCH_PRIORITY,
   'HTMLImageElement.referrerPolicy': { keywords: REFERRER_POLICIES },
   'HTMLImageElement.crossOrigin': CORS_SETTINGS,
+  'HTMLMediaElement.crossOrigin': CORS_SETTINGS,
+  // (…a media element's preload: its missing and invalid value default the UA's, Metadata the one the spec suggests)
+  'HTMLMediaElement.preload': { keywords: ['none', 'metadata', 'auto'], aliases: { '': 'auto' }, missing: 'metadata', invalid: 'metadata' },
+  'HTMLMediaElement.loading': LAZY_LOADING,
   'HTMLImageElement.fetchPriority': FETCH_PRIORITY,
   'HTMLImageElement.decoding': { keywords: ['sync', 'async', 'auto'], missing: 'auto', invalid: 'auto' },
   'HTMLImageElement.loading': LAZY_LOADING,
