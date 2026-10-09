@@ -172,6 +172,12 @@ const INTERFACES = [
   ['html', 'HTMLButtonElement', { install: true }],
   ['html', 'HTMLOptionElement', { install: true }],
   ['html', 'HTMLTextAreaElement', { install: true }],
+  ['html', 'HTMLSelectElement', { install: true, indexedProperties: 'the Proxy its prototype chain holds (dom-nodes.js `SelectProto`)' }],
+  ['html', 'HTMLFormElement', {
+    install: true,
+    namedProperties: 'the Proxy each form is (dom-nodes.js `FORM_HANDLER`)',
+    indexedProperties: 'the same Proxy'
+  }],
   ['html', 'HTMLInputElement', {
     install: true,
     omitMembers: { webkitEntries: 'the Entries API\'s file system entries are not implemented' }
