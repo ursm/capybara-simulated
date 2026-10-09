@@ -84,4 +84,31 @@ RSpec.describe 'CSSOM bindings' do
     JS
     expect(out).to eq(['print', true, nil, 'NotAllowedError', 2, -1, 'i { color: green; }', 2, 'b', 'screen', 'SyntaxError', 1])
   end
+
+  # A declaration block is the interface of its kind: an element's, a style rule's and a computed style a
+  # CSSStyleProperties with an attribute for every property; a page rule's and a font face's the descriptors interface
+  # of theirs, with an attribute for each descriptor and none for any other property (Firefox alike).
+  it 'makes each declaration the interface of its kind' do
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><style id="s">@page { margin: 1in } @font-face { font-family: x } p { float: left }</style><p id="p">']] })
+    session.visit '/'
+    out = run(session, <<~JS)
+      const err = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
+      const [page, face, rule] = s.sheet.cssRules;
+      const cls = (o) => Object.prototype.toString.call(o);
+      return [
+        err(() => new CSSStyleDeclaration()), err(() => p.style.getPropertyValue()),
+        cls(p.style), cls(getComputedStyle(p)), cls(rule.style), cls(page.style), cls(face.style),
+        rule.style.cssFloat, page.style.marginTop, page.style['margin-top'], 'color' in page.style, page.style.color,
+        face.style.fontFamily, 'fontFamily' in rule.style, rule.style instanceof CSSStyleDeclaration,
+        Object.getPrototypeOf(CSSPageDescriptors.prototype) === CSSStyleDeclaration.prototype,
+        err(() => Object.getOwnPropertyDescriptor(CSSStyleProperties.prototype, 'color').get.call(page.style))
+      ];
+    JS
+    expect(out).to eq([
+      'TypeError', 'TypeError',
+      '[object CSSStyleProperties]', '[object CSSStyleProperties]', '[object CSSStyleProperties]',
+      '[object CSSPageDescriptors]', '[object CSSFontFaceDescriptors]',
+      'left', '1in', '1in', false, nil, 'x', true, true, true, 'TypeError'
+    ])
+  end
 end

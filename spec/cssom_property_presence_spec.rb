@@ -131,7 +131,7 @@ RSpec.describe 'CSS property names on a CSSStyleDeclaration' do
   # Two neighbouring surfaces this does NOT give us, both measured rather than assumed:
   #
   # - OWN-ness is a Chrome/Gecko split and we take the SPEC side. CSSOM defines these as IDL
-  #   attributes on CSSStyleDeclaration.prototype, so they are present but not own — which is
+  #   attributes on CSSStyleProperties.prototype, so they are present but not own — which is
   #   exactly what `css/cssom/cssstyledeclaration-properties.html` asserts
   #   (`assert_false(declaration.hasOwnProperty("color"))`). Chrome defines them as own, enumerable,
   #   configurable data properties and FAILS that subtest; we pass it, and adding a
@@ -154,11 +154,11 @@ RSpec.describe 'CSS property names on a CSSStyleDeclaration' do
   # a different question: `Reflect.getOwnPropertyDescriptor` / `Reflect.ownKeys` walking the
   # prototype chain, which is how `css/css-logical/getComputedStyle-listing.html` checks that a
   # property is exposed at all. Those find nothing on a proxy that only traps reads, so the
-  # attributes have to exist where CSSOM puts them — on the interface prototype.
+  # attributes have to exist where CSSOM puts them — on CSSStyleProperties' prototype.
   it 'exposes each property as an IDL attribute on the interface prototype' do
     s = style_probe
     expect(s.evaluate_script(<<~JS)).to eq([true, true, true, true, true])
-      (() => { const p = CSSStyleDeclaration.prototype;
+      (() => { const p = CSSStyleProperties.prototype;
                const d = Object.getOwnPropertyDescriptor(p, 'borderBlockEndColor');
                return [!!d, typeof d.get === 'function', typeof d.set === 'function', d.enumerable, d.configurable]; })()
     JS
@@ -170,7 +170,7 @@ RSpec.describe 'CSS property names on a CSSStyleDeclaration' do
   it 'exposes every spelling CSSOM defines for a property' do
     s = style_probe
     expect(s.evaluate_script(<<~JS)).to eq([true, true, true, true, true, false])
-      (() => { const k = Reflect.ownKeys(CSSStyleDeclaration.prototype);
+      (() => { const k = Reflect.ownKeys(CSSStyleProperties.prototype);
                return ['marginInlineStart', 'margin-inline-start', 'webkitAppearance', 'WebkitAppearance', 'cssFloat',
                        'notAProperty'].map(n => k.includes(n)); })()
     JS

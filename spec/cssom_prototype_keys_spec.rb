@@ -18,7 +18,7 @@ RSpec.describe 'CSSOM property maps are prototype-less' do
   # write / read named after one must not throw.
   it 'does not leak Object.prototype members as CSS values' do
     s = session
-    expect(s.evaluate_script(<<~JS)).to eq(['CSSStyleDeclaration', 'function', '', '', 'ok'])
+    expect(s.evaluate_script(<<~JS)).to eq(['CSSStyleProperties', 'function', '', '', 'ok'])
       (() => {
         const el = document.getElementById('d');
         const c = getComputedStyle(el);

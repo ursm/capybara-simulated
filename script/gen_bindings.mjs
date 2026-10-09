@@ -361,6 +361,11 @@ const INTERFACES = [
   ['dom', 'StaticRange', { install: true }],
   ['dom', 'Range', { install: true }],
   ['selection-api', 'Selection', { install: true }],
+  ['cssom', 'CSSStyleDeclaration', { install: true, indexedProperties: 'the Proxy each declaration is (style-proxy.js `makeDeclProxy`)' }],
+  ['cssom', 'CSSStyleProperties', { install: true }],
+  ['cssom', 'CSSPageDescriptors', { install: true }],
+  ['css-fonts-5', 'CSSFontFaceDescriptors', { install: true }],
+  ['css-anchor-position', 'CSSPositionTryDescriptors', { install: true }],
   ['cssom', 'MediaList'],
   ['cssom', 'StyleSheetList'],
   ['cssom', 'CSSRuleList'],
@@ -1050,11 +1055,15 @@ function generateInterface(def, options = {}) {
       if (m.special === 'stringifier') stringifier = m.name;
       else if (m.special && m.special !== 'inherit') throw new Error(`${label}: a ${m.special} attribute is not generated yet`);
       members.push(m.name);
+      // (…a name no identifier — CSSPageDescriptors' `margin-top` — quoted, as its implementation's member)
+      const key = /^[A-Za-z_$][\w$]*$/.test(m.name) ? m.name : JSON.stringify(m.name);
+      const getImpl = key === m.name ? `impl.get_${m.name}` : `impl[${JSON.stringify(`get_${m.name}`)}]`;
+      const setImpl = key === m.name ? `impl.set_${m.name}` : `impl[${JSON.stringify(`set_${m.name}`)}]`;
       // (…[LegacyLenientThis] only an event handler's here, whose accessors the installing class's are)
       if ((m.extAttrs || []).some((e) => e.name === 'LegacyLenientThis')) throw new Error(`${label}: a [LegacyLenientThis] attribute is not generated yet`);
       // (…a promise-typed one's exception its promise's rejection, as its getter steps say)
-      const getter = `return impl.get_${m.name}(${self});`;
-      out.push(`    get ${m.name}() { ${promiseOf(m) ? rejecting(getter) : getter} }`);
+      const getter = `return ${getImpl}(${self});`;
+      out.push(`    get ${key}() { ${promiseOf(m) ? rejecting(getter) : getter} }`);
       const forwards = (m.extAttrs || []).find((e) => e.name === 'PutForwards');
       if (forwards) {
         // [PutForwards=x] (Web IDL §3.7.6): a write to the attribute is a write of `x` on the object it answers
@@ -1062,23 +1071,23 @@ function generateInterface(def, options = {}) {
         // (…the object no object — a document's `location` with no window — a TypeError)
         const target = forwards.rhs.value;
         const notObject = JSON.parse(failure({ iface: name, member: m.name }, 'The attribute value is not an object'));
-        out.push(`    set ${m.name}(v) { const object = impl.get_${m.name}(${self}); if (object === null || (typeof object !== 'object' && typeof object !== 'function')) throw new TypeError(${JSON.stringify(notObject)}); object.${target} = v; }`);
+        out.push(`    set ${key}(v) { const object = ${getImpl}(${self}); if (object === null || (typeof object !== 'object' && typeof object !== 'function')) throw new TypeError(${JSON.stringify(notObject)}); object.${target} = v; }`);
       } else if ((m.extAttrs || []).some((e) => e.name === 'Replaceable')) {
         // [Replaceable] (Web IDL §3.7.6): a write to the read-only attribute replaces it with a data property of the
         // object — a page's `innerWidth = 1024` keeps its own value, and the attribute is gone for it
-        out.push(`    set ${m.name}(v) { const self = ${self}; Object.defineProperty(self, '${m.name}', { value: v, writable: true, enumerable: true, configurable: true }); }`);
+        out.push(`    set ${key}(v) { const self = ${self}; Object.defineProperty(self, '${m.name}', { value: v, writable: true, enumerable: true, configurable: true }); }`);
       } else if ((m.extAttrs || []).some((e) => e.name === 'LegacyLenientSetter')) {
         // [LegacyLenientSetter] (Web IDL §3.4.2): a read-only attribute with a setter that does nothing — but check its
         // `this` — so a page's own assignment to it (an old polyfill's) is no error
-        out.push(`    set ${m.name}(v) { ${self}; }`);
+        out.push(`    set ${key}(v) { ${self}; }`);
       } else if (!m.readonly && enums.has(m.idlType.idlType)) {
         // (…an enumeration's: a string it has not is ignored, not an error — Web IDL §3.7.6)
         const value = `enumValue(v, ${JSON.stringify(enums.get(m.idlType.idlType))}, ${failure({ iface: name, member: m.name })})`;
         const v = m.idlType.nullable ? `v == null ? null : ${value}` : value;
-        out.push(`    set ${m.name}(v) { const self = ${self}; const value = ${v}; if (value !== undefined) impl.set_${m.name}(self, value); }`);
+        out.push(`    set ${key}(v) { const self = ${self}; const value = ${v}; if (value !== undefined) ${setImpl}(self, value); }`);
       } else if (!m.readonly) {
         const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
-        out.push(`    set ${m.name}(v) { impl.set_${m.name}(${self}, ${v}); }`);
+        out.push(`    set ${key}(v) { ${setImpl}(${self}, ${v}); }`);
       }
       continue;
     }

@@ -8,7 +8,8 @@ require_relative 'support/session_teardown'
 # its traps, and for a long time that was ALL it answered: nothing was ever defined on
 # `CSSStyleDeclaration.prototype`, so `Reflect.ownKeys` / `Reflect.getOwnPropertyDescriptor` walking
 # the chain came back empty and `CSSStyleDeclaration.prototype.setProperty` was `undefined`. The
-# prototype now carries what CSSOM puts on it: the interface's own eight members, and an IDL
+# prototypes now carry what CSSOM puts on them: CSSStyleDeclaration's own eight members, and — on
+# CSSStyleProperties.prototype, the interface an element's and a style rule's declaration is — an IDL
 # attribute for every supported CSS property.
 #
 # Chrome puts the property attributes somewhere else entirely — own, enumerable, configurable DATA
@@ -34,7 +35,7 @@ RSpec.describe 'the CSSStyleDeclaration interface surface' do
   it 'throws when a member is used on the bare prototype' do
     s = style_probe
     expect(s.evaluate_script(<<~JS)).to eq(['TypeError', 'TypeError', 'TypeError', 'TypeError'])
-      (() => { const p = CSSStyleDeclaration.prototype;
+      (() => { const p = CSSStyleProperties.prototype;
                const threw = (f) => { try { f(); return 'no throw'; } catch (e) { return e.constructor.name; } };
                return [threw(() => p.color), threw(() => { p.color = 'red'; }),
                        threw(() => p.cssText), threw(() => p.item(0))]; })()
@@ -50,7 +51,7 @@ RSpec.describe 'the CSSStyleDeclaration interface surface' do
     s = style_probe
     expect(s.evaluate_script(<<~JS)).to eq('TypeError')
       (() => { try {
-                 return Reflect.get(CSSStyleDeclaration.prototype, 'color', {getPropertyValue: () => 'spoofed'});
+                 return Reflect.get(CSSStyleProperties.prototype, 'color', {getPropertyValue: () => 'spoofed'});
                } catch (e) { return e.constructor.name; } })()
     JS
   end
@@ -132,8 +133,8 @@ RSpec.describe 'the CSSStyleDeclaration interface surface' do
     s = style_probe
     expect(s.evaluate_script(<<~JS)).to eq(['', '3px', ''])
       (() => { const el = document.getElementById('a');
-               const get = Object.getOwnPropertyDescriptor(CSSStyleDeclaration.prototype, 'marginInlineStart').get;
-               const set = Object.getOwnPropertyDescriptor(CSSStyleDeclaration.prototype, 'marginInlineStart').set;
+               const get = Object.getOwnPropertyDescriptor(CSSStyleProperties.prototype, 'marginInlineStart').get;
+               const set = Object.getOwnPropertyDescriptor(CSSStyleProperties.prototype, 'marginInlineStart').set;
                const before = get.call(el.style);
                set.call(el.style, '3px');
                const after = get.call(el.style);
@@ -171,7 +172,7 @@ RSpec.describe 'the CSSStyleDeclaration interface surface' do
       (() => { const p = CSSStyleDeclaration.prototype;                     // the MAIN realm's
                const adopted = document.getElementById('f').contentDocument.createElement('div');
                document.body.appendChild(adopted);                          // …adopts it into this one
-               Object.getOwnPropertyDescriptor(p, 'backgroundColor').set.call(adopted.style, 'blue');
+               Object.getOwnPropertyDescriptor(CSSStyleProperties.prototype, 'backgroundColor').set.call(adopted.style, 'blue');
                return [p.getPropertyValue.call(adopted.style, 'background-color'),
                        p.getPropertyValue.call(getComputedStyle(adopted), 'background-color'),
                        Object.getOwnPropertyDescriptor(p, 'length').get.call(adopted.style)]; })()

@@ -186,7 +186,7 @@ RSpec.describe 'the -webkit- property surface' do
   it 'stores something for every -webkit- spelling it advertises' do
     s = page('<div id="a"></div>')
     expect(s.evaluate_script(<<~JS)).to eq([])
-      (() => Reflect.ownKeys(CSSStyleDeclaration.prototype)
+      (() => Reflect.ownKeys(CSSStyleProperties.prototype)
                .filter(k => typeof k === 'string' && k.startsWith('-webkit-'))
                .filter(name => { const d = document.createElement('div');
                                  d.style.setProperty(name, 'inherit');
@@ -226,7 +226,7 @@ RSpec.describe 'the -webkit- property surface' do
   it 'gives every spelling an IDL attribute that reads the property' do
     s = page('<style>#a { transform: scale(3) }</style><div id="a"></div>')
     expect(s.evaluate_script(<<~JS)).to eq([true, true, true, 'matrix(3, 0, 0, 3, 0, 0)'])
-      (() => { const p = CSSStyleDeclaration.prototype, cs = getComputedStyle(document.getElementById('a'));
+      (() => { const p = CSSStyleProperties.prototype, cs = getComputedStyle(document.getElementById('a'));
                return ['webkitTransform' in cs,
                        Reflect.ownKeys(p).includes('webkitTransform'),
                        Reflect.ownKeys(p).includes('-webkit-transform'),
