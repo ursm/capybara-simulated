@@ -437,6 +437,14 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "actuallyDisabled", actually_disabled, context_id);
     crate::dom::register(scope, ns, "listOfOptions", list_of_options, context_id);
     crate::dom::register(scope, ns, "isListBox", is_list_box, context_id);
+    crate::dom::register(scope, ns, "isSubmitButton", is_submit_button, context_id);
+}
+
+// __dom.isSubmitButton(nid) -> whether the element is a submit button (`element_state::is_submit_button`).
+fn is_submit_button(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(crate::dom::realm(scope, cid).get(id).is_some_and(|n| n.is_submit_button()));
 }
 
 // __dom.isListBox(nid) -> whether a `<select>` shows as a list box, its display size above 1 (`is_list_box`) — else a
