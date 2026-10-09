@@ -3478,8 +3478,9 @@ module Capybara
 
       # ── Host-fn callbacks invoked by bridge.js ──────────────────
 
-      def rack_fetch_body(url)
-        result = rack_fetch('GET', url, '', {}, 'follow')
+      # (…a mode's verdicts judged against `client_url`'s origin, a worker script's 'same-origin')
+      def rack_fetch_body(url, cors_mode: nil, client_url: nil)
+        result = rack_fetch('GET', url, '', {}, 'follow', cors_mode, client_url: client_url)
         # …the URL it was fetched from at last, its redirects followed (a worker's global scope takes it: HTML "run a worker"
         # sets its url to the response's)…
         Thread.current[:csim_asset_url] = result && result['url']
@@ -4542,7 +4543,7 @@ module Capybara
         body = if service && (pending = (@sw_scope_meta[sw_scope.to_s] || {}).delete(:pending_body))
           pending
         elsif !sw_script
-          fetch_worker_script(target)
+          fetch_worker_script(target, parent_worker ? @workers.dig(parent_worker, :script_url) : frame_realm_url(realm_id))
         end
         # Resource Timing for a DEDICATED worker's own main-script fetch — a browser files it in the
         # creating context's timeline (a classic worker as 'other', a module worker as 'script'; the
@@ -4556,9 +4557,9 @@ module Capybara
         if !service && !shared && !sw_script && body && target.match?(%r{\Ahttps?://}i)
           Thread.current[:csim_worker_rt] = {'url' => target, 'meta' => Thread.current[:csim_asset_meta]}
         end
-        # A dedicated or shared worker's global scope is at the URL its script came from at last — its redirects followed
-        # (HTML "run a worker": the worker global scope's url is the response's), which its location, its imports' base and
-        # its requests' referrer read. (A service worker's script may not redirect.)
+        # A dedicated or shared worker's global scope is at the URL its script came from at last — its same-origin redirects
+        # followed (HTML "run a worker": the worker global scope's url is the response's), which its location, its imports'
+        # base and its requests' referrer read. (A service worker's script may not redirect.)
         if !service && !sw_script && body && target.match?(%r{\Ahttps?://}i) && Thread.current[:csim_asset_url].to_s.match?(%r{\Ahttps?://}i)
           target = Thread.current[:csim_asset_url].to_s
         end
@@ -8570,7 +8571,7 @@ module Capybara
         end
         # Fire any timer the initial script parked BEFORE releasing the init hold — the
         # same gated drain the poll loop runs per tick. `fetch()` defers its body to a
-        # setTimeout(0), so a fetch() issued by the initial script / connect handler is,
+        # setTimeout(0), so a fetch() issued by the initial script is,
         # at this point, ONLY a due timer: once the init hold drops, nothing pending-
         # visible remains until the first poll tick (50 ms away), and a runner that
         # force-timeouts on idle kills the test inside that blind window
@@ -8863,7 +8864,10 @@ module Capybara
         rt.call('__csimReportWorkerScriptError', e.message, file || url, line.to_i, col.to_i)
       end
 
-      private def fetch_worker_script(url)
+      # A worker's script, of `url`: an http(s) one fetched in mode 'same-origin' against its creator's URL `client_url` —
+      # a cross-origin URL or redirect a network error, as for a classic and a module worker alike (HTML "fetch a classic
+      # worker script", "fetch a single module script") — which fires the worker's `error`.
+      private def fetch_worker_script(url, client_url)
         u = url.to_s
         if u.start_with?('blob:')
           # Resolve via the Driver's partition store so a SAME-partition blob created
@@ -8886,7 +8890,7 @@ module Capybara
         # from a data: URL — its origin is opaque, so its blob: URLs serialize
         # with a 'null' origin). Decode inline; Rack can't serve a data: URL.
         return decode_data_url_body(u) if u.start_with?('data:')
-        rack_fetch_body(u)
+        rack_fetch_body(u, cors_mode: 'same-origin', client_url: client_url)
       end
 
       # The decoded body of a `data:[<mediatype>][;base64],<data>` URL (RFC 2397):

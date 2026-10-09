@@ -3543,7 +3543,6 @@ html/dom/idlharness.any.js:
   "constructor" property'
 - 'TextMetrics interface: existence and properties of interface prototype object''s
   @@unscopables property'
-- 'Worker interface: existence and properties of interface object'
 html/dom/idlharness.https.html:
 - AudioTrack interface object length
 - AudioTrack interface object name
@@ -5010,7 +5009,6 @@ html/dom/idlharness.https.html:
 - 'Sanitizer interface: operation setComments(boolean)'
 - 'Sanitizer interface: operation setDataAttributes(boolean)'
 - 'ShadowRoot interface: operation setHTML(DOMString, optional SetHTMLOptions)'
-- 'SharedWorker interface: existence and properties of interface object'
 - Stringification of document.all
 - Stringification of document.createElement("form").elements
 - Stringification of document.createElement("listing")
@@ -5250,7 +5248,6 @@ html/dom/idlharness.https.html:
 - 'Window interface: window must inherit property "frames" with the proper type'
 - 'Window interface: window must inherit property "navigation" with the proper type'
 - Window must be primary interface of window
-- 'Worker interface: existence and properties of interface object'
 - Worklet interface object length
 - Worklet interface object name
 - 'Worklet interface: existence and properties of interface object'
