@@ -771,6 +771,85 @@ impl RealmArena {
     fn is_editable(&self, id: NodeId) -> bool {
         self.editing_host(id).is_some()
     }
+    // A labelable element (HTML §4.10.2): a button, input but a hidden one, meter, output, progress, select or textarea —
+    // or a form-associated custom element.
+    pub(crate) fn is_labelable(&self, id: NodeId) -> bool {
+        let Some(n) = self.get(id).filter(|n| n.kind == NodeKind::Element) else { return false };
+        if n.state & STATE_FORM_ASSOCIATED != 0 {
+            return true;
+        }
+        n.is_html()
+            && match &*n.local_name {
+                "input" => n.input_type() != "hidden",
+                "button" | "meter" | "output" | "progress" | "select" | "textarea" => true,
+                _ => false,
+            }
+    }
+    // A label's labeled control (HTML §4.10.4): with a `for` attribute, the first element of its tree with that id —
+    // none for an empty one — where that is labelable; else its first labelable descendant in tree order.
+    pub(crate) fn labeled_control(&self, label: NodeId) -> Option<NodeId> {
+        let n = self.get(label)?;
+        if let Some(target) = n.plain_attr("for") {
+            if target.is_empty() {
+                return None;
+            }
+            let hit = self.find_in_tree(self.root_of(label), |_, e| e.get_attr("id") == Some(target))?;
+            return self.is_labelable(hit).then_some(hit);
+        }
+        n.children.iter().find_map(|&c| self.find_in_tree(c, |c, _| self.is_labelable(c)))
+    }
+    // A labelable element's labels (its `labels`), in tree order: the HTML labels of its tree whose labeled control it
+    // is — none for an element that is not labelable.
+    pub(crate) fn labels_of(&self, control: NodeId) -> Vec<NodeId> {
+        let mut labels = Vec::new();
+        if self.is_labelable(control) {
+            self.find_in_tree(self.root_of(control), |c, n| {
+                if n.is_html_named("label") && self.labeled_control(c) == Some(control) {
+                    labels.push(c);
+                }
+                false
+            });
+        }
+        labels
+    }
+    // Interactive content (HTML §3.2.5.2.7), as a label's activation behaviour asks: an event targeted at it, or inside
+    // it, is its own, not the label's.
+    fn is_interactive_content(&self, n: &NodeData) -> bool {
+        if !n.is_html() {
+            return false;
+        }
+        match &*n.local_name {
+            "button" | "select" | "textarea" | "label" | "summary" | "details" | "embed" | "iframe" => true,
+            "input" => n.input_type() != "hidden",
+            "a" | "area" => n.plain_attr("href").is_some(),
+            "audio" | "video" => n.plain_attr("controls").is_some(),
+            "img" => n.plain_attr("usemap").is_some(),
+            _ => false,
+        }
+    }
+    // The label a click on `id` activates the labeled control of (HTML "click in a label"): itself, where it is an HTML
+    // label; none where it is interactive content; else its nearest label ancestor short of any interactive one.
+    pub(crate) fn label_to_activate(&self, id: NodeId) -> Option<NodeId> {
+        let n = self.get(id)?;
+        if n.is_html_named("label") {
+            return Some(id);
+        }
+        if self.is_interactive_content(n) {
+            return None;
+        }
+        let mut cur = self.parent_of(id);
+        while let Some(c) = cur {
+            let p = self.get(c).filter(|p| p.kind == NodeKind::Element)?;
+            if p.is_html_named("label") {
+                return Some(c);
+            }
+            if self.is_interactive_content(p) {
+                return None;
+            }
+            cur = self.parent_of(c);
+        }
+        None
+    }
     // `id`'s editing host (HTML §6.8.1): itself or its nearest ancestor element whose `contenteditable` is in the true
     // or plaintext-only state — or none, where the nearest one that says is in the false state, or none says.
     pub(crate) fn editing_host(&self, id: NodeId) -> Option<NodeId> {

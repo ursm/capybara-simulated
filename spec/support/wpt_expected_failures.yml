@@ -1963,7 +1963,6 @@ custom-elements/enqueue-custom-element-callback-reactions-inside-another-callbac
   getting invoked before the attribute change completes
 custom-elements/form-associated/ElementInternals-labels.html:
 - LABEL association
-- LABEL click
 custom-elements/form-associated/ElementInternals-reportValidity-bubble.html:
 - "!= custom-elements/form-associated/ElementInternals-reportValidity-bubble-notref.html"
 custom-elements/form-associated/ElementInternals-reportValidity-delegatesFocus.html:
@@ -1974,11 +1973,6 @@ custom-elements/form-associated/form-disabled-callback.html:
 - Relationship with FIELDSET
 custom-elements/form-associated/form-reset-callback.html:
 - Clicking a reset button invokes formResetCallback in a microtask
-custom-elements/form-associated/label-delegatesFocus.html:
-- Clicking on a label for a form associated custom element with delegatesFocus should
-  focus the custom element's focus delegate.
-- Clicking on a span in a label for a form associated custom element with delegatesFocus
-  should focus the custom element's focus delegate.
 custom-elements/htmlconstructor/newtarget-customized-builtins.html:
 - If prototype is not object (5), derives the fallback from NewTarget's GetFunctionRealm
   (customized built-in elements)

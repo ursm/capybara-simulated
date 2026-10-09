@@ -514,25 +514,52 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "defaultButton", default_button, context_id);
     crate::dom::register(scope, ns, "formListed", form_listed, context_id);
     crate::dom::register(scope, ns, "editingHost", editing_host, context_id);
+    crate::dom::register(scope, ns, "isLabelable", is_labelable, context_id);
+    crate::dom::register(scope, ns, "labeledControl", labeled_control, context_id);
+    crate::dom::register(scope, ns, "labelsOf", labels_of, context_id);
+    crate::dom::register(scope, ns, "labelToActivate", label_to_activate, context_id);
 }
 
-// __dom.editingHost(nid) -> [the node's editing host] or [] (`element_state::editing_host`), from the node's root.
-fn editing_host(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.isLabelable(nid) -> whether the element is labelable (`element_state::is_labelable`).
+fn is_labelable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
-    let Some(node) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let arena = crate::dom::realm(scope, cid);
-    let (root, host) = (arena.root_of(node), arena.editing_host(node));
-    rv.set(crate::dom::nodes_value(scope, cid, root, host.as_slice()));
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(crate::dom::realm(scope, cid).is_labelable(id));
 }
 
-// __dom.formOwner(nid) -> [the control's form owner] or [] (`element_state::form_owner`), as `nodes_value` answers it
-// from the control's root.
-fn form_owner(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let Some(control) = crate::dom::nid_arg(scope, &args, 0) else { return };
+// __dom.labeledControl / labelsOf / labelToActivate(nid) -> the node(s) `element_state` answers: a label's labeled
+// control, a control's labels, the label a click activates.
+fn labeled_control(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    nodes_from_root(scope, &args, rv, |arena, id| arena.labeled_control(id).into_iter().collect());
+}
+fn labels_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    nodes_from_root(scope, &args, rv, |arena, id| arena.labels_of(id));
+}
+fn label_to_activate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    nodes_from_root(scope, &args, rv, |arena, id| arena.label_to_activate(id).into_iter().collect());
+}
+// (…what `answer` gives of a node, as `nodes_value` answers it from the node's root)
+fn nodes_from_root(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: &v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+    answer: impl FnOnce(&RealmArena, NodeId) -> Vec<NodeId>,
+) {
+    let cid = crate::dom::realm_id(scope, args);
+    let Some(id) = crate::dom::nid_arg(scope, args, 0) else { return };
     let arena = crate::dom::realm(scope, cid);
-    let (root, owner) = (arena.root_of(control), arena.form_owner(control));
-    rv.set(crate::dom::nodes_value(scope, cid, root, owner.as_slice()));
+    let (root, nodes) = (arena.root_of(id), answer(arena, id));
+    rv.set(crate::dom::nodes_value(scope, cid, root, &nodes));
+}
+
+// __dom.editingHost(nid) -> [the node's editing host] or [] (`element_state::editing_host`).
+fn editing_host(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    nodes_from_root(scope, &args, rv, |arena, id| arena.editing_host(id).into_iter().collect());
+}
+
+// __dom.formOwner(nid) -> [the control's form owner] or [] (`element_state::form_owner`).
+fn form_owner(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    nodes_from_root(scope, &args, rv, |arena, id| arena.form_owner(id).into_iter().collect());
 }
 
 // __dom.defaultButton(nid) -> [the form's default button] or [] (`element_state::default_button_of`), from the form's
@@ -554,14 +581,9 @@ fn form_listed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     rv.set(crate::dom::nodes_value(scope, cid, tree, &listed));
 }
 
-// __dom.radioGroup(nid) -> a radio's group, itself included, in tree order (`element_state::radio_group`), as
-// `nodes_value` answers them from its tree's root.
-fn radio_group(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let Some(radio) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let arena = crate::dom::realm(scope, cid);
-    let (root, group) = (arena.root_of(radio), arena.radio_group(radio));
-    rv.set(crate::dom::nodes_value(scope, cid, root, &group));
+// __dom.radioGroup(nid) -> a radio's group, itself included, in tree order (`element_state::radio_group`).
+fn radio_group(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    nodes_from_root(scope, &args, rv, RealmArena::radio_group);
 }
 
 // __dom.optionDisabled(nid) -> whether an option is disabled for its select's selectedness and entry list
@@ -968,7 +990,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod selectedness_tests {
+mod form_tests {
     use super::*;
     use web_atoms::ns;
 
@@ -1019,5 +1041,31 @@ mod selectedness_tests {
         let dirty = html(&mut arena, None, "option", &["selected"]);
         arena.get_mut_quietly(dirty).unwrap().state = STATE_SELECTED_DIRTY;
         assert_eq!(arena.option_initialised(dirty), STATE_SELECTED_DIRTY | STATE_SELECTED_INIT);
+    }
+
+    #[test]
+    fn labels_and_editing_hosts() {
+        let mut arena = RealmArena::default();
+        let root = html(&mut arena, None, "div", &[]);
+        // (…a label without `for`: its first labelable descendant — past a hidden input — in tree order)
+        let label = html(&mut arena, Some(root), "label", &[]);
+        let wrap = html(&mut arena, Some(label), "span", &[]);
+        let hidden = html(&mut arena, Some(wrap), "input", &["type"]);
+        arena.get_mut_quietly(hidden).unwrap().attributes = vec![("type".into(), "hidden".into())];
+        let input = html(&mut arena, Some(wrap), "input", &[]);
+        assert_eq!(arena.labeled_control(label), Some(input));
+        assert_eq!(arena.labels_of(input), vec![label]);
+        assert!(!arena.is_labelable(hidden) && arena.labels_of(hidden).is_empty());
+        // (…a click on the label's text activates it, one on its control the control)
+        let text = html(&mut arena, Some(label), "b", &[]);
+        assert_eq!(arena.label_to_activate(text), Some(label));
+        assert_eq!(arena.label_to_activate(input), None);
+        // (…an editing host is the nearest contenteditable that is not false)
+        let host = html(&mut arena, Some(root), "div", &["contenteditable"]);
+        let off = html(&mut arena, Some(host), "p", &["contenteditable"]);
+        arena.get_mut_quietly(off).unwrap().attributes = vec![("contenteditable".into(), "FALSE".into())];
+        let inner = html(&mut arena, Some(host), "em", &[]);
+        assert_eq!(arena.editing_host(inner), Some(host));
+        assert_eq!(arena.editing_host(off), None);
     }
 }
