@@ -137,4 +137,27 @@ RSpec.describe 'WebAuthn bindings' do
     JS
     expect(out).to eq(['SecurityError'])
   end
+
+  # A credential that is not discoverable answers only a request naming it (Chrome's virtual authenticator alike); a
+  # frame that inherits its creator's origin makes credentials for it; and the extension outputs are the platform's own.
+  it 'finds a non-discoverable credential only by its id' do
+    session = simulated_session(app)
+    session.visit '/'
+    session.driver.browser.webauthn.add_virtual_authenticator 'hasResidentKey' => true
+    out = run(session, <<~JS)
+      const rejection = (p) => p.then((c) => c.id, (e) => e.name);
+      const frame = document.body.appendChild(document.createElement('iframe'));
+      const created = await frame.contentWindow.navigator.credentials.create({publicKey: {
+        rp: {name: 'x'}, user: {id: new Uint8Array([1]), name: 'u', displayName: 'U'}, challenge: new Uint8Array([2]),
+        pubKeyCredParams: [{type: 'public-key', alg: -7}], authenticatorSelection: {residentKey: 'discouraged'}, extensions: {credProps: true}
+      }});
+      frame.contentWindow.structuredClone = () => 'hijacked';
+      return [
+        created.getClientExtensionResults(), JSON.parse(new TextDecoder().decode(created.response.clientDataJSON)).origin === location.origin,
+        await rejection(navigator.credentials.get({publicKey: {challenge: new Uint8Array([3])}})),
+        await rejection(navigator.credentials.get({publicKey: {challenge: new Uint8Array([3]), allowCredentials: [{type: 'public-key', id: created.rawId}]}})) === created.id
+      ];
+    JS
+    expect(out).to eq([{'credProps' => {'rk' => false}}, true, 'NotAllowedError', true])
+  end
 end

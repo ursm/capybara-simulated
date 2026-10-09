@@ -255,13 +255,14 @@ module Capybara
       end
 
       # …that a user's accepted credentials are exactly these (§5.1.10.3):
-      # the user's other credentials for that RP ID are removed.
+      # the user's other discoverable credentials for that RP ID — the
+      # ones an authenticator knows the user of — are removed.
       def signal_all_accepted_credentials(rp_id, user_id_b64, credential_ids_b64)
         user_id  = Base64.urlsafe_decode64(user_id_b64.to_s)
         accepted = credential_ids_b64.map {|id| Base64.urlsafe_decode64(id.to_s) }
         @authenticators.each_value do |auth|
           auth[:credentials].delete_if {|raw_id, cred|
-            cred.rp_id == rp_id.to_s && cred.user_handle == user_id && !accepted.include?(raw_id)
+            cred.resident && cred.rp_id == rp_id.to_s && cred.user_handle == user_id && !accepted.include?(raw_id)
           }
         end
       end
@@ -312,16 +313,12 @@ module Capybara
           end
           return nil
         end
-        # Discoverable (resident) first, then any credential bound to
-        # this rpId — Chrome's virtual authenticator falls back the
-        # same way in 2FA-only flows.
-        [true, false].each do |resident_only|
-          @authenticators.each_value do |a|
-            c = a[:credentials].values.find {|x|
-              (!resident_only || x.resident) && rp_match.call(x)
-            }
-            return [a, c] if c
-          end
+        # With no allow list, only a discoverable credential can answer
+        # (§6.3.3) — Chrome's virtual authenticator refuses a
+        # non-resident one there.
+        @authenticators.each_value do |a|
+          c = a[:credentials].values.find {|x| x.resident && rp_match.call(x) }
+          return [a, c] if c
         end
         nil
       end
