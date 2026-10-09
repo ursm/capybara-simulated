@@ -45,15 +45,10 @@ fn trim_ascii_ws(s: &str) -> &str {
     s.trim_matches(is_ascii_ws)
 }
 
-// HTML "rules for parsing non-negative integers", or None.
+// HTML "rules for parsing non-negative integers" — the rules for parsing integers, a negative value none (`-0` is 0) —
+// or None.
 pub(crate) fn parse_non_negative(s: &str) -> Option<u64> {
-    let s = s.trim_start_matches(is_ascii_ws);
-    let s = s.strip_prefix('+').unwrap_or(s);
-    let digits: &str = &s[..s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len())];
-    if digits.is_empty() {
-        return None;
-    }
-    Some(digits.bytes().fold(0u64, |v, d| v.saturating_mul(10).saturating_add(u64::from(d - b'0'))))
+    parse_html_integer(s).and_then(|v| u64::try_from(v).ok())
 }
 
 // An exact decimal (coefficient, digits after the point), for a step check a double cannot resolve.

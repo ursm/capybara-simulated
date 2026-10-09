@@ -94,6 +94,14 @@ const INTERFACES = [
       prerendering: 'no prerendering'
     }
   }],
+  // The element interfaces, each installed on the class dom-class-aliases.js makes of it — its [Reflect…] members the
+  // binding's own, the rest an implementation's.
+  ['html', 'HTMLTableElement', { install: true }],
+  ['html', 'HTMLTableCaptionElement', { install: true }],
+  ['html', 'HTMLTableColElement', { install: true }],
+  ['html', 'HTMLTableSectionElement', { install: true }],
+  ['html', 'HTMLTableRowElement', { install: true }],
+  ['html', 'HTMLTableCellElement', { install: true }],
   ['html', 'HTMLElement', {
     install: true,
     omit: {
@@ -650,7 +658,11 @@ function checkExtAttrs(extAttrs, where, label) {
 // the implementation's. A type no rule here covers (a DOMTokenList, an element reference, an SVGAnimated*) is the
 // implementation's both ways. The getter and setter as `{ get, set }` — expressions of `self` (and `v`, converted) —
 // or null.
-const REFLECT_ENUMS = {};
+// (…an enumerated one the HTML prose makes reflect, limited to only known values, its IDL saying no [Reflect] — the
+// table's entry makes it one)
+const REFLECT_ENUMS = {
+  'HTMLTableCellElement.scope': { keywords: ['row', 'col', 'rowgroup', 'colgroup'] }
+};
 // (…but the members of these the implementation's: ARIAMixin's, which reflect enumerated per the ARIA reflection and
 // which ElementInternals includes as state of its own, no content attribute)
 const REFLECTED_BY_IMPLEMENTATION = new Set(['ARIAMixin']);
@@ -659,7 +671,8 @@ const reflectKeywordTables = [];
 function reflectionOf(iface, m, where) {
   if (REFLECTED_BY_IMPLEMENTATION.has(m.parent?.name)) return null;
   const ext = new Map((m.extAttrs || []).map((e) => [e.name, e]));
-  const named = ext.get('Reflect') ?? ext.get('ReflectURL') ?? ext.get('ReflectSetter');
+  const named = ext.get('Reflect') ?? ext.get('ReflectURL') ?? ext.get('ReflectSetter') ??
+    (REFLECT_ENUMS[`${iface}.${m.name}`] && { name: 'Reflect' });
   if (!named) return null;
   const attr = JSON.stringify(named.rhs ? JSON.parse(named.rhs.value) : m.name.toLowerCase());
   const type = m.idlType.idlType, nullable = m.idlType.nullable;
@@ -1677,6 +1690,7 @@ const htmlParents = [...definitions.values()]
   .sort(([a], [b]) => (a < b ? -1 : 1));
 // …and the event handlers of WindowEventHandlers (its own and its partials' — but those of specs the Window omits):
 // what `<body>` / `<frameset>` reflect to their Window (events.js).
+const htmlElementInstalls = INTERFACES.filter(([, n, o]) => o?.install && /^HTML.+Element$/.test(n)).map(([, n]) => n);
 const windowOptions = INTERFACES.find(([, n]) => n === 'Window')[2];
 const windowHandlers = [mixins.get('WindowEventHandlers'), ...(additions.get('WindowEventHandlers') || [])
   .filter((a) => !Object.hasOwn(windowOptions.omit, a.partial)).map((a) => a.def)]
@@ -1687,6 +1701,11 @@ export const WINDOW_EVENT_HANDLERS = ${JSON.stringify(windowHandlers)};
 // The interface each HTML element interface inherits.
 export const HTML_INTERFACE_PARENTS = {
 ${htmlParents.map(([n, p]) => `  ${n}: '${p}'`).join(',\n')}
+};
+
+// The HTML element interfaces generated, each its install, which dom-class-aliases.js runs on the class it makes of it.
+export const HTML_ELEMENT_INSTALLS = {
+${htmlElementInstalls.map((n) => `  ${n}: install${n}`).join(',\n')}
 };`;
 
 // The dictionaries an implementation converts itself — an `any` argument's, as the type its steps name: a canvas's
