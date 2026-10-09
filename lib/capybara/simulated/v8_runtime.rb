@@ -564,13 +564,14 @@ module Capybara
         nil
       end
 
-      # One native microtask checkpoint — a checkpoint runs the queue until
-      # empty, and rusty already performs one at the end of every top-level
-      # eval/call (V8's default kAuto policy), so a single explicit checkpoint
-      # is all `settle` needs to advance chained `await`/`.then` queues
-      # between ticks.
+      # One microtask checkpoint — a checkpoint runs the queue until empty, so a
+      # single one is all `settle` needs to advance chained `await`/`.then`
+      # queues between ticks. The bridge's (`__csim_yield`), not rusty's native
+      # one: HTML runs steps after the drain (IndexedDB's transaction cleanup),
+      # and a delivery loop that calls this between messages makes each message
+      # a task of its own.
       def drain_microtasks
-        @ctx&.perform_microtask_checkpoint
+        @ctx&.call('__csim_yield')
       end
 
       # Run pending foreground platform tasks (FinalizationRegistry cleanup callbacks) so the native

@@ -14,7 +14,8 @@ module Capybara
 
       def eval_void(src)    = @ctx.eval_void(src.to_s)
       def call(name, *args) = @ctx.call(name.to_s, *args)
-      def drain_microtasks  = @ctx.perform_microtask_checkpoint
+      # (…the bridge's checkpoint, with the steps HTML runs after it: V8Runtime#drain_microtasks)
+      def drain_microtasks  = @ctx.call('__csim_yield')
       # (…its clock advanced `ms` — a poll tick's, or as far as the window's clock went meanwhile: Browser#run_worker)
       def drain_timers(ms = 50) = @ctx.call('__drainTimers', ms.to_i)
       def has_ready_timer?  = !!@ctx.call('__hasReadyTimer')

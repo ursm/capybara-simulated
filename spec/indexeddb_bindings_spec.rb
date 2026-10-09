@@ -9,8 +9,12 @@ require_relative 'support/session_teardown'
 # what an aborted one wrote, and answers each realm's member on its own realm's objects.
 RSpec.describe 'IndexedDB bindings' do
   let(:app) {
-    lambda {|_env|
-      [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><p>idb</p><iframe srcdoc="<p>frame</p>"></iframe>']]
+    lambda {|env|
+      if env['PATH_INFO'] == '/worker.js'
+        [200, {'content-type' => 'text/javascript'}, ['postMessage(1); postMessage(2);']]
+      else
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><p>idb</p><iframe srcdoc="<p>frame</p>"></iframe>']]
+      end
     }
   }
 
@@ -147,6 +151,28 @@ RSpec.describe 'IndexedDB bindings' do
       return err(() => tx.objectStore('s').put(1, 1));
     JS
     expect(out).to eq('TransactionInactiveError')
+  end
+
+  it 'ends a transaction made in one message task before the next' do
+    session = simulated_session(app)
+    session.visit '/'
+    out = probe(session, <<~JS)
+      const db = await open('messages', (db) => db.createObjectStore('s'));
+      let tx;
+      return new Promise((resolve) => {
+        new Worker('/worker.js').onmessage = (e) => {
+          if (e.data === 1) tx = db.transaction('s', 'readwrite');
+          else resolve(err(() => tx.objectStore('s').put(1, 1)));
+        };
+      });
+    JS
+    expect(out).to eq('TransactionInactiveError')
+  end
+
+  it "returns a script's value as the script left it, its microtasks after" do
+    session = simulated_session(app)
+    session.visit '/'
+    expect(session.evaluate_script('(() => { const a = [1]; Promise.resolve().then(() => a.push(2)); return a; })()')).to eq([1])
   end
 
   it 'takes a commit a listener made, and runs a target’s capture listeners first' do
