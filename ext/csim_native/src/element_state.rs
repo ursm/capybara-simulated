@@ -767,26 +767,27 @@ impl RealmArena {
         }
         self.is_editable(id)
     }
-    // Is `id` in an editing host — the nearest element ancestor with a `contenteditable` state says `true` (or
-    // `plaintext-only`), not `false`?
+    // Is `id` in an editing host (`editing_host`)?
     fn is_editable(&self, id: NodeId) -> bool {
+        self.editing_host(id).is_some()
+    }
+    // `id`'s editing host (HTML §6.8.1): itself or its nearest ancestor element whose `contenteditable` is in the true
+    // or plaintext-only state — or none, where the nearest one that says is in the false state, or none says.
+    pub(crate) fn editing_host(&self, id: NodeId) -> Option<NodeId> {
         let mut cur = Some(id);
         while let Some(c) = cur {
-            let Some(n) = self.get(c) else { break };
-            if n.kind != NodeKind::Element {
-                break;
-            }
+            let n = self.get(c).filter(|n| n.kind == NodeKind::Element)?;
             if let Some(v) = n.plain_attr("contenteditable") {
                 if v.is_empty() || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("plaintext-only") {
-                    return true;
+                    return Some(c);
                 }
                 if v.eq_ignore_ascii_case("false") {
-                    return false;
+                    return None;
                 }
             }
             cur = self.parent_of(c);
         }
-        false
+        None
     }
     // `:default`: an option with the `selected` attribute, a checkbox / radio button with `checked`, and its form's
     // default button (none for a submit button with no form owner).

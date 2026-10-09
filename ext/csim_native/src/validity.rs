@@ -513,6 +513,16 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "formOwner", form_owner, context_id);
     crate::dom::register(scope, ns, "defaultButton", default_button, context_id);
     crate::dom::register(scope, ns, "formListed", form_listed, context_id);
+    crate::dom::register(scope, ns, "editingHost", editing_host, context_id);
+}
+
+// __dom.editingHost(nid) -> [the node's editing host] or [] (`element_state::editing_host`), from the node's root.
+fn editing_host(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(node) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let arena = crate::dom::realm(scope, cid);
+    let (root, host) = (arena.root_of(node), arena.editing_host(node));
+    rv.set(crate::dom::nodes_value(scope, cid, root, host.as_slice()));
 }
 
 // __dom.formOwner(nid) -> [the control's form owner] or [] (`element_state::form_owner`), as `nodes_value` answers it
