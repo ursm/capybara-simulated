@@ -327,6 +327,10 @@ fn anim_call(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
                     }
                     Ok(())
                 },
+                "timeline" => {
+                    model.set_timeline(id, arg.is_some_and(|n| n != 0.0));
+                    Ok(())
+                },
                 "finishNotification" => {
                     model.finish_notification(id);
                     Ok(())

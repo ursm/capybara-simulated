@@ -257,6 +257,25 @@ const INTERFACES = [
   ['webcrypto', 'Crypto', { install: true }],
   ['service-workers', 'Cache', { install: true }],
   ['service-workers', 'CacheStorage', { install: true }],
+  ['web-animations', 'AnimationTimeline', {
+    install: true,
+    omitMembers: { play: 'AnimationTimeline.play(): a level-2 shorthand no engine ships (Chrome and Firefox have none)' }
+  }],
+  ['web-animations', 'DocumentTimeline', { install: true }],
+  ['web-animations', 'AnimationEffect', {
+    install: true,
+    omit: {
+      'web-animations-2': 'the timing hierarchy (parent, siblings, before / after / replace / remove): group effects, which ' +
+        'no engine ships'
+    }
+  }],
+  ['web-animations', 'KeyframeEffect', { install: true }],
+  ['web-animations', 'Animation', {
+    install: true,
+    omitMembers: { trigger: 'Animation Triggers are not implemented (an unratified draft only Chrome ships)' }
+  }],
+  ['css-animations-2', 'CSSAnimation', { install: true }],
+  ['css-transitions-2', 'CSSTransition', { install: true }],
   ['html', 'DOMParser', { install: true }],
   ['html', 'XMLSerializer', { install: true }],
   ['intersection-observer', 'IntersectionObserver', { install: true }],

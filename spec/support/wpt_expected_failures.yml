@@ -1629,8 +1629,6 @@ css/css-transitions/disconnected-element-001.html:
 css/css-transitions/dynamic-root-element.html:
 - Transitions don't incorrectly start on dynamic document element insertion
 css/css-transitions/idlharness-2.html:
-- CSSTransition interface object length
-- 'CSSTransition interface: attribute transitionProperty'
 - 'Partial dictionary TransitionEventInit: original dictionary defined'
 - 'Partial interface TransitionEvent: original interface defined'
 css/css-transitions/parsing/transition-timing-function-computed.html:
@@ -7049,32 +7047,9 @@ web-animations/animation-model/keyframe-effects/effect-value-replaced-animations
 - Removed animations do not contribute to animated style
 - Removed animations do not contribute to the effect stack
 web-animations/idlharness.window.js:
-- Animation interface object length
-- 'Animation interface: attribute currentTime'
-- 'Animation interface: attribute effect'
-- 'Animation interface: attribute finished'
-- 'Animation interface: attribute id'
-- 'Animation interface: attribute overallProgress'
-- 'Animation interface: attribute pending'
-- 'Animation interface: attribute playState'
-- 'Animation interface: attribute playbackRate'
-- 'Animation interface: attribute ready'
-- 'Animation interface: attribute replaceState'
-- 'Animation interface: attribute startTime'
-- 'Animation interface: attribute timeline'
 - 'Animation interface: attribute trigger'
-- 'Animation interface: new Animation() must inherit property "overallProgress" with
-  the proper type'
 - 'Animation interface: new Animation() must inherit property "trigger" with the proper
   type'
-- 'Animation interface: operation cancel()'
-- 'Animation interface: operation commitStyles()'
-- 'Animation interface: operation finish()'
-- 'Animation interface: operation pause()'
-- 'Animation interface: operation persist()'
-- 'Animation interface: operation play()'
-- 'Animation interface: operation reverse()'
-- 'Animation interface: operation updatePlaybackRate(double)'
 - 'AnimationEffect interface: attribute nextSibling'
 - 'AnimationEffect interface: attribute parent'
 - 'AnimationEffect interface: attribute previousSibling'
@@ -7084,7 +7059,6 @@ web-animations/idlharness.window.js:
   null) with too few arguments must throw TypeError'
 - 'AnimationEffect interface: calling replace(AnimationEffect...) on new KeyframeEffect(null,
   null) with too few arguments must throw TypeError'
-- 'AnimationEffect interface: existence and properties of interface object'
 - 'AnimationEffect interface: new KeyframeEffect(null, null) must inherit property
   "after(AnimationEffect...)" with the proper type'
 - 'AnimationEffect interface: new KeyframeEffect(null, null) must inherit property
@@ -7101,11 +7075,8 @@ web-animations/idlharness.window.js:
   "replace(AnimationEffect...)" with the proper type'
 - 'AnimationEffect interface: operation after(AnimationEffect...)'
 - 'AnimationEffect interface: operation before(AnimationEffect...)'
-- 'AnimationEffect interface: operation getComputedTiming()'
-- 'AnimationEffect interface: operation getTiming()'
 - 'AnimationEffect interface: operation remove()'
 - 'AnimationEffect interface: operation replace(AnimationEffect...)'
-- 'AnimationEffect interface: operation updateTiming(optional OptionalEffectTiming)'
 - AnimationNodeList interface object length
 - AnimationNodeList interface object name
 - 'AnimationNodeList interface: attribute length'
@@ -7116,17 +7087,12 @@ web-animations/idlharness.window.js:
 - 'AnimationNodeList interface: existence and properties of interface prototype object''s
   @@unscopables property'
 - 'AnimationNodeList interface: operation item(unsigned long)'
-- 'AnimationTimeline interface: attribute currentTime'
-- 'AnimationTimeline interface: attribute duration'
 - 'AnimationTimeline interface: calling play(optional AnimationEffect?) on document.timeline
   with too few arguments must throw TypeError'
 - 'AnimationTimeline interface: document.timeline must inherit property "currentTime"
   with the proper type'
-- 'AnimationTimeline interface: document.timeline must inherit property "duration"
-  with the proper type'
 - 'AnimationTimeline interface: document.timeline must inherit property "play(optional
   AnimationEffect?)" with the proper type'
-- 'AnimationTimeline interface: existence and properties of interface object'
 - 'AnimationTimeline interface: operation play(optional AnimationEffect?)'
 - AnimationTrigger interface object length
 - AnimationTrigger interface object name
@@ -7156,15 +7122,6 @@ web-animations/idlharness.window.js:
 - 'GroupEffect interface: operation append(AnimationEffect...)'
 - 'GroupEffect interface: operation clone()'
 - 'GroupEffect interface: operation prepend(AnimationEffect...)'
-- KeyframeEffect interface object length
-- 'KeyframeEffect interface: attribute composite'
-- 'KeyframeEffect interface: attribute iterationComposite'
-- 'KeyframeEffect interface: attribute pseudoElement'
-- 'KeyframeEffect interface: attribute target'
-- 'KeyframeEffect interface: calling setKeyframes(object?) on new KeyframeEffect(null,
-  null) with too few arguments must throw TypeError'
-- 'KeyframeEffect interface: operation getKeyframes()'
-- 'KeyframeEffect interface: operation setKeyframes(object?)'
 - SequenceEffect interface object length
 - SequenceEffect interface object name
 - 'SequenceEffect interface: existence and properties of interface object'
@@ -7178,14 +7135,10 @@ web-animations/interfaces/Animatable/animate-no-browsing-context.html:
 - Element.animate() creates an animation with the correct timeline when called on
   an element in a document without a browsing context
 - Replacing the timeline of an animation targetting an element in a document without
-  a browsing context and then adopting that element causes it to start updating style
-- Replacing the timeline of an animation targetting an element in a document without
   a browsing context leaves it in the pending state
 - The timeline associated with an animation trigger on an element in a document without
   a browsing context is inactive
 web-animations/interfaces/Animatable/animate.html:
-- Element.animate() correctly sets the Animation's timeline with null timeline in
-  KeyframeAnimationOptions.
 - Element.animate() creates an Animation object in the relevant realm of the target
   element
 - Element.animate() creates an Animation object with a KeyframeEffect that is created
@@ -7211,15 +7164,6 @@ web-animations/interfaces/Animation/onremove.html:
 - "[harness] TIMEOUT"
 - onremove event is fired when replaced animation is removed.
 - onremove events are fired in the correct order
-web-animations/interfaces/Animation/overallProgress.html:
-- overallProgress of a newly created animation without an effect is unresolved
-- overallProgress of an animation is calculated by currentTime / effect endTime.
-- overallProgress of an animation whose currentTime is unresolved is unresolved.
-- overallProgress of an animation whose effect's endTime is infinity is zero.
-- overallProgress of an animation whose effect's endTime is zero is one if its currentTime
-  is non-negative.
-- overallProgress of an animation whose effect's endTime is zero is zero if its currentTime
-  is negative.
 web-animations/interfaces/Animation/persist.html:
 - Allows an animation to be persisted after being removed
 - "[harness] TIMEOUT"
@@ -7227,22 +7171,16 @@ web-animations/interfaces/Animation/startTime.html:
 - startTime is resolved when running
 web-animations/interfaces/Animation/style-change-events.html:
 - All property keys are recognized
+- Animation.commitStyles produces expected style change events
 web-animations/interfaces/DocumentOrShadowRoot/getAnimations.html:
 - Document.getAnimations() returns animations on elements inside same-origin iframes
 - iframe.contentDocument.getAnimations() returns animations on elements inside same-origin
   Document
-web-animations/interfaces/DocumentTimeline/constructor.html:
-- A negative origin time makes the document timeline's current time run ahead of the
-  default document timeline
-- A positive origin time makes the document timeline's current time lag behind the
-  default document timeline
 web-animations/interfaces/KeyframeEffect/getKeyframes.html:
 - getKeyframes() should serialize its css values with a on keyframe sequence which
   requires value serilaization of its values
 web-animations/interfaces/KeyframeEffect/processing-a-keyframes-argument-001.html:
 - Reading from a custom iterator that returns a non-object keyframe should throw
-web-animations/interfaces/KeyframeEffect/style-change-events.html:
-- All property keys are recognized
 web-animations/interfaces/KeyframeEffect/target.html:
 - Change target from a non-existing to a different non-existing pseudo-element by
   setting pseudoElement.
@@ -7281,41 +7219,13 @@ web-animations/responsive/toggle-animated-iframe-visibility.html:
 - "== web-animations/responsive/toggle-animated-iframe-visibility-ref.html"
 web-animations/timing-model/animations/invalidating-animation-before-start-time-synced.html:
 - Animation invalidated before startTime is set doesn't affect startTime
-web-animations/timing-model/animations/play-states.html:
-- reports 'finished' for a finished-pending animation
-- reports 'finished' when playback rate > 0 and current time = target effect end and
-  there is a pending play task
 web-animations/timing-model/animations/reversing-an-animation.html:
 - Reversing when when playbackRate == 0 should preserve the current time and playback
   rate
-web-animations/timing-model/animations/seamlessly-updating-the-playback-rate-of-an-animation.html:
-- Updating the negative playback rate with the unresolved current time and a positive
-  infinite associated effect end should not throw an exception
 web-animations/timing-model/animations/setting-the-current-time-of-an-animation.html:
 - Validate different value types that can be used to set current time
 web-animations/timing-model/animations/setting-the-start-time-of-an-animation.html:
 - Validate different value types that can be used to set start time
-web-animations/timing-model/animations/setting-the-timeline-of-an-animation.html:
-- After clearing and re-setting timeline on a pause-pending animation it completes
-  pausing
-- After clearing and re-setting timeline on an animation in the middle of an aborted
-  pause, it continues playing using the same start time
-- After clearing and re-setting timeline on play-pending animation it begins to play
-- After clearing timeline on a pause-pending animation it is still pending
-- After clearing timeline on finished animation it is running
-- After clearing timeline on idle animation it is still idle
-- After clearing timeline on paused animation it is still paused
-- After clearing timeline on play-pending animation it is still pending
-- After clearing timeline on running animation it is still running
-- After setting timeline on a pause-pending animation it becomes paused after pending
-- After setting timeline on a play-pending animation it begins playing after pending
-- After setting timeline on an idle animation without a start time it is still idle
-- After setting timeline on animation paused outside active interval it is still paused
-- After setting timeline on paused animation it is still paused
-- After transitioning from a null timeline on an animation with a start time it is
-  still running
-- After transitioning from a null timeline on an animation with a sufficiently ancient
-  start time it is finished
 web-animations/timing-model/animations/sync-start-times.html:
 - "== web-animations/timing-model/animations/sync-start-times-ref.html"
 web-animations/timing-model/timelines/sibling-iframe-timeline.html:

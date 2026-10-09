@@ -707,6 +707,18 @@ impl Animations {
         id
     }
 
+    // §4.4.1 "setting the timeline of an animation" — the document timeline or none, the page's handle having told the
+    // timelines apart: its hold time dropped where its start time is resolved, so a finished state is not sticky but
+    // follows its current time on the new timeline.
+    pub(crate) fn set_timeline(&mut self, id: AnimationId, has_timeline: bool) {
+        let Some(a) = self.animations.get_mut(&id) else { return };
+        a.has_timeline = has_timeline;
+        if a.start_time.is_some() {
+            a.hold_time = None;
+        }
+        self.update_finished_state(id, false, false);
+    }
+
     // §4.4.3 (as far as the effect goes): an effect belongs to one animation at a time, so another's loses it.
     pub(crate) fn set_effect(&mut self, id: AnimationId, effect: Option<EffectId>) {
         let Some(old) = self.animations.get(&id).map(|a| a.effect) else { return };
