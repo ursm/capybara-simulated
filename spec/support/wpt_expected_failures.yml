@@ -3393,7 +3393,6 @@ html/dom/idlharness.https.html:
   the proper type'
 - 'HTMLMediaElement interface: operation addTextTrack(TextTrackKind, optional DOMString,
   optional DOMString)'
-- HTMLSelectElement must be primary interface of document.createElement("select")
 - 'HTMLTrackElement interface: attribute track'
 - 'HTMLTrackElement interface: document.createElement("track") must inherit property
   "track" with the proper type'

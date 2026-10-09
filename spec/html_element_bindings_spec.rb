@@ -271,4 +271,47 @@ RSpec.describe 'HTML element bindings' do
     JS
     expect(got).to eq([nil, nil, 'BOGUS', 'POLITE'])
   end
+
+  it 'fires reset before it resets, however a control is named' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const f = document.body.appendChild(document.createElement('form'));
+        f.innerHTML = '<input name=reset value=orig><input type=reset>';
+        const [input, button] = f.querySelectorAll('input');
+        input.value = 'changed';
+        button.click();
+        const afterClick = input.value;
+        input.value = 'changed';
+        let seen;
+        f.addEventListener('reset', (e) => { seen = input.value; e.preventDefault(); });
+        HTMLFormElement.prototype.reset.call(f);
+        return [afterClick, seen, input.value];
+      })()
+    JS
+    expect(got).to eq(['orig', 'changed', 'changed'])
+  end
+
+  it "takes a select's options for its indexed properties, a customized built-in's too" do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        customElements.define('x-sel', class extends HTMLSelectElement {}, { extends: 'select' });
+        const s = document.createElement('select');
+        s.innerHTML = '<option>a</option><option>b</option>';
+        s.appendChild(document.createElementNS('urn:x', 'option'));
+        const t = document.createElement('select', { is: 'x-sel' });
+        t.innerHTML = '<option>c</option>';
+        const observer = new MutationObserver(() => {});
+        observer.observe(s, { childList: true });
+        s.add(s[0], s[0]);
+        return [
+          Object.getPrototypeOf(s) === HTMLSelectElement.prototype, '1' in s, '2' in s, s.length,
+          Array.prototype.map.call(s, (o) => o.text).join(), t[0].text, Object.keys(s).slice(0, 2),
+          observer.takeRecords().length
+        ];
+      })()
+    JS
+    expect(got).to eq([true, true, false, 2, 'a,b', 'c', %w[0 1], 0])
+  end
 end

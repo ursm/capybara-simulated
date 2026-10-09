@@ -321,7 +321,8 @@ impl RealmArena {
         selected.is_empty() || (selected.len() == 1 && Some(selected[0]) == placeholder)
     }
     // The select's list of options: its option descendants in tree order past transparent wrappers, an optgroup's
-    // (not a nested optgroup's), none under an `<hr>`, a `<datalist>` or a nested `<select>`.
+    // (not a nested optgroup's), none under an `<hr>`, a `<datalist>` or a nested `<select>` — HTML elements each, an
+    // element of another namespace named so only a wrapper.
     pub(crate) fn list_of_options(&self, select: NodeId) -> Vec<NodeId> {
         let mut out = Vec::new();
         self.collect_options(select, false, &mut out);
@@ -331,7 +332,7 @@ impl RealmArena {
         let Some(n) = self.get(node) else { return };
         for &c in &n.children {
             let Some(e) = self.get(c).filter(|e| e.kind == NodeKind::Element) else { continue };
-            match &*e.local_name {
+            match if e.is_html() { &*e.local_name } else { "" } {
                 "option" => out.push(c),
                 "hr" | "datalist" | "select" => {}
                 "optgroup" if in_optgroup => {}
