@@ -110,8 +110,8 @@ const DIR_NO_VALUE_INPUT_TYPES: [&str; 12] =
 
 impl NodeData {
     // A submit button (form-helpers.js `isSubmitButton`): an `<input type=submit|image>`, or a `<button>` in the Submit
-    // state — any `type` but `reset` and `button`, and a missing one unless a `command` / `commandfor` makes it a
-    // Command button.
+    // state — its `type` `submit`, or the Auto state (a missing or invalid one) of a button no `command` / `commandfor`
+    // makes a command button.
     pub(crate) fn is_submit_button(&self) -> bool {
         if self.is_html_named("input") {
             return matches!(self.input_type(), "submit" | "image");
@@ -119,10 +119,14 @@ impl NodeData {
         if !self.is_html_named("button") {
             return false;
         }
-        match self.plain_attr("type") {
-            None => self.plain_attr("command").is_none() && self.plain_attr("commandfor").is_none(),
-            Some(t) => !t.eq_ignore_ascii_case("reset") && !t.eq_ignore_ascii_case("button"),
+        let ty = self.plain_attr("type").unwrap_or("");
+        if ty.eq_ignore_ascii_case("submit") {
+            return true;
         }
+        if ty.eq_ignore_ascii_case("reset") || ty.eq_ignore_ascii_case("button") {
+            return false;
+        }
+        self.plain_attr("command").is_none() && self.plain_attr("commandfor").is_none()
     }
     // An `<input>`'s type state: its `type` attribute, ASCII-lowercased, when that names one; else Text.
     pub(crate) fn input_type(&self) -> &'static str {

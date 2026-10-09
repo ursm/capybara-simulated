@@ -233,4 +233,18 @@ RSpec.describe 'HTML element bindings' do
     expect(opened).to eq([true, true])
     expect(got).to eq([false, 'done', true, [['show-modal', 'open'], ['beforetoggle', 'open'], ['close', 'shut'], ['beforetoggle', 'shut']]])
   end
+
+  it 'takes a command button in the Auto state for no submit button, however its type is invalid' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const form = document.body.appendChild(document.createElement('form'));
+        form.innerHTML = '<input><button id=a type=foo commandfor=x>a</button><button id=b type=submit>b</button>' +
+          '<input type=checkbox id=c value="">';
+        const [a, b, c] = ['a', 'b', 'c'].map((id) => document.getElementById(id));
+        return [a.type, a.willValidate, a.matches(':default'), b.matches(':default'), c.value];
+      })()
+    JS
+    expect(got).to eq(['button', false, false, true, ''])
+  end
 end
