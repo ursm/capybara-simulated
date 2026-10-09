@@ -373,6 +373,32 @@ impl RealmArena {
         });
         listed
     }
+    // Whether `el` is one of a form's named elements (HTML §4.10.3 "supported property names"): a listed element but an
+    // image button whose form owner it is, or an HTML img inside it.
+    pub(crate) fn is_form_named_candidate(&self, form: NodeId, el: NodeId) -> bool {
+        let Some(n) = self.get(el).filter(|n| n.kind == NodeKind::Element) else { return false };
+        if n.is_html_named("img") {
+            return el != form && self.is_inclusive_ancestor(form, el) && self.root_of(el) == self.root_of(form);
+        }
+        let image = n.is_html_named("input") && n.input_type() == "image";
+        is_listed(n) && !image && self.form_owner(el) == Some(form)
+    }
+    // …and those of them whose id or name is `name` (exactly, as UTF-16), in tree order.
+    pub(crate) fn form_named(&self, form: NodeId, name: &[u16]) -> Vec<NodeId> {
+        let root = self.form_tree(form);
+        let is = |n: &NodeData, attr: &str| match n.get_attr_u16(attr) {
+            Some(units) => units == name,
+            None => n.plain_attr(attr).is_some_and(|v| v.encode_utf16().eq(name.iter().copied())),
+        };
+        let mut named = Vec::new();
+        self.find_in_tree(root, |c, n| {
+            if c != root && (is(n, "name") || is(n, "id")) && self.is_form_named_candidate(form, c) {
+                named.push(c);
+            }
+            false
+        });
+        named
+    }
     // …and a fieldset's (its `elements`): its listed descendants in tree order, image buttons and nested fieldsets
     // included.
     pub(crate) fn fieldset_listed(&self, fieldset: NodeId) -> Vec<NodeId> {
