@@ -185,4 +185,17 @@ RSpec.describe 'HTML element bindings' do
     JS
     expect(got).to be(false)
   end
+
+  it 'counts an HTML iframe as a child navigable, not an element only named so' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const before = window.length;
+        document.body.append(document.createElementNS('http://www.w3.org/1999/xhtml', 'IFRAME'));
+        document.body.append(document.createElementNS('http://www.w3.org/2000/svg', 'iframe'));
+        return [before, window.length, frames.length];
+      })()
+    JS
+    expect(got).to eq([1, 1, 1])
+  end
 end

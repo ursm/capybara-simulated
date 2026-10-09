@@ -3362,8 +3362,6 @@ html/dom/idlharness.https.html:
 - 'HTMLButtonElement interface: attribute validity'
 - 'HTMLButtonElement interface: attribute value'
 - 'HTMLButtonElement interface: attribute willValidate'
-- 'HTMLButtonElement interface: calling setCustomValidity(DOMString) on document.createElement("button")
-  with too few arguments must throw TypeError'
 - 'HTMLButtonElement interface: document.createElement("button") must inherit property
   "command" with the proper type'
 - 'HTMLButtonElement interface: document.createElement("button") must inherit property
@@ -3453,52 +3451,6 @@ html/dom/idlharness.https.html:
 - 'HTMLInputElement interface: attribute valueAsNumber'
 - 'HTMLInputElement interface: attribute width'
 - 'HTMLInputElement interface: attribute willValidate'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("button")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("checkbox")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("color")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("date")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("datetime-local")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("email")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("file")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("hidden")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("image")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("month")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("number")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("password")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("radio")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("range")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("reset")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("search")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("submit")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("tel")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("text")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("time")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("url")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on createInput("week")
-  with too few arguments must throw TypeError'
-- 'HTMLInputElement interface: calling setCustomValidity(DOMString) on document.createElement("input")
-  with too few arguments must throw TypeError'
 - 'HTMLInputElement interface: calling setSelectionRange(unsigned long, unsigned long,
   optional DOMString) on createInput("button") with too few arguments must throw TypeError'
 - 'HTMLInputElement interface: calling setSelectionRange(unsigned long, unsigned long,
@@ -3768,8 +3720,6 @@ html/dom/idlharness.https.html:
   with too few arguments must throw TypeError'
 - 'HTMLSelectElement interface: calling namedItem(DOMString) on document.createElement("select")
   with too few arguments must throw TypeError'
-- 'HTMLSelectElement interface: calling setCustomValidity(DOMString) on document.createElement("select")
-  with too few arguments must throw TypeError'
 - 'HTMLSelectElement interface: operation add((HTMLOptionElement or HTMLOptGroupElement),
   optional (HTMLElement or long)?)'
 - 'HTMLSelectElement interface: operation checkValidity()'
@@ -3803,8 +3753,6 @@ html/dom/idlharness.https.html:
 - 'HTMLTextAreaElement interface: attribute value'
 - 'HTMLTextAreaElement interface: attribute willValidate'
 - 'HTMLTextAreaElement interface: attribute wrap'
-- 'HTMLTextAreaElement interface: calling setCustomValidity(DOMString) on document.createElement("textarea")
-  with too few arguments must throw TypeError'
 - 'HTMLTextAreaElement interface: calling setSelectionRange(unsigned long, unsigned
   long, optional DOMString) on document.createElement("textarea") with too few arguments
   must throw TypeError'
