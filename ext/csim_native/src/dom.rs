@@ -2776,6 +2776,11 @@ fn own_sheet(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgume
         engine.swap_sheet(&old, &new);
     }
 }
+// The sheet an insertion or a removal is in: the one given — or, for a rule a sheet no longer holds (a grouping rule
+// removed from it, whose own list CSSOM still edits), the one its parent rule was made in.
+fn sheet_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, parent: Option<u32>) -> Option<u32> {
+    handle_arg(scope, args, 0).or_else(|| sheet_of(scope, args, parent?))
+}
 // The id of the sheet the rule `handle` is in.
 fn sheet_of(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, handle: u32) -> Option<u32> {
     with_sheets(scope, args, |store, _| store.rule(handle).map(|r| r.sheet))
@@ -2849,9 +2854,9 @@ fn rule_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 // __dom.ruleInsert(sheetId, parentHandle, css, index) -> [handle, interface, …the URLs an `@import` in it waits for], or
 // the name of the DOMException the insertion is refused with. `parentHandle` -1: the sheet's own list.
 fn rule_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(sheet) = handle_arg(scope, &args, 0) else { return };
-    own_sheet(scope, &args, sheet);
     let parent = handle_arg(scope, &args, 1);
+    let Some(sheet) = sheet_arg(scope, &args, parent) else { return };
+    own_sheet(scope, &args, sheet);
     let css = args.get(2).to_rust_string_lossy(scope);
     let index = args.get(3).uint32_value(scope).unwrap_or(0) as usize;
     match with_sheets(scope, &args, |store, lock| crate::cssom_rule::insert(store, lock, sheet, parent, &css, index)) {
@@ -2865,11 +2870,12 @@ fn rule_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         Err(name) => set_str(scope, &mut rv, name),
     }
 }
-// __dom.ruleDelete(sheetId, parentHandle, index) -> '' or the name of the DOMException the removal is refused with.
+// __dom.ruleDelete(sheetId, parentHandle, index) -> '' or the name of the DOMException the removal is refused with (a
+// sheet id of -1: the parent's, `sheet_arg`).
 fn rule_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(sheet) = handle_arg(scope, &args, 0) else { return };
-    own_sheet(scope, &args, sheet);
     let parent = handle_arg(scope, &args, 1);
+    let Some(sheet) = sheet_arg(scope, &args, parent) else { return };
+    own_sheet(scope, &args, sheet);
     let index = args.get(2).uint32_value(scope).unwrap_or(u32::MAX) as usize;
     let refused = with_sheets(scope, &args, |store, lock| crate::cssom_rule::delete(store, lock, sheet, parent, index).err());
     if refused.is_none() {

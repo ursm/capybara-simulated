@@ -82,7 +82,9 @@ RSpec.describe 'CSSOM bindings' do
       out.push(list.length - before);
       return out;
     JS
-    expect(out).to eq(['print', true, nil, 'NotAllowedError', 2, -1, 'i { color: green; }', 2, 'b', 'screen', 'SyntaxError', 1])
+    # (A constructed sheet's location is its document's base URL, CSSOM's "create a constructed CSSStyleSheet" says;
+    # Chrome and Firefox — measured — answer null.)
+    expect(out).to eq(['print', true, 'http://www.example.com/', 'NotAllowedError', 2, -1, 'i { color: green; }', 2, 'b', 'screen', 'SyntaxError', 1])
   end
 
   # A declaration block is the interface of its kind: an element's, a style rule's and a computed style a
@@ -110,5 +112,45 @@ RSpec.describe 'CSSOM bindings' do
       '[object CSSPageDescriptors]', '[object CSSFontFaceDescriptors]',
       'left', '1in', '1in', false, nil, 'x', true, true, true, 'TypeError'
     ])
+  end
+
+  # A member of this realm's binding acts on another realm's rule and sheet as that realm's own (an iframe's rules are
+  # its own store's); `replace` makes a sheet of the text a task later, refusing modification until then; a grouping
+  # rule a sheet no longer holds still edits its own list, and lets go of its rules; an `@import`'s media list is its
+  # sheet's, the same object; and an empty initial value is one.
+  it 'acts on each object in its own realm' do
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [<<~HTML]] })
+      <!doctype html><meta charset="utf-8">
+      <style id="s">@import url(data:text/css,p{}) print; a { color: red } b { color: red } @media all { i { color: red } }</style>
+      <iframe id="f" srcdoc="<style>q { color: blue } u { color: blue } v { & a {} color: blue; }</style>"></iframe>
+    HTML
+    session.visit '/'
+    out = run(session, <<~JS)
+      const err = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
+      await new Promise((resolve) => (f.contentDocument.readyState === 'complete' ? resolve() : f.onload = resolve));
+      const frameSheet = f.contentDocument.styleSheets[0], frameRule = frameSheet.cssRules[0];
+      const selectorText = Object.getOwnPropertyDescriptor(CSSStyleRule.prototype, 'selectorText');
+      const out = [selectorText.get.call(frameRule)];
+      selectorText.set.call(frameRule, 'em');
+      CSSStyleSheet.prototype.insertRule.call(frameSheet, 'ins { color: green }', 1);
+      const nested = frameSheet.cssRules[3].cssRules[1];
+      out.push(frameSheet.cssRules[0].selectorText, frameSheet.cssRules[1].selectorText, s.sheet.cssRules[1].selectorText,
+        frameSheet.cssRules[1] instanceof f.contentWindow.CSSStyleRule,
+        Object.getOwnPropertyDescriptor(CSSNestedDeclarations.prototype, 'style').get.call(nested).cssText);
+      const sheet = new CSSStyleSheet(), pending = sheet.replace('x { color: red }');
+      out.push(err(() => sheet.insertRule('y {}')), sheet.cssRules.length);
+      await pending;
+      out.push(sheet.cssRules.length, err(() => sheet.insertRule('y {}')));
+      const media = s.sheet.cssRules[3], child = media.cssRules[0];
+      s.sheet.deleteRule(3);
+      media.insertRule('z { color: red }', 0);
+      out.push(media.cssRules.length, child.parentStyleSheet);
+      const imported = s.sheet.cssRules[0];
+      out.push(imported.media === imported.styleSheet.media, imported.styleSheet.media.mediaText);
+      sheet.replaceSync('@property --x { syntax: "*"; inherits: false; initial-value: ; }');
+      out.push(sheet.cssRules[0].initialValue);
+      return out;
+    JS
+    expect(out).to eq(['q', 'em', 'ins', 'a', true, 'color: blue;', 'NotAllowedError', 0, 1, 'none', 2, nil, true, 'print', ''])
   end
 end

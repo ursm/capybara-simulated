@@ -178,7 +178,8 @@ pub(crate) fn get(store: &SheetStore, lock: &SharedRwLock, handle: u32, what: &s
         (Rule::Css(CssRule::Property(p)), "name") => format!("--{}", p.name.0),
         (Rule::Css(CssRule::Property(p)), "syntax") => p.descriptors.syntax.as_ref().map_or_else(String::new, |s| css(s)),
         (Rule::Css(CssRule::Property(p)), "inherits") => p.descriptors.inherits.as_ref().map_or_else(String::new, |i| css(i)),
-        (Rule::Css(CssRule::Property(p)), "initial") => p.descriptors.initial_value.as_ref().map_or_else(String::new, |v| css(&**v)),
+        // (…none where it declares none, and an empty one where it declares that)
+        (Rule::Css(CssRule::Property(p)), "initial") => css(&**p.descriptors.initial_value.as_ref()?),
         (Rule::Css(CssRule::CounterStyle(c)), "name") => css(c.read_with(&guard).name()),
         (Rule::Css(CssRule::PositionTry(p)), "name") => css(&p.read_with(&guard).name),
         (Rule::Css(CssRule::FontPaletteValues(p)), "name") => css(&p.name),

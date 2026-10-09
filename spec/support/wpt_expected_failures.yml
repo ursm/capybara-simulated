@@ -1702,8 +1702,6 @@ css/cssom/computed-style-004.html:
   of outer iframe.
 css/cssom/css-style-attr-decl-block.html:
 - Changes to CSS declaration block after a base URL change
-css/cssom/cssimportrule-parent.html:
-- "@import stylesheet is properly unlinked from parent after removal"
 css/cssom/cssom-getPropertyValue-common-checks.html:
 - All shorthands can serialize their longhands set to 'initial'
 css/cssom/cssstyledeclaration-registered-custom-properties.html:

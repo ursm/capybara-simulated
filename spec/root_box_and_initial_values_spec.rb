@@ -823,7 +823,7 @@ RSpec.describe 'root box + computed initial values' do
     JS
     # A name a browser doesn't support never becomes a declaration. Capturing every declaration made
     # the stylesheet path able to reach names the inline path was already gated against.
-    expect(got).to eq(['CSSStyleDeclaration', ''])
+    expect(got).to eq(['CSSStyleProperties', ''])
   end
 
   it 'computes a declared line width, not just an absent one' do
