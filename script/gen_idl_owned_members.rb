@@ -92,7 +92,7 @@ KEEP_SHARED = %w[rel relList].to_set
 # with a MODELLED interface (img.src + HTMLPortalElement.src) should still relocate
 # to the modelled owner — keeping it shared would needlessly leak it onto every
 # element. (Curated rather than "all uncovered"; the gate would flag a miss.)
-OBSOLETE_KEEP = %w[HTMLAppletElement].select { |i| SURFACE[i] }
+OBSOLETE_KEEP = %w[HTMLAppletElement].select {|i| SURFACE[i] }
 uncovered_owned = OBSOLETE_KEEP.each_with_object(Set.new) do |iface, acc|
   Array(SURFACE[iface]['members']).each { |m| acc << m }
 end

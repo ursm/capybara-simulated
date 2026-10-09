@@ -5739,30 +5739,9 @@ html/semantics/interactive-elements/the-details-element/auto-expand-details-elem
 - auto-expand-details-element-fragment
 html/semantics/interactive-elements/the-details-element/details-add-summary.html:
 - "== html/semantics/interactive-elements/the-details-element/details-add-summary-ref.html"
-html/semantics/interactive-elements/the-details-element/details-name-exclusivity-fragment-insertion.html:
-- Test that inserting two open details elements with the same name via DocumentFragment
-  results in exactly one being open.
 html/semantics/interactive-elements/the-details-element/details-toggle-source.html:
 - "[harness] ERROR"
 - "[harness] no subtests"
-html/semantics/interactive-elements/the-details-element/name-attribute.html:
-- "[harness] TIMEOUT"
-- basic handling of mutually exclusive details
-- basic handling of mutually exclusive details when the element isn't connected
-- closing as a result of parsing doesn't depend on attribute order
-- exclusivity enforcement with attachment scenario connected
-- exclusivity enforcement with attachment scenario connected-in-implementation-create-document
-- exclusivity enforcement with attachment scenario connected-in-template
-- exclusivity enforcement with attachment scenario connected-in-xhr-response
-- exclusivity enforcement with attachment scenario disconnected
-- exclusivity enforcement with attachment scenario shadow
-- exclusivity enforcement with attachment scenario shadow-in-disconnected
-- exclusivity enforcement with attachment scenario template-in-disconnected
-- handling of insertion of elements into group
-- handling of name attribute changes
-- more complex handling of mutually exclusive details
-- mutation event and toggle event order
-- mutually exclusive details across multiple names and multiple tree scopes
 html/semantics/interactive-elements/the-dialog-element/backdrop-descendant-selector.html:
 - "== html/semantics/interactive-elements/the-dialog-element/backdrop-descendant-selector-ref.html"
 html/semantics/interactive-elements/the-dialog-element/backdrop-dynamic-display-none.html:

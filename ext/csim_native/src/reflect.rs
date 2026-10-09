@@ -40,7 +40,7 @@ fn reflected(value: Option<&str>, kind: u32, default: f64, min: f64, max: f64) -
 
 // HTML "rules for parsing floating-point number values": past leading ASCII whitespace, a sign, digits with a
 // fraction, an exponent — as much of them as there is — or None; a zero is +0, and a value too large for a double none.
-pub(crate) fn parse_float_value(s: &str) -> Option<f64> {
+fn parse_float_value(s: &str) -> Option<f64> {
     let b = s.trim_start_matches(|c: char| matches!(c, '\t' | '\n' | '\x0C' | '\r' | ' ')).as_bytes();
     let mut i = 0;
     let mut sign = 1.0;
