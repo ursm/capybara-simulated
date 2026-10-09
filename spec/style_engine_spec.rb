@@ -544,7 +544,7 @@ RSpec.describe 'style engine invalidation' do
   it 'styles a list box by its parsed display size' do
     s = visit(%w[1 \ 1\  0 x 2 +3].map {|v| %(<select size="#{v}"></select>) }.join + '<select multiple></select><select multiple size="1"></select><select id="late"></select>')
     read = s.evaluate_script('[...document.querySelectorAll("select")].map((e) => getComputedStyle(e).overflowY).join(" ")')
-    expect(read).to eq('clip clip clip clip scroll scroll scroll clip clip')
+    expect(read).to eq('clip clip clip clip scroll scroll scroll scroll clip')
     expect(s.evaluate_script('(() => { document.getElementById("late").size = 4; return getComputedStyle(document.getElementById("late")).overflowY })()')).to eq('scroll')
   end
 

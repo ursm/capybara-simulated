@@ -319,5 +319,13 @@ RSpec.describe 'HTML element bindings' do
       })()
     JS
     expect(got).to eq([true, true, false, 2, 'a,b', 'c', %w[0 1], 0])
+    multiple = session.evaluate_script(<<~JS)
+      (() => {
+        const m = document.body.appendChild(document.createElement('select'));
+        m.outerHTML = '<select id=m required multiple size=1><option value="" selected>p</option><option>b</option></select>';
+        return document.getElementById('m').validity.valueMissing;
+      })()
+    JS
+    expect(multiple).to be(false)
   end
 end

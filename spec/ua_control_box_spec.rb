@@ -262,11 +262,10 @@ RSpec.describe 'UA stylesheet: the form-control box' do
                   '<select id="one" multiple size="1"><option>one</option></select>')
     expect(size(s, 's4')[1]).to eq(70)   # Chrome: 70 (4 rows of 17, plus the 1px border)
     expect(size(s, 'm')[1]).to  eq(70)   # a bare `multiple` shows 4 rows
-    # HTML's display size, not the presence of `multiple`: an explicit `size="1"` is one row, and
-    # Chrome draws it as a dropdown — grey face and all. (Its WIDTH there is a Chrome oddity we
-    # don't reproduce: 83 for a short option, where the same select without `multiple` is 45.)
+    # An explicit `size="1"` is one row — but with `multiple` still a list box (HTML rendering §15.5.15: "multiple
+    # attribute present, or … display size greater than 1"), white as Firefox draws it; Chrome draws a drop-down there.
     expect(size(s, 'one')[1]).to eq(19)
-    expect(style(s, 'one', 'backgroundColor')).to eq(['rgb(239, 239, 239)'])
+    expect(style(s, 'one', 'backgroundColor')).to eq(['rgb(255, 255, 255)'])
   end
 
   it 'does not render a hidden input at all' do

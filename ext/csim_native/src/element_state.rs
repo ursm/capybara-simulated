@@ -352,11 +352,12 @@ impl RealmArena {
     pub(crate) fn is_filtered(&self, id: NodeId) -> bool {
         self.has_state(id, STATE_FILTERED)
     }
-    // A `<select>` shown as a LIST BOX rather than a drop-down (HTML rendering §15.5.15): `multiple`, or a display size
-    // above 1 — its `size` PARSED as a non-negative integer, so ` 1 ` and junk are drop-downs as they are to
-    // `selectDisplaySize`. What the UA sheet's `:-servo-list-box` asks, and the walk's.
+    // A `<select>` shown as a LIST BOX rather than a drop-down box (HTML rendering §15.5.15): `multiple`, or a display
+    // size above 1 — its `size` PARSED as a non-negative integer, so ` 1 ` and junk are drop-downs. What the UA sheet's
+    // `:-servo-list-box` asks, the walk's, the selectedness algorithm's and valueMissing's placeholder label option.
     pub(crate) fn is_list_box(&self, id: NodeId) -> bool {
-        self.get(id).is_some_and(|n| n.is_html_named("select")) && self.select_display_size(id) > 1
+        let Some(n) = self.get(id).filter(|n| n.is_html_named("select")) else { return false };
+        n.get_attr("multiple").is_some() || self.select_display_size(id) > 1
     }
     // …a `<select>`'s DISPLAY SIZE: its `size` where that parses above 0, else 4 for a `multiple`
     // one and 1 for a drop-down.
