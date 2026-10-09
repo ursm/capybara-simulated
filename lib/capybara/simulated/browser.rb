@@ -10742,6 +10742,8 @@ module Capybara
       # Cache Storage backing — origin-partitioned dumb store; the JS side owns the spec
       # matching (cache-storage.js). `@cache_storage` is
       #   origin => {seq:, names: {name => cache_id}, caches: {cache_id => {seq:, entries:}}}
+      # A name is the JSON string of the cache's DOMString name (cache-storage.js `storedName`), which keeps a lone
+      # surrogate as an escape; the JS side parses what `cache_storage_keys` returns.
       # The name→id indirection models the spec's "dooms, but does not delete immediately":
       # `caches.delete(name)` unmaps the name, but a Cache handle already bound to the id
       # keeps operating on its own storage (a fresh `open(name)` gets a new id / empty cache).
