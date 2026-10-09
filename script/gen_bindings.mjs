@@ -167,6 +167,8 @@ const INTERFACES = [
     omit: { ...NO_WINDOW_HANDLERS, compat: 'onorientationchange: a mobile-only legacy, which a desktop browser has not' }
   }],
   ['html', 'HTMLFrameSetElement', { install: true, omit: NO_WINDOW_HANDLERS }],
+  ['html', 'HTMLOutputElement', { install: true }],
+  ['html', 'HTMLFieldSetElement', { install: true }],
   ['html', 'HTMLCanvasElement', {
     install: true,
     omit: { 'mediacapture-fromelement': 'captureStream: media capture from a canvas is not implemented' },
