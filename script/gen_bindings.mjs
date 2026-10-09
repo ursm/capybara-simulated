@@ -132,6 +132,7 @@ const INTERFACES = [
   ['html', 'HTMLEmbedElement', { install: true }],
   ['html', 'HTMLFrameElement', { install: true }],
   ['html', 'HTMLMarqueeElement', { install: true }],
+  ['html', 'HTMLDialogElement', { install: true }],
   ['html', 'HTMLMeterElement', { install: true }],
   ['html', 'HTMLProgressElement', { install: true }],
   ['html', 'HTMLTemplateElement', { install: true }],
@@ -689,8 +690,6 @@ function checkExtAttrs(extAttrs, where, label) {
   }
 }
 
-// What a conversion's TypeError says, by where the value comes from (Chrome's messages): an operation's argument
-// (`index`, from 0), or an attribute's value.
 // [Reflect…] (HTML §2.6.1): an attribute that reflects a content attribute — named by its value, else its own name
 // lowercased — whose getter and setter steps the generated binding takes itself, from reflect.js: a DOMString's (or a
 // USVString's), a [ReflectURL] one's, an enumerated one's (its keywords and defaults REFLECT_ENUMS's, the HTML prose
@@ -783,6 +782,8 @@ function typeName(t) {
     : t.idlType;
   return t.nullable ? `${name}?` : name;
 }
+// What a conversion's TypeError says, by where the value comes from (Chrome's messages): an operation's argument
+// (`index`, from 0), or an attribute's value.
 function conversionError(where, what) {
   return failure(where, where.index === undefined
     ? `Failed to convert value to '${what}'.`

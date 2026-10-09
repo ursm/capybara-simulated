@@ -12,13 +12,13 @@
 //
 // Scope + limits — and these are the SHIM's, not the driver's:
 //   - Pointer/touch/wheel/key GESTURES that only need event DISPATCH work.
-//   - Coordinate origins are DISCARDED: a "viewport"-origin action targets the
-//     element that actually carries a listener for the event type, falling back
-//     to the scrolling element (a bubbling event then reaches document/window
-//     listeners). This shim predates the layout engine and was written when the
-//     comment here could say "there is NO layout engine"; `elementFromPoint` has
-//     answered from real boxes since v0.8.0, so aiming these actions at the point
-//     they name is unfinished wiring — the backlog, not a limit.
+//   - A pointer move aims at the point it names (`elementFromPoint`, from the
+//     layout's real boxes): a viewport origin's point, the pointer's own moved, or
+//     an element origin's centre plus the offset (that element the target). A
+//     WHEEL action still discards its coordinates: it targets the element that
+//     carries a listener for the event type, falling back to the scrolling
+//     element (a bubbling event then reaches document/window listeners) — the
+//     backlog, not a limit.
 //   - Likewise an action that needs a real scroll-position change: the geometry
 //     to move is there, `case 'scroll'` just fires a `wheel` event without
 //     moving any offset. The subtests that need it are IN-SCOPE failures now
@@ -352,13 +352,14 @@
     dispatch(t, new W.WheelEvent('mousewheel', Object.assign({ cancelable: chainHasNonPassive(t, 'mousewheel') }, init)));
   }
 
-  function firePointer(target, pType, mType) {
+  function firePointer(target, pType, mType, x, y) {
     if (!target) return;
+    var at = { clientX: x || 0, clientY: y || 0 };
     if (pType && W.PointerEvent) {
-      dispatch(target, new W.PointerEvent(pType, { bubbles: true, cancelable: true, composed: true, pointerType: 'mouse', isPrimary: true }));
+      dispatch(target, new W.PointerEvent(pType, Object.assign({ bubbles: true, cancelable: true, composed: true, pointerType: 'mouse', isPrimary: true }, at)));
     }
     if (mType) {
-      var ev = new W.MouseEvent(mType, { bubbles: true, cancelable: true, composed: true });
+      var ev = new W.MouseEvent(mType, Object.assign({ bubbles: true, cancelable: true, composed: true }, at));
       dispatch(target, ev);
       // HTML mousedown default action: move focus to the clicked element, or — if
       // it isn't a focus target — reset focus to the body. The Capybara click path
@@ -391,11 +392,21 @@
     switch (a.kind) {
       case 'pointerMove':
         p = state[a.pointer];
-        if (a.origin && typeof a.origin === 'object' && a.origin.nodeType) p.target = a.origin;
-        p.x = a.x; p.y = a.y;
+        if (a.origin && typeof a.origin === 'object' && a.origin.nodeType) {
+          // (…an element origin: the offset from its centre — the element itself the target)
+          var box = a.origin.getBoundingClientRect();
+          p.target = a.origin;
+          p.x = box.left + box.width / 2 + (a.x || 0); p.y = box.top + box.height / 2 + (a.y || 0);
+        } else {
+          // (…a viewport origin — or the pointer's own — the point named, and what is there the target)
+          if (a.origin === 'pointer') { p.x = (p.x || 0) + (a.x || 0); p.y = (p.y || 0) + (a.y || 0); }
+          else { p.x = a.x || 0; p.y = a.y || 0; }
+          var hit = D() && D().elementFromPoint(p.x, p.y);
+          p.target = hit || scroller();
+        }
         if (p.down) {                                   // implicit pointer capture
           if (p.type === 'touch') fireTouch(p.target, 'touchmove');
-          else firePointer(p.target, 'pointermove', 'mousemove');
+          else firePointer(p.target, 'pointermove', 'mousemove', p.x, p.y);
         }
         break;
       case 'pointerDown':
@@ -404,14 +415,14 @@
         if (!p.target) p.target = scroller();
         p.downTarget = p.target;
         if (p.type === 'touch') fireTouch(p.target, 'touchstart');
-        else firePointer(p.target, 'pointerdown', 'mousedown');
+        else firePointer(p.target, 'pointerdown', 'mousedown', p.x, p.y);
         break;
       case 'pointerUp':
         p = state[a.pointer];
         if (!p.target) p.target = scroller();
         if (p.type === 'touch') fireTouch(p.target, 'touchend');
         else {
-          firePointer(p.target, 'pointerup', 'mouseup');
+          firePointer(p.target, 'pointerup', 'mouseup', p.x, p.y);
           // `click` fires only when up lands on the same target the pointer went
           // down on (no drag away) — matches real browsers.
           if (p.target === p.downTarget) {
@@ -489,6 +500,8 @@
     this._current = null;                    // current pointer source name
     this.context = null;
   }
+  // (…the pointer buttons by name, as upstream's builder names them: `{button: actions.ButtonType.LEFT}`)
+  Actions.prototype.ButtonType = { LEFT: 0, MIDDLE: 1, RIGHT: 2, BACK: 3, FORWARD: 4 };
   Actions.prototype._cur = function () {
     if (!this._current) { this._current = 'auto-mouse'; this._pointers['auto-mouse'] = 'mouse'; }
     return this._current;

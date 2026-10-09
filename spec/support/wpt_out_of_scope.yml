@@ -42737,11 +42737,7 @@ html/semantics/forms/the-select-element/show-picker-being-rendered.html:
   reason: showPicker() gating on render state (being-rendered / content-visibility:hidden)
     — needs visibility/render state we do not model.
 html/semantics/interactive-elements/the-details-element/details-toggle-source-commandfor.tentative.html:
-- name: "[harness] ERROR"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: "[harness] no subtests"
+- name: 'ToggleEvent.source on <details> elements: command invokers.'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -42753,12 +42749,6 @@ html/semantics/interactive-elements/the-dialog-element/dialog-close-via-attribut
     path/suffix. CLAUDE.md rule 1.
 - name: Removing the open attribute from an open non-modal dialog should fire a close
     event.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-html/semantics/interactive-elements/the-dialog-element/dialog-requestclose-closedby.tentative.html:
-- name: requestClose() should close the dialog even when computed closedby becomes
-    none
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54568,19 +54558,19 @@ selection/contenteditable/modify.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 selection/contenteditable/modifying-selection-with-non-primary-mouse-button.tentative.html:
-- name: Shift + middle click in a link shouldn't extend the selection
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Shift + middle click should extend the selection
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Shift + secondary click in a link shouldn't extend the selection
+- name: Shift + secondary click should extend the selection
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Shift + secondary click should extend the selection
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54590,16 +54580,6 @@ selection/contenteditable/modifying-selection-with-non-primary-mouse-button.tent
     path/suffix. CLAUDE.md rule 1.
 - name: middle click should set focus to clicked editable element and collapse selection
     around the clicked point
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: middle click shouldn't move caret in an editable element if the default of
-    mousedown event is prevented
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: middle click shouldn't move caret in an editable element if the default of
-    pointerdown event is prevented
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54614,16 +54594,6 @@ selection/contenteditable/modifying-selection-with-non-primary-mouse-button.tent
     path/suffix. CLAUDE.md rule 1.
 - name: secondary click should set focus to clicked editable element and collapse
     selection around the clicked point
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: secondary click shouldn't move caret in an editable element if the default
-    of mousedown event is prevented
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: secondary click shouldn't move caret in an editable element if the default
-    of pointerdown event is prevented
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54642,26 +54612,16 @@ selection/contenteditable/modifying-selection-with-primary-mouse-button.tentativ
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Primary click shouldn't move caret in an editable element if the default of
-    mousedown event is prevented
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Primary click shouldn't move caret in an editable element if the default of
-    pointerdown event is prevented
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Primary mouse button down should move caret, and primary mouse button up should
     extend the selection
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Shift + Primary click in a link shouldn't extend the selection
+- name: Shift + Primary click should extend the selection
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Shift + Primary click should extend the selection
+- name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

@@ -268,6 +268,13 @@ const SUPPORT_TREES = [
 // the vendored common/dispatcher framework; neither tree is in TREES.
 const SUPPORT_FILES = [
   'html/resources/common.js',
+  // html/semantics/interactive-elements' dialog and details tests drive light dismiss, close requests and toggle
+  // sources through these helpers (clickOn / sendEscKey / sendCloseRequest / the toggle-source harness, the focus
+  // utilities) by path into trees we don't vendor; each is plain testdriver code.
+  'html/semantics/popovers/resources/popover-utils.js',
+  'html/semantics/popovers/resources/toggle-event-source-test.js',
+  'close-watcher/resources/helpers.js',
+  'html/interaction/focus/the-autofocus-attribute/resources/utils.js',
   'pointerevents/pointerevent_support.js',
   'html/cross-origin-embedder-policy/credentialless/resources/common.js',
   'html/anonymous-iframe/resources/common.js',
