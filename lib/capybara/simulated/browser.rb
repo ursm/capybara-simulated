@@ -463,7 +463,7 @@ module Capybara
         # or a newer server response).
         @sw_scope_meta    = {}
         # Navigation Preload state, per active-worker HANDLE (the registration's active worker — the
-        # client's `registration.active._handle` and the worker's own `__csimWorkerHandle` are the
+        # client's registration's active worker's handle and the worker's own `__csimWorkerHandle` are the
         # same id, so both isolates key here identically). {enabled:, header:}; absent → the spec
         # default {false, 'true'}. Read at navigation time to decide whether to issue the parallel
         # preload request (see service_worker_navigation_fetch), and by the NavigationPreloadManager.
@@ -4625,11 +4625,11 @@ module Capybara
             # reads it ('none' bypasses the HTTP cache).
             sw_uvc: service ? sw_scope_update_via_cache(sw_scope) : nil,
             sw_imports_map: pending_imports,
-            # The registration's CURRENT active version at spawn time — the new worker's
-            # `self.registration.active` snapshot during its own install phase
-            # (registration-attribute's newer worker). Resolved here, on the
-            # registry-owning thread.
-            sw_prev_active: service && (ah = @sw_registrations[sw_scope.to_s]) ? @workers[ah]&.dig(:script_url) : nil
+            # The registration's CURRENT active version at spawn time — its script URL and handle, the new
+            # worker's `self.registration.active` snapshot during its own install phase (registration-attribute's
+            # newer worker) and what its navigation preload is keyed by. Resolved here, on the registry-owning
+            # thread.
+            sw_prev_active: service && (ah = @sw_registrations[sw_scope.to_s]) && @workers[ah] ? {url: @workers[ah][:script_url], handle: ah} : nil
           )
         end
         # A nested spawn runs THIS method on a worker thread, so other threads can observe
@@ -5261,7 +5261,7 @@ module Capybara
       # The registration's committed script type at an EXACT scope — a realm
       # synthesizing a registration object for a scope another realm registered
       # (cross-realm register / a directly-wired controller) mirrors it into
-      # reg._workerType so a later update()/re-register from that realm runs the
+      # WorkerType so a later update()/re-register from that realm runs the
       # right parse check and respawns under the right type.
       def sw_scope_worker_type(scope)
         h = @sw_registrations[scope.to_s].to_i
@@ -8414,7 +8414,7 @@ module Capybara
           rt.eval_void("globalThis.__csimSwImportMap = #{JSON.generate(sw_imports_map)};") if sw_imports_map
           # The registration's active version at spawn — `self.registration.active`
           # while THIS version installs (registration-attribute's newer worker).
-          rt.eval_void("globalThis.__csimSwPrevActiveUrl = #{JSON.generate(sw_prev_active)};") if sw_prev_active
+          rt.eval_void("globalThis.__csimSwPrevActive = #{JSON.generate(sw_prev_active)};") if sw_prev_active
           rt.eval_void('__csim_installServiceWorkerScope();')
         end
         # Seed the client mirror BEFORE the script evaluates: `clients.matchAll()` at top level is a

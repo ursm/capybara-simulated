@@ -8,7 +8,9 @@ require_relative 'support/poll_until'
 
 # ServiceWorker, ServiceWorkerRegistration, ServiceWorkerContainer and NavigationPreloadManager, generated from their
 # IDL: made by the platform alone, their state in slots — the client's objects and the service worker's own view of
-# itself and its registration alike, which are the same interfaces' objects.
+# itself and its registration alike, which are the same interfaces' objects. A service worker posting to itself gets
+# the message, from its own ServiceWorker; a registration with no active worker yet has no navigation preload to enable
+# (an InvalidStateError, Service Workers §3.5), and a header value has no leading or trailing whitespace (Fetch).
 RSpec.describe 'Service Worker bindings' do
   let(:app) {
     Rack::Builder.new {
@@ -17,7 +19,16 @@ RSpec.describe 'Service Worker bindings' do
         when '/' then [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>']]
         when '/sw.js'
           [200, {'content-type' => 'text/javascript'}, [<<~JS]]
-            self.onmessage = (e) => e.source.postMessage({
+            // A message to itself, during startup; and the navigation preload of a registration with no active worker yet.
+            let fromSelf = null;
+            let preloadWhileInstalling = null;
+            self.addEventListener('message', (e) => { if (e.data === 'self') fromSelf = e.source === self.serviceWorker; });
+            self.serviceWorker.postMessage('self');
+            self.addEventListener('install', (e) => {
+              e.waitUntil(self.registration.navigationPreload.enable().then(() => 'ok', (err) => err.name).then((r) => { preloadWhileInstalling = r; }));
+            });
+            self.onmessage = (e) => e.data !== 'self' && e.source.postMessage({
+              fromSelf, preloadWhileInstalling,
               registration: [self.registration instanceof ServiceWorkerRegistration, Object.prototype.toString.call(self.registration),
                              Object.keys(self.registration), self.registration.updateViaCache, self.registration.scope],
               worker: [self.serviceWorker instanceof ServiceWorker, self.serviceWorker.state, self.registration.active === self.serviceWorker],
@@ -61,7 +72,8 @@ RSpec.describe 'Service Worker bindings' do
         globalThis.__out = {
           surface,
           client: [reg instanceof ServiceWorkerRegistration, Object.keys(reg), reg.navigationPreload === reg.navigationPreload,
-                   Object.isFrozen(regs), await rej(reg.navigationPreload.setHeaderValue('\\u0100')), buffer.byteLength],
+                   Object.isFrozen(regs), await rej(reg.navigationPreload.setHeaderValue('\\u0100')),
+                   await rej(reg.navigationPreload.setHeaderValue(' x')), buffer.byteLength],
           worker: await reply
         };
       })().catch((e) => { globalThis.__out = String(e); });
@@ -71,8 +83,10 @@ RSpec.describe 'Service Worker bindings' do
     scope = "#{session.evaluate_script('location.origin')}/"
     expect(got).to eq(
       'surface' => ['TypeError', 'TypeError', 'TypeError', 'TypeError', true, 'TypeError'],
-      'client' => [true, [], true, true, 'TypeError', 0],
+      'client' => [true, [], true, true, 'TypeError', 'TypeError', 0],
       'worker' => {
+        'fromSelf' => true,
+        'preloadWhileInstalling' => 'InvalidStateError',
         'registration' => [true, '[object ServiceWorkerRegistration]', [], 'imports', scope],
         'worker' => [true, 'activated', true],
         'preload' => true

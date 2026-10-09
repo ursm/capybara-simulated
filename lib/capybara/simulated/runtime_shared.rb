@@ -214,19 +214,19 @@ module Capybara
         # registration reflecting the shared active worker instead of installing a duplicate.
         '__csim_swActiveHandleForScope' => ->(b, *a) { b.sw_active_handle_for_scope(a[0]) },
         # The committed script type at that scope — the synthesized registration's
-        # reg._workerType (module SWs observed from a second realm).
+        # WorkerType (module SWs observed from a second realm).
         '__csim_swScopeWorkerType'      => ->(b, *a) { b.sw_scope_worker_type(a[0]) },
         # Whether a worker has reached 'activated' — false while its registration still activates it — for a realm
         # minting a worker it never saw the lifecycle of (a frame a still-activating worker controls).
         '__csim_swWorkerActivated'      => ->(b, *a) { b.sw_worker_activated?(a[0]) },
         # HTML "try activate" in one atomic verdict: may `candidate` (installed, in the waiting
         # slot) take over from `outgoing`? Extended work / controllees / skipWaiting are all
-        # host state — see sw_may_activate? and _scheduleLifecycle.
+        # host state — see sw_may_activate? and sw-client.js scheduleLifecycle.
         '__csim_swMayActivate'        => ->(b, *a) { b.sw_may_activate?(a[0], a[1]) },
         '__csim_swNoteActivationParked' => ->(b, *_) { b.sw_note_activation_parked; nil },
         # Navigation Preload state (NavigationPreloadManager), keyed by the registration's active
-        # worker handle — reached identically from the client (registration.active._handle) and the
-        # worker (__csimWorkerHandle). Get returns {enabled, headerValue}; set leaves a nil field as-is.
+        # worker handle — reached identically from the client (its registration's active worker's handle)
+        # and the worker (__csimWorkerHandle, or the active version's it was spawned beside). Get returns {enabled, headerValue}; set leaves a nil field as-is.
         '__csim_swNavPreloadState'    => ->(b, *a) { b.nav_preload_state(a[0]) },
         '__csim_swNavPreloadSet'      => ->(b, *a) { b.nav_preload_set(a[0], a[1], a[2]); nil },
         # A navigation (iframe/document load) → its controlling SW's `fetch` event, awaited

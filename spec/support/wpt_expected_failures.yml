@@ -6563,10 +6563,8 @@ service-workers/service-worker/ServiceWorkerGlobalScope/error-message-event.http
 service-workers/service-worker/ServiceWorkerGlobalScope/extendable-message-event.https.html:
 - Post an extendable message from a top-level client
 - Post extendable messages among service workers
-- Post loopback extendable messages
 - "[harness] TIMEOUT"
 service-workers/service-worker/ServiceWorkerGlobalScope/postmessage.https.html:
-- Post loopback messages
 - Post messages among service workers
 - "[harness] TIMEOUT"
 service-workers/service-worker/ServiceWorkerGlobalScope/service-worker-error-event.https.html:
@@ -6711,10 +6709,6 @@ service-workers/service-worker/local-url-inherit-controller.https.html:
 service-workers/service-worker/multi-globals/url-parsing.https.html:
 - getRegistration should use the relevant global of the object it was called on to
   resolve the script URL
-- register should use the relevant global of the object it was called on to resolve
-  the script URL and the default scope URL
-- register should use the relevant global of the object it was called on to resolve
-  the script URL and the given scope URL
 service-workers/service-worker/multipart-image.https.html:
 - cross-origin multipart image via SW with approved CORS should be readable
 - cross-origin multipart image with no-cors via SW should not be readable
@@ -6722,8 +6716,6 @@ service-workers/service-worker/multipart-image.https.html:
 service-workers/service-worker/navigate-window.https.html:
 - Clients.matchAll() should not show an old window after it navigates.
 - Clients.matchAll() should not show an old window as controlled after it navigates.
-service-workers/service-worker/navigation-preload/get-state.https.html:
-- no active worker
 service-workers/service-worker/navigation-preload/redirect.https.html:
 - Navigation Preload no-location redirect response with body.
 - Navigation Preload no-location redirect response.
