@@ -4,19 +4,7 @@
 # rest onto their owning interface prototypes. This RESIDUAL is the deliberate floor:
 #   - rel / relList — also reflected on the RENDERED SVG <a> (SVGAElement), which the
 #     driver gives no interface prototype, so the one accessor stays on the base.
-#   - the rest — owned by <marquee> (HTMLMarqueeElement), which the driver renders as
-#     HTMLUnknownElement (no prototype to receive them) yet reflection-obsolete probes;
-#     keeping them shared is what lets <marquee> keep them.
 # Ratcheting + symmetric (spec/idl_coverage_spec.rb 'per-interface ownership'): a NEW
 # leak, or a now-absent entry still listed, turns the suite red.
-- bgColor
-- height
-- hspace
 - rel
 - relList
-- scrollAmount
-- scrollDelay
-- start
-- trueSpeed
-- vspace
-- width

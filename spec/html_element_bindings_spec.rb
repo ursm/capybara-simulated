@@ -125,4 +125,35 @@ RSpec.describe 'HTML element bindings' do
     session.find('body').send_keys(:escape)
     expect(session.evaluate_script("[cancels, a.open, b.open, b.closedBy]")).to eq([['b'], true, false, 'none'])
   end
+
+  it 'clones a node into its own node document' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const hd = document.implementation.createHTMLDocument('');
+        const i = hd.createElement('i');
+        i.append(hd.createElement('b'), 'x');
+        const copy = i.cloneNode(true);
+        const t = document.createElement('template');
+        t.innerHTML = '<p>x</p>';
+        const content = t.content.cloneNode(true);
+        return [copy, ...copy.childNodes].map((n) => n.ownerDocument === hd).concat(content.firstChild.ownerDocument === t.content.ownerDocument);
+      })()
+    JS
+    expect(got).to eq([true, true, true, true])
+  end
+
+  it 'takes a removed dialog off the open dialogs' do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend', '<dialog id=a>a</dialog><dialog id=b>b</dialog>');
+      const [a, b] = document.querySelectorAll('dialog');
+      a.showModal();
+      b.showModal();
+      b.remove();
+      document.body.append(b);
+    JS
+    session.find('body').send_keys(:escape)
+    expect(session.evaluate_script('[a.open, b.open]')).to eq([false, true])
+  end
 end

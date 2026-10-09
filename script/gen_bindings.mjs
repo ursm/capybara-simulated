@@ -132,6 +132,11 @@ const INTERFACES = [
   ['html', 'HTMLEmbedElement', { install: true }],
   ['html', 'HTMLFrameElement', { install: true }],
   ['html', 'HTMLMarqueeElement', { install: true }],
+  ['html', 'HTMLAnchorElement', {
+    install: true,
+    omit: { 'private-click-measurement': 'attributionSourceId: Private Click Measurement is not implemented (a WICG proposal)' }
+  }],
+  ['html', 'HTMLAreaElement', { install: true }],
   ['html', 'HTMLDialogElement', { install: true }],
   ['html', 'HTMLMeterElement', { install: true }],
   ['html', 'HTMLProgressElement', { install: true }],
@@ -700,8 +705,15 @@ function checkExtAttrs(extAttrs, where, label) {
 // or null.
 // (…an enumerated one the HTML prose makes reflect, limited to only known values, its IDL saying no [Reflect] — the
 // table's entry makes it one)
+// (…a referrer policy attribute's keywords: Referrer Policy §8.1's, the empty string the no-referrer-given state's)
+const REFERRER_POLICIES = [
+  '', 'no-referrer', 'no-referrer-when-downgrade', 'same-origin', 'origin', 'strict-origin', 'origin-when-cross-origin',
+  'strict-origin-when-cross-origin', 'unsafe-url'
+];
 const REFLECT_ENUMS = {
   'HTMLTableCellElement.scope': { keywords: ['row', 'col', 'rowgroup', 'colgroup'] },
+  'HTMLAnchorElement.referrerPolicy': { keywords: REFERRER_POLICIES },
+  'HTMLAreaElement.referrerPolicy': { keywords: REFERRER_POLICIES },
   'HTMLTemplateElement.shadowRootMode': { keywords: ['open', 'closed'] },
   'HTMLTemplateElement.shadowRootSlotAssignment': { keywords: ['named', 'manual'], missing: 'named', invalid: 'named' },
   'HTMLTrackElement.kind': {
