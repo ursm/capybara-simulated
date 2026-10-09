@@ -170,6 +170,7 @@ const INTERFACES = [
   ['html', 'HTMLOutputElement', { install: true }],
   ['html', 'HTMLFieldSetElement', { install: true }],
   ['html', 'HTMLButtonElement', { install: true }],
+  ['html', 'HTMLOptionElement', { install: true }],
   ['html', 'HTMLCanvasElement', {
     install: true,
     omit: { 'mediacapture-fromelement': 'captureStream: media capture from a canvas is not implemented' },
