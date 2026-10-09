@@ -6402,7 +6402,10 @@ module Capybara
 
       # The active fetch-handling worker controlling a navigation to `url`. nil when uncontrolled
       # or the SW is known to have no fetch listener (→ load from the network).
-      private def sw_controller_for_navigation(url)
+      private def sw_controller_for_navigation(url) = sw_navigation_match(url)&.first
+
+      # …and the scope of the registration it is of, [handle, scope] — whose navigation preload state applies.
+      private def sw_navigation_match(url)
         match = sw_scope_match(url) or return nil
         handle = match[0]
         w = @workers[handle] or return nil
@@ -6417,7 +6420,7 @@ module Capybara
         # round-trip budget with no one to answer.
         return nil if !sw_interception_worthy?(w) || !w[:thread]&.alive?
 
-        handle
+        match
       end
 
       # Route a navigation request (document / iframe load) to its controlling SW's `fetch`
@@ -6428,7 +6431,8 @@ module Capybara
       # hash (SW served the document), or nil to load from the network (no controller, no
       # respondWith, network error, or the SW didn't answer within the round-trip budget).
       def service_worker_navigation_fetch(url, is_reload: false, is_history: false, referrer_source: nil, referrer_policy: nil, method: 'GET', body: nil, content_type: nil, site_seed: nil, origin_null: false, dest: 'iframe', cookie_cross_site: false, resulting_client_id: nil)
-        handle = sw_controller_for_navigation(url) or return nil
+        match = sw_navigation_match(url) or return nil
+        handle, preload_scope = match
         w      = @workers[handle] or return nil
         fetch_id = (@sw_nav_seq -= 1)
         # Navigation Preload: when the controlling registration has it enabled, issue the parallel
@@ -6441,7 +6445,6 @@ module Capybara
         # `dest` distinguishes a TOP-LEVEL navigation ('document') from a frame's ('iframe'):
         # the preload request must report the navigation's own Sec-Fetch-Dest — the SameSite
         # Lax cookie gate only applies to a top-level document GET.
-        preload_scope = @sw_registrations.key(handle)
         preload = if method.to_s.upcase == 'GET' && nav_preload_enabled?(preload_scope)
           navigation_preload_response(
             url,
@@ -6736,7 +6739,6 @@ module Capybara
         # Drop any navigation scope mirrored to this now-dead worker so a later navigation
         # doesn't route to it (it falls through to the network instead).
         @sw_registrations.reject! {|_scope, h| h == handle.to_i }
-        @sw_navpreload.delete(handle.to_i)
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
