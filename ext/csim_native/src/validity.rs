@@ -514,11 +514,18 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "defaultButton", default_button, context_id);
     crate::dom::register(scope, ns, "formListed", form_listed, context_id);
     crate::dom::register(scope, ns, "formSubmittables", form_submittables, context_id);
+    crate::dom::register(scope, ns, "implicitSubmissionForm", implicit_submission_form, context_id);
     crate::dom::register(scope, ns, "editingHost", editing_host, context_id);
     crate::dom::register(scope, ns, "isLabelable", is_labelable, context_id);
     crate::dom::register(scope, ns, "labeledControl", labeled_control, context_id);
     crate::dom::register(scope, ns, "labelsOf", labels_of, context_id);
     crate::dom::register(scope, ns, "labelToActivate", label_to_activate, context_id);
+}
+
+// __dom.implicitSubmissionForm(nid) -> [the form Enter in the control submits] or []
+// (`element_state::implicit_submission_form`).
+fn implicit_submission_form(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    nodes_from_root(scope, &args, rv, |arena, id| arena.implicit_submission_form(id).into_iter().collect());
 }
 
 // __dom.isLabelable(nid) -> whether the element is labelable (`element_state::is_labelable`).

@@ -790,6 +790,38 @@ impl RealmArena {
         });
         out
     }
+    // Whether an element is a field that blocks implicit submission (HTML §4.10.21.2) of its form: an input in the
+    // Text, Search, Telephone, URL, Email, Password, Date, Month, Week, Time, Local Date and Time or Number state.
+    fn blocks_implicit_submission(&self, id: NodeId) -> bool {
+        self.get(id).is_some_and(|n| {
+            n.is_html_named("input")
+                && matches!(
+                    n.input_type(),
+                    "text" | "search" | "tel" | "url" | "email" | "password" | "date" | "month" | "week" | "time"
+                        | "datetime-local" | "number"
+                )
+        })
+    }
+    // The form the user's Enter in `control` implicitly submits (HTML §4.10.21.2): its form owner, where `control` is a
+    // field that blocks implicit submission and the form has a default button — or, with none, where `control` is the
+    // only such field the form has.
+    pub(crate) fn implicit_submission_form(&self, control: NodeId) -> Option<NodeId> {
+        if !self.blocks_implicit_submission(control) {
+            return None;
+        }
+        let form = self.form_owner(control)?;
+        if self.default_button_of(form).is_some() {
+            return Some(form);
+        }
+        let mut blocking = 0;
+        self.find_in_tree(self.form_tree(form), |c, _| {
+            if self.blocks_implicit_submission(c) && self.form_owner(c) == Some(form) {
+                blocking += 1;
+            }
+            blocking > 1
+        });
+        (blocking == 1).then_some(form)
+    }
     fn in_datalist(&self, id: NodeId) -> bool {
         let mut cur = self.parent_of(id);
         while let Some(c) = cur {
