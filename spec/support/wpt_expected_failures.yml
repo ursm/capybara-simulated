@@ -2244,14 +2244,6 @@ dom/idlharness.window.js:
 - 'HTMLCollection interface: existence and properties of interface object'
 - 'HTMLCollection interface: operation item(unsigned long)'
 - 'HTMLCollection interface: operation namedItem(DOMString)'
-- 'NodeList interface: attribute length'
-- 'NodeList interface: calling item(unsigned long) on document.querySelectorAll("script")
-  with too few arguments must throw TypeError'
-- 'NodeList interface: existence and properties of interface object'
-- 'NodeList interface: existence and properties of interface prototype object'
-- 'NodeList interface: iterable<Node>'
-- 'NodeList interface: operation item(unsigned long)'
-- Stringification of document.querySelectorAll("script")
 - Stringification of new XSLTProcessor()
 - XSLTProcessor interface object length
 - XSLTProcessor interface object name
@@ -2302,8 +2294,6 @@ dom/nodes/Node-appendChild-cereactions-vs-script.window.js:
 - Custom element reactions follow script execution
 dom/nodes/Node-cloneNode-document-allow-declarative-shadow-roots.window.js:
 - cloneNode() and document's allow declarative shadow roots
-dom/nodes/NodeList-live-mutations.window.js:
-- 'NodeList live mutations: NodeList ownPropertyNames'
 dom/nodes/ParentNode-querySelector-All-xht.xht:
 - 'Selectors-API Test Suite: XHTML'
 dom/nodes/insertion-removing-steps/insertion-removing-steps-iframe.window.js:
@@ -4665,8 +4655,6 @@ html/dom/idlharness.https.html:
 - 'PluginArray interface: operation item(unsigned long)'
 - 'PluginArray interface: operation namedItem(DOMString)'
 - 'PluginArray interface: operation refresh()'
-- 'RadioNodeList interface: attribute value'
-- 'RadioNodeList interface: existence and properties of interface object'
 - 'SVGElement interface: attribute onmouseenter'
 - 'SVGElement interface: attribute onmouseleave'
 - 'SVGSVGElement interface: attribute onafterprint'

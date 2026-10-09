@@ -86,7 +86,7 @@ RSpec.describe 'Simulated (V8-resident DOM) — smoke' do
             <input id="name" value="alice">
             <script>
               globalThis.__title   = document.querySelector('#greeting').textContent;
-              globalThis.__items   = document.querySelectorAll('li').map(li => li.textContent);
+              globalThis.__items   = Array.from(document.querySelectorAll('li'), (li) => li.textContent);
               globalThis.__name    = document.querySelector('#name').value;
               globalThis.__matches = document.querySelector('#name').matches('input#name');
             </script>
