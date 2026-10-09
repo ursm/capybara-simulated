@@ -303,15 +303,12 @@ impl RealmArena {
         v
     }
 
-    // A `<select>`'s valueMissing (dom-nodes.js `selectSuffersValueMissing`): nothing selected — or, for a drop-down,
+    // A `<select>`'s valueMissing: nothing selected — or, for a drop-down box,
     // only its placeholder label option (an empty-valued first option, a child of the select).
     fn select_suffers_value_missing(&self, id: NodeId) -> bool {
         let options = self.list_of_options(id);
         let selected: Vec<NodeId> = options.iter().copied().filter(|&o| self.is_selected(o)).collect();
-        let Some(n) = self.get(id) else { return false };
-        let size = n.plain_attr("size").and_then(|s| crate::validity::parse_html_integer(s)).filter(|&s| s > 0);
-        let dropdown = n.plain_attr("multiple").is_none() && size.unwrap_or(1) == 1;
-        if !dropdown {
+        if self.is_list_box(id) {
             return selected.is_empty();
         }
         let placeholder = options
@@ -439,6 +436,15 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "willValidate", will_validate, context_id);
     crate::dom::register(scope, ns, "actuallyDisabled", actually_disabled, context_id);
     crate::dom::register(scope, ns, "listOfOptions", list_of_options, context_id);
+    crate::dom::register(scope, ns, "isListBox", is_list_box, context_id);
+}
+
+// __dom.isListBox(nid) -> whether a `<select>` shows as a list box, its display size above 1 (`is_list_box`) — else a
+// drop-down box.
+fn is_list_box(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(crate::dom::realm(scope, cid).is_list_box(id));
 }
 
 // __dom.listOfOptions(nid) -> a `<select>`'s list of options (`list_of_options`), as `nodes_value` answers.

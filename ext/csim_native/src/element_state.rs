@@ -358,7 +358,7 @@ impl RealmArena {
     pub(crate) fn is_list_box(&self, id: NodeId) -> bool {
         self.get(id).is_some_and(|n| n.is_html_named("select")) && self.select_display_size(id) > 1
     }
-    // …a `<select>`'s DISPLAY SIZE (`selectDisplaySize`): its `size` where that parses above 0, else 4 for a `multiple`
+    // …a `<select>`'s DISPLAY SIZE: its `size` where that parses above 0, else 4 for a `multiple`
     // one and 1 for a drop-down.
     pub(crate) fn select_display_size(&self, id: NodeId) -> u64 {
         let Some(n) = self.get(id) else { return 1 };
