@@ -138,6 +138,22 @@ const INTERFACES = [
   }],
   ['html', 'HTMLAreaElement', { install: true }],
   ['html', 'HTMLImageElement', { install: true }],
+  ['html', 'HTMLIFrameElement', {
+    install: true,
+    omit: {
+      'anonymous-iframe': 'credentialless: credentialless iframes are not implemented',
+      'connection-allowlists': 'connectionAllowlist: Connection Allowlists are not implemented (a WICG proposal)',
+      'csp-embedded-enforcement': 'csp: CSP Embedded Enforcement is not implemented',
+      'permissions-policy': 'permissionsPolicy: the Permissions Policy API is not implemented',
+      'trust-token-api': 'privateToken: Private State Tokens are not implemented (a WICG proposal)'
+    }
+  }],
+  ['html', 'HTMLObjectElement', { install: true }],
+  ['html', 'HTMLCanvasElement', {
+    install: true,
+    omit: { 'mediacapture-fromelement': 'captureStream: media capture from a canvas is not implemented' },
+    omitMembers: { transferControlToOffscreen: 'a canvas whose rendering an OffscreenCanvas controls is not implemented' }
+  }],
   ['html', 'HTMLLinkElement', { install: true }],
   ['html', 'HTMLScriptElement', { install: true }],
   ['html', 'HTMLDialogElement', { install: true }],
@@ -735,6 +751,8 @@ const REFLECT_ENUMS = {
   'HTMLImageElement.fetchPriority': FETCH_PRIORITY,
   'HTMLImageElement.decoding': { keywords: ['sync', 'async', 'auto'], missing: 'auto', invalid: 'auto' },
   'HTMLImageElement.loading': LAZY_LOADING,
+  'HTMLIFrameElement.referrerPolicy': { keywords: REFERRER_POLICIES },
+  'HTMLIFrameElement.loading': LAZY_LOADING,
   'HTMLLinkElement.as': {
     keywords: [
       'fetch', 'audio', 'document', 'embed', 'font', 'image', 'manifest', 'object', 'report', 'script', 'sharedworker', 'style',
