@@ -516,6 +516,12 @@ const INTERFACES = [
   ['html', 'WorkerLocation', { install: true }]
 ];
 
+// …and from reflect.js, the [Reflect…] attributes' steps.
+const REFLECTION = [
+  'reflectString', 'reflectNullableString', 'setReflectedString', 'reflectBoolean', 'setReflectedBoolean', 'reflectURL',
+  'reflectEnum', 'reflectNullableEnum', 'reflectNumber', 'setReflectedNumber', 'LONG', 'LONG_NON_NEGATIVE', 'UNSIGNED',
+  'UNSIGNED_POSITIVE', 'UNSIGNED_RANGE', 'DOUBLE', 'DOUBLE_POSITIVE', 'UNSIGNED_POSITIVE_FALLBACK'
+];
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
   'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
@@ -636,6 +642,67 @@ function checkExtAttrs(extAttrs, where, label) {
 // A conversion's TypeError message, as the JS expression of a string — Chrome's: the member's prefix, and in a
 // dictionary's member, the dictionary member's after the prefix of what converts the dictionary (`prefix`, at run
 // time) — then `text`.
+// [Reflect…] (HTML §2.6.1): an attribute that reflects a content attribute — named by its value, else its own name
+// lowercased — whose getter and setter steps the generated binding takes itself, from reflect.js: a DOMString's (or a
+// USVString's), a [ReflectURL] one's, an enumerated one's (its keywords and defaults REFLECT_ENUMS's, the HTML prose
+// that defines them being no IDL), a boolean's and a number's — by its type and [ReflectNonNegative] / [ReflectPositive]
+// / [ReflectPositiveWithFallback] / [ReflectRange] / [ReflectDefault]. [ReflectSetter]: its setter alone, its getter
+// the implementation's. A type no rule here covers (a DOMTokenList, an element reference, an SVGAnimated*) is the
+// implementation's both ways. The getter and setter as `{ get, set }` — expressions of `self` (and `v`, converted) —
+// or null.
+const REFLECT_ENUMS = {};
+// (…but the members of these the implementation's: ARIAMixin's, which reflect enumerated per the ARIA reflection and
+// which ElementInternals includes as state of its own, no content attribute)
+const REFLECTED_BY_IMPLEMENTATION = new Set(['ARIAMixin']);
+// (…an enumerated one's keywords a table of the module's: each canonical keyword by its ASCII-lowercase form)
+const reflectKeywordTables = [];
+function reflectionOf(iface, m, where) {
+  if (REFLECTED_BY_IMPLEMENTATION.has(m.parent?.name)) return null;
+  const ext = new Map((m.extAttrs || []).map((e) => [e.name, e]));
+  const named = ext.get('Reflect') ?? ext.get('ReflectURL') ?? ext.get('ReflectSetter');
+  if (!named) return null;
+  const attr = JSON.stringify(named.rhs ? JSON.parse(named.rhs.value) : m.name.toLowerCase());
+  const type = m.idlType.idlType, nullable = m.idlType.nullable;
+  let get, set;
+  if (type === 'DOMString' || type === 'USVString') {
+    const keywords = REFLECT_ENUMS[`${iface}.${m.name}`];
+    if (ext.has('ReflectURL')) get = `reflectURL(self, ${attr})`;
+    else if (keywords) {
+      const table = `REFLECT_KEYWORDS_${reflectKeywordTables.length}`;
+      reflectKeywordTables.push(`const ${table} = new Map(${JSON.stringify([
+        ...keywords.keywords.map((k) => [k.toLowerCase(), k]),
+        ...Object.entries(keywords.aliases ?? {})
+      ])});`);
+      const missing = JSON.stringify(keywords.missing ?? null), invalid = JSON.stringify(keywords.invalid ?? null);
+      get = `${nullable ? 'reflectNullableEnum' : 'reflectEnum'}(self, ${attr}, ${table}, ${missing}, ${invalid})`;
+    } else get = `${nullable ? 'reflectNullableString' : 'reflectString'}(self, ${attr})`;
+    set = `setReflectedString(self, ${attr}, v)`;
+  } else if (type === 'boolean' && !nullable) {
+    get = `reflectBoolean(self, ${attr})`;
+    set = `setReflectedBoolean(self, ${attr}, v)`;
+  } else if ((type === 'long' || type === 'unsigned long' || type === 'double') && !nullable) {
+    const range = ext.get('ReflectRange');
+    const [min, max] = range ? range.rhs.value.map((v) => Number(v.value)) : [0, 0];
+    const kind = type === 'long'
+      ? (ext.has('ReflectNonNegative') ? 'LONG_NON_NEGATIVE' : 'LONG')
+      : type === 'double'
+        ? (ext.has('ReflectPositive') ? 'DOUBLE_POSITIVE' : 'DOUBLE')
+        : range ? 'UNSIGNED_RANGE'
+        : ext.has('ReflectPositive') ? 'UNSIGNED_POSITIVE'
+        : ext.has('ReflectPositiveWithFallback') ? 'UNSIGNED_POSITIVE_FALLBACK'
+        : 'UNSIGNED';
+    const positive = kind === 'UNSIGNED_POSITIVE' || kind === 'UNSIGNED_POSITIVE_FALLBACK';
+    const fallback = ext.has('ReflectDefault') ? Number(JSON.parse(`${ext.get('ReflectDefault').rhs.value}`))
+      : kind === 'LONG_NON_NEGATIVE' ? -1 : positive ? 1 : 0;
+    const getKind = kind === 'UNSIGNED_POSITIVE_FALLBACK' ? 'UNSIGNED_POSITIVE' : kind;
+    get = `reflectNumber(self, ${attr}, ${getKind}, ${fallback}, ${min}, ${max})`;
+    set = `setReflectedNumber(self, ${attr}, ${kind}, ${fallback}, v, ${failure(where)})`;
+  } else {
+    return null;
+  }
+  if (ext.has('ReflectSetter')) get = null;
+  return { get, set };
+}
 function failure(where, text = '') {
   if (where.dictionary) return `prefix + ${JSON.stringify(`Failed to read the '${where.member}' property from '${where.dictionary}': ${text}`)}`;
   return JSON.stringify((where.index === undefined
@@ -1085,8 +1152,9 @@ function generateInterface(def, options = {}) {
       const setImpl = key === m.name ? `impl.set_${m.name}` : `impl[${JSON.stringify(`set_${m.name}`)}]`;
       // (…[LegacyLenientThis] only an event handler's here, whose accessors the installing class's are)
       if ((m.extAttrs || []).some((e) => e.name === 'LegacyLenientThis')) throw new Error(`${label}: a [LegacyLenientThis] attribute is not generated yet`);
+      const reflection = options.install ? reflectionOf(name, m, { iface: name, member: m.name }) : null;
       // (…a promise-typed one's exception its promise's rejection, as its getter steps say)
-      const getter = `return ${getImpl}(${self});`;
+      const getter = reflection?.get ? `const self = ${self}; return ${reflection.get};` : `return ${getImpl}(${self});`;
       out.push(`    get ${key}() { ${promiseOf(m) ? rejecting(getter) : getter} }`);
       const forwards = (m.extAttrs || []).find((e) => e.name === 'PutForwards');
       if (forwards) {
@@ -1109,6 +1177,9 @@ function generateInterface(def, options = {}) {
         const value = `enumValue(v, ${JSON.stringify(enums.get(m.idlType.idlType))}, ${failure({ iface: name, member: m.name })})`;
         const v = m.idlType.nullable ? `v == null ? null : ${value}` : value;
         out.push(`    set ${key}(v) { const self = ${self}; const value = ${v}; if (value !== undefined) ${setImpl}(self, value); }`);
+      } else if (!m.readonly && reflection) {
+        const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
+        out.push(`    set ${key}(v) { const self = ${self}; v = ${v}; ${reflection.set}; }`);
       } else if (!m.readonly) {
         const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
         out.push(`    set ${key}(v) { ${setImpl}(${self}, ${v}); }`);
@@ -1352,7 +1423,7 @@ const EVENT_HANDLER_TYPES = new Set(['EventHandler', 'OnErrorEventHandler', 'OnB
 // generated code names something of its own by it (`self`, `impl`, a conversion it calls, … — CSSMathSum's
 // constructor takes `args`).
 const RESERVED = new Set([
-  'self', 'impl', 'KEY', 'PLATFORM', 'x', 'v', 'callback', 'args', ...RUNTIME,
+  'self', 'impl', 'KEY', 'PLATFORM', 'x', 'v', 'callback', 'args', ...RUNTIME, ...REFLECTION,
   'arguments', 'eval', 'implements', 'interface', 'let', 'package', 'private', 'protected', 'public', 'static', 'yield',
   'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'enum',
   'export', 'extends', 'false', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'null',
@@ -1633,6 +1704,11 @@ const source = `// GENERATED by script/gen_bindings.mjs from @webref/idl — do 
 import {
 ${wrap(RUNTIME)}
 } from '../webidl.js';
+import {
+${wrap(REFLECTION)}
+} from '../reflect.js';
+
+${reflectKeywordTables.join('\n')}
 
 ${body}
 

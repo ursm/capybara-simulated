@@ -327,7 +327,7 @@ impl RealmArena {
     }
     // The select's list of options: its option descendants in tree order past transparent wrappers, an optgroup's
     // (not a nested optgroup's), none under an `<hr>`, a `<datalist>` or a nested `<select>`.
-    fn list_of_options(&self, select: NodeId) -> Vec<NodeId> {
+    pub(crate) fn list_of_options(&self, select: NodeId) -> Vec<NodeId> {
         let mut out = Vec::new();
         self.collect_options(select, false, &mut out);
         out
@@ -442,6 +442,15 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "validityFlags", validity_flags, context_id);
     crate::dom::register(scope, ns, "willValidate", will_validate, context_id);
     crate::dom::register(scope, ns, "actuallyDisabled", actually_disabled, context_id);
+    crate::dom::register(scope, ns, "listOfOptions", list_of_options, context_id);
+}
+
+// __dom.listOfOptions(nid) -> a `<select>`'s list of options (`list_of_options`), as `nodes_value` answers.
+fn list_of_options(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let ids = crate::dom::realm(scope, cid).list_of_options(select);
+    rv.set(crate::dom::nodes_value(scope, cid, select, &ids));
 }
 
 // __dom.validityFlags(nid) -> the constraints the element suffers from (`validity`), its ValidityState's flags in IDL
