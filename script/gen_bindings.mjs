@@ -799,6 +799,11 @@ const FORM_ENCTYPE = {
 // (…a popover invoker's action: toggle, show and hide, toggle its missing and invalid value default)
 const POPOVER_TARGET_ACTION = { keywords: ['toggle', 'show', 'hide'], missing: 'toggle', invalid: 'toggle' };
 const REFLECT_ENUMS = {
+  'HTMLElement.dir': { keywords: ['ltr', 'rtl', 'auto'] },
+  'HTMLElement.popover': { keywords: ['auto', 'manual', 'hint'], aliases: { '': 'auto' }, invalid: 'manual' },
+  'HTMLElement.enterKeyHint': { keywords: ['enter', 'done', 'go', 'next', 'previous', 'search', 'send'] },
+  'HTMLElement.inputMode': { keywords: ['none', 'text', 'tel', 'url', 'email', 'numeric', 'decimal', 'search'] },
+  'HTMLElement.virtualKeyboardPolicy': { keywords: ['auto', 'manual'] },
   'HTMLTableCellElement.scope': { keywords: ['row', 'col', 'rowgroup', 'colgroup'] },
   'HTMLAnchorElement.referrerPolicy': { keywords: REFERRER_POLICIES },
   'HTMLAreaElement.referrerPolicy': { keywords: REFERRER_POLICIES },
