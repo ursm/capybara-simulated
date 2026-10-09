@@ -138,7 +138,8 @@ pub(crate) fn css_text(store: &SheetStore, lock: &SharedRwLock, handle: u32) -> 
 // `@keyframes`, `@layer`, `@property`, `@counter-style`, `@position-try`, `@font-palette-values`), `key` (a keyframe's
 // selector), `href` (as written) / `url` (resolved) / `supports` / `layer` (an `@import`'s), `prefix` / `namespace` (an
 // `@namespace`'s), `family` / `values` (an `@font-feature-values`'s, and `family` an `@font-palette-values`'s),
-// `names` (an `@layer` statement's, comma-separated), `start` / `end` (an `@scope`'s), `syntax` / `inherits` /
+// `names` (an `@layer` statement's, comma-separated), `conditions` (an `@container`'s, a `name\tquery` line each),
+// `base-palette` / `override-colors` (an `@font-palette-values`'s), `start` / `end` (an `@scope`'s), `syntax` / `inherits` /
 // `initial` (an `@property`'s) and a counter style's descriptors by name. None where the rule has no such attribute.
 pub(crate) fn get(store: &SheetStore, lock: &SharedRwLock, handle: u32, what: &str) -> Option<String> {
     let r = store.rule(handle)?;
@@ -159,6 +160,13 @@ pub(crate) fn get(store: &SheetStore, lock: &SharedRwLock, handle: u32, what: &s
         },
         (Rule::Css(CssRule::Supports(s)), "condition") => css(&s.condition),
         (Rule::Css(CssRule::Container(c)), "condition") => css(&c.conditions),
+        // (…a line per condition — its container name, its query — as CSSContainerRule's `conditions` reads them)
+        (Rule::Css(CssRule::Container(c)), "conditions") => c
+            .conditions
+            .0
+            .iter()
+            .map(|c| format!("{}\t{}\n", css(c.name()), c.query_condition().map_or_else(String::new, |q| css(q))))
+            .collect(),
         (Rule::Css(CssRule::Namespace(n)), "prefix") => n.prefix.as_ref().map_or_else(String::new, |p| p.to_string()),
         (Rule::Css(CssRule::Namespace(n)), "namespace") => n.url.to_string(),
         (Rule::Css(CssRule::Keyframes(k)), "name") => {
@@ -175,6 +183,8 @@ pub(crate) fn get(store: &SheetStore, lock: &SharedRwLock, handle: u32, what: &s
         (Rule::Css(CssRule::PositionTry(p)), "name") => css(&p.read_with(&guard).name),
         (Rule::Css(CssRule::FontPaletteValues(p)), "name") => css(&p.name),
         (Rule::Css(CssRule::FontPaletteValues(p)), "family") => p.family_names.iter().map(|n| css(n)).collect::<Vec<_>>().join(", "),
+        (Rule::Css(CssRule::FontPaletteValues(p)), "base-palette") => p.base_palette.as_ref().map_or_else(String::new, |b| css(b)),
+        (Rule::Css(CssRule::FontPaletteValues(p)), "override-colors") => p.override_colors.iter().map(|c| css(c)).collect::<Vec<_>>().join(", "),
         (Rule::Css(CssRule::FontFeatureValues(f)), "family") => f.family_names.iter().map(|n| css(n)).collect::<Vec<_>>().join(", "),
         // (…its feature values: a line per declaration — its block's at-rule name, the name it declares, its values)
         (Rule::Css(CssRule::FontFeatureValues(f)), "values") => {

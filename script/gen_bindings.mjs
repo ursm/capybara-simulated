@@ -361,6 +361,36 @@ const INTERFACES = [
   ['dom', 'StaticRange', { install: true }],
   ['dom', 'Range', { install: true }],
   ['selection-api', 'Selection', { install: true }],
+  ['cssom', 'MediaList'],
+  ['cssom', 'StyleSheetList'],
+  ['cssom', 'CSSRuleList'],
+  ['cssom', 'StyleSheet', { install: true }],
+  ['cssom', 'CSSStyleSheet', { install: true }],
+  ['cssom', 'CSSRule', { install: true }],
+  ['cssom', 'CSSGroupingRule', { install: true }],
+  ['cssom', 'CSSStyleRule', { install: true }],
+  ['cssom', 'CSSImportRule', { install: true }],
+  ['cssom', 'CSSPageRule', { install: true }],
+  ['cssom', 'CSSMarginRule', { install: true }],
+  ['cssom', 'CSSNamespaceRule', { install: true }],
+  ['css-conditional', 'CSSConditionRule', { install: true }],
+  ['css-conditional', 'CSSMediaRule', { install: true }],
+  ['css-conditional', 'CSSSupportsRule', { install: true }],
+  ['css-conditional-5', 'CSSContainerRule', { install: true }],
+  ['css-cascade', 'CSSLayerBlockRule', { install: true }],
+  ['css-cascade', 'CSSLayerStatementRule', { install: true }],
+  ['css-cascade-6', 'CSSScopeRule', { install: true }],
+  ['css-transitions-2', 'CSSStartingStyleRule', { install: true }],
+  ['css-fonts-5', 'CSSFontFaceRule', { install: true }],
+  ['css-fonts', 'CSSFontFeatureValuesRule', { install: true }],
+  ['css-fonts', 'CSSFontFeatureValuesMap', { install: true }],
+  ['css-fonts', 'CSSFontPaletteValuesRule', { install: true }],
+  ['css-animations', 'CSSKeyframeRule', { install: true }],
+  ['css-animations', 'CSSKeyframesRule', { install: true, indexedProperties: 'the Proxy each @keyframes rule is (cssom.js `withIndexedGetter`)' }],
+  ['css-counter-styles', 'CSSCounterStyleRule', { install: true }],
+  ['css-properties-values-api', 'CSSPropertyRule', { install: true }],
+  ['css-nesting', 'CSSNestedDeclarations', { install: true }],
+  ['css-anchor-position', 'CSSPositionTryRule', { install: true }],
   ['dom', 'MutationObserver', { install: true }],
   ['cssom-view', 'MediaQueryList', { install: true }],
   ['dom', 'MutationRecord', { install: true }],
@@ -463,7 +493,7 @@ const RUNTIME = [
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
-  'defineLength', 'defineUnscopables', 'unforgeableMembers', 'defaultJSONOf', 'defineSetlike'
+  'defineLength', 'defineUnscopables', 'unforgeableMembers', 'defaultJSONOf', 'defineSetlike', 'defineMaplike'
 ];
 
 const all = await parseAll();
@@ -950,7 +980,7 @@ function generateInterface(def, options = {}) {
     return options.install ? `thisIs(this ?? globalThis, IS_SELF${message})` : `thisOf(this ?? globalThis, KEY${message})`;
   };
   const self = selfCheck();
-  let indexed = null, valueIterator = false, pairIterator = false, setlike = null, stringifier = null;
+  let indexed = null, valueIterator = false, pairIterator = false, setlike = null, maplike = null, stringifier = null;
   const constructors = [];
   const memberList = membersOf(def, options.omit, options.omitMembers);
   for (const m of memberList) {
@@ -974,6 +1004,20 @@ function generateInterface(def, options = {}) {
         throw new Error(`${label}: a setlike of other than an interface type or a DOMString is not generated yet`);
       }
       setlike = { readonly: !!m.readonly, convert };
+      continue;
+    }
+    if (m.type === 'maplike') {
+      // (…a maplike declaration, Web IDL §3.7.11: the members over the implementation's backing map, `impl.mapOf(self)`
+      // — a JS Map — set / delete / clear only where it is not readonly and the interface declares none of its own; a
+      // key each member takes converted as that member's argument, a value `set` takes as its second)
+      if (!options.install) throw new Error(`${label}: a maplike interface the binding makes is not generated yet`);
+      const [keyType, valueType] = m.idlType;
+      const keys = ['get', 'has', 'delete', 'set'].map((member) => `${member}: (v) => ${conversion(keyType, 'v', { iface: name, member, index: 0 }, checks)}`);
+      maplike = {
+        readonly: !!m.readonly,
+        keys: `{ ${keys.join(', ')} }`,
+        value: `(v) => ${conversion(valueType, 'v', { iface: name, member: 'set', index: 1 }, checks)}`
+      };
       continue;
     }
     if (m.type === 'iterable') {
@@ -1118,7 +1162,8 @@ function generateInterface(def, options = {}) {
       throw new Error(`${name}: an installed interface with an indexed getter or an iterator is not generated yet`);
     }
     if (setlike) setlike.declared = memberList.filter((o) => o.type === 'operation' && ['add', 'delete', 'clear'].includes(o.name)).map((o) => o.name);
-    return installInterface(def, { body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, preamble, indexed });
+    if (maplike) maplike.declared = memberList.filter((o) => o.type === 'operation' && ['set', 'delete', 'clear'].includes(o.name)).map((o) => o.name);
+    return installInterface(def, { body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, maplike, preamble, indexed });
   }
   if (unforgeables.length) throw new Error(`${name}: [LegacyUnforgeable] members of an interface the binding makes are not generated yet`);
   if (handlers.length) throw new Error(`${name}: event handlers of an interface the binding makes are not generated yet`);
@@ -1170,7 +1215,7 @@ function generateInterface(def, options = {}) {
 // …a [Global] interface's (Window's) on the global object itself (Web IDL §3.7.5), its [LegacyUnforgeable] ones too —
 // by the two functions it returns, which define them on a global: its members (configurable, made once where the
 // snapshot is, which a realm made from it has already), and its [LegacyUnforgeable] ones, as each realm is made.
-function installInterface(def, { body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, preamble, indexed }) {
+function installInterface(def, { body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, maplike, preamble, indexed }) {
   const name = def.name;
   const global = (def.extAttrs || []).some((e) => e.name === 'Global');
   const holder = global ? 'members' : 'iface.prototype';
@@ -1195,6 +1240,10 @@ function installInterface(def, { body, statics, unforgeables, checks, unscopable
   if (setlike) {
     const own = setlike.readonly ? [] : ['add', 'delete', 'clear'].filter((n) => !setlike.declared.includes(n));
     lines.push(`  defineSetlike(iface.prototype, '${name}', (self) => impl.setOf(self), IS_SELF, ${JSON.stringify(own)}, ${setlike.convert}, impl.setChanged);`);
+  }
+  if (maplike) {
+    const own = maplike.readonly ? [] : ['set', 'delete', 'clear'].filter((n) => !maplike.declared.includes(n));
+    lines.push(`  defineMaplike(iface.prototype, '${name}', (self) => impl.mapOf(self), IS_SELF, ${JSON.stringify(own)}, ${maplike.keys}, ${maplike.value});`);
   }
   if (constants.length) {
     const list = JSON.stringify(constants.map(([n]) => n));
