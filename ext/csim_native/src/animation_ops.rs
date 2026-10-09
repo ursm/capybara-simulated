@@ -272,12 +272,12 @@ fn anim_effect_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     });
 }
 
-// __dom.animNew(effect | 0, hasTimeline) -> animation id.
+// __dom.animNew(effect | 0, timeline origin time | null) -> animation id.
 fn anim_new(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, _arena| {
         let effect = number_arg(scope, args.get(0)).map(|n| n as EffectId).filter(|&e| e != 0);
-        let has_timeline = args.get(1).boolean_value(scope);
-        let id = engine.web_animations_op(|model| model.new_animation(effect, has_timeline));
+        let timeline = number_arg(scope, args.get(1));
+        let id = engine.web_animations_op(|model| model.new_animation(effect, timeline));
         rv.set(v8::Integer::new_from_unsigned(scope, id).into());
     });
 }
@@ -328,7 +328,7 @@ fn anim_call(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
                     Ok(())
                 },
                 "timeline" => {
-                    model.set_timeline(id, arg.is_some_and(|n| n != 0.0));
+                    model.set_timeline(id, arg);
                     Ok(())
                 },
                 "finishNotification" => {

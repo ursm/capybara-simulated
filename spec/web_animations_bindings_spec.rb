@@ -48,4 +48,36 @@ RSpec.describe 'Web Animations bindings' do
       'TypeError', 'TypeError', 'TypeError', 'TypeError', true, true, 100, nil, 0, nil, 0.25, nil, 100, 'running', 'TypeError'
     ])
   end
+
+  # An animation runs on its own timeline's time — a DocumentTimeline's the document's less its origin time; a CSS
+  # animation's `finished` is read without applying style (Chrome and Firefox), where `ready` applies it (Gecko); the
+  # timing reports its members in the dictionaries' order; web-animations-2's effect `playbackRate`, which no engine
+  # ships, is no member read. Chrome's figures.
+  it 'runs on its timeline' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const d = document.getElementById('d');
+        const t = new DocumentTimeline({originTime: 100});
+        const a = new Animation(new KeyframeEffect(d, {opacity: [0, 1]}, 1000), t);
+        a.startTime = t.currentTime;
+        const style = document.createElement('style');
+        style.textContent = '@keyframes k { to { opacity: 0 } }';
+        document.head.append(style);
+        d.style.animation = 'k 100s';
+        const css = d.getAnimations().find((x) => x instanceof CSSAnimation);
+        const finished = css.finished;
+        d.style.animation = 'none';
+        const same = finished === css.finished;
+        let read = false;
+        const effect = new KeyframeEffect(d, null, { duration: 10, get playbackRate() { read = true; return 'x'; } });
+        return [
+          Math.round(a.currentTime), same, read, Object.keys(effect.getTiming()), Object.keys(effect.getComputedTiming()).slice(8)
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      0, true, false, %w[delay direction duration easing endDelay fill iterationStart iterations],
+      %w[activeDuration currentIteration endTime localTime progress]
+    ])
+  end
 end

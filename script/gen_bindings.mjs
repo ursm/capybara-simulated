@@ -769,6 +769,21 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   return `(${steps.map(([test, value]) => `${test} ? ${value} : `).join('')}${otherwise})`;
 }
 
+// Dictionary members a spec adds that no implementation here answers, by `Dictionary.member`, and why — no member
+// here, so a page's value is never read: web-animations-2's effect `playbackRate`, of the timing model whose group
+// effects no engine ships (Chrome and Firefox read no such member).
+const OMITTED_DICTIONARY_MEMBERS = {
+  'EffectTiming.playbackRate': 'web-animations-2 effect playback rates: no engine ships them',
+  'OptionalEffectTiming.playbackRate': 'web-animations-2 effect playback rates: no engine ships them'
+};
+// (…one no dictionary has — renamed, dropped — is an error: the entry goes)
+for (const key of Object.keys(OMITTED_DICTIONARY_MEMBERS)) {
+  const [dict, member] = key.split('.');
+  const d = dictionaries.get(dict);
+  const members = d ? [...d.members, ...(additions.get(dict) || []).flatMap((a) => a.def.members)] : [];
+  if (!members.some((m) => m.name === member)) throw new Error(`${key}: no dictionary has it now — remove it from OMITTED_DICTIONARY_MEMBERS`);
+}
+
 // A dictionary's conversion (Web IDL §3.2.17): a function of its own, written once beside the interfaces — undefined
 // or null an empty dictionary, any other non-object a TypeError; each member, its inherited dictionaries' first and
 // each's (its partials' included) in lexicographic order, got from the object, converted, or its default where it is
@@ -795,7 +810,7 @@ function dictionaryConverter(name) {
     // `{sanitizer: x}`, without the Sanitizer API)
     const absent = (t) => (t.union ? t.idlType.every(absent) : ABSENT_INTERFACES.has(t.idlType) || ABSENT_TYPES.has(t.idlType));
     const members = [...d.members, ...(additions.get(d.name) || []).flatMap((a) => a.def.members)]
-      .filter((m) => !absent(m.idlType));
+      .filter((m) => !absent(m.idlType) && !Object.hasOwn(OMITTED_DICTIONARY_MEMBERS, `${d.name}.${m.name}`));
     for (const m of members.sort((a, b) => (a.name < b.name ? -1 : 1))) {
       const where = { dictionary: d.name, member: m.name };
       lines.push(`  {`);

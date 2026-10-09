@@ -275,7 +275,7 @@ impl Animations {
         });
         e.given = true;
         self.set_target(effect, Some(owner.clone()));
-        let id = self.new_animation(Some(effect), true);
+        let id = self.new_animation(Some(effect), Some(0.0));
         let transition = CssTransition {
             property: change.property.clone(),
             generation,

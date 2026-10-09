@@ -362,8 +362,9 @@ pub(crate) enum AnimationError {
 #[derive(Clone, Debug)]
 pub(crate) struct Animation {
     pub(crate) effect: Option<EffectId>,
-    // (Only the document timeline, or none.)
-    pub(crate) has_timeline: bool,
+    // The origin time of its timeline — a document timeline, whose time is the document's less it (§4.3.1: the default
+    // one's zero) — or None without one.
+    pub(crate) timeline: Option<f64>,
     pub(crate) start_time: Option<f64>,
     pub(crate) hold_time: Option<f64>,
     pub(crate) playback_rate: f64,
@@ -679,7 +680,7 @@ impl Animations {
     }
 
     // `new Animation(effect, timeline)` (§4.4 constructor): idle, its ready promise settled.
-    pub(crate) fn new_animation(&mut self, effect: Option<EffectId>, has_timeline: bool) -> AnimationId {
+    pub(crate) fn new_animation(&mut self, effect: Option<EffectId>, timeline: Option<f64>) -> AnimationId {
         self.next_animation += 1;
         self.next_sequence += 1;
         let id = self.next_animation;
@@ -687,7 +688,7 @@ impl Animations {
             id,
             Animation {
                 effect: None,
-                has_timeline,
+                timeline,
                 start_time: None,
                 hold_time: None,
                 playback_rate: 1.0,
@@ -707,12 +708,12 @@ impl Animations {
         id
     }
 
-    // §4.4.1 "setting the timeline of an animation" — the document timeline or none, the page's handle having told the
-    // timelines apart: its hold time dropped where its start time is resolved, so a finished state is not sticky but
-    // follows its current time on the new timeline.
-    pub(crate) fn set_timeline(&mut self, id: AnimationId, has_timeline: bool) {
+    // §4.4.1 "setting the timeline of an animation" — a document timeline of `timeline`'s origin time, or none, the
+    // page's handle having told the timelines apart: its hold time dropped where its start time is resolved, so a
+    // finished state is not sticky but follows its current time on the new timeline.
+    pub(crate) fn set_timeline(&mut self, id: AnimationId, timeline: Option<f64>) {
         let Some(a) = self.animations.get_mut(&id) else { return };
-        a.has_timeline = has_timeline;
+        a.timeline = timeline;
         if a.start_time.is_some() {
             a.hold_time = None;
         }
@@ -749,8 +750,9 @@ impl Animations {
         self.update_finished_state(id, false, false);
     }
 
-    fn timeline_time_of(&self, a: &Animation) -> Option<f64> {
-        if a.has_timeline { self.timeline_time } else { None }
+    // An animation's timeline's current time: the document's less its origin time, None without a timeline.
+    pub(crate) fn timeline_time_of(&self, a: &Animation) -> Option<f64> {
+        self.timeline_time.zip(a.timeline).map(|(time, origin)| time - origin)
     }
 
     // §4.5.4: the end of the animation's effect, 0 without one.
@@ -1159,10 +1161,12 @@ impl Animations {
             if pending.is_none() && a.start_time.is_none() && a.hold_time.is_none() {
                 continue;
             }
-            match pending {
-                Some(PendingTask::Play) => self.run_pending_play(id, now),
-                Some(PendingTask::Pause) => self.run_pending_pause(id, now),
-                None => self.update_finished_state(id, false, false),
+            // (…a pending task's ready time its timeline's time; one with no timeline waits)
+            match (pending, self.timeline_time_of(a)) {
+                (Some(PendingTask::Play), Some(ready)) => self.run_pending_play(id, ready),
+                (Some(PendingTask::Pause), Some(ready)) => self.run_pending_pause(id, ready),
+                (Some(_), None) => {},
+                (None, _) => self.update_finished_state(id, false, false),
             }
             if pending.is_some() {
                 self.touch(id);
@@ -1203,9 +1207,6 @@ impl Animations {
 
     // §4.4.10, the pending play task at `ready_time`.
     fn run_pending_play(&mut self, id: AnimationId, ready_time: f64) {
-        if !self.animations[&id].has_timeline {
-            return;
-        }
         let a = self.animations.get_mut(&id).unwrap();
         a.pending = None;
         if let Some(hold) = a.hold_time {
@@ -1235,9 +1236,6 @@ impl Animations {
 
     // §4.4.12, the pending pause task at `ready_time`.
     fn run_pending_pause(&mut self, id: AnimationId, ready_time: f64) {
-        if !self.animations[&id].has_timeline {
-            return;
-        }
         let a = self.animations.get_mut(&id).unwrap();
         a.pending = None;
         if let (Some(start), None) = (a.start_time, a.hold_time) {
@@ -1258,7 +1256,7 @@ impl Animations {
     pub(crate) fn next_frame_delay(&self) -> Option<f64> {
         let mut best: Option<f64> = None;
         for (&id, a) in &self.animations {
-            let due = if a.pending.is_some() && a.has_timeline {
+            let due = if a.pending.is_some() && a.timeline.is_some() {
                 Some(0.0)
             } else if self.play_state(id) == PlayState::Running && a.playback_rate != 0.0 {
                 let current = self.current_time(id).unwrap_or(0.0);
@@ -1425,7 +1423,7 @@ mod tests {
 
     fn playing(model: &mut Animations, duration: f64) -> AnimationId {
         let effect = model.new_effect(timing(duration));
-        let id = model.new_animation(Some(effect), true);
+        let id = model.new_animation(Some(effect), Some(0.0));
         model.play(id, true).unwrap();
         id
     }
@@ -1544,7 +1542,7 @@ mod tests {
         assert_eq!((model.play_state(id), model.current_time(id)), (PlayState::Idle, None));
         assert!(model.take_signals().iter().any(|s| matches!(s, Signal::Cancel { .. })));
         let infinite = model.new_effect(EffectTiming { iterations: f64::INFINITY, ..timing(1000.0) });
-        let forever = model.new_animation(Some(infinite), true);
+        let forever = model.new_animation(Some(infinite), Some(0.0));
         assert_eq!(model.finish(forever), Err(AnimationError::InvalidState));
     }
 

@@ -104,7 +104,7 @@ impl Animations {
         e.composite = style.composite;
         e.implicit_easing = Some(style.implicit_easing);
         self.set_target(effect, Some(owner.clone()));
-        let id = self.new_animation(Some(effect), true);
+        let id = self.new_animation(Some(effect), Some(0.0));
         let animation =
             CssAnimation { name: style.name, position, overridden: Overrides::empty(), style_paused: style.paused };
         self.own(id, owner, CssKind::Animation(animation));

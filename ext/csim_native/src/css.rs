@@ -165,7 +165,7 @@ impl Animations {
             let into_iteration = (iteration.unwrap_or(0.0) - timing.iteration_start).max(0.0) * timing.duration;
             animation_events(was, phase, start, end, into_iteration, ran)
         };
-        let timeline = self.timeline_time.filter(|_| a.has_timeline).unwrap_or(0.0);
+        let timeline = self.timeline_time_of(a).unwrap_or(0.0);
         let due = |kind: &str, elapsed: f64| match (a.start_time, a.playback_rate) {
             (Some(start), rate) if rate != 0.0 && !kind.ends_with("cancel") => start + (timing.delay + elapsed) / rate,
             _ => timeline,
