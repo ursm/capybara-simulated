@@ -12,6 +12,8 @@ use crate::dom::register;
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "urlParse", url_parse, context_id);
     register(scope, ns, "urlSet", url_set, context_id);
+    register(scope, ns, "urlencodedParse", urlencoded_parse, context_id);
+    register(scope, ns, "urlencodedSerialize", urlencoded_serialize, context_id);
 }
 
 // A URL's parts, in `parts`' order.
@@ -162,4 +164,33 @@ fn url_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     }
     let parts = parts(scope, &url);
     rv.set(parts.into());
+}
+
+// __dom.urlencodedParse(input) -> [name, value, name, value, …]: the application/x-www-form-urlencoded parser's tuples
+// (URL Standard §5.1) of `input`'s UTF-8 bytes — `+` a space, each `%XX` its byte, the bytes UTF-8 decoded without BOM,
+// an invalid sequence U+FFFD.
+fn urlencoded_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let input = usv(scope, args.get(0));
+    let items: Vec<v8::Local<v8::Value>> = url::form_urlencoded::parse(input.as_bytes())
+        .flat_map(|(name, value)| [name, value])
+        .map(|text| v8::String::new(scope, &text).map_or_else(|| v8::undefined(scope).into(), Into::into))
+        .collect();
+    let array = v8::Array::new_with_elements(scope, &items);
+    rv.set(array.into());
+}
+
+// __dom.urlencodedSerialize(list) -> the application/x-www-form-urlencoded serializer's string (URL Standard §5.2) of the
+// tuples in `list`, flat as the parser answers them: each name and value percent-encoded in UTF-8 with the
+// application/x-www-form-urlencoded set, a space `+`.
+fn urlencoded_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    for i in (0..list.length()).step_by(2) {
+        let [name, value] = [i, i + 1].map(|k| list.get_index(scope, k).map(|v| usv(scope, v)).unwrap_or_default());
+        serializer.append_pair(&name, &value);
+    }
+    let text = serializer.finish();
+    if let Some(string) = v8::String::new(scope, &text) {
+        rv.set(string.into());
+    }
 }
