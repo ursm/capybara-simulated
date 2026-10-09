@@ -35,6 +35,26 @@ RSpec.describe 'Service Worker bindings' do
               preload: self.registration.navigationPreload === self.registration.navigationPreload
             });
           JS
+        # (…a worker that reports its scope's client and event interfaces)
+        when '/surface.js'
+          [200, {'content-type' => 'text/javascript'}, [<<~JS]]
+            const err = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
+            const rej = (p) => p.then(() => 'ok', (e) => e.name);
+            let routes = null;
+            self.addEventListener('install', (e) => { routes = rej(e.addRoutes({ condition: {}, source: 'network' })); });
+            self.onmessage = async (e) => {
+              const extended = err(() => e.waitUntil(Promise.resolve()));   // (…while it is dispatched, not after an await)
+              const message = new ExtendableMessageEvent('message', { ports: [] });
+              e.source.postMessage({
+                clients: [self.clients instanceof Clients, Object.keys(Clients.prototype).includes('matchAll'),
+                          e.source instanceof WindowClient, e.source.focused, e.source.visibilityState,
+                          await rej(self.clients.openWindow('/x')), err(() => new Client())],
+                events: [err(() => new ExtendableEvent('x').waitUntil(Promise.resolve())), err(() => new FetchEvent('fetch')),
+                         Object.isFrozen(message.ports), message.ports === message.ports, message.data,
+                         extended, await routes]
+              });
+            };
+          JS
         # (…a version that sets its registration's navigation preload header while it installs, and takes over)
         when '/update.js'
           [200, {'content-type' => 'text/javascript'}, [<<~JS]]
@@ -121,5 +141,30 @@ RSpec.describe 'Service Worker bindings' do
     JS
     poll_until { session.evaluate_script('globalThis.__out !== null') }
     expect(session.evaluate_script('globalThis.__out')).to eq(%w[true two])
+  end
+
+  # A service worker's clients and events, generated from their IDL: its scope's Clients and the WindowClient a page is
+  # to it; a window opened only on a user's activation, which a worker here never has (InvalidAccessError); an event a
+  # page made is untrusted, so it extends nothing (InvalidStateError, §4.5.1), where the platform's message event does
+  # while it is dispatched; a FetchEvent needs its request; a router condition needs a member.
+  it "is what a service worker's clients and events are" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__out = null;
+      (async () => {
+        const reg = await navigator.serviceWorker.register('/surface.js', {scope: '/'});
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise((res) => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const reply = new Promise((res) => { navigator.serviceWorker.onmessage = (e) => res(e.data); });
+        reg.active.postMessage('go');
+        globalThis.__out = await reply;
+      })().catch((e) => { globalThis.__out = String(e); });
+    JS
+    poll_until { session.evaluate_script('globalThis.__out !== null') }
+    expect(session.evaluate_script('globalThis.__out')).to eq(
+      'clients' => [true, true, true, false, 'visible', 'InvalidAccessError', 'TypeError'],
+      'events' => ['InvalidStateError', 'TypeError', true, true, nil, 'none', 'TypeError']
+    )
   end
 end

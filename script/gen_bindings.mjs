@@ -273,6 +273,21 @@ const INTERFACES = [
   }],
   ['service-workers', 'ServiceWorkerContainer', { install: true }],
   ['service-workers', 'NavigationPreloadManager', { install: true }],
+  ['service-workers', 'Client', {
+    install: true,
+    omit: { 'page-lifecycle': 'lifecycleState: the Page Lifecycle API is not implemented (a WICG proposal)' }
+  }],
+  ['service-workers', 'WindowClient', {
+    install: true,
+    omitMembers: {
+      ancestorOrigins: "the ancestor origins of a client: Location's ancestorOrigins, which it mirrors, is not implemented (Firefox has neither)"
+    }
+  }],
+  ['service-workers', 'Clients', { install: true }],
+  ['service-workers', 'ExtendableEvent', { install: true }],
+  ['service-workers', 'ExtendableMessageEvent', { install: true }],
+  ['service-workers', 'FetchEvent', { install: true }],
+  ['service-workers', 'InstallEvent', { install: true }],
   ['web-animations', 'AnimationTimeline', {
     install: true,
     omitMembers: { play: 'AnimationTimeline.play(): a level-2 shorthand no engine ships (Chrome and Firefox have none)' }
@@ -710,8 +725,8 @@ function flattenUnion(t) {
   return { members, includesNullable };
 }
 
-// A union's conversion (Web IDL §3.2.25), for unions of interfaces, a callback function, a dictionary, a string, a
-// numeric type and boolean (a callable value the callback function's):
+// A union's conversion (Web IDL §3.2.25), for unions of interfaces, a callback function, a dictionary, a string (or an
+// enumeration), a numeric type and boolean (a callable value the callback function's):
 // null or undefined null where it includes a nullable type, else the dictionary's; an object of one of its interfaces
 // as it is; any other object the dictionary's; a boolean or a number as itself where its type is a member; then the
 // string type's conversion, else the numeric type's, else boolean's — and with none of them, a TypeError. A union
@@ -736,7 +751,8 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   // (…a WindowProxy among them the Window it is a proxy of: the Window's test, as for one alone)
   const ifaces = of((u) => u.idlType === 'WindowProxy' || definitions.get(u.idlType)?.type === 'interface');
   const dicts = of((u) => dictionaries.has(u.idlType));
-  const strings = of((u) => STRING_TYPES.has(u.idlType));
+  // (…an enumeration among the string types, as Web IDL's distinguishability has it: RouterSourceEnum)
+  const strings = of((u) => STRING_TYPES.has(u.idlType) || enums.has(u.idlType));
   const numerics = of((u) => NUMERIC_TYPES.has(u.idlType));
   const booleans = of((u) => u.idlType === 'boolean');
   const callbacks = of((u) => definitions.get(u.idlType)?.type === 'callback');
