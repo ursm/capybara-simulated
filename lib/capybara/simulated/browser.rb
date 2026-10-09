@@ -11325,7 +11325,7 @@ module Capybara
       # slot mutated IN PLACE — `@pending_window_nav` / `@pending_frame_nav` are
       # Hashes keyed by realm and the frame-submit / frame-reload slots are Arrays.
       NAV_INTENT_SLOTS = %i[
-        @pending_location @pending_reload @pending_history_traverse
+        @pending_location @pending_location_replace @pending_reload @pending_history_traverse
         @pending_window_nav @pending_frame_nav @pending_frame_submit
         @pending_frame_reload @pending_frame_traverse
       ].freeze

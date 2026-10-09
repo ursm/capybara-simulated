@@ -196,6 +196,19 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
     expect(cross_window_eval('w.location.assign')).to eq('SecurityError') # assign not cross-origin
   end
 
+  # (b1) …and what its `href` setter and `replace()` navigate to is resolved by the caller, against the caller's document —
+  # a relative URL the page's — where a javascript: URL from another origin navigates to nothing (HTML's navigate).
+  it "navigates a cross-origin Location to the caller's URL, never to a javascript: one" do
+    session.execute_script(<<~JS)
+      window.seen = [];
+      addEventListener('message', (e) => seen.push(String(e.data).split(' ')[0]));
+      document.body.appendChild(document.createElement('iframe')).src = 'http://cross.example.org/child';
+    JS
+    session.execute_script(%q(frames[0].location.href = 'javascript:parent.postMessage("ran", "*")'))
+    session.execute_script("frames[0].location.replace('/rel')")
+    expect(session.evaluate_script('[seen.includes("ran"), frames[0].location.href]')).to eq([false, 'http://www.example.com/rel'])
+  end
+
   # (b2) A Window member called with a cross-origin window as `this` passes Web IDL's security check only for a
   # CrossOriginProperty: the getter of `document` read off this window and called on the frame's throws, as reading
   # it through the frame does; its driver state is no more reachable; `postMessage` / `closed` stay callable.
