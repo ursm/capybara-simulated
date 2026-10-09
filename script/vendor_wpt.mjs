@@ -4,6 +4,7 @@
 // artifact" model as gen_idl_surface.mjs and the JS bundles.
 //
 //   node script/vendor_wpt.mjs            # vendor at the pinned commit
+//   node script/vendor_wpt.mjs <tree>...  # …only these trees (each listed below)
 //   WPT_REF=<sha|branch> node script/vendor_wpt.mjs   # override the pin
 //
 // What it vendors, all at one pinned commit:
@@ -200,6 +201,11 @@ const TREES = [
                                        // half is reftests, which this gate renders (see the reftest
                                        // painter), so a transform that lands in the wrong place is visible
                                        // rather than merely un-asserted.
+  'selection',                         // The Selection API — getSelection / addRange / collapse / extend /
+                                       // setBaseAndExtent / containsNode / deleteFromDocument / the
+                                       // selectionchange events: the cursor every rich-text editor
+                                       // (ProseMirror / Tiptap / Trix) drives and reads back. Its caret /
+                                       // drag / `modify` slices need line layout and hit-testing.
   'css/geometry',                      // DOMMatrix / DOMPoint / DOMRect / DOMQuad — the geometry interfaces
                                        // canvas transforms, Path2D.addPath and app code build on, and the
                                        // CSS transform list `new DOMMatrix(string)` parses.
@@ -450,8 +456,16 @@ async function main() {
   // network is down or GitHub rate-limits an unauthenticated run — cleaning before knowing the
   // download can even start left the corpus DELETED and the working tree needing a
   // `git checkout -- spec/wpt` to recover (measured, twice).
+  // (…every tree, or the ones named on the command line — a tree newly added to TREES vendored without
+  // re-fetching all the others; the harness and the support files come along either way)
+  const all = [...TREES, ...SUPPORT_TREES];
+  const named = process.argv.slice(2);
+  const unknown = named.filter((tree) => !all.includes(tree));
+  if (unknown.length) throw new Error(`not in TREES or SUPPORT_TREES: ${unknown.join(', ')}`);
+  const trees = named.length ? named : all;
+
   const paths = [];
-  for (const tree of [...TREES, ...SUPPORT_TREES]) {
+  for (const tree of trees) {
     const blobs = await listBlobs(sha, tree);
     console.error(`  ${tree}: ${blobs.length} blobs`);
     paths.push(...blobs);
@@ -460,7 +474,7 @@ async function main() {
   paths.push(...SUPPORT_FILES);
 
   // Clean the vendored trees (but keep our committed resources/testharnessreport.js).
-  for (const tree of [...TREES, ...SUPPORT_TREES]) {
+  for (const tree of trees) {
     await cleanTree(join(OUT, tree));
   }
   await rm(join(OUT, 'resources', 'testharness.js'), { force: true });

@@ -360,6 +360,7 @@ const INTERFACES = [
   ['dom', 'AbstractRange', { install: true }],
   ['dom', 'StaticRange', { install: true }],
   ['dom', 'Range', { install: true }],
+  ['selection-api', 'Selection', { install: true }],
   ['dom', 'MutationObserver', { install: true }],
   ['cssom-view', 'MediaQueryList', { install: true }],
   ['dom', 'MutationRecord', { install: true }],
