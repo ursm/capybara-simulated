@@ -32487,10 +32487,6 @@ custom-elements/form-associated/ElementInternals-submit-behavior.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-dom/collections/HTMLCollection-supported-property-indices.html:
-- name: Handling of property names that look like integers around 2^32
-  reason: Exactly the 2^32 index-boundary exotic-object edge cited in rule 2; no real
-    library/app depends on it and matching requires special index-coercion handling.
 dom/events/EventListener-incumbent-global-1.sub.html:
 - name: Check the incumbent global EventListeners  are called with
   reason: Needs the WebIDL incumbent settings object — when a listener fires, the
