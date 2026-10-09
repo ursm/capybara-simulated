@@ -4543,7 +4543,7 @@ module Capybara
         body = if service && (pending = (@sw_scope_meta[sw_scope.to_s] || {}).delete(:pending_body))
           pending
         elsif !sw_script
-          fetch_worker_script(target, parent_worker ? @workers.dig(parent_worker, :script_url) : frame_realm_url(realm_id))
+          fetch_worker_script(target, parent_worker ? @workers.dig(parent_worker, :url) : frame_realm_url(realm_id))
         end
         # Resource Timing for a DEDICATED worker's own main-script fetch — a browser files it in the
         # creating context's timeline (a classic worker as 'other', a module worker as 'script'; the
@@ -4592,7 +4592,8 @@ module Capybara
         # lock is per worker rather than the shared counter mutex: the only two things that ever
         # contend for it are that stop and the worker's own dispose, and holding it across a native
         # call must not block anything else in the browser.
-        record = {thread: nil, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, rt: nil, rt_lock: Mutex.new}
+        # `url`: the worker's own URL — its script's, after redirects — which a nested worker's script fetch is judged against.
+        record = {thread: nil, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, url: target, rt: nil, rt_lock: Mutex.new}
         # The Update algorithm byte-checks a new fetch against the running version's
         # script (+ its recorded imports — sw_note_import fills that map as the worker
         # evaluates). SW scripts are small; only service workers pay the retention.
@@ -8443,6 +8444,7 @@ module Capybara
           if final_url != url || final_ctrl != controller.to_i
             if final_url != url
               url = final_url
+              (w = @workers[handle]) && w[:url] = url
               rt.eval_void("globalThis.__csimUpdateLocation(#{JSON.generate(url)});")
             end
             if final_ctrl != controller.to_i
@@ -9096,8 +9098,10 @@ module Capybara
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
-        # -inserted-after-open). So this resolves only against the document URL.
-        target = resolve_against_current(url.to_s)
+        # -inserted-after-open). So this resolves only against the document URL — a relative one: an absolute URL is the
+        # request's as it is, which also keeps a worker thread's fetch (its URLs resolved in its own isolate) off the main
+        # realm, whose current document only its own thread may ask about.
+        target = url.to_s.match?(%r{\Ahttps?://}i) ? url.to_s : resolve_against_current(url.to_s)
         return nil unless target.is_a?(String) && target.match?(%r{\Ahttps?://}i)
         # Fetch "port blocking" (https://fetch.spec.whatwg.org/#port-blocking): a
         # request to a blocked port is a network error before any connection —

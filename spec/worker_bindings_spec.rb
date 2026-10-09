@@ -23,6 +23,11 @@ RSpec.describe 'Worker bindings' do
       when '/away' then [302, {'location' => 'http://other.example/echo.js'}, []]
       when '/echo.js' then [200, {'content-type' => 'text/javascript'}, ['onmessage = (e) => postMessage(e.data);']]
       when '/ref' then [200, {'content-type' => 'text/plain'}, [env['HTTP_REFERER'].to_s]]
+      when '/nest.js'
+        [200, {'content-type' => 'text/javascript'}, ['const w = new Worker("echo.js"); w.onmessage = (e) => postMessage(["nested", e.data]); ' \
+                                                      'w.onerror = () => postMessage("nested-error"); onmessage = (e) => w.postMessage(e.data);']]
+      when '/frame' then [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>frame']]
+      when '/framed' then [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><iframe src="http://other.example/frame"></iframe>']]
       else [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>']]
       end
     end
@@ -53,5 +58,23 @@ RSpec.describe 'Worker bindings' do
       'TypeError', 'TypeError', [], {'hi' => 1}, 'TypeError', true, true, [],
       ['http://www.example.com/shared.js', 'http://www.example.com/shared.js', true, true], 'error', false, 'SyntaxError', 'SyntaxError'
     ])
+  end
+
+  # A nested worker's script is judged against its parent worker's URL: in a frame of another origin, its worker's
+  # same-origin child runs.
+  it "judges a nested worker's script against its parent" do
+    session = simulated_session(app)
+    session.visit '/framed'
+    session.within_frame(0) do
+      session.execute_script(<<~JS)
+        globalThis.__out = null;
+        const w = new Worker('/nest.js');
+        w.onmessage = (e) => { globalThis.__out = e.data; };
+        w.onerror = () => { globalThis.__out = 'error'; };
+        w.postMessage('hi');
+      JS
+      poll_until { session.evaluate_script('globalThis.__out !== null') }
+      expect(session.evaluate_script('globalThis.__out')).to eq(['nested', 'hi'])
+    end
   end
 end
