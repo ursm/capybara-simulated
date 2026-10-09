@@ -293,6 +293,10 @@ pub(crate) const STATE_DIRTY_BY_USER: u32 = 1 << 12;
 pub(crate) const STATE_CUSTOM_ERROR: u32 = 1 << 13;
 pub(crate) const STATE_USER_INTERACTED: u32 = 1 << 14;
 pub(crate) const STATE_HAS_FILES: u32 = 1 << 15;
+// …and an option's selectedness flags (HTML §4.10.10): dirty — set by script or the user, after which its `selected`
+// attribute no longer drives it — and initialised from that attribute once.
+pub(crate) const STATE_SELECTED_DIRTY: u32 = 1 << 16;
+pub(crate) const STATE_SELECTED_INIT: u32 = 1 << 17;
 
 
 impl NodeData {

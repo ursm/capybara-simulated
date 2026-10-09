@@ -14,7 +14,7 @@ use crate::input_value::{number_of, parse_float, step_scale};
 use web_atoms::local_name;
 use crate::dom::{
     NodeData, NodeId, NodeKind, RealmArena, STATE_CUSTOM_ERROR, STATE_DIRTY_BY_USER, STATE_FORM_ASSOCIATED,
-    STATE_HAS_FILES, STATE_USER_INTERACTED,
+    STATE_HAS_FILES, STATE_SELECTED, STATE_SELECTED_DIRTY, STATE_SELECTED_INIT, STATE_USER_INTERACTED,
 };
 
 // The ValidityState flags.
@@ -338,6 +338,74 @@ impl RealmArena {
             }
         }
     }
+    // An option's state with its selectedness initialised from its `selected` attribute where nothing has done it yet —
+    // the default the attribute gives one that is not dirty — however the option entered the tree.
+    pub(crate) fn option_initialised(&self, option: NodeId) -> u32 {
+        let Some(n) = self.get(option) else { return 0 };
+        let state = n.state;
+        if state & STATE_SELECTED_INIT != 0 {
+            return state;
+        }
+        let selected = if state & STATE_SELECTED_DIRTY != 0 {
+            state & STATE_SELECTED
+        } else if n.plain_attr("selected").is_some() {
+            STATE_SELECTED
+        } else {
+            0
+        };
+        (state & !STATE_SELECTED) | selected | STATE_SELECTED_INIT
+    }
+    // Whether an option is disabled for its select's selectedness (HTML §4.10.10): its own `disabled`, or its nearest
+    // optgroup's — across a wrapper of a customizable select — not its select's.
+    pub(crate) fn option_disabled(&self, option: NodeId) -> bool {
+        if self.get(option).is_some_and(|n| n.plain_attr("disabled").is_some()) {
+            return true;
+        }
+        let mut at = self.parent_of(option);
+        while let Some(id) = at {
+            let Some(n) = self.get(id).filter(|n| n.kind == NodeKind::Element) else { return false };
+            match if n.is_html() { &*n.local_name } else { "" } {
+                "optgroup" => return n.plain_attr("disabled").is_some(),
+                "select" | "option" | "datalist" => return false,
+                _ => at = self.parent_of(id),
+            }
+        }
+        false
+    }
+    // HTML's selectedness setting algorithm (§4.10.7) for a select that is not `multiple`, `just` the option just
+    // selected — inserted selected, or set so — which wins over the others: every option initialised first; then the
+    // others cleared where `just` is selected; with none selected, a drop-down box's first option not disabled
+    // selected; with more than one, all but the last in tree order cleared. The options whose state it changes, with their new
+    // state — which the caller writes, as the element objects mirror it.
+    pub(crate) fn selectedness(&self, select: NodeId, just: Option<NodeId>) -> Vec<(NodeId, u32)> {
+        if self.get(select).is_none_or(|n| !n.is_html_named("select") || n.plain_attr("multiple").is_some()) {
+            return Vec::new();
+        }
+        let options = self.list_of_options(select);
+        let before: Vec<u32> = options.iter().map(|&o| self.get(o).map_or(0, |n| n.state)).collect();
+        let mut state: Vec<u32> = options.iter().map(|&o| self.option_initialised(o)).collect();
+        let selected = |s: u32| s & STATE_SELECTED != 0;
+        if let Some(at) = just.and_then(|j| options.iter().position(|&o| o == j)).filter(|&at| selected(state[at])) {
+            for (i, s) in state.iter_mut().enumerate() {
+                if i != at {
+                    *s &= !STATE_SELECTED;
+                }
+            }
+        }
+        let chosen: Vec<usize> = (0..state.len()).filter(|&i| selected(state[i])).collect();
+        if chosen.is_empty() {
+            if !self.is_list_box(select) {
+                if let Some(i) = (0..options.len()).find(|&i| !self.option_disabled(options[i])) {
+                    state[i] |= STATE_SELECTED;
+                }
+            }
+        } else {
+            for &i in &chosen[..chosen.len() - 1] {
+                state[i] &= !STATE_SELECTED;
+            }
+        }
+        (0..options.len()).filter(|&i| state[i] != before[i]).map(|i| (options[i], state[i])).collect()
+    }
     // An option's value: its `value` attribute, else its text.
     fn option_value(&self, id: NodeId) -> String {
         match self.get(id).and_then(|n| n.plain_attr("value")) {
@@ -438,6 +506,43 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "listOfOptions", list_of_options, context_id);
     crate::dom::register(scope, ns, "isListBox", is_list_box, context_id);
     crate::dom::register(scope, ns, "isSubmitButton", is_submit_button, context_id);
+    crate::dom::register(scope, ns, "selectedness", selectedness, context_id);
+    crate::dom::register(scope, ns, "optionInitialised", option_initialised, context_id);
+    crate::dom::register(scope, ns, "optionDisabled", option_disabled, context_id);
+}
+
+// __dom.optionDisabled(nid) -> whether an option is disabled for its select's selectedness and entry list
+// (`option_disabled`).
+fn option_disabled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(option) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(crate::dom::realm(scope, cid).option_disabled(option));
+}
+
+// __dom.selectedness(selectNid, justNid) -> [index, state, index, state, …]: the options of the select's list of
+// options whose state the selectedness setting algorithm (`selectedness`) changes, by their index there, with their new
+// state; `justNid` -1 for none.
+fn selectedness(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let just = crate::dom::nid_arg(scope, &args, 1);
+    let arena = crate::dom::realm(scope, cid);
+    let options = arena.list_of_options(select);
+    let items: Vec<v8::Local<v8::Value>> = arena
+        .selectedness(select, just)
+        .into_iter()
+        .flat_map(|(o, state)| [options.iter().position(|&x| x == o).unwrap_or(0) as f64, f64::from(state)])
+        .map(|n| v8::Number::new(scope, n).into())
+        .collect();
+    let array = v8::Array::new_with_elements(scope, &items);
+    rv.set(array.into());
+}
+
+// __dom.optionInitialised(nid) -> the option's state with its selectedness initialised (`option_initialised`).
+fn option_initialised(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(option) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    rv.set_uint32(crate::dom::realm(scope, cid).option_initialised(option));
 }
 
 // __dom.isSubmitButton(nid) -> whether the element is a submit button (`element_state::is_submit_button`).
@@ -806,5 +911,60 @@ mod tests {
         let value = vec![0x61, 0xD800, 0x62];
         let re = compiled_pattern(&units("a.b")).unwrap();
         assert!(re.find_from_utf16(&value, 0).next().is_some());
+    }
+}
+
+#[cfg(test)]
+mod selectedness_tests {
+    use super::*;
+    use web_atoms::ns;
+
+    // An HTML element named `name` with `attrs`, a child of `parent`.
+    fn html(arena: &mut RealmArena, parent: Option<NodeId>, name: &str, attrs: &[&str]) -> NodeId {
+        let mut n = NodeData::of_kind(NodeKind::Element, Vec::new());
+        n.local_name = name.into();
+        n.ns = ns!(html);
+        n.attributes = attrs.iter().map(|a| (a.to_string(), String::new())).collect();
+        arena.create(n, parent)
+    }
+    fn selected(arena: &RealmArena, changes: &[(NodeId, u32)], option: NodeId) -> bool {
+        let changed = changes.iter().find(|(o, _)| *o == option);
+        let state = changed.map_or_else(|| arena.get(option).unwrap().state, |c| c.1);
+        state & STATE_SELECTED != 0
+    }
+
+    #[test]
+    fn selectedness_setting_algorithm() {
+        let mut arena = RealmArena::default();
+        // (…a drop-down box with none selected: its first option not disabled — past a disabled one and one in a
+        // disabled optgroup)
+        let select = html(&mut arena, None, "select", &[]);
+        let off = html(&mut arena, Some(select), "option", &["disabled"]);
+        let group = html(&mut arena, Some(select), "optgroup", &["disabled"]);
+        let grouped = html(&mut arena, Some(group), "option", &[]);
+        let first = html(&mut arena, Some(select), "option", &[]);
+        let changes = arena.selectedness(select, None);
+        assert!(!selected(&arena, &changes, off) && !selected(&arena, &changes, grouped));
+        assert!(selected(&arena, &changes, first));
+        // (…two selected by their attribute: the last; one just selected: it, whatever its place)
+        let two = html(&mut arena, None, "select", &[]);
+        let a = html(&mut arena, Some(two), "option", &["selected"]);
+        let b = html(&mut arena, Some(two), "option", &["selected"]);
+        let changes = arena.selectedness(two, None);
+        assert!(!selected(&arena, &changes, a) && selected(&arena, &changes, b));
+        let changes = arena.selectedness(two, Some(a));
+        assert!(selected(&arena, &changes, a) && !selected(&arena, &changes, b));
+        // (…a list box keeps none; a multiple select is left to its options)
+        let list = html(&mut arena, None, "select", &["size"]);
+        arena.get_mut_quietly(list).unwrap().attributes = vec![("size".into(), "3".into())];
+        html(&mut arena, Some(list), "option", &[]);
+        assert!(arena.selectedness(list, None).iter().all(|(_, s)| s & STATE_SELECTED == 0));
+        let multiple = html(&mut arena, None, "select", &["multiple"]);
+        html(&mut arena, Some(multiple), "option", &["selected"]);
+        assert!(arena.selectedness(multiple, None).is_empty());
+        // (…a dirty option keeps its selectedness over its attribute)
+        let dirty = html(&mut arena, None, "option", &["selected"]);
+        arena.get_mut_quietly(dirty).unwrap().state = STATE_SELECTED_DIRTY;
+        assert_eq!(arena.option_initialised(dirty), STATE_SELECTED_DIRTY | STATE_SELECTED_INIT);
     }
 }
