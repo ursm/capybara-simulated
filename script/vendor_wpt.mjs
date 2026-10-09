@@ -85,6 +85,10 @@ const TREES = [
                                        // reflection, compile-on-first-use + lexical scopes, listener
                                        // registration order, OnErrorEventHandler; validates the
                                        // registered-listener on-handler model (events.js setHandlerSlot)
+  'html/semantics/interactive-elements', // <dialog> (show / showModal / close / requestClose / closedby /
+                                       // returnValue / cancel), <details> (toggle, exclusive accordions),
+                                       // <summary> activation and the command / commandfor invokers — DOM
+                                       // and event surface the app suites' modals and disclosures ride on
   'html/semantics/forms',              // form submission / constraint validation / FormData / input /
                                        // select / textarea / labels — the form-driven surface every app
                                        // suite exercises (layout-dependent widget-rendering subtests are

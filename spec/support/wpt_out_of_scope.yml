@@ -42736,6 +42736,47 @@ html/semantics/forms/the-select-element/show-picker-being-rendered.html:
 - name: select showPicker() throws when not being rendered
   reason: showPicker() gating on render state (being-rendered / content-visibility:hidden)
     — needs visibility/render state we do not model.
+html/semantics/interactive-elements/the-details-element/details-toggle-source-commandfor.tentative.html:
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] no subtests"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/semantics/interactive-elements/the-dialog-element/dialog-close-via-attribute.tentative.html:
+- name: Removing the open attribute from an open modal dialog should run the closing
+    algorithm.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Removing the open attribute from an open non-modal dialog should fire a close
+    event.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/semantics/interactive-elements/the-dialog-element/dialog-requestclose-closedby.tentative.html:
+- name: requestClose() should close the dialog even when computed closedby becomes
+    none
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with-transformed-ancestor.tentative.html:
+- name: "== html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with-fixed-position-cb-ref.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with-will-change-ancestor.tentative.html:
+- name: "== html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with-fixed-position-cb-ref.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/semantics/interactive-elements/the-dialog-element/top-layer-stacking.tentative.html:
+- name: "== html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-ref.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/webappapis/scripting/events/event-handler-onmove-01.tentative.html:
 - name: Window move event
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
