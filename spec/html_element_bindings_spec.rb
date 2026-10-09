@@ -198,4 +198,19 @@ RSpec.describe 'HTML element bindings' do
     JS
     expect(got).to eq([1, 1, 1])
   end
+
+  it 'names on the window and the document only HTML elements' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const f = document.createElementNS('http://www.w3.org/1999/xhtml', 'IFRAME');
+        f.setAttribute('name', 'qq');
+        const x = document.createElementNS('urn:x', 'form');
+        x.setAttribute('name', 'qf');
+        document.body.append(f, x);
+        return [typeof document.qq, typeof window.qq, typeof document.qf];
+      })()
+    JS
+    expect(got).to eq(%w[undefined undefined undefined])
+  end
 end
