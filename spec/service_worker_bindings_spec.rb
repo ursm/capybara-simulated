@@ -41,7 +41,19 @@ RSpec.describe 'Service Worker bindings' do
             const err = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
             const rej = (p) => p.then(() => 'ok', (e) => e.name);
             let routes = null;
+            let chained = null;
+            let late = false;
             self.addEventListener('install', (e) => { routes = rej(e.addRoutes({ condition: {}, source: 'network' })); });
+            // (…waitUntil from a microtask chained twice deep in a handler: still during its dispatch)
+            self.addEventListener('install', async (e) => {
+              await null;
+              await null;
+              chained = err(() => e.waitUntil(Promise.resolve()));
+            });
+            // (…one added from a microtask after the handler, the activation waiting for it to settle)
+            self.addEventListener('activate', (e) => {
+              Promise.resolve().then(() => e.waitUntil(new Promise((r) => setTimeout(() => { late = true; r(); }, 300))));
+            });
             self.onmessage = async (e) => {
               const extended = err(() => e.waitUntil(Promise.resolve()));   // (…while it is dispatched, not after an await)
               const message = new ExtendableMessageEvent('message', { ports: [] });
@@ -51,7 +63,7 @@ RSpec.describe 'Service Worker bindings' do
                           await rej(self.clients.openWindow('/x')), err(() => new Client())],
                 events: [err(() => new ExtendableEvent('x').waitUntil(Promise.resolve())), err(() => new FetchEvent('fetch')),
                          Object.isFrozen(message.ports), message.ports === message.ports, message.data,
-                         extended, await routes]
+                         extended, await routes, chained, late]
               });
             };
           JS
@@ -146,7 +158,8 @@ RSpec.describe 'Service Worker bindings' do
   # A service worker's clients and events, generated from their IDL: its scope's Clients and the WindowClient a page is
   # to it; a window opened only on a user's activation, which a worker here never has (InvalidAccessError); an event a
   # page made is untrusted, so it extends nothing (InvalidStateError, §4.5.1), where the platform's message event does
-  # while it is dispatched; a FetchEvent needs its request; a router condition needs a member.
+  # while it is dispatched — through every microtask its handlers chain — and its lifecycle step waits for a lifetime
+  # promise added after a handler; a FetchEvent needs its request; a router condition needs a member.
   it "is what a service worker's clients and events are" do
     session = simulated_session(app)
     session.visit '/'
@@ -164,7 +177,7 @@ RSpec.describe 'Service Worker bindings' do
     poll_until { session.evaluate_script('globalThis.__out !== null') }
     expect(session.evaluate_script('globalThis.__out')).to eq(
       'clients' => [true, true, true, false, 'visible', 'InvalidAccessError', 'TypeError'],
-      'events' => ['InvalidStateError', 'TypeError', true, true, nil, 'none', 'TypeError']
+      'events' => ['InvalidStateError', 'TypeError', true, true, nil, 'none', 'TypeError', 'none', true]
     )
   end
 end

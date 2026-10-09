@@ -59,7 +59,11 @@ RSpec.describe 'Service Worker client enumeration' do
         const to   = e.data && e.data.postTo;
         const opts = (e.data && e.data.options) || undefined;
         e.waitUntil(self.clients.matchAll(opts).then(async cs => {
-          if (cmd) { const t = cs.find(c => c.url.endsWith(cmd)); if (t) await t.focus(); }
+          let focus = null;
+          if (cmd) {
+            const t = cs.find(c => c.url.endsWith(cmd));
+            if (t) focus = await t.focus().then(() => 'ok', (err) => err.name);
+          }
           // Relay to another client — used to prove a `client.postMessage` aimed at a WORKER
           // client reaches that worker's own navigator.serviceWorker.
           if (to) {
@@ -68,7 +72,7 @@ RSpec.describe 'Service Worker client enumeration' do
             if (t) t.postMessage({relayed: to});
           }
           const after = (cmd || to) ? await self.clients.matchAll(opts) : cs;
-          e.source.postMessage({clients: after.map(describe), pinged: pinged.slice(),
+          e.source.postMessage({clients: after.map(describe), pinged: pinged.slice(), focus,
                                 clientsIsClients: self.clients instanceof Clients});
         }));
       };
@@ -322,20 +326,18 @@ RSpec.describe 'Service Worker client enumeration' do
     expect(clients.find {|c| c['id'] == 'client-window' }['focused']).to be(true)
   end
 
-  # `clients.matchAll().then(cs => cs[0].focus())` — how a notificationclick handler raises the
-  # existing tab. The worker asks the browser to move the focus chain and sees the result.
-  it 'moves focus from the worker via WindowClient.focus()' do
+  # `clients.matchAll().then(cs => cs[0].focus())` is how a notificationclick handler raises the existing tab — on a
+  # user's activation, which a worker here never has: WindowClient.focus() rejects with an InvalidAccessError (§4.3.4),
+  # and the focus stays where the page put it.
+  it 'refuses WindowClient.focus() without a user activation' do
     session = session_with_frames({'a' => '/scope/page.html#a', 'b' => '/scope/page.html#b'})
     session.execute_script("document.getElementById('a').focus();")
-    clients = match_all(session, via: 'b', focus: '#b')
+    report = worker_report(session, via: 'b', focus: '#b')
 
-    expect(clients.map {|c| c['canFocus'] }).to all(be(true))
-    expect(clients.select {|c| c['focused'] }.map {|c| c['url'] }).to eq([clients.first['url']])
-    expect(clients.first['url']).to end_with('#b')
-
-    # A second, plain matchAll: the worker applied the move to its own mirror synchronously,
-    # so this only stays true if the BROWSER applied it too when it drained the request.
-    expect(match_all(session, via: 'b').first['url']).to end_with('#b')
+    expect(report['focus']).to eq('InvalidAccessError')
+    expect(report['clients'].map {|c| c['canFocus'] }).to all(be(true))
+    expect(report['clients'].find {|c| c['url'].end_with?('#a') }['focused']).to be(true)
+    expect(report['clients'].find {|c| c['url'].end_with?('#b') }['focused']).to be(false)
   end
 
   # Registration now FOLLOWS control, so a client can move between workers at runtime: a

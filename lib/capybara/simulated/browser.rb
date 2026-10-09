@@ -6766,8 +6766,7 @@ module Capybara
         broadcasts,  rest0  = events.partition {|e| e[:kind] == 'broadcast' }
         port_ends,   rest0b = rest0.partition  {|e| PORT_END_KINDS.include?(e[:kind]) }
         port_msgs,   rest0c = rest0b.partition {|e| e[:kind] == 'port_msg' }
-        sw_focuses,  rest0c2 = rest0c.partition {|e| e[:kind] == 'sw_client_focus' }
-        sw_navs,     rest0c3 = rest0c2.partition {|e| e[:kind] == 'sw_client_navigate' }
+        sw_navs,     rest0c3 = rest0c.partition {|e| e[:kind] == 'sw_client_navigate' }
         skip_waits,  rest0d0 = rest0c3.partition {|e| e[:kind] == 'sw_skip_waiting' }
         sw_unregs,   rest0d0b = rest0d0.partition {|e| e[:kind] == 'sw_unregister' }
         sw_evals,    rest0d1 = rest0d0b.partition {|e| e[:kind] == 'sw_eval' }
@@ -6790,12 +6789,6 @@ module Capybara
           when 'port_closed'    then port_end_closed(e[:end])
           when 'port_redeliver' then port_redeliver(e[:end], e[:data])
           end
-        end
-        # `WindowClient.focus()` — the worker asked to move the focus chain to a client. Applied
-        # BEFORE the messages below, so a SW that focuses a client and then reports its own
-        # matchAll() in the same turn sees the move it just made.
-        sw_focuses.each do |e|
-          rid = sw_client_realm(e[:client]) and note_focused_realm(rid)
         end
         # `WindowClient.navigate()` — only QUEUED here (see sw_navigate_client). It must not run
         # before the sw_msgs / claims / fetch_resps below: the worker emitted those FIRST, and a
@@ -8270,13 +8263,9 @@ module Capybara
           # A script exception the worker's global left unhandled, for its Worker's `error` (workers.js).
           report_error:   ->(message, filename, lineno, colno) { outbox << {handle: handle, kind: '__scripterror', message: message.to_s, filename: filename.to_s, lineno: lineno.to_i, colno: colno.to_i} },
           post_to_client: ->(client_id, data) { outbox << {handle: handle, kind: 'sw_client_msg', client: client_id, data: data.to_s} },
-          # WindowClient.focus() — moving the focus chain is cross-realm browser state, so the
-          # worker asks rather than does. Delivered by deliver_worker_messages, which echoes the
-          # move back to every SW as a `client_focus`.
-          focus_client:   ->(client_id)       { outbox << {handle: handle, kind: 'sw_client_focus', client: client_id} },
-          # WindowClient.navigate() — like focus_client, the browser owns the act; unlike it, the
-          # worker is waiting on the OUTCOME (final URL / cross-origin / refusal), so the reply
-          # comes back on this worker's inbox keyed by nav_id.
+          # WindowClient.navigate() — the browser owns the act, and the worker is waiting on the
+          # OUTCOME (final URL / cross-origin / refusal), so the reply comes back on this worker's
+          # inbox keyed by nav_id.
           navigate_client: ->(client_id, url, nav_id) { outbox << {handle: handle, kind: 'sw_client_navigate', client: client_id, url: url.to_s, nav_id: nav_id.to_i} },
           claim:          ->                  { outbox << {handle: handle, kind: 'sw_claim', has_fetch: sw_has_fetch} },
           # skipWaiting() — record the flag HERE, on the worker's own thread, before the

@@ -1622,7 +1622,6 @@ module Capybara
         # deliver_worker_messages): client.postMessage, clients.claim (set the client's controller),
         # and a controlled fetch's respondWith result. See run_worker for the closures.
         c.attach('__csim_swPostToClient', ->(client_id, data) { sw_hooks[:post_to_client]&.call(client_id, data); nil }) if sw_hooks[:post_to_client]
-        c.attach('__csim_swFocusClient',   ->(client_id)       { sw_hooks[:focus_client]&.call(client_id);       nil }) if sw_hooks[:focus_client]
         c.attach('__csim_swNavigateClient', ->(client_id, url, nav_id) { sw_hooks[:navigate_client]&.call(client_id, url, nav_id); nil }) if sw_hooks[:navigate_client]
         c.attach('__csim_swClaim',        ->                  { sw_hooks[:claim]&.call; nil }) if sw_hooks[:claim]
         c.attach('__csim_swSkipWaitingRequest', ->             { sw_hooks[:skip_waiting]&.call; nil }) if sw_hooks[:skip_waiting]

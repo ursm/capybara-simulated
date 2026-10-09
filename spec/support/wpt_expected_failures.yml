@@ -6597,9 +6597,6 @@ service-workers/service-worker/claim-worker-fetch.https.html:
 service-workers/service-worker/client-url-creation-url.https.html:
 - Going back to new document changes creation URL
 - "[harness] TIMEOUT"
-service-workers/service-worker/clients-matchall-frozen.https.html:
-- Test Clients.matchAll()
-- "[harness] TIMEOUT"
 service-workers/service-worker/clients-matchall-order.https.html:
 - Clients.matchAll() returns controlled windows and frames in focus order.
 - Clients.matchAll() returns controlled windows in focus order.  Case 1.

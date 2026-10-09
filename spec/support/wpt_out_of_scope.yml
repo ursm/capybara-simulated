@@ -53594,6 +53594,19 @@ service-workers/cache-storage/cross-partition.https.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+service-workers/service-worker/clients-matchall-frozen.https.html:
+- name: Test Clients.matchAll()
+  reason: "[WICG] Page Lifecycle API (Client.lifecycleState, document 'freeze', test_driver.freeze;
+    https://wicg.github.io/page-lifecycle/) — an unratified WICG Community Group draft
+    shipped only in Chromium. The test freezes a window and reads its client's lifecycleState,
+    which the generated Client omits as that proposal's member. Unratified specs default
+    out per CLAUDE.md rule 1. Re-audit if it advances to a ratified standard."
+- name: "[harness] TIMEOUT"
+  reason: "[WICG] Page Lifecycle API (Client.lifecycleState, document 'freeze', test_driver.freeze;
+    https://wicg.github.io/page-lifecycle/) — an unratified WICG Community Group draft
+    shipped only in Chromium. The test freezes a window and reads its client's lifecycleState,
+    which the generated Client omits as that proposal's member. Unratified specs default
+    out per CLAUDE.md rule 1. Re-audit if it advances to a ratified standard."
 service-workers/service-worker/partitioned-cookies.tentative.https.html:
 - name: 'Service Worker: Partitioned Cookies'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
