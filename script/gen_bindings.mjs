@@ -96,6 +96,42 @@ const INTERFACES = [
   }],
   // The element interfaces, each installed on the class dom-class-aliases.js makes of it — its [Reflect…] members the
   // binding's own, the rest an implementation's.
+  ['html', 'HTMLHtmlElement', { install: true }],
+  ['html', 'HTMLHeadElement', { install: true }],
+  ['html', 'HTMLTitleElement', { install: true }],
+  ['html', 'HTMLBaseElement', { install: true }],
+  ['html', 'HTMLMetaElement', { install: true }],
+  ['html', 'HTMLHeadingElement', { install: true }],
+  ['html', 'HTMLParagraphElement', { install: true }],
+  ['html', 'HTMLHRElement', { install: true }],
+  ['html', 'HTMLPreElement', { install: true }],
+  ['html', 'HTMLQuoteElement', { install: true }],
+  ['html', 'HTMLOListElement', { install: true }],
+  ['html', 'HTMLUListElement', { install: true }],
+  ['html', 'HTMLMenuElement', { install: true }],
+  ['html', 'HTMLLIElement', { install: true }],
+  ['html', 'HTMLDListElement', { install: true }],
+  ['html', 'HTMLDivElement', { install: true }],
+  ['html', 'HTMLDataElement', { install: true }],
+  ['html', 'HTMLTimeElement', { install: true }],
+  ['html', 'HTMLSpanElement', { install: true }],
+  ['html', 'HTMLBRElement', { install: true }],
+  ['html', 'HTMLModElement', { install: true }],
+  ['html', 'HTMLPictureElement', { install: true }],
+  ['html', 'HTMLSourceElement', { install: true }],
+  ['html', 'HTMLAudioElement', { install: true }],
+  ['html', 'HTMLOptGroupElement', { install: true }],
+  ['html', 'HTMLDetailsElement', { install: true }],
+  ['html', 'HTMLDirectoryElement', { install: true }],
+  ['html', 'HTMLFontElement', { install: true }],
+  ['html', 'HTMLParamElement', { install: true }],
+  ['html', 'HTMLMapElement', { install: true }],
+  ['html', 'HTMLLabelElement', { install: true }],
+  ['html', 'HTMLLegendElement', { install: true }],
+  ['html', 'HTMLDataListElement', { install: true }],
+  ['html', 'HTMLEmbedElement', { install: true }],
+  ['html', 'HTMLFrameElement', { install: true }],
+  ['html', 'HTMLMarqueeElement', { install: true }],
   ['html', 'HTMLTableElement', { install: true }],
   ['html', 'HTMLTableCaptionElement', { install: true }],
   ['html', 'HTMLTableColElement', { install: true }],
@@ -617,10 +653,11 @@ const HANDLED = {
   // ([Serializable] / [Transferable]: the structured clone's to honour — platform-globals.js `cloneInto` — no member's;
   // [LegacyWindowAlias]: the Window's other names for the interface object, its implementation's to put there;
   // [LegacyOverrideBuiltIns]: its named properties answered over the prototype chain, by the implementation that
-  // answers them — `namedProperties`)
+  // answers them — `namedProperties`; [LegacyFactoryFunction]: `Audio` / `Image` / `Option`, whose steps are prose, defined
+  // beside the interface object by its implementation — dom-class-aliases.js)
   interface: [
     'Exposed', 'SecureContext', 'Global', 'LegacyUnenumerableNamedProperties', 'Serializable', 'Transferable', 'LegacyWindowAlias',
-    'LegacyOverrideBuiltIns'
+    'LegacyOverrideBuiltIns', 'LegacyFactoryFunction'
   ],
   member: [
     'SameObject', 'NewObject', 'CEReactions', 'Unscopable', 'PutForwards', 'Reflect', 'SecureContext', 'LegacyLenientSetter',
