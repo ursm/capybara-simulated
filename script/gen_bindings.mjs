@@ -137,6 +137,7 @@ const INTERFACES = [
     omit: { 'private-click-measurement': 'attributionSourceId: Private Click Measurement is not implemented (a WICG proposal)' }
   }],
   ['html', 'HTMLAreaElement', { install: true }],
+  ['html', 'HTMLImageElement', { install: true }],
   ['html', 'HTMLLinkElement', { install: true }],
   ['html', 'HTMLScriptElement', { install: true }],
   ['html', 'HTMLDialogElement', { install: true }],
@@ -717,6 +718,8 @@ const REFERRER_POLICIES = [
 const CORS_SETTINGS = { keywords: ['anonymous', 'use-credentials'], aliases: { '': 'anonymous' }, invalid: 'anonymous' };
 // (…a fetch priority attribute's: high, low and auto, auto its missing and invalid value default)
 const FETCH_PRIORITY = { keywords: ['high', 'low', 'auto'], missing: 'auto', invalid: 'auto' };
+// (…a lazy loading attribute's: lazy and eager, eager its missing and invalid value default)
+const LAZY_LOADING = { keywords: ['lazy', 'eager'], missing: 'eager', invalid: 'eager' };
 const REFLECT_ENUMS = {
   'HTMLTableCellElement.scope': { keywords: ['row', 'col', 'rowgroup', 'colgroup'] },
   'HTMLAnchorElement.referrerPolicy': { keywords: REFERRER_POLICIES },
@@ -727,6 +730,11 @@ const REFLECT_ENUMS = {
   'HTMLScriptElement.crossOrigin': CORS_SETTINGS,
   'HTMLLinkElement.fetchPriority': FETCH_PRIORITY,
   'HTMLScriptElement.fetchPriority': FETCH_PRIORITY,
+  'HTMLImageElement.referrerPolicy': { keywords: REFERRER_POLICIES },
+  'HTMLImageElement.crossOrigin': CORS_SETTINGS,
+  'HTMLImageElement.fetchPriority': FETCH_PRIORITY,
+  'HTMLImageElement.decoding': { keywords: ['sync', 'async', 'auto'], missing: 'auto', invalid: 'auto' },
+  'HTMLImageElement.loading': LAZY_LOADING,
   'HTMLLinkElement.as': {
     keywords: [
       'fetch', 'audio', 'document', 'embed', 'font', 'image', 'manifest', 'object', 'report', 'script', 'sharedworker', 'style',

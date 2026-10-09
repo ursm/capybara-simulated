@@ -156,4 +156,33 @@ RSpec.describe 'HTML element bindings' do
     session.find('body').send_keys(:escape)
     expect(session.evaluate_script('[a.open, b.open]')).to eq([false, true])
   end
+
+  it "fires a link's load once, as it is connected or its href changes" do
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0], loads = [];
+      const l = document.createElement('link');
+      l.addEventListener('load', () => loads.push('a'));
+      l.setAttribute('rel', 'stylesheet');
+      l.setAttribute('href', 'data:text/css,p{}');
+      document.head.append(l);
+      setTimeout(() => {
+        l.href = 'data:text/css,p{}';
+        setTimeout(() => done([loads.length, document.createElement('script').async]), 20);
+      }, 20);
+    JS
+    expect(got).to eq([1, true])
+  end
+
+  it 'takes a script the parser inserts for no force async' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const div = document.createElement('div');
+        div.innerHTML = '<script>1<\\/script>';
+        return div.firstChild.async;
+      })()
+    JS
+    expect(got).to be(false)
+  end
 end
