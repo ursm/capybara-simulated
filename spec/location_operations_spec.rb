@@ -55,4 +55,29 @@ RSpec.describe 'Location operations' do
     session.execute_script("location.assign('#zz')")
     expect(session.evaluate_script('location.hash')).to eq('#zz')
   end
+
+  # HTML §7.2.4: every member an own, unforgeable property; valueOf and @@toPrimitive own and fixed; the protocol
+  # setter's scheme checked; an empty hash a URL ending in `#` (Chrome 154, measured).
+  it 'is the interface HTML describes' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const own = Object.getOwnPropertyDescriptor(location, 'assign');
+        const thrown = (f) => { try { f(); return 'no'; } catch (e) { return e.name + ': ' + e.message; } };
+        return [
+          typeof Location, location instanceof Location, Object.getOwnPropertyNames(Location.prototype),
+          [own.writable, own.enumerable, own.configurable], location.valueOf === Object.prototype.valueOf,
+          String(location.ancestorOrigins), location.ancestorOrigins === location.ancestorOrigins,
+          thrown(() => { location.protocol = '1x'; }), thrown(() => new Location())
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      'function', true, ['constructor'], [false, true, false], true, '[object DOMStringList]', true,
+      "SyntaxError: Failed to set the 'protocol' property on 'Location': '1x' is an invalid protocol.",
+      "TypeError: Failed to construct 'Location': Illegal constructor"
+    ])
+    session.execute_script("location.hash = 'a'")
+    session.execute_script("location.hash = ''")
+    expect(session.evaluate_script('location.href')).to end_with('/start#')
+  end
 end

@@ -85,8 +85,6 @@ HTMLElement:
   - scrollParent
 HTMLInputElement:
   - webkitEntries
-Location:
-  - ancestorOrigins
 Navigator:
   - cpuPerformance
   - crossOriginStorage

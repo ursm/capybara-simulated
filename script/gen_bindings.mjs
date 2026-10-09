@@ -378,6 +378,7 @@ const INTERFACES = [
   ['IndexedDB', 'IDBCursor', { install: true }],
   ['IndexedDB', 'IDBCursorWithValue', { install: true }],
   ['html', 'DOMStringList'],
+  ['html', 'Location', { install: true }],
   ['css-font-loading', 'FontFaceSetLoadEvent', { install: true }],
   ['gamepad', 'GamepadEvent', { install: true }],
   ['orientation-event', 'DeviceMotionEventAcceleration'],
@@ -1279,6 +1280,8 @@ function generateInterface(def, options = {}) {
   };
   const self = selfCheck();
   let indexed = null, valueIterator = false, pairIterator = false, setlike = null, maplike = null, stringifier = null;
+  // (…and where its toString goes: an unforgeable stringifier attribute's an own property too — Location's `href`)
+  let stringifierOut = null;
   const constructors = [];
   const memberList = membersOf(def, options.omit, options.omitMembers);
   for (const m of memberList) {
@@ -1345,8 +1348,10 @@ function generateInterface(def, options = {}) {
       // ([LegacyUnforgeable], Web IDL §3.4.10: an own property of each object, which cannot be reconfigured)
       const out = (m.extAttrs || []).some((e) => e.name === 'LegacyUnforgeable') ? unforgeables : body;
       // (…an `inherit` one, Web IDL §2.5.2, its inherited getter's value and a setter of its own: DOMPoint's coordinates)
-      if (m.special === 'stringifier') stringifier = m.name;
-      else if (m.special && m.special !== 'inherit') throw new Error(`${label}: a ${m.special} attribute is not generated yet`);
+      if (m.special === 'stringifier') {
+        stringifier = m.name;
+        stringifierOut = out;
+      } else if (m.special && m.special !== 'inherit') throw new Error(`${label}: a ${m.special} attribute is not generated yet`);
       members.push(m.name);
       // (…a name no identifier — CSSPageDescriptors' `margin-top` — quoted, as its implementation's member)
       const key = /^[A-Za-z_$][\w$]*$/.test(m.name) ? m.name : JSON.stringify(m.name);
@@ -1451,7 +1456,9 @@ function generateInterface(def, options = {}) {
       if (members.includes(m.name)) continue;
       members.push(m.name);
       const group = memberList.filter((o) => o.type === 'operation' && o.name === m.name && o.special !== 'static');
-      body.push(`    ${group.length > 1 ? overloadedOperation(name, group, checks, selfCheck) : operation(name, m, checks, selfCheck)}`);
+      // (…[LegacyUnforgeable] an own property of each object, as an attribute's: Location's assign / replace / reload)
+      const out = (m.extAttrs || []).some((e) => e.name === 'LegacyUnforgeable') ? unforgeables : body;
+      out.push(`    ${group.length > 1 ? overloadedOperation(name, group, checks, selfCheck) : operation(name, m, checks, selfCheck)}`);
       continue;
     }
     throw new Error(`${label}: a ${m.type} member is not generated yet`);
@@ -1462,7 +1469,7 @@ function generateInterface(def, options = {}) {
   if (indexed && !(lengthAttr && /^(?:unsigned )?(?:short|long|long long)$/.test(lengthAttr.idlType.idlType))) {
     throw new Error(`${name}: an indexed getter with no integer-typed \`length\` is not generated yet`);
   }
-  if (stringifier && stringifier !== 'toString') body.push(`    toString() { return impl.get_${stringifier}(${self}); }`);
+  if (stringifier && stringifier !== 'toString') stringifierOut.push(`    toString() { return impl.get_${stringifier}(${self}); }`);
   const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
   if (options.install) {
     // (…an indexed getter the implementation's exotic object answers — `indexedProperties`, NamedNodeMap's Proxy — its
