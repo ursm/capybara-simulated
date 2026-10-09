@@ -172,6 +172,10 @@ const INTERFACES = [
   ['html', 'HTMLButtonElement', { install: true }],
   ['html', 'HTMLOptionElement', { install: true }],
   ['html', 'HTMLTextAreaElement', { install: true }],
+  ['html', 'HTMLInputElement', {
+    install: true,
+    omitMembers: { webkitEntries: 'the Entries API\'s file system entries are not implemented' }
+  }],
   ['html', 'HTMLCanvasElement', {
     install: true,
     omit: { 'mediacapture-fromelement': 'captureStream: media capture from a canvas is not implemented' },
@@ -745,6 +749,11 @@ function checkExtAttrs(extAttrs, where, label) {
 // the implementation's. A type no rule here covers (a DOMTokenList, an element reference, an SVGAnimated*) is the
 // implementation's both ways. The getter and setter as `{ get, set }` — expressions of `self` (and `v`, converted) —
 // or null.
+// (…a number whose kind the HTML prose gives and its IDL does not — input.size, "limited to only positive numbers" with
+// a default of 20, an IDL [Reflect] alone: the table's entry is its kind and default)
+const REFLECT_NUMBERS = {
+  'HTMLInputElement.size': { kind: 'UNSIGNED_POSITIVE', fallback: 20 }
+};
 // (…an enumerated one the HTML prose makes reflect, limited to only known values, its IDL saying no [Reflect] — the
 // table's entry makes it one)
 // (…a referrer policy attribute's keywords: Referrer Policy §8.1's, the empty string the no-referrer-given state's)
@@ -786,6 +795,10 @@ const REFLECT_ENUMS = {
   'HTMLButtonElement.formEnctype': FORM_ENCTYPE,
   'HTMLButtonElement.formMethod': { keywords: ['get', 'post', 'dialog'], missing: '', invalid: 'get' },
   'HTMLButtonElement.popoverTargetAction': POPOVER_TARGET_ACTION,
+  'HTMLInputElement.popoverTargetAction': POPOVER_TARGET_ACTION,
+  'HTMLInputElement.formEnctype': FORM_ENCTYPE,
+  'HTMLInputElement.formMethod': { keywords: ['get', 'post'], missing: '', invalid: 'get' },
+  'HTMLInputElement.colorSpace': { keywords: ['limited-srgb', 'display-p3'], missing: 'limited-srgb', invalid: 'limited-srgb' },
   'HTMLLinkElement.as': {
     keywords: [
       'fetch', 'audio', 'document', 'embed', 'font', 'image', 'manifest', 'object', 'report', 'script', 'sharedworker', 'style',
@@ -834,7 +847,8 @@ function reflectionOf(iface, m, where) {
   } else if ((type === 'long' || type === 'unsigned long' || type === 'double') && !nullable) {
     const range = ext.get('ReflectRange');
     const [min, max] = range ? range.rhs.value.map((v) => Number(v.value)) : [0, 0];
-    const kind = type === 'long'
+    const prose = REFLECT_NUMBERS[`${iface}.${m.name}`];
+    const kind = prose ? prose.kind : type === 'long'
       ? (ext.has('ReflectNonNegative') ? 'LONG_NON_NEGATIVE' : 'LONG')
       : type === 'double'
         ? (ext.has('ReflectPositive') ? 'DOUBLE_POSITIVE' : 'DOUBLE')
@@ -843,7 +857,7 @@ function reflectionOf(iface, m, where) {
         : ext.has('ReflectPositiveWithFallback') ? 'UNSIGNED_POSITIVE_FALLBACK'
         : 'UNSIGNED';
     const positive = kind === 'UNSIGNED_POSITIVE' || kind === 'UNSIGNED_POSITIVE_FALLBACK';
-    const fallback = ext.has('ReflectDefault') ? Number(JSON.parse(`${ext.get('ReflectDefault').rhs.value}`))
+    const fallback = prose ? prose.fallback : ext.has('ReflectDefault') ? Number(JSON.parse(`${ext.get('ReflectDefault').rhs.value}`))
       : kind === 'LONG_NON_NEGATIVE' ? -1 : positive ? 1 : 0;
     const getKind = kind === 'UNSIGNED_POSITIVE_FALLBACK' ? 'UNSIGNED_POSITIVE' : kind;
     get = `reflectNumber(self, ${attr}, ${getKind}, ${fallback}, ${min}, ${max})`;

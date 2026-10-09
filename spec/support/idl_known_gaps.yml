@@ -10,8 +10,7 @@
 # Remaining entries are dominated by: layout-engine geometry (getBoxQuads,
 # convert*FromNode), fullscreen / pointer-lock / view-transitions,
 # device / streaming / privacy-sandbox navigator APIs (all OUT OF SCOPE), plus
-# in-scope-but-deferred work: most HTMLInputElement reflection (max/min/step/
-# labels/valueAs*), element-reference ARIA reflection, and Document write-stream.
+# in-scope-but-deferred work such as the Entries API and Document write-stream.
 Document:
   - activeViewTransition
   # `all` is intentionally NOT exposed: its [[IsHTMLDDA]] falsy/typeof-'undefined'
@@ -85,7 +84,6 @@ HTMLElement:
   - ontouchstart
   - scrollParent
 HTMLInputElement:
-  - popoverTargetElement
   - webkitEntries
 Location:
   - ancestorOrigins
