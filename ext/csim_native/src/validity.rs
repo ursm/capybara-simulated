@@ -510,6 +510,38 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "optionInitialised", option_initialised, context_id);
     crate::dom::register(scope, ns, "optionDisabled", option_disabled, context_id);
     crate::dom::register(scope, ns, "radioGroup", radio_group, context_id);
+    crate::dom::register(scope, ns, "formOwner", form_owner, context_id);
+    crate::dom::register(scope, ns, "defaultButton", default_button, context_id);
+    crate::dom::register(scope, ns, "formListed", form_listed, context_id);
+}
+
+// __dom.formOwner(nid) -> [the control's form owner] or [] (`element_state::form_owner`), as `nodes_value` answers it
+// from the control's root.
+fn form_owner(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(control) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let arena = crate::dom::realm(scope, cid);
+    let (root, owner) = (arena.root_of(control), arena.form_owner(control));
+    rv.set(crate::dom::nodes_value(scope, cid, root, owner.as_slice()));
+}
+
+// __dom.defaultButton(nid) -> [the form's default button] or [] (`element_state::default_button_of`), from the form's
+// tree (`form_tree`).
+fn default_button(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(form) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let arena = crate::dom::realm(scope, cid);
+    let (tree, button) = (arena.form_tree(form), arena.default_button_of(form));
+    rv.set(crate::dom::nodes_value(scope, cid, tree, button.as_slice()));
+}
+
+// __dom.formListed(nid) -> the form's listed elements (`element_state::form_listed`), from the form's tree.
+fn form_listed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(form) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let arena = crate::dom::realm(scope, cid);
+    let (tree, listed) = (arena.form_tree(form), arena.form_listed(form));
+    rv.set(crate::dom::nodes_value(scope, cid, tree, &listed));
 }
 
 // __dom.radioGroup(nid) -> a radio's group, itself included, in tree order (`element_state::radio_group`), as

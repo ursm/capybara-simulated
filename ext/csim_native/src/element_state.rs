@@ -348,11 +348,32 @@ impl RealmArena {
         let hint = self.parser_form_owner(id)?;
         (self.get(hint).is_some() && self.root_of(hint) == self.root_of(id)).then_some(hint)
     }
+    // The tree a form's controls are in: its root's when it is connected, else its own subtree (form-associated ones
+    // share its tree).
+    pub(crate) fn form_tree(&self, form: NodeId) -> NodeId {
+        if self.is_connected(form) { self.root_of(form) } else { form }
+    }
     // A form's default button: the first submit button in tree order whose form owner is the form, not a
-    // `<select>`'s (form-helpers.js `defaultButtonOf`).
-    fn default_button_of(&self, form: NodeId) -> Option<NodeId> {
-        let root = if self.is_connected(form) { self.root_of(form) } else { form };
-        self.with_form_facts(root, |f| f.defaults.get(&form).copied())
+    // `<select>`'s — what implicit submission submits with, and the submit button `:default` matches.
+    pub(crate) fn default_button_of(&self, form: NodeId) -> Option<NodeId> {
+        self.with_form_facts(self.form_tree(form), |f| f.defaults.get(&form).copied())
+    }
+    // A form's listed elements (HTML "listed"), in tree order: its tree's input / button / fieldset / object / output /
+    // select / textarea and form-associated custom elements whose form owner it is — but an image button — what its
+    // `elements` holds.
+    pub(crate) fn form_listed(&self, form: NodeId) -> Vec<NodeId> {
+        let root = self.form_tree(form);
+        let mut listed = Vec::new();
+        self.find_in_tree(root, |c, n| {
+            let tag = matches!(&*n.local_name, "input" | "button" | "fieldset" | "object" | "output" | "select" | "textarea");
+            let control = (n.is_html() && tag) || n.state & STATE_FORM_ASSOCIATED != 0;
+            let image = n.is_html_named("input") && n.input_type() == "image";
+            if c != root && control && !image && self.form_owner(c) == Some(form) {
+                listed.push(c);
+            }
+            false
+        });
+        listed
     }
     fn in_select(&self, id: NodeId) -> bool {
         let mut cur = self.shadow_including_parent(id);
