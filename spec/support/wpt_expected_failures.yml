@@ -6688,18 +6688,12 @@ selection/fire-selectionchange-event-on-document-if-textcontrol-element-is-in-sh
 selection/fire-selectionchange-event-on-pressing-backspace.html:
 - Selectionchange event is fired after removing the character
 - Selectionchange event is fired after removing the range
-selection/fire-selectionchange-event-on-textcontrol-element-on-pressing-backspace.html:
-- selectionchange event fired on an input element
 selection/move-by-word-korean.html:
-- Korean/Latin transition should be considered a word boundary when moving backward
-- Korean/Latin transition should be considered a word boundary when moving forward
 - Latin/Korean transition should be considered a word boundary when moving backward
 - Latin/Korean transition should be considered a word boundary when moving forward
 selection/move-by-word-with-symbol.html:
-- Symbols should be included while moving backward by word
 - Symbols should be included while moving backward by word in input element
 - Symbols should be included while moving backward by word in textarea element
-- Symbols should be included while moving forward by word
 - Symbols should be included while moving forward by word in input element
 - Symbols should be included while moving forward by word in textarea element
 selection/onselectstart-on-key-in-contenteditable.html:
@@ -6715,11 +6709,6 @@ selection/selection-direction-on-single-click.html:
 selection/selection-focused-element-becomes-nonfocusable.html:
 - Focused element is disabled
 - Focused element is removed
-selection/selection-modify-extend-word-generated-content.html:
-- extending selection from middle of first word of the middle line shouldn't extend
-  the range to the previous line
-- extending selection from middle of last word of the middle line shouldn't extend
-  the range to the next line
 selection/textcontrols/focus.html:
 - "[harness] ERROR"
 - "[harness] no subtests"

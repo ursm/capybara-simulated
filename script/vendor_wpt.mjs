@@ -457,11 +457,13 @@ async function main() {
   // download can even start left the corpus DELETED and the working tree needing a
   // `git checkout -- spec/wpt` to recover (measured, twice).
   // (…every tree, or the ones named on the command line — a tree newly added to TREES vendored without
-  // re-fetching all the others; the harness and the support files come along either way)
+  // re-fetching all the others; the harness and SUPPORT_FILES come along either way, a SUPPORT_TREES entry only when
+  // named. At the pin only: WPT_VERSION records one commit for every tree.)
   const all = [...TREES, ...SUPPORT_TREES];
   const named = process.argv.slice(2);
   const unknown = named.filter((tree) => !all.includes(tree));
   if (unknown.length) throw new Error(`not in TREES or SUPPORT_TREES: ${unknown.join(', ')}`);
+  if (named.length && sha !== PINNED) throw new Error('a subset of the trees is vendored at the pinned commit only');
   const trees = named.length ? named : all;
 
   const paths = [];

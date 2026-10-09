@@ -42770,10 +42770,6 @@ input-events/input-events-get-target-ranges-backspace.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Alt + Backspace at "<p>abc def[] ghi</p>"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: |-
     Backspace at "<div contenteditable="false">
       <div contenteditable=""><p>{}<br></p></div></div>
@@ -43307,10 +43303,6 @@ input-events/input-events-get-target-ranges-backspace.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: Control + Backspace at "<p>   abc[] def</p>"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Control + Backspace at "<p>abc def[] ghi</p>"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -47646,27 +47638,11 @@ input-events/input-events-get-target-ranges-during-and-after-dispatch.tentative.
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 input-events/input-events-get-target-ranges-forwarddelete.tentative.html:
-- name: Alt + Delete at "<p>abc []def   </p>"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Alt + Delete at "<p>abc []def   </p>" - comparing innerHTML
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Alt + Delete at "<p>abc []def ghi</p>"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Control + Delete at "<p>abc []def   </p>"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Control + Delete at "<p>abc []def   </p>" - comparing innerHTML
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Control + Delete at "<p>abc []def ghi</p>"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -54667,12 +54643,6 @@ selection/contenteditable/modifying-selection-with-primary-mouse-button.tentativ
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-selection/modify-extend-word-trailing-inline-block.tentative.html:
-- name: 'Selection.modify: Extending a word towards the end of a line ended by an
-    inline-block.'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 selection/modify-line-flex-column.tentative.html:
 - name: backward
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -54714,10 +54684,6 @@ selection/modify.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: Jump <br> forward which follows a linefeed
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Stop at previous word boundary when whitespaces are trimmed
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
