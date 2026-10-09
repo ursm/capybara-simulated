@@ -224,9 +224,9 @@ module Capybara
         # host state — see sw_may_activate? and sw-client.js scheduleLifecycle.
         '__csim_swMayActivate'        => ->(b, *a) { b.sw_may_activate?(a[0], a[1]) },
         '__csim_swNoteActivationParked' => ->(b, *_) { b.sw_note_activation_parked; nil },
-        # Navigation Preload state (NavigationPreloadManager), keyed by the registration's active
-        # worker handle — reached identically from the client (its registration's active worker's handle)
-        # and the worker (__csimWorkerHandle, or the active version's it was spawned beside). Get returns {enabled, headerValue}; set leaves a nil field as-is.
+        # Navigation Preload state (NavigationPreloadManager), keyed by the registration's scope —
+        # reached identically from the client's registration and the worker's own. Get returns
+        # {enabled, headerValue}; set leaves a nil field as-is.
         '__csim_swNavPreloadState'    => ->(b, *a) { b.nav_preload_state(a[0]) },
         '__csim_swNavPreloadSet'      => ->(b, *a) { b.nav_preload_set(a[0], a[1], a[2]); nil },
         # A navigation (iframe/document load) → its controlling SW's `fetch` event, awaited

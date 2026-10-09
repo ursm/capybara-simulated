@@ -462,15 +462,11 @@ module Capybara
         # version must run EXACTLY those bytes, not a re-fetch that could hit the HTTP cache
         # or a newer server response).
         @sw_scope_meta    = {}
-        # Navigation Preload state, per active-worker HANDLE (the registration's active worker — the
-        # client's registration's active worker's handle and the worker's own `__csimWorkerHandle` are the
-        # same id, so both isolates key here identically). {enabled:, header:}; absent → the spec
-        # default {false, 'true'}. Read at navigation time to decide whether to issue the parallel
-        # preload request (see service_worker_navigation_fetch), and by the NavigationPreloadManager.
-        # EARNED GAP: the spec keeps this per-REGISTRATION (it survives a SW update); keying by the
-        # active worker's handle means an update — which mints a fresh handle — resets it to default.
-        # No vendored subtest enables preload then updates the worker, so handle-keying (which needs no
-        # scope plumbing to the worker isolate) is the simpler load-bearing choice.
+        # Navigation Preload state, per REGISTRATION (Service Workers §3.5: it survives an update), keyed
+        # by its scope — which the client's registration object and the worker's own carry alike.
+        # {enabled:, header:}; absent → the spec default {false, 'true'}. Read at navigation time to
+        # decide whether to issue the parallel preload request (see service_worker_navigation_fetch),
+        # and by the NavigationPreloadManager. Dropped when the scope is unregistered.
         @sw_navpreload = {}
         # clients.claim() events that arrived before their scope was mirrored into @sw_registrations
         # (activate→claim() races the client-side lifecycle) — buffered here, flushed by sw_register_scope.
@@ -5484,32 +5480,34 @@ module Capybara
         end
         nil
       end
-      # Navigation Preload state for a registration's active worker (keyed by its handle). Returns the
-      # spec default {enabled:false, headerValue:'true'} when never set. Read by the client- and
-      # worker-side NavigationPreloadManager (getState) and at navigation time (nav_preload_enabled?).
-      def nav_preload_state(handle)
-        st = @sw_navpreload[handle.to_i] || {}
+      # Navigation Preload state of the registration at `scope`. Returns the spec default
+      # {enabled:false, headerValue:'true'} when never set. Read by the client- and worker-side
+      # NavigationPreloadManager (getState) and at navigation time (nav_preload_enabled?).
+      def nav_preload_state(scope)
+        st = @sw_navpreload[scope.to_s] || {}
         {'enabled' => st.fetch(:enabled, false), 'headerValue' => st.fetch(:header, 'true')}
       end
 
-      # Update the state for a worker handle. A nil `enabled` / `header` leaves that field unchanged
-      # (enable/disable set only enabled; setHeaderValue sets only the header — the JS side has already
-      # validated the header value and String()-ified it). The InvalidStateError "no active worker"
-      # gate lives in the JS manager (a null handle never reaches here).
-      def nav_preload_set(handle, enabled, header)
-        st = (@sw_navpreload[handle.to_i] ||= {})
+      # Update the state of the registration at `scope`. A nil `enabled` / `header` leaves that field
+      # unchanged (enable/disable set only enabled; setHeaderValue sets only the header — the JS side has
+      # already validated the header value). The InvalidStateError "no active worker" gate lives in the
+      # JS manager.
+      def nav_preload_set(scope, enabled, header)
+        st = (@sw_navpreload[scope.to_s] ||= {})
         st[:enabled] = !!enabled unless enabled.nil?
         st[:header]  = header.to_s unless header.nil?
         nil
       end
 
-      # Whether the registration whose active worker controls `url` has navigation preload enabled —
-      # gates the parallel preload request during a navigation.
-      def nav_preload_enabled?(handle)
-        handle && @sw_navpreload.dig(handle.to_i, :enabled) ? true : false
+      # Whether the registration at `scope` has navigation preload enabled — gates the parallel preload
+      # request during a navigation.
+      def nav_preload_enabled?(scope)
+        scope && @sw_navpreload.dig(scope.to_s, :enabled) ? true : false
       end
 
       def sw_unregister_scope(scope)
+        # (…its navigation preload state with it: a registration made at the scope later is a new one)
+        @sw_navpreload.delete(scope.to_s)
         @sw_registrations.delete(scope.to_s)
         @sw_registered_scopes.delete(scope.to_s)
         @sw_activating_scopes.delete(scope.to_s)
@@ -6443,14 +6441,15 @@ module Capybara
         # `dest` distinguishes a TOP-LEVEL navigation ('document') from a frame's ('iframe'):
         # the preload request must report the navigation's own Sec-Fetch-Dest — the SameSite
         # Lax cookie gate only applies to a top-level document GET.
-        preload = if method.to_s.upcase == 'GET' && nav_preload_enabled?(handle)
+        preload_scope = @sw_registrations.key(handle)
+        preload = if method.to_s.upcase == 'GET' && nav_preload_enabled?(preload_scope)
           navigation_preload_response(
             url,
             referrer_source,
             referrer_policy,
             site_seed,
             origin_null,
-            nav_preload_state(handle)['headerValue'],
+            nav_preload_state(preload_scope)['headerValue'],
             dest:              dest,
             cookie_cross_site: cookie_cross_site
           )

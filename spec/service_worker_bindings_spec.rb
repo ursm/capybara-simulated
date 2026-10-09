@@ -35,6 +35,14 @@ RSpec.describe 'Service Worker bindings' do
               preload: self.registration.navigationPreload === self.registration.navigationPreload
             });
           JS
+        # (…a version that sets its registration's navigation preload header while it installs, and takes over)
+        when '/update.js'
+          [200, {'content-type' => 'text/javascript'}, [<<~JS]]
+            self.addEventListener('install', (e) => {
+              e.waitUntil(self.registration.navigationPreload.setHeaderValue(new URL(location).searchParams.get('v'))
+                .catch(() => {}).then(() => self.skipWaiting()));
+            });
+          JS
         else [404, {'content-type' => 'text/plain'}, ['nope']]
         end
       }
@@ -92,5 +100,26 @@ RSpec.describe 'Service Worker bindings' do
         'preload' => true
       }
     )
+  end
+
+  # Navigation preload state is the registration's (§3.5): what a new version sets while it installs is still its
+  # registration's once it is active — and before, while the registration had no active worker, there was none to set.
+  it "keeps a registration's navigation preload across an update" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__out = null;
+      const until = (w, s) => new Promise((res) => { if (w.state === s) return res(); w.addEventListener('statechange', () => { if (w.state === s) res(); }); });
+      (async () => {
+        const reg = await navigator.serviceWorker.register('/update.js?v=one', {scope: '/'});
+        await until(reg.installing || reg.waiting || reg.active, 'activated');
+        const first = (await reg.navigationPreload.getState()).headerValue;
+        const again = await navigator.serviceWorker.register('/update.js?v=two', {scope: '/'});
+        await until(again.installing, 'activated');
+        globalThis.__out = [first, (await reg.navigationPreload.getState()).headerValue];
+      })().catch((e) => { globalThis.__out = String(e); });
+    JS
+    poll_until { session.evaluate_script('globalThis.__out !== null') }
+    expect(session.evaluate_script('globalThis.__out')).to eq(%w[true two])
   end
 end
