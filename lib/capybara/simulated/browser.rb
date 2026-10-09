@@ -3480,6 +3480,9 @@ module Capybara
 
       def rack_fetch_body(url)
         result = rack_fetch('GET', url, '', {}, 'follow')
+        # …the URL it was fetched from at last, its redirects followed (a worker's global scope takes it: HTML "run a worker"
+        # sets its url to the response's)…
+        Thread.current[:csim_asset_url] = result && result['url']
         # What the asset's Resource Timing entry reports — kept beside the cached body (see
         # `external_asset_source`), since the body alone is what the loader hands back.
         Thread.current[:csim_asset_meta] = result && resource_timing_meta(result)
@@ -4552,6 +4555,12 @@ module Capybara
         # just stashed (cleared at the top of the spawn so a failed one can't leak).
         if !service && !shared && !sw_script && body && target.match?(%r{\Ahttps?://}i)
           Thread.current[:csim_worker_rt] = {'url' => target, 'meta' => Thread.current[:csim_asset_meta]}
+        end
+        # A dedicated or shared worker's global scope is at the URL its script came from at last — its redirects followed
+        # (HTML "run a worker": the worker global scope's url is the response's), which its location, its imports' base and
+        # its requests' referrer read. (A service worker's script may not redirect.)
+        if !service && !sw_script && body && target.match?(%r{\Ahttps?://}i) && Thread.current[:csim_asset_url].to_s.match?(%r{\Ahttps?://}i)
+          target = Thread.current[:csim_asset_url].to_s
         end
         # A blob: worker script that didn't resolve (revoked / unavailable) fails the
         # same way — fire onerror rather than spawn a worker that runs nothing.
@@ -8559,13 +8568,6 @@ module Capybara
           # @worker_initializing hold — both markers reach the outbox before release_init.
           sw_check_phase.call
         end
-        # A SharedWorker fires `connect` AFTER its script set `self.onconnect`; the
-        # connect handler's port post lands in the outbox before release_init, so
-        # worker_pending? stays true until it's delivered.
-        if shared
-          rt.eval_void('typeof __csimFireSharedWorkerConnect === "function" && __csimFireSharedWorkerConnect();')
-          rt.drain_microtasks
-        end
         # Fire any timer the initial script parked BEFORE releasing the init hold — the
         # same gated drain the poll loop runs per tick. `fetch()` defers its body to a
         # setTimeout(0), so a fetch() issued by the initial script / connect handler is,
@@ -9188,7 +9190,7 @@ module Capybara
         # the request's referrer: an explicit `init.referrer` URL when given, else the
         # document URL ("client"); an empty referrer means no-referrer (compute_referrer
         # maps a blank source to nil).
-        ref_source = referrer.nil? ? @current_url : referrer
+        ref_source = referrer.nil? ? client : referrer
         # The request's INITIATOR origin for Sec-Fetch-Site — captured ONCE (loop-invariant), before
         # the per-hop referrer reassignment (5927 below) degrades ref_source, and independent of
         # Referrer-Policy: the initiator is the referrer's origin (a SW's `fetch(event.request)`

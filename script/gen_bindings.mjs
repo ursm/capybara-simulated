@@ -273,6 +273,8 @@ const INTERFACES = [
   }],
   ['service-workers', 'ServiceWorkerContainer', { install: true }],
   ['service-workers', 'NavigationPreloadManager', { install: true }],
+  ['html', 'Worker', { install: true }],
+  ['html', 'SharedWorker', { install: true }],
   ['service-workers', 'Client', {
     install: true,
     omit: { 'page-lifecycle': 'lifecycleState: the Page Lifecycle API is not implemented (a WICG proposal)' }

@@ -3543,11 +3543,7 @@ html/dom/idlharness.any.js:
   "constructor" property'
 - 'TextMetrics interface: existence and properties of interface prototype object''s
   @@unscopables property'
-- Worker interface object length
 - 'Worker interface: existence and properties of interface object'
-- 'Worker interface: operation postMessage(any, optional StructuredSerializeOptions)'
-- 'Worker interface: operation postMessage(any, sequence<object>)'
-- 'Worker interface: operation terminate()'
 html/dom/idlharness.https.html:
 - AudioTrack interface object length
 - AudioTrack interface object name
@@ -5014,8 +5010,6 @@ html/dom/idlharness.https.html:
 - 'Sanitizer interface: operation setComments(boolean)'
 - 'Sanitizer interface: operation setDataAttributes(boolean)'
 - 'ShadowRoot interface: operation setHTML(DOMString, optional SetHTMLOptions)'
-- SharedWorker interface object length
-- 'SharedWorker interface: attribute port'
 - 'SharedWorker interface: existence and properties of interface object'
 - Stringification of document.all
 - Stringification of document.createElement("form").elements
@@ -5256,11 +5250,7 @@ html/dom/idlharness.https.html:
 - 'Window interface: window must inherit property "frames" with the proper type'
 - 'Window interface: window must inherit property "navigation" with the proper type'
 - Window must be primary interface of window
-- Worker interface object length
 - 'Worker interface: existence and properties of interface object'
-- 'Worker interface: operation postMessage(any, optional StructuredSerializeOptions)'
-- 'Worker interface: operation postMessage(any, sequence<object>)'
-- 'Worker interface: operation terminate()'
 - Worklet interface object length
 - Worklet interface object name
 - 'Worklet interface: existence and properties of interface object'
@@ -7427,13 +7417,6 @@ xhr/open-url-multi-window-6.htm:
 - 'XMLHttpRequest: open() in document that is not fully active (but may be active)
   should throw'
 - "[harness] TIMEOUT"
-xhr/open-url-redirected-sharedworker-origin.htm:
-- "[harness] TIMEOUT"
-- "[harness] no subtests"
-xhr/open-url-redirected-worker-origin.htm:
-- Referer header
-xhr/open-url-worker-origin.htm:
-- Referer header
 xhr/overridemimetype-blob.html:
 - Loading data…
 xhr/overridemimetype-headers-received-state-force-shiftjis.htm:
