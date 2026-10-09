@@ -169,6 +169,24 @@ RSpec.describe 'IndexedDB bindings' do
     expect(out).to eq('TransactionInactiveError')
   end
 
+  it "leaves a script's microtasks to its end while it builds a frame" do
+    session = simulated_session(app)
+    session.visit '/'
+    out = session.evaluate_script(<<~JS)
+      (() => {
+        const log = [];
+        Promise.resolve().then(() => log.push('micro'));
+        const frame = document.createElement('iframe');
+        frame.srcdoc = '<p>x';
+        document.body.append(frame);
+        frame.contentWindow;
+        log.push('sync');
+        return log;
+      })()
+    JS
+    expect(out).to eq(['sync'])
+  end
+
   it "returns a script's value as the script left it, its microtasks after" do
     session = simulated_session(app)
     session.visit '/'
