@@ -1512,6 +1512,9 @@ pub(crate) struct Dom {
     pub(crate) node_template: Option<v8::Global<v8::FunctionTemplate>>,
     // The template a legacy platform object with an indexed getter is made from (legacy.rs).
     pub(crate) indexed_template: Option<v8::Global<v8::ObjectTemplate>>,
+    // The values serialized and not yet read back or let go, by their numbers (clone.rs).
+    pub(crate) serialized: std::collections::HashMap<u32, crate::clone::Serialized>,
+    pub(crate) next_serialized: u32,
     // Every live range's boundary points (ranges.rs).
     pub(crate) ranges: crate::ranges::Ranges,
     // Each realm's style engine (made by `styleSheets`).

@@ -8,32 +8,48 @@
 // the value, and the value holds the object's place in it. Deserializing — where no script may run while V8 reads —
 // that list is read first and handed to the hook, which makes the platform objects; the value is read after, each
 // place the object made for it.
+//
+// A serialization is kept here, by its number, until it is read back or let go: between the two the bindings run
+// StructuredSerializeWithTransfer's own steps — the transfer list checked again, each transferable moved.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use v8::{ValueDeserializerHelper, ValueSerializerHelper};
 
-use crate::dom::register;
+use crate::dom::{dom, register};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "structuredSerialize", structured_serialize, context_id);
+    register(scope, ns, "structuredTransfer", structured_transfer, context_id);
     register(scope, ns, "structuredDeserialize", structured_deserialize, context_id);
-    register(scope, ns, "structuredClone", structured_clone, context_id);
+    register(scope, ns, "structuredDiscard", structured_discard, context_id);
+}
+
+// A value serialized: its bytes — the descriptions' length (four bytes, little-endian) and serialization, none where
+// it holds no platform object, then the value's — the memory of the SharedArrayBuffers it shares, by their places, and
+// the ArrayBuffers its transfer list names: until they are detached (`structuredTransfer`) the buffers, then their
+// memory, which the value read back is made new buffers over — in whatever realm reads it.
+pub(crate) struct Serialized {
+    bytes: Vec<u8>,
+    shared: Vec<v8::SharedRef<v8::BackingStore>>,
+    buffers: Vec<v8::Global<v8::ArrayBuffer>>,
+    transferred: Vec<v8::SharedRef<v8::BackingStore>>,
 }
 
 type Descriptions = Rc<RefCell<Vec<v8::Global<v8::Value>>>>;
-// The SharedArrayBuffers a value holds, by their places: what a structured clone shares rather than copies — where it
-// may share them at all (an agent cluster that is cross-origin isolated), and only within the isolate.
 type Shared = Rc<RefCell<Vec<v8::SharedRef<v8::BackingStore>>>>;
 
 // The serializer's delegate: the bindings' hook (none for plain data), what it said of the object V8 last asked about —
-// V8 asks whether an object is a host object, then has it written, one after the other — and every description written.
+// V8 asks whether an object is a host object, then has it written, one after the other — every description written,
+// the SharedArrayBuffers kept where they may be shared (an agent cluster that is cross-origin isolated), and this
+// realm's %Object.prototype%, which an ordinary object of it has.
 struct Serializer<'h> {
     hook: Option<v8::Local<'h, v8::Function>>,
     asked: RefCell<Option<v8::Global<v8::Value>>>,
     described: Descriptions,
     shared: Option<Shared>,
+    object_prototype: Option<v8::Local<'h, v8::Value>>,
 }
 
 impl v8::ValueSerializerImpl for Serializer<'_> {
@@ -61,12 +77,12 @@ impl v8::ValueSerializerImpl for Serializer<'_> {
         Some(shared.len() as u32 - 1)
     }
 
-    // An ordinary object — one whose prototype is its realm's %Object.prototype%, or null — is no platform object, and
-    // the hook is not asked.
+    // An ordinary object of this realm — one whose prototype is its %Object.prototype%, or null — is no platform
+    // object, and the hook is not asked (another realm's is the hook's to tell, as any object with another prototype).
     fn is_host_object<'s>(&self, scope: &mut v8::PinScope<'s, '_>, object: v8::Local<'s, v8::Object>) -> Option<bool> {
         let hook = self.hook?;
         let proto = object.get_prototype(scope)?;
-        if proto.is_null() || is_object_prototype(scope, object, proto) {
+        if proto.is_null() || self.object_prototype.is_some_and(|p| p == proto) {
             return Some(false);
         }
         let undefined = v8::undefined(scope).into();
@@ -107,18 +123,6 @@ impl v8::ValueSerializerImpl for Serializer<'_> {
     }
 }
 
-// Whether `proto` is the %Object.prototype% of `object`'s realm.
-fn is_object_prototype(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>, proto: v8::Local<'_, v8::Value>) -> bool {
-    let Some(context) = object.get_creation_context(scope) else { return false };
-    let global = context.global(scope);
-    let constructor = v8::String::new(scope, "Object")
-        .and_then(|k| global.get(scope, k.into()))
-        .and_then(|c| v8::Local::<v8::Object>::try_from(c).ok());
-    let Some(constructor) = constructor else { return false };
-    let Some(key) = v8::String::new(scope, "prototype") else { return false };
-    constructor.get(scope, key.into()).is_some_and(|p| p == proto)
-}
-
 // The deserializer's delegate: the platform objects the hook made, and the SharedArrayBuffers' memory, by their places.
 struct Deserializer {
     objects: Vec<v8::Global<v8::Object>>,
@@ -145,7 +149,7 @@ impl v8::ValueDeserializerImpl for Deserializer {
 }
 
 // A DOMException of this realm's, thrown.
-fn throw_dom_exception(scope: &mut v8::PinScope<'_, '_>, message: v8::Local<'_, v8::String>, name: &str) {
+pub(crate) fn throw_dom_exception(scope: &mut v8::PinScope<'_, '_>, message: v8::Local<'_, v8::String>, name: &str) {
     let context = scope.get_current_context();
     let global = context.global(scope);
     let constructor = v8::String::new(scope, "DOMException")
@@ -161,7 +165,7 @@ fn throw_dom_exception(scope: &mut v8::PinScope<'_, '_>, message: v8::Local<'_, 
 }
 
 // One value's bytes, by V8's serializer — the header, then the value — and the descriptions its platform objects took;
-// None where it threw.
+// None where it threw. Each ArrayBuffer `transfer` lists is written as its place in the list, not its bytes.
 fn write(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
@@ -170,7 +174,8 @@ fn write(
     transfer: &[v8::Local<'_, v8::ArrayBuffer>],
 ) -> Option<(Vec<u8>, Vec<v8::Global<v8::Value>>)> {
     let described = Descriptions::default();
-    let delegate = Serializer { hook, asked: RefCell::new(None), described: described.clone(), shared };
+    let object_prototype = hook.and_then(|_| v8::Object::new(scope).get_prototype(scope));
+    let delegate = Serializer { hook, asked: RefCell::new(None), described: described.clone(), shared, object_prototype };
     let serializer = v8::ValueSerializer::new(scope, Box::new(delegate));
     serializer.write_header();
     for (place, buffer) in transfer.iter().enumerate() {
@@ -182,11 +187,10 @@ fn write(
     Some((bytes, described.take()))
 }
 
-// StructuredSerialize `value` into bytes, `hook` answering for each object no ordinary one — None where it threw
-// (V8's DataCloneError for a function or a symbol, the hook's for a platform object; a SharedArrayBuffer's but where
-// `shared` keeps them) — each of the ArrayBuffers `transfer` lists written as its place in the list, not its bytes. The
-// bytes: the descriptions' length (four bytes, little-endian) and serialization, then the value's.
-pub(crate) fn serialize(
+// StructuredSerialize `value`, `hook` answering for each object no ordinary one — None where it threw (V8's
+// DataCloneError for a function or a symbol, the hook's for a platform object; a SharedArrayBuffer's but where `shared`
+// keeps them).
+fn serialize(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
     hook: v8::Local<'_, v8::Function>,
@@ -194,9 +198,13 @@ pub(crate) fn serialize(
     transfer: &[v8::Local<'_, v8::ArrayBuffer>],
 ) -> Option<Vec<u8>> {
     let (bytes, described) = write(scope, value, Some(hook), shared, transfer)?;
-    let descriptions: Vec<v8::Local<v8::Value>> = described.into_iter().map(|d| v8::Local::new(scope, d)).collect();
-    let descriptions = v8::Array::new_with_elements(scope, &descriptions);
-    let (head, _) = write(scope, descriptions.into(), None, None, &[])?;
+    let head = if described.is_empty() {
+        Vec::new()
+    } else {
+        let descriptions: Vec<v8::Local<v8::Value>> = described.into_iter().map(|d| v8::Local::new(scope, d)).collect();
+        let descriptions = v8::Array::new_with_elements(scope, &descriptions);
+        write(scope, descriptions.into(), None, None, &[])?.0
+    };
     let mut out = Vec::with_capacity(4 + head.len() + bytes.len());
     out.extend_from_slice(&(head.len() as u32).to_le_bytes());
     out.extend_from_slice(&head);
@@ -204,7 +212,7 @@ pub(crate) fn serialize(
     Some(out)
 }
 
-// One value read from bytes, by V8's deserializer.
+// One value read from bytes, by V8's deserializer — each transferred ArrayBuffer the one `transferred` has at its place.
 fn read<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     bytes: &[u8],
@@ -221,21 +229,21 @@ fn read<'s>(
     deserializer.read_value(context)
 }
 
-// StructuredDeserialize `bytes` in the current realm, `hook(descriptions)` making the platform objects — an array of
-// them, in the descriptions' order — the SharedArrayBuffers over `shared`'s memory, and each transferred ArrayBuffer
-// the one `transferred` has at its place.
-pub(crate) fn deserialize<'s>(
+// StructuredDeserialize `serialized` in the current realm, `hook(descriptions)` making the platform objects — an array
+// of them, in the descriptions' order.
+fn deserialize<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    bytes: &[u8],
+    serialized: Serialized,
     hook: v8::Local<'_, v8::Function>,
-    shared: Vec<v8::SharedRef<v8::BackingStore>>,
-    transferred: &[v8::Local<'_, v8::ArrayBuffer>],
 ) -> Option<v8::Local<'s, v8::Value>> {
+    let transferred: Vec<v8::Local<v8::ArrayBuffer>> =
+        serialized.transferred.iter().map(|store| v8::ArrayBuffer::with_backing_store(scope, store)).collect();
+    let bytes = &serialized.bytes;
     let split = 4 + u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?) as usize;
     let (head, body) = (bytes.get(4..split)?, bytes.get(split..)?);
-    let descriptions = read(scope, head, Vec::new(), Vec::new(), &[])?;
     let mut objects = Vec::new();
-    if v8::Local::<v8::Array>::try_from(descriptions).is_ok_and(|a| a.length() > 0) {
+    if !head.is_empty() {
+        let descriptions = read(scope, head, Vec::new(), Vec::new(), &[])?;
         let undefined = v8::undefined(scope).into();
         let made = v8::Local::<v8::Array>::try_from(hook.call(scope, undefined, &[descriptions])?).ok()?;
         for i in 0..made.length() {
@@ -243,55 +251,63 @@ pub(crate) fn deserialize<'s>(
             objects.push(v8::Global::new(scope, object));
         }
     }
-    read(scope, body, objects, shared, transferred)
+    read(scope, body, objects, serialized.shared, &transferred)
 }
 
-// __dom.structuredSerialize(value, hook) -> an ArrayBuffer of its serialization.
+// The ArrayBuffers an array lists — None for anything else.
+fn buffers<'s>(scope: &mut v8::PinScope<'s, '_>, list: v8::Local<'_, v8::Value>) -> Option<Vec<v8::Local<'s, v8::ArrayBuffer>>> {
+    let Ok(list) = v8::Local::<v8::Array>::try_from(list) else { return Some(Vec::new()) };
+    (0..list.length()).map(|i| list.get_index(scope, i).and_then(|b| v8::Local::<v8::ArrayBuffer>::try_from(b).ok())).collect()
+}
+
+// __dom.structuredSerialize(value, hook, mayShare, transfer) -> the serialization's number: its SharedArrayBuffers
+// shared where `mayShare`, and the ArrayBuffers `transfer` lists — none of them detached yet — written by their places.
+// The number is the isolate's: any realm of it may read the value back.
 fn structured_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(hook) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
-    let Some(bytes) = serialize(scope, args.get(0), hook, None, &[]) else { return };
-    let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
-    rv.set(v8::ArrayBuffer::with_backing_store(scope, &store).into());
-}
-
-// __dom.structuredDeserialize(buffer, hook) -> the value it holds, made in this realm.
-fn structured_deserialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Ok(buffer) = v8::Local::<v8::ArrayBuffer>::try_from(args.get(0)) else { return };
-    let Ok(hook) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
-    let length = buffer.byte_length();
-    let bytes = match buffer.data() {
-        Some(data) if length > 0 => unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, length) }.to_vec(),
-        _ => Vec::new(),
-    };
-    if let Some(value) = deserialize(scope, &bytes, hook, Vec::new(), &[]) {
-        rv.set(value);
-    }
-}
-
-// __dom.structuredClone(value, serializeHook, deserializeHook, mayShare, buffers) -> StructuredDeserializeWithTransfer
-// (StructuredSerializeWithTransfer(value)) in this realm: its SharedArrayBuffers shared where `mayShare` (a
-// cross-origin isolated agent cluster's), and the ArrayBuffers `buffers` lists transferred — each detached once the
-// value is serialized, its memory a new one's.
-fn structured_clone(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Ok(serialize_hook) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
-    let Ok(deserialize_hook) = v8::Local::<v8::Function>::try_from(args.get(2)) else { return };
-    let shared = args.get(3).boolean_value(scope).then(Shared::default);
-    let mut buffers = Vec::new();
-    if let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(4)) {
-        for i in 0..list.length() {
-            let Some(buffer) = list.get_index(scope, i).and_then(|b| v8::Local::<v8::ArrayBuffer>::try_from(b).ok()) else { return };
-            buffers.push(buffer);
-        }
-    }
-    let Some(bytes) = serialize(scope, args.get(0), serialize_hook, shared.clone(), &buffers) else { return };
-    let mut transferred = Vec::with_capacity(buffers.len());
-    for buffer in &buffers {
-        let store = buffer.get_backing_store();
-        buffer.detach(None);
-        transferred.push(v8::ArrayBuffer::with_backing_store(scope, &store));
-    }
+    let shared = args.get(2).boolean_value(scope).then(Shared::default);
+    let Some(transfer) = buffers(scope, args.get(3)) else { return };
+    let Some(bytes) = serialize(scope, args.get(0), hook, shared.clone(), &transfer) else { return };
     let shared = shared.map(|s| s.take()).unwrap_or_default();
-    if let Some(value) = deserialize(scope, &bytes, deserialize_hook, shared, &transferred) {
+    let buffers = transfer.into_iter().map(|b| v8::Global::new(scope, b)).collect();
+    let d = dom(scope);
+    let number = d.next_serialized;
+    d.next_serialized = number.wrapping_add(1);
+    d.serialized.insert(number, Serialized { bytes, shared, buffers, transferred: Vec::new() });
+    rv.set(v8::Integer::new_from_unsigned(scope, number).into());
+}
+
+// __dom.structuredTransfer(number): the ArrayBuffers its transfer list names detached, their memory the serialization's
+// — the bindings having checked again that each is still there to detach.
+fn structured_transfer(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(number) = args.get(0).uint32_value(scope) else { return };
+    let Some(serialized) = dom(scope).serialized.get_mut(&number) else { return };
+    let buffers = std::mem::take(&mut serialized.buffers);
+    let mut transferred = Vec::with_capacity(buffers.len());
+    for buffer in buffers {
+        let buffer = v8::Local::new(scope, buffer);
+        transferred.push(buffer.get_backing_store());
+        buffer.detach(None);
+    }
+    if let Some(serialized) = dom(scope).serialized.get_mut(&number) {
+        serialized.transferred = transferred;
+    }
+}
+
+// __dom.structuredDeserialize(number, hook) -> the value that serialization holds, made in this realm, its transferred
+// ArrayBuffers new ones over their memory; the serialization gone.
+fn structured_deserialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(number) = args.get(0).uint32_value(scope) else { return };
+    let Ok(hook) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
+    let Some(serialized) = dom(scope).serialized.remove(&number) else { return };
+    if let Some(value) = deserialize(scope, serialized, hook) {
         rv.set(value);
+    }
+}
+
+// __dom.structuredDiscard(number): a serialization let go unread (its transfer refused).
+fn structured_discard(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    if let Some(number) = args.get(0).uint32_value(scope) {
+        dom(scope).serialized.remove(&number);
     }
 }

@@ -131,4 +131,46 @@ RSpec.describe 'Structured clone of platform objects' do
       'file'       => [true, 'a.txt', 1]
     )
   end
+
+  it 'checks a transfer list before and after serializing, and moves nothing it refuses' do
+    session.visit '/'
+    out = probe(<<~JS)
+      const memory = new WebAssembly.Memory({ initial: 1 }), kept = new ArrayBuffer(4), late = new ArrayBuffer(4);
+      const fake = { [Symbol.toStringTag]: 'ArrayBuffer' };
+      return {
+        wasm:     [err(() => structuredClone(memory.buffer, { transfer: [memory.buffer] })), memory.buffer.detached],
+        fake:     [err(() => structuredClone(1, { transfer: [kept, fake] })), kept.detached],
+        detached: err(() => structuredClone({ get x() { structuredClone(late, { transfer: [late] }); return 1; } }, { transfer: [late] }))
+      };
+    JS
+    expect(out).to eq('wasm' => ['DataCloneError', false], 'fake' => ['DataCloneError', false], 'detached' => 'DataCloneError')
+  end
+
+  it "keeps a FileList's files the Files the value holds, and builds its descriptors as data" do
+    session.visit '/'
+    out = probe(<<~JS)
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(['one'], 'a.txt'));
+      const files = transfer.files, [list, file] = structuredClone([files, files[0]]);
+      let called = 0;
+      Object.defineProperty(Object.prototype, 'enumerable', { set() { called++; }, configurable: true });
+      const own = Object.getOwnPropertyDescriptor(files, '0');
+      delete Object.prototype.enumerable;
+      return { same: list[0] === file, enumerable: own.enumerable, called };
+    JS
+    expect(out).to eq('same' => true, 'enumerable' => true, 'called' => 0)
+  end
+
+  it "clones a page's object whatever class string it claims, and reads a frame's message back in the frame" do
+    session.visit '/'
+    session.evaluate_script('new Promise((resolve) => (frames[0].document.readyState === "complete" ? resolve() : frames[0].onload = resolve))')
+    out = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      class Spoof { get [Symbol.toStringTag]() { return 'Window'; } }
+      const spoofed = structuredClone(new Spoof());
+      frames[0].onmessage = (e) => done({ spoof: Object.getPrototypeOf(spoofed) === Object.prototype, realm: e.data instanceof frames[0].Object });
+      frames[0].postMessage({ n: 1 }, '*');
+    JS
+    expect(out).to eq('spoof' => true, 'realm' => true)
+  end
 end

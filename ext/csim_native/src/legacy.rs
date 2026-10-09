@@ -2,7 +2,8 @@
 // properties an interceptor answers from its implementation — `item(i)` (null for an index it does not support) and
 // `length()`, the functions its internal fields hold — as Web IDL's [[GetOwnProperty]], [[DefineOwnProperty]],
 // [[Delete]], [[Set]] and [[OwnPropertyKeys]] have them: each supported index an own data property, read-only,
-// enumerable and configurable, which can be neither defined nor deleted; no index set, supported or not. Unlike the
+// enumerable and configurable (V8 makes its descriptor of the getter's value and the query's attributes), which can be
+// neither defined nor deleted; no index set, supported or not. Unlike the
 // Proxy `withIndexedGetter` makes (webidl.js), it is no exotic JS object to V8's serializer, which hands it to the
 // bindings' hook (clone.rs) as the platform object it is.
 
@@ -26,7 +27,6 @@ fn template<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::ObjectTem
             .query(query)
             .deleter(delete)
             .definer(define)
-            .descriptor(descriptor)
             .enumerator(enumerate),
     );
     dom(scope).indexed_template = Some(v8::Global::new(scope, t));
@@ -105,22 +105,6 @@ fn delete(scope: &mut v8::PinScope<'_, '_>, i: u32, args: v8::PropertyCallbackAr
         return v8::Intercepted::kNo;
     }
     rv.set_bool(false);
-    v8::Intercepted::kYes
-}
-
-fn descriptor(scope: &mut v8::PinScope<'_, '_>, i: u32, args: v8::PropertyCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) -> v8::Intercepted {
-    let Some(value) = item(scope, args.holder(), i) else { return v8::Intercepted::kNo };
-    let d = v8::Object::new(scope);
-    for (key, v) in [
-        ("value", value),
-        ("writable", v8::Boolean::new(scope, false).into()),
-        ("enumerable", v8::Boolean::new(scope, true).into()),
-        ("configurable", v8::Boolean::new(scope, true).into()),
-    ] {
-        let Some(key) = v8::String::new(scope, key) else { return v8::Intercepted::kNo };
-        d.set(scope, key.into(), v);
-    }
-    rv.set(d.into());
     v8::Intercepted::kYes
 }
 
