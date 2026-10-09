@@ -235,8 +235,23 @@ impl RealmArena {
             _ => false,
         }
     }
-    // Does `id`'s radio button group — its name, form owner and tree — hold a checked radio (form-helpers.js
-    // `radioGroupHasChecked`)? A nameless radio is its own group.
+    // `id`'s radio button group (HTML §4.10.5.1.15), itself included, in tree order: the radios of its tree with its
+    // name — not empty, compared exactly — and its form owner. A nameless radio is its own group.
+    pub(crate) fn radio_group(&self, id: NodeId) -> Vec<NodeId> {
+        let Some(name) = self.get(id).and_then(|n| n.plain_attr("name")).filter(|n| !n.is_empty()) else { return vec![id] };
+        let owner = self.form_owner(id);
+        let mut group = Vec::new();
+        self.find_in_tree(self.root_of(id), |c, n| {
+            let radio = n.is_html_named("input") && n.input_type() == "radio";
+            if radio && n.plain_attr("name") == Some(name) && self.form_owner(c) == owner {
+                group.push(c);
+            }
+            false
+        });
+        group
+    }
+    // Does `id`'s radio button group — its name, form owner and tree — hold a checked radio? A nameless radio is its own
+    // group.
     fn radio_group_has_checked(&self, id: NodeId) -> bool {
         if self.is_checked(id) {
             return true;

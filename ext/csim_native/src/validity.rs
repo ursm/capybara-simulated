@@ -509,6 +509,17 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "selectedness", selectedness, context_id);
     crate::dom::register(scope, ns, "optionInitialised", option_initialised, context_id);
     crate::dom::register(scope, ns, "optionDisabled", option_disabled, context_id);
+    crate::dom::register(scope, ns, "radioGroup", radio_group, context_id);
+}
+
+// __dom.radioGroup(nid) -> a radio's group, itself included, in tree order (`element_state::radio_group`), as
+// `nodes_value` answers them from its tree's root.
+fn radio_group(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(radio) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let arena = crate::dom::realm(scope, cid);
+    let (root, group) = (arena.root_of(radio), arena.radio_group(radio));
+    rv.set(crate::dom::nodes_value(scope, cid, root, &group));
 }
 
 // __dom.optionDisabled(nid) -> whether an option is disabled for its select's selectedness and entry list
