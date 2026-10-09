@@ -173,10 +173,16 @@ module Capybara
           user_handle: user_id
         )
 
+        # (…and what an AuthenticatorAttestationResponse reads out of the attestation object: its authenticator data,
+        # the credential public key as SubjectPublicKeyInfo, and the authenticator's transport)
         {
-          'credentialId'      => Base64.urlsafe_encode64(raw_id.b, padding: false),
-          'clientDataJSON'    => Base64.urlsafe_encode64(client_data.b, padding: false),
-          'attestationObject' => Base64.urlsafe_encode64(attestation_object.b, padding: false)
+          'credentialId'            => Base64.urlsafe_encode64(raw_id.b, padding: false),
+          'clientDataJSON'          => Base64.urlsafe_encode64(client_data.b, padding: false),
+          'attestationObject'       => Base64.urlsafe_encode64(attestation_object.b, padding: false),
+          'authenticatorData'       => Base64.urlsafe_encode64(auth_data.b, padding: false),
+          'publicKey'               => Base64.urlsafe_encode64(key.public_to_der.b, padding: false),
+          'transports'              => [transport(opts)],
+          'authenticatorAttachment' => attachment(opts)
         }
       end
 
@@ -224,15 +230,21 @@ module Capybara
                           Base64.urlsafe_encode64(cred.user_handle.b, padding: false) : nil
 
         {
-          'credentialId'      => Base64.urlsafe_encode64(cred.raw_id.b, padding: false),
-          'clientDataJSON'    => Base64.urlsafe_encode64(client_data.b, padding: false),
-          'authenticatorData' => Base64.urlsafe_encode64(auth_data.b, padding: false),
-          'signature'         => Base64.urlsafe_encode64(signature.b, padding: false),
-          'userHandle'        => user_handle_out
+          'credentialId'            => Base64.urlsafe_encode64(cred.raw_id.b, padding: false),
+          'clientDataJSON'          => Base64.urlsafe_encode64(client_data.b, padding: false),
+          'authenticatorData'       => Base64.urlsafe_encode64(auth_data.b, padding: false),
+          'signature'               => Base64.urlsafe_encode64(signature.b, padding: false),
+          'userHandle'              => user_handle_out,
+          'authenticatorAttachment' => attachment(opts)
         }
       end
 
       private
+
+      # The transport a virtual authenticator was added with (CDP's `transport`), and so its attachment (WebAuthn §5.4.5):
+      # an `internal` one is the platform's, every other one roams.
+      def transport(opts) = opts['transport'] || 'usb'
+      def attachment(opts) = transport(opts) == 'internal' ? 'platform' : 'cross-platform'
 
       def pick_authenticator_for_create(req)
         sel    = req['authenticatorSelection'] || {}

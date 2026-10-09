@@ -275,6 +275,12 @@ const INTERFACES = [
   ['service-workers', 'NavigationPreloadManager', { install: true }],
   ['html', 'Worker', { install: true }],
   ['html', 'SharedWorker', { install: true }],
+  ['credential-management', 'Credential', { install: true }],
+  ['credential-management', 'CredentialsContainer', { install: true }],
+  ['webauthn', 'PublicKeyCredential', { install: true }],
+  ['webauthn', 'AuthenticatorResponse', { install: true }],
+  ['webauthn', 'AuthenticatorAttestationResponse', { install: true }],
+  ['webauthn', 'AuthenticatorAssertionResponse', { install: true }],
   ['service-workers', 'Client', {
     install: true,
     omit: { 'page-lifecycle': 'lifecycleState: the Page Lifecycle API is not implemented (a WICG proposal)' }
