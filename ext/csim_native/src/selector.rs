@@ -29,11 +29,9 @@ use selectors::parser::{
 };
 use selectors::{Element, OpaqueElement};
 
-use web_atoms::ns;
 use crate::dom::{NodeId, RealmArena};
 
 pub(crate) const HTML_NS: &str = "http://www.w3.org/1999/xhtml";
-const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
 
 // A CSS string (idents, local names, namespaces, attribute values). Wraps String to satisfy the
 // selectors associated-type bounds (PrecomputedHash / Borrow<str>) a bare String can't.
@@ -522,17 +520,8 @@ impl<'a> Element for NodeRef<'a> {
 
     fn apply_selector_flags(&self, _flags: ElementSelectorFlags) {}
 
-    // A hyperlink: an HTML `<a>` / `<area>` with an `href` in no namespace (HTML "selectors" — a `<link>` is none), or
-    // an SVG `<a>` with that or an XLink `href` (SVG 1.1's `xlink:href`, or one set unprefixed by `setAttributeNS`).
     fn is_link(&self) -> bool {
-        let node = self.node();
-        match &*node.local_name {
-            "a" | "area" if node.is_html() => node.plain_attr("href").is_some(),
-            "a" if node.ns == ns!(svg) => {
-                node.plain_attr("href").is_some() || node.ns_attr(XLINK_NS, "href").is_some()
-            }
-            _ => false,
-        }
+        self.node().is_hyperlink()
     }
     fn is_html_slot_element(&self) -> bool {
         self.node().is_html_named("slot")

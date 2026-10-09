@@ -328,4 +328,36 @@ RSpec.describe 'HTML element bindings' do
     JS
     expect(multiple).to be(false)
   end
+
+  # A click inside a label's labeled control is the control's own, not handed back to it through the label (Chrome);
+  # a form-associated custom element is labelable, its internals' labels its labels; an SVG <form> owns no control and
+  # an SVG element's contenteditable makes nothing editable; ids, `for`s and names compare as UTF-16.
+  it 'takes labels, form owners and editing hosts as HTML has them' do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      customElements.define('x-face', class extends HTMLElement {
+        static formAssociated = true;
+        constructor() { super(); this.i = this.attachInternals(); }
+      });
+      document.body.insertAdjacentHTML('beforeend', `
+        <label><x-face id=xf><span id=sp>inside</span></x-face></label>
+        <label for=xf2 id=l2>l2</label><x-face id=xf2></x-face>
+        <svg><form><foreignObject><input id=inside></foreignObject></form></svg>
+        <svg><g contenteditable=true><foreignObject><div id=ce>x</div></foreignObject></g></svg>`);
+      window.clicks = 0;
+      xf.addEventListener('click', () => clicks++);
+    JS
+    session.find('#sp').click
+    session.execute_script('sp.click()')
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const label = document.body.appendChild(document.createElement('label'));
+        label.htmlFor = 'a\\uD800';
+        const input = document.body.appendChild(document.createElement('input'));
+        input.id = 'a\\uDC00';
+        return [clicks, xf2.i.labels.length, xf2.i.labels[0].id, inside.form, ce.isContentEditable, label.control];
+      })()
+    JS
+    expect(got).to eq([2, 1, 'l2', nil, false, nil])
+  end
 end

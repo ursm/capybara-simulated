@@ -7,7 +7,6 @@
 
 use std::cmp::Ordering;
 
-use web_atoms::ns;
 
 use std::collections::HashMap;
 
@@ -17,7 +16,6 @@ use crate::style::StyleEngine;
 // The HTML elements focusable by what they are (an `<input type=hidden>` excepted; a `<summary>` only as its details'
 // summary, below).
 const FOCUSABLE_TAGS: [&str; 9] = ["input", "textarea", "select", "button", "iframe", "embed", "object", "audio", "video"];
-const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
 
 // Is `id` a focusable area: an element not actually disabled, with a valid `tabindex` — else focusable by its kind, a
 // hyperlink, or editable — in no `inert` subtree, and being rendered or the fallback content of a rendered `<canvas>`,
@@ -41,30 +39,20 @@ fn candidate(arena: &RealmArena, id: NodeId, n: &NodeData) -> bool {
         if FOCUSABLE_TAGS.contains(&tag) {
             return !(tag == "input" && n.plain_attr("type").is_some_and(|t| t.eq_ignore_ascii_case("hidden")));
         }
-        if matches!(tag, "a" | "area") && n.plain_attr("href").is_some() {
+        if tag == "summary" && arena.is_details_summary(id) {
             return true;
         }
-        if tag == "summary" && details_summary(arena, id) {
-            return true;
-        }
-    } else if n.ns == ns!(svg) && &*n.local_name == "a" && (n.plain_attr("href").is_some() || n.ns_attr(XLINK_NS, "href").is_some()) {
-        return true;
     }
-    editable_host(n)
+    n.is_hyperlink() || editing_host(arena, id)
 }
 // A valid `tabindex`: an integer by the HTML rules, in the range of the IDL attribute's `long` (Chrome and Firefox,
 // measured, ignore one past it).
 fn tabindex(n: &NodeData) -> Option<i64> {
     n.plain_attr("tabindex").and_then(crate::validity::parse_html_integer).filter(|t| i32::try_from(*t).is_ok())
 }
-// Whether `id` is the summary for its parent `<details>`: the first `<summary>` child of one.
-fn details_summary(arena: &RealmArena, id: NodeId) -> bool {
-    let Some(parent) = arena.parent_of(id).and_then(|p| arena.get(p)).filter(|p| p.is_html_named("details")) else { return false };
-    parent.children.iter().find(|&&c| arena.get(c).is_some_and(|c| c.is_html_named("summary"))) == Some(&id)
-}
-// A `contenteditable` that is not "false".
-fn editable_host(n: &NodeData) -> bool {
-    n.plain_attr("contenteditable").is_some_and(|v| !v.eq_ignore_ascii_case("false"))
+// An editing host itself (element_state.rs `editing_host`).
+fn editing_host(arena: &RealmArena, id: NodeId) -> bool {
+    arena.editing_host(id) == Some(id)
 }
 // Inert: the element or an element it is a flat-tree descendant of carries `inert` — up through the slot a node is
 // assigned to, and from a shadow root to its host (Chrome and Firefox, measured: an `inert` around the slot makes its
@@ -196,8 +184,10 @@ impl Navigator<'_> {
         let mut tree = Vec::new();
         let mut stack: Vec<NodeId> = nodes.iter().rev().copied().collect();
         while let Some(el) = stack.pop() {
-            let Some(n) = self.arena.get(el).filter(|n| n.kind == NodeKind::Element) else { continue };
-            let editable = editable_host(n);
+            if self.arena.get(el).is_none_or(|n| n.kind != NodeKind::Element) {
+                continue;
+            }
+            let editable = editing_host(self.arena, el);
             let item = self.classify(el);
             let descend = !item.as_ref().is_some_and(Item::owner) && !editable;
             if let Some(mut item) = item {

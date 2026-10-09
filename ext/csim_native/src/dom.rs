@@ -357,6 +357,18 @@ impl NodeData {
     pub(crate) fn is_html_named(&self, name: &str) -> bool {
         self.is_html() && &*self.local_name == name
     }
+    // A hyperlink: an HTML `<a>` / `<area>` with an `href` in no namespace (a `<link>` is none), or an SVG `<a>` with that
+    // or an XLink `href` (SVG 1.1's `xlink:href`, or one set unprefixed by `setAttributeNS`) — what `:link` matches and
+    // a click follows.
+    pub(crate) fn is_hyperlink(&self) -> bool {
+        match &*self.local_name {
+            "a" | "area" if self.is_html() => self.plain_attr("href").is_some(),
+            "a" if self.ns == ns!(svg) => {
+                self.plain_attr("href").is_some() || self.ns_attr("http://www.w3.org/1999/xlink", "href").is_some()
+            }
+            _ => false,
+        }
+    }
     // The tag HTML's rendering rules know an element by: its local name in the HTML namespace, `svg` for an SVG root (a
     // replaced element to the HTML around it), and none — "" — for every other element, which CSS lays out by its style
     // alone (an element of an unknown namespace is no `<img>` and no `<br>`, whatever its local name).
@@ -544,6 +556,15 @@ impl NodeData {
             return None;
         }
         self.attr_u16.iter().find(|(k, _)| k == name).map(|(_, u)| u.as_slice())
+    }
+    // Whether the attribute `local` in no namespace has the value `other`'s attribute `other_local` has — both present,
+    // compared exactly, as UTF-16 (a lone surrogate is not U+FFFD): an id against a `for` or a `form`.
+    pub(crate) fn same_attr(&self, local: &str, other: &NodeData, other_local: &str) -> bool {
+        let (Some(a), Some(b)) = (self.plain_attr(local), other.plain_attr(other_local)) else { return false };
+        if self.attr_u16.is_empty() && other.attr_u16.is_empty() {
+            return a == b;
+        }
+        self.plain_attr_units(local) == other.plain_attr_units(other_local)
     }
     // The value of the attribute `local` in no namespace as the page wrote it: UTF-16, a lone surrogate included.
     pub(crate) fn plain_attr_units(&self, local: &str) -> Option<Vec<u16>> {

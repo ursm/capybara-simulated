@@ -75,8 +75,8 @@ fn is_valid_custom_element_name(name: &str) -> bool {
 // The radio groups holding a checked radio (name, form owner) and each form's default button, of one tree.
 #[derive(Default)]
 pub(crate) struct FormFacts {
-    checked_groups: std::collections::HashSet<(String, Option<NodeId>)>,
-    required_groups: std::collections::HashSet<(String, Option<NodeId>)>,
+    checked_groups: std::collections::HashSet<(Vec<u16>, Option<NodeId>)>,
+    required_groups: std::collections::HashSet<(Vec<u16>, Option<NodeId>)>,
     defaults: std::collections::HashMap<NodeId, NodeId>,
 }
 // Those facts per tree root, as of the arena's `mutations` count — and, from a second walk that reads them (a radio's
@@ -238,12 +238,12 @@ impl RealmArena {
     // `id`'s radio button group (HTML §4.10.5.1.15), itself included, in tree order: the radios of its tree with its
     // name — not empty, compared exactly — and its form owner. A nameless radio is its own group.
     pub(crate) fn radio_group(&self, id: NodeId) -> Vec<NodeId> {
-        let Some(name) = self.get(id).and_then(|n| n.plain_attr("name")).filter(|n| !n.is_empty()) else { return vec![id] };
+        let Some(me) = self.get(id).filter(|n| radio_name(n).is_some()) else { return vec![id] };
         let owner = self.form_owner(id);
         let mut group = Vec::new();
         self.find_in_tree(self.root_of(id), |c, n| {
             let radio = n.is_html_named("input") && n.input_type() == "radio";
-            if radio && n.plain_attr("name") == Some(name) && self.form_owner(c) == owner {
+            if radio && n.same_attr("name", me, "name") && self.form_owner(c) == owner {
                 group.push(c);
             }
             false
@@ -256,9 +256,9 @@ impl RealmArena {
         if self.is_checked(id) {
             return true;
         }
-        let Some(name) = self.get(id).and_then(|n| n.plain_attr("name")).filter(|n| !n.is_empty()) else { return false };
+        let Some(name) = self.get(id).and_then(radio_name) else { return false };
         let owner = self.form_owner(id);
-        self.with_form_facts(self.root_of(id), |f| f.checked_groups.contains(&(name.to_string(), owner)))
+        self.with_form_facts(self.root_of(id), |f| f.checked_groups.contains(&(name, owner)))
     }
     // What those two ask of `root`'s tree, from ONE walk of it, kept until the arena next changes: a pseudo-class asked of
     // every radio or submit button in turn walked the whole tree per element.
@@ -274,8 +274,8 @@ impl RealmArena {
         let mut facts = FormFacts::default();
         self.find_in_tree(root, |c, n| {
             if n.is_html_named("input") && n.input_type() == "radio" {
-                if let Some(name) = n.plain_attr("name").filter(|n| !n.is_empty()) {
-                    let group = (name.to_string(), self.form_owner(c));
+                if let Some(name) = radio_name(n) {
+                    let group = (name, self.form_owner(c));
                     if n.plain_attr("required").is_some() {
                         facts.required_groups.insert(group.clone());
                     }
@@ -331,7 +331,7 @@ impl RealmArena {
             if form_id.is_empty() {
                 return None;
             }
-            let hit = self.find_in_tree(self.root_of(id), |_, e| e.get_attr("id") == Some(form_id))?;
+            let hit = self.find_in_tree(self.root_of(id), |_, e| e.same_attr("id", n, "form"))?;
             return self.get(hit).is_some_and(|f| f.is_html_named("form")).then_some(hit);
         }
         let mut cur = self.parent_of(id);
@@ -340,7 +340,7 @@ impl RealmArena {
             if p.kind != NodeKind::Element {
                 break;
             }
-            if p.local_name == local_name!("form") {
+            if p.is_html_named("form") {
                 return Some(c);
             }
             cur = self.parent_of(c);
@@ -472,8 +472,8 @@ impl RealmArena {
     }
     // Does `id`'s radio group — some member `required` — have nothing checked (valueMissing for every member)?
     pub(crate) fn radio_group_misses_required(&self, id: NodeId) -> bool {
-        let Some(name) = self.get(id).and_then(|n| n.plain_attr("name")).filter(|n| !n.is_empty()) else { return false };
-        let group = (name.to_string(), self.form_owner(id));
+        let Some(name) = self.get(id).and_then(radio_name) else { return false };
+        let group = (name, self.form_owner(id));
         let required = self.get(id).is_some_and(|n| n.plain_attr("required").is_some());
         self.with_form_facts(self.root_of(id), |f| {
             (required || f.required_groups.contains(&group)) && !f.checked_groups.contains(&group)
@@ -768,7 +768,7 @@ impl RealmArena {
         self.is_editable(id)
     }
     // Is `id` in an editing host (`editing_host`)?
-    fn is_editable(&self, id: NodeId) -> bool {
+    pub(crate) fn is_editable(&self, id: NodeId) -> bool {
         self.editing_host(id).is_some()
     }
     // The submittable elements whose values a form's entry list takes (HTML "construct the entry list" step 5.1), in tree
@@ -854,24 +854,34 @@ impl RealmArena {
             if target.is_empty() {
                 return None;
             }
-            let hit = self.find_in_tree(self.root_of(label), |_, e| e.get_attr("id") == Some(target))?;
+            let hit = self.find_in_tree(self.root_of(label), |_, e| e.same_attr("id", n, "for"))?;
             return self.is_labelable(hit).then_some(hit);
         }
         n.children.iter().find_map(|&c| self.find_in_tree(c, |c, _| self.is_labelable(c)))
     }
     // A labelable element's labels (its `labels`), in tree order: the HTML labels of its tree whose labeled control it
     // is — none for an element that is not labelable.
+    // One walk of the tree: a label with a `for` labels the control where that names its id and it is the first element
+    // of the tree with that id; any other where the control is its first labelable descendant.
     pub(crate) fn labels_of(&self, control: NodeId) -> Vec<NodeId> {
-        let mut labels = Vec::new();
-        if self.is_labelable(control) {
-            self.find_in_tree(self.root_of(control), |c, n| {
-                if n.is_html_named("label") && self.labeled_control(c) == Some(control) {
-                    labels.push(c);
+        let Some(me) = self.get(control).filter(|_| self.is_labelable(control)) else { return Vec::new() };
+        let named = me.plain_attr("id").is_some_and(|id| !id.is_empty());
+        let (mut labels, mut first_with_id, mut passed) = (Vec::new(), true, false);
+        self.find_in_tree(self.root_of(control), |c, n| {
+            if c == control {
+                passed = true;
+            } else if named && !passed && n.same_attr("id", me, "id") {
+                first_with_id = false;
+            }
+            if n.is_html_named("label") {
+                let by_for = n.plain_attr("for").is_some();
+                if (by_for && named && n.same_attr("for", me, "id")) || (!by_for && self.labeled_control(c) == Some(control)) {
+                    labels.push((c, by_for));
                 }
-                false
-            });
-        }
-        labels
+            }
+            false
+        });
+        labels.into_iter().filter(|&(_, by_for)| first_with_id || !by_for).map(|(c, _)| c).collect()
     }
     // Interactive content (HTML §3.2.5.2.7), as a label's activation behaviour asks: an event targeted at it, or inside
     // it, is its own, not the label's.
@@ -890,7 +900,14 @@ impl RealmArena {
     }
     // The label a click on `id` activates the labeled control of (HTML "click in a label"): itself, where it is an HTML
     // label; none where it is interactive content; else its nearest label ancestor short of any interactive one.
+    // None, too, where the click is on the label's labeled control or inside it — its own (Chrome: a click inside a
+    // labeled form-associated custom element or `<output>` is not handed back to it).
     pub(crate) fn label_to_activate(&self, id: NodeId) -> Option<NodeId> {
+        let label = self.enclosing_label(id)?;
+        let inside = self.labeled_control(label).is_some_and(|control| self.is_inclusive_ancestor(control, id));
+        (!inside).then_some(label)
+    }
+    fn enclosing_label(&self, id: NodeId) -> Option<NodeId> {
         let n = self.get(id)?;
         if n.is_html_named("label") {
             return Some(id);
@@ -911,13 +928,48 @@ impl RealmArena {
         }
         None
     }
-    // `id`'s editing host (HTML §6.8.1): itself or its nearest ancestor element whose `contenteditable` is in the true
-    // or plaintext-only state — or none, where the nearest one that says is in the false state, or none says.
+    // Whether a click on `id` activates it — it has activation behaviour (HTML): a hyperlink (an SVG one too); a button,
+    // input or select; the summary of its details; a label with a labeled control.
+    pub(crate) fn is_click_activatable(&self, id: NodeId) -> bool {
+        let Some(n) = self.get(id).filter(|n| n.kind == NodeKind::Element) else { return false };
+        if n.is_hyperlink() {
+            return true;
+        }
+        n.is_html()
+            && match &*n.local_name {
+                "button" | "input" | "select" => true,
+                "summary" => self.is_details_summary(id),
+                "label" => self.labeled_control(id).is_some(),
+                _ => false,
+            }
+    }
+    // A click's activation target (DOM dispatch): the nearest element with activation behaviour on its path from
+    // `target` — itself or, the click bubbling, an ancestor across shadow trees and slots (the flat tree's parents, as
+    // the composed path runs).
+    pub(crate) fn activation_target(&self, target: NodeId) -> Option<NodeId> {
+        let mut cur = Some(target);
+        while let Some(c) = cur {
+            if self.is_click_activatable(c) {
+                return Some(c);
+            }
+            cur = crate::geometry::flat_parent(self, c);
+        }
+        None
+    }
+    // HTML's "summary for its parent details": the first summary child of an HTML details element — the one that opens
+    // and closes it.
+    pub(crate) fn is_details_summary(&self, id: NodeId) -> bool {
+        let Some(parent) = self.parent_of(id).and_then(|p| self.get(p)).filter(|p| p.is_html_named("details")) else { return false };
+        parent.children.iter().find(|&&c| self.get(c).is_some_and(|c| c.is_html_named("summary"))) == Some(&id)
+    }
+    // `id`'s editing host (HTML §6.8.1): itself or its nearest ancestor HTML element whose `contenteditable` is in the
+    // true or plaintext-only state — or none, where the nearest one that says is in the false state, or none says.
     pub(crate) fn editing_host(&self, id: NodeId) -> Option<NodeId> {
         let mut cur = Some(id);
         while let Some(c) = cur {
             let n = self.get(c).filter(|n| n.kind == NodeKind::Element)?;
-            if let Some(v) = n.plain_attr("contenteditable") {
+            // (…an HTML element's attribute alone: another's says nothing, inheriting its parent's)
+            if let Some(v) = n.plain_attr("contenteditable").filter(|_| n.is_html()) {
                 if v.is_empty() || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("plaintext-only") {
                     return Some(c);
                 }
@@ -944,6 +996,11 @@ impl RealmArena {
         }
         n.is_submit_button() && self.form_owner(id).is_some_and(|f| self.default_button_of(f) == Some(id))
     }
+}
+
+// A radio's group name: its `name`, as UTF-16 (compared exactly), where it has a non-empty one.
+fn radio_name(n: &NodeData) -> Option<Vec<u16>> {
+    n.plain_attr_units("name").filter(|name| !name.is_empty())
 }
 
 #[cfg(test)]

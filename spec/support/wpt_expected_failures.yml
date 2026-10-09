@@ -1961,8 +1961,6 @@ custom-elements/enqueue-custom-element-callback-reactions-inside-another-callbac
 - Setting an observed attribute on an element with attributeChangedCallback while
   it has a connectedCallback in its custom element reaction queue must result in connectedCallback
   getting invoked before the attribute change completes
-custom-elements/form-associated/ElementInternals-labels.html:
-- LABEL association
 custom-elements/form-associated/ElementInternals-reportValidity-bubble.html:
 - "!= custom-elements/form-associated/ElementInternals-reportValidity-bubble-notref.html"
 custom-elements/form-associated/ElementInternals-reportValidity-delegatesFocus.html:

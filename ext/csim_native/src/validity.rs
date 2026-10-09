@@ -520,6 +520,42 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "labeledControl", labeled_control, context_id);
     crate::dom::register(scope, ns, "labelsOf", labels_of, context_id);
     crate::dom::register(scope, ns, "labelToActivate", label_to_activate, context_id);
+    crate::dom::register(scope, ns, "isEditable", is_editable, context_id);
+    crate::dom::register(scope, ns, "isClickActivatable", is_click_activatable, context_id);
+    crate::dom::register(scope, ns, "isDetailsSummary", is_details_summary, context_id);
+    crate::dom::register(scope, ns, "activationTarget", activation_target, context_id);
+}
+
+// __dom.isEditable / isClickActivatable / isDetailsSummary(nid) -> what `element_state` answers of the node: whether it
+// is in an editing host, whether a click activates it, whether it is the summary of its details.
+fn is_editable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    node_test(scope, &args, rv, RealmArena::is_editable);
+}
+fn is_click_activatable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    node_test(scope, &args, rv, RealmArena::is_click_activatable);
+}
+fn is_details_summary(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    node_test(scope, &args, rv, RealmArena::is_details_summary);
+}
+fn node_test(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: &v8::FunctionCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+    test: impl FnOnce(&RealmArena, NodeId) -> bool,
+) {
+    let cid = crate::dom::realm_id(scope, args);
+    let Some(id) = crate::dom::nid_arg(scope, args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(test(crate::dom::realm(scope, cid), id));
+}
+
+// __dom.activationTarget(nid) -> [a click's activation target] or [] (`element_state::activation_target`), from the
+// target's shadow-including root: the path runs out of shadow trees.
+fn activation_target(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let arena = crate::dom::realm(scope, cid);
+    let (root, found) = (arena.shadow_including_root(target), arena.activation_target(target));
+    rv.set(crate::dom::nodes_value(scope, cid, root, found.as_slice()));
 }
 
 // __dom.implicitSubmissionForm(nid) -> [the form Enter in the control submits] or []
