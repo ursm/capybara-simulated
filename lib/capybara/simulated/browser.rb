@@ -9100,7 +9100,8 @@ module Capybara
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
         # -inserted-after-open). So this resolves only against the document URL — a relative one: an absolute URL is the
         # request's as it is, which also keeps a worker thread's fetch (its URLs resolved in its own isolate) off the main
-        # realm, whose current document only its own thread may ask about.
+        # realm, whose current document only its own thread may ask about. (An absolute URL is taken as already serialized:
+        # every caller resolves it first, JS-side or through parse_url / resolve_against.)
         target = url.to_s.match?(%r{\Ahttps?://}i) ? url.to_s : resolve_against_current(url.to_s)
         return nil unless target.is_a?(String) && target.match?(%r{\Ahttps?://}i)
         # Fetch "port blocking" (https://fetch.spec.whatwg.org/#port-blocking): a
