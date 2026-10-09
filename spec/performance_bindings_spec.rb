@@ -77,7 +77,7 @@ RSpec.describe 'Performance bindings' do
       "TypeError: Failed to execute 'mark' on 'Performance': 'neg' cannot have a negative start time.",
       "SyntaxError: Failed to execute 'mark' on 'Performance': 'navigationStart' is part of the PerformanceTiming interface, and cannot be used as a mark name.",
       "SyntaxError: Failed to construct 'PerformanceMark': 'loadEventEnd' is part of the PerformanceTiming interface, and cannot be used as a mark name.",
-      "DataCloneError: Failed to execute 'mark' on 'Performance': A function could not be cloned.",
+      "DataCloneError: Failed to execute 'mark' on 'Performance': () => 1 could not be cloned.",
       [false, true, 1, nil, nil],
       [5, 'mark', nil, 0],
       %w[id name entryType startTime duration navigationId],

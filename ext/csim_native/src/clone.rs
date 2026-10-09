@@ -24,6 +24,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "structuredTransfer", structured_transfer, context_id);
     register(scope, ns, "structuredDeserialize", structured_deserialize, context_id);
     register(scope, ns, "structuredDiscard", structured_discard, context_id);
+    register(scope, ns, "structuredExport", structured_export, context_id);
+    register(scope, ns, "structuredImport", structured_import, context_id);
 }
 
 // A value serialized: its bytes — the descriptions' length (four bytes, little-endian) and serialization, none where
@@ -310,4 +312,44 @@ fn structured_discard(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     if let Some(number) = args.get(0).uint32_value(scope) {
         dom(scope).serialized.remove(&number);
     }
+}
+
+// __dom.structuredExport(number) -> [bytes, buffers]: a serialization taken out of the isolate — to another one, a
+// worker's — its bytes an ArrayBuffer and its transferred ArrayBuffers new ones over their memory, for the bindings to
+// carry across (a message's own channel; RustyRacer.transferOut). It shares no SharedArrayBuffer, which no isolate here
+// shares with another.
+fn structured_export(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(number) = args.get(0).uint32_value(scope) else { return };
+    let Some(serialized) = dom(scope).serialized.remove(&number) else { return };
+    let store = v8::ArrayBuffer::new_backing_store_from_vec(serialized.bytes).make_shared();
+    let bytes = v8::ArrayBuffer::with_backing_store(scope, &store).into();
+    let buffers: Vec<v8::Local<v8::Value>> =
+        serialized.transferred.iter().map(|store| v8::ArrayBuffer::with_backing_store(scope, store).into()).collect();
+    let buffers = v8::Array::new_with_elements(scope, &buffers).into();
+    rv.set(v8::Array::new_with_elements(scope, &[bytes, buffers]).into());
+}
+
+// __dom.structuredImport(bytes, buffers) -> the number of a serialization another isolate exported: its bytes, and its
+// transferred ArrayBuffers' memory taken from `buffers` (each detached), to be read back as one serialized here.
+fn structured_import(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(bytes) = v8::Local::<v8::ArrayBuffer>::try_from(args.get(0)) else { return };
+    let Some(buffers) = buffers(scope, args.get(1)) else { return };
+    let length = bytes.byte_length();
+    let bytes = match bytes.data() {
+        Some(data) if length > 0 => unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, length) }.to_vec(),
+        _ => Vec::new(),
+    };
+    let transferred = buffers
+        .into_iter()
+        .map(|buffer| {
+            let store = buffer.get_backing_store();
+            buffer.detach(None);
+            store
+        })
+        .collect();
+    let d = dom(scope);
+    let number = d.next_serialized;
+    d.next_serialized = number.wrapping_add(1);
+    d.serialized.insert(number, Serialized { bytes, shared: Vec::new(), buffers: Vec::new(), transferred });
+    rv.set(v8::Integer::new_from_unsigned(scope, number).into());
 }

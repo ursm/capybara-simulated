@@ -181,4 +181,28 @@ RSpec.describe 'Structured clone of platform objects' do
     JS
     expect(out).to eq('spoof' => true, 'realm' => true, 'bitmap' => [true, 1, 0], 'stream' => [true, 'chunk', true])
   end
+
+  it "carries a value's Maps, Dates, cycles and shared references to a worker and back, its buffers moved" do
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0], w = new Worker('/echo.js');
+      const shared = { n: 1 }, value = { map: new Map([['k', shared]]), at: new Date(5), shared, big: 2n ** 64n };
+      value.self = value;
+      const buffer = new Uint8Array([1, 2, 3]).buffer;
+      w.onmessage = (e) => {
+        const [back] = e.data;
+        done({
+          map:      back.map instanceof Map && back.map.get('k') === back.shared,
+          date:     back.at instanceof Date && back.at.getTime(),
+          cycle:    back.self === back,
+          big:      String(back.big),
+          buffer:   Array.from(new Uint8Array(back.buffer)),
+          detached: buffer.detached
+        });
+      };
+      value.buffer = buffer;
+      w.postMessage(value, [buffer]);
+    JS
+    expect(got).to eq('map' => true, 'date' => 5, 'cycle' => true, 'big' => '18446744073709551616', 'buffer' => [1, 2, 3], 'detached' => true)
+  end
 end
