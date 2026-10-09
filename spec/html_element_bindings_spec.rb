@@ -257,4 +257,18 @@ RSpec.describe 'HTML element bindings' do
     got = session.evaluate_script('[!!v.error, v.currentSrc.endsWith("/missing.mp4"), v.buffered.length, v.preload]')
     expect(got).to eq([true, true, 0, 'metadata'])
   end
+
+  it 'reflects an ARIA attribute as the string it is, with no default' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const d = document.createElement('div');
+        const before = [d.ariaChecked, d.ariaLive];
+        d.setAttribute('aria-checked', 'BOGUS');
+        d.ariaLive = 'POLITE';
+        return [...before, d.ariaChecked, d.getAttribute('aria-live')];
+      })()
+    JS
+    expect(got).to eq([nil, nil, 'BOGUS', 'POLITE'])
+  end
 end

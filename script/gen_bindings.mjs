@@ -841,13 +841,13 @@ const REFLECT_ENUMS = {
 // (…and one whose number kind its IDL names alone — HTMLProgressElement's `max`, [ReflectPositive]; HTMLTextAreaElement's
 // `cols`, [ReflectPositiveWithFallback] — which the kind's definition makes one that reflects its own name)
 const REFLECT_IMPLIED_BY = ['ReflectNonNegative', 'ReflectPositive', 'ReflectPositiveWithFallback', 'ReflectRange'];
-// (…but the members of these the implementation's: ARIAMixin's, which reflect enumerated per the ARIA reflection and
-// which ElementInternals includes as state of its own, no content attribute)
-const REFLECTED_BY_IMPLEMENTATION = new Set(['ARIAMixin']);
+// (…but the members a mixin's reflection gives one interface and not another the implementation's: ARIAMixin's, which
+// ElementInternals includes as state of its own, no content attribute)
+const REFLECTED_BY_IMPLEMENTATION = new Set(['ElementInternals.ARIAMixin']);
 // (…an enumerated one's keywords a table of the module's: each canonical keyword by its ASCII-lowercase form)
 const reflectKeywordTables = [];
 function reflectionOf(iface, m, where) {
-  if (REFLECTED_BY_IMPLEMENTATION.has(m.parent?.name)) return null;
+  if (REFLECTED_BY_IMPLEMENTATION.has(`${iface}.${m.parent?.name}`)) return null;
   const ext = new Map((m.extAttrs || []).map((e) => [e.name, e]));
   const named = ext.get('Reflect') ?? ext.get('ReflectURL') ?? ext.get('ReflectSetter') ??
     (REFLECT_IMPLIED_BY.some((name) => ext.has(name)) || REFLECT_ENUMS[`${iface}.${m.name}`] ? { name: 'Reflect' } : null);
