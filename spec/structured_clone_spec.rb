@@ -9,8 +9,13 @@ require_relative 'support/session_teardown'
 RSpec.describe 'Structured clone of platform objects' do
   let(:app) {
     lambda do |env|
-      if env['PATH_INFO'] == '/echo.js'
+      case env['PATH_INFO']
+      when '/echo.js'
         [200, {'content-type' => 'text/javascript'}, ["onmessage = (e) => postMessage([e.data, new QuotaExceededError('wq', { quota: 3, requested: 4 })]);"]]
+      when '/refuse.js'
+        [200, {'content-type' => 'text/javascript'}, ['try { structuredClone(() => 1); } catch (e) { postMessage(e.message); }']]
+      when '/popup'
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><script>window.got = []; onmessage = (e) => got.push(e.data.byteLength);</script>']]
       else
         [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><p>x<iframe srcdoc="y"></iframe>']]
       end
@@ -204,5 +209,18 @@ RSpec.describe 'Structured clone of platform objects' do
       w.postMessage(value, [buffer]);
     JS
     expect(got).to eq('map' => true, 'date' => 5, 'cycle' => true, 'big' => '18446744073709551616', 'buffer' => [1, 2, 3], 'detached' => true)
+  end
+
+  it "carries a large message to another window, and refuses in a worker in Chrome's words" do
+    session.visit '/'
+    refused = session.evaluate_async_script("new Worker('/refuse.js').onmessage = (e) => arguments[0](e.data);")
+    session.execute_script("window.popup = window.open('/popup');")
+    session.switch_to_window(session.windows.last)
+    session.evaluate_script('window.got')
+    session.switch_to_window(session.windows.first)
+    session.execute_script("popup.postMessage(new Uint8Array(100000), '*'); popup.postMessage(new Uint8Array(10), '*');")
+    session.switch_to_window(session.windows.last)
+    got = session.evaluate_script('window.got')
+    expect([got, refused]).to eq([[100_000, 10], "Failed to execute 'structuredClone' on 'WorkerGlobalScope': () => 1 could not be cloned."])
   end
 end
