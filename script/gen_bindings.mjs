@@ -326,6 +326,7 @@ const INTERFACES = [
   ['html', 'SubmitEvent', { install: true }],
   ['html', 'FormDataEvent', { install: true }],
   ['html', 'ToggleEvent', { install: true }],
+  ['html', 'CommandEvent', { install: true }],
   ['html', 'StorageEvent', { install: true }],
   ['html', 'MessageEvent', { install: true }],
   ['xhr', 'ProgressEvent', { install: true }],

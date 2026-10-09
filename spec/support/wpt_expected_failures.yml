@@ -3267,16 +3267,6 @@ html/dom/idlharness.https.html:
 - 'CloseWatcher interface: operation close()'
 - 'CloseWatcher interface: operation destroy()'
 - 'CloseWatcher interface: operation requestClose()'
-- CommandEvent interface object length
-- CommandEvent interface object name
-- 'CommandEvent interface: attribute command'
-- 'CommandEvent interface: attribute source'
-- 'CommandEvent interface: existence and properties of interface object'
-- 'CommandEvent interface: existence and properties of interface prototype object'
-- 'CommandEvent interface: existence and properties of interface prototype object''s
-  "constructor" property'
-- 'CommandEvent interface: existence and properties of interface prototype object''s
-  @@unscopables property'
 - 'DOMStringList interface: calling contains(DOMString) on location.ancestorOrigins
   with too few arguments must throw TypeError'
 - 'DOMStringList interface: calling item(unsigned long) on location.ancestorOrigins
@@ -5595,13 +5585,6 @@ html/semantics/interactive-elements/the-dialog-element/dialog-showModal.html:
 - opening dialog with multiple focusable children, one having the autofocus attribute
 - opening dialog without focusable children
 - when opening multiple dialogs, the most recently opened is rendered on top
-html/semantics/interactive-elements/the-dialog-element/dialog-toggle-source.html:
-- 'ToggleEvent.soruce on <dialog> elements: open with button, close with dialog.close().'
-- 'ToggleEvent.source on <dialog> elements: command button.'
-- 'ToggleEvent.source on <dialog> elements: open with button, close with light dismiss.'
-- 'ToggleEvent.source on <dialog> elements: open with showModal, close with button.'
-- 'ToggleEvent.source on <dialog> elements: open with showModal, close with request-close
-  button.'
 html/semantics/interactive-elements/the-dialog-element/dialogs-with-no-backdrop.html:
 - "== html/semantics/interactive-elements/the-dialog-element/dialogs-with-no-backdrop-ref.html"
 html/semantics/interactive-elements/the-dialog-element/dont-share-style-to-top-layer.html:

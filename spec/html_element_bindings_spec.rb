@@ -213,4 +213,24 @@ RSpec.describe 'HTML element bindings' do
     JS
     expect(got).to eq(%w[undefined undefined undefined])
   end
+
+  it 'runs a command or popover invoker as a click activates it' do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend', `
+        <button id=open commandfor=d command=show-modal>open</button>
+        <dialog id=d><button id=shut commandfor=d command=close value=done>close</button></dialog>
+        <button id=pop popovertarget=p>pop</button><div id=p popover>p</div>`);
+      window.seen = [];
+      d.addEventListener('command', (e) => seen.push([e.command, e.source.id]));
+      d.addEventListener('beforetoggle', (e) => seen.push(['beforetoggle', e.source && e.source.id]));
+    JS
+    session.click_button 'open'
+    opened = session.evaluate_script('[d.open, d.matches(":modal")]')
+    session.click_button 'close'
+    session.click_button 'pop'
+    got = session.evaluate_script('[d.open, d.returnValue, p.matches(":popover-open"), seen]')
+    expect(opened).to eq([true, true])
+    expect(got).to eq([false, 'done', true, [['show-modal', 'open'], ['beforetoggle', 'open'], ['close', 'shut'], ['beforetoggle', 'shut']]])
+  end
 end

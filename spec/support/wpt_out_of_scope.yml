@@ -55605,10 +55605,6 @@ shadow-dom/reference-target/tentative/dom-mutation.html:
   reason: referenceTarget id-resolution ordering inside shadow; tentative non-standard
     feature not modeled
 shadow-dom/reference-target/tentative/event-path.html:
-- name: Constructed events given a source don't become composed
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Event path includes all shadow hosts and shadow roots up to the root of the
     source, but non-bubbling event fires only where currentTarget == retargeted original
     target
@@ -55622,9 +55618,6 @@ shadow-dom/reference-target/tentative/event-path.html:
 - name: Event path skips root containing neither source nor target. Non-bubbling event
     fires only where currentTarget == retargeted original target
   reason: event path retargeting through tentative non-standard shadowRootReferenceTarget;
-    not modeled
-- name: Event propagates to source's shadow tree only; source in deeper shadow root
-  reason: event propagation via tentative non-standard shadowRootReferenceTarget;
     not modeled
 - name: Event propagates to source's shadow tree only; target in deeper shadow root
   reason: event propagation via tentative non-standard shadowRootReferenceTarget;
