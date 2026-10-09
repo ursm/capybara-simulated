@@ -249,7 +249,7 @@ RSpec.describe 'Cache Storage API' do
 
   # Every step reads a Request's and a Response's own state, never a page's own property on the object (Chrome alike);
   # keys() Requests have immutable headers (§5.4.7 — Chrome's are mutable); put refuses a locked body (§5.4.5); addAll
-  # checks the Requests given before it makes any from a string, and uses no promise steps a page replaced.
+  # checks the Requests given before it makes any from a string, and calls no Promise.resolve nor `then` a page replaced.
   it 'follows the operations steps' do
     session = simulated_session(app)
     session.visit '/'
@@ -267,10 +267,14 @@ RSpec.describe 'Cache Storage API' do
       const urls = (await c.keys()).map((r) => new URL(r.url).pathname);
       const [key] = await c.keys('/real');
       let called = 0;
-      const resolve = Promise.resolve;
+      const [resolve, then] = [Promise.resolve, Promise.prototype.then];
       Promise.resolve = function (v) { called++; return resolve.call(this, v); };
+      Promise.prototype.then = function (...args) { called++; return then.apply(this, args); };
+      const streamed = new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array([65])); c.close(); } }));
       await c.addAll(['/asset']);
+      await c.put('/streamed', streamed);
       Promise.resolve = resolve;
+      Promise.prototype.then = then;
       return [
         steps, urls.sort(), (() => { try { key.headers.set('x', 'y'); return 'none'; } catch (e) { return e.name; } })(),
         await why(c.put('/l', locked)), await why(c.addAll(['http://[bad', new Request('/x', {method: 'POST'})])), called
