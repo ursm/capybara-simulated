@@ -33,6 +33,11 @@ const OUT = join(ROOT, 'lib', 'capybara', 'simulated', 'js', 'src', 'generated',
 // exposes on no object: feature detection reads them (flatpickr binds `touchstart` instead of `mousedown` where
 // `window.ontouchstart` is defined).
 const NO_TOUCH = { 'touch-events': 'ontouch*: no touch screen, whose handlers a desktop browser exposes nowhere' };
+// (…WindowEventHandlers' partials of APIs not implemented: the Window's, and a <body>'s / <frameset>'s, which reflect it)
+const NO_WINDOW_HANDLERS = {
+  gamepad: 'ongamepad*: the Gamepad API is not implemented',
+  portals: 'portalHost / onportalactivate: portals are not implemented'
+};
 const INTERFACES = [
   ['dom', 'DOMTokenList'],
   ['dom', 'NodeFilter'],
@@ -149,6 +154,19 @@ const INTERFACES = [
     }
   }],
   ['html', 'HTMLObjectElement', { install: true }],
+  ['html', 'HTMLVideoElement', {
+    install: true,
+    omit: {
+      'media-playback-quality': 'getVideoPlaybackQuality: playback quality is not modelled (nothing plays)',
+      'picture-in-picture': 'Picture-in-Picture is not implemented',
+      'video-rvfc': 'requestVideoFrameCallback: no frame is presented'
+    }
+  }],
+  ['html', 'HTMLBodyElement', {
+    install: true,
+    omit: { ...NO_WINDOW_HANDLERS, compat: 'onorientationchange: a mobile-only legacy, which a desktop browser has not' }
+  }],
+  ['html', 'HTMLFrameSetElement', { install: true, omit: NO_WINDOW_HANDLERS }],
   ['html', 'HTMLCanvasElement', {
     install: true,
     omit: { 'mediacapture-fromelement': 'captureStream: media capture from a canvas is not implemented' },
@@ -191,6 +209,7 @@ const INTERFACES = [
     namedProperties: true,
     omit: {
       ...NO_TOUCH,
+      ...NO_WINDOW_HANDLERS,
       'anonymous-iframe': 'credentialless: credentialless iframes are not implemented',
       compat: 'orientation / onorientationchange: a mobile-only legacy, which a desktop browser has not',
       cookiestore: 'cookieStore: the Cookie Store API is not implemented',
@@ -203,11 +222,9 @@ const INTERFACES = [
       'fenced-frame': 'fence: fenced frames are not implemented',
       fetch: 'fetch / fetchLater: the Fetch polyfill converts its own arguments; fetchLater is not implemented',
       'file-system-access': 'show*Picker: the File System Access pickers are not implemented',
-      gamepad: 'ongamepad*: the Gamepad API is not implemented',
       'local-font-access': 'queryLocalFonts: Local Font Access is not implemented',
       'manifest-incubations': 'onappinstalled / onbeforeinstallprompt: app installation is not implemented',
       'orientation-event': 'ondevice*: device orientation and motion are not implemented',
-      portals: 'portalHost / onportalactivate: portals are not implemented',
       PushManagerAttribute: 'pushManager: the Push API is not implemented',
       'scheduling-apis': 'scheduler: the Prioritized Task Scheduling API is not implemented',
       'speech-api': 'speechSynthesis: the Web Speech API is not implemented',
