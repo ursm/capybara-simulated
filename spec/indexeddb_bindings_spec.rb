@@ -10,7 +10,7 @@ require_relative 'support/session_teardown'
 RSpec.describe 'IndexedDB bindings' do
   let(:app) {
     lambda {|_env|
-      [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><p>idb</p>']]
+      [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><p>idb</p><iframe srcdoc="<p>frame</p>"></iframe>']]
     }
   }
 
@@ -104,6 +104,68 @@ RSpec.describe 'IndexedDB bindings' do
       'after'    => 3,
       'error'    => 'InvalidStateError'
     )
+  end
+
+  it 'ends a transaction a script the host ran made, with the script' do
+    session = simulated_session(app)
+    session.visit '/'
+    probe(session, <<~JS)
+      window.db = await open('host', (db) => db.createObjectStore('s'));
+      const tx = db.transaction('s', 'readwrite');
+      [1, 2, 3].forEach((n) => tx.objectStore('s').put(n, n));
+      await new Promise((resolve) => tx.oncomplete = resolve);
+    JS
+    session.execute_script(<<~JS)
+      window.tx = db.transaction('s', 'readwrite');
+      setTimeout(() => { try { tx.objectStore('s').put(4, 4); window.late = 'none'; } catch (e) { window.late = e.name; } });
+    JS
+    walked = session.evaluate_async_script(<<~JS)
+      const done = arguments[0], keys = [];
+      const request = db.transaction('s').objectStore('s').openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return done(keys);
+        keys.push(cursor.key);
+        cursor.continue();
+      };
+      request.transaction.onabort = () => done('aborted');
+    JS
+    expect([session.evaluate_script('window.late'), walked]).to eq(['TransactionInactiveError', [1, 2, 3]])
+  end
+
+  it "ends a transaction another realm's connection made with the task that made it" do
+    session = simulated_session(app)
+    session.visit '/'
+    out = probe(session, <<~JS)
+      const request = frames[0].indexedDB.open('framed', 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('s');
+      const db = await settled(request);
+      const tick = () => new Promise((resolve) => setTimeout(resolve));
+      let tx;
+      await new Promise((resolve) => setTimeout(() => { tx = db.transaction('s', 'readwrite'); resolve(); }));
+      await tick();
+      return err(() => tx.objectStore('s').put(1, 1));
+    JS
+    expect(out).to eq('TransactionInactiveError')
+  end
+
+  it 'takes a commit a listener made, and runs a target’s capture listeners first' do
+    session = simulated_session(app)
+    session.visit '/'
+    out = probe(session, <<~JS)
+      const db = await open('commit', (db) => db.createObjectStore('s'));
+      const tx = db.transaction('s', 'readwrite');
+      tx.objectStore('s').add(1, 1);
+      // (…an error no listener canceled, on a transaction the listener committed: it completes)
+      tx.objectStore('s').add(2, 1).onerror = () => tx.commit();
+      const outcome = await new Promise((resolve) => { tx.oncomplete = () => resolve('complete'); tx.onabort = () => resolve('abort'); });
+      const target = new EventTarget(), order = [];
+      target.addEventListener('x', () => order.push('bubble'));
+      target.addEventListener('x', () => order.push('capture'), true);
+      target.dispatchEvent(new Event('x'));
+      return { outcome, order };
+    JS
+    expect(out).to eq('outcome' => 'complete', 'order' => %w[capture bubble])
   end
 
   it 'runs a step’s worth of a chain of tasks at one instant, however many turns it takes' do
