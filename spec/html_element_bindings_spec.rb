@@ -254,8 +254,14 @@ RSpec.describe 'HTML element bindings' do
       window.v = document.createElement('video');
       v.setAttribute('src', '/missing.mp4');
     JS
-    got = session.evaluate_script('[!!v.error, v.currentSrc.endsWith("/missing.mp4"), v.buffered.length, v.preload]')
-    expect(got).to eq([true, true, 0, 'metadata'])
+    got = session.evaluate_script('[!!v.error, v.currentSrc.endsWith("/missing.mp4"), v.buffered.length, v.preload, v.networkState]')
+    expect(got).to eq([true, true, 0, 'metadata', 3])
+    session.execute_script(<<~JS)
+      window.seen = [];
+      for (const type of ['emptied', 'loadstart', 'error']) v.addEventListener(type, () => seen.push(type));
+      v.src = v.getAttribute('src');
+    JS
+    expect(session.evaluate_script('seen')).to eq(%w[emptied loadstart error])
   end
 
   it 'reflects an ARIA attribute as the string it is, with no default' do
