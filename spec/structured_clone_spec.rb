@@ -169,14 +169,16 @@ RSpec.describe 'Structured clone of platform objects' do
       class Spoof { get [Symbol.toStringTag]() { return 'Window'; } }
       const spoofed = structuredClone(new Spoof());
       createImageBitmap(new ImageData(1, 1)).then((bitmap) => {
-        frames[0].onmessage = (e) => done({
+        const stream = new ReadableStream({ start(c) { c.enqueue('chunk'); c.close(); } });
+        frames[0].onmessage = (e) => e.data.stream.getReader().read().then(({ value }) => done({
           spoof:  Object.getPrototypeOf(spoofed) === Object.prototype,
           realm:  e.data instanceof frames[0].Object,
-          bitmap: [e.data.bitmap instanceof frames[0].ImageBitmap, e.data.bitmap.width, bitmap.width]
-        });
-        frames[0].postMessage({ n: 1, bitmap }, '*', [bitmap]);
+          bitmap: [e.data.bitmap instanceof frames[0].ImageBitmap, e.data.bitmap.width, bitmap.width],
+          stream: [e.data.stream instanceof frames[0].ReadableStream, value, stream.locked]
+        }));
+        frames[0].postMessage({ n: 1, bitmap, stream }, '*', [bitmap, stream]);
       });
     JS
-    expect(out).to eq('spoof' => true, 'realm' => true, 'bitmap' => [true, 1, 0])
+    expect(out).to eq('spoof' => true, 'realm' => true, 'bitmap' => [true, 1, 0], 'stream' => [true, 'chunk', true])
   end
 end
