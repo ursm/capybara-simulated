@@ -48,6 +48,31 @@ FileAPI/url/sandboxed-iframe.html:
     test-harness/GC-helper gap in the constructed iframe, not a driver gap — surfaced
     once the WindowProxy event.source fix let the collection complete (the standalone
     url-with-fetch.any.js variant, which loads gc.js, passes).
+IndexedDB/storage-buckets.https.any.js:
+- name: Basic test that buckets create independent databases.
+  reason: "[WICG] Storage Buckets (wicg.github.io/storage-buckets, a WICG draft that
+    only Chromium ships): `navigator.storageBuckets` and its per-bucket `indexedDB`
+    are not implemented, and the test's /storage/buckets/ helpers are not vendored."
+- name: Tests trying to use indexedDB in a deleted bucket.
+  reason: "[WICG] Storage Buckets (wicg.github.io/storage-buckets, a WICG draft that
+    only Chromium ships): `navigator.storageBuckets` and its per-bucket `indexedDB`
+    are not implemented, and the test's /storage/buckets/ helpers are not vendored."
+- name: "[dedicatedworker] [harness] ERROR"
+  reason: "[WICG] Storage Buckets (wicg.github.io/storage-buckets, a WICG draft that
+    only Chromium ships): `navigator.storageBuckets` and its per-bucket `indexedDB`
+    are not implemented, and the test's /storage/buckets/ helpers are not vendored."
+- name: "[dedicatedworker] [harness] no subtests"
+  reason: "[WICG] Storage Buckets (wicg.github.io/storage-buckets, a WICG draft that
+    only Chromium ships): `navigator.storageBuckets` and its per-bucket `indexedDB`
+    are not implemented, and the test's /storage/buckets/ helpers are not vendored."
+- name: "[serviceworker] [harness] ERROR"
+  reason: "[WICG] Storage Buckets (wicg.github.io/storage-buckets, a WICG draft that
+    only Chromium ships): `navigator.storageBuckets` and its per-bucket `indexedDB`
+    are not implemented, and the test's /storage/buckets/ helpers are not vendored."
+- name: "[serviceworker] [harness] no subtests"
+  reason: "[WICG] Storage Buckets (wicg.github.io/storage-buckets, a WICG draft that
+    only Chromium ships): `navigator.storageBuckets` and its per-bucket `indexedDB`
+    are not implemented, and the test's /storage/buckets/ helpers are not vendored."
 WebCryptoAPI/derive_bits_keys/argon2.tentative.https.any.js:
 - name: setup - define tests
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

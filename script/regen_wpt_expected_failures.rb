@@ -61,7 +61,12 @@ TENTATIVE_REASON = 'Unratified `.tentative` spec — auto-classified out-of-scop
 # check scans for, so the writer and reader can't drift) — that check re-surfaces the
 # entry when the test's <link rel=help> stops referencing WICG, i.e. it standardized,
 # the signal a missing `.tentative` suffix can't give. Map: rel => reason.
-WICG_OUT = {}.freeze
+WICG_OUT = {
+  'IndexedDB/storage-buckets.https.any.js' =>
+    "#{WptRunner::WICG_REASON_TAG} Storage Buckets (wicg.github.io/storage-buckets, a WICG draft that only " \
+    'Chromium ships): `navigator.storageBuckets` and its per-bucket `indexedDB` are not implemented, and the ' \
+    "test's /storage/buckets/ helpers are not vendored."
+}.freeze
 
 # Unratified proposals that are morally `.tentative` (an in-flux spec no browser ships and
 # no app depends on) but carry NEITHER a `tentative` path NOR a WICG `<link rel=help>` — a

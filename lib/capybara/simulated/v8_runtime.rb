@@ -1565,12 +1565,11 @@ module Capybara
 
       # A fresh per-frame realm boots from the snapshot, so every
       # `globalThis.…` assignment csim ran *post-snapshot* in `build_ctx` is
-      # missing (realm state). Re-seed the `__csim_yield` alias and the
-      # realm's own state (`__csimInitRealm()`: its document, the Worker
+      # missing (realm state). Re-seed the realm's own state
+      # (`__csimInitRealm()`: its document, the Worker
       # constructors); the `__csim_runScript` dispatcher comes from
       # `attach_run_script_with_cache` (realm-bound).
       def reseed_realm_js(c)
-        c.eval_void("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
         init_realm(c)
         seed_layout(c)
       end
@@ -1588,12 +1587,6 @@ module Capybara
         # One rendezvous for the whole table (~50 fns) — this runs per cold
         # build, per worker, and per warm realm reset.
         c.attach_many(fns)
-        # `dispatchEventForUserAction` calls `__csim_yield` between listener
-        # invocations to match HTML spec "clean up after running script"
-        # microtask-checkpoint semantics. Alias it to the namespace's native
-        # in-isolate checkpoint so callers pay ~sub-µs instead of an
-        # attached-fn cross-thread round-trip.
-        c.eval_void("globalThis.__csim_yield = globalThis.#{HOST_NAMESPACE_NAME}.drainMicrotasks;")
         # Register the bridge's recorder for V8's promise-reject notifications
         # — the one channel that surfaces rejections no handler sees by HTML's
         # notify task (fire-and-forget async functions, bare `Promise.reject`,

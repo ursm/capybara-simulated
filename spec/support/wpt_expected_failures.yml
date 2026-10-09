@@ -29,6 +29,23 @@ FileAPI/url/url-in-tags.window.js:
 - "[harness] TIMEOUT"
 FileAPI/url/url_xmlhttprequest_img.html:
 - "== FileAPI/url/url_xmlhttprequest_img-ref.html (never ready to capture)"
+IndexedDB/back-forward-cache-open-connection.window.js:
+- back-forward-cache-open-connection
+IndexedDB/back-forward-cache-open-transaction.window.js:
+- back-forward-cache-open-transaction
+IndexedDB/database-names-by-origin.html:
+- closed database names don't leak to cross-origin iframe
+- closed database names don't leak to cross-origin window
+- open database names don't leak to cross-origin iframe
+- open database names don't leak to cross-origin window
+IndexedDB/file_support.sub.html:
+- Composed slices of a file can be stored and retrieved from IndexedDB
+- Saves and loads back File objects from IndexedDB
+- Sliced file can be stored and retrieved from IndexedDB
+IndexedDB/idb-partitioned-persistence.sub.html:
+- Persistence test for partitioned IndexedDB
+IndexedDB/serialize-sharedarraybuffer-throws.https.html:
+- 'IndexedDB: Attempting to serialize a SharedArrayBuffer should throw'
 WebCryptoAPI/import_export/ec_importKey.https.any.js:
 - 'Good parameters: P-256 bits (spki, buffer(59, compressed), {name: ECDH, namedCurve:
   P-256}, true, [])'
@@ -3138,17 +3155,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - text-transform handles Turkish casing ("<div><div lang='tr' style='text-transform:uppercase'>i
   ı")
 html/dom/idlharness.any.js:
-- DOMStringList interface object length
-- DOMStringList interface object name
-- 'DOMStringList interface: attribute length'
-- 'DOMStringList interface: existence and properties of interface object'
-- 'DOMStringList interface: existence and properties of interface prototype object'
-- 'DOMStringList interface: existence and properties of interface prototype object''s
-  "constructor" property'
-- 'DOMStringList interface: existence and properties of interface prototype object''s
-  @@unscopables property'
-- 'DOMStringList interface: operation contains(DOMString)'
-- 'DOMStringList interface: operation item(unsigned long)'
 - 'DedicatedWorkerGlobalScope interface: internal [[SetPrototypeOf]] method of global
   platform object - setting to a new value via Object.setPrototypeOf should throw
   a TypeError'
@@ -3273,27 +3279,16 @@ html/dom/idlharness.https.html:
   "constructor" property'
 - 'CommandEvent interface: existence and properties of interface prototype object''s
   @@unscopables property'
-- DOMStringList interface object length
-- DOMStringList interface object name
-- 'DOMStringList interface: attribute length'
 - 'DOMStringList interface: calling contains(DOMString) on location.ancestorOrigins
   with too few arguments must throw TypeError'
 - 'DOMStringList interface: calling item(unsigned long) on location.ancestorOrigins
   with too few arguments must throw TypeError'
-- 'DOMStringList interface: existence and properties of interface object'
-- 'DOMStringList interface: existence and properties of interface prototype object'
-- 'DOMStringList interface: existence and properties of interface prototype object''s
-  "constructor" property'
-- 'DOMStringList interface: existence and properties of interface prototype object''s
-  @@unscopables property'
 - 'DOMStringList interface: location.ancestorOrigins must inherit property "contains(DOMString)"
   with the proper type'
 - 'DOMStringList interface: location.ancestorOrigins must inherit property "item(unsigned
   long)" with the proper type'
 - 'DOMStringList interface: location.ancestorOrigins must inherit property "length"
   with the proper type'
-- 'DOMStringList interface: operation contains(DOMString)'
-- 'DOMStringList interface: operation item(unsigned long)'
 - DOMStringList must be primary interface of location.ancestorOrigins
 - 'Document interface: attribute onreadystatechange'
 - 'Document interface: calling parseHTML(DOMString, optional SetHTMLOptions) on documentWithHandlers
@@ -6538,6 +6533,9 @@ service-workers/service-worker/import-scripts-updated-flag.https.html:
 - import script not previously imported
 service-workers/service-worker/indexeddb.https.html:
 - Verify Indexed DB operation in a Service Worker
+- "[harness] ERROR"
+- 'clean up: database'
+- 'clean up: registration'
 service-workers/service-worker/intercepted-referrer.https.html:
 - document.referrer for a navigation intercepted by a Service Worker is unchanged
   and matches the parent URL

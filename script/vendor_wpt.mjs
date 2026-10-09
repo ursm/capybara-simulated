@@ -206,6 +206,10 @@ const TREES = [
                                        // selectionchange events: the cursor every rich-text editor
                                        // (ProseMirror / Tiptap / Trix) drives and reads back. Its caret /
                                        // drag / `modify` slices need line layout and hit-testing.
+  'IndexedDB',                         // IndexedDB — databases, object stores, indexes, key ranges, cursors and
+                                       // the transaction lifetime rules, on the in-process store idb.js keeps:
+                                       // the client-side database an offline-capable app keeps. Data API, no
+                                       // layout.
   'css/geometry',                      // DOMMatrix / DOMPoint / DOMRect / DOMQuad — the geometry interfaces
                                        // canvas transforms, Path2D.addPath and app code build on, and the
                                        // CSS transform list `new DOMMatrix(string)` parses.

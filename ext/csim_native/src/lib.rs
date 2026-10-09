@@ -67,6 +67,7 @@ mod traversal;
 mod unicode;
 mod url_ops;
 mod validity;
+mod values;
 mod video;
 mod walk;
 mod walk_ops;

@@ -2745,12 +2745,16 @@ module Capybara
         # so the worker runs (Thread.pass does NOT hand it over); gated on a live worker so
         # worker-free files pay nothing.
         sleep(WORKER_GVL_YIELD) if @workers.any? {|_, w| w[:thread]&.alive? }
+        # (…and at most a step's worth of tasks at that instant, however many turns they take: a chain of tasks each due
+        # at once — an IndexedDB request whose `success` makes the next — is a turn's whole budget every turn)
+        tasks = RUN_LOOP_MAX_ITER
         loop do
-          r = @runtime.run_loop_step(0)          # run only what's due NOW + microtasks + render; no clock advance
+          r = @runtime.run_loop_step(0, tasks)   # run only what's due NOW + microtasks + render; no clock advance
           progressed = step_and_drain_progressed(r)
           turns += 1
+          tasks -= r['fired'].to_i
           break unless progressed
-          break if turns >= EVENT_LOOP_QUIESCENCE_CAP
+          break if turns >= EVENT_LOOP_QUIESCENCE_CAP || tasks <= 0
         end
 
         # Interlude — hold the virtual clock while a controlled-client fetch is awaiting the
