@@ -2236,14 +2236,6 @@ dom/idlharness.window.js:
   with the proper type'
 - 'Element interface: existence and properties of interface object'
 - 'Element interface: operation requestFullscreen(optional FullscreenOptions)'
-- 'HTMLCollection interface: attribute length'
-- 'HTMLCollection interface: calling item(unsigned long) on document.body.children
-  with too few arguments must throw TypeError'
-- 'HTMLCollection interface: calling namedItem(DOMString) on document.body.children
-  with too few arguments must throw TypeError'
-- 'HTMLCollection interface: existence and properties of interface object'
-- 'HTMLCollection interface: operation item(unsigned long)'
-- 'HTMLCollection interface: operation namedItem(DOMString)'
 - Stringification of new XSLTProcessor()
 - XSLTProcessor interface object length
 - XSLTProcessor interface object name
@@ -3519,10 +3511,6 @@ html/dom/idlharness.https.html:
 - 'HTMLFontElement interface: attribute color'
 - 'HTMLFontElement interface: attribute face'
 - 'HTMLFontElement interface: attribute size'
-- 'HTMLFormControlsCollection interface: calling namedItem(DOMString) on document.createElement("form").elements
-  with too few arguments must throw TypeError'
-- 'HTMLFormControlsCollection interface: existence and properties of interface object'
-- 'HTMLFormControlsCollection interface: operation namedItem(DOMString)'
 - 'HTMLFormElement interface: attribute acceptCharset'
 - 'HTMLFormElement interface: attribute action'
 - 'HTMLFormElement interface: attribute autocomplete'
@@ -4095,11 +4083,6 @@ html/dom/idlharness.https.html:
 - 'HTMLOptionElement interface: attribute selected'
 - 'HTMLOptionElement interface: attribute text'
 - 'HTMLOptionElement interface: attribute value'
-- 'HTMLOptionsCollection interface: attribute length'
-- 'HTMLOptionsCollection interface: attribute selectedIndex'
-- 'HTMLOptionsCollection interface: existence and properties of interface object'
-- 'HTMLOptionsCollection interface: operation add((HTMLOptionElement or HTMLOptGroupElement),
-  optional (HTMLElement or long)?)'
 - 'HTMLOutputElement interface: attribute defaultValue'
 - 'HTMLOutputElement interface: attribute form'
 - 'HTMLOutputElement interface: attribute htmlFor'
@@ -4696,7 +4679,6 @@ html/dom/idlharness.https.html:
 - 'Sanitizer interface: operation setDataAttributes(boolean)'
 - 'ShadowRoot interface: operation setHTML(DOMString, optional SetHTMLOptions)'
 - Stringification of document.all
-- Stringification of document.createElement("form").elements
 - Stringification of document.createElement("listing")
 - Stringification of document.createElement("marquee")
 - Stringification of document.createElement("track").track

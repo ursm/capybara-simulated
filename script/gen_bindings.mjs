@@ -186,6 +186,13 @@ const INTERFACES = [
   ['html', 'CustomStateSet', { install: true }],
   ['html', 'ElementInternals', { install: true }],
   ['html', 'DOMStringMap', { install: true, namedProperties: 'the Proxy each element\'s dataset is (dom-nodes.js)' }],
+  ['dom', 'HTMLCollection', {
+    install: true,
+    namedProperties: 'the Proxy each collection is (dom-collections.js `legacyCollection`)',
+    indexedProperties: 'the same Proxy'
+  }],
+  ['html', 'HTMLOptionsCollection', { install: true, indexedProperties: 'the Proxy each collection is' }],
+  ['html', 'HTMLFormControlsCollection', { install: true, namedProperties: 'the Proxy each collection is' }],
   ['dom', 'NodeList', { install: true, indexedProperties: 'the Proxy `withIndexedGetter` makes of each (dom-collections.js `makeNodeList`)' }],
   ['html', 'RadioNodeList', { install: true }],
   ['dom', 'NamedNodeMap', {
