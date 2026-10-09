@@ -1510,6 +1510,8 @@ pub(crate) struct Dom {
     attrs_view_template: Option<v8::Global<v8::ObjectTemplate>>,
     // The template every node's object is made from (`node_handle`, `__dom.NodeBase`).
     pub(crate) node_template: Option<v8::Global<v8::FunctionTemplate>>,
+    // The template a legacy platform object with an indexed getter is made from (legacy.rs).
+    pub(crate) indexed_template: Option<v8::Global<v8::ObjectTemplate>>,
     // Every live range's boundary points (ranges.rs).
     pub(crate) ranges: crate::ranges::Ranges,
     // Each realm's style engine (made by `styleSheets`).
@@ -1828,6 +1830,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::url_ops::install(scope, ns, context_id);
     crate::text_codec::install(scope, ns, context_id);
     crate::values::install(scope, ns, context_id);
+    crate::clone::install(scope, ns, context_id);
+    crate::legacy::install(scope, ns, context_id);
     crate::document_encoding::install(scope, ns, context_id);
     register(scope, ns, "nowNanos", now_nanos, context_id);
     // Incremental-sync primitives (the store-flip F1 foundation): keep the arena current

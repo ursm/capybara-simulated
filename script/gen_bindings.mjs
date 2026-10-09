@@ -26,7 +26,9 @@ const OUT = join(ROOT, 'lib', 'capybara', 'simulated', 'js', 'src', 'generated',
 // adds to it that no implementation here answers yet, and why — a mixin it includes, by name; a partial interface of
 // it, or a partial of a mixin it includes, by the spec's name. Anything else added is merged. `omitMembers`: single
 // members no implementation answers, by name (and why). `namedProperties` / `indexedProperties`: how an installed
-// interface's objects answer its named / indexed property getter themselves (a Proxy of the class's).
+// interface's objects answer its named / indexed property getter themselves (a Proxy of the class's). `nativeIndexed`:
+// an interface the binding makes whose objects with an indexed getter are made natively (webidl.js
+// `nativeIndexedObject`), not as the Proxy `withIndexedGetter` makes.
 // GlobalEventHandlers' touch handlers, which a desktop with no touch screen — headless Chrome's and Firefox's, measured —
 // exposes on no object: feature detection reads them (flatpickr binds `touchstart` instead of `mousedown` where
 // `window.ontouchstart` is defined).
@@ -372,7 +374,8 @@ const INTERFACES = [
   ['encoding', 'TextEncoderStream', { install: true }],
   ['FileAPI', 'Blob', { install: true }],
   ['FileAPI', 'File', { install: true }],
-  ['FileAPI', 'FileList'],
+  // (…made natively: a FileList is [Serializable], and V8's serializer takes no Proxy)
+  ['FileAPI', 'FileList', { nativeIndexed: true }],
   ['FileAPI', 'FileReader', { install: true }],
   ['FileAPI', 'FileReaderSync', { install: true }],
   ['dom', 'XPathResult', { install: true }],
@@ -518,7 +521,7 @@ const RUNTIME = [
   'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
-  'defineConstants', 'withIndexedGetter', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
+  'defineConstants', 'withIndexedGetter', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers', 'defaultJSONOf', 'defineSetlike', 'defineMaplike'
 ];
 
@@ -1233,9 +1236,11 @@ function generateInterface(def, options = {}) {
     lines.push(`  defineIndexedIterator(${name}.prototype);`);
   }
   // …and its objects, as the platform makes them (`create(...state)`), exotic where it has an indexed getter.
-  const make = indexed
-    ? `withIndexedGetter(new ${name}(PLATFORM, ...state), (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s))`
-    : `new ${name}(PLATFORM, ...state)`;
+  const make = !indexed
+    ? `new ${name}(PLATFORM, ...state)`
+    : options.nativeIndexed
+      ? `{ const s = nativeIndexedObject(${name}.prototype, KEY, (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s)); impl.init(s, ...state); return s.owner; }`
+      : `withIndexedGetter(new ${name}(PLATFORM, ...state), (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s))`;
   lines.push(`  return { interface: ${name}, create: (...state) => ${make} };`);
   lines.push(`}`);
   return lines.join('\n');

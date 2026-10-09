@@ -1,9 +1,11 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
-# The structured clone of platform objects (HTML §2.7): a DOMException — any realm's — is [Serializable], made this
-# realm's again with its name and message (a QuotaExceededError with its quota); a platform object that is not, a
-# DataCloneError.
+# The structured clone (HTML §2.7), V8's own serializer (clone.rs) with the bindings saying what each platform object
+# serializes to: the JavaScript values with their cycles and shared references; a DOMException — any realm's — made
+# this realm's again with its name and message (a QuotaExceededError with its quota); a platform object that is not
+# [Serializable], a DataCloneError; a transfer list's ArrayBuffers and ports moved; and a FileList — the one
+# [Serializable] legacy platform object — made natively (legacy.rs), since V8's serializer takes no Proxy.
 RSpec.describe 'Structured clone of platform objects' do
   let(:app) {
     lambda do |env|
@@ -45,5 +47,88 @@ RSpec.describe 'Structured clone of platform objects' do
                      new QuotaExceededError('qm', { quota: 5, requested: 6 })]);
     JS
     expect(got).to eq([[true, 'NotFoundError', 'fm', 8], [true, 't'], [true, 5, 6], [true, 3, 4]])
+  end
+
+  def probe(script)
+    session.evaluate_script("(() => { 'use strict'; const err = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } }; #{script} })()")
+  end
+
+  it 'keeps cycles and shared references, and takes a platform object by what it is' do
+    session.visit '/'
+    out = probe(<<~JS)
+      const shared = { n: 1 }, cyclic = { shared, again: shared };
+      cyclic.self = cyclic;
+      const copy = structuredClone(cyclic);
+      class Point { constructor() { this.x = 1; } }
+      const values = structuredClone([new DOMRect(1, 2, 3, 4), new Map([[1, 'a']]), new Point()]);
+      return {
+        cycle:  copy.self === copy,
+        shared: copy.shared === copy.again && copy.shared !== shared,
+        rect:   [values[0] instanceof DOMRect, values[0].width],
+        map:    values[1].get(1),
+        plain:  Object.getPrototypeOf(values[2]) === Object.prototype,
+        event:  err(() => structuredClone(new Event('x'))),
+        node:   err(() => structuredClone(document.body)),
+        fn:     err(() => structuredClone(() => 1))
+      };
+    JS
+    expect(out).to eq(
+      'cycle'  => true,
+      'shared' => true,
+      'rect'   => [true, 3],
+      'map'    => 'a',
+      'plain'  => true,
+      'event'  => 'DataCloneError',
+      'node'   => 'DataCloneError',
+      'fn'     => 'DataCloneError'
+    )
+  end
+
+  it 'transfers an ArrayBuffer and a MessagePort' do
+    session.visit '/'
+    out = probe(<<~JS)
+      const buffer = new Uint8Array([1, 2, 3]).buffer, { port1 } = new MessageChannel();
+      const copy = structuredClone({ view: new Uint8Array(buffer, 1), port: port1 }, { transfer: [buffer, port1] });
+      return {
+        detached: buffer.detached,
+        view:     Array.from(copy.view),
+        port:     copy.port instanceof MessagePort && copy.port !== port1,
+        twice:    err(() => structuredClone(1, { transfer: [copy.port, copy.port] }))
+      };
+    JS
+    expect(out).to eq('detached' => true, 'view' => [2, 3], 'port' => true, 'twice' => 'DataCloneError')
+  end
+
+  it 'makes a FileList a legacy platform object, and clones its files' do
+    session.visit '/'
+    out = probe(<<~JS)
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(['one'], 'a.txt', { type: 'text/plain' }));
+      const files = transfer.files, copy = structuredClone(files), own = Object.getOwnPropertyDescriptor(files, '0');
+      return {
+        own:        [own.writable, own.enumerable, own.configurable],
+        keys:       Object.keys(files),
+        has:        [0 in files, 1 in files],
+        past:       files[1],
+        delete:     err(() => { delete files[0]; }),
+        deletePast: delete files[1],
+        set:        err(() => { files[0] = null; }),
+        define:     err(() => Object.defineProperty(files, '1', { value: 1 })),
+        list:       copy instanceof FileList && copy !== files,
+        file:       [copy[0] instanceof File, copy[0].name, copy.length]
+      };
+    JS
+    expect(out).to eq(
+      'own'        => [false, true, true],
+      'keys'       => ['0'],
+      'has'        => [true, false],
+      'past'       => nil,
+      'delete'     => 'TypeError',
+      'deletePast' => true,
+      'set'        => 'TypeError',
+      'define'     => 'TypeError',
+      'list'       => true,
+      'file'       => [true, 'a.txt', 1]
+    )
   end
 end

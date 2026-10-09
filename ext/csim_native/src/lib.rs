@@ -12,6 +12,7 @@ mod animations;
 mod av1;
 mod canvas;
 mod canvas_path;
+mod clone;
 mod collections;
 mod css;
 mod css_animations;
@@ -41,6 +42,7 @@ mod image_encode;
 mod image_source;
 // Layout: the records the walk builds (mod walk) laid out, driven by the `layoutBuild` op (mod walk_ops).
 mod layout;
+mod legacy;
 mod mime;
 mod mutation;
 mod namespaces;
