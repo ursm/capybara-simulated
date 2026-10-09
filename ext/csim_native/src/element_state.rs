@@ -771,6 +771,35 @@ impl RealmArena {
     fn is_editable(&self, id: NodeId) -> bool {
         self.editing_host(id).is_some()
     }
+    // The submittable elements whose values a form's entry list takes (HTML "construct the entry list" step 5.1), in tree
+    // order: its tree's button / input / select / textarea and form-associated custom elements whose form owner it is —
+    // but one with a `<datalist>` ancestor, and one actually disabled unless it is the submitter, whose name and value
+    // a submission takes whatever disabled it as it fired.
+    pub(crate) fn form_submittables(&self, form: NodeId, submitter: Option<NodeId>) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        self.find_in_tree(self.form_tree(form), |c, n| {
+            let control = n.is_html() && matches!(&*n.local_name, "button" | "input" | "select" | "textarea");
+            if (control || n.state & STATE_FORM_ASSOCIATED != 0)
+                && self.form_owner(c) == Some(form)
+                && (Some(c) == submitter || !self.is_actually_disabled(c))
+                && !self.in_datalist(c)
+            {
+                out.push(c);
+            }
+            false
+        });
+        out
+    }
+    fn in_datalist(&self, id: NodeId) -> bool {
+        let mut cur = self.parent_of(id);
+        while let Some(c) = cur {
+            if self.get(c).is_some_and(|n| n.is_html_named("datalist")) {
+                return true;
+            }
+            cur = self.parent_of(c);
+        }
+        false
+    }
     // A labelable element (HTML §4.10.2): a button, input but a hidden one, meter, output, progress, select or textarea —
     // or a form-associated custom element.
     pub(crate) fn is_labelable(&self, id: NodeId) -> bool {

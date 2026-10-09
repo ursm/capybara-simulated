@@ -89,6 +89,26 @@ RSpec.describe 'FormData "formdata" event, USV conversion, _charset_' do
     expect(result).to eq('fired' => 1, 'bubbles' => true, 'cancelable' => false, 'n1' => 'v1', 'added' => 'x')
   end
 
+  # The controls an entry list takes are the form's by its form owner — the parser's form element pointer's too
+  # (`<table><form>…<input>`, foster-parented out of the form) — a detached form's its own subtree's, none in a
+  # `<datalist>`, and a disabled one only as the submitter (HTML "construct the entry list").
+  it 'takes the controls whose form owner the form is' do
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend',
+        '<table><form id=t><tr><td><input name=fostered value=1></td></tr></form></table>');
+    JS
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const detached = document.createElement('form');
+        detached.innerHTML = '<input name=a value=1><datalist><input name=b value=2></datalist>' +
+          '<button name=s value=go disabled>s</button><input name=d value=3 disabled>';
+        const entries = (fd) => [...fd].map((e) => e.join('=')).join('&');
+        return [entries(new FormData(t)), entries(new FormData(detached, detached.querySelector('button')))];
+      })()
+    JS
+    expect(got).to eq(['fostered=1', 'a=1&s=go'])
+  end
+
   it 'gives a hidden _charset_ control the UTF-8 encoding name' do
     charset = session.evaluate_script(<<~JS)
       (function () {

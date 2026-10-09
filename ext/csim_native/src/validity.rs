@@ -513,6 +513,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "formOwner", form_owner, context_id);
     crate::dom::register(scope, ns, "defaultButton", default_button, context_id);
     crate::dom::register(scope, ns, "formListed", form_listed, context_id);
+    crate::dom::register(scope, ns, "formSubmittables", form_submittables, context_id);
     crate::dom::register(scope, ns, "editingHost", editing_host, context_id);
     crate::dom::register(scope, ns, "isLabelable", is_labelable, context_id);
     crate::dom::register(scope, ns, "labeledControl", labeled_control, context_id);
@@ -570,6 +571,17 @@ fn default_button(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let arena = crate::dom::realm(scope, cid);
     let (tree, button) = (arena.form_tree(form), arena.default_button_of(form));
     rv.set(crate::dom::nodes_value(scope, cid, tree, button.as_slice()));
+}
+
+// __dom.formSubmittables(formNid, submitterNid) -> the elements the form's entry list takes values of
+// (`element_state::form_submittables`), from the form's tree; `submitterNid` -1 for none.
+fn form_submittables(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(form) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let submitter = crate::dom::nid_arg(scope, &args, 1);
+    let arena = crate::dom::realm(scope, cid);
+    let (tree, elements) = (arena.form_tree(form), arena.form_submittables(form, submitter));
+    rv.set(crate::dom::nodes_value(scope, cid, tree, &elements));
 }
 
 // __dom.formListed(nid) -> the form's listed elements (`element_state::form_listed`), from the form's tree.
