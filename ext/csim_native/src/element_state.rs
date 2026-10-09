@@ -365,10 +365,20 @@ impl RealmArena {
         let root = self.form_tree(form);
         let mut listed = Vec::new();
         self.find_in_tree(root, |c, n| {
-            let tag = matches!(&*n.local_name, "input" | "button" | "fieldset" | "object" | "output" | "select" | "textarea");
-            let control = (n.is_html() && tag) || n.state & STATE_FORM_ASSOCIATED != 0;
             let image = n.is_html_named("input") && n.input_type() == "image";
-            if c != root && control && !image && self.form_owner(c) == Some(form) {
+            if c != root && is_listed(n) && !image && self.form_owner(c) == Some(form) {
+                listed.push(c);
+            }
+            false
+        });
+        listed
+    }
+    // …and a fieldset's (its `elements`): its listed descendants in tree order, image buttons and nested fieldsets
+    // included.
+    pub(crate) fn fieldset_listed(&self, fieldset: NodeId) -> Vec<NodeId> {
+        let mut listed = Vec::new();
+        self.find_in_tree(fieldset, |c, n| {
+            if c != fieldset && is_listed(n) {
                 listed.push(c);
             }
             false
@@ -996,6 +1006,13 @@ impl RealmArena {
         }
         n.is_submit_button() && self.form_owner(id).is_some_and(|f| self.default_button_of(f) == Some(id))
     }
+}
+
+// A listed element (HTML §4.10.2): an HTML button, fieldset, input, object, output, select or textarea, or a
+// form-associated custom element.
+fn is_listed(n: &NodeData) -> bool {
+    let tag = matches!(&*n.local_name, "input" | "button" | "fieldset" | "object" | "output" | "select" | "textarea");
+    (n.is_html() && tag) || n.state & STATE_FORM_ASSOCIATED != 0
 }
 
 // A radio's group name: its `name`, as UTF-16 (compared exactly), where it has a non-empty one.

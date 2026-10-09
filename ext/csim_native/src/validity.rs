@@ -513,6 +513,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "formOwner", form_owner, context_id);
     crate::dom::register(scope, ns, "defaultButton", default_button, context_id);
     crate::dom::register(scope, ns, "formListed", form_listed, context_id);
+    crate::dom::register(scope, ns, "fieldsetListed", fieldset_listed, context_id);
     crate::dom::register(scope, ns, "formSubmittables", form_submittables, context_id);
     crate::dom::register(scope, ns, "implicitSubmissionForm", implicit_submission_form, context_id);
     crate::dom::register(scope, ns, "editingHost", editing_host, context_id);
@@ -614,6 +615,14 @@ fn default_button(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let arena = crate::dom::realm(scope, cid);
     let (tree, button) = (arena.form_tree(form), arena.default_button_of(form));
     rv.set(crate::dom::nodes_value(scope, cid, tree, button.as_slice()));
+}
+
+// __dom.fieldsetListed(nid) -> a fieldset's listed descendants (`element_state::fieldset_listed`), from the fieldset.
+fn fieldset_listed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(fieldset) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let listed = crate::dom::realm(scope, cid).fieldset_listed(fieldset);
+    rv.set(crate::dom::nodes_value(scope, cid, fieldset, &listed));
 }
 
 // __dom.formSubmittables(formNid, submitterNid) -> the elements the form's entry list takes values of
