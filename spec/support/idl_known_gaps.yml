@@ -32,6 +32,7 @@ Document:
   - hasRedemptionRecord
   - measureElement
   - measureText
+  - modelContext
   - namedFlows
   # The touch handlers a desktop with no touch screen exposes nowhere (headless Chrome and Firefox, measured):
   # flatpickr binds `touchstart` instead of `mousedown` where `window.ontouchstart` is defined.
@@ -49,8 +50,6 @@ Element:
   - activeViewTransition
   - ariaNotify
   - computedStyleMap
-  - containertiming
-  - containertimingIgnore
   - convertPointFromNode
   - convertQuadFromNode
   - convertRectFromNode
@@ -73,6 +72,8 @@ HTMLAnchorElement:
   - attributionSourceId
 HTMLElement:
   - attributeStyleMap
+  - containerTiming
+  - containerTimingIgnore
   - editContext
   - headingOffset
   - headingReset
@@ -89,6 +90,9 @@ HTMLInputElement:
 Location:
   - ancestorOrigins
 Navigator:
+  - cpuPerformance
+  - crossOriginStorage
+  - install
   # (…NavigatorID's Gecko compatibility mode, which a navigator answering in Chrome's has not: HTML §8.9.1.1)
   - oscpu
   - taintEnabled
@@ -115,7 +119,6 @@ Navigator:
   - mediaSession
   - mimeTypes
   - ml
-  - modelContext
   - plugins
   - preferences
   - presentation

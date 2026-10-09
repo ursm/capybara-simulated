@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "webrefVersion": "3.79.0",
-    "interfaceCount": 1123
+    "webrefVersion": "3.85.0",
+    "interfaceCount": 1138
   },
   "AbortController": {
     "members": [
@@ -178,11 +178,11 @@
   },
   "AnimationTrigger": {
     "members": [
+      "activationRangeEnd",
+      "activationRangeStart",
+      "activeRangeEnd",
+      "activeRangeStart",
       "behavior",
-      "exitRangeEnd",
-      "exitRangeStart",
-      "rangeEnd",
-      "rangeStart",
       "timeline"
     ],
     "static": [],
@@ -717,6 +717,7 @@
       "slice",
       "stream",
       "text",
+      "textStream",
       "type"
     ],
     "static": [],
@@ -1555,6 +1556,14 @@
     "static": [
       "fromElement"
     ],
+    "inheritance": null,
+    "mixins": []
+  },
+  "CrossOriginStorageManager": {
+    "members": [
+      "requestFileHandle"
+    ],
+    "static": [],
     "inheritance": null,
     "mixins": []
   },
@@ -2847,6 +2856,7 @@
       "location",
       "measureElement",
       "measureText",
+      "modelContext",
       "moveBefore",
       "namedFlows",
       "onabort",
@@ -3432,8 +3442,6 @@
       "clientWidth",
       "closest",
       "computedStyleMap",
-      "containertiming",
-      "containertimingIgnore",
       "convertPointFromNode",
       "convertQuadFromNode",
       "convertRectFromNode",
@@ -5179,6 +5187,19 @@
       "PopoverTargetAttributes"
     ]
   },
+  "HTMLCameraElement": {
+    "members": [
+      "error",
+      "oncancel",
+      "onerror",
+      "ontrack",
+      "setConstraints",
+      "track"
+    ],
+    "static": [],
+    "inheritance": "HTMLElement",
+    "mixins": []
+  },
   "HTMLCanvasElement": {
     "members": [
       "captureStream",
@@ -5277,6 +5298,8 @@
       "autofocus",
       "blur",
       "click",
+      "containerTiming",
+      "containerTimingIgnore",
       "contentEditable",
       "dataset",
       "dir",
@@ -5623,6 +5646,7 @@
       "align",
       "allow",
       "allowFullscreen",
+      "connectionAllowlist",
       "contentDocument",
       "contentWindow",
       "credentialless",
@@ -5751,6 +5775,21 @@
     "inheritance": "HTMLElement",
     "mixins": [
       "PopoverTargetAttributes"
+    ]
+  },
+  "HTMLInstallElement": {
+    "members": [
+      "invalidReason",
+      "isValid",
+      "manifest",
+      "manifestId",
+      "oninstallresult",
+      "onvalidationstatuschange"
+    ],
+    "static": [],
+    "inheritance": "HTMLElement",
+    "mixins": [
+      "ActivationBlockersMixin"
     ]
   },
   "HTMLLabelElement": {
@@ -5920,6 +5959,19 @@
       "min",
       "optimum",
       "value"
+    ],
+    "static": [],
+    "inheritance": "HTMLElement",
+    "mixins": []
+  },
+  "HTMLMicrophoneElement": {
+    "members": [
+      "error",
+      "oncancel",
+      "onerror",
+      "ontrack",
+      "setConstraints",
+      "track"
     ],
     "static": [],
     "inheritance": "HTMLElement",
@@ -6325,6 +6377,7 @@
   "HTMLTemplateElement": {
     "members": [
       "content",
+      "htmlFor",
       "shadowRootClonable",
       "shadowRootCustomElementRegistry",
       "shadowRootDelegatesFocus",
@@ -6414,6 +6467,19 @@
   },
   "HTMLUnknownElement": {
     "members": [],
+    "static": [],
+    "inheritance": "HTMLElement",
+    "mixins": []
+  },
+  "HTMLUserMediaElement": {
+    "members": [
+      "error",
+      "oncancel",
+      "onerror",
+      "onstream",
+      "setConstraints",
+      "stream"
+    ],
     "static": [],
     "inheritance": "HTMLElement",
     "mixins": []
@@ -6803,6 +6869,14 @@
     "inheritance": "ExtendableEvent",
     "mixins": []
   },
+  "InstallResultEvent": {
+    "members": [
+      "result"
+    ],
+    "static": [],
+    "inheritance": "Event",
+    "mixins": []
+  },
   "Instance": {
     "members": [
       "exports"
@@ -6810,6 +6884,20 @@
     "static": [],
     "inheritance": null,
     "mixins": []
+  },
+  "InteractionContentfulPaint": {
+    "members": [
+      "interactionId",
+      "largestContentfulPaint",
+      "paintTime",
+      "presentationTime",
+      "toJSON"
+    ],
+    "static": [],
+    "inheritance": "PerformanceEntry",
+    "mixins": [
+      "PaintTimingMixin"
+    ]
   },
   "IntersectionObserver": {
     "members": [
@@ -6948,6 +7036,7 @@
       "onquotaoverflow",
       "prompt",
       "promptStreaming",
+      "samplingMode",
       "temperature",
       "topK"
     ],
@@ -7331,6 +7420,7 @@
   },
   "MediaDevices": {
     "members": [
+      "defaultSemantics",
       "enumerateDevices",
       "getDisplayMedia",
       "getSupportedConstraints",
@@ -7594,12 +7684,14 @@
       "label",
       "muted",
       "oncapturehandlechange",
+      "onconfigurationchange",
       "onended",
       "onisolationchange",
       "onmute",
       "onunmute",
       "readyState",
       "sendCaptureAction",
+      "stats",
       "stop"
     ],
     "static": [],
@@ -7610,6 +7702,19 @@
     "members": [],
     "static": [],
     "inheritance": "AudioNode",
+    "mixins": []
+  },
+  "MediaStreamTrackAudioStats": {
+    "members": [
+      "averageLatency",
+      "latency",
+      "maximumLatency",
+      "minimumLatency",
+      "resetLatency",
+      "toJSON"
+    ],
+    "static": [],
+    "inheritance": null,
     "mixins": []
   },
   "MediaStreamTrackEvent": {
@@ -7630,6 +7735,17 @@
     "members": [
       "discardedFrames",
       "readable",
+      "totalFrames"
+    ],
+    "static": [],
+    "inheritance": null,
+    "mixins": []
+  },
+  "MediaStreamTrackVideoStats": {
+    "members": [
+      "deliveredFrames",
+      "discardedFrames",
+      "toJSON",
       "totalFrames"
     ],
     "static": [],
@@ -7790,9 +7906,11 @@
     "members": [
       "accelerated",
       "createConstantTensor",
+      "createExportableTensor",
       "createTensor",
       "destroy",
       "dispatch",
+      "exportToGPU",
       "lost",
       "opSupportLimits",
       "readTensor",
@@ -7939,19 +8057,15 @@
   },
   "ModelContext": {
     "members": [
+      "executeTool",
+      "getTools",
+      "ontoolactivated",
+      "ontoolcancel",
       "ontoolchange",
       "registerTool"
     ],
     "static": [],
     "inheritance": "EventTarget",
-    "mixins": []
-  },
-  "ModelContextClient": {
-    "members": [
-      "requestUserInteraction"
-    ],
-    "static": [],
-    "inheritance": null,
     "mixins": []
   },
   "Module": {
@@ -8199,8 +8313,10 @@
       "connection",
       "contacts",
       "cookieEnabled",
+      "cpuPerformance",
       "createHandwritingRecognizer",
       "credentials",
+      "crossOriginStorage",
       "deprecatedReplaceInURN",
       "deprecatedURNtoURL",
       "deviceMemory",
@@ -8215,6 +8331,7 @@
       "hardwareConcurrency",
       "hid",
       "ink",
+      "install",
       "javaEnabled",
       "keyboard",
       "language",
@@ -8228,7 +8345,6 @@
       "mediaSession",
       "mimeTypes",
       "ml",
-      "modelContext",
       "onLine",
       "oscpu",
       "pdfViewerEnabled",
@@ -8275,6 +8391,7 @@
       "NavigatorConcurrentHardware",
       "NavigatorContentUtils",
       "NavigatorCookies",
+      "NavigatorCrossOriginStorage",
       "NavigatorDeviceMemory",
       "NavigatorGPU",
       "NavigatorID",
@@ -8611,6 +8728,7 @@
   },
   "OfflineAudioContext": {
     "members": [
+      "close",
       "length",
       "oncomplete",
       "resume",
@@ -9075,7 +9193,8 @@
       "paintTime",
       "presentationTime",
       "rootElement",
-      "size"
+      "size",
+      "toJSON"
     ],
     "static": [],
     "inheritance": "PerformanceEntry",
@@ -9317,6 +9436,21 @@
     "static": [],
     "inheritance": null,
     "mixins": []
+  },
+  "PerformanceSoftNavigation": {
+    "members": [
+      "getLargestInteractionContentfulPaint",
+      "interactionId",
+      "navigationType",
+      "paintTime",
+      "presentationTime",
+      "toJSON"
+    ],
+    "static": [],
+    "inheritance": "PerformanceEntry",
+    "mixins": [
+      "PaintTimingMixin"
+    ]
   },
   "PerformanceTiming": {
     "members": [
@@ -9645,8 +9779,15 @@
   },
   "ProcessingInstruction": {
     "members": [
+      "getAttribute",
+      "getAttributeNames",
+      "hasAttribute",
+      "hasAttributes",
+      "removeAttribute",
+      "setAttribute",
       "sheet",
-      "target"
+      "target",
+      "toggleAttribute"
     ],
     "static": [],
     "inheritance": "CharacterData",
@@ -9681,6 +9822,21 @@
     ],
     "static": [],
     "inheritance": "Event",
+    "mixins": []
+  },
+  "Proofreader": {
+    "members": [
+      "correctionExplanationLanguage",
+      "expectedInputLanguages",
+      "includeCorrectionExplanations",
+      "includeCorrectionTypes",
+      "proofread"
+    ],
+    "static": [
+      "availability",
+      "create"
+    ],
+    "inheritance": null,
     "mixins": []
   },
   "ProximitySensor": {
@@ -9957,6 +10113,7 @@
       "signal",
       "targetAddressSpace",
       "text",
+      "textStream",
       "url"
     ],
     "static": [],
@@ -10012,6 +10169,7 @@
       "status",
       "statusText",
       "text",
+      "textStream",
       "type",
       "url"
     ],
@@ -10302,7 +10460,10 @@
       "signalingState"
     ],
     "static": [
-      "generateCertificate"
+      "cancelDiagnosticLogging",
+      "generateCertificate",
+      "startDiagnosticLogging",
+      "stopDiagnosticLogging"
     ],
     "inheritance": "EventTarget",
     "mixins": []
@@ -10382,7 +10543,7 @@
     "inheritance": null,
     "mixins": []
   },
-  "RTCRtpSFrameDecrypter": {
+  "RTCRtpSFrameDecryptor": {
     "members": [
       "addDecryptionKey",
       "onerror",
@@ -10391,17 +10552,17 @@
     "static": [],
     "inheritance": "EventTarget",
     "mixins": [
-      "SFrameDecrypterManager"
+      "SFrameDecryptorManager"
     ]
   },
-  "RTCRtpSFrameEncrypter": {
+  "RTCRtpSFrameEncryptor": {
     "members": [
       "setEncryptionKey"
     ],
     "static": [],
     "inheritance": null,
     "mixins": [
-      "SFrameEncrypterManager"
+      "SFrameEncryptorManager"
     ]
   },
   "RTCRtpTransceiver": {
@@ -10477,7 +10638,8 @@
       "removeUnsafe",
       "replaceElementWithChildren",
       "setComments",
-      "setDataAttributes"
+      "setDataAttributes",
+      "setJavascriptURLs"
     ],
     "static": [],
     "inheritance": null,
@@ -10770,7 +10932,7 @@
       "PushManagerAttribute"
     ]
   },
-  "SFrameDecrypterStream": {
+  "SFrameDecryptorStream": {
     "members": [
       "addDecryptionKey",
       "onerror",
@@ -10782,10 +10944,10 @@
     "inheritance": "EventTarget",
     "mixins": [
       "GenericTransformStream",
-      "SFrameDecrypterManager"
+      "SFrameDecryptorManager"
     ]
   },
-  "SFrameEncrypterStream": {
+  "SFrameEncryptorStream": {
     "members": [
       "readable",
       "setEncryptionKey",
@@ -10795,7 +10957,7 @@
     "inheritance": null,
     "mixins": [
       "GenericTransformStream",
-      "SFrameEncrypterManager"
+      "SFrameEncryptorManager"
     ]
   },
   "SFrameTransformErrorEvent": {
@@ -10921,7 +11083,7 @@
   "SpeechGrammarList": {
     "members": [
       "addFromString",
-      "addFromURI",
+      "addFromUri",
       "item",
       "length"
     ],
@@ -11321,6 +11483,7 @@
     "static": [],
     "inheritance": "SVGGraphicsElement",
     "mixins": [
+      "HyperlinkElementUtils",
       "SVGURIReference"
     ]
   },
@@ -12047,7 +12210,6 @@
     "members": [
       "filterUnits",
       "height",
-      "href",
       "primitiveUnits",
       "width",
       "x",
@@ -12055,9 +12217,7 @@
     ],
     "static": [],
     "inheritance": "SVGElement",
-    "mixins": [
-      "SVGURIReference"
-    ]
+    "mixins": []
   },
   "SVGForeignObjectElement": {
     "members": [
@@ -12612,10 +12772,8 @@
   },
   "SVGUseElement": {
     "members": [
-      "animatedInstanceRoot",
       "height",
       "href",
-      "instanceRoot",
       "width",
       "x",
       "y"
@@ -12940,6 +13098,22 @@
       "newState",
       "oldState",
       "source"
+    ],
+    "static": [],
+    "inheritance": "Event",
+    "mixins": []
+  },
+  "ToolActivatedEvent": {
+    "members": [
+      "toolName"
+    ],
+    "static": [],
+    "inheritance": "Event",
+    "mixins": []
+  },
+  "ToolCancelEvent": {
+    "members": [
+      "toolName"
     ],
     "static": [],
     "inheritance": "Event",
@@ -14493,7 +14667,9 @@
       "location",
       "locationbar",
       "matchMedia",
+      "maximize",
       "menubar",
+      "minimize",
       "moveBy",
       "moveTo",
       "name",
@@ -14658,6 +14834,7 @@
       "requestResize",
       "resizeBy",
       "resizeTo",
+      "restore",
       "scheduler",
       "screen",
       "screenLeft",
@@ -14673,6 +14850,7 @@
       "self",
       "sessionStorage",
       "setInterval",
+      "setResizable",
       "setTimeout",
       "showDirectoryPicker",
       "showOpenFilePicker",
@@ -14811,6 +14989,7 @@
       "appVersion",
       "clearAppBadge",
       "connection",
+      "crossOriginStorage",
       "deviceMemory",
       "globalPrivacyControl",
       "gpu",
@@ -14845,6 +15024,7 @@
       "GlobalPrivacyControl",
       "NavigatorBadge",
       "NavigatorConcurrentHardware",
+      "NavigatorCrossOriginStorage",
       "NavigatorDeviceMemory",
       "NavigatorGPU",
       "NavigatorID",
@@ -15200,6 +15380,44 @@
     ],
     "static": [],
     "inheritance": null,
+    "mixins": []
+  },
+  "XRGPUBinding": {
+    "members": [
+      "createCubeLayer",
+      "createCylinderLayer",
+      "createEquirectLayer",
+      "createProjectionLayer",
+      "createQuadLayer",
+      "getDepthInformation",
+      "getPreferredColorFormat",
+      "getSubImage",
+      "getViewSubImage",
+      "nativeProjectionScaleFactor",
+      "usesDepthValues"
+    ],
+    "static": [],
+    "inheritance": null,
+    "mixins": []
+  },
+  "XRGPUDepthInformation": {
+    "members": [
+      "getViewDescriptor",
+      "texture"
+    ],
+    "static": [],
+    "inheritance": "XRDepthInformation",
+    "mixins": []
+  },
+  "XRGPUSubImage": {
+    "members": [
+      "colorTexture",
+      "depthStencilTexture",
+      "getViewDescriptor",
+      "motionVectorTexture"
+    ],
+    "static": [],
+    "inheritance": "XRSubImage",
     "mixins": []
   },
   "XRHand": {
@@ -15662,9 +15880,7 @@
       "depthStencilTextureHeight",
       "depthStencilTextureWidth",
       "imageIndex",
-      "motionVectorTexture",
-      "motionVectorTextureHeight",
-      "motionVectorTextureWidth"
+      "motionVectorTexture"
     ],
     "static": [],
     "inheritance": "XRSubImage",

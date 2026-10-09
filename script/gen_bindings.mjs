@@ -137,6 +137,8 @@ const INTERFACES = [
     omit: { 'private-click-measurement': 'attributionSourceId: Private Click Measurement is not implemented (a WICG proposal)' }
   }],
   ['html', 'HTMLAreaElement', { install: true }],
+  ['html', 'HTMLLinkElement', { install: true }],
+  ['html', 'HTMLScriptElement', { install: true }],
   ['html', 'HTMLDialogElement', { install: true }],
   ['html', 'HTMLMeterElement', { install: true }],
   ['html', 'HTMLProgressElement', { install: true }],
@@ -710,10 +712,27 @@ const REFERRER_POLICIES = [
   '', 'no-referrer', 'no-referrer-when-downgrade', 'same-origin', 'origin', 'strict-origin', 'origin-when-cross-origin',
   'strict-origin-when-cross-origin', 'unsafe-url'
 ];
+// (…a CORS settings attribute's: anonymous — its empty value too — and use-credentials, a missing one none, an invalid
+// one anonymous)
+const CORS_SETTINGS = { keywords: ['anonymous', 'use-credentials'], aliases: { '': 'anonymous' }, invalid: 'anonymous' };
+// (…a fetch priority attribute's: high, low and auto, auto its missing and invalid value default)
+const FETCH_PRIORITY = { keywords: ['high', 'low', 'auto'], missing: 'auto', invalid: 'auto' };
 const REFLECT_ENUMS = {
   'HTMLTableCellElement.scope': { keywords: ['row', 'col', 'rowgroup', 'colgroup'] },
   'HTMLAnchorElement.referrerPolicy': { keywords: REFERRER_POLICIES },
   'HTMLAreaElement.referrerPolicy': { keywords: REFERRER_POLICIES },
+  'HTMLLinkElement.referrerPolicy': { keywords: REFERRER_POLICIES },
+  'HTMLScriptElement.referrerPolicy': { keywords: REFERRER_POLICIES },
+  'HTMLLinkElement.crossOrigin': CORS_SETTINGS,
+  'HTMLScriptElement.crossOrigin': CORS_SETTINGS,
+  'HTMLLinkElement.fetchPriority': FETCH_PRIORITY,
+  'HTMLScriptElement.fetchPriority': FETCH_PRIORITY,
+  'HTMLLinkElement.as': {
+    keywords: [
+      'fetch', 'audio', 'document', 'embed', 'font', 'image', 'manifest', 'object', 'report', 'script', 'sharedworker', 'style',
+      'track', 'video', 'worker', 'xslt'
+    ]
+  },
   'HTMLTemplateElement.shadowRootMode': { keywords: ['open', 'closed'] },
   'HTMLTemplateElement.shadowRootSlotAssignment': { keywords: ['named', 'manual'], missing: 'named', invalid: 'named' },
   'HTMLTrackElement.kind': {
