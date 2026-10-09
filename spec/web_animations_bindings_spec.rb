@@ -80,4 +80,29 @@ RSpec.describe 'Web Animations bindings' do
       %w[activeDuration currentIteration endTime localTime progress]
     ])
   end
+
+  # Playback events due together go out in composite order whatever timelines their animations are on: each is
+  # scheduled at the document's time, its timeline's origin time on (web-animations §4.2 step 5) — the event still
+  # carrying its own timeline's time.
+  it 'sorts events across timelines' do
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      (async () => {
+        const d = document.getElementById('d');
+        const order = [];
+        const x = new Animation(new KeyframeEffect(d, null, 1000), new DocumentTimeline({originTime: -500}));
+        const y = new Animation(new KeyframeEffect(d, null, 1000), document.timeline);
+        x.play();
+        y.play();
+        await Promise.all([x.ready, y.ready]);
+        x.onfinish = (e) => order.push(['x', Math.round(e.timelineTime - document.timeline.currentTime)]);
+        y.onfinish = (e) => order.push(['y', Math.round(e.timelineTime - document.timeline.currentTime)]);
+        x.finish();
+        y.finish();
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        return order.map(([name, offset]) => name + (offset > 0 ? '+' : ''));
+      })().then(done, (e) => done(String(e)));
+    JS
+    expect(got).to eq(%w[x+ y])
+  end
 end

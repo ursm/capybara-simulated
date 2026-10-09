@@ -166,6 +166,9 @@ impl Animations {
             animation_events(was, phase, start, end, into_iteration, ran)
         };
         let timeline = self.timeline_time_of(a).unwrap_or(0.0);
+        // (…each due at a time of its timeline, scheduled at the document's — the time every animation's events are
+        // sorted by, whichever timeline it is on)
+        let origin = a.timeline.unwrap_or(0.0);
         let due = |kind: &str, elapsed: f64| match (a.start_time, a.playback_rate) {
             (Some(start), rate) if rate != 0.0 && !kind.ends_with("cancel") => start + (timing.delay + elapsed) / rate,
             _ => timeline,
@@ -181,7 +184,7 @@ impl Animations {
                 transition,
                 name: name.clone(),
                 order,
-                scheduled: due(kind, elapsed),
+                scheduled: due(kind, elapsed) + origin,
             })
             .collect();
         self.css_events.extend(queued);
