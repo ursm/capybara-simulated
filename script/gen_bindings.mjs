@@ -169,6 +169,7 @@ const INTERFACES = [
   ['html', 'HTMLFrameSetElement', { install: true, omit: NO_WINDOW_HANDLERS }],
   ['html', 'HTMLOutputElement', { install: true }],
   ['html', 'HTMLFieldSetElement', { install: true }],
+  ['html', 'HTMLButtonElement', { install: true }],
   ['html', 'HTMLCanvasElement', {
     install: true,
     omit: { 'mediacapture-fromelement': 'captureStream: media capture from a canvas is not implemented' },
@@ -755,6 +756,13 @@ const CORS_SETTINGS = { keywords: ['anonymous', 'use-credentials'], aliases: { '
 const FETCH_PRIORITY = { keywords: ['high', 'low', 'auto'], missing: 'auto', invalid: 'auto' };
 // (…a lazy loading attribute's: lazy and eager, eager its missing and invalid value default)
 const LAZY_LOADING = { keywords: ['lazy', 'eager'], missing: 'eager', invalid: 'eager' };
+// (…a form's encoding type override's: the three enctypes, '' where it is missing, urlencoded where invalid)
+const FORM_ENCTYPE = {
+  keywords: ['application/x-www-form-urlencoded', 'multipart/form-data', 'text/plain'],
+  missing: '', invalid: 'application/x-www-form-urlencoded'
+};
+// (…a popover invoker's action: toggle, show and hide, toggle its missing and invalid value default)
+const POPOVER_TARGET_ACTION = { keywords: ['toggle', 'show', 'hide'], missing: 'toggle', invalid: 'toggle' };
 const REFLECT_ENUMS = {
   'HTMLTableCellElement.scope': { keywords: ['row', 'col', 'rowgroup', 'colgroup'] },
   'HTMLAnchorElement.referrerPolicy': { keywords: REFERRER_POLICIES },
@@ -772,6 +780,9 @@ const REFLECT_ENUMS = {
   'HTMLImageElement.loading': LAZY_LOADING,
   'HTMLIFrameElement.referrerPolicy': { keywords: REFERRER_POLICIES },
   'HTMLIFrameElement.loading': LAZY_LOADING,
+  'HTMLButtonElement.formEnctype': FORM_ENCTYPE,
+  'HTMLButtonElement.formMethod': { keywords: ['get', 'post', 'dialog'], missing: '', invalid: 'get' },
+  'HTMLButtonElement.popoverTargetAction': POPOVER_TARGET_ACTION,
   'HTMLLinkElement.as': {
     keywords: [
       'fetch', 'audio', 'document', 'embed', 'font', 'image', 'manifest', 'object', 'report', 'script', 'sharedworker', 'style',
