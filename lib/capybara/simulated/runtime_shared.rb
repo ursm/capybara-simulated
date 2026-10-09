@@ -278,12 +278,14 @@ module Capybara
             {'error' => e.message, 'name' => e.webauthn_name}
           end
         },
-        '__csimWebauthnAddVirtualAuthenticator'    => ->(b, *a) { b.webauthn.add_virtual_authenticator(a[0]) },
-        '__csimWebauthnRemoveVirtualAuthenticator' => ->(b, *a) { b.webauthn.remove_virtual_authenticator(a[0]); nil },
-        '__csimWebauthnAddCredential'              => ->(b, *a) { b.webauthn.add_credential(a[0], a[1]); nil },
-        '__csimWebauthnRemoveCredential'           => ->(b, *a) { b.webauthn.remove_credential(a[0], a[1]); nil },
-        '__csimWebauthnGetCredentials'             => ->(b, *a) { b.webauthn.get_credentials(a[0]) },
-        '__csimWebauthnSetUserVerified'            => ->(b, *a) { b.webauthn.set_user_verified(a[0], a[1]); nil }
+        '__csimWebauthnAddVirtualAuthenticator'      => ->(b, *a) { b.webauthn.add_virtual_authenticator(a[0]) },
+        '__csimWebauthnRemoveVirtualAuthenticator'   => ->(b, *a) { b.webauthn.remove_virtual_authenticator(a[0]); nil },
+        '__csimWebauthnAddCredential'                => ->(b, *a) { b.webauthn.add_credential(a[0], a[1]); nil },
+        '__csimWebauthnRemoveCredential'             => ->(b, *a) { b.webauthn.remove_credential(a[0], a[1]); nil },
+        '__csimWebauthnGetCredentials'               => ->(b, *a) { b.webauthn.get_credentials(a[0]) },
+        '__csimWebauthnSetUserVerified'              => ->(b, *a) { b.webauthn.set_user_verified(a[0], a[1]); nil },
+        '__csimWebauthnSignalUnknownCredential'      => ->(b, *a) { b.webauthn.signal_unknown_credential(a[0], a[1]); nil },
+        '__csimWebauthnSignalAllAcceptedCredentials' => ->(b, *a) { b.webauthn.signal_all_accepted_credentials(a[0], a[1], a[2]); nil }
       }.freeze
 
       # Host fns that route to pure stdlib — no Browser surface,

@@ -8,7 +8,7 @@ require 'json'
 module Capybara
   module Simulated
     # Per-Browser virtual WebAuthn authenticator state. Mirrors the
-    # subset of the WebAuthn Level 2 spec real apps (Discourse's
+    # subset of the WebAuthn spec real apps (Discourse's
     # security key + passkey flows) exercise: ES256 keys, fmt="none"
     # attestation, AAGUID per authenticator, excludeCredentials +
     # userVerification + resident-key enforcement, and the CDP
@@ -123,11 +123,10 @@ module Capybara
           end
         end
 
-        sel    = req['authenticatorSelection'] || {}
-        uv_req = sel['userVerification']
-        require_resident = %w[required preferred].include?(sel['residentKey']) ||
-                           sel['requireResidentKey']
-        if require_resident && !opts['hasResidentKey']
+        sel      = req['authenticatorSelection'] || {}
+        uv_req   = sel['userVerification']
+        resident = resident_key(sel)
+        if resident == 'required' && !opts['hasResidentKey']
           raise Error.new('ConstraintError', 'resident-key required but authenticator does not support it')
         end
         if uv_req == 'required' && !user_verified?(opts)
@@ -136,7 +135,7 @@ module Capybara
 
         key     = OpenSSL::PKey::EC.generate('prime256v1')
         raw_id  = SecureRandom.random_bytes(32)
-        is_resident = !!(opts['hasResidentKey'] && require_resident)
+        is_resident = !!opts['hasResidentKey'] && resident != 'discouraged'
         flags   = FLAG_UP | FLAG_AT
         flags  |= FLAG_UV if user_verified?(opts)
         # BE/BS mark the credential as syncable — clients use this to
@@ -169,12 +168,16 @@ module Capybara
           private_key: key,
           rp_id:       rp_id,
           sign_count:  0,
-          resident:    is_resident || !!opts['hasResidentKey'],
+          resident:    is_resident,
           user_handle: user_id
         )
 
-        # (…and what an AuthenticatorAttestationResponse reads out of the attestation object: its authenticator data,
-        # the credential public key as SubjectPublicKeyInfo, and the authenticator's transport)
+        # Beside the attestation object, what an
+        # AuthenticatorAttestationResponse reads out of it (the
+        # authenticator data, the credential public key as
+        # SubjectPublicKeyInfo), the authenticator's transport and
+        # attachment, and whether the credential is discoverable (the
+        # credProps extension's `rk`).
         {
           'credentialId'            => Base64.urlsafe_encode64(raw_id.b, padding: false),
           'clientDataJSON'          => Base64.urlsafe_encode64(client_data.b, padding: false),
@@ -182,7 +185,8 @@ module Capybara
           'authenticatorData'       => Base64.urlsafe_encode64(auth_data.b, padding: false),
           'publicKey'               => Base64.urlsafe_encode64(key.public_to_der.b, padding: false),
           'transports'              => [transport(opts)],
-          'authenticatorAttachment' => attachment(opts)
+          'authenticatorAttachment' => attachment(opts),
+          'residentKey'             => is_resident
         }
       end
 
@@ -239,26 +243,62 @@ module Capybara
         }
       end
 
+      # A relying party's signal that a credential id is unknown to
+      # it (WebAuthn §5.1.10.2): the credential is removed from every
+      # authenticator holding it for that RP ID.
+      def signal_unknown_credential(rp_id, credential_id_b64)
+        raw_id = Base64.urlsafe_decode64(credential_id_b64.to_s)
+        @authenticators.each_value do |auth|
+          cred = auth[:credentials][raw_id]
+          auth[:credentials].delete(raw_id) if cred && cred.rp_id == rp_id.to_s
+        end
+      end
+
+      # …that a user's accepted credentials are exactly these (§5.1.10.3):
+      # the user's other credentials for that RP ID are removed.
+      def signal_all_accepted_credentials(rp_id, user_id_b64, credential_ids_b64)
+        user_id  = Base64.urlsafe_decode64(user_id_b64.to_s)
+        accepted = credential_ids_b64.map {|id| Base64.urlsafe_decode64(id.to_s) }
+        @authenticators.each_value do |auth|
+          auth[:credentials].delete_if {|raw_id, cred|
+            cred.rp_id == rp_id.to_s && cred.user_handle == user_id && !accepted.include?(raw_id)
+          }
+        end
+      end
+
       private
 
-      # The transport a virtual authenticator was added with (CDP's `transport`), and so its attachment (WebAuthn §5.4.5):
-      # an `internal` one is the platform's, every other one roams.
-      def transport(opts) = opts['transport'] || 'usb'
+      # The transport a virtual authenticator was added with (CDP's
+      # `transport`, whose `cable` is WebAuthn's `hybrid`), and so its
+      # attachment (§5.4.5): an `internal` one is the platform's, every
+      # other one roams.
+      def transport(opts)
+        t = opts['transport'] || 'usb'
+        t == 'cable' ? 'hybrid' : t
+      end
+
       def attachment(opts) = transport(opts) == 'internal' ? 'platform' : 'cross-platform'
 
+      # The relying party's resident-key requirement (§5.4.4):
+      # `residentKey` where it is given, else `requireResidentKey`.
+      def resident_key(sel)
+        return sel['residentKey'] if %w[required preferred discouraged].include?(sel['residentKey'])
+        sel['requireResidentKey'] ? 'required' : 'discouraged'
+      end
+
+      # An authenticator that can make the credential — one with
+      # resident keys where they are required, and preferably where
+      # they are preferred — or the first one, to refuse it.
       def pick_authenticator_for_create(req)
-        sel    = req['authenticatorSelection'] || {}
-        uv_req = sel['userVerification']
-        require_resident = %w[required preferred].include?(sel['residentKey']) ||
-                           sel['requireResidentKey']
+        sel      = req['authenticatorSelection'] || {}
+        uv_req   = sel['userVerification']
+        resident = resident_key(sel)
         compatible = @authenticators.values.select {|a|
           opts = a[:options]
-          ok = true
-          ok &&= !!opts['hasResidentKey'] if require_resident
-          ok &&= user_verified?(opts)    if uv_req == 'required'
-          ok
+          (resident != 'required' || opts['hasResidentKey']) && (uv_req != 'required' || user_verified?(opts))
         }
-        compatible.first || @authenticators.values.first
+        preferred = compatible.find {|a| a[:options]['hasResidentKey'] } if resident == 'preferred'
+        preferred || compatible.first || @authenticators.values.first
       end
 
       def pick_credential_for_get(rp_id, allow_ids)
