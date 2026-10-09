@@ -42,8 +42,8 @@ RSpec.describe 'Location operations' do
     got = session.evaluate_script(<<~JS)
       (() => {
         const frame = document.querySelector('iframe').contentWindow;
-        location.assign.call(frame.location, '#in-frame');
-        frame.location.assign.call(location, '#in-page');
+        location.assign.call(frame.location, frame.location.href + '#in-frame');
+        frame.location.assign.call(location, location.href + '#in-page');
         return [location.hash, frame.location.hash];
       })()
     JS
@@ -79,5 +79,29 @@ RSpec.describe 'Location operations' do
     session.execute_script("location.hash = 'a'")
     session.execute_script("location.hash = ''")
     expect(session.evaluate_script('location.href')).to end_with('/start#')
+  end
+
+  # One ancestor origin per ancestor; `hash = ''` on a URL with no fragment none; a traversal between fragments a
+  # `hashchange`; `javascript:` run; a `replace` no history entry; a URL with a `%` that begins no escape sent as written
+  # (Chrome 154 and the spec).
+  it 'navigates as HTML has a location navigate' do
+    session.execute_script(<<~JS)
+      document.body.appendChild(document.createElement('iframe')).src = '/b/f';
+    JS
+    expect(session.evaluate_script('[frames[0].location.ancestorOrigins.length, location.ancestorOrigins.length]')).to eq([1, 0])
+    session.execute_script("location.hash = ''")
+    expect(session.evaluate_script('location.href')).to end_with('/start')
+    session.execute_script(<<~JS)
+      window.seen = [];
+      addEventListener('hashchange', (e) => seen.push(e.newURL.split('#')[1]));
+      location.hash = 'q';
+    JS
+    session.execute_script("location.hash = 'r'")
+    session.execute_script('history.back()')
+    session.execute_script("location.href = 'javascript:seen.push(\"js\")'")
+    expect(session.evaluate_script('seen')).to eq(%w[q r q js])
+    length = session.evaluate_script('history.length')
+    session.execute_script("location.replace('/other?a=%zz')")
+    expect(session.evaluate_script('[history.length, location.pathname, location.search]')).to eq([length, '/other', '?a=%zz'])
   end
 end

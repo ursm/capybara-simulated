@@ -2181,10 +2181,13 @@ module Capybara
           # inline; the popstate dispatch happens within the current
           # call's JS context.
           @history_idx = target
-          entry = @history[target]
+          entry   = @history[target]
+          old_url = @current_url
           @current_url = entry[:url]
           @runtime.call('__csimUpdateLocation', @current_url)
           @runtime.call('__csimDispatchPopState', entry[:state])
+          # (…and a `hashchange` queued where the fragment moved — HTML "update document for history step application")
+          @runtime.call('__csimQueueHashChange', old_url, @current_url) if fragment_of(old_url) != fragment_of(@current_url)
           :same_document
         elsif force
           # Ruby-driven (`page.go_back`), or a non-active window driven by its
@@ -2244,6 +2247,11 @@ module Capybara
       # is a `:push_state` entry (or the boundary just changed state on
       # the current URL). A `:visit` entry between them means we'd
       # cross a real navigation, which needs a fresh document.
+      # A URL's fragment — nil where it has none, which an empty one is not.
+      def fragment_of(url)
+        url.to_s.include?('#') ? url.to_s.split('#', 2)[1] : nil
+      end
+
       def same_document_traversal?(from, to)
         lo, hi = [from, to].sort
         ((lo + 1)..hi).all? {|i| @history[i] && @history[i][:kind] == :push_state }
@@ -2255,6 +2263,11 @@ module Capybara
         @history = @history[0..@history_idx] if @history_idx + 1 < @history.size
         @history << entry.merge(kind: entry[:kind] || :visit)
         @history_idx = @history.size - 1
+      end
+      # …and one in place of the current entry (a `location.replace`), the forward tail kept.
+      def replace_history(entry)
+        return record_history(entry) if @history.empty?
+        @history[@history_idx] = entry.merge(kind: entry[:kind] || :visit)
       end
       # `is_reload` distinguishes a RELOAD of the current entry (`refresh`) from a
       # history TRAVERSAL (`go_back`/`go_forward`) — a controlling SW observes the
@@ -9828,12 +9841,15 @@ module Capybara
       # Defer the navigation: doing it from inside the running V8 call
       # would dispose the Context mid-call. tick_real_time drains
       # after the call returns. Same pattern as `__csimPendingFormSubmit`.
-      def location_assign(url)
-        @pending_location = resolve_against_current(url.to_s)
+      # (…`replace`: a `location.replace`, whose navigation replaces the current history entry rather than adding one)
+      def location_assign(url, replace: false)
+        @pending_location         = resolve_against_current(url.to_s)
+        @pending_location_replace = replace
       end
       def consume_pending_location
         return unless (url = @pending_location)
         @pending_location = nil
+        replace = @pending_location_replace
         # A `location.href`/`assign`/`hash` set to a same-document
         # fragment (e.g. `location.hash = ''`) is NOT a document fetch —
         # move the hash without rebuilding the VM, matching the anchor-
@@ -9841,6 +9857,10 @@ module Capybara
         # the page, discarding all JS state.
         if pure_fragment_navigation?(url)
           update_current_hash(url)
+        elsif !@current_realm_id && url.match?(/\Adata:/i)
+          # A page navigating its top-level browsing context to a `data:` URL: Chrome and Firefox refuse it (the
+          # URL's document would run with no origin of its own).
+          nil
         elsif @current_realm_id
           # A JS-driven `location.*` from inside a `within_frame` block
           # navigates the FRAME, not the top page (same as a self-targeted
@@ -9848,7 +9868,7 @@ module Capybara
           # untouched.
           navigate_frame(url)
         else
-          navigate(url)
+          navigate(url, replace: replace)
         end
       end
       # A nested browsing context navigating its OWN `location` (the frame's
@@ -10949,7 +10969,7 @@ module Capybara
         ct.to_s.empty? ? 'text/html' : ct.to_s
       end
 
-      def navigate(url, depth: 0, referer: @current_url, from_history: false, is_reload: false, initiator: @current_url, site_seed: nil)
+      def navigate(url, depth: 0, referer: @current_url, from_history: false, is_reload: false, initiator: @current_url, site_seed: nil, replace: false)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
@@ -10992,7 +11012,7 @@ module Capybara
           end
           unless from_history || depth > 0
             capture_outgoing_form_state
-            record_history({method: :get, url: url})
+            replace ? replace_history({method: :get, url: url}) : record_history({method: :get, url: url})
           end
           # A controlled top-level navigation goes to the controlling SW's fetch event
           # first (mode 'navigate', dest 'document') — the registration may live in ANY
@@ -11419,7 +11439,10 @@ module Capybara
       RACK_URI_ILLEGAL = %r{[^!*'();:@&=+$,/?\[\]A-Za-z0-9\-._~%]}n
       def rack_env_for(url, **opts)
         target = url.to_s.sub(/#.*/m, '')
-        env    = Rack::MockRequest.env_for(target.b.gsub(RACK_URI_ILLEGAL) {|c| format('%%%02X', c.ord) }, **opts)
+        # (…what Rack's URI parser refuses escaped for it alone — a byte outside its set, a `%` that begins no escape — the
+        # path and query passed on as the page wrote them, as a browser sends them)
+        parseable = target.b.gsub(RACK_URI_ILLEGAL) {|c| format('%%%02X', c.ord) }.gsub(/%(?![0-9A-Fa-f]{2})/n, '%25')
+        env       = Rack::MockRequest.env_for(parseable, **opts)
         if (m = target.match(%r{\A[^:/?#]+://[^/?#]*([^?#]*)(?:\?(.*))?\z}m))
           env['PATH_INFO']    = m[1].empty? ? '/' : m[1]
           env['QUERY_STRING'] = m[2].to_s
