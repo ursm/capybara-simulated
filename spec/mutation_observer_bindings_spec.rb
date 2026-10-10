@@ -103,4 +103,45 @@ RSpec.describe 'MutationObserver bindings' do
     JS
     expect(got).to eq(['frame attributes d', 'main attributes fs', 'main childList fs'])
   end
+
+  # The agent's one mutation observer microtask notifies every realm's observers, in the order they were made, before
+  # the microtasks queued after the change (Chrome 2026-10-10: `frame 1`, `main 1`, then `p0`…); a node another realm
+  # observes is observed whichever realm's script changes it (5 records); and a frame removed, its observers observe
+  # nothing more.
+  it "notifies every realm's observers as the agent's one microtask" do
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0], seen = [];
+      const f = document.createElement('iframe');
+      f.srcdoc = '<p id=fs></p>';
+      f.onload = () => {
+        const w = f.contentWindow, d = document.getElementById('d'), fs = w.document.getElementById('fs');
+        new w.MutationObserver((rs) => seen.push(`frame ${rs.length}`)).observe(d, { attributes: true });
+        new MutationObserver((rs) => seen.push(`main ${rs.length}`)).observe(d, { attributes: true });
+        d.setAttribute('a', '1');
+        let p = Promise.resolve();
+        for (let i = 0; i < 2; i++) p = p.then(() => seen.push(`p${i}`));
+        const adopted = [];
+        new w.MutationObserver((rs) => rs.forEach((r) => adopted.push(r.type))).observe(fs, { attributes: true, childList: true, subtree: true, characterData: true });
+        const b = document.createElement('b');
+        b.append('t');
+        fs.append(b);
+        b.setAttribute('x', '1');
+        b.firstChild.data = 'u';
+        b.textContent = '';
+        setTimeout(() => {
+          f.remove();
+          let threw = null;
+          try { for (let i = 0; i < 100; i++) d.setAttribute('z', i); } catch (e) { threw = e.name; }
+          setTimeout(() => done([seen, adopted, threw]), 0);
+        }, 0);
+      };
+      document.body.append(f);
+    JS
+    expect(got).to eq([
+      ['frame 1', 'main 1', 'p0', 'p1', 'main 100'],
+      %w[childList attributes characterData childList],
+      nil
+    ])
+  end
 end

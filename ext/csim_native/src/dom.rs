@@ -834,6 +834,7 @@ impl RealmArena {
         sheets.reset();
         faces.with(|f| *f = Default::default());
         self.state = RealmState { faces, sheets, state_epoch: state_epoch + 1, ..RealmState::default() };
+        self.observers.drop_realm(cid);
         self.free_realm_nodes(cid);
         // (…and what the isolate latched for any realm's page, where this is the only realm left)
         if self.parked.is_empty() {
@@ -851,6 +852,7 @@ impl RealmArena {
         if self.cur == cid {
             self.state = RealmState::default();
         }
+        self.observers.drop_realm(cid);
         self.free_realm_nodes(cid);
     }
     // How many nodes the realm an op works in has made and not freed.

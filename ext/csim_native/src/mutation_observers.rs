@@ -41,9 +41,86 @@ pub(crate) struct Observers {
     // the isolate's: a change one realm's script makes may interest an observer another's made.
     realms: HashMap<u32, i32>,
     next: u32,
+    // The realms with records, transient registrations or signaled slots waiting to be notified — the agent's pending
+    // mutation observers, by realm (which holds them): one notification, in whichever realm it runs, takes them all.
+    pending: Vec<i32>,
+    // What every realm's bindings read without a call (`moFlags`, a view each of the one buffer): [0] whether any node
+    // has a registered observer — which a change must then ask about, whichever realm's script made it — [1] whether
+    // the agent's mutation observer microtask is queued, [2] whether observers are being notified.
+    flags: Option<v8::SharedRef<v8::BackingStore>>,
 }
 
+const ANY_REGISTERED: usize = 0;
+const MICROTASK_QUEUED: usize = 1;
+
 impl Observers {
+    // (…[0] kept as the lists are)
+    fn sync(&self) {
+        if let Some(flags) = &self.flags {
+            flags[ANY_REGISTERED].set(u8::from(!self.lists.is_empty()));
+        }
+    }
+
+    // "observe" past its option checks: `observer`'s registration of `target` given the options anew — the transient
+    // ones made from it dropped, as they no longer say what it observes — or made.
+    fn observe(&mut self, observer: u32, target: NodeId, options: Rc<Options>) {
+        let list = self.lists.entry(target).or_default();
+        if let Some(registered) = list.iter_mut().find(|r| r.observer == observer && r.source.is_none()) {
+            registered.options = options;
+            for node in self.transient.get(&observer).into_iter().flatten() {
+                if let Some(list) = self.lists.get_mut(node) {
+                    list.retain(|r| !(r.observer == observer && r.source == Some(target)));
+                }
+            }
+        } else {
+            list.push(Registered { observer, options, source: None });
+            self.nodes.entry(observer).or_default().push(target);
+        }
+        self.sync();
+    }
+
+    // "disconnect": every registered observer of `observer` dropped, from its node list and its transient node set.
+    fn disconnect(&mut self, observer: u32) {
+        let nodes = self.nodes.remove(&observer).into_iter().flatten();
+        for node in nodes.chain(self.transient.remove(&observer).into_iter().flatten()) {
+            if let Some(list) = self.lists.get_mut(&node) {
+                list.retain(|r| r.observer != observer);
+                if list.is_empty() {
+                    self.lists.remove(&node);
+                }
+            }
+        }
+        self.sync();
+    }
+
+    // "remove transient registered observers" for `observer`, as its notification begins.
+    fn remove_transients(&mut self, observer: u32) {
+        for node in self.transient.remove(&observer).into_iter().flatten() {
+            if let Some(list) = self.lists.get_mut(&node) {
+                list.retain(|r| r.observer != observer || r.source.is_none());
+                if list.is_empty() {
+                    self.lists.remove(&node);
+                }
+            }
+        }
+        self.sync();
+    }
+
+    // Realm `cid` is gone — a frame removed or navigated, a page left: its observers observe nothing more, as nothing
+    // can notify them, and nothing of it is pending. (Its notification microtask, where it had one queued, went with it:
+    // the next change queues another.)
+    pub(crate) fn drop_realm(&mut self, cid: i32) {
+        let gone: Vec<u32> = self.realms.iter().filter(|&(_, &c)| c == cid).map(|(&o, _)| o).collect();
+        for observer in gone {
+            self.disconnect(observer);
+            self.realms.remove(&observer);
+        }
+        self.pending.retain(|&c| c != cid);
+        if let Some(flags) = &self.flags {
+            flags[MICROTASK_QUEUED].set(0);
+        }
+    }
+
     // A freed node's list goes with it, and its place in the node list or transient node set of each observer it named.
     pub(crate) fn forget(&mut self, id: NodeId) {
         if self.lists.is_empty() {
@@ -51,6 +128,7 @@ impl Observers {
         }
         if let Some(list) = self.lists.remove(&id) {
             self.unlist(id, &list);
+            self.sync();
         }
     }
     // …and those of nodes freed wholesale.
@@ -78,51 +156,6 @@ pub(crate) enum Change<'a> {
 }
 
 impl RealmArena {
-    // "observe" past its option checks: `observer`'s registration of `target` given the options anew — the transient
-    // ones made from it dropped, as they no longer say what it observes — or made.
-    fn observe(&mut self, observer: u32, target: NodeId, options: Rc<Options>) {
-        let store = &mut self.observers;
-        let list = store.lists.entry(target).or_default();
-        if let Some(registered) = list.iter_mut().find(|r| r.observer == observer && r.source.is_none()) {
-            registered.options = options;
-            for node in store.transient.get(&observer).into_iter().flatten() {
-                if let Some(list) = store.lists.get_mut(node) {
-                    list.retain(|r| !(r.observer == observer && r.source == Some(target)));
-                }
-            }
-        } else {
-            list.push(Registered { observer, options, source: None });
-            store.nodes.entry(observer).or_default().push(target);
-        }
-    }
-
-    // "disconnect": every registered observer of `observer` dropped, from its node list and its transient node set.
-    fn disconnect(&mut self, observer: u32) {
-        let store = &mut self.observers;
-        let nodes = store.nodes.remove(&observer).into_iter().flatten();
-        for node in nodes.chain(store.transient.remove(&observer).into_iter().flatten()) {
-            if let Some(list) = store.lists.get_mut(&node) {
-                list.retain(|r| r.observer != observer);
-                if list.is_empty() {
-                    store.lists.remove(&node);
-                }
-            }
-        }
-    }
-
-    // "remove transient registered observers" for `observer`, as its notification begins.
-    fn remove_transients(&mut self, observer: u32) {
-        let store = &mut self.observers;
-        for node in store.transient.remove(&observer).into_iter().flatten() {
-            if let Some(list) = store.lists.get_mut(&node) {
-                list.retain(|r| r.observer != observer || r.source.is_none());
-                if list.is_empty() {
-                    store.lists.remove(&node);
-                }
-            }
-        }
-    }
-
     // "queue a mutation record"'s interested observers: of the registered observers of `target`'s inclusive ancestors,
     // each whose options take the change — a node's that is not the target only with `subtree` — once, in the order
     // first met, with whether any of its registrations asks for the old value.
@@ -191,6 +224,7 @@ impl RealmArena {
             }
             list.push(Registered { observer, options, source: Some(source) });
             store.transient.entry(observer).or_default().push(node);
+            store.flags.iter().for_each(|f| f[ANY_REGISTERED].set(1));
             if !pending.contains(&observer) {
                 pending.push(observer);
             }
@@ -208,6 +242,47 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moAddTransients", add_transients, context_id);
     crate::dom::register(scope, ns, "moAddTransientsOfChildren", add_transients_of_children, context_id);
     crate::dom::register(scope, ns, "moRealm", realm_of, context_id);
+    crate::dom::register(scope, ns, "moPend", pend, context_id);
+    crate::dom::register(scope, ns, "moTakePending", take_pending, context_id);
+    crate::dom::register(scope, ns, "moHasPending", has_pending, context_id);
+    crate::dom::register(scope, ns, "moDropRealm", drop_realm, context_id);
+    // (…and the flags, a view on the isolate's one buffer)
+    let store = {
+        let observers = &mut crate::dom::dom(scope).arena.observers;
+        observers.flags.get_or_insert_with(|| v8::ArrayBuffer::new_backing_store_from_vec(vec![0u8; 3]).make_shared()).clone()
+    };
+    let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
+    if let (Some(view), Some(key)) = (v8::Uint8Array::new(scope, buffer, 0, 3), v8::String::new(scope, "moFlags")) {
+        ns.set(scope, key.into(), view.into());
+    }
+}
+
+// __dom.moPend(): the calling realm has observers to notify (records, transient registrations) or slots signaled.
+fn pend(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let pending = &mut crate::dom::dom(scope).arena.observers.pending;
+    if !pending.contains(&cid) {
+        pending.push(cid);
+    }
+}
+
+// __dom.moTakePending() -> [cid] — the realms `moPend` named since, emptied.
+fn take_pending(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cids = std::mem::take(&mut crate::dom::dom(scope).arena.observers.pending);
+    let values: Vec<v8::Local<'_, v8::Value>> = cids.iter().map(|&c| v8::Integer::new(scope, c).into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+
+// __dom.moHasPending() -> whether any realm has observers to notify or slots signaled.
+fn has_pending(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(!crate::dom::dom(scope).arena.observers.pending.is_empty());
+}
+
+// __dom.moDropRealm(cid) — realm `cid` is gone (`Observers::drop_realm`).
+fn drop_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    if let Some(cid) = args.get(0).int32_value(scope) {
+        crate::dom::dom(scope).arena.observers.drop_realm(cid);
+    }
 }
 
 // The arena of the realm a binding is called in.
@@ -247,19 +322,19 @@ fn observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
         }
         filter
     });
-    arena(scope, &args).observe(observer, target, Rc::new(Options { flags, filter }));
+    arena(scope, &args).observers.observe(observer, target, Rc::new(Options { flags, filter }));
 }
 
 // __dom.moDisconnect(observer).
 fn disconnect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let observer = args.get(0).uint32_value(scope).unwrap_or(0);
-    arena(scope, &args).disconnect(observer);
+    arena(scope, &args).observers.disconnect(observer);
 }
 
 // __dom.moRemoveTransients(observer).
 fn remove_transients(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let observer = args.get(0).uint32_value(scope).unwrap_or(0);
-    arena(scope, &args).remove_transients(observer);
+    arena(scope, &args).observers.remove_transients(observer);
 }
 
 // __dom.moInterested(nid, type, name, namespaced) -> the interested observers, each as `observer * 2 + wantsOldValue`:
