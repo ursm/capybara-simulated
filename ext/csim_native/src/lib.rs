@@ -12,6 +12,7 @@ mod animations;
 mod av1;
 mod canvas;
 mod canvas_path;
+mod caret;
 mod clone;
 mod collections;
 mod css;

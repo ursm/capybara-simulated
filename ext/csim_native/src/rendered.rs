@@ -36,7 +36,7 @@ const ATOMIC_INLINE_TAGS: [&str; 13] =
 fn tag(n: &NodeData) -> &str {
     &n.local_name
 }
-fn is_block_tag(t: &str) -> bool {
+pub(crate) fn is_block_tag(t: &str) -> bool {
     BLOCK_TAGS.contains(&t) || t == "ul"
 }
 
