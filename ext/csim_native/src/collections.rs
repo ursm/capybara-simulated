@@ -159,6 +159,16 @@ pub(crate) struct IdIndex {
 }
 
 impl IdIndex {
+    // Whether it holds no map.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.maps.is_empty()
+    }
+    // A freed node is no tree's root any more.
+    pub(crate) fn forget(&mut self, root: NodeId) {
+        if !self.maps.is_empty() {
+            self.maps.remove(&root);
+        }
+    }
     // (…a page making tree after detached tree asks of each: the sizes are a hint, dropped wholesale past a bound)
     fn note_size(&mut self, root: NodeId, size: usize) {
         if self.sizes.len() >= 4096 {
@@ -220,6 +230,10 @@ impl RealmArena {
                 }
                 true
             });
+            // (…the maps of a page asking of fragment after fragment, dropped wholesale past a bound as the sizes are)
+            if memo.maps.len() >= 256 {
+                memo.maps.clear();
+            }
             memo.maps.insert(root, ids);
             memo.note_size(root, visited);
         }

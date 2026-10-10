@@ -14,8 +14,9 @@ publish = false
 crate-type = ["cdylib"]
 
 [build-dependencies]
-# build.rs compiles src/v8_shim.cc.
+# build.rs compiles src/v8_shim.cc, finding the v8 crate's headers through `cargo metadata`.
 cc = "1"
+serde_json = "1"
 
 [dependencies]
 # rusty_racer as a LIBRARY (not its gem .so): we call install_classes from our own

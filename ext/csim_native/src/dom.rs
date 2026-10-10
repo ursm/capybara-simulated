@@ -1028,6 +1028,7 @@ impl RealmArena {
         if self.get(id).is_some_and(|n| n.plain_attr("id").is_some()) {
             self.id_epoch += 1;
         }
+        self.id_index.get_mut().forget(id);
         self.unlist(id.idx);
         let slot = &mut self.slots[id.idx as usize];
         let (assigned_slot, pseudo_boxes) = slot.data.as_ref().map_or((None, [None; 2]), |n| (n.assigned_slot, n.pseudo_boxes));
@@ -1087,7 +1088,11 @@ impl RealmArena {
     // an element with an id — an id joins or leaves a tree, or moves in its order — and NOT otherwise, so a page appending
     // id-less nodes one by one between named-access reads (`d.appendChild(…)` in a loop, `d` the window's named property)
     // keeps one map, where each append threw it away and each read walked the whole tree.
+    // (…and no walk where no map is made: the walks' answers keep nothing)
     fn ids_moved(&mut self, id: NodeId) {
+        if self.id_index.borrow().is_empty() {
+            return;
+        }
         let mut stack = vec![id];
         while let Some(n) = stack.pop() {
             let Some(node) = self.get(n) else { continue };
@@ -1467,7 +1472,6 @@ impl RealmArena {
             return;
         }
         self.state_epoch += 1;
-        self.ids_moved(child);
         let mut p = Some(parent);
         while let Some(a) = p {
             if a == child {

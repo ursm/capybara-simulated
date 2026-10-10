@@ -336,6 +336,7 @@ dependencies = [
  "rusty_vp9",
  "ryu-js",
  "selectors",
+ "serde_json",
  "skrifa",
  "smallvec",
  "stylo",

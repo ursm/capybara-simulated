@@ -24,7 +24,8 @@ extern "C" void csim_node_reset_root(void* wrappable);
 namespace {
 
 // What V8 asks when a scavenge drops a young, unmodified wrapper a droppable reference held: the embedder clears that
-// reference, found through the object it wraps under `tag` (Blink's model).
+// reference, found through the object it wraps under `tag` (Blink's model). It MUST be cleared: one left set is zapped
+// by V8 and crashes the next scavenge — so only a wrapper filed under `tag` may ever be held by a droppable reference.
 class RootsHandler final : public v8::EmbedderRootsHandler {
  public:
   RootsHandler(v8::Isolate* isolate, uint16_t tag) : isolate_(isolate), tag_(tag) {}

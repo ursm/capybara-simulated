@@ -53,9 +53,13 @@ unsafe extern "C" {
 // V8 dropped the wrapper of the handle `wrappable` (filed under TAG): its reference goes, and it holds its object no more.
 #[unsafe(no_mangle)]
 extern "C" fn csim_node_reset_root(wrappable: *mut std::ffi::c_void) {
-    // SAFETY: the roots handler unwrapped this pointer under TAG, which only NodeHandles are wrapped under; V8 calls it
-    // on the main thread, outside any borrow of the handle.
-    let handle = unsafe { &*(wrappable as *const NodeHandle) };
+    // SAFETY: the roots handler unwrapped this pointer under TAG, which only NodeHandles are wrapped under — the RustObj
+    // header `Object::wrap` stored, not the handle: `UnsafePtr` finds the handle in it (a cast of the raw pointer wrote
+    // into that header and left the reference V8 then zapped, which the next scavenge crashed on). V8 calls it on the
+    // main thread, outside any borrow of the handle.
+    let raw = wrappable as *mut _;
+    let Some(ptr) = (unsafe { v8::cppgc::UnsafePtr::<NodeHandle>::new(&raw) }) else { return };
+    let handle = unsafe { ptr.as_ref() };
     handle.held.set(false);
     // SAFETY: as above; V8 resets the reference it reports dropped only through this call's embedder.
     unsafe { csim_traced_clear(handle.object.get()) };
