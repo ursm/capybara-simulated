@@ -268,8 +268,7 @@ fn handle_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) 
     unsafe { v8::Object::unwrap::<TAG, NodeHandle>(scope, obj) }
 }
 
-// Bind the node `value` is the object of to slot `nid` — a no-op for an object that is no node's (one
-// made before `__dom` existed, the snapshot's bootstrap).
+// Bind the node `value` is the object of to slot `nid` — a no-op for an object that is no node's.
 pub(crate) fn bind(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>, nid: NodeId) {
     let Some(ptr) = handle_of(scope, value) else { return };
     // SAFETY: the handle lives while its object does, which the caller holds.
@@ -399,8 +398,8 @@ fn rare_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     }
 }
 
-// `__dom.nodeDocument(node)` -> its node document, null for none — undefined for an object with no handle (the
-// snapshot's warm-up's node, an author's `Object.create(Node.prototype)`), which keeps its own.
+// `__dom.nodeDocument(node)` -> its node document, null for none — undefined for an object with no handle (an
+// author's `Object.create(Node.prototype)`), which keeps its own.
 fn node_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(ptr) = handle_of(scope, args.get(0)) else { return };
     // SAFETY: the main thread writes the reference; the handle lives while the object, an argument, does.

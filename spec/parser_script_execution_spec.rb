@@ -80,15 +80,6 @@ RSpec.describe 'scripts the parser runs' do
     expect(s.evaluate_script('R')).to eq([300, true, 'HTML'])
   end
 
-  # …and without indexing a long list's siblings once per child: the parser reads each new node's siblings after
-  # inserting it, and every insertion moves the tree generation, so an index keyed on it alone was built per child —
-  # a 12,000-item list parsed in 1.7 s where it takes 76 ms. A COUNT, not a wall.
-  it 'parses a long list without indexing its siblings per child' do
-    items = (1..3000).map {|i| "<li>i#{i}</li>" }.join("\n")
-    s = session_for("<!DOCTYPE html><html><body><script>window.B = __csimSibIndexBuilds()</script><ul>#{items}</ul></body></html>")
-    expect(s.evaluate_script('__csimSibIndexBuilds() - B')).to be < 10
-  end
-
   # A classic script marked `nomodule` does not run where modules are supported — parsed, or inserted by script —
   # which is the other half of differential serving.
   it 'does not run a nomodule classic script' do

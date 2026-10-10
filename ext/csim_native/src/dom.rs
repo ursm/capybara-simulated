@@ -1753,6 +1753,11 @@ pub(crate) fn nodes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, ids: &
         .collect();
     v8::Array::new_with_elements(scope, &objects).into()
 }
+// …and one node, or none: its object, or null.
+pub(crate) fn node_value<'s>(scope: &mut v8::PinScope<'s, '_>, id: Option<NodeId>) -> v8::Local<'s, v8::Value> {
+    let held = id.and_then(|id| dom(scope).arena.get(id).and_then(|n| crate::node_handle::held(&n.link)));
+    held.and_then(|h| h.get(scope)).map_or_else(|| v8::null(scope).into(), Into::into)
+}
 
 // The arena for realm `cid` and its style engine, for a change the engine has to hear of — the engine's change hooks
 // (`attributes_will_change`, `children_changed`, `node_left`, …) are Firefox's restyle manager, called where the DOM changes.
@@ -2148,29 +2153,21 @@ const IS_CONNECTED_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction:
         v8::fast_api::Int64Representation::Number,
     ),
 )];
-// __dom.relativeNode(nid, kind) -> the node DOM's accessor of `kind` names (`relative`), its object; null for none;
-// undefined for one whose object V8 dropped (the bindings walk their own tree then).
+// __dom.relativeNode(nid, kind) -> the node DOM's accessor of `kind` names (`relative`), as `node_value` answers it.
 fn relative_node(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return };
     let kind = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
-    let arena = &dom(scope).arena;
-    let Some(found) = arena.relative(id, kind) else { return rv.set_null() };
-    let Some(held) = arena.get(found).and_then(|n| crate::node_handle::held(&n.link)) else { return };
-    if let Some(object) = held.get(scope) {
-        rv.set(object.into());
-    }
+    let found = dom(scope).arena.relative(id, kind);
+    rv.set(node_value(scope, found));
 }
-// __dom.childAt(nid, index) -> the node's index-th child, its object; null past the last (a `childNodes` item);
-// undefined for one whose object V8 dropped.
+// __dom.childAt(nid, index) -> the node's index-th child (a `childNodes` item), as `node_value` answers it — null past
+// the last.
 fn child_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return };
     let index = args.get(1).uint32_value(scope).unwrap_or(u32::MAX) as usize;
     let arena = &dom(scope).arena;
-    let Some(&child) = arena.get(id).and_then(|n| n.children.get(index)) else { return rv.set_null() };
-    let Some(held) = arena.get(child).and_then(|n| crate::node_handle::held(&n.link)) else { return };
-    if let Some(object) = held.get(scope) {
-        rv.set(object.into());
-    }
+    let found = arena.get(id).and_then(|n| n.children.get(index).copied());
+    rv.set(node_value(scope, found));
 }
 // __dom.childNodes(nid) -> the node's children, as `nodes_value` answers.
 fn child_nodes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

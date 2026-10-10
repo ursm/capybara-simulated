@@ -206,45 +206,6 @@ module Capybara
         @@snapshot_lock.synchronize { @@snapshot ||= build_snapshot }
       end
 
-      # Pre-warm script: exercises the JS surfaces that get JIT-compiled
-      # on every page load (HTML parse, selector tokenise + match, event
-      # dispatch, style-decl parse, cascade resolve). Runs once at
-      # snapshot creation; the resulting compiled-code state ships in
-      # the snapshot so each new context starts with these paths warm.
-      # (`Snapshot#warmup!` follows the V8 WarmUpSnapshotDataBlob contract:
-      # the warmup runs in a throwaway context — only code, no heap state,
-      # survives into the blob.)
-      SNAPSHOT_WARMUP = <<~JS.freeze
-        (function () {
-          // Drive a representative document through parse → script
-          // eval → selector / event / cascade primitives so the
-          // bytecode cache covers them when a real visit hits. (…in a
-          // realm with its own state, as a real one is: its document.)
-          try { __csimInitRealm(); } catch (_) {}
-          const html = '<!doctype html><html><head><style>' +
-            '.a { display: none } .a.show { display: block }' +
-            '#m, .b > .c { visibility: hidden }' +
-            '@media (max-width: 899px) { .b { display: none } }' +
-            '</style></head><body>' +
-            '<div id="m" class="a"><span class="b"><a class="c" href="/x">x</a></span></div>' +
-            '<form><input name="q" type="text" value="hi"><button type="submit">go</button></form>' +
-            '<script>document.querySelector("#m");</script>' +
-            '</body></html>';
-          try { __csimLoadDocument(html); } catch (_) {}
-          try { __csimEvaluateXPath('//a', 0); } catch (_) {}
-          try { __csimVisible(1); } catch (_) {}
-          try { __csimQuery(0, '#m'); } catch (_) {}
-          try { __csimQuery(0, '.b > .c'); } catch (_) {}
-          try {
-            const root = document.documentElement;
-            if (root) {
-              root.querySelectorAll('a');
-              root.querySelectorAll('.b > .c, #m');
-            }
-          } catch (_) {}
-        })();
-      JS
-
       # `Snapshot.new(source)` is non-deterministic — V8 embeds
       # transient allocator state in the produced bytes, so the same
       # source yields different blobs across runs. V8's bytecode-cache
@@ -286,12 +247,7 @@ module Capybara
       end
 
       def self.build_snapshot_uncached
-        snap = RustyRacer::Snapshot.new(RuntimeShared.snapshot_src)
-        # `warmup!` runs `SNAPSHOT_WARMUP` once in a throwaway context and
-        # keeps the resulting compiled code, so contexts created from this
-        # snapshot inherit JIT-primed versions of the hot paths above.
-        snap.warmup!(SNAPSHOT_WARMUP) rescue nil
-        snap
+        RustyRacer::Snapshot.new(RuntimeShared.snapshot_src)
       end
 
       # `Snapshot.load` doesn't validate — corrupt bytes surface as a V8
@@ -312,7 +268,7 @@ module Capybara
         return nil if ENV['CSIM_SNAPSHOT_CACHE'].to_s.casecmp('off').zero?
         dir = ENV['CSIM_SNAPSHOT_CACHE_DIR'] ||
               File.join(ENV['HOME'] || '/tmp', '.cache', 'capybara-simulated', 'snapshot')
-        sha = Digest::SHA256.hexdigest(RuntimeShared.snapshot_src + SNAPSHOT_WARMUP)
+        sha = Digest::SHA256.hexdigest(RuntimeShared.snapshot_src)
         tag = cached_data_version_tag
         File.join(dir, "#{tag}-#{sha[0, 16]}.bin")
       end
