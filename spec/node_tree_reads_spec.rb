@@ -69,4 +69,25 @@ RSpec.describe 'Node tree reads' do
     JS
     expect(got).to eq([[true, true, true, true], [nil, nil, nil], [true, true, true], [nil, true], true, true, nil])
   end
+
+  # The tree's accessors are the engine's answers (dom.rs `relativeNode`): a shadow root is no child of its host — its
+  # parent, siblings and its children's parent element none — and a template's contents no child of the template.
+  # Chrome: as below.
+  it 'answers the tree accessors across a shadow root and a template' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const host = document.getElementById('d'), root = host.attachShadow({mode: 'open'});
+        const inner = root.appendChild(document.createElement('i'));
+        host.append(document.createElement('b'));
+        const t = document.createElement('template');
+        t.innerHTML = '<p>x</p>';
+        return [
+          root.parentNode, root.nextSibling, inner.parentNode === root, inner.parentElement, host.firstChild.tagName,
+          host.childElementCount, t.content.parentNode, t.hasChildNodes(), t.content.firstChild.parentNode === t.content
+        ];
+      })()
+    JS
+    expect(got).to eq([nil, nil, true, nil, 'B', 1, nil, false, true])
+  end
 end

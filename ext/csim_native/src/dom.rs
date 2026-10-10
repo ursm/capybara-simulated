@@ -1608,15 +1608,24 @@ impl RealmArena {
         None
     }
     // …and the node view's: a sibling or child of any kind.
+    // (…the nearest live one, a stale edge stepped over, as the element view steps over them)
     pub(crate) fn sibling(&self, id: NodeId, step: isize) -> Option<NodeId> {
         let node = self.get(id)?;
         let parent = self.get(node.parent?)?;
-        let at = node.index_in(parent).filter(|&i| parent.children[i] == id).or_else(|| parent.children.iter().position(|&c| c == id))?;
-        parent.children.get(at.checked_add_signed(step)?).copied()
+        let mut at = node.index_in(parent).filter(|&i| parent.children[i] == id).or_else(|| parent.children.iter().position(|&c| c == id))?;
+        loop {
+            at = at.checked_add_signed(step)?;
+            let &c = parent.children.get(at)?;
+            if self.get(c).is_some() {
+                return Some(c);
+            }
+        }
     }
     pub(crate) fn child_count(&self, id: NodeId, elements: bool) -> u32 {
         let Some(n) = self.get(id) else { return 0 };
-        if elements { n.children.iter().filter(|&&c| self.is_element(c)).count() as u32 } else { n.children.len() as u32 }
+        // (…live ones: a stale edge counts as none, as in the element view)
+        let live = n.children.iter().filter(|&&c| if elements { self.is_element(c) } else { self.get(c).is_some() });
+        live.count() as u32
     }
     pub(crate) fn last_element_child(&self, id: NodeId) -> Option<NodeId> {
         let node = self.get(id)?;
