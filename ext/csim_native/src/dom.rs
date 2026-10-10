@@ -1904,6 +1904,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setTemplateContent", set_template_content, context_id);
     register(scope, ns, "setDoctype", set_doctype, context_id);
     register(scope, ns, "setIsValue", set_is_value, context_id);
+    register(scope, ns, "isValue", is_value, context_id);
     register(scope, ns, "setContainerMargins", set_container_margins, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
     // Slot assignment (slots.rs): what each slot is assigned, run over a shadow tree as what it depends on changes, and
@@ -1913,6 +1914,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "assignedSlotOf", assigned_slot_of, context_id);
     register(scope, ns, "assignedNodesOf", assigned_nodes_of, context_id);
     register(scope, ns, "setValue", set_value, context_id);
+    register(scope, ns, "value", value, context_id);
     register(scope, ns, "setParserFormOwner", set_parser_form_owner, context_id);
     register(scope, ns, "setCustomStates", set_custom_states, context_id);
     register(scope, ns, "setTarget", set_target, context_id);
@@ -2273,6 +2275,14 @@ fn set_value(
     }
 }
 
+// __dom.value(nid) -> a form control's live value: a string once dirty, undefined while clean.
+fn value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let Some(units) = realm(scope, cid).get(id).and_then(|n| n.value.clone()) else { return };
+    rv.set(utf16_value(scope, &units));
+}
+
 // __dom.setDoctype(nid, name, publicId, systemId): a doctype's name and identifiers, as a reused document's next parse
 // gives them.
 fn set_doctype(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
@@ -2294,6 +2304,13 @@ fn set_template_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     realm(scope, cid).set_template_content(id, content);
 }
 
+// __dom.isValue(nid) -> the `is` value the element was created with, or undefined for none.
+fn is_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let Some(units) = realm(scope, cid).get(id).and_then(|n| n.is_value.clone()) else { return };
+    rv.set(utf16_value(scope, &units));
+}
 // __dom.setIsValue(nid, value): the `is` value an element was made with (null for none).
 fn set_is_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return };
