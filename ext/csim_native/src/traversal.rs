@@ -425,10 +425,13 @@ fn following(arena: &RealmArena, from: NodeId, root: NodeId, skip: bool) -> Opti
 // The NodeIterator "pre-removing steps" for the removal of `removed`, of one of an iterator's pointers (its root `root`):
 // None where it stays as it is, else where it is then.
 pub(crate) fn pre_remove(arena: &RealmArena, removed: NodeId, root: NodeId, at: Pointer) -> Option<Pointer> {
-    // (…a removal of the root, or of an ancestor of it, takes the iterator's whole tree with it; one of no ancestor of the
-    // reference leaves it where it is)
-    let contains = |a: NodeId, b: NodeId| matches!(arena.relation(a, b), Some(Relation::Same | Relation::Ancestor));
-    if contains(removed, root) || !contains(removed, at.node) {
+    // (…a removal of no inclusive ancestor of the pointer leaves it where it is — a leaf's but the pointer's own at once,
+    // the rest told by the pointer's parent links, which every removal asks of every live iterator; one of the root, or
+    // of an ancestor of it, takes the iterator's whole tree with it)
+    if at.node != removed && arena.get(removed).is_none_or(|n| n.children.is_empty()) {
+        return None;
+    }
+    if !crate::ranges::contains(arena, removed, at.node) || crate::ranges::contains(arena, removed, root) {
         return None;
     }
     // (…before it: the first node following the removed one and not in it, under the root)
@@ -455,7 +458,7 @@ pub(crate) fn pre_remove(arena: &RealmArena, removed: NodeId, root: NodeId, at: 
 // last child under the root, before it; else to the parent, after it.
 pub(crate) fn pre_remove_all(arena: &RealmArena, parent: NodeId, root: NodeId, at: Pointer) -> Option<Pointer> {
     // (…the child the pointer is in; one that holds the root takes the iterator's whole tree with it)
-    if arena.relation(parent, at.node) != Some(Relation::Ancestor) {
+    if at.node == parent || !crate::ranges::contains(arena, parent, at.node) {
         return None;
     }
     let child = arena.chain(at.node).into_iter().skip_while(|&n| n != parent).nth(1);

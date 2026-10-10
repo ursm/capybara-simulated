@@ -2,16 +2,16 @@
 // traversals running on it while their filters do — kept here, and the "NodeIterator pre-removing steps" every removal
 // runs on them (§4.2.3), over every live iterator of the isolate, wherever its tree.
 //
-// An iterator's state is the engine's, held by a handle on V8's C++ heap (`__dom.NodeIteratorBase`, as a range's is:
-// ranges.rs) that the iterator's slots hold, and that traces its root's and its reference's objects — what `root` and
-// `referenceNode` hand out, and what keeps them alive while the iterator is. A collected iterator's entry is freed at the
-// next op on iterators.
+// An iterator's state is the engine's, named by a handle on V8's C++ heap (`__dom.NodeIteratorBase`, as a range's is:
+// ranges.rs) that the iterator's slots hold. What keeps its nodes alive is the root its slots hold too: the reference is
+// always in the root's tree, every node of which the tree's edges keep (node_handle.rs). A collected iterator's entry is
+// freed at the next op on iterators.
 
-use std::cell::{Cell, RefCell, UnsafeCell};
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
-use v8::cppgc::{GarbageCollected, Visitor, WeakPersistent};
+use v8::cppgc::{GarbageCollected, Visitor};
 
 use crate::dom::{nid_arg, NodeId, RealmArena};
 
@@ -21,24 +21,14 @@ const TAG: u16 = 3;
 // What marks an object as an iterator's handle (its internal field 0).
 static BRAND: u8 = 0;
 
-const ROOT: usize = 0;
-const REFERENCE: usize = 1;
-
 pub(crate) struct IteratorHandle {
     // The iterator's entry (`Iterators::entries`), or none until it is set up; and the queue of the isolate's iterators.
     id: Cell<Option<u32>>,
     dead: RefCell<Weak<Dead>>,
-    // The root's and the reference's objects. Written on the main thread only.
-    nodes: [UnsafeCell<v8::TracedReference<v8::Object>>; 2],
 }
 
 unsafe impl GarbageCollected for IteratorHandle {
-    fn trace(&self, visitor: &mut Visitor) {
-        for n in &self.nodes {
-            // SAFETY: the collector reads the reference as TracedReference's barriers allow; nothing here hands one out.
-            visitor.trace(unsafe { &*n.get() });
-        }
-    }
+    fn trace(&self, _visitor: &mut Visitor) {}
     fn get_name(&self) -> &'static std::ffi::CStr {
         c"IteratorHandle"
     }
@@ -68,7 +58,6 @@ pub(crate) struct Pointer {
 }
 
 struct Entry {
-    handle: WeakPersistent<IteratorHandle>,
     root: NodeId,
     reference: Pointer,
     // The pointers of the traversals running on it, innermost last: the node each handed its filter, which a removal
@@ -115,43 +104,25 @@ impl Iterators {
     fn entry(&mut self, id: u32) -> Option<&mut Entry> {
         self.entries.get_mut(id as usize)?.as_mut()
     }
-    // The pre-removing steps `step` answers for each pointer of each live iterator, run: the iterators whose reference
-    // moved, and the node it moved to.
-    fn pre_remove(&mut self, step: impl Fn(NodeId, Pointer) -> Option<Pointer>) -> Vec<(*const IteratorHandle, NodeId)> {
+    // The pre-removing steps `step` answers for each pointer of each live iterator, run.
+    fn pre_remove(&mut self, step: impl Fn(NodeId, Pointer) -> Option<Pointer>) {
         self.sweep();
-        let mut moved = Vec::new();
         for e in self.entries.iter_mut().flatten() {
             for w in &mut e.working {
                 if let Some(p) = step(e.root, *w) {
                     *w = p;
                 }
             }
-            if let Some(p) = step(e.root, e.reference).filter(|&p| p != e.reference) {
-                let node_changed = p.node != e.reference.node;
+            if let Some(p) = step(e.root, e.reference) {
                 e.reference = p;
-                if let Some(h) = e.handle.get().filter(|_| node_changed) {
-                    moved.push((h as *const IteratorHandle, p.node));
-                }
             }
         }
-        moved
     }
 }
 
 // The isolate's iterators.
 fn iterators<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Iterators {
     &mut crate::dom::dom(scope).iterators
-}
-
-// The handles whose references moved, made to hold their new references' objects.
-fn follow(scope: &mut v8::PinScope<'_, '_>, moved: Vec<(*const IteratorHandle, NodeId)>) {
-    for (h, node) in moved {
-        let object = crate::dom::node_value(scope, Some(node));
-        let Ok(object) = v8::Local::<v8::Object>::try_from(object) else { continue };
-        // SAFETY: the handle was read live from its entry's WeakPersistent before anything allocated; the main thread
-        // writes the references.
-        unsafe { (*(*h).nodes[REFERENCE].get()).reset(scope, Some(object)) };
-    }
 }
 
 // The NodeIterator pre-removing steps for the removal of `removed`, over every live iterator — before it leaves its
@@ -162,8 +133,7 @@ pub(crate) fn removing(scope: &mut v8::PinScope<'_, '_>, cid: i32, removed: Node
     }
     let d = crate::dom::dom(scope);
     let arena: &RealmArena = d.arena.enter(cid);
-    let moved = d.iterators.pre_remove(|root, p| crate::traversal::pre_remove(arena, removed, root, p));
-    follow(scope, moved);
+    d.iterators.pre_remove(|root, p| crate::traversal::pre_remove(arena, removed, root, p));
 }
 
 // The constructor an iterator's handle is made with (`__dom.NodeIteratorBase`): branded, and a wrapper of a fresh one.
@@ -175,11 +145,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
     let dead = Arc::downgrade(&iterators(scope).dead);
-    let handle = IteratorHandle {
-        id: Cell::new(None),
-        dead: RefCell::new(dead),
-        nodes: [UnsafeCell::new(v8::TracedReference::empty()), UnsafeCell::new(v8::TracedReference::empty())],
-    };
+    let handle = IteratorHandle { id: Cell::new(None), dead: RefCell::new(dead) };
     let heap = scope.get_cpp_heap().expect("NodeIteratorBase is installed only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
     unsafe {
@@ -240,25 +206,19 @@ fn iterators_live(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
     rv.set_uint32(store.live as u32);
 }
 
-// __dom.iteratorInit(handle, rootNid, root): the iterator `handle` is of starts at its root, before it.
+// __dom.iteratorInit(handle, rootNid): the iterator `handle` is of starts at its root, before it.
 fn iterator_init(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 1) else { return };
-    let Ok(object) = v8::Local::<v8::Object>::try_from(args.get(2)) else { return };
     let Some(ptr) = handle_of(scope, args.get(0)) else { return };
-    // SAFETY: the handle lives while its wrapper does, which the caller holds; the main thread writes the references.
+    // SAFETY: the handle lives while its wrapper does, which the caller holds.
     let handle = unsafe { ptr.as_ref() };
     if handle.id.get().is_some() {
         return;
     }
-    for n in &handle.nodes {
-        // SAFETY: as above; the assignment runs TracedReference's barrier.
-        unsafe { (*n.get()).reset(scope, Some(object)) };
-    }
-    let weak = WeakPersistent::new(&ptr);
     let store = iterators(scope);
     store.sweep();
     let start = Pointer { node: root, before: true };
-    let id = store.add(Entry { handle: weak, root, reference: start, working: Vec::new() });
+    let id = store.add(Entry { root, reference: start, working: Vec::new() });
     handle.id.set(Some(id));
 }
 
@@ -286,8 +246,7 @@ fn iterators_removing_all(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let cid = crate::dom::realm_id(scope, &args);
     let d = crate::dom::dom(scope);
     let arena: &RealmArena = d.arena.enter(cid);
-    let moved = d.iterators.pre_remove(|root, p| crate::traversal::pre_remove_all(arena, parent, root, p));
-    follow(scope, moved);
+    d.iterators.pre_remove(|root, p| crate::traversal::pre_remove_all(arena, parent, root, p));
 }
 
 // A traversal on the iterator `handle` is: where it starts (its reference), its root — and, around each call of its
@@ -309,9 +268,7 @@ pub(crate) fn pop_working(scope: &mut v8::PinScope<'_, '_>, id: u32) -> Option<P
 }
 // …and where the traversal leaves it: its reference then.
 pub(crate) fn traversal_end(scope: &mut v8::PinScope<'_, '_>, id: u32, at: Pointer) {
-    let Some(e) = iterators(scope).entry(id) else { return };
-    let node_changed = e.reference.node != at.node;
-    e.reference = at;
-    let Some(h) = e.handle.get().filter(|_| node_changed).map(|h| h as *const IteratorHandle) else { return };
-    follow(scope, vec![(h, at.node)]);
+    if let Some(e) = iterators(scope).entry(id) {
+        e.reference = at;
+    }
 }
