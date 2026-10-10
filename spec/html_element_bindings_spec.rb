@@ -223,6 +223,25 @@ RSpec.describe 'HTML element bindings' do
 
   # Chrome 2026-10-10: na/nar/nfs undefined, dup/mix HTMLCollections of 2, fr the frame's window, frid and onlyid the
   # element; the document's names ni,nf,ne,mix,fr,b1,a1.
+  # (…whichever realm's code or parser named them: Chrome 2026-10-10, an element of each)
+  it "names on the window the elements another realm or an XML parse named" do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const fd = frames[0].document;
+        const made = fd.createElement('div');
+        made.id = 'fromframe';
+        const imported = fd.createElement('p');
+        imported.id = 'imported';
+        const xml = new DOMParser().parseFromString('<html xmlns="http://www.w3.org/1999/xhtml"><body><form name="xform"/></body></html>', 'application/xhtml+xml');
+        document.body.append(made, document.importNode(imported), xml.querySelector('form'));
+        return [window.fromframe && window.fromframe.localName, window.imported && window.imported.localName,
+                window.xform && window.xform.localName, document.xform && document.xform.localName];
+      })()
+    JS
+    expect(got).to eq(%w[div p form form])
+  end
+
   it "names a window's objects and a document's elements as HTML does" do
     session.visit '/'
     session.execute_script(<<~JS)
