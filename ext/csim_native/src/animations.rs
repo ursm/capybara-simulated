@@ -343,9 +343,11 @@ pub(crate) enum Signal {
     ReadyRejected { animation: AnimationId, generation: u32 },
     FinishedResolved { animation: AnimationId, generation: u32 },
     FinishedRejected { animation: AnimationId, generation: u32 },
-    Finish { animation: AnimationId, current_time: Option<f64>, timeline_time: Option<f64> },
+    // (…`finish` scheduled where the effect END is on the timeline, §4.4.15 — which a later event of the same update,
+    // a `remove`, follows)
+    Finish { animation: AnimationId, current_time: Option<f64>, timeline_time: Option<f64>, scheduled: Option<f64> },
     Cancel { animation: AnimationId, timeline_time: Option<f64> },
-    Remove { animation: AnimationId, timeline_time: Option<f64> },
+    Remove { animation: AnimationId, current_time: Option<f64>, timeline_time: Option<f64> },
     // A finish notification was queued for the next microtask checkpoint: the handle is to run it then
     // (`finish_notification`).
     FinishNotificationQueued { animation: AnimationId },
@@ -643,7 +645,7 @@ impl Animations {
             .filter_map(|id| self.effects.get(id))
             .filter(|e| e.target.as_ref() == Some(target))
             .filter_map(|e| Some((e.animation?, e)))
-            .filter(|&(id, _)| wanted(id))
+            .filter(|&(id, _)| wanted(id) && self.animations[&id].replace_state != ReplaceState::Removed)
             .collect();
         ordered.sort_by(|(x, _), (y, _)| self.composite_order(*x, *y, tree_order));
         if let Some(last) = last {
@@ -1137,13 +1139,14 @@ impl Animations {
         }
         let timeline_time = self.timeline_time_of(&self.animations[&id]);
         let current_time = self.current_time(id);
+        let scheduled = self.end_on_timeline(id).or(timeline_time);
         let a = self.animations.get_mut(&id).unwrap();
         if a.finished.settled {
             return;
         }
         a.finished.settled = true;
         self.signals.push(Signal::FinishedResolved { animation: id, generation: a.finished.generation });
-        self.signals.push(Signal::Finish { animation: id, current_time, timeline_time });
+        self.signals.push(Signal::Finish { animation: id, current_time, timeline_time, scheduled });
     }
 
     // A frame of the document timeline (§4.2 "update animations and send events", its animation part): the timeline
@@ -1307,6 +1310,69 @@ impl Animations {
             .collect();
         out.sort_by(|&x, &y| self.composite_order(x, y, tree_order));
         out
+    }
+
+    // Where on its timeline animation `id` reaches its effect's end — its start going forwards, playing backwards: its
+    // animation time `end` (or 0) as timeline time (§4.4.15 "convert an animation time to timeline time"), None where
+    // that is unresolved (no start time, a zero rate, an infinite end).
+    fn end_on_timeline(&self, id: AnimationId) -> Option<f64> {
+        let a = &self.animations[&id];
+        let rate = a.playback_rate;
+        let time = if rate > 0.0 { self.effect_end(id) } else { 0.0 };
+        (rate != 0.0 && time.is_finite()).then_some(())?;
+        Some(time / rate + a.start_time?)
+    }
+
+    // Is animation `id` REPLACEABLE (§5.5.2)? Not prescribed by markup — no CSS animation or transition its owner owns —
+    // finished, not removed, on a (monotonically increasing) document timeline, and its effect in effect and targeting
+    // something.
+    fn replaceable(&self, id: AnimationId) -> bool {
+        let a = &self.animations[&id];
+        let markup = a.css.as_ref().is_some_and(|css| css.owner.is_some());
+        let Some(effect) = a.effect.and_then(|e| self.effects.get(&e)) else { return false };
+        !markup
+            && a.replace_state != ReplaceState::Removed
+            && a.timeline.is_some()
+            && effect.target.is_some()
+            && self.play_state(id) == PlayState::Finished
+            && self.computed_timing_of(effect).is_some_and(|t| t.progress.is_some())
+    }
+
+    // §5.5.2 "remove replaced animations": every replaceable, active animation each of whose target properties a
+    // replaceable animation of the same target later in composite order includes too is REMOVED — out of its effect
+    // stack — and owes a `remove` event (its current time, its timeline's), in composite order. Whether any was.
+    pub(crate) fn remove_replaced(&mut self, tree_order: &impl Fn(NodeId, NodeId) -> Ordering) -> bool {
+        let mut candidates: Vec<AnimationId> = self.animations.keys().copied().filter(|&id| self.replaceable(id)).collect();
+        if candidates.len() < 2 {
+            return false;
+        }
+        candidates.sort_by(|&x, &y| self.composite_order(x, y, tree_order));
+        let properties = |id: AnimationId| -> Option<(&Target, Vec<&OwnedPropertyDeclarationId>)> {
+            let effect = self.animations[&id].effect.and_then(|e| self.effects.get(&e))?;
+            let computed = effect.computed.as_ref()?;
+            Some((effect.target.as_ref()?, computed.properties.iter().map(|(p, ..)| p).collect()))
+        };
+        let mut removed = Vec::new();
+        for (i, &id) in candidates.iter().enumerate() {
+            if self.animations[&id].replace_state != ReplaceState::Active {
+                continue;
+            }
+            let Some((target, mine)) = properties(id) else { continue };
+            let later: Vec<(&Target, Vec<&OwnedPropertyDeclarationId>)> = candidates[i + 1..].iter().filter_map(|&l| properties(l)).collect();
+            let replaced = mine.iter().all(|p| later.iter().any(|(t, theirs)| *t == target && theirs.contains(p)));
+            if replaced {
+                removed.push(id);
+            }
+        }
+        let any = !removed.is_empty();
+        for id in removed {
+            let current_time = self.current_time(id);
+            let timeline_time = self.timeline_time_of(&self.animations[&id]);
+            self.animations.get_mut(&id).unwrap().replace_state = ReplaceState::Removed;
+            self.touch(id);
+            self.signals.push(Signal::Remove { animation: id, current_time, timeline_time });
+        }
+        any
     }
 
     pub(crate) fn take_signals(&mut self) -> Vec<Signal> {
@@ -1510,7 +1576,7 @@ mod tests {
         model.finish_notification(id);
         let signals = model.take_signals();
         assert!(signals.contains(&Signal::FinishedResolved { animation: id, generation: 0 }));
-        assert!(signals.contains(&Signal::Finish { animation: id, current_time: Some(1000.0), timeline_time: Some(1500.0) }));
+        assert!(signals.contains(&Signal::Finish { animation: id, current_time: Some(1000.0), timeline_time: Some(1500.0), scheduled: Some(1000.0) }));
         // …and playing it again rewinds it, with a new finished promise.
         model.play(id, true).unwrap();
         assert_eq!(model.current_time(id), Some(0.0));

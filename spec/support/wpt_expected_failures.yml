@@ -6102,10 +6102,6 @@ web-animations/animation-model/animation-types/interpolation-per-property-002.ht
 web-animations/animation-model/keyframe-effects/effect-value-iteration-composite-operation.html:
 - iteration composition of incompatible calc-size() bases (accumulation skipped at
   0%, allowed at 50%)
-web-animations/animation-model/keyframe-effects/effect-value-replaced-animations.html:
-- Persisted animations contribute to the effect stack
-- Removed animations do not contribute to animated style
-- Removed animations do not contribute to the effect stack
 web-animations/idlharness.window.js:
 - 'Animation interface: attribute trigger'
 - 'Animation interface: new Animation() must inherit property "trigger" with the proper
@@ -6221,17 +6217,12 @@ web-animations/interfaces/Animatable/getAnimations.html:
 - Throws SyntaxError for an empty selector
 - Throws SyntaxError for an invalid pseudo-element selector
 web-animations/interfaces/Animation/onremove.html:
-- "[harness] TIMEOUT"
 - onremove event is fired when replaced animation is removed.
 - onremove events are fired in the correct order
-web-animations/interfaces/Animation/persist.html:
-- Allows an animation to be persisted after being removed
-- "[harness] TIMEOUT"
 web-animations/interfaces/Animation/startTime.html:
 - startTime is resolved when running
 web-animations/interfaces/Animation/style-change-events.html:
 - All property keys are recognized
-- Animation.commitStyles produces expected style change events
 web-animations/interfaces/DocumentOrShadowRoot/getAnimations.html:
 - Document.getAnimations() returns animations on elements inside same-origin iframes
 - iframe.contentDocument.getAnimations() returns animations on elements inside same-origin
@@ -6295,54 +6286,7 @@ web-animations/timing-model/timelines/timelines.html:
 - Timeline time increases once per animation frame
 - Timeline time increases once per animation frame in an iframe
 web-animations/timing-model/timelines/update-and-send-events-replacement.html:
-- Dispatches an event when removing
 - Dispatches remove events after finish events
-- Does NOT dispatch a remove event twice
-- Does NOT remove an animation after making a redundant change to another animation's
-  current time
-- Does NOT remove an animation after making a redundant change to another animation's
-  effect's properties
-- Does NOT remove an animation after making a redundant change to another animation's
-  timeline
-- Does NOT remove an animation after making a redundant change to its current time
-- Does NOT remove an animation after making a redundant change to its effect's properties
-- Does NOT remove an animation after making a redundant change to its timeline
-- Fires remove event before requestAnimationFrame
-- Performs removal in deeply nested iframes
-- Queues all remove events before running them
-- Removes a CSS animation no longer tied to markup
-- Removes a CSS transition no longer tied to markup
-- Removes an animation after another animation finishes
-- Removes an animation after it finishes
-- Removes an animation after multiple other animations finish
-- Removes an animation after seeking another animation
-- Removes an animation after seeking it
-- Removes an animation after updating another animation's effect to one with a different
-  target
-- Removes an animation after updating another animation's effect to one with different
-  properties
-- Removes an animation after updating another animation's effect to one with different
-  timing
-- Removes an animation after updating another animation's effect's properties
-- Removes an animation after updating another animation's effect's target
-- Removes an animation after updating another animation's timeline
-- Removes an animation after updating its effect to one with a different target
-- Removes an animation after updating its effect to one with different properties
-- Removes an animation after updating its effect to one with different timing
-- Removes an animation after updating its effect's properties
-- Removes an animation after updating its effect's target
-- Removes an animation after updating its fill mode
-- Removes an animation after updating its timeline
-- Removes an animation after updating the fill mode of another animation
-- Removes an animation by another animation using logical properties
-- Removes an animation by another animation using logical properties after updating
-  the context
-- Removes an animation that uses a shorthand
-- Removes an animation using logical properties
-- Removes an animation when another animation uses a shorthand
-- Removes an animation when another covers the same properties
-- Updates ALL timelines before checking for replacement
-- "[harness] TIMEOUT"
 webmessaging/event.origin.sub.htm:
 - 'Test Description: event.origin returns the origin of the message.'
 - "[harness] ERROR"

@@ -500,30 +500,34 @@ fn anim_timing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     });
 }
 
-// __dom.animSignals() -> [kind, animation, a, b, …]: what the handles are to do, in order — `ready` / `readyReject` /
-// `finished` / `finishedReject` (a: the promise's generation), `finish` (a: current time, b: timeline time),
-// `cancel` / `remove` (b: timeline time), and `finishNotification` (a microtask to queue for the animation).
+// __dom.animSignals() -> [kind, animation, a, b, scheduled, …]: what the handles are to do, in order — `ready` /
+// `readyReject` / `finished` / `finishedReject` (a: the promise's generation), `finish` / `remove` (a: current time, b:
+// timeline time), `cancel` (b: timeline time), and `finishNotification` (a microtask to queue for the animation); an
+// event's `scheduled` the timeline time it is scheduled at (its timeline time but for `finish`'s).
 fn anim_signals(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, _arena| {
         let signals = engine.web_animations.take_signals();
-        let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(signals.len() * 4);
+        let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(signals.len() * 5);
         for signal in signals {
-            let (kind, animation, a, b) = match signal {
-                Signal::ReadyResolved { animation, generation } => ("ready", animation, Some(generation as f64), None),
-                Signal::ReadyRejected { animation, generation } => ("readyReject", animation, Some(generation as f64), None),
-                Signal::FinishedResolved { animation, generation } => ("finished", animation, Some(generation as f64), None),
+            let (kind, animation, a, b, scheduled) = match signal {
+                Signal::ReadyResolved { animation, generation } => ("ready", animation, Some(generation as f64), None, None),
+                Signal::ReadyRejected { animation, generation } => ("readyReject", animation, Some(generation as f64), None, None),
+                Signal::FinishedResolved { animation, generation } => ("finished", animation, Some(generation as f64), None, None),
                 Signal::FinishedRejected { animation, generation } => {
-                    ("finishedReject", animation, Some(generation as f64), None)
+                    ("finishedReject", animation, Some(generation as f64), None, None)
                 },
-                Signal::Finish { animation, current_time, timeline_time } => ("finish", animation, current_time, timeline_time),
-                Signal::Cancel { animation, timeline_time } => ("cancel", animation, None, timeline_time),
-                Signal::Remove { animation, timeline_time } => ("remove", animation, None, timeline_time),
-                Signal::FinishNotificationQueued { animation } => ("finishNotification", animation, None, None),
+                Signal::Finish { animation, current_time, timeline_time, scheduled } => {
+                    ("finish", animation, current_time, timeline_time, scheduled)
+                },
+                Signal::Cancel { animation, timeline_time } => ("cancel", animation, None, timeline_time, timeline_time),
+                Signal::Remove { animation, current_time, timeline_time } => ("remove", animation, current_time, timeline_time, timeline_time),
+                Signal::FinishNotificationQueued { animation } => ("finishNotification", animation, None, None, None),
             };
             items.push(string_value(scope, kind));
             items.push(v8::Number::new(scope, animation as f64).into());
             items.push(optional_number(scope, a));
             items.push(optional_number(scope, b));
+            items.push(optional_number(scope, scheduled));
         }
         rv.set(v8::Array::new_with_elements(scope, &items).into());
     });

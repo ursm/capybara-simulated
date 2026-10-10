@@ -3833,6 +3833,9 @@ fn style_tick_unguarded(
     // (The Web Animations' frame first: it moves their timeline, and the flush composes what it moved.)
     engine.web_animations_op(|animations| animations.tick(now));
     engine.flush(arena, now);
+    // (…and then the animations it replaced are removed: what their effects animate, as the flush computed it, is what
+    // decides — §4.4 "update animations and send events")
+    engine.remove_replaced_animations(arena);
     let failures = engine.take_verify_failures();
     let events = engine.take_animation_events(arena);
     let retargeted = engine.web_animations.take_retargeted();
