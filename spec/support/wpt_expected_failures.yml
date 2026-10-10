@@ -6209,7 +6209,6 @@ web-animations/interfaces/Animatable/getAnimations-iframe.html:
 web-animations/interfaces/Animatable/getAnimations-pseudoElement-option-on-view-transition.html:
 - Returns view transition animations with pseudoElement option
 web-animations/interfaces/Animatable/getAnimations.html:
-- Does not return an animation that has been removed
 - Does not return animations with zero playback rate in before phase
 - Returns animations on functional pseudo-element when it is specified
 - Returns animations on pseudo-element when it is specified
@@ -6223,6 +6222,7 @@ web-animations/interfaces/Animation/startTime.html:
 - startTime is resolved when running
 web-animations/interfaces/Animation/style-change-events.html:
 - All property keys are recognized
+- Animation.commitStyles produces expected style change events
 web-animations/interfaces/DocumentOrShadowRoot/getAnimations.html:
 - Document.getAnimations() returns animations on elements inside same-origin iframes
 - iframe.contentDocument.getAnimations() returns animations on elements inside same-origin

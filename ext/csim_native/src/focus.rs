@@ -436,10 +436,12 @@ pub(crate) fn dialog_focus_control(engine: &mut StyleEngine, arena: &RealmArena,
     }
     focus_delegate(engine, arena, dialog, now).unwrap_or(dialog)
 }
-// The element the document `dialog` is in has focused — its realm's, whichever realm asks.
+// The element the document `dialog` is in has focused — its realm's, whichever realm asks; none for a document the
+// realm made that is not the one it shows (a DOMParser's), which has no focus of its own.
 fn document_focus(arena: &RealmArena, dialog: NodeId) -> Option<NodeId> {
-    let doc = arena.get(arena.shadow_including_root(dialog)).filter(|d| d.kind == NodeKind::Document)?;
-    arena.realm_state(doc.realm)?.focus
+    let root = arena.shadow_including_root(dialog);
+    let doc = arena.get(root).filter(|d| d.kind == NodeKind::Document)?;
+    arena.realm_state(doc.realm)?.focus.filter(|&f| arena.shadow_including_root(f) == root)
 }
 // …its "previously focused element", kept as it opens: what its document has focused…
 pub(crate) fn dialog_opening(arena: &mut RealmArena, dialog: NodeId) {

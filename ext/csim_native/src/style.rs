@@ -1346,7 +1346,6 @@ impl StyleEngine {
             .collect()
     }
 
-    // A Web Animations op (`element.animate`, `play()`, a seek…): whatever it did, the next read styles again.
     // Web Animations' "remove replaced animations" for the document (§5.5.2), its composite order the tree's.
     pub(crate) fn remove_replaced_animations(&mut self, arena: &RealmArena) {
         if self.web_animations.remove_replaced(&|a, b| tree_order(arena, a, b)) {
@@ -1354,6 +1353,7 @@ impl StyleEngine {
         }
     }
 
+    // A Web Animations op (`element.animate`, `play()`, a seek…): whatever it did, the next read styles again.
     pub(crate) fn web_animations_op<R>(&mut self, op: impl FnOnce(&mut waapi::Animations) -> R) -> R {
         self.styled = None;
         op(&mut self.web_animations)

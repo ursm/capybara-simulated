@@ -645,7 +645,8 @@ impl Animations {
             .filter_map(|id| self.effects.get(id))
             .filter(|e| e.target.as_ref() == Some(target))
             .filter_map(|e| Some((e.animation?, e)))
-            .filter(|&(id, _)| wanted(id) && self.animations[&id].replace_state != ReplaceState::Removed)
+            // (…a removed animation's none, but the one committing its styles: §4.4.19 adds its effect to the stack)
+            .filter(|&(id, _)| wanted(id) && (self.animations[&id].replace_state != ReplaceState::Removed || Some(id) == last))
             .collect();
         ordered.sort_by(|(x, _), (y, _)| self.composite_order(*x, *y, tree_order));
         if let Some(last) = last {
@@ -1306,7 +1307,7 @@ impl Animations {
                 a.effect.and_then(|e| self.effects.get(&e)).and_then(|e| e.target.as_ref()).is_some_and(&targets)
             })
             .map(|(&id, _)| id)
-            .filter(|&id| self.relevant(id))
+            .filter(|&id| self.relevant(id) && self.animations[&id].replace_state != ReplaceState::Removed)
             .collect();
         out.sort_by(|&x, &y| self.composite_order(x, y, tree_order));
         out
@@ -1342,28 +1343,37 @@ impl Animations {
     // replaceable animation of the same target later in composite order includes too is REMOVED — out of its effect
     // stack — and owes a `remove` event (its current time, its timeline's), in composite order. Whether any was.
     pub(crate) fn remove_replaced(&mut self, tree_order: &impl Fn(NodeId, NodeId) -> Ordering) -> bool {
-        let mut candidates: Vec<AnimationId> = self.animations.keys().copied().filter(|&id| self.replaceable(id)).collect();
-        if candidates.len() < 2 {
-            return false;
+        // (…by target: only one with two or more replaceable animations can lose one — the common "fade in, then hold"
+        // page has one each, and is asked nothing more)
+        let mut by_target: HashMap<NodeId, Vec<AnimationId>> = HashMap::new();
+        for &id in self.animations.keys() {
+            if self.replaceable(id) {
+                let target = self.animations[&id].effect.and_then(|e| self.effects.get(&e)).and_then(|e| e.target.as_ref());
+                if let Some(target) = target {
+                    by_target.entry(target.node).or_default().push(id);
+                }
+            }
         }
-        candidates.sort_by(|&x, &y| self.composite_order(x, y, tree_order));
-        let properties = |id: AnimationId| -> Option<(&Target, Vec<&OwnedPropertyDeclarationId>)> {
-            let effect = self.animations[&id].effect.and_then(|e| self.effects.get(&e))?;
-            let computed = effect.computed.as_ref()?;
-            Some((effect.target.as_ref()?, computed.properties.iter().map(|(p, ..)| p).collect()))
-        };
         let mut removed = Vec::new();
-        for (i, &id) in candidates.iter().enumerate() {
-            if self.animations[&id].replace_state != ReplaceState::Active {
-                continue;
-            }
-            let Some((target, mine)) = properties(id) else { continue };
-            let later: Vec<(&Target, Vec<&OwnedPropertyDeclarationId>)> = candidates[i + 1..].iter().filter_map(|&l| properties(l)).collect();
-            let replaced = mine.iter().all(|p| later.iter().any(|(t, theirs)| *t == target && theirs.contains(p)));
-            if replaced {
-                removed.push(id);
+        for (_, mut group) in by_target.into_iter().filter(|(_, g)| g.len() > 1) {
+            group.sort_by(|&x, &y| self.composite_order(x, y, tree_order));
+            // (…from the top of the stack down, the properties of the replaceable animations above each, per target)
+            let mut above: Vec<(&Target, Vec<&OwnedPropertyDeclarationId>)> = Vec::new();
+            for &id in group.iter().rev() {
+                let Some(effect) = self.animations[&id].effect.and_then(|e| self.effects.get(&e)) else { continue };
+                let (Some(target), Some(computed)) = (effect.target.as_ref(), effect.computed.as_ref()) else { continue };
+                let mine: Vec<&OwnedPropertyDeclarationId> = computed.properties.iter().map(|(p, ..)| p).collect();
+                let covered = |p: &&OwnedPropertyDeclarationId| above.iter().any(|(t, theirs)| *t == target && theirs.contains(p));
+                if self.animations[&id].replace_state == ReplaceState::Active && mine.iter().all(covered) {
+                    removed.push(id);
+                }
+                match above.iter_mut().find(|(t, _)| *t == target) {
+                    Some((_, theirs)) => theirs.extend(mine),
+                    None => above.push((target, mine)),
+                }
             }
         }
+        removed.sort_by(|&x, &y| self.composite_order(x, y, tree_order));
         let any = !removed.is_empty();
         for id in removed {
             let current_time = self.current_time(id);
