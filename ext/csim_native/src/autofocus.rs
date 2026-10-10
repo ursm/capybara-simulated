@@ -133,8 +133,8 @@ fn processed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     crate::dom::realm(scope, cid).autofocus_processed(top);
 }
 
-// __dom.autofocusNext(topNid, focused) -> [the next candidate] (`autofocus_next`), its object — a candidate is in a
-// document, so held — or undefined for none.
+// __dom.autofocusNext(topNid, focused) -> [the next candidate] (`autofocus_next`), as `nodes_value` answers, or
+// undefined for none.
 fn next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(top) = nid_arg(scope, &args, 0) else { return };
     let focused = args.get(1).is_true();

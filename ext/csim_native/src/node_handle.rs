@@ -17,8 +17,8 @@
 // objects still carry state of their own as properties, so no node made and dropped dies young — measured
 // 2026-10-11: +13-16% on a churn microbench (200k createElement), ~1% on the app suites. The reference is DROPPABLE
 // (src/v8_shim.cc): it holds an object with state of its own as a strong one does, and once a node's object is a bare
-// wrapper, its state the engine's, a scavenge may drop it young (`csim_node_reset_root`) — and the handle then makes
-// it anew.
+// wrapper, its state the engine's, a scavenge may drop it young (`csim_node_reset_root`), and the handle answers for it
+// no more: an answer then falls back to the node's path, a dispatch to the JS walk (making it anew is still to come).
 
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::sync::atomic::{AtomicBool, Ordering};

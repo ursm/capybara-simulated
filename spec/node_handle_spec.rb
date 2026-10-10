@@ -203,24 +203,24 @@ RSpec.describe 'node handles' do
     expect(body.text).to eq('main')
   end
 
-  # A node in a document is held by its handle, which answers a query with its object: one put back after the parent it
-  # left with is held again, and the hand-over leans on nothing a page can replace (`queueMicrotask`).
-  it 'holds the object of every node in a document, however it came back' do
-    got = page('<div id=d><p id=p>x</p></div>').evaluate_script(<<~JS)
+  # Every node's handle holds its object from its making, so the engine answers with the objects themselves — of a
+  # detached tree, a DOMParser document, a `<form>` and a `<select>` (their Proxies, which a script holds) — not paths
+  # the bindings walk.
+  it 'answers with the object of every node, in a document or not' do
+    got = page('<div id=d></div>').evaluate_script(<<~JS)
       (() => {
-        const d = document.getElementById('d'), p = document.getElementById('p');
-        d.remove();
-        document.body.append(p);
-        const held = Array.isArray(__dom.query(document._nid, '*', false));
-        const saved = window.queueMicrotask;
-        delete window.queueMicrotask;
-        let removed;
-        try { p.remove(); removed = !p.isConnected; } finally { window.queueMicrotask = saved; }
-        document.body.append(d);
-        return [held, removed, Array.isArray(__dom.query(document._nid, '*', false))];
+        const tree = document.createElement('div');
+        tree.innerHTML = '<form><select><option>a</option></select></form><p>x</p>';
+        const found = __dom.query(tree._nid, '*', false);
+        const parsed = new DOMParser().parseFromString('<p>y</p>', 'text/html');
+        const inParsed = __dom.query(parsed._nid, 'p', false);
+        return [
+          Array.isArray(found), found[0] === tree.querySelector('form'), found[1] === tree.querySelector('select'),
+          Array.isArray(inParsed), inParsed[0] === parsed.querySelector('p')
+        ];
       })()
     JS
-    expect(got).to eq([true, true, true])
+    expect(got).to eq([true, true, true, true, true])
   end
 
   # An inert document — `createHTMLDocument`'s, a DOMParser's — is no page Ruby reaches into: its nodes are not held for

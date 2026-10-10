@@ -2039,7 +2039,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // that node's attributes (the Element constructor installs it in place of the JS `{}`).
     register(scope, ns, "attrsView", attrs_view, context_id);
     register(scope, ns, "adoptSubtree", adopt_subtree, context_id);
-    // …and a node's object, held by its handle while the node is in a document (node_handle.rs)
+    // …and a node's object, held by its handle from its making (node_handle.rs)
     register(scope, ns, "setNodeObject", crate::node_handle::set_node_object, context_id);
     register(scope, ns, "statedNodes", crate::node_handle::stated_nodes, context_id);
     register(scope, ns, "nodesUnder", nodes_under, context_id);
