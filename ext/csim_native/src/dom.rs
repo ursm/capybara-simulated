@@ -696,6 +696,8 @@ pub(crate) struct RealmArena {
     custom_states: std::collections::HashMap<NodeId, Vec<String>>,
     // Every node's registered observer list, and each mutation observer's nodes (mutation_observers.rs).
     pub(crate) observers: crate::mutation_observers::Observers,
+    // Each top-level document's autofocus candidates (autofocus.rs).
+    pub(crate) autofocus: crate::autofocus::Autofocus,
     // Moves with every write to the arena (a node made or freed, any `get_mut`): what a memo of it keys on.
     pub(crate) mutations: u64,
     // The lock the style engines' rules and every element's parsed declarations are read under — ONE for the isolate's
@@ -743,6 +745,8 @@ pub(crate) struct RealmState {
     // the element focus last moved to — kept as focus leaves it for the viewport (Chrome: Tab after `blur()` goes on
     // from the blurred element) — or the node a press that focused nothing landed on (`setFocusStart`).
     pub(crate) focus_start: Option<NodeId>,
+    // Each open dialog's "previously focused element": what was focused as it opened, which closing it gives focus back to.
+    pub(crate) previously_focused: std::collections::HashMap<NodeId, NodeId>,
     // The modal dialogs, in the order they were shown — the top layer's: the last blocks the document (`is_inert`).
     pub(crate) modals: Vec<NodeId>,
     // Whether the focus shows NO ring (not `:focus-visible`): only after a pointer focus of a non-text control.
@@ -864,6 +868,7 @@ impl RealmArena {
         }
         self.observers.drop_realm(cid);
         self.free_realm_nodes(cid);
+        self.autofocus_forget_dead();
     }
     // How many nodes the realm an op works in has made and not freed.
     pub(crate) fn realm_node_count(&self) -> usize {
@@ -1279,6 +1284,10 @@ impl RealmArena {
     }
     // The root of `id`'s tree, shadow-including: a shadow root's host is its parent here (not a template's contents':
     // they are a tree of their own). (`root_of`, element_state.rs, is the plain one.)
+    // Realm `cid`'s state, whichever realm the arena is in.
+    pub(crate) fn realm_state(&self, cid: i32) -> Option<&RealmState> {
+        if cid == self.cur { Some(&self.state) } else { self.parked.get(&cid) }
+    }
     pub(crate) fn shadow_including_root(&self, mut id: NodeId) -> NodeId {
         loop {
             id = self.root_of(id);
@@ -1933,6 +1942,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::scroll_into_view::install(scope, ns, context_id);
     crate::rendered::install(scope, ns, context_id);
     crate::focus::install(scope, ns, context_id);
+    crate::autofocus::install(scope, ns, context_id);
     crate::resolved::install(scope, ns, context_id);
     crate::mime::install(scope, ns, context_id);
     crate::font_faces::install(scope, ns, context_id);

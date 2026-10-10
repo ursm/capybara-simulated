@@ -9,6 +9,7 @@
 // The Web Animations model: the timeline, animations and their effects' timing; and the ops a JS handle asks it with.
 mod animation_ops;
 mod animations;
+mod autofocus;
 mod av1;
 mod canvas;
 mod canvas_path;

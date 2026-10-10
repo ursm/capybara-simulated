@@ -434,16 +434,52 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "focusable", focusable_op, context_id);
     crate::dom::register(scope, ns, "nextFocus", next_focus_op, context_id);
     crate::dom::register(scope, ns, "focusableArea", focusable_area_op, context_id);
-    crate::dom::register(scope, ns, "focusDelegate", focus_delegate_op, context_id);
+    crate::dom::register(scope, ns, "dialogFocusingSteps", dialog_focusing_steps_op, context_id);
+    crate::dom::register(scope, ns, "dialogFocusRestore", dialog_focus_restore_op, context_id);
 }
 
-// __dom.focusDelegate(nid, now) -> [the element's focus delegate] or [] (`focus_delegate`), as `nodes_value` answers.
-fn focus_delegate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let found = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| focus_delegate(engine, arena, target, now)).flatten();
+// HTML's "dialog focusing steps" for a dialog opening, up to running the focusing steps: the element focused now kept as
+// its previously focused element, and the control to focus — the dialog where it carries `autofocus`, else its focus
+// delegate, else the dialog itself.
+pub(crate) fn dialog_focus_control(engine: &mut StyleEngine, arena: &RealmArena, dialog: NodeId, now: f64) -> NodeId {
+    if arena.get(dialog).is_some_and(|n| n.plain_attr("autofocus").is_some()) {
+        return dialog;
+    }
+    focus_delegate(engine, arena, dialog, now).unwrap_or(dialog)
+}
+// …and, closing it, its previously focused element — taken — where focus goes back to it: the dialog was modal, or holds
+// the focus (a shadow-including inclusive descendant of it is focused).
+pub(crate) fn dialog_focus_restore(arena: &mut RealmArena, dialog: NodeId, was_modal: bool) -> Option<NodeId> {
+    let previous = arena.previously_focused.remove(&dialog)?;
+    let holds = arena.focus.is_some_and(|f| shadow_including_inclusive_ancestor(arena, dialog, f));
+    (was_modal || holds).then_some(previous)
+}
+
+// __dom.dialogFocusingSteps(dialogNid, now) -> [the control to focus] (`dialog_focus_control`), as `nodes_value`
+// answers, the focused element kept for the dialog's closing.
+fn dialog_focusing_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(dialog) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);
-    let root = crate::dom::realm(scope, cid).shadow_including_root(target);
-    rv.set(crate::dom::nodes_value(scope, cid, root, found.as_slice()));
+    let arena = crate::dom::realm(scope, cid);
+    match arena.focus {
+        Some(focused) => arena.previously_focused.insert(dialog, focused),
+        None => arena.previously_focused.remove(&dialog),
+    };
+    let control = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| dialog_focus_control(engine, arena, dialog, now)).unwrap_or(dialog);
+    let root = crate::dom::realm(scope, cid).shadow_including_root(dialog);
+    rv.set(crate::dom::nodes_value(scope, cid, root, &[control]));
+}
+
+// __dom.dialogFocusRestore(dialogNid, wasModal) -> [the element focus goes back to] (`dialog_focus_restore`), as
+// `nodes_value` answers, or undefined for none.
+fn dialog_focus_restore_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(dialog) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let was_modal = args.get(1).is_true();
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let Some(previous) = dialog_focus_restore(arena, dialog, was_modal).filter(|&p| arena.get(p).is_some()) else { return };
+    let root = arena.shadow_including_root(previous);
+    rv.set(crate::dom::nodes_value(scope, cid, root, &[previous]));
 }
 
 // __dom.focusableArea(hostNid, now) -> [what focusing the delegating host focuses] or [] (`focusable_area`), as

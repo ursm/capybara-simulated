@@ -566,11 +566,20 @@ impl RealmArena {
         if !fragments.iter().any(candidate) || self.root_of(id) != *doc {
             return false;
         }
-        let indicated = fragments.iter().find_map(|f| {
-            self.find_in_tree(*doc, |_, e| e.get_attr("id") == Some(f.as_str()))
-                .or_else(|| self.find_in_tree(*doc, |_, e| named(e, f)))
-        });
-        indicated == Some(id)
+        self.indicated_part(*doc, fragments) == Some(id)
+    }
+    // The target element of the document `doc` in realm `cid`, or none.
+    pub(crate) fn target_element_of(&self, cid: i32, doc: NodeId) -> Option<NodeId> {
+        let (target_doc, fragments) = self.realm_state(cid)?.target.as_ref()?;
+        (*target_doc == doc).then(|| self.indicated_part(doc, fragments)).flatten()
+    }
+    // …its indicated part for its target fragments: the first element of its tree with the id of one of them, tried in
+    // turn, else the first HTML `<a>` with that name.
+    fn indicated_part(&self, doc: NodeId, fragments: &[String]) -> Option<NodeId> {
+        let named = |n: &NodeData, f: &str| n.is_html_named("a") && n.plain_attr("name") == Some(f);
+        fragments.iter().find_map(|f| {
+            self.find_in_tree(doc, |_, e| e.get_attr("id") == Some(f.as_str())).or_else(|| self.find_in_tree(doc, |_, e| named(e, f)))
+        })
     }
     // `:lang(ranges)`: the element's language — the nearest shadow-including inclusive
     // ancestor's `lang` in the XML namespace, or an HTML or SVG one's own `lang` — matches a range (comma-joined, lowercased)
