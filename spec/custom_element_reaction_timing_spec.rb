@@ -119,7 +119,7 @@ RSpec.describe 'custom element reaction timing' do
   # A shadow tree the parser's custom element built in its constructor connects once, each element of it: one a
   # `connectedCallback` inserts beside it is connected by its own insertion, not again by the walk that found its
   # sibling (it read the tree live, and called back the inserted one twice). Chrome: ["xa=1", "xb=n1", "end=1"].
-  it 'calls back an element a shadow tree\'s callback inserts once' do
+  it "calls back an element a shadow tree's callback inserts once" do
     html = <<~HTML
       <!DOCTYPE html><meta charset=utf-8><script>
         window.log = [];
