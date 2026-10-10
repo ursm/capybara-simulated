@@ -50,4 +50,32 @@ RSpec.describe 'the event path through shadow trees' do
       'host:host/window body:host/window | '
     ])
   end
+
+  # A path across a shadow root is the flat tree's, retargeted, whichever realm's script dispatches: one with no shadow
+  # tree of its own, dispatching at a node in a frame's shadow tree, took the plain parent chain (the host's listeners
+  # saw the button, not the host) — or stopped at the shadow root. Chrome 155: "#document-fragment:btn host:host
+  # BODY:host".
+  it "retargets across a frame's shadow root, whichever realm dispatches" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const f = document.body.appendChild(document.createElement('iframe'));
+      f.onload = () => {
+        const fd = f.contentDocument;
+        const host = fd.body.appendChild(fd.createElement('div'));
+        host.id = 'host';
+        const root = host.attachShadow({mode: 'open'});
+        const btn = root.appendChild(fd.createElement('button'));
+        btn.id = 'btn';
+        const log = [];
+        const note = (e) => log.push((e.currentTarget.id || e.currentTarget.nodeName) + ':' + e.target.id);
+        for (const t of [host, fd.body, root]) t.addEventListener('zz', note);
+        EventTarget.prototype.dispatchEvent.call(btn, new Event('zz', {bubbles: true, composed: true}));
+        done(log.join(' '));
+      };
+      f.srcdoc = '<!doctype html><body>';
+    JS
+    expect(got).to eq('#document-fragment:btn host:host BODY:host')
+  end
 end

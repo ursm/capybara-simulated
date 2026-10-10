@@ -457,10 +457,10 @@ fn set_subtree_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     }
 }
 
-// `__dom.dispatchPath(targetNid)` -> [path, stores] for a dispatch at a node in a document with no shadow tree in it:
-// the target and its ancestors up to the document, their objects — each held, as a node in a document is — and each
-// one's listener store (undefined for none); undefined where a node of it is not held (a tree in no document), whose
-// path the bindings walk.
+// `__dom.dispatchPath(targetNid)` -> [path, stores] for a dispatch at a node in a document: the target and its
+// ancestors up to the document, their objects — each held, as a node in a document is — and each one's listener store
+// (undefined for none); undefined where a node of it is not held (a tree in no document), whose path the bindings
+// walk; null where the path crosses a shadow root, which the flat tree's event path (event_path.rs) retargets across.
 fn dispatch_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return };
     // (…the handles found first, while the arena is borrowed: reading the references allocates nothing a collection
@@ -469,15 +469,19 @@ fn dispatch_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         let arena = &crate::dom::dom(scope).arena;
         let mut out = Vec::new();
         let mut cur = Some(target);
-        let mut all_held = true;
-        while let Some(id) = cur {
-            match arena.get(id).and_then(|n| n.link.handle()).filter(|h| h.held.get()) {
+        let mut held = true;
+        while let Some(id) = cur.filter(|_| held) {
+            let Some(n) = arena.get(id) else { break };
+            if n.host.is_some() {
+                return rv.set_null();
+            }
+            match n.link.handle().filter(|h| h.held.get()) {
                 Some(h) => out.push(h as *const NodeHandle),
-                None => all_held = false,
+                None => held = false,
             }
             cur = arena.parent_of(id);
         }
-        all_held.then_some(out)
+        held.then_some(out)
     };
     let Some(handles) = handles else { return };
     let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
