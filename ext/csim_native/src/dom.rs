@@ -309,6 +309,19 @@ pub(crate) const STATE_SELECTED_INIT: u32 = 1 << 17;
 // from then on, whatever its registry resolves to after (adopted into an inert document) — custom_elements.rs.
 pub(crate) const STATE_UPGRADED: u32 = 1 << 18;
 
+// The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its
+// first and last child, its previous and next sibling, and the element ones of those.
+const RELATIVE_PARENT: u32 = 0;
+const RELATIVE_PARENT_ELEMENT: u32 = 1;
+const RELATIVE_FIRST_CHILD: u32 = 2;
+const RELATIVE_LAST_CHILD: u32 = 3;
+const RELATIVE_PREVIOUS: u32 = 4;
+const RELATIVE_NEXT: u32 = 5;
+const RELATIVE_FIRST_ELEMENT: u32 = 6;
+const RELATIVE_LAST_ELEMENT: u32 = 7;
+const RELATIVE_PREVIOUS_ELEMENT: u32 = 8;
+const RELATIVE_NEXT_ELEMENT: u32 = 9;
+
 
 impl NodeData {
     // A node of `kind` with its character data and nothing else — the element fields are filled by the caller.
@@ -1594,6 +1607,39 @@ impl RealmArena {
         }
         None
     }
+    // …and the node view's: a sibling or child of any kind.
+    pub(crate) fn sibling(&self, id: NodeId, step: isize) -> Option<NodeId> {
+        let node = self.get(id)?;
+        let parent = self.get(node.parent?)?;
+        let at = node.index_in(parent).filter(|&i| parent.children[i] == id).or_else(|| parent.children.iter().position(|&c| c == id))?;
+        parent.children.get(at.checked_add_signed(step)?).copied()
+    }
+    pub(crate) fn child_count(&self, id: NodeId, elements: bool) -> u32 {
+        let Some(n) = self.get(id) else { return 0 };
+        if elements { n.children.iter().filter(|&&c| self.is_element(c)).count() as u32 } else { n.children.len() as u32 }
+    }
+    pub(crate) fn last_element_child(&self, id: NodeId) -> Option<NodeId> {
+        let node = self.get(id)?;
+        node.children.iter().rev().copied().find(|&c| self.is_element(c))
+    }
+    // The node DOM's tree accessors name from `id` (`relativeNode`'s kinds).
+    pub(crate) fn relative(&self, id: NodeId, kind: u32) -> Option<NodeId> {
+        let first_child = |n: &NodeData| n.children.first().copied();
+        let last_child = |n: &NodeData| n.children.last().copied();
+        match kind {
+            RELATIVE_PARENT => self.parent_of(id),
+            RELATIVE_PARENT_ELEMENT => self.parent_of(id).filter(|&p| self.is_element(p)),
+            RELATIVE_FIRST_CHILD => self.get(id).and_then(first_child),
+            RELATIVE_LAST_CHILD => self.get(id).and_then(last_child),
+            RELATIVE_PREVIOUS => self.sibling(id, -1),
+            RELATIVE_NEXT => self.sibling(id, 1),
+            RELATIVE_FIRST_ELEMENT => self.first_element_child(id),
+            RELATIVE_LAST_ELEMENT => self.last_element_child(id),
+            RELATIVE_PREVIOUS_ELEMENT => self.prev_element_sibling(id),
+            RELATIVE_NEXT_ELEMENT => self.next_element_sibling(id),
+            _ => None,
+        }
+    }
     // Every element of the realm it holds the state of, whichever of its trees it is in.
     pub(crate) fn element_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.realm_nodes.get(&self.cur).into_iter().flatten().filter_map(|&i| {
@@ -1907,6 +1953,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register_fast(scope, ns, "state", state, STATE_FAST, context_id);
     register_fast(scope, ns, "realmOf", realm_of, REALM_OF_FAST, context_id);
     register_fast(scope, ns, "isConnected", is_connected, IS_CONNECTED_FAST, context_id);
+    register(scope, ns, "relativeNode", relative_node, context_id);
+    register_fast(scope, ns, "childCount", child_count, CHILD_COUNT_FAST, context_id);
     register_fast(scope, ns, "contains", contains, CONTAINS_FAST, context_id);
     register_fast(scope, ns, "shadowIncludingContains", shadow_including_contains, SHADOW_INCLUDING_CONTAINS_FAST, context_id);
     register(scope, ns, "setArena", set_arena, context_id);
@@ -2137,6 +2185,41 @@ const IS_CONNECTED_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction:
     &v8::fast_api::CFunctionInfo::new(
         v8::fast_api::Type::Bool.as_info(),
         &[v8::fast_api::Type::V8Value.as_info(), v8::fast_api::Type::Float64.as_info(), v8::fast_api::Type::CallbackOptions.as_info()],
+        v8::fast_api::Int64Representation::Number,
+    ),
+)];
+// __dom.relativeNode(nid, kind) -> the node DOM's accessor of `kind` names (`relative`), its object; null for none;
+// undefined for one whose object V8 dropped (the bindings walk their own tree then).
+fn relative_node(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let kind = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
+    let arena = &dom(scope).arena;
+    let Some(found) = arena.relative(id, kind) else { return rv.set_null() };
+    let Some(held) = arena.get(found).and_then(|n| crate::node_handle::held(&n.link)) else { return };
+    if let Some(object) = held.get(scope) {
+        rv.set(object.into());
+    }
+}
+// __dom.childCount(nid, elements) -> how many children the node has — element ones alone, with `elements`.
+fn child_count(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = nid_arg(scope, &args, 0);
+    let elements = args.get(1).is_true();
+    rv.set_uint32(id.map_or(0, |id| dom(scope).arena.child_count(id, elements)));
+}
+fn child_count_fast(_receiver: v8::Local<v8::Value>, nid: f64, elements: bool, options: *mut v8::fast_api::FastApiCallbackOptions) -> u32 {
+    let id = if nid >= 0.0 { NodeId::from_i64(nid as i64) } else { None };
+    fast_dom(options).zip(id).map_or(0, |(d, id)| d.arena.child_count(id, elements))
+}
+const CHILD_COUNT_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new(
+    child_count_fast as _,
+    &v8::fast_api::CFunctionInfo::new(
+        v8::fast_api::Type::Uint32.as_info(),
+        &[
+            v8::fast_api::Type::V8Value.as_info(),
+            v8::fast_api::Type::Float64.as_info(),
+            v8::fast_api::Type::Bool.as_info(),
+            v8::fast_api::Type::CallbackOptions.as_info(),
+        ],
         v8::fast_api::Int64Representation::Number,
     ),
 )];
