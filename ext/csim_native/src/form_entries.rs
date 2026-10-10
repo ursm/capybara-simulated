@@ -24,9 +24,17 @@ fn units(s: &str) -> Vec<u16> {
 }
 
 impl RealmArena {
-    // The entry list of `form`, submitted by `submitter`, in the character encoding `encoding` (what a `_charset_`
-    // hidden field takes); `colour` the style engine's reading of a colour field's value.
-    pub(crate) fn entry_list(&self, form: NodeId, submitter: Option<NodeId>, encoding: &[u16], colour: &dyn Fn(&str) -> String) -> Vec<Entry> {
+    // The entry list of `form`, submitted by `submitter` — an image button at its selected coordinate `at` — in the
+    // character encoding `encoding` (what a `_charset_` hidden field takes); `colour` the style engine's reading of a
+    // colour field's value.
+    pub(crate) fn entry_list(
+        &self,
+        form: NodeId,
+        submitter: Option<NodeId>,
+        at: (i32, i32),
+        encoding: &[u16],
+        colour: &dyn Fn(&str) -> String,
+    ) -> Vec<Entry> {
         let mut out = Vec::new();
         for field in self.form_submittables(form, submitter) {
             let Some(n) = self.get(field) else { continue };
@@ -37,11 +45,12 @@ impl RealmArena {
             let submits = Some(field) == submitter;
             let name = n.plain_attr_units("name").unwrap_or_default();
             let attr = |local: &str, or: &str| n.plain_attr_units(local).unwrap_or_else(|| units(or));
-            // (…a nameless field submits nothing, but an image button submitting: bare `x` and `y`)
+            // (…a nameless field submits nothing, but an image button submitting: its selected coordinate, under bare `x`
+            // and `y` where it has no name)
             if n.is_html_named("input") && n.input_type() == "image" && submits {
                 let coordinate = |axis: &str| if name.is_empty() { units(axis) } else { [&name[..], &units(&format!(".{axis}"))].concat() };
-                out.push(Entry::Text(coordinate("x"), units("0")));
-                out.push(Entry::Text(coordinate("y"), units("0")));
+                out.push(Entry::Text(coordinate("x"), units(&at.0.to_string())));
+                out.push(Entry::Text(coordinate("y"), units(&at.1.to_string())));
                 continue;
             }
             if name.is_empty() || !n.is_html() {
@@ -146,20 +155,22 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "formEntries", form_entries, context_id);
 }
 
-// __dom.formEntries(formNid, submitterNid, encoding) -> [entries, nodes]: `entries` flat, three to an entry — `0, name,
+// __dom.formEntries(formNid, submitterNid, encoding, x, y) -> [entries, nodes] — `x`, `y` an image submitter's selected
+// coordinate: `entries` flat, three to an entry — `0, name,
 // value` a string entry, `1, name, k` the files of `nodes[k]`, `2, null, k` the custom element `nodes[k]`'s — and
 // `nodes` those elements, as `nodes_value` answers from the form's tree.
 fn form_entries(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(form) = nid_arg(scope, &args, 0) else { return };
     let submitter = nid_arg(scope, &args, 1);
     let encoding = crate::dom::utf16_arg(scope, args.get(2));
+    let at = (args.get(3).int32_value(scope).unwrap_or(0), args.get(4).int32_value(scope).unwrap_or(0));
     let cid = crate::dom::realm_id(scope, &args);
     let (entries, tree) = {
         let d = crate::dom::dom(scope);
         let arena: &RealmArena = d.arena.enter(cid);
         let engine = d.styles.get(&cid);
         let colour = |v: &str| crate::input_value::colour_value(engine, arena, v);
-        (arena.entry_list(form, submitter, &encoding, &colour), arena.form_tree(form))
+        (arena.entry_list(form, submitter, at, &encoding, &colour), arena.form_tree(form))
     };
     let (mut flat, mut nodes): (Vec<v8::Local<'_, v8::Value>>, Vec<NodeId>) = (Vec::new(), Vec::new());
     for entry in entries {

@@ -527,3 +527,34 @@ RSpec.describe 'FormData binding' do
     expect(result).to eq([%w[_charset_ UTF-8]])
   end
 end
+
+# An image button submits its selected coordinate: where a user's click selected it — the point's offset in the button,
+# from its padding edge as Chrome measures it — and the origin for a click a script made (HTML: a coordinate the user
+# "explicitly selected"; Firefox: 0,0 for any script's, Chrome 0,0 for `click()`).
+RSpec.describe 'Image button selected coordinate' do
+  let(:html) {
+    <<~HTML
+      <!doctype html><meta charset=utf-8><style>body{margin:0}</style>
+      <form action="/r"><input id=i type=image name=im style="width:40px;height:20px;border:3px solid;padding:2px;display:block;margin:10px"></form>
+    HTML
+  }
+  let(:app) {
+    lambda {|env|
+      body = env['PATH_INFO'] == '/r' ? "q=#{env['QUERY_STRING']}" : html
+      [200, {'content-type' => env['PATH_INFO'] == '/r' ? 'text/plain' : 'text/html'}, [body]]
+    }
+  }
+  let(:session) { simulated_session(app) }
+
+  it "submits the point a user's click selected" do
+    session.visit '/'
+    session.find('#i').click
+    expect(session.text).to eq('q=im.x=22&im.y=12')
+  end
+
+  it "submits the origin for a script's click" do
+    session.visit '/'
+    session.execute_script('setTimeout(() => i.click())')
+    expect(session).to have_text('q=im.x=0&im.y=0')
+  end
+end
