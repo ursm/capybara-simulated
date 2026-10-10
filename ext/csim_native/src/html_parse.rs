@@ -424,10 +424,11 @@ fn steps<'s>(scope: &mut v8::PinScope<'s, '_>, id: u32, status: i32, with_id: bo
     v8::Array::new_with_elements(scope, &items)
 }
 
-// __dom.htmlParse(html, wellFormed, scripting, contextNs, contextLocalName, withForm, quirks) -> [id, steps…, status].
-// A document parse, or — given the namespace (as `ns_code` numbers it) and local name of the element whose content it
-// is — a fragment parse in that context (handle 1; handle 2 its form element pointer, `withForm`), in its document's
-// mode (`quirks` 0 no-quirks, 1 limited-quirks, 2 quirks).
+// __dom.htmlParse(html, wellFormed, scripting, contextNs, contextLocalName, withForm, quirks, srcdoc) -> [id, steps…,
+// status]. A document parse — of an iframe srcdoc document with `srcdoc`, which no missing or legacy doctype puts in
+// quirks mode — or, given the namespace (as `ns_code` numbers it) and local name of the element whose content it is, a
+// fragment parse in that context (handle 1; handle 2 its form element pointer, `withForm`), in its document's mode
+// (`quirks` 0 no-quirks, 1 limited-quirks, 2 quirks).
 fn html_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     // (…a parse that panicked starting is parse 0, which there is none of, its input run out)
     parser_op(scope, None, &mut rv, &[0, -1], |scope, rv| {
@@ -443,7 +444,8 @@ fn html_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
             Some(1) => QuirksMode::LimitedQuirks,
             _ => QuirksMode::NoQuirks,
         };
-        let opts = TreeBuilderOpts { scripting_enabled: scripting, quirks_mode, ..Default::default() };
+        let iframe_srcdoc = args.get(7).boolean_value(scope);
+        let opts = TreeBuilderOpts { scripting_enabled: scripting, iframe_srcdoc, quirks_mode, ..Default::default() };
         // (…the text is decoded already, its byte order mark gone with the decoding: a U+FEFF left is text)
         let tokenizer_opts = TokenizerOpts { discard_bom: false, ..Default::default() };
         let tokenizer = match &context {

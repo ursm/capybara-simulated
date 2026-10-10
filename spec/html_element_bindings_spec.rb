@@ -41,6 +41,13 @@ RSpec.describe 'HTML element bindings' do
     expect(got).to eq([1, 1])
   end
 
+  # (HTML "initial" insertion mode: a missing doctype sets quirks mode "if the document is not an iframe srcdoc document";
+  # Chrome: CSS1Compat)
+  it 'parses an iframe srcdoc document with no doctype in no-quirks mode' do
+    session.visit '/'
+    expect(session.evaluate_script('frames[0].document.compatMode')).to eq('CSS1Compat')
+  end
+
   it "resolves a srcdoc document's base against the base it inherits" do
     session.visit '/'
     got = session.evaluate_script("document.querySelector('iframe').contentDocument.querySelector('base').href")

@@ -43,7 +43,10 @@ pub(crate) fn scrolling_element(engine: &mut StyleEngine, arena: &RealmArena, do
     let style = |id: Option<NodeId>| id.and_then(|id| primary_style(arena, id)).map(|s| overflows(&s));
     let (Some(own), Some(parent)) = (style(Some(body)), style(arena.get(body).and_then(|n| n.parent))) else { return Some(body) };
     let scrollable = |o: Overflow| !matches!(o, Overflow::Visible | Overflow::Clip);
-    let potentially_scrollable = rendered(engine, arena, body, true, false, None, now)
+    // (…"has an associated box": rendered, and not `display: contents`, which generates none)
+    let has_box = primary_style(arena, body).is_some_and(|s| s.get_box().clone_display() != Display::Contents);
+    let potentially_scrollable = has_box
+        && rendered(engine, arena, body, true, false, None, now)
         && (0..2).any(|axis| scrollable(own[axis]) && (parent[axis] == Overflow::Clip || scrollable(parent[axis])));
     (!potentially_scrollable).then_some(body)
 }
@@ -93,14 +96,16 @@ fn propagated_overflow(arena: &RealmArena, id: NodeId, style: &ComputedValues) -
 
 // The box whose padding edge a mouse event's offset is measured from: `id`'s own, or — a non-replaced inline box having
 // none — that of the nearest box up the flat tree that is not one (Chrome and Firefox, MouseEvent-prototype-offsetX-
-// offsetY: a span's offset is from its container's, an `<img>`'s from its own).
+// offsetY: a span's offset is from its container's, an `<img>`'s from its own); an element that generates no box at
+// all — `display: contents`, a `<slot>` — passed over on the way, as the layout passes it.
 pub(crate) fn padding_edge_box(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, now: f64) -> NodeId {
     engine.flush(arena, now);
     let mut at = id;
     loop {
         let Some(node) = arena.get(at) else { return at };
-        let inline = primary_style(arena, at).is_some_and(|s| s.get_box().walk_display(node.rendering_tag()) == Display::Inline);
-        if !inline || replaced_or_control(arena, at, node) {
+        let display = primary_style(arena, at).map(|s| s.get_box().walk_display(node.rendering_tag()));
+        let boxless = matches!(display, None | Some(Display::Contents | Display::None));
+        if !boxless && (display != Some(Display::Inline) || replaced_or_control(arena, at, node)) {
             return at;
         }
         match crate::geometry::flat_parent(arena, at).filter(|&p| arena.get(p).is_some_and(|n| n.kind == NodeKind::Element)) {

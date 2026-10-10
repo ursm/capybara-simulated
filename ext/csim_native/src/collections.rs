@@ -145,80 +145,101 @@ fn window_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 
 // The ids of each tree asked for them since the last change that can move one (`id_epoch`: a node linked, unlinked or
 // freed, an `id` written). A walk for an id stops at its element, and a page building a tree asks for one between
-// insertions — so a map, a walk of the whole tree, is made only for a tree asked more often than that between two such
-// changes: the label of every control of a form, a loop of reads, `getElementById(x).setAttribute(…)` over and over.
+// insertions — so a map, a walk of the whole tree, is made only once the walks since that change have visited as many
+// nodes as the tree holds: the label of every control of a form, a loop of reads, `getElementById(x).setAttribute(…)`
+// over and over take the map, a find-insert-find loop the walks, which cost it no more than the map would.
 #[derive(Default)]
 pub(crate) struct IdIndex {
     epoch: u64,
-    asks: u32,
+    // The nodes walked since that change, and the maps made.
+    walked: usize,
     maps: HashMap<NodeId, HashMap<Vec<u16>, Vec<NodeId>>>,
+    // How many nodes each tree held when last walked whole — kept across changes, a tree's size moving little.
+    sizes: HashMap<NodeId, usize>,
 }
-const WALKS_BEFORE_INDEX: u32 = 2;
+
+impl IdIndex {
+    // (…a page making tree after detached tree asks of each: the sizes are a hint, dropped wholesale past a bound)
+    fn note_size(&mut self, root: NodeId, size: usize) {
+        if self.sizes.len() >= 4096 {
+            self.sizes.clear();
+        }
+        self.sizes.insert(root, size);
+    }
+}
 
 impl RealmArena {
     // The first element of `root`'s tree in tree order, `root` itself included, whose id is `id` (exactly, as UTF-16 —
     // a lone surrogate included)…
     pub(crate) fn element_by_id(&self, root: NodeId, id: &[u16]) -> Option<NodeId> {
-        self.with_ids(root, |ids| ids.get(id).and_then(|found| found.first().copied()), || {
-            let mut found = None;
-            self.each_with_id(root, id, |n| {
-                found = Some(n);
-                false
-            });
-            found
-        })
+        self.with_ids(root, id, true, |ids| ids.get(id).and_then(|found| found.first().copied()), |found| found.first().copied())
     }
     // …and every one, in tree order.
     pub(crate) fn elements_by_id(&self, root: NodeId, id: &[u16]) -> Vec<NodeId> {
-        self.with_ids(root, |ids| ids.get(id).cloned().unwrap_or_default(), || {
-            let mut found = Vec::new();
-            self.each_with_id(root, id, |n| {
-                found.push(n);
-                true
-            });
-            found
-        })
+        self.with_ids(root, id, false, |ids| ids.get(id).cloned().unwrap_or_default(), |found| found)
     }
-    // An answer from the tree's id map where it has one, or where it is asked often enough to make one (`IdIndex`); else
-    // from a walk.
-    fn with_ids<R>(&self, root: NodeId, indexed: impl FnOnce(&HashMap<Vec<u16>, Vec<NodeId>>) -> R, walk: impl FnOnce() -> R) -> R {
+    // An answer for the elements of `id` in `root`'s tree from its id map where it has one, or where the walks have come
+    // to its size (`IdIndex`); else from a walk to them — to the first alone with `first`.
+    fn with_ids<R>(
+        &self,
+        root: NodeId,
+        id: &[u16],
+        first: bool,
+        indexed: impl FnOnce(&HashMap<Vec<u16>, Vec<NodeId>>) -> R,
+        walked: impl FnOnce(Vec<NodeId>) -> R,
+    ) -> R {
         let mut memo = self.id_index.borrow_mut();
         if memo.epoch != self.id_epoch {
             memo.maps.clear();
-            memo.asks = 0;
+            memo.walked = 0;
             memo.epoch = self.id_epoch;
         }
-        memo.asks += 1;
-        if memo.asks <= WALKS_BEFORE_INDEX && !memo.maps.contains_key(&root) {
+        let size = memo.sizes.get(&root).copied().unwrap_or_else(|| self.realm_node_count());
+        if !memo.maps.contains_key(&root) && memo.walked < size {
             drop(memo);
-            return walk();
+            let mut found = Vec::new();
+            let (visited, whole) = self.each_element_from(root, |n, node| {
+                if node.plain_attr_is("id", id) {
+                    found.push(n);
+                    return !first;
+                }
+                true
+            });
+            let mut memo = self.id_index.borrow_mut();
+            memo.walked += visited;
+            if whole {
+                memo.note_size(root, visited);
+            }
+            return walked(found);
         }
-        let ids = memo.maps.entry(root).or_insert_with(|| {
+        let mut visited = 0;
+        if !memo.maps.contains_key(&root) {
             let mut ids: HashMap<Vec<u16>, Vec<NodeId>> = HashMap::new();
-            self.each_element_from(root, |n, node| {
+            (visited, _) = self.each_element_from(root, |n, node| {
                 if let Some(units) = node.plain_attr_units("id") {
                     ids.entry(units).or_default().push(n);
                 }
                 true
             });
-            ids
-        });
-        indexed(ids)
+            memo.maps.insert(root, ids);
+            memo.note_size(root, visited);
+        }
+        indexed(&memo.maps[&root])
     }
-    // Each element with the id in `root`'s tree in tree order, while `visit` says go on.
-    fn each_with_id(&self, root: NodeId, id: &[u16], mut visit: impl FnMut(NodeId) -> bool) {
-        self.each_element_from(root, |n, node| !node.plain_attr_is("id", id) || visit(n));
-    }
-    // Each element of `root`'s tree in tree order, `root` itself included, while `visit` says go on.
-    fn each_element_from(&self, root: NodeId, mut visit: impl FnMut(NodeId, &NodeData) -> bool) {
+    // Each element of `root`'s tree in tree order, `root` itself included, while `visit` says go on: how many nodes it
+    // came to, and whether that was all of them.
+    fn each_element_from(&self, root: NodeId, mut visit: impl FnMut(NodeId, &NodeData) -> bool) -> (usize, bool) {
         let mut stack = vec![root];
+        let mut visited = 0;
         while let Some(n) = stack.pop() {
             let Some(node) = self.get(n) else { continue };
+            visited += 1;
             if node.kind == NodeKind::Element && !visit(n, node) {
-                return;
+                return (visited, false);
             }
             stack.extend(node.children.iter().rev());
         }
+        (visited, true)
     }
 
     // HTML's named properties of a document (§3.1.6) and of its window (§7.2.2.3), over the document tree — not into a

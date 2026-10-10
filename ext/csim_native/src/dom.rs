@@ -853,6 +853,10 @@ impl RealmArena {
         }
         self.free_realm_nodes(cid);
     }
+    // How many nodes the realm an op works in has made and not freed.
+    pub(crate) fn realm_node_count(&self) -> usize {
+        self.realm_nodes.get(&self.cur).map_or(0, Vec::len)
+    }
     // Free every node realm `cid` made.
     fn free_realm_nodes(&mut self, cid: i32) {
         self.mutations += 1;
