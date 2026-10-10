@@ -56,6 +56,7 @@ mod mutation_observers;
 mod namespaces;
 mod node_handle;
 mod numbers;
+mod node_iterators;
 mod ranges;
 mod reflect;
 // Bringing a box into view: the scroll boxes that move, and to where (`scrollIntoView`, a driver's scroll-if-needed).

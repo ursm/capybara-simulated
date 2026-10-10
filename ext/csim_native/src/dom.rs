@@ -1718,6 +1718,7 @@ pub(crate) struct Dom {
     pub(crate) next_serialized: u32,
     // Every live range's boundary points (ranges.rs).
     pub(crate) ranges: crate::ranges::Ranges,
+    pub(crate) iterators: crate::node_iterators::Iterators,
     // Each realm's style engine (made by `styleSheets`).
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
     // Each realm's Rust walk's last pass and the measures kept of it (`walk_reuse`).
@@ -1899,6 +1900,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
         ns.set(scope, key.into(), base.into());
     }
     crate::ranges::install(scope, ns, context_id);
+    // …the constructor every NodeIterator's state is held by, and its ops (node_iterators.rs)
+    if let Some(base) = crate::node_iterators::base_function(scope) {
+        let key = v8::String::new(scope, "NodeIteratorBase").expect("a short string");
+        ns.set(scope, key.into(), base.into());
+    }
+    crate::node_iterators::install(scope, ns, context_id);
     // …and an attribute's token set (token_list.rs)
     crate::token_list::install(scope, ns, context_id);
     // …and the element lists named by a filter (collections.rs)
@@ -2945,6 +2952,8 @@ fn remove_child(
         return;
     };
     let cid = realm_id(scope, &args);
+    // (…the NodeIterators' pre-removing steps first, with the node still where it was)
+    crate::node_iterators::removing(scope, cid, child);
     let (arena, mut engine) = arena_and_engine(scope, cid);
     let old = arena.parent_of(child);
     if let Some(engine) = engine.as_deref_mut() {
