@@ -1025,7 +1025,9 @@ impl RealmArena {
             return;
         }
         self.mutations += 1;
-        self.id_epoch += 1;
+        if self.get(id).is_some_and(|n| n.plain_attr("id").is_some()) {
+            self.id_epoch += 1;
+        }
         self.unlist(id.idx);
         let slot = &mut self.slots[id.idx as usize];
         let (assigned_slot, pseudo_boxes) = slot.data.as_ref().map_or((None, [None; 2]), |n| (n.assigned_slot, n.pseudo_boxes));
@@ -1081,11 +1083,27 @@ impl RealmArena {
         }
     }
 
+    // `id`'s subtree moves between trees, or within one: the id maps (collections.rs `IdIndex`) are stale where it holds
+    // an element with an id — an id joins or leaves a tree, or moves in its order — and NOT otherwise, so a page appending
+    // id-less nodes one by one between named-access reads (`d.appendChild(…)` in a loop, `d` the window's named property)
+    // keeps one map, where each append threw it away and each read walked the whole tree.
+    fn ids_moved(&mut self, id: NodeId) {
+        let mut stack = vec![id];
+        while let Some(n) = stack.pop() {
+            let Some(node) = self.get(n) else { continue };
+            if node.kind == NodeKind::Element && node.plain_attr("id").is_some() {
+                self.id_epoch += 1;
+                return;
+            }
+            stack.extend(node.children.iter().copied());
+        }
+    }
+
     // Append `child` at the end of `parent`'s children, recording its position so prev/next-sibling
     // nav is O(1). The one place children are linked (create / import), so a position can never drift
     // from the list.
     fn link_child(&mut self, parent: NodeId, child: NodeId) {
-        self.id_epoch += 1;
+        self.ids_moved(child);
         let (pos, first) = match self.get(parent) {
             Some(p) => (p.children.len(), p.first_position),
             None => return,
@@ -1389,7 +1407,7 @@ impl RealmArena {
     // first or the last child is O(1) and any other costs only the shift of the ones after it.
     pub(crate) fn detach(&mut self, child: NodeId) {
         self.state_epoch += 1;
-        self.id_epoch += 1;
+        self.ids_moved(child);
         let Some(old) = self.get(child).and_then(|n| n.parent) else { return };
         let at = self.child_index(child);
         let (mut from, mut one) = (at, true);
@@ -1449,7 +1467,7 @@ impl RealmArena {
             return;
         }
         self.state_epoch += 1;
-        self.id_epoch += 1;
+        self.ids_moved(child);
         let mut p = Some(parent);
         while let Some(a) = p {
             if a == child {

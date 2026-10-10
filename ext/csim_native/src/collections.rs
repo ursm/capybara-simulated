@@ -393,3 +393,35 @@ fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let answer = crate::dom::nodes_value(scope, cid, root, &ids);
     rv.set(answer);
 }
+
+#[cfg(test)]
+mod id_map_tests {
+    use crate::dom::{NodeData, NodeId, NodeKind, RealmArena};
+    use web_atoms::ns;
+
+    fn element(arena: &mut RealmArena, parent: Option<NodeId>, id: Option<&str>) -> NodeId {
+        let mut n = NodeData::of_kind(NodeKind::Element, Vec::new());
+        n.local_name = "div".into();
+        n.ns = ns!(html);
+        n.attributes = id.map(|i| vec![("id".to_string(), i.to_string())]).unwrap_or_default();
+        arena.create(n, parent)
+    }
+
+    #[test]
+    fn an_id_map_survives_id_less_insertions_and_follows_an_id() {
+        let mut arena = RealmArena::default();
+        let doc = arena.create(NodeData::of_kind(NodeKind::Document, Vec::new()), None);
+        let a = element(&mut arena, Some(doc), Some("a"));
+        for _ in 0..50 {
+            assert_eq!(arena.element_by_id(doc, &"a".encode_utf16().collect::<Vec<_>>()), Some(a));
+        }
+        let epoch = arena.id_epoch;
+        element(&mut arena, Some(doc), None);
+        assert_eq!(arena.id_epoch, epoch, "an id-less element keeps the maps");
+        let b = element(&mut arena, Some(doc), Some("b"));
+        assert_ne!(arena.id_epoch, epoch);
+        assert_eq!(arena.element_by_id(doc, &"b".encode_utf16().collect::<Vec<_>>()), Some(b));
+        arena.detach(b);
+        assert_eq!(arena.element_by_id(doc, &"b".encode_utf16().collect::<Vec<_>>()), None);
+    }
+}
