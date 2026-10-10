@@ -1789,6 +1789,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::collections::install(scope, ns, context_id);
     crate::mutation_observers::install(scope, ns, context_id);
     crate::scroll_boxes::install(scope, ns, context_id);
+    crate::form_entries::install(scope, ns, context_id);
     // …and the tree mutation algorithms' checks (mutation.rs)
     crate::mutation::install(scope, ns, context_id);
     // …and where one node is against another (traversal.rs)

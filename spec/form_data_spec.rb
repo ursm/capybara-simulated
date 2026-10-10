@@ -89,6 +89,23 @@ RSpec.describe 'FormData "formdata" event, USV conversion, _charset_' do
     expect(result).to eq('fired' => 1, 'bubbles' => true, 'cancelable' => false, 'n1' => 'v1', 'added' => 'x')
   end
 
+  # Each field's value is the one its `value` getter returns, sanitized for its type (HTML "construct the entry list":
+  # "the value of the field element"). Chrome 2026-10-10: the same seven.
+  it "takes each field's value sanitized for its type" do
+    result = session.evaluate_script(<<~JS)
+      (function () {
+        const f = document.createElement('form');
+        f.innerHTML = '<input type=email name=e value=" a@b "><input type=number name=n value="1x">' +
+          '<input type=color name=c value="#ABCDEF"><input name=t value="a\\nb">' +
+          '<input type=range name=r min=0 max=10 value=50><input type=date name=d value="2020-13-01">' +
+          '<input type=hidden name=h value=" kept ">';
+        document.body.appendChild(f);
+        return [...new FormData(f)];
+      })()
+    JS
+    expect(result).to eq([%w[e a@b], ['n', ''], %w[c #abcdef], %w[t ab], %w[r 10], ['d', ''], ['h', ' kept ']])
+  end
+
   # The controls an entry list takes are the form's by its form owner — the parser's form element pointer's too
   # (`<table><form>…<input>`, foster-parented out of the form) — a detached form's its own subtree's, none in a
   # `<datalist>`, and a disabled one only as the submitter (HTML "construct the entry list").

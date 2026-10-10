@@ -112,20 +112,28 @@ impl RealmArena {
     // A control's value as its `value` getter reads it before sanitization: the live value once dirty, else the
     // `value` attribute — a `<textarea>`'s child text, newlines normalized.
     pub(crate) fn raw_value(&self, n: &NodeData) -> String {
+        String::from_utf16_lossy(&self.raw_value_units(n))
+    }
+    // …exactly, as UTF-16.
+    pub(crate) fn raw_value_units(&self, n: &NodeData) -> Vec<u16> {
         if let Some(v) = &n.value {
-            return String::from_utf16_lossy(v);
+            return v.to_vec();
         }
         if n.local_name == local_name!("textarea") {
-            let text: Vec<u16> = n
-                .children
-                .iter()
-                .filter_map(|&c| self.get(c))
-                .filter(|t| t.kind == NodeKind::Text)
-                .flat_map(|t| t.data.iter().copied())
-                .collect();
-            return String::from_utf16_lossy(&text).replace("\r\n", "\n").replace('\r', "\n");
+            let mut out = Vec::new();
+            let text = n.children.iter().filter_map(|&c| self.get(c)).filter(|t| t.kind == NodeKind::Text).flat_map(|t| t.data.iter().copied());
+            let mut text = text.peekable();
+            while let Some(u) = text.next() {
+                if u == 0x0D {
+                    text.next_if_eq(&0x0A);
+                    out.push(0x0A);
+                } else {
+                    out.push(u);
+                }
+            }
+            return out;
         }
-        n.plain_attr("value").unwrap_or("").to_string()
+        n.plain_attr_units("value").unwrap_or_default()
     }
     // An `<input>`'s value, sanitized for its type as the `value` getter returns it (`input_value::sanitize`) — for the
     // types a constraint reads the value of (a colour is none of them).
@@ -407,7 +415,7 @@ impl RealmArena {
         (0..options.len()).filter(|&i| state[i] != before[i]).map(|i| (options[i], state[i])).collect()
     }
     // An option's value: its `value` attribute, else its text.
-    fn option_value(&self, id: NodeId) -> String {
+    pub(crate) fn option_value(&self, id: NodeId) -> String {
         match self.get(id).and_then(|n| n.plain_attr("value")) {
             Some(v) => v.to_string(),
             None => self.option_text(id),

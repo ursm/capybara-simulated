@@ -30,6 +30,7 @@ mod focus;
 // registers a font (registerFontPath) to a handle it names the face by (`walkFace`).
 mod font;
 mod font_faces;
+mod form_entries;
 mod fontconfig;
 mod geometry;
 // HTML's presentational hints: the declarations an element's attributes add to the cascade.

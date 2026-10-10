@@ -424,6 +424,14 @@ fn set_string(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnValue<'_, v8:
 }
 const NO_ATTRS: Attrs<'static> = Attrs { min: None, max: None, step: None, value: None, multiple: false };
 
+// A colour input's value for `v`: the colour the style engine parses it as, opaque sRGB `#rrggbb` — `#000000` for none.
+pub(crate) fn colour_value(engine: Option<&crate::style::StyleEngine>, arena: &crate::dom::RealmArena, v: &str) -> String {
+    let Some(c) = crate::style::parse_color(engine, arena, trim_ascii_ws(v), "") else { return "#000000".to_string() };
+    let [r, g, b, _] = *c.to_color_space(style::color::ColorSpace::Srgb).raw_components();
+    let hex = |x: f32| ((f64::from(x).clamp(0.0, 1.0) * 255.0 + 0.5).floor()) as u8;
+    format!("#{:02x}{:02x}{:02x}", hex(r), hex(g), hex(b))
+}
+
 // __dom.inputSanitize(nid, type, value) -> the input's value sanitized as `type` (`sanitize`), by its attributes; a
 // colour by the style engine, opaque sRGB `#rrggbb`, `#000000` for no colour.
 fn input_sanitize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -434,12 +442,7 @@ fn input_sanitize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let d = crate::dom::dom(scope);
     let arena: &crate::dom::RealmArena = d.arena.enter(cid);
     let engine = d.styles.get(&cid);
-    let colour = |v: &str| {
-        let Some(c) = crate::style::parse_color(engine, arena, trim_ascii_ws(v), "") else { return "#000000".to_string() };
-        let [r, g, b, _] = *c.to_color_space(style::color::ColorSpace::Srgb).raw_components();
-        let hex = |x: f32| ((f64::from(x).clamp(0.0, 1.0) * 255.0 + 0.5).floor()) as u8;
-        format!("#{:02x}{:02x}{:02x}", hex(r), hex(g), hex(b))
-    };
+    let colour = |v: &str| colour_value(engine, arena, v);
     let attrs = id.and_then(|id| arena.get(id)).map_or(NO_ATTRS, Attrs::of);
     let out = sanitize_units(&ty, &value, &attrs, &colour);
     let out = crate::dom::utf16_value(scope, &out);
