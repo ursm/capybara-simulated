@@ -147,6 +147,14 @@ pub(crate) struct ShadowInit {
 }
 
 // An attribute of the DOM's attribute list (`NodeData::attribute_list`): its namespace, prefix, local name and value.
+// An element's name as the DOM holds it, UTF-16 throughout (`NodeData::name_u16`).
+#[derive(PartialEq)]
+pub(crate) struct ExactName {
+    pub(crate) local: Vec<u16>,
+    pub(crate) ns: Vec<u16>,
+    pub(crate) prefix: Option<Vec<u16>>,
+}
+
 pub(crate) struct Attribute {
     pub(crate) ns: Option<String>,
     pub(crate) prefix: Option<String>,
@@ -167,9 +175,9 @@ pub(crate) struct NodeData {
     pub(crate) ns: Namespace,
     // An element's namespace prefix (`prefix`; None for none) — fixed at creation.
     pub(crate) prefix: Option<Box<str>>,
-    // …and, for the rare element whose namespace or prefix carries a LONE SURROGATE (U+FFFD in the two above), both
-    // exactly, as UTF-16 — what a namespace lookup compares (`ns_units`, `prefix_units`).
-    pub(crate) name_u16: Option<Box<(Vec<u16>, Option<Vec<u16>>)>>,
+    // …and, for the rare element whose local name, namespace or prefix carries a LONE SURROGATE (U+FFFD in the three
+    // above), all three exactly — what a namespace lookup (`ns_units`, `prefix_units`) and `isEqualNode` compare.
+    pub(crate) name_u16: Option<Box<ExactName>>,
     pub(crate) attributes: Vec<(String, String)>,
     // Lossless override for the rare attribute value that carries a LONE SURROGATE (unpaired U+D800..
     // U+DFFF) — valid in a JS DOMString (UTF-16) but not in Rust's UTF-8 `String`, where it degrades to
@@ -459,21 +467,21 @@ impl NodeData {
     // An element's namespace, exactly (the empty one for none).
     pub(crate) fn ns_units(&self) -> Cow<'_, [u16]> {
         match &self.name_u16 {
-            Some(exact) => Cow::Borrowed(&exact.0),
+            Some(exact) => Cow::Borrowed(&exact.ns),
             None => Cow::Owned(self.ns.encode_utf16().collect()),
         }
     }
     // Whether an element's namespace is `units`, exactly.
     pub(crate) fn ns_is(&self, units: &[u16]) -> bool {
         match &self.name_u16 {
-            Some(exact) => exact.0 == units,
+            Some(exact) => exact.ns == units,
             None => self.ns.encode_utf16().eq(units.iter().copied()),
         }
     }
     // …and its prefix (None for none).
     pub(crate) fn prefix_is(&self, units: Option<&[u16]>) -> bool {
         match (&self.name_u16, units) {
-            (Some(exact), _) => exact.1.as_deref() == units,
+            (Some(exact), _) => exact.prefix.as_deref() == units,
             (None, Some(units)) => self.prefix.as_deref().is_some_and(|p| p.encode_utf16().eq(units.iter().copied())),
             (None, None) => self.prefix.is_none(),
         }
@@ -481,8 +489,16 @@ impl NodeData {
     // …and its prefix, exactly.
     pub(crate) fn prefix_units(&self) -> Option<Cow<'_, [u16]>> {
         match &self.name_u16 {
-            Some(exact) => exact.1.as_deref().map(Cow::Borrowed),
+            Some(exact) => exact.prefix.as_deref().map(Cow::Borrowed),
             None => self.prefix.as_deref().map(|p| Cow::Owned(p.encode_utf16().collect())),
+        }
+    }
+    // Whether two elements have one name — local name, namespace and prefix — exactly.
+    pub(crate) fn same_name(&self, other: &NodeData) -> bool {
+        match (&self.name_u16, &other.name_u16) {
+            (None, None) => self.local_name == other.local_name && self.ns == other.ns && self.prefix == other.prefix,
+            (Some(x), Some(y)) => x == y,
+            _ => false,
         }
     }
     // The attributes that are in a namespace, in attribute-list order: each one's key, namespace and local name, exactly.
@@ -684,9 +700,9 @@ pub(crate) struct RealmArena {
     // life, as a block parsed under one lock can never be read under another, and an element keeps its `style` block
     // into another realm's tree.
     pub(crate) style_lock: crate::style::StyleLock,
-    // Per tree root, the elements of each id in tree order, as of `mutations` (collections.rs `elements_by_id`): a page's
-    // `getElementById` asked one walk of its tree per call, a document's whole, where browsers keep an id map.
-    pub(crate) id_index: std::cell::RefCell<(u64, std::collections::HashMap<NodeId, std::collections::HashMap<Vec<u16>, Vec<NodeId>>>)>,
+    // Per tree root, the elements of each id, made once a tree is asked for ids often between changes
+    // (collections.rs `IdIndex`).
+    pub(crate) id_index: std::cell::RefCell<crate::collections::IdIndex>,
     // Per tree root, the facts element_state.rs asks of every control in turn, as of `mutations` (`form_facts`).
     pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
     // Each element's resolved directionality asked so far, true for rtl, as of `mutations` (`is_rtl`)…
@@ -1946,7 +1962,7 @@ fn import_node(
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let local_name = LocalName::from(args.get(0).to_rust_string_lossy(scope));
+    let (local, local_u16) = read_v8_value(scope, args.get(0));
     let (ns, ns_u16) = read_v8_value(scope, args.get(1));
     let parent = nid_arg(scope, &args, 2);
     let (attributes, attr_u16) = read_attrs_flat(scope, args.get(3));
@@ -1958,11 +1974,14 @@ fn import_node(
         false => (None, None),
     };
     // (…exactly, beside, where either lost a lone surrogate)
-    let name_u16 = (ns_u16.is_some() || prefix_u16.is_some()).then(|| {
-        let prefix_units = prefix.as_ref().map(|p| prefix_u16.unwrap_or_else(|| p.encode_utf16().collect()));
-        Box::new((ns_u16.unwrap_or_else(|| ns.encode_utf16().collect()), prefix_units))
+    let name_u16 = (local_u16.is_some() || ns_u16.is_some() || prefix_u16.is_some()).then(|| {
+        Box::new(ExactName {
+            local: local_u16.unwrap_or_else(|| local.encode_utf16().collect()),
+            ns: ns_u16.unwrap_or_else(|| ns.encode_utf16().collect()),
+            prefix: prefix.as_ref().map(|p| prefix_u16.unwrap_or_else(|| p.encode_utf16().collect())),
+        })
     });
-    let (ns, prefix) = (Namespace::from(ns), prefix.map(String::into_boxed_str));
+    let (local_name, ns, prefix) = (LocalName::from(local), Namespace::from(ns), prefix.map(String::into_boxed_str));
     let cid = realm_id(scope, &args);
     crate::node_handle::reclaim(dom(scope));
     let (arena, engine) = arena_and_engine(scope, cid);

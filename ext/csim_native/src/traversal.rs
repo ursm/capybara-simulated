@@ -7,7 +7,7 @@
 // took from where it last was — up to the parent, down to the first or last child, across to the next or previous
 // sibling — which it takes in its own tree to have the object it hands the filter (and the node it answers with).
 
-use crate::dom::{nid_arg, realm_id, NodeId, NodeKind, RealmArena, Relation};
+use crate::dom::{nid_arg, realm_id, NodeData, NodeId, NodeKind, RealmArena, Relation};
 
 const DISCONNECTED: u32 = 0x01;
 const PRECEDING: u32 = 0x02;
@@ -471,29 +471,31 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 impl RealmArena {
     // DOM §4.4 "equals": two nodes of one type — a doctype by its name and identifiers, an element by its namespace,
     // prefix, local name and attributes (each of one in the other, by namespace, local name and value, in any order), a
-    // processing instruction by its target and data, character data by its data — with as many children, each equal.
+    // processing instruction by its target and data, character data by its data — with as many children, each equal:
+    // pair by pair, in tree order, the names compared exactly (a lone surrogate is no U+FFFD).
     pub(crate) fn is_equal_node(&self, a: NodeId, b: NodeId) -> bool {
-        let (Some(x), Some(y)) = (self.get(a), self.get(b)) else { return false };
-        if x.node_type() != y.node_type() {
-            return false;
-        }
-        let same = match x.kind {
-            NodeKind::Element => {
-                let (xs, ys) = (x.attribute_list(), y.attribute_list());
-                x.ns == y.ns
-                    && x.prefix == y.prefix
-                    && x.name_u16 == y.name_u16
-                    && x.local_name == y.local_name
-                    && xs.len() == ys.len()
-                    && xs.iter().all(|p| ys.iter().any(|q| p.ns == q.ns && p.local == q.local && p.value == q.value))
+        let mut pairs = vec![(a, b)];
+        while let Some((a, b)) = pairs.pop() {
+            let (Some(x), Some(y)) = (self.get(a), self.get(b)) else { return false };
+            if x.node_type() != y.node_type() || x.children.len() != y.children.len() {
+                return false;
             }
-            NodeKind::ProcessingInstruction => x.local_name == y.local_name && x.data == y.data,
-            NodeKind::Text | NodeKind::Comment => x.data == y.data,
-            NodeKind::Other => x.data == y.data && x.doctype_ids == y.doctype_ids,
-            NodeKind::Document | NodeKind::Fragment => true,
-        };
-        same && x.children.len() == y.children.len()
-            && x.children.iter().zip(&y.children).all(|(&c, &d)| self.is_equal_node(c, d))
+            let same = match x.kind {
+                NodeKind::Element => {
+                    let (xs, ys) = (exact_attributes(x), exact_attributes(y));
+                    x.same_name(y) && xs.len() == ys.len() && xs.iter().all(|p| ys.contains(p))
+                }
+                NodeKind::ProcessingInstruction => x.local_name == y.local_name && x.data == y.data,
+                NodeKind::Text | NodeKind::Comment => x.data == y.data,
+                NodeKind::Other => x.data == y.data && x.doctype_ids == y.doctype_ids,
+                NodeKind::Document | NodeKind::Fragment => true,
+            };
+            if !same {
+                return false;
+            }
+            pairs.extend(x.children.iter().copied().zip(y.children.iter().copied()).rev());
+        }
+        true
     }
     // DOM's "descendant text content": the data of the node's Text descendants (CDATA sections included), in tree order.
     pub(crate) fn text_content(&self, id: NodeId) -> Vec<u16> {
@@ -509,6 +511,22 @@ impl RealmArena {
         }
         out
     }
+}
+
+// An element's attributes as `is_equal_node` compares them: each one's namespace (empty for none), local name and value,
+// exactly.
+fn exact_attributes(n: &NodeData) -> Vec<(Vec<u16>, Vec<u16>, Vec<u16>)> {
+    let namespaced: Vec<_> = n.namespaced_attributes().map(|(key, ns, local)| (key, ns.into_owned(), local.into_owned())).collect();
+    n.attributes
+        .iter()
+        .map(|(key, _)| {
+            let value = n.attr_units(key).map(std::borrow::Cow::into_owned).unwrap_or_default();
+            match namespaced.iter().find(|(k, _, _)| *k == key) {
+                Some((_, ns, local)) => (ns.clone(), local.clone(), value),
+                None => (Vec::new(), key.encode_utf16().collect(), value),
+            }
+        })
+        .collect()
 }
 
 // __dom.isEqualNode(a, b) -> whether the two nodes are equal (`is_equal_node`).

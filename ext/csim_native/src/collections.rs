@@ -4,6 +4,8 @@
 // filter takes, answered as `nodes_value` says (their objects, or their paths from the scope), which the live
 // collections wrap.
 
+use std::collections::HashMap;
+
 use web_atoms::ns;
 
 use crate::dom::{f64_array, nid_arg, realm_id, utf16_arg, NodeData, NodeId, NodeKind, RealmArena};
@@ -141,35 +143,82 @@ fn window_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set(crate::dom::nodes_value(scope, cid, doc, &found));
 }
 
+// The ids of each tree asked for them since the arena last changed. A walk for an id stops at its element, and a page
+// mostly asks for one between writes — `getElementById(x).setAttribute(…)`, every write a change of the arena — so a map,
+// a walk of the whole tree, is made only for a tree asked more often than that between two changes: the label of every
+// control of a form, a loop of reads.
+#[derive(Default)]
+pub(crate) struct IdIndex {
+    mutations: u64,
+    asks: u32,
+    maps: HashMap<NodeId, HashMap<Vec<u16>, Vec<NodeId>>>,
+}
+const WALKS_BEFORE_INDEX: u32 = 2;
+
 impl RealmArena {
     // The first element of `root`'s tree in tree order, `root` itself included, whose id is `id` (exactly, as UTF-16 —
-    // a lone surrogate included).
+    // a lone surrogate included)…
     pub(crate) fn element_by_id(&self, root: NodeId, id: &[u16]) -> Option<NodeId> {
-        self.elements_by_id(root, id).first().copied()
+        self.with_ids(root, |ids| ids.get(id).and_then(|found| found.first().copied()), || {
+            let mut found = None;
+            self.each_with_id(root, id, |n| {
+                found = Some(n);
+                false
+            });
+            found
+        })
     }
-    // …and every one, in tree order: from the tree's id map, made in one walk the first time it is asked after the arena
-    // changed (`id_index`).
+    // …and every one, in tree order.
     pub(crate) fn elements_by_id(&self, root: NodeId, id: &[u16]) -> Vec<NodeId> {
+        self.with_ids(root, |ids| ids.get(id).cloned().unwrap_or_default(), || {
+            let mut found = Vec::new();
+            self.each_with_id(root, id, |n| {
+                found.push(n);
+                true
+            });
+            found
+        })
+    }
+    // An answer from the tree's id map where it has one, or where it is asked often enough to make one (`IdIndex`); else
+    // from a walk.
+    fn with_ids<R>(&self, root: NodeId, indexed: impl FnOnce(&HashMap<Vec<u16>, Vec<NodeId>>) -> R, walk: impl FnOnce() -> R) -> R {
         let mut memo = self.id_index.borrow_mut();
-        if memo.0 != self.mutations {
-            memo.1.clear();
-            memo.0 = self.mutations;
+        if memo.mutations != self.mutations {
+            memo.maps.clear();
+            memo.asks = 0;
+            memo.mutations = self.mutations;
         }
-        let ids = memo.1.entry(root).or_insert_with(|| {
-            let mut ids: std::collections::HashMap<Vec<u16>, Vec<NodeId>> = std::collections::HashMap::new();
-            let mut stack = vec![root];
-            while let Some(n) = stack.pop() {
-                let Some(node) = self.get(n) else { continue };
-                if node.kind == NodeKind::Element {
-                    if let Some(units) = node.plain_attr_units("id") {
-                        ids.entry(units).or_default().push(n);
-                    }
+        memo.asks += 1;
+        if memo.asks <= WALKS_BEFORE_INDEX && !memo.maps.contains_key(&root) {
+            drop(memo);
+            return walk();
+        }
+        let ids = memo.maps.entry(root).or_insert_with(|| {
+            let mut ids: HashMap<Vec<u16>, Vec<NodeId>> = HashMap::new();
+            self.each_element_from(root, |n, node| {
+                if let Some(units) = node.plain_attr_units("id") {
+                    ids.entry(units).or_default().push(n);
                 }
-                stack.extend(node.children.iter().rev());
-            }
+                true
+            });
             ids
         });
-        ids.get(id).cloned().unwrap_or_default()
+        indexed(ids)
+    }
+    // Each element with the id in `root`'s tree in tree order, while `visit` says go on.
+    fn each_with_id(&self, root: NodeId, id: &[u16], mut visit: impl FnMut(NodeId) -> bool) {
+        self.each_element_from(root, |n, node| !node.plain_attr_is("id", id) || visit(n));
+    }
+    // Each element of `root`'s tree in tree order, `root` itself included, while `visit` says go on.
+    fn each_element_from(&self, root: NodeId, mut visit: impl FnMut(NodeId, &NodeData) -> bool) {
+        let mut stack = vec![root];
+        while let Some(n) = stack.pop() {
+            let Some(node) = self.get(n) else { continue };
+            if node.kind == NodeKind::Element && !visit(n, node) {
+                return;
+            }
+            stack.extend(node.children.iter().rev());
+        }
     }
 
     // HTML's named properties of a document (§3.1.6) and of its window (§7.2.2.3), over the document tree — not into a
