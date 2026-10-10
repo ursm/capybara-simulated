@@ -3476,8 +3476,8 @@ fn xpath_prefixes(
 }
 
 // __dom.xpathEvaluate(expression, contextNid, attrKey, html, namespaces, resultType) -> a number, string or boolean,
-// or for a node-set [key, path…, key, path…, …] in document order (each node as its path from the root of the context's
-// tree, `RealmArena::push_path`; `key` an attribute's store key, null for the node itself). The context is the node
+// or for a node-set [key, node, key, node, …] in document order (each node its object; `key` an attribute's store key,
+// null for the node itself). The context is the node
 // `contextNid`, or its attribute stored under `attrKey` (a string); `namespaces` a flat [prefix, uri, …] array.
 // Throws a TypeError for a value of the wrong type; `undefined` for a context the arena does not hold.
 fn xpath_evaluate(
@@ -3515,20 +3515,14 @@ fn xpath_evaluate(
         None => crate::xpath::XNode::Node(id),
     };
     let answer = crate::xpath::evaluate(arena, &text, context, html, &namespaces, result_type);
-    // (…the node-set as (path, key) pairs, read while the arena is borrowed)
-    let root = arena.root_of(id);
+    // (…the node-set as (node, key) pairs, read while the arena is borrowed)
     let answer = answer.map(|a| match a {
         crate::xpath::Answer::Nodes(nodes) => {
-            let path = |n: NodeId| {
-                let mut out = Vec::new();
-                arena.push_path(root, n, &mut out);
-                out
-            };
             let pairs: Vec<_> = nodes
                 .iter()
                 .map(|x| match *x {
-                    crate::xpath::XNode::Node(n) => (path(n), None),
-                    crate::xpath::XNode::Attr(n, i) => (path(n), crate::xpath::attribute_key(arena, n, i).map(str::to_owned)),
+                    crate::xpath::XNode::Node(n) => (n, None),
+                    crate::xpath::XNode::Attr(n, i) => (n, crate::xpath::attribute_key(arena, n, i).map(str::to_owned)),
                 })
                 .collect();
             Err(pairs)
@@ -3545,13 +3539,18 @@ fn xpath_evaluate(
             scope.throw_exception(error);
         }
         Ok(Err(pairs)) => {
-            let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
-            for (path, key) in &pairs {
+            // (…the nodes' objects found first, before anything is allocated: a collection in between could take a
+            // handle)
+            let held: Vec<_> = pairs.iter().map(|&(n, _)| dom(scope).arena.get(n).and_then(|d| crate::node_handle::held(&d.link))).collect();
+            let objects: Vec<Option<v8::Local<v8::Object>>> = held.iter().map(|h| h.as_ref().and_then(|h| h.get(scope))).collect();
+            let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(pairs.len() * 2);
+            for ((_, key), object) in pairs.iter().zip(objects) {
+                let Some(object) = object else { continue };
                 items.push(match key.as_deref().and_then(|k| v8::String::new(scope, k)) {
                     Some(k) => k.into(),
                     None => v8::null(scope).into(),
                 });
-                items.extend(path.iter().map(|&v| -> v8::Local<v8::Value> { v8::Number::new(scope, v).into() }));
+                items.push(object.into());
             }
             rv.set(v8::Array::new_with_elements(scope, &items).into());
         }
