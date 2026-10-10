@@ -310,7 +310,8 @@ pub(crate) const STATE_SELECTED_INIT: u32 = 1 << 17;
 pub(crate) const STATE_UPGRADED: u32 = 1 << 18;
 
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its
-// first and last child, its previous and next sibling, and the element ones of those.
+// first and last child, its previous and next sibling, and the element ones of those — and the bindings' own upward
+// step, a node's parent or, for a shadow root, its host.
 pub(crate) const RELATIVE_PARENT: u32 = 0;
 const RELATIVE_PARENT_ELEMENT: u32 = 1;
 pub(crate) const RELATIVE_FIRST_CHILD: u32 = 2;
@@ -321,6 +322,7 @@ const RELATIVE_FIRST_ELEMENT: u32 = 6;
 const RELATIVE_LAST_ELEMENT: u32 = 7;
 const RELATIVE_PREVIOUS_ELEMENT: u32 = 8;
 const RELATIVE_NEXT_ELEMENT: u32 = 9;
+const RELATIVE_PARENT_OR_HOST: u32 = 10;
 
 
 impl NodeData {
@@ -1620,6 +1622,7 @@ impl RealmArena {
             RELATIVE_LAST_ELEMENT => self.last_element_child(id),
             RELATIVE_PREVIOUS_ELEMENT => self.prev_element_sibling(id),
             RELATIVE_NEXT_ELEMENT => self.next_element_sibling(id),
+            RELATIVE_PARENT_OR_HOST => self.parent_of(id).or_else(|| self.get(id)?.host),
             _ => None,
         }
     }
