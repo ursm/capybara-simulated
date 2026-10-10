@@ -24,7 +24,7 @@ const FOCUSABLE_TAGS: [&str; 9] = ["input", "textarea", "select", "button", "ifr
 // Firefox, measured).
 pub(crate) fn focusable(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, now: f64) -> bool {
     let Some(n) = arena.get(id).filter(|n| n.kind == NodeKind::Element) else { return false };
-    if arena.is_actually_disabled(id) || !candidate(arena, id, n) || inert(arena, id) {
+    if arena.is_actually_disabled(id) || !candidate(arena, id, n) || arena.is_inert(id) {
         return false;
     }
     let rendered = |engine: &mut StyleEngine, id| crate::rendered::rendered(engine, arena, id, false, true, None, now);
@@ -53,13 +53,6 @@ fn tabindex(n: &NodeData) -> Option<i64> {
 // An editing host itself (element_state.rs `editing_host`): one its own attribute makes one, asking no ancestor.
 fn editing_host(arena: &RealmArena, id: NodeId) -> bool {
     arena.get(id).is_some_and(|n| n.contenteditable_state() == Some(true))
-}
-// Inert: the element or an element it is a flat-tree descendant of carries `inert` — up through the slot a node is
-// assigned to, and from a shadow root to its host (Chrome and Firefox, measured: an `inert` around the slot makes its
-// assigned content inert).
-fn inert(arena: &RealmArena, id: NodeId) -> bool {
-    std::iter::successors(Some(id), |&c| arena.get(c).and_then(|n| n.assigned_slot.filter(|&s| arena.get(s).is_some()).or(n.parent).or(n.host)))
-        .any(|e| arena.get(e).is_some_and(|n| n.kind == NodeKind::Element && n.plain_attr("inert").is_some()))
 }
 // The element ancestors of `id`, nearest first, up to the first node that is none (a shadow root, a document).
 fn element_ancestors(arena: &RealmArena, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {

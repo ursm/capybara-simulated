@@ -5100,8 +5100,6 @@ html/semantics/interactive-elements/the-dialog-element/dialog-form-submission.ht
 - calling form.submit() in click handler of submit button should start the submission
   synchronously
 - input image button should return the coordinates
-html/semantics/interactive-elements/the-dialog-element/dialog-inert.html:
-- dialog-inert
 html/semantics/interactive-elements/the-dialog-element/dialog-light-dismiss-pointer-capture.html:
 - Light dismiss on dialog with mouse input with pointer capture.
 - Light dismiss on dialog with touch input with pointer capture.
@@ -5205,21 +5203,6 @@ html/semantics/interactive-elements/the-dialog-element/form-submit-dialog-shadow
 html/semantics/interactive-elements/the-dialog-element/inert-focus-in-frames.html:
 - "[harness] ERROR"
 - "[harness] no subtests"
-html/semantics/interactive-elements/the-dialog-element/inert-inlines.html:
-- Tests that inert inlines do not receive mouse events.
-html/semantics/interactive-elements/the-dialog-element/inert-node-is-uneditable.html:
-- Test that inert nodes cannot be edited. The test passes if the only text you can
-  edit is in the dialog.
-html/semantics/interactive-elements/the-dialog-element/inert-node-is-unfocusable.html:
-- "#body is not  focusable"
-- "#bottom-dialog is not  focusable"
-- "#bottom-dialog-button is not  focusable"
-- "#color is not  focusable"
-- "#contenteditable-div is not  focusable"
-- "#datetime is not  focusable"
-- "#select is not  focusable"
-- "#tabindex-span is not  focusable"
-- "#text is not  focusable"
 html/semantics/interactive-elements/the-dialog-element/inert-node-is-unselectable.html:
 - Test that inert nodes cannot be selected. The test passes if the only text you can
   select is inside the dialog.
@@ -5237,9 +5220,6 @@ html/semantics/interactive-elements/the-dialog-element/inertness-with-modal-dial
   of the outer iframe aren't marked as inert.
 - Modal dialogs in the main document and outer iframe mark outer nodes as inert. Contents
   of the outer iframe aren't marked as inert.
-html/semantics/interactive-elements/the-dialog-element/modal-dialog-ancestor-is-inert.html:
-- Test that ancestors of modal dialog are inert.
-- "[harness] ERROR"
 html/semantics/interactive-elements/the-dialog-element/modal-dialog-backdrop-opacity.html:
 - "== html/semantics/interactive-elements/the-dialog-element/modal-dialog-backdrop-opacity-ref.html"
 html/semantics/interactive-elements/the-dialog-element/modal-dialog-backdrop.html:
@@ -5262,8 +5242,6 @@ html/semantics/interactive-elements/the-dialog-element/modal-dialog-in-visibilit
 - 'Modal dialog should have visibility: visible by default in UA sheet'
 html/semantics/interactive-elements/the-dialog-element/modal-dialog-selection.html:
 - By default, text inside a modal dialog can be selected
-html/semantics/interactive-elements/the-dialog-element/remove-dialog-should-unblock-document.html:
-- Test that removing dialog unblocks the document.
 html/semantics/interactive-elements/the-dialog-element/removed-element-is-removed-from-top-layer.html:
 - "== html/semantics/interactive-elements/the-dialog-element/removed-element-is-removed-from-top-layer-ref.html"
 html/semantics/interactive-elements/the-dialog-element/show-modal-focusing-steps.html:

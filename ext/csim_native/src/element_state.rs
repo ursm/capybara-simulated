@@ -989,6 +989,24 @@ impl RealmArena {
         let Some(parent) = self.parent_of(id).and_then(|p| self.get(p)).filter(|p| p.is_html_named("details")) else { return false };
         parent.children.iter().find(|&&c| self.get(c).is_some_and(|c| c.is_html_named("summary"))) == Some(&id)
     }
+    // Is `id` INERT (HTML §6.6.2)? An element in the flat tree under one with the `inert` attribute (up through the slot a
+    // node is assigned to, and from a shadow root to its host: Chrome and Firefox, measured — an `inert` around the slot
+    // makes its assigned content inert), or one a modal dialog
+    // blocks: the topmost one shown, where `id` is no flat-tree inclusive descendant of it — the rest of its document is
+    // "blocked by a modal dialog". An inert node is as if absent to the hit test and focus.
+    pub(crate) fn is_inert(&self, id: NodeId) -> bool {
+        let up = |c: &NodeId| self.get(*c).and_then(|n| n.assigned_slot.filter(|&s| self.get(s).is_some()).or(n.parent).or(n.host));
+        let modal = self.modals.iter().rev().copied().find(|&m| self.get(m).is_some());
+        let mut in_modal = modal.is_none();
+        for e in std::iter::successors(Some(id), up) {
+            let Some(n) = self.get(e) else { break };
+            if n.kind == NodeKind::Element && n.plain_attr("inert").is_some() {
+                return true;
+            }
+            in_modal |= Some(e) == modal;
+        }
+        !in_modal && modal.is_some_and(|m| self.root_of(m) == self.root_of(id) || self.shadow_including_root(m) == self.shadow_including_root(id))
+    }
     // `id`'s editing host (HTML §6.8.1): itself or its nearest ancestor HTML element whose `contenteditable` is in the
     // true or plaintext-only state — or none, where the nearest one that says is in the false state, or none says.
     pub(crate) fn editing_host(&self, id: NodeId) -> Option<NodeId> {

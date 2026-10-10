@@ -811,6 +811,10 @@ pub(crate) fn project(m: &M4, x: f64, y: f64) -> Option<[f64; 2]> {
 // `id`'s BORDER BOX as the page measures it (`renderedBox`): where its scrolls carried it, under every transform on the
 // way — None where it generates no box.
 pub(crate) fn rendered_box(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
+    // (…a graphics element inside an `<svg>` its geometry's: the layout gives the `<svg>` alone a box)
+    if crate::svg_geometry::outer_svg(arena, id).is_some() {
+        return crate::svg_geometry::client_rect(arena, id);
+    }
     let style = box_style(arena, id)?;
     if is_boxless(arena, id, &style) {
         return None;

@@ -334,6 +334,23 @@ impl<'a> Painting<'a> {
                 out.push(el);
             }
         }
+        // (…and inside an `<svg>` it lands on, the graphics element under the point, before it — with the containers it
+        // is in — where there is one: the layout gives the `<svg>` alone a box)
+        if let Some(i) = out.iter().position(|&id| self.arena.get(id).is_some_and(|n| n.ns == web_atoms::ns!(svg) && &*n.local_name == "svg")) {
+            if let Some(shape) = crate::svg_geometry::hit(self.arena, out[i], x, y) {
+                let mut inner = vec![shape];
+                let mut at = self.arena.get(shape).and_then(|n| n.parent);
+                while let Some(p) = at.filter(|&p| p != out[i]) {
+                    inner.push(p);
+                    at = self.arena.get(p).and_then(|n| n.parent);
+                }
+                if all {
+                    out.splice(i..i, inner);
+                } else {
+                    out = vec![shape];
+                }
+            }
+        }
         let [w, h] = self.arena.viewport;
         if (x >= 0.0 && y >= 0.0 && x <= w && y <= h) && self.has_box(root) && !out.contains(&root) && (all || out.is_empty()) {
             out.push(root);
@@ -444,7 +461,8 @@ impl<'a> Painting<'a> {
         if s.get_inherited_box().visibility != style::computed_values::visibility::T::Visible {
             return false;
         }
-        contains_point(self.arena, id, x, y) && !clipped_at(self.arena, id, x, y)
+        // (…and not inert: as if absent to a hit, HTML §6.6.2 — asked of a box around the point alone)
+        contains_point(self.arena, id, x, y) && !clipped_at(self.arena, id, x, y) && !self.arena.is_inert(id)
     }
 }
 

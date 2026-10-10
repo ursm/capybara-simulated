@@ -736,6 +736,8 @@ pub(crate) struct RealmState {
     // `:focus-within` and `:hover` walk up.
     pub(crate) focus: Option<NodeId>,
     pub(crate) hover: Option<NodeId>,
+    // The modal dialogs, in the order they were shown — the top layer's: the last blocks the document (`is_inert`).
+    pub(crate) modals: Vec<NodeId>,
     // Whether the focus shows NO ring (not `:focus-visible`): only after a pointer focus of a non-text control.
     pub(crate) focus_ring_hidden: bool,
     // The realm document and its target fragments (as it stands, then decoded), when it has any — what `:target`
@@ -1134,6 +1136,7 @@ impl RealmArena {
     pub(crate) fn set_state(&mut self, id: NodeId, bits: u32) {
         self.state_epoch += 1;
         let Some(node) = self.get_mut(id) else { return };
+        let was_modal = node.state & STATE_MODAL != 0;
         node.state = bits;
         let state = &mut self.state;
         for (bit, slot) in [(STATE_FOCUSED, &mut state.focus), (STATE_HOVERED, &mut state.hover)] {
@@ -1141,6 +1144,13 @@ impl RealmArena {
                 *slot = Some(id);
             } else if *slot == Some(id) {
                 *slot = None;
+            }
+        }
+        // (…and a dialog shown modally goes on top, one closed off)
+        if was_modal != (bits & STATE_MODAL != 0) {
+            state.modals.retain(|&m| m != id);
+            if bits & STATE_MODAL != 0 {
+                state.modals.push(id);
             }
         }
     }
