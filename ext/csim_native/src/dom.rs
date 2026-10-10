@@ -1108,7 +1108,6 @@ impl RealmArena {
     // nav is O(1). The one place children are linked (create / import), so a position can never drift
     // from the list.
     fn link_child(&mut self, parent: NodeId, child: NodeId) {
-        self.ids_moved(child);
         let (pos, first) = match self.get(parent) {
             Some(p) => (p.children.len(), p.first_position),
             None => return,
@@ -1176,6 +1175,8 @@ impl RealmArena {
         }
         let id = self.alloc(NodeData { parent, realm: self.cur, ..data });
         if let Some(p) = parent {
+            // (…a node made in place — the one move whose detach has not walked it: `insert_child`'s did)
+            self.ids_moved(id);
             self.link_child(p, id);
         }
         id

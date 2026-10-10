@@ -24,7 +24,7 @@ RSpec.describe 'Node wrappers dropped young' do
       JS
     RUBY
     env = {'CSIM_V8_FLAGS' => 'expose-gc', 'CSIM_SNAPSHOT_CACHE' => 'off'}
-    out, status = Open3.capture2e(env, RbConfig.ruby, '-Ilib', '-e', script, chdir: File.expand_path('..', __dir__))
+    out, status = Open3.capture2e(env, RbConfig.ruby, '-rbundler/setup', '-Ilib', '-e', script, chdir: File.expand_path('..', __dir__))
     expect([status.success?, out.lines.last&.chomp]).to eq([true, 'x']), out[-2000..]
   end
 end

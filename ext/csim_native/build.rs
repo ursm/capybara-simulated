@@ -35,6 +35,8 @@ fn resolved_v8() -> (PathBuf, Vec<String>) {
 fn main() {
     println!("cargo:rerun-if-changed=src/v8_shim.cc");
     println!("cargo:rerun-if-env-changed=CSIM_V8_INCLUDE");
+    // (…and when the resolved v8 crate may have moved: the workspace's lock file)
+    println!("cargo:rerun-if-changed=../../Cargo.lock");
     let include = match std::env::var("CSIM_V8_INCLUDE") {
         Ok(dir) => PathBuf::from(dir),
         Err(_) => {
