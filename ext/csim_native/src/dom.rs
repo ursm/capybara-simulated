@@ -312,7 +312,7 @@ pub(crate) const STATE_UPGRADED: u32 = 1 << 18;
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its
 // first and last child, its previous and next sibling, and the element ones of those — and the bindings' own upward
 // steps: a node's parent or, for a shadow root, its host; its tree's root (a shadow root the root of its own); and its
-// shadow-including root.
+// shadow-including root — and a document's head and body (HTML §3.1.3).
 pub(crate) const RELATIVE_PARENT: u32 = 0;
 const RELATIVE_PARENT_ELEMENT: u32 = 1;
 pub(crate) const RELATIVE_FIRST_CHILD: u32 = 2;
@@ -326,6 +326,8 @@ const RELATIVE_NEXT_ELEMENT: u32 = 9;
 const RELATIVE_PARENT_OR_HOST: u32 = 10;
 const RELATIVE_ROOT: u32 = 11;
 const RELATIVE_SHADOW_INCLUDING_ROOT: u32 = 12;
+const RELATIVE_HEAD: u32 = 13;
+const RELATIVE_BODY: u32 = 14;
 
 
 impl NodeData {
@@ -1628,8 +1630,17 @@ impl RealmArena {
             RELATIVE_PARENT_OR_HOST => self.parent_of(id).or_else(|| self.get(id)?.host),
             RELATIVE_ROOT => self.get(id).map(|_| self.root_of(id)),
             RELATIVE_SHADOW_INCLUDING_ROOT => self.get(id).map(|_| self.shadow_including_root(id)),
+            // (…the document element's first HTML `head` child; its first HTML `body` or `frameset` child, where it is an
+            // HTML `html`)
+            RELATIVE_HEAD => self.document_part(id, false, &|n| n.is_html_named("head")),
+            RELATIVE_BODY => self.document_part(id, true, &|n| n.is_html_named("body") || n.is_html_named("frameset")),
             _ => None,
         }
+    }
+    fn document_part(&self, doc: NodeId, in_html: bool, is: &dyn Fn(&NodeData) -> bool) -> Option<NodeId> {
+        let root = self.first_element_child(doc)?;
+        let root = self.get(root).filter(|r| !in_html || r.is_html_named("html"))?;
+        root.children.iter().copied().find(|&c| self.get(c).is_some_and(is))
     }
     // Every element of the realm it holds the state of, whichever of its trees it is in.
     pub(crate) fn element_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
@@ -1925,6 +1936,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register_fast(scope, ns, "isConnected", is_connected, IS_CONNECTED_FAST, context_id);
     register(scope, ns, "relativeNode", relative_node, context_id);
     register(scope, ns, "childAt", child_at, context_id);
+    register(scope, ns, "subtreeNodes", subtree_nodes, context_id);
     register(scope, ns, "childNodes", child_nodes, context_id);
     register_fast(scope, ns, "childCount", child_count, CHILD_COUNT_FAST, context_id);
     register_fast(scope, ns, "childIndex", child_index_op, CHILD_INDEX_FAST, context_id);
@@ -2176,6 +2188,22 @@ fn child_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let arena = &dom(scope).arena;
     let found = arena.get(id).and_then(|n| n.children.get(index).copied());
     rv.set(node_value(scope, found));
+}
+// __dom.subtreeNodes(nid) -> the node and its shadow-including descendants, as `nodes_value` answers them: in tree
+// order, a host's shadow tree before its light children (not into a template's contents).
+fn subtree_nodes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let mut out = Vec::new();
+    let mut stack = vec![id];
+    while let Some(n) = stack.pop() {
+        let Some(node) = arena.get(n) else { continue };
+        out.push(n);
+        stack.extend(node.children.iter().rev().copied());
+        stack.extend(node.shadow_root);
+    }
+    rv.set(nodes_value(scope, cid, &out));
 }
 // __dom.childNodes(nid) -> the node's children, as `nodes_value` answers.
 fn child_nodes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
