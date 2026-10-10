@@ -5217,7 +5217,6 @@ html/semantics/interactive-elements/the-dialog-element/inert-node-is-unfocusable
 - "#color is not  focusable"
 - "#contenteditable-div is not  focusable"
 - "#datetime is not  focusable"
-- "#html is not  focusable"
 - "#select is not  focusable"
 - "#tabindex-span is not  focusable"
 - "#text is not  focusable"
