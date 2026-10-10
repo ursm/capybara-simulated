@@ -305,6 +305,9 @@ pub(crate) const STATE_HAS_FILES: u32 = 1 << 15;
 // attribute no longer drives it — and initialised from that attribute once.
 pub(crate) const STATE_SELECTED_DIRTY: u32 = 1 << 16;
 pub(crate) const STATE_SELECTED_INIT: u32 = 1 << 17;
+// …and an element an upgrade has been tried on, or made custom by its constructor: its custom element reactions run
+// from then on, whatever its registry resolves to after (adopted into an inert document) — custom_elements.rs.
+pub(crate) const STATE_UPGRADED: u32 = 1 << 18;
 
 
 impl NodeData {
@@ -1986,6 +1989,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::rendered::install(scope, ns, context_id);
     crate::focus::install(scope, ns, context_id);
     crate::autofocus::install(scope, ns, context_id);
+    crate::custom_elements::install(scope, ns, context_id);
     crate::text_selection::install(scope, ns, context_id);
     crate::intersection::install(scope, ns, context_id);
     crate::resize_observation::install(scope, ns, context_id);
