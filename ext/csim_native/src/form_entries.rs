@@ -82,7 +82,7 @@ impl RealmArena {
                 "select" => {
                     for option in self.list_of_options(field) {
                         if self.get(option).is_some_and(|o| o.state & STATE_SELECTED != 0) && !self.option_disabled(option) {
-                            out.push(Entry::Text(name.clone(), units(&self.option_value(option))));
+                            out.push(Entry::Text(name.clone(), self.option_value(option)));
                             if n.plain_attr("multiple").is_none() {
                                 break;
                             }

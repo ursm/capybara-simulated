@@ -449,18 +449,23 @@ impl RealmArena {
         }
         (0..options.len()).filter(|&i| state[i] != before[i]).map(|i| (options[i], state[i])).collect()
     }
-    // An option's value: its `value` attribute, else its text.
-    pub(crate) fn option_value(&self, id: NodeId) -> String {
-        match self.get(id).and_then(|n| n.plain_attr("value")) {
-            Some(v) => v.to_string(),
-            None => self.option_text(id),
+    // An option's value: its `value` attribute, else its text — as the code units the page sees, a lone surrogate
+    // included.
+    pub(crate) fn option_value(&self, id: NodeId) -> Vec<u16> {
+        match self.get(id).and_then(|n| n.plain_attr_units("value")) {
+            Some(v) => v,
+            None => self.option_text_units(id),
         }
     }
-    // …and its `text`: its descendant text but a script's, ASCII whitespace stripped and collapsed.
-    fn option_text(&self, id: NodeId) -> String {
+    // …and its `text`: its descendant text but an HTML or SVG script's, ASCII whitespace stripped and collapsed.
+    fn option_text_units(&self, id: NodeId) -> Vec<u16> {
         let mut text: Vec<u16> = Vec::new();
         self.collect_text(id, &mut text);
-        String::from_utf16_lossy(&text).split(is_ascii_ws).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
+        let words: Vec<&[u16]> = text.split(|&u| is_ascii_ws_unit(u)).filter(|w| !w.is_empty()).collect();
+        words.join(&0x20)
+    }
+    fn option_text(&self, id: NodeId) -> String {
+        String::from_utf16_lossy(&self.option_text_units(id))
     }
 
     // The text a form control SHOWS in its box (walk.rs `control_text`), and whether that is its placeholder: a
@@ -506,7 +511,9 @@ impl RealmArena {
         for &c in &n.children {
             match self.get(c) {
                 Some(t) if t.kind == NodeKind::Text => out.extend_from_slice(&t.data),
-                Some(e) if e.kind == NodeKind::Element && e.local_name != local_name!("script") => self.collect_text(c, out),
+                Some(e) if e.kind == NodeKind::Element && !(e.local_name == local_name!("script") && (e.is_html() || e.ns == web_atoms::ns!(svg))) => {
+                    self.collect_text(c, out)
+                }
                 _ => {}
             }
         }
@@ -804,7 +811,7 @@ fn select_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let cid = crate::dom::realm_id(scope, &args);
     let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let value = crate::dom::utf16_arg(scope, args.get(1));
-    let changed = crate::dom::realm(scope, cid).select_option(select, |arena, _, o| arena.option_value(o).encode_utf16().eq(value.iter().copied()));
+    let changed = crate::dom::realm(scope, cid).select_option(select, |arena, _, o| arena.option_value(o) == value);
     rv.set(crate::dom::nodes_value(scope, cid, select, &changed));
 }
 

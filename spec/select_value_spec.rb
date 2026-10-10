@@ -125,6 +125,51 @@ RSpec.describe 'picking a disabled option' do
     expect(session.find(:css, '#grp').value).to eq('Keep')
   end
 
+  # A pick is the select's own document's to restyle: one the parent's script built and moved into a frame matches
+  # the frame's `option:checked` rule at its new option, through `value` and `selectedIndex` alike.
+  it "restyles the options of a select in another realm's document as they are picked" do
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const f = document.body.appendChild(document.createElement('iframe'));
+      f.onload = () => {
+        const fd = f.contentDocument, fw = f.contentWindow;
+        const s = document.createElement('select');
+        s.innerHTML = '<option>a</option><option>b</option><option>c</option>';
+        fd.body.append(s);
+        const colors = () => [...s.options].map((o) => fw.getComputedStyle(o).color);
+        s.value = 'b';
+        const byValue = colors();
+        s.selectedIndex = 2;
+        done([byValue, colors()]);
+      };
+      f.srcdoc = '<!doctype html><style>option { color: rgb(0, 0, 255) } option:checked { color: rgb(255, 0, 0) }</style><body>';
+    JS
+    blue, red = 'rgb(0, 0, 255)', 'rgb(255, 0, 0)'
+    expect(got).to eq([[blue, red, blue], [blue, blue, red]])
+  end
+
+  # An option's value is the code units the page sees, a lone surrogate one of them (DOM's string equality), and its
+  # text skips only an HTML or SVG `<script>` — a MathML one is text like any other (Chrome: `aMb` is picked).
+  it 'picks the option whose value is the exact string, with only HTML and SVG scripts left out of its text' do
+    got = session.evaluate_script(<<~'JS')
+      (() => {
+        const s = document.createElement('select');
+        s.innerHTML = '<option>x</option><option>y</option>';
+        s.options[1].setAttribute('value', '\uD800');
+        const out = [];
+        s.value = '\uFFFD'; out.push(s.selectedIndex);
+        s.value = '\uD800'; out.push(s.selectedIndex);
+        const m = document.createElementNS('http://www.w3.org/1998/Math/MathML', 'script');
+        m.textContent = 'M';
+        s.options[0].append(m);
+        s.options[0].textContent = 'a'; s.options[0].append(m, 'b');
+        s.value = 'aMb'; out.push(s.selectedIndex);
+        return out;
+      })()
+    JS
+    expect(got).to eq([-1, 1, 0])
+  end
+
   it 'refuses to unselect a disabled option' do
     session.find(:css, '#multi option', text: 'Stuck').unselect_option
     expect(session.find(:css, '#multi').value).to eq(['Stay', 'Stuck'])
