@@ -38,4 +38,24 @@ RSpec.describe 'Intersection geometry' do
     expect(got['margin']).to eq(['115,55,25,50', '30,19,110,132', 0.5])
     expect([got['hidden'][0], got['clip'][0]]).to eq(['330,10,10,40', '530,10,10,40'])
   end
+
+  # (…an infinite-scroll sentinel just below a scroller's scrollport, watched with a margin: intersecting — the root is
+  # no clip of its own target's; and a target in a frame under its root there, or under the frame's document)
+  it 'intersects a target below the scrollport within the margin, and one in a frame against a root there' do
+    page = <<~'HTML'
+      <!doctype html><meta charset=utf-8><style>body{margin:0}</style>
+      <div id=sc style="height:100px;width:100px;overflow:hidden"><div style="height:150px"></div><div id=s style="height:20px"></div></div>
+      <iframe id=f style="border:0;width:300px;height:200px" srcdoc="<style>body{margin:0}</style><div id=r style='margin-left:100px;width:100px;height:100px;overflow:hidden'><div id=x style='margin-left:80px;width:50px;height:50px'></div></div>"></iframe>
+      <script>
+        window.res = {};
+        const mk = (name, el, opts) => new IntersectionObserver((es) => { res[name] = [es[0].isIntersecting, es[0].intersectionRatio]; }, opts).observe(el);
+        mk('margin', s, {root: sc, rootMargin: '100px 0px'}); mk('nomargin', s, {root: sc});
+        f.onload = () => { const d = f.contentDocument; mk('frameRoot', d.getElementById('x'), {root: d.getElementById('r')}); mk('frameDoc', d.getElementById('x'), {root: d}); };
+      </script>
+    HTML
+    s2 = simulated_session(->(_) { [200, {'content-type' => 'text/html'}, [page]] })
+    s2.visit '/'
+    expect(s2.evaluate_script('Object.keys(res).length')).to eq(4)
+    expect(s2.evaluate_script('res')).to eq('margin' => [true, 1], 'nomargin' => [false, 0], 'frameRoot' => [true, 0.4], 'frameDoc' => [true, 0.4])
+  end
 end

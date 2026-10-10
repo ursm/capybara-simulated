@@ -1,6 +1,7 @@
-// Intersection Observer's geometry (§3.2.8 "run the update intersection observations steps"): the root intersection
-// rectangle — the viewport for a document root, a root element's padding box where it clips its content, else its
-// border box, grown by the observer's margin — and each target's intersection with it, "computed" as the spec says:
+// Intersection Observer's geometry (§3.2.8 "run the update intersection observations steps"), in one realm's layout:
+// the root intersection rectangle — the viewport for a document root, a root element's padding box where it clips its
+// content (in both axes: Chrome and Firefox take the border box of one clipping in one), else its border box, grown by
+// the observer's margin — and each target's intersection with it, "computed" as the spec says:
 // the target's bounding box clipped by every box up its containing-block chain that clips its overflow, up to the root
 // (none where the root is an element the target is not under), then by the root's rectangle — edge-adjacent rectangles
 // intersecting, with no area. The ratio of that area to the target's, and the threshold index it reaches. What the
@@ -104,7 +105,8 @@ impl RealmArena {
         let base = match root {
             None => [0.0, 0.0, self.viewport[0], self.viewport[1]],
             Some(r) => {
-                let clips = self.get(r).and_then(|n| crate::geometry::laid(self, n)).is_some_and(|b| b.clip != 0);
+                use crate::layout::{CLIP_X, CLIP_Y};
+                let clips = self.get(r).and_then(|n| crate::geometry::laid(self, n)).is_some_and(|b| b.clip & (CLIP_X | CLIP_Y) == CLIP_X | CLIP_Y);
                 if clips { crate::hit_test::clip_rect(self, r)? } else { crate::geometry::rendered_box(self, r)? }
             }
         };
@@ -134,14 +136,20 @@ impl RealmArena {
                 rect.is_some()
             });
         }
-        let intersection = if reached_root { rect.zip(root_rect).and_then(|(r, root)| intersect(r, root)) } else { None };
+        // (…a target not under its root is skipped: no box, no intersection — the spec's zeros, Chrome's)
+        if !reached_root {
+            return Observation { target: None, intersection: None, ratio: 0.0, threshold_index: 0 };
+        }
+        let intersection = rect.zip(root_rect).and_then(|(r, root)| intersect(r, root));
         let area = bounds.map_or(0.0, |b| b[2] * b[3]);
         let ratio = match intersection {
             Some(i) if area > 0.0 => i[2] * i[3] / area,
             Some(_) => 1.0,
             None => 0.0,
         };
-        Observation { target: bounds, intersection, ratio, threshold_index: thresholds.iter().filter(|&&t| t <= ratio).count() }
+        // (…its threshold index 0 where it does not intersect, whatever thresholds sit at 0)
+        let threshold_index = if intersection.is_some() { thresholds.iter().filter(|&&t| t <= ratio).count() } else { 0 };
+        Observation { target: bounds, intersection, ratio, threshold_index }
     }
 }
 
