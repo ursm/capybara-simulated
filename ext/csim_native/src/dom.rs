@@ -1897,6 +1897,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "inspectNode", inspect_node, context_id);
     // Element state no attribute carries, for the state pseudo-classes (`:checked`, `:focus`, `:hover`, …).
     register(scope, ns, "setState", set_state, context_id);
+    register(scope, ns, "state", state, context_id);
     register(scope, ns, "setNaturalSize", set_natural_size, context_id);
     register(scope, ns, "linkPseudoBox", link_pseudo_box, context_id);
     register(scope, ns, "directionality", directionality, context_id);
@@ -2230,18 +2231,27 @@ fn insert_child(
     }
 }
 
-// __dom.setState(nid, bits): the element's state bits (`STATE_*`) become `bits`.
-fn set_state(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let bits = args.get(1).uint32_value(scope).unwrap_or(0);
+// __dom.setState(nid, mask, bits) -> the bits it had: the element's state bits (`STATE_*`) under `mask` become `bits`.
+fn set_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
+    let mask = args.get(1).uint32_value(scope).unwrap_or(0);
+    let bits = args.get(2).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
-    realm(scope, cid).set_state(id, bits);
+    let arena = realm(scope, cid);
+    let had = arena.get(id).map_or(0, |n| n.state);
+    let next = (had & !mask) | (bits & mask);
+    if next != had {
+        arena.set_state(id, next);
+    }
+    rv.set_uint32(had);
+}
+
+// __dom.state(nid) -> the element's state bits (`STATE_*`): what a script or the user did to it that no attribute
+// records, the engine's alone.
+fn state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
+    let cid = realm_id(scope, &args);
+    rv.set_uint32(realm(scope, cid).get(id).map_or(0, |n| n.state));
 }
 
 // __dom.setValue(nid, value): a form control's live value — a string once dirty, `undefined` back to its default.

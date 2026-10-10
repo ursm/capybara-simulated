@@ -411,19 +411,30 @@ pub(crate) fn hold_objects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
         }
     }
 }
-pub(crate) fn release_objects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// …and the nodes among them an element state is on (`STATE_*`), whose removing steps may have state to undo — or
+// undefined for none.
+pub(crate) fn release_objects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(nodes) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
+    let mut stated = Vec::new();
     for i in 0..nodes.length() {
         let Some(value) = nodes.get_index(scope, i) else { continue };
         let Some(ptr) = handle_of(scope, value) else { continue };
         // SAFETY: as above.
         let h = unsafe { ptr.as_ref() };
-        if let (true, Some(nid)) = (h.held.replace(false), h.nid.get()) {
-            crate::dom::dom(scope).let_go.push(nid);
+        let Some(nid) = h.nid.get() else { continue };
+        let d = crate::dom::dom(scope);
+        if d.arena.get(nid).is_some_and(|n| n.state != 0) {
+            stated.push(value);
+        }
+        if h.held.replace(false) {
+            d.let_go.push(nid);
         }
     }
     if crate::dom::dom(scope).let_go.len() >= 4096 {
         let_go(scope);
+    }
+    if !stated.is_empty() {
+        rv.set(v8::Array::new_with_elements(scope, &stated).into());
     }
 }
 

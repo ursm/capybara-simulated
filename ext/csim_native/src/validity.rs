@@ -363,6 +363,41 @@ impl RealmArena {
         };
         (state & !STATE_SELECTED) | selected | STATE_SELECTED_INIT
     }
+    // A select's selected options, in its list of options' order — the first only, with `first` — with each one's index
+    // there.
+    pub(crate) fn selected_options(&self, select: NodeId, first: bool) -> Vec<(usize, NodeId)> {
+        let selected = self
+            .list_of_options(select)
+            .into_iter()
+            .enumerate()
+            .filter(|&(_, o)| self.get(o).is_some_and(|n| n.state & STATE_SELECTED != 0));
+        if first { selected.take(1).collect() } else { selected.collect() }
+    }
+    // `select.selectedIndex = …` / `select.value = …`: every option of the select initialised, the first that `pick`
+    // takes (by its index and itself) selected and dirty — as a user's pick, not through its `selected` attribute — and
+    // every other deselected; none, where it takes none (the select reads back -1, not re-defaulted, as Chrome). The
+    // options whose selectedness changed.
+    pub(crate) fn select_option(&mut self, select: NodeId, pick: impl Fn(&Self, usize, NodeId) -> bool) -> Vec<NodeId> {
+        let mut changed = Vec::new();
+        let mut picked = false;
+        for (i, o) in self.list_of_options(select).into_iter().enumerate() {
+            let Some(had) = self.get(o).map(|n| n.state) else { continue };
+            let initialised = self.option_initialised(o);
+            let next = if !picked && pick(self, i, o) {
+                picked = true;
+                initialised | STATE_SELECTED | STATE_SELECTED_DIRTY
+            } else {
+                initialised & !STATE_SELECTED
+            };
+            if next != had {
+                self.set_state(o, next);
+            }
+            if (next ^ had) & STATE_SELECTED != 0 {
+                changed.push(o);
+            }
+        }
+        changed
+    }
     // Whether an option is disabled for its select's selectedness (HTML §4.10.10): its own `disabled`, or its nearest
     // optgroup's — across a wrapper of a customizable select — not its select's.
     pub(crate) fn option_disabled(&self, option: NodeId) -> bool {
@@ -512,6 +547,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "willValidate", will_validate, context_id);
     crate::dom::register(scope, ns, "actuallyDisabled", actually_disabled, context_id);
     crate::dom::register(scope, ns, "listOfOptions", list_of_options, context_id);
+    crate::dom::register(scope, ns, "selectedOptions", selected_options, context_id);
+    crate::dom::register(scope, ns, "selectedIndex", selected_index, context_id);
+    crate::dom::register(scope, ns, "selectIndex", select_index, context_id);
+    crate::dom::register(scope, ns, "selectValue", select_value, context_id);
     crate::dom::register(scope, ns, "isListBox", is_list_box, context_id);
     crate::dom::register(scope, ns, "isSubmitButton", is_submit_button, context_id);
     crate::dom::register(scope, ns, "selectedness", selectedness, context_id);
@@ -733,6 +772,40 @@ fn list_of_options(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let ids = crate::dom::realm(scope, cid).list_of_options(select);
     rv.set(crate::dom::nodes_value(scope, cid, select, &ids));
+}
+
+// __dom.selectedOptions(selectNid, first) -> its selected options (`selected_options`), as `nodes_value` answers.
+fn selected_options(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let first = args.get(1).is_true();
+    let ids: Vec<NodeId> = crate::dom::realm(scope, cid).selected_options(select, first).into_iter().map(|(_, o)| o).collect();
+    rv.set(crate::dom::nodes_value(scope, cid, select, &ids));
+}
+
+// __dom.selectedIndex(selectNid) -> the index of its first selected option, -1 with none.
+fn selected_index(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_int32(-1) };
+    let first = crate::dom::realm(scope, cid).selected_options(select, true).first().map_or(-1, |&(i, _)| i as i32);
+    rv.set_int32(first);
+}
+
+// __dom.selectIndex(selectNid, index) / __dom.selectValue(selectNid, value) -> the options whose selectedness changed
+// as the index-th option, or the first of that value, is picked (`select_option`), as `nodes_value` answers.
+fn select_index(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let index = args.get(1).integer_value(scope).unwrap_or(-1);
+    let changed = crate::dom::realm(scope, cid).select_option(select, |_, i, _| i as i64 == index);
+    rv.set(crate::dom::nodes_value(scope, cid, select, &changed));
+}
+fn select_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let value = crate::dom::utf16_arg(scope, args.get(1));
+    let changed = crate::dom::realm(scope, cid).select_option(select, |arena, _, o| arena.option_value(o).encode_utf16().eq(value.iter().copied()));
+    rv.set(crate::dom::nodes_value(scope, cid, select, &changed));
 }
 
 // __dom.validityFlags(nid) -> the constraints the element suffers from (`validity`), its ValidityState's flags in IDL
