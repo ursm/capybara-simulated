@@ -25,6 +25,7 @@ mod cssom_rule;
 mod document_encoding;
 mod dom;
 mod dom_matrix;
+mod editing;
 mod element_state;
 mod event_path;
 mod focus;

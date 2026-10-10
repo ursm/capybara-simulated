@@ -1960,6 +1960,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::text_selection::install(scope, ns, context_id);
     crate::intersection::install(scope, ns, context_id);
     crate::resize_observation::install(scope, ns, context_id);
+    crate::editing::install(scope, ns, context_id);
     crate::resolved::install(scope, ns, context_id);
     crate::mime::install(scope, ns, context_id);
     crate::font_faces::install(scope, ns, context_id);

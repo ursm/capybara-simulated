@@ -293,6 +293,10 @@ fn compare(arena: &RealmArena, a: Boundary, b: Boundary) -> Option<std::cmp::Ord
         }
     }
 }
+// …of two points given as (node, offset).
+pub(crate) fn compare_points(arena: &RealmArena, (a, ao): (NodeId, u32), (b, bo): (NodeId, u32)) -> Option<std::cmp::Ordering> {
+    compare(arena, Boundary { node: a, offset: ao }, Boundary { node: b, offset: bo })
+}
 fn ordering_value(o: Option<std::cmp::Ordering>) -> Option<i32> {
     o.map(|o| o as i32)
 }
