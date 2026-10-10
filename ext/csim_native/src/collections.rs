@@ -21,6 +21,9 @@ enum Filter {
     Name(Vec<u16>),
     // The legacy document collections: an HTML element of a local name, and an attribute it must hold.
     Html(&'static [&'static str], Option<&'static str>),
+    // A stylesheet's owner: an HTML or SVG `<style>`, an HTML `<link>` (by local name and namespace — an SVG `STYLE`
+    // is none).
+    SheetOwners,
 }
 
 use crate::validity::is_ascii_ws_unit as ascii_whitespace;
@@ -62,6 +65,11 @@ impl Filter {
             Filter::Html(names, attr) => {
                 n.ns == ns!(html) && names.contains(&&*n.local_name) && attr.is_none_or(|a| n.plain_attr(a).is_some())
             }
+            Filter::SheetOwners => match &*n.local_name {
+                "style" => n.ns == ns!(html) || n.ns == ns!(svg),
+                "link" => n.ns == ns!(html),
+                _ => false,
+            },
         }
     }
 }
@@ -353,6 +361,8 @@ const SCRIPTS: u32 = 6;
 const ANCHORS: u32 = 7;
 const EMBEDS: u32 = 8;
 const NAME: u32 = 9;
+const SHEET_OWNERS: u32 = 10;
+const SHADOW_HOSTS: u32 = 11;
 
 // A string argument, or None for "*" (any).
 fn name_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Option<String> {
@@ -363,7 +373,9 @@ fn name_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Op
 // __dom.elementsBy(scopeNid, kind, a, b) -> the scope's descendant elements a filter takes, as `nodes_value` answers: class names
 // (`kind` 0: `a` the list, `b` quirks mode), a namespace and local name (1: `a` the namespace, null for none, `b` the
 // local name; "*" any), a qualified name (2: `a`, "*" any; `b` an HTML document), a legacy document collection
-// (3 forms, 4 images, 5 links, 6 scripts, 7 anchors, 8 embeds), or a `name` (9: `a`).
+// (3 forms, 4 images, 5 links, 6 scripts, 7 anchors, 8 embeds), a `name` (9: `a`), the stylesheets' owners (10) —
+// or the shadow hosts among its shadow-including descendants (11: shadow-including tree order, a host before its
+// shadow tree's own).
 fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let kind = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
@@ -400,6 +412,12 @@ fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         ANCHORS => Filter::Html(&["a"], Some("name")),
         EMBEDS => Filter::Html(&["embed"], None),
         NAME => Filter::Name(utf16_arg(scope, a)),
+        SHEET_OWNERS => Filter::SheetOwners,
+        SHADOW_HOSTS => {
+            let cid = realm_id(scope, &args);
+            let ids = crate::dom::realm(scope, cid).shadow_including_elements(root, |n| n.shadow_root.is_some());
+            return rv.set(crate::dom::nodes_value(scope, cid, root, &ids));
+        }
         _ => return,
     };
     let cid = realm_id(scope, &args);
