@@ -701,6 +701,8 @@ pub(crate) struct RealmArena {
     // Each open dialog's "previously focused element": what its document had focused as it opened, which closing it
     // gives focus back to — whichever realm's script opens and closes it (focus.rs).
     pub(crate) previously_focused: std::collections::HashMap<NodeId, NodeId>,
+    // Each text control's selection, once it has one (text_selection.rs).
+    pub(crate) text_selections: std::collections::HashMap<NodeId, crate::text_selection::TextSelection>,
     // Moves with every write to the arena (a node made or freed, any `get_mut`): what a memo of it keys on.
     pub(crate) mutations: u64,
     // The lock the style engines' rules and every element's parsed declarations are read under — ONE for the isolate's
@@ -1951,6 +1953,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::rendered::install(scope, ns, context_id);
     crate::focus::install(scope, ns, context_id);
     crate::autofocus::install(scope, ns, context_id);
+    crate::text_selection::install(scope, ns, context_id);
     crate::resolved::install(scope, ns, context_id);
     crate::mime::install(scope, ns, context_id);
     crate::font_faces::install(scope, ns, context_id);
@@ -2021,6 +2024,9 @@ pub(crate) fn register(
         v8::Function::builder(callback).data(data).build(scope),
         v8::String::new(scope, name),
     ) {
+        // (…one op to a name: a second module registering a name it shares replaced the first's silently — `rangeText`,
+        // Range's stringifier, once answered as a text control's `setRangeText`)
+        assert!(!ns.has_own_property(scope, k.into()).unwrap_or(false), "__dom.{name} registered twice");
         ns.set(scope, k.into(), f.into());
     }
 }

@@ -91,8 +91,11 @@ impl RealmArena {
     }
 
     // A dropped or begun-again realm's documents are gone, and their candidates with them; so are the dialogs' records
-    // of what they gave focus back to.
+    // of what they gave focus back to, and its controls' selections.
     pub(crate) fn forget_dead_focus_records(&mut self) {
+        let mut selections = std::mem::take(&mut self.text_selections);
+        selections.retain(|&id, _| self.get(id).is_some());
+        self.text_selections = selections;
         let mut docs = std::mem::take(&mut self.autofocus.docs);
         docs.retain(|&top, _| self.get(top).is_some());
         self.autofocus.docs = docs;

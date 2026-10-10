@@ -71,6 +71,7 @@ mod svg_geometry;
 mod tables;
 mod text;
 mod text_codec;
+mod text_selection;
 mod token_list;
 mod traversal;
 // The Unicode classes layout asks of a character, parsed out of the regex that spells them by regex-syntax.
