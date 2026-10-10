@@ -214,6 +214,29 @@ RSpec.describe 'HTML element bindings' do
     expect(got).to eq(%w[undefined undefined undefined])
   end
 
+  # Chrome 2026-10-10: na/nar/nfs undefined, dup/mix HTMLCollections of 2, fr the frame's window, frid and onlyid the
+  # element; the document's names ni,nf,ne,mix,fr,b1,a1.
+  it "names a window's objects and a document's elements as HTML does" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend', `
+        <a name=na></a><area name=nar><img name=ni><form name=nf></form><embed name=ne>
+        <div id=dup></div><span id=dup></span><img name=mix><p id=mix></p>
+        <iframe name=fr id=frid></iframe><iframe id=onlyid></iframe><img name=a1 id=b1>`);
+    JS
+    got = session.evaluate_script(<<~JS)
+      ['na', 'nar', 'ni', 'nf', 'ne', 'dup', 'mix', 'fr', 'frid', 'onlyid'].map((k) => {
+        const v = window[k];
+        if (v === undefined) return 'undefined';
+        if (v === frames[1]) return 'frame';
+        return v instanceof HTMLCollection ? `collection ${v.length}` : v.localName;
+      })
+    JS
+    names = session.evaluate_script("Object.getOwnPropertyNames(document).filter((k) => !k.startsWith('_') && k !== 'location')")
+    expect(got).to eq(['undefined', 'undefined', 'img', 'form', 'embed', 'collection 2', 'collection 2', 'frame', 'iframe', 'iframe'])
+    expect(names).to eq(%w[ni nf ne mix fr b1 a1])
+  end
+
   it 'runs a command or popover invoker as a click activates it' do
     session.visit '/'
     session.execute_script(<<~JS)

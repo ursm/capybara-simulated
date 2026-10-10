@@ -582,6 +582,15 @@ impl NodeData {
         let value = self.plain_attr(local)?;
         Some(self.get_attr_u16(local).map_or_else(|| value.encode_utf16().collect(), <[u16]>::to_vec))
     }
+    // Whether the attribute `local` in no namespace is `units`, exactly (as UTF-16) — compared where the arena holds it,
+    // no copy made.
+    pub(crate) fn plain_attr_is(&self, local: &str, units: &[u16]) -> bool {
+        match (self.plain_attr(local), self.get_attr_u16(local)) {
+            (None, _) => false,
+            (Some(_), Some(own)) => own == units,
+            (Some(value), None) => value.encode_utf16().eq(units.iter().copied()),
+        }
+    }
 }
 
 // Is `key` the store key of an attribute named `local` when it has no namespace record — `local` itself, or `local`
@@ -675,9 +684,9 @@ pub(crate) struct RealmArena {
     // life, as a block parsed under one lock can never be read under another, and an element keeps its `style` block
     // into another realm's tree.
     pub(crate) style_lock: crate::style::StyleLock,
-    // Per tree root, the first element of each id, as of `mutations` (collections.rs `element_by_id`): a page's
+    // Per tree root, the elements of each id in tree order, as of `mutations` (collections.rs `elements_by_id`): a page's
     // `getElementById` asked one walk of its tree per call, a document's whole, where browsers keep an id map.
-    pub(crate) id_index: std::cell::RefCell<(u64, std::collections::HashMap<NodeId, std::collections::HashMap<Vec<u16>, NodeId>>)>,
+    pub(crate) id_index: std::cell::RefCell<(u64, std::collections::HashMap<NodeId, std::collections::HashMap<Vec<u16>, Vec<NodeId>>>)>,
     // Per tree root, the facts element_state.rs asks of every control in turn, as of `mutations` (`form_facts`).
     pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
     // Each element's resolved directionality asked so far, true for rtl, as of `mutations` (`is_rtl`)…

@@ -56,13 +56,7 @@ impl Filter {
                     None => *want == *n.local_name,
                 }
             }
-            Filter::Name(name) => {
-                n.ns == ns!(html)
-                    && match n.get_attr_u16("name") {
-                        Some(units) => units == &name[..],
-                        None => n.plain_attr("name").is_some_and(|v| v.encode_utf16().eq(name.iter().copied())),
-                    }
-            }
+            Filter::Name(name) => n.ns == ns!(html) && n.plain_attr_is("name", name),
             Filter::Html(names, attr) => {
                 n.ns == ns!(html) && names.contains(&&*n.local_name) && attr.is_none_or(|a| n.plain_attr(a).is_some())
             }
@@ -73,23 +67,33 @@ impl Filter {
 // The descendant elements of `scope` the filter takes, in tree order.
 fn collect(arena: &RealmArena, scope: NodeId, filter: &Filter) -> Vec<NodeId> {
     let mut out = Vec::new();
+    each_element(arena, scope, |id, n| {
+        if filter.takes(n) {
+            out.push(id);
+        }
+    });
+    out
+}
+
+// Each descendant element of `scope` in tree order — not into a shadow tree or a template's contents.
+fn each_element(arena: &RealmArena, scope: NodeId, mut visit: impl FnMut(NodeId, &NodeData)) {
     let mut stack: Vec<NodeId> = arena.get(scope).map_or(Vec::new(), |n| n.children.iter().rev().copied().collect());
     while let Some(id) = stack.pop() {
         let Some(n) = arena.get(id) else { continue };
         if n.kind != NodeKind::Element {
             continue;
         }
-        if filter.takes(n) {
-            out.push(id);
-        }
+        visit(id, n);
         stack.extend(n.children.iter().rev());
     }
-    out
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "elementsBy", elements_by, context_id);
     crate::dom::register(scope, ns, "elementById", element_by_id, context_id);
+    crate::dom::register(scope, ns, "documentNamed", document_named, context_id);
+    crate::dom::register(scope, ns, "documentNames", document_names, context_id);
+    crate::dom::register(scope, ns, "windowNamed", window_named, context_id);
 }
 
 // __dom.elementById(rootNid, id) -> `getElementById`: the first element in tree order, the root itself included, whose id
@@ -104,31 +108,155 @@ fn element_by_id(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set(answer);
 }
 
+// __dom.documentNamed(docNid, name) -> the document's named elements with the name (`RealmArena::document_named`), as
+// `nodes_value` answers.
+fn document_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return };
+    let name = utf16_arg(scope, args.get(1));
+    let cid = realm_id(scope, &args);
+    let found = crate::dom::realm(scope, cid).document_named(doc, &name);
+    rv.set(crate::dom::nodes_value(scope, cid, doc, &found));
+}
+
+// __dom.documentNames(docNid) -> [name] — the document's supported property names (`RealmArena::document_names`).
+fn document_names(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let names = crate::dom::realm(scope, cid).document_names(doc);
+    let strings: Vec<v8::Local<'_, v8::Value>> = names
+        .iter()
+        .filter_map(|units| v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal).map(Into::into))
+        .collect();
+    rv.set(v8::Array::new_with_elements(scope, &strings).into());
+}
+
+// __dom.windowNamed(docNid, name, kind) -> the named objects of the document's window with the name
+// (`RealmArena::window_named`): kind 0 its navigables' containers, 1 its elements of the id alone, 2 all its elements.
+fn window_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return };
+    let name = utf16_arg(scope, args.get(1));
+    let kind = args.get(2).int32_value(scope).unwrap_or(2);
+    let cid = realm_id(scope, &args);
+    let found = crate::dom::realm(scope, cid).window_named(doc, &name, kind);
+    rv.set(crate::dom::nodes_value(scope, cid, doc, &found));
+}
+
 impl RealmArena {
     // The first element of `root`'s tree in tree order, `root` itself included, whose id is `id` (exactly, as UTF-16 —
-    // a lone surrogate included): from the tree's id map, made in one walk the first time it is asked after the arena
-    // changed (`id_index`).
+    // a lone surrogate included).
     pub(crate) fn element_by_id(&self, root: NodeId, id: &[u16]) -> Option<NodeId> {
+        self.elements_by_id(root, id).first().copied()
+    }
+    // …and every one, in tree order: from the tree's id map, made in one walk the first time it is asked after the arena
+    // changed (`id_index`).
+    pub(crate) fn elements_by_id(&self, root: NodeId, id: &[u16]) -> Vec<NodeId> {
         let mut memo = self.id_index.borrow_mut();
         if memo.0 != self.mutations {
             memo.1.clear();
             memo.0 = self.mutations;
         }
         let ids = memo.1.entry(root).or_insert_with(|| {
-            let mut ids = std::collections::HashMap::new();
+            let mut ids: std::collections::HashMap<Vec<u16>, Vec<NodeId>> = std::collections::HashMap::new();
             let mut stack = vec![root];
             while let Some(n) = stack.pop() {
                 let Some(node) = self.get(n) else { continue };
                 if node.kind == NodeKind::Element {
                     if let Some(units) = node.plain_attr_units("id") {
-                        ids.entry(units).or_insert(n);
+                        ids.entry(units).or_default().push(n);
                     }
                 }
                 stack.extend(node.children.iter().rev());
             }
             ids
         });
-        ids.get(id).copied()
+        ids.get(id).cloned().unwrap_or_default()
+    }
+
+    // HTML's named properties of a document (§3.1.6) and of its window (§7.2.2.3), over the document tree — not into a
+    // shadow tree or a template's contents.
+    //
+    // An embed or object is "exposed" where no object or embed is its ancestor, as the structure tells it (which of a
+    // plugin and the fallback content an object shows is not modelled).
+    fn exposed(&self, id: NodeId) -> bool {
+        let mut at = self.get(id).and_then(|n| n.parent);
+        while let Some(n) = at.and_then(|p| self.get(p)).filter(|n| n.kind == NodeKind::Element) {
+            if n.is_html_named("object") || n.is_html_named("embed") {
+                return false;
+            }
+            at = n.parent;
+        }
+        true
+    }
+    // The names an element of a document is a named element with, its id's first: an embed, form, iframe, img or object
+    // by its `name`, an object by its `id`, and an img by its `id` where it has a `name` too — an embed or object only
+    // where it is exposed; none empty.
+    fn document_names_of(&self, id: NodeId, n: &NodeData) -> [Option<Vec<u16>>; 2] {
+        if n.ns != ns!(html) {
+            return [None, None];
+        }
+        let nonempty = |v: Option<Vec<u16>>| v.filter(|v| !v.is_empty());
+        let name = nonempty(n.plain_attr_units("name"));
+        let (by_name, by_id) = match &*n.local_name {
+            "form" | "iframe" => (true, false),
+            "img" => (true, name.is_some()),
+            "embed" => (self.exposed(id), false),
+            "object" => {
+                let exposed = self.exposed(id);
+                (exposed, exposed)
+            }
+            _ => (false, false),
+        };
+        [nonempty(n.plain_attr_units("id")).filter(|_| by_id), name.filter(|_| by_name)]
+    }
+    // The document's named elements with the name `name`, in tree order.
+    pub(crate) fn document_named(&self, doc: NodeId, name: &[u16]) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        if name.is_empty() {
+            return out;
+        }
+        each_element(self, doc, |id, n| {
+            if self.document_names_of(id, n).iter().flatten().any(|v| v == name) {
+                out.push(id);
+            }
+        });
+        out
+    }
+    // The document's supported property names: each element's names in tree order, a later duplicate ignored.
+    pub(crate) fn document_names(&self, doc: NodeId) -> Vec<Vec<u16>> {
+        let (mut out, mut seen) = (Vec::new(), std::collections::HashSet::new());
+        each_element(self, doc, |id, n| {
+            for name in self.document_names_of(id, n).into_iter().flatten() {
+                if seen.insert(name.clone()) {
+                    out.push(name);
+                }
+            }
+        });
+        out
+    }
+    // The named objects of the document's window with the name `name`, in tree order — by `kind`: 0 the containers of
+    // its child navigables whose target name it is (an iframe's or a frame's, the `name` its container gave it — one the
+    // navigable gave itself is not modelled); 1 the elements whose id it is; 2 those and the embed, form, img and object
+    // elements whose `name` it is.
+    pub(crate) fn window_named(&self, doc: NodeId, name: &[u16], kind: i32) -> Vec<NodeId> {
+        if name.is_empty() {
+            return Vec::new();
+        }
+        if kind == 1 {
+            return self.elements_by_id(doc, name);
+        }
+        let mut out = Vec::new();
+        each_element(self, doc, |id, n| {
+            let named = |tags: &[&str]| n.ns == ns!(html) && tags.contains(&&*n.local_name) && n.plain_attr_is("name", name);
+            let takes = if kind == 0 {
+                named(&["iframe", "frame"])
+            } else {
+                named(&["embed", "form", "img", "object"]) || n.plain_attr_is("id", name)
+            };
+            if takes {
+                out.push(id);
+            }
+        });
+        out
     }
 }
 
