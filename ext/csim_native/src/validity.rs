@@ -449,6 +449,65 @@ impl RealmArena {
         }
         (0..options.len()).filter(|&i| state[i] != before[i]).map(|i| (options[i], state[i])).collect()
     }
+    // HTML's "ask for a reset" (§4.10.7) of a tree change: `nodes` inserted into `parent` (`inserted`), or removed from
+    // it. Where one of them is an option or an optgroup, or `parent` is a select or an optgroup, the select they are (or
+    // were) in runs the selectedness setting algorithm — a just-inserted selected option, the last such in order (its
+    // own or an inserted optgroup's), winning over the incumbent, each initialised from its `selected` attribute first.
+    // The select, and the options whose selectedness changed; None where no select is affected.
+    pub(crate) fn ask_for_reset(&mut self, parent: NodeId, nodes: &[NodeId], inserted: bool) -> Option<(NodeId, Vec<NodeId>)> {
+        let named = |a: &Self, id: NodeId, name: &str| a.get(id).is_some_and(|n| n.is_html_named(name));
+        let affects = named(self, parent, "select")
+            || named(self, parent, "optgroup")
+            || nodes.iter().any(|&n| named(self, n, "option") || named(self, n, "optgroup"));
+        if !affects {
+            return None;
+        }
+        let mut at = Some(parent);
+        let select = loop {
+            let n = self.get(at?)?;
+            if n.kind != NodeKind::Element {
+                return None;
+            }
+            if n.is_html_named("select") {
+                break at?;
+            }
+            at = n.parent;
+        };
+        let mut changed = Vec::new();
+        let mut just = None;
+        if inserted {
+            for &n in nodes {
+                let mut options = Vec::new();
+                if named(self, n, "option") {
+                    options.push(n);
+                } else if named(self, n, "optgroup") {
+                    self.descendant_options(n, &mut options);
+                }
+                for o in options {
+                    changed.extend(self.initialise_options(o));
+                    if self.get(o).is_some_and(|d| d.state & STATE_SELECTED != 0) {
+                        just = Some(o);
+                    }
+                }
+            }
+        }
+        let states = self.selectedness(select, just);
+        for o in self.apply_option_states(states) {
+            if !changed.contains(&o) {
+                changed.push(o);
+            }
+        }
+        Some((select, changed))
+    }
+    // The HTML options under `id`, in tree order.
+    fn descendant_options(&self, id: NodeId, out: &mut Vec<NodeId>) {
+        for &c in self.get(id).map_or(&[][..], |n| &n.children[..]) {
+            if self.get(c).is_some_and(|n| n.is_html_named("option")) {
+                out.push(c);
+            }
+            self.descendant_options(c, out);
+        }
+    }
     // Options' new states written; the options whose selectedness they changed.
     pub(crate) fn apply_option_states(&mut self, states: Vec<(NodeId, u32)>) -> Vec<NodeId> {
         let mut changed = Vec::new();
@@ -582,6 +641,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "isListBox", is_list_box, context_id);
     crate::dom::register(scope, ns, "isSubmitButton", is_submit_button, context_id);
     crate::dom::register(scope, ns, "selectedness", selectedness, context_id);
+    crate::dom::register(scope, ns, "askForReset", ask_for_reset, context_id);
     crate::dom::register(scope, ns, "initialiseOptions", initialise_options, context_id);
     crate::dom::register(scope, ns, "optionDisabled", option_disabled, context_id);
     crate::dom::register(scope, ns, "radioGroup", radio_group, context_id);
@@ -763,6 +823,20 @@ fn selectedness(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let states = arena.selectedness(select, just);
     let changed = arena.apply_option_states(states);
     rv.set(crate::dom::nodes_value(scope, cid, &changed));
+}
+
+// __dom.askForReset(parentNid, [nid, …], inserted) -> [select, options] (`ask_for_reset`): the select the nodes'
+// insertion into the parent (or removal from it) asked for a reset, and the options whose selectedness that changed, as
+// `nodes_value` answers them — nothing where no select is affected.
+fn ask_for_reset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(parent) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let nodes = crate::dom::nids_arg(scope, args.get(1));
+    let inserted = args.get(2).is_true();
+    let Some((select, changed)) = crate::dom::realm(scope, cid).ask_for_reset(parent, &nodes, inserted) else { return };
+    let select = crate::dom::node_value(scope, Some(select));
+    let changed = crate::dom::nodes_value(scope, cid, &changed);
+    rv.set(v8::Array::new_with_elements(scope, &[select, changed]).into());
 }
 
 // __dom.initialiseOptions(nid) -> the options — of a select, or an option itself — whose selectedness their

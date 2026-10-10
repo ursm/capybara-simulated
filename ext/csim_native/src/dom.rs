@@ -2867,7 +2867,7 @@ fn set_shadow_host(
 }
 
 // The nids a JS array lists (an entry that is none skipped).
-fn nids_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<NodeId> {
+pub(crate) fn nids_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<NodeId> {
     let Ok(arr) = v8::Local::<v8::Array>::try_from(value) else { return Vec::new() };
     (0..arr.length())
         .filter_map(|i| arr.get_index(scope, i).and_then(|v| v.integer_value(scope)).and_then(NodeId::from_i64))
