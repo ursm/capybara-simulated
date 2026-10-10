@@ -1908,6 +1908,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setState", set_state, context_id);
     register_fast(scope, ns, "state", state, STATE_FAST, context_id);
     register_fast(scope, ns, "realmOf", realm_of, REALM_OF_FAST, context_id);
+    register_fast(scope, ns, "isConnected", is_connected, IS_CONNECTED_FAST, context_id);
     register(scope, ns, "setArena", set_arena, context_id);
     register(scope, ns, "arenaOf", arena_of, context_id);
     register(scope, ns, "setNaturalSize", set_natural_size, context_id);
@@ -2118,6 +2119,23 @@ const REALM_OF_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new
     realm_of_fast as _,
     &v8::fast_api::CFunctionInfo::new(
         v8::fast_api::Type::Int32.as_info(),
+        &[v8::fast_api::Type::V8Value.as_info(), v8::fast_api::Type::Float64.as_info(), v8::fast_api::Type::CallbackOptions.as_info()],
+        v8::fast_api::Int64Representation::Number,
+    ),
+)];
+// __dom.isConnected(nid) -> whether the node is connected (DOM §4.4): its shadow-including root a document.
+fn is_connected(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = nid_arg(scope, &args, 0);
+    rv.set_bool(id.is_some_and(|id| dom(scope).arena.is_connected(id)));
+}
+fn is_connected_fast(_receiver: v8::Local<v8::Value>, nid: f64, options: *mut v8::fast_api::FastApiCallbackOptions) -> bool {
+    let id = if nid >= 0.0 { NodeId::from_i64(nid as i64) } else { None };
+    fast_dom(options).zip(id).is_some_and(|(d, id)| d.arena.is_connected(id))
+}
+const IS_CONNECTED_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new(
+    is_connected_fast as _,
+    &v8::fast_api::CFunctionInfo::new(
+        v8::fast_api::Type::Bool.as_info(),
         &[v8::fast_api::Type::V8Value.as_info(), v8::fast_api::Type::Float64.as_info(), v8::fast_api::Type::CallbackOptions.as_info()],
         v8::fast_api::Int64Representation::Number,
     ),
