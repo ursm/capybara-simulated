@@ -1523,17 +1523,14 @@ impl RealmArena {
         }
     }
 
-    // Rewrite the positions of the children of `parent` from index `from` on, from their list indexes — after an
-    // insertion or a removal there shifted them. Quietly: the index is where to find a child in its parent's list, read
-    // by nothing a layout walk or a memo keys on — the change itself is the parent's, which `get_mut` stamped. Stamped
-    // as a change of each, every sibling after a removed child was walked again rather than spliced back (a 400-item
-    // list, `remove()` of the 200th: 203 records walked, 3 once it is not).
     // `nodes`, in order, `parent`'s children before `before` (the last, where it is none or no child of it) — each taken
-    // from where it is first: one splice of the list and one reindex past it, where an insertion each reindexed the list
-    // after it each time. A node that is the parent or an ancestor of it, or a second time, is left out.
-    pub(crate) fn insert_children(&mut self, parent: NodeId, nodes: &[NodeId], before: Option<NodeId>) {
+    // from where it is first: one splice of the list, where an insertion each moved the list after it each time; and the
+    // nodes it inserted. A node that is the parent or an ancestor of it, or a second time, is left out. The positions
+    // past them move with them — none at the front, where the list starts earlier instead (as `insert_child`'s) — and of
+    // the handles' edges only the ones around them change.
+    pub(crate) fn insert_children(&mut self, parent: NodeId, nodes: &[NodeId], before: Option<NodeId>) -> Vec<NodeId> {
         if self.get(parent).is_none() {
-            return;
+            return Vec::new();
         }
         self.state_epoch += 1;
         let mut ancestors = Vec::new();
@@ -1550,16 +1547,33 @@ impl RealmArena {
         }
         let len = self.get(parent).map_or(0, |p| p.children.len());
         let at = before.filter(|&b| self.parent_of(b) == Some(parent)).map_or(len, |b| self.child_index(b));
-        if let Some(p) = self.get_mut(parent) {
-            p.children.splice(at..at, nodes.iter().copied());
+        let count = nodes.len();
+        let Some(p) = self.get_mut(parent) else { return Vec::new() };
+        p.children.splice(at..at, nodes.iter().copied());
+        if at == 0 {
+            p.first_position -= count as i64;
         }
+        let (first, total) = (p.first_position, p.children.len());
         for &n in &nodes {
             if let Some(c) = self.get_mut(n) {
                 c.parent = Some(parent);
             }
         }
-        self.reindex_children(parent, at, false);
+        let moved = if at == 0 { count } else { total };
+        for i in at..moved {
+            let Some(c) = self.get(parent).and_then(|p| p.children.get(i).copied()) else { break };
+            if let Some(node) = self.get_mut_quietly(c) {
+                node.position = first + i as i64;
+            }
+        }
+        self.relink(parent, at.saturating_sub(1), at + count);
+        nodes
     }
+    // Rewrite the positions of the children of `parent` from index `from` on, from their list indexes — after an
+    // insertion or a removal there shifted them. Quietly: the index is where to find a child in its parent's list, read
+    // by nothing a layout walk or a memo keys on — the change itself is the parent's, which `get_mut` stamped. Stamped
+    // as a change of each, every sibling after a removed child was walked again rather than spliced back (a 400-item
+    // list, `remove()` of the 200th: 203 records walked, 3 once it is not).
     fn reindex_children(&mut self, parent: NodeId, from: usize, one: bool) {
         let (len, first) = self.get(parent).map_or((0, 0), |p| (p.children.len(), p.first_position));
         for i in from..len {
@@ -2551,10 +2565,9 @@ fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node
             engine.node_left(arena, n);
         }
     }
-    arena.insert_children(parent, nodes, before);
+    let inserted = arena.insert_children(parent, nodes, before);
     // (…where they went, past the first: a boundary in the parent after it moves by them)
-    let index = nodes.first().filter(|&&n| arena.parent_of(n) == Some(parent)).map(|&n| arena.child_index(n));
-    let inserted = nodes.iter().filter(|&&n| arena.parent_of(n) == Some(parent)).count() as u32;
+    let index = inserted.first().map(|&n| arena.child_index(n));
     if let Some(engine) = engine {
         let mut changed: Vec<NodeId> = Vec::new();
         for o in old.into_iter().filter(|&o| o != parent) {
@@ -2568,7 +2581,7 @@ fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node
         engine.children_changed(arena, parent);
     }
     if let Some(index) = index.filter(|_| before.is_some()) {
-        crate::ranges::inserted(scope, parent, index as u32, inserted);
+        crate::ranges::inserted(scope, parent, index as u32, inserted.len() as u32);
     }
 }
 
