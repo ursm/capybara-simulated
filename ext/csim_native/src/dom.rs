@@ -1917,7 +1917,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "assignedSlotOf", assigned_slot_of, context_id);
     register(scope, ns, "assignedNodesOf", assigned_nodes_of, context_id);
     register(scope, ns, "setValue", set_value, context_id);
-    register(scope, ns, "value", value, context_id);
     register(scope, ns, "setParserFormOwner", set_parser_form_owner, context_id);
     register(scope, ns, "setCustomStates", set_custom_states, context_id);
     register(scope, ns, "setTarget", set_target, context_id);
@@ -2312,14 +2311,6 @@ fn set_value(
     if let Some(node) = arena.get_mut(id) {
         node.value = value;
     }
-}
-
-// __dom.value(nid) -> a form control's live value: a string once dirty, undefined while clean.
-fn value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
-    let cid = realm_id(scope, &args);
-    let Some(units) = realm(scope, cid).get(id).and_then(|n| n.value.clone()) else { return };
-    rv.set(utf16_value(scope, &units));
 }
 
 // __dom.setDoctype(nid, name, publicId, systemId): a doctype's name and identifiers, as a reused document's next parse
