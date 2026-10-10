@@ -1409,6 +1409,9 @@ module Capybara
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
+        if dom_call('__csimInert', handle)
+          raise Capybara::Simulated::ElementNotInteractable, "element not interactable: #{describe_node_handle(handle)} is inert"
+        end
         # `attach_file` hands us a Pathname (or Array of Pathnames);
         # the marshaller rejects non-primitive types. Coerce to a path-list
         # form V8 can hold — the actual multipart upload happens later

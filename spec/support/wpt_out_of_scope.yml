@@ -47502,6 +47502,11 @@ html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/semantics/interactive-elements/the-dialog-element/focus-previous-iframe.tentative.html:
+- name: "[harness] ERROR"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/semantics/interactive-elements/the-dialog-element/top-layer-stacking.tentative.html:
 - name: "== html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-ref.html"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

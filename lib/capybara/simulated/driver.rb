@@ -899,7 +899,7 @@ module Capybara
         end
       end
 
-      def invalid_element_errors = [Capybara::Simulated::StaleElement, Capybara::Simulated::ClickIntercepted]
+      def invalid_element_errors = [Capybara::Simulated::StaleElement, Capybara::Simulated::ClickIntercepted, Capybara::Simulated::ElementNotInteractable]
       def no_such_window_error   = Capybara::WindowError
 
       # A real raster of the laid-out page (see js/src/paint.js), not a serialization of it: the

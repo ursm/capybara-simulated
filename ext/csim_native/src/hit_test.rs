@@ -8,6 +8,7 @@
 // paints in the inline phase of whatever the box paints inside.
 
 use crate::dom::{NodeId, NodeKind, RealmArena};
+use crate::style::StyleEngine;
 use crate::geometry::{box_style, flat_parent, laid, laid_frags, laid_out_box, transform_chain, M4};
 use crate::walk::WalkDisplay;
 use std::collections::HashMap;
@@ -37,7 +38,9 @@ struct Chain {
 // of a container in their order-modified order) and the chains asked so far.
 pub(crate) struct Painting<'a> {
     arena: &'a RealmArena,
-    animating: &'a dyn Fn(NodeId) -> bool,
+    // The realm's style engine, where it has one: what an element's animations and its `::backdrop` are asked of.
+    engine: Option<&'a StyleEngine>,
+    stacking_animated: Vec<String>,
     order: HashMap<NodeId, f64>,
     preorder: Vec<NodeId>,
     // …the index past each box's subtree in `preorder`.
@@ -48,10 +51,12 @@ pub(crate) struct Painting<'a> {
 }
 
 impl<'a> Painting<'a> {
-    // `animating` answers whether an element has a current animation of a `STACKING_ANIMATED` property.
-    pub(crate) fn new(arena: &'a RealmArena, animating: &'a dyn Fn(NodeId) -> bool) -> Painting<'a> {
+    pub(crate) fn new(arena: &'a RealmArena, engine: Option<&'a StyleEngine>) -> Painting<'a> {
         let mut p = Painting {
-            arena, animating, order: HashMap::new(), preorder: Vec::new(), ends: Vec::new(), chains: HashMap::new(), painted: HashMap::new()
+            arena,
+            engine,
+            stacking_animated: STACKING_ANIMATED.iter().map(|p| p.to_string()).collect(),
+            order: HashMap::new(), preorder: Vec::new(), ends: Vec::new(), chains: HashMap::new(), painted: HashMap::new()
         };
         if let Some(root) = arena.layout_root {
             p.visit(root);
@@ -60,6 +65,11 @@ impl<'a> Painting<'a> {
         p
     }
 
+    // Whether the modal dialog `id`'s `::backdrop` generates a box: not `display: none` (none asked of a realm without
+    // a style engine, where it is taken to).
+    fn has_backdrop(&self, id: NodeId) -> bool {
+        self.engine.is_none_or(|e| e.pseudo_generates_box(self.arena, id, "backdrop"))
+    }
     fn has_box(&self, id: NodeId) -> bool {
         self.arena.get(id).is_some_and(|n| laid(self.arena, n).is_some() || laid_frags(self.arena, n).is_some())
     }
@@ -150,7 +160,7 @@ impl<'a> Painting<'a> {
             || ((self.positioned(s) || self.item(id, s)) && (self.z_index(s).is_some() || b.will_change.bits.contains(style::values::specified::box_::WillChangeBits::Z_INDEX)))
             || crate::walk::contains_out_of_flow(s, self.arena, id, node)
             || self.composites_as_group(id, s)
-            || (self.animating)(id)
+            || self.engine.is_some_and(|e| e.animation_activity(id, &self.stacking_animated).0)
     }
     // The effects that composite a subtree as ONE image before it meets the page: an opacity below 1, a blend mode, an
     // isolation, a clip path, a mask, a view-transition name, a transformable box that preserves 3D, and a `will-change`
@@ -352,7 +362,17 @@ impl<'a> Painting<'a> {
             }
         }
         let [w, h] = self.arena.viewport;
-        if (x >= 0.0 && y >= 0.0 && x <= w && y <= h) && self.has_box(root) && !out.contains(&root) && (all || out.is_empty()) {
+        let in_viewport = x >= 0.0 && y >= 0.0 && x <= w && y <= h;
+        // (…and where a modal dialog is shown, its `::backdrop` under it in the top layer, over the whole viewport and
+        // answering as the dialog: what the rest of the document — inert, so hit nowhere — would have been; none where
+        // the dialog is inert itself, or its backdrop generates no box)
+        if let Some(modal) = self.arena.modals.iter().rev().copied().find(|&m| self.has_box(m)) {
+            if in_viewport && !out.contains(&modal) && (all || out.is_empty()) && !self.arena.is_inert(modal) && self.has_backdrop(modal) {
+                out.push(modal);
+            }
+            return out;
+        }
+        if in_viewport && self.has_box(root) && !out.contains(&root) && (all || out.is_empty()) {
             out.push(root);
         }
         out
@@ -640,6 +660,7 @@ pub(crate) fn box_parent(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "isInert", is_inert_op, context_id);
     crate::dom::register(scope, ns, "hitTest", hit_test_op, context_id);
     crate::dom::register(scope, ns, "paintOrder", paint_order_op, context_id);
     crate::dom::register(scope, ns, "observedVisible", observed_visible_op, context_id);
@@ -647,6 +668,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // __dom.clippedAway(nid) -> whether the element's rendered box is clipped away whole (`clipped_away`).
+// __dom.isInert(nid) -> whether the node is inert (`RealmArena::is_inert`): the driver refuses to click it.
+fn is_inert_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let inert = crate::dom::nid_arg(scope, &args, 0).is_some_and(|id| crate::dom::realm(scope, cid).is_inert(id));
+    rv.set_bool(inert);
+}
 fn clipped_away_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let away = crate::dom::nid_arg(scope, &args, 0).is_some_and(|id| clipped_away(crate::dom::realm(scope, cid), id));
@@ -666,9 +693,7 @@ fn painting<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgu
         }
         &*engine
     });
-    let props: Vec<String> = STACKING_ANIMATED.iter().map(|p| p.to_string()).collect();
-    let animating = |id: NodeId| engine.is_some_and(|e| e.animation_activity(id, &props).0);
-    Some(ask(&mut Painting::new(arena, &animating)))
+    Some(ask(&mut Painting::new(arena, engine)))
 }
 
 // __dom.hitTest(x, y, all, now) -> Float64Array: the elements a hit at the viewport point lands on, topmost first (only

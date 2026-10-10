@@ -1858,6 +1858,14 @@ impl StyleEngine {
         })
     }
 
+    // Whether `id`'s pseudo-element `pseudo` generates a box as the document is styled now: its `display` other than
+    // `none`.
+    pub(crate) fn pseudo_generates_box(&self, arena: &RealmArena, id: NodeId, pseudo: &str) -> bool {
+        primary_style(arena, id)
+            .and_then(|originating| self.pseudo_style(arena, id, pseudo, &originating))
+            .is_some_and(|values| values.get_box().clone_display() != style::values::computed::Display::None)
+    }
+
     // `id`'s `::placeholder` as the walk lays its text out (walk.rs `control_text`), the style its originating element has
     // now.
     pub(crate) fn placeholder_style(&self, arena: &RealmArena, id: NodeId) -> Option<Arc<ComputedValues>> {

@@ -4994,102 +4994,25 @@ html/semantics/interactive-elements/the-dialog-element/backdrop-in-flow.html:
 - "== html/semantics/interactive-elements/the-dialog-element/backdrop-in-flow-ref.html"
 html/semantics/interactive-elements/the-dialog-element/backdrop-inherits.html:
 - "== html/semantics/interactive-elements/the-dialog-element/backdrop-inherits-ref.html"
-html/semantics/interactive-elements/the-dialog-element/backdrop-receives-element-events.html:
-- Test that ::backdrop receives events for the associated element
-- "[harness] TIMEOUT"
 html/semantics/interactive-elements/the-dialog-element/backdrop-stacking-order.html:
 - "== html/semantics/interactive-elements/the-dialog-element/backdrop-stacking-order-ref.html"
 html/semantics/interactive-elements/the-dialog-element/child-sequential-focus.html:
-- Autofocus takes precedence over keyboard-focusable requirement.
 - Only keyboard-focusable elements should get dialog initial focus including in nested
   buttons.
 - Only keyboard-focusable elements should get dialog initial focus including in subtrees.
 - Only keyboard-focusable elements should get dialog initial focus.
-- dialog element with autofocus should get initial focus.
 html/semantics/interactive-elements/the-dialog-element/dialog-active-document.html:
 - showModal should throw when the document isn't active
-html/semantics/interactive-elements/the-dialog-element/dialog-autofocus-just-once.html:
-- An autofocus element in a dialog element should not try to get focus twice.
 html/semantics/interactive-elements/the-dialog-element/dialog-autofocus-multiple-times.html:
 - "[harness] TIMEOUT"
 - autofocus is run every time a dialog is opened
 html/semantics/interactive-elements/the-dialog-element/dialog-autofocus.html:
 - "[harness] TIMEOUT"
 - autofocus when a modal dialog is opened
-html/semantics/interactive-elements/the-dialog-element/dialog-cancel-with-input.html:
-- Test dialog modal is closed by escape key with input focused
-html/semantics/interactive-elements/the-dialog-element/dialog-cancel-with-select.html:
-- Test dialog modal is closed by escape key with select focused
 html/semantics/interactive-elements/the-dialog-element/dialog-canceling.html:
 - Modal dialogs should close when the escape key is pressed.
-html/semantics/interactive-elements/the-dialog-element/dialog-closedby-corner-cases.html:
-- Clicking outside, when focusin calls showModal, modal
-- Pressing escape, when focusin calls showModal, modal
-html/semantics/interactive-elements/the-dialog-element/dialog-closedby-start-open.html:
-- Opening and closing a dialog during the dialog focus fixup should still leave closedby
-  functional
 html/semantics/interactive-elements/the-dialog-element/dialog-focus-previous-outside.html:
-- Focus restore should always occur for modal dialogs.
-- Focus restore should occur when the focused element is in a shadowroot inside the
-  dialog.
 - Focus restore should occur when the focused element is slotted into a dialog.
-- Focus restore should work when the dialog itself is focused.
-html/semantics/interactive-elements/the-dialog-element/dialog-focus-shadow-double-nested.html:
-- show()
-- showModal()
-html/semantics/interactive-elements/the-dialog-element/dialog-focus-shadow.html:
-- 'show: Autofocus after, no delegatesFocus'
-- 'show: Autofocus after, yes delegatesFocus'
-- 'show: Autofocus before, no delegatesFocus'
-- 'show: Autofocus before, yes delegatesFocus'
-- 'show: Autofocus inside shadow tree, no delegatesFocus, no siblings'
-- 'show: Autofocus inside shadow tree, no delegatesFocus, sibling after'
-- 'show: Autofocus inside shadow tree, no delegatesFocus, sibling before'
-- 'show: Autofocus inside shadow tree, yes delegatesFocus, no siblings'
-- 'show: Autofocus inside shadow tree, yes delegatesFocus, sibling after'
-- 'show: Autofocus inside shadow tree, yes delegatesFocus, sibling before'
-- 'show: Autofocus on shadow host, no delegatesFocus, no siblings'
-- 'show: Autofocus on shadow host, no delegatesFocus, sibling after'
-- 'show: Autofocus on shadow host, no delegatesFocus, sibling before'
-- 'show: Autofocus on shadow host, yes delegatesFocus, no siblings'
-- 'show: Autofocus on shadow host, yes delegatesFocus, sibling after'
-- 'show: Autofocus on shadow host, yes delegatesFocus, sibling before'
-- 'show: No autofocus, no delegatesFocus, no siblings'
-- 'show: No autofocus, no delegatesFocus, sibling after'
-- 'show: No autofocus, no delegatesFocus, sibling before'
-- 'show: No autofocus, no delegatesFocus, slotted target'
-- 'show: No autofocus, yes delegatesFocus, no siblings'
-- 'show: No autofocus, yes delegatesFocus, sibling after'
-- 'show: No autofocus, yes delegatesFocus, sibling before'
-- 'show: Shadowroot on child, no autofocus, no delegatesFocus'
-- 'show: Two shadow trees, both delegatesFocus, first tree doesn''t have autofocus
-  element, second does'
-- 'showModal: Autofocus after, no delegatesFocus'
-- 'showModal: Autofocus after, yes delegatesFocus'
-- 'showModal: Autofocus before, no delegatesFocus'
-- 'showModal: Autofocus before, yes delegatesFocus'
-- 'showModal: Autofocus inside shadow tree, no delegatesFocus, no siblings'
-- 'showModal: Autofocus inside shadow tree, no delegatesFocus, sibling after'
-- 'showModal: Autofocus inside shadow tree, no delegatesFocus, sibling before'
-- 'showModal: Autofocus inside shadow tree, yes delegatesFocus, no siblings'
-- 'showModal: Autofocus inside shadow tree, yes delegatesFocus, sibling after'
-- 'showModal: Autofocus inside shadow tree, yes delegatesFocus, sibling before'
-- 'showModal: Autofocus on shadow host, no delegatesFocus, no siblings'
-- 'showModal: Autofocus on shadow host, no delegatesFocus, sibling after'
-- 'showModal: Autofocus on shadow host, no delegatesFocus, sibling before'
-- 'showModal: Autofocus on shadow host, yes delegatesFocus, no siblings'
-- 'showModal: Autofocus on shadow host, yes delegatesFocus, sibling after'
-- 'showModal: Autofocus on shadow host, yes delegatesFocus, sibling before'
-- 'showModal: No autofocus, no delegatesFocus, no siblings'
-- 'showModal: No autofocus, no delegatesFocus, sibling after'
-- 'showModal: No autofocus, no delegatesFocus, sibling before'
-- 'showModal: No autofocus, no delegatesFocus, slotted target'
-- 'showModal: No autofocus, yes delegatesFocus, no siblings'
-- 'showModal: No autofocus, yes delegatesFocus, sibling after'
-- 'showModal: No autofocus, yes delegatesFocus, sibling before'
-- 'showModal: Shadowroot on child, no autofocus, no delegatesFocus'
-- 'showModal: Two shadow trees, both delegatesFocus, first tree doesn''t have autofocus
-  element, second does'
 html/semantics/interactive-elements/the-dialog-element/dialog-focusability.html:
 - The dialog element itself should not be keyboard focusable.
 html/semantics/interactive-elements/the-dialog-element/dialog-focusing-steps-inert.html:
@@ -5177,10 +5100,6 @@ html/semantics/interactive-elements/the-dialog-element/dialog-requestclose-recur
   event
 html/semantics/interactive-elements/the-dialog-element/dialog-showModal.html:
 - When the document is not attached to any pages, showModal() should throw.
-- 'dialog element: showModal()'
-- opening dialog with multiple focusable children
-- opening dialog with multiple focusable children, one having the autofocus attribute
-- opening dialog without focusable children
 - when opening multiple dialogs, the most recently opened is rendered on top
 html/semantics/interactive-elements/the-dialog-element/dialogs-with-no-backdrop.html:
 - "== html/semantics/interactive-elements/the-dialog-element/dialogs-with-no-backdrop-ref.html"
@@ -5191,11 +5110,6 @@ html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with
 html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with-fo-ancestor.html:
 - "== html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with-fixed-position-cb-ref.html"
 html/semantics/interactive-elements/the-dialog-element/focus-after-close.html:
-- Focus should be moved to the previously focused element (Complex dialog usage)
-- Focus should be moved to the previously focused element even if it has moved in
-  between show/close
-- Focus should be moved to the previously focused element even if it has moved to
-  shadow DOM root in between show/close
 - Focus should not scroll if the previously focused element is outside the viewport
 - "[harness] TIMEOUT"
 html/semantics/interactive-elements/the-dialog-element/form-submit-dialog-shadow.html:
@@ -5703,7 +5617,6 @@ selection/selection-content-visibility-hidden.html:
 selection/selection-direction-on-single-click.html:
 - direction returns "none" when the selection is collapsed
 selection/selection-focused-element-becomes-nonfocusable.html:
-- Focused element is disabled
 - Focused element is removed
 selection/textcontrols/focus.html:
 - "[harness] ERROR"

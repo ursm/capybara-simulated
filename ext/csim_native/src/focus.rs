@@ -14,8 +14,11 @@ use crate::dom::{NodeData, NodeId, NodeKind, RealmArena};
 use crate::style::StyleEngine;
 
 // The HTML elements focusable by what they are (an `<input type=hidden>` excepted; a `<summary>` only as its details'
-// summary, below).
-const FOCUSABLE_TAGS: [&str; 9] = ["input", "textarea", "select", "button", "iframe", "embed", "object", "audio", "video"];
+// summary, below). A `<dialog>` among them — rendered only while open — is the UA's to decide (HTML: "if the user agent
+// decided that dialog elements were not generally focusable"), and Chrome and Firefox both focus one, by `focus()` and
+// by the dialog focusing steps where it holds nothing else that can take focus; Chrome leaves it out of the sequential
+// order (its `tabIndex` -1), as `classify` does.
+const FOCUSABLE_TAGS: [&str; 10] = ["input", "textarea", "select", "button", "iframe", "embed", "object", "audio", "video", "dialog"];
 
 // Is `id` a focusable area: an element not actually disabled, with a valid `tabindex` — else focusable by its kind, a
 // hyperlink, or editable — in no `inert` subtree, and being rendered or the fallback content of a rendered `<canvas>`,
@@ -117,7 +120,7 @@ impl Navigator<'_> {
     fn classify(&mut self, el: NodeId) -> Option<Item> {
         let n = self.arena.get(el)?;
         let tabindex = tabindex(n);
-        let negative = tabindex.is_some_and(|t| t < 0);
+        let negative = tabindex.map_or(n.is_html_named("dialog"), |t| t < 0);
         let group = if negative { 0 } else { tabindex.unwrap_or(0) };
         let owner = |kind, sub| Some(Item { el, kind, sub: Some(sub), included: !negative, group, tree_pos: 0 });
         if n.is_html_named("slot") {
@@ -369,12 +372,16 @@ pub(crate) fn focusable_area(engine: &mut StyleEngine, arena: &RealmArena, host:
         None => focus_delegate(engine, arena, host, now),
     }
 }
-// …its "focus delegate": its shadow tree's autofocus delegate — the first descendant carrying `autofocus` that is a
-// focusable area or stands for one — else its first descendant that is one or stands for one, in tree order: the tree's
-// own descendants, a nested shadow host standing for its own focusable area (so the path to what is found delegates
-// focus at every shadow boundary), a slotted node none of the tree's.
-fn focus_delegate(engine: &mut StyleEngine, arena: &RealmArena, host: NodeId, now: f64) -> Option<NodeId> {
-    let root = delegating_root(arena, host)?;
+// HTML's "focus delegate" of `target` — a shadow host's in its shadow tree, none where that does not delegate focus; any
+// other element's among its own descendants (what the dialog focusing steps focus): the autofocus delegate — the first
+// descendant carrying `autofocus` that is a focusable area or stands for one — else the first descendant that is one or
+// stands for one, in tree order: the tree's own descendants, a nested shadow host standing for its own focusable area
+// (so the path to what is found delegates focus at every shadow boundary), a slotted node none of the tree's.
+pub(crate) fn focus_delegate(engine: &mut StyleEngine, arena: &RealmArena, target: NodeId, now: f64) -> Option<NodeId> {
+    let root = match arena.get(target)?.shadow_root {
+        Some(_) => delegating_root(arena, target)?,
+        None => target,
+    };
     let mut area = |engine: &mut StyleEngine, id: NodeId| {
         if focusable(engine, arena, id, now) { Some(id) } else { focusable_area(engine, arena, id, now) }
     };
@@ -417,6 +424,16 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "focusable", focusable_op, context_id);
     crate::dom::register(scope, ns, "nextFocus", next_focus_op, context_id);
     crate::dom::register(scope, ns, "focusableArea", focusable_area_op, context_id);
+    crate::dom::register(scope, ns, "focusDelegate", focus_delegate_op, context_id);
+}
+
+// __dom.focusDelegate(nid, now) -> [the element's focus delegate] or [] (`focus_delegate`), as `nodes_value` answers.
+fn focus_delegate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let found = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| focus_delegate(engine, arena, target, now)).flatten();
+    let cid = crate::dom::realm_id(scope, &args);
+    let root = crate::dom::realm(scope, cid).shadow_including_root(target);
+    rv.set(crate::dom::nodes_value(scope, cid, root, found.as_slice()));
 }
 
 // __dom.focusableArea(hostNid, now) -> [what focusing the delegating host focuses] or [] (`focusable_area`), as
@@ -439,13 +456,15 @@ fn focusable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 }
 
 // __dom.nextFocus(docNid, currentNid, reverse, now) -> the element Tab (Shift-Tab, with `reverse`) moves focus to from
-// `currentNid` (-1: nothing focused), as its nid and then the path to it from the document — each step a child's index
+// `currentNid` (-1: nothing focused, the document's sequential focus navigation starting point), as its nid and then the path to it from the document — each step a child's index
 // among the live ones, or -1 into the shadow root of the element before it — or null where nothing is focusable.
 fn next_focus_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_null() };
     let current = crate::dom::nid_arg(scope, &args, 1);
     let reverse = args.get(2).is_true();
     let path = crate::rendered::with_engine(scope, &args, 3, |engine, arena, now| {
+        // (…nothing focused: on from the starting point, where it is in the document yet — else from its start)
+        let current = current.or(arena.focus_start.filter(|&s| arena.shadow_including_root(s) == doc));
         let next = next(engine, arena, doc, current, reverse, now)?;
         let mut path = Vec::new();
         let mut cur = next;

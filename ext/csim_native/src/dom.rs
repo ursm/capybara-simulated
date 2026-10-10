@@ -717,6 +717,9 @@ pub(crate) struct RealmArena {
     // written, a `<bdi>` or an `<input>` made (`notes_direction`): every other page is ltr throughout, and asking
     // cost the state scan a walk per element (a 1500-row append, 626 → 1150 ms).
     pub(crate) direction_sources: bool,
+    // Whether an element has ever carried an `inert` attribute (`notes_inert`): until one has, only a modal dialog makes
+    // a node inert, and `is_inert` — asked of every box the hit test passes — need walk no ancestors.
+    pub(crate) inert_sources: bool,
     // The layout walks' clock: a walk moves it on as it begins, and a change is stamped with where it stands
     // (`NodeData::stamp`), so a stamp past the epoch a walk began at is a change since that walk — one clock for every
     // realm's walks, as a node carries its stamp into another realm's tree.
@@ -736,6 +739,10 @@ pub(crate) struct RealmState {
     // `:focus-within` and `:hover` walk up.
     pub(crate) focus: Option<NodeId>,
     pub(crate) hover: Option<NodeId>,
+    // Its "sequential focus navigation starting point" (HTML §6.6.3), where Tab goes on from when nothing is focused:
+    // the element focus last moved to — kept as focus leaves it for the viewport (Chrome: Tab after `blur()` goes on
+    // from the blurred element) — or the node a press that focused nothing landed on (`setFocusStart`).
+    pub(crate) focus_start: Option<NodeId>,
     // The modal dialogs, in the order they were shown — the top layer's: the last blocks the document (`is_inert`).
     pub(crate) modals: Vec<NodeId>,
     // Whether the focus shows NO ring (not `:focus-visible`): only after a pointer focus of a non-text control.
@@ -842,6 +849,7 @@ impl RealmArena {
         if self.parked.is_empty() {
             self.has_shadow_hosts = false;
             self.direction_sources = false;
+            self.inert_sources = false;
         }
     }
     pub(crate) fn is_dropped(&self, cid: i32) -> bool {
@@ -1044,6 +1052,7 @@ impl RealmArena {
     // holds, or that the new page reuses, is a node yet; the rest go as V8 collects them (node_handle.rs).
     fn reset(&mut self) {
         self.focus = None;
+        self.focus_start = None;
         self.hover = None;
         self.target = None;
         self.form_facts.get_mut().clear();
@@ -1121,6 +1130,7 @@ impl RealmArena {
     // A new node, appended to `parent` when that is live (a stale parent nid leaves it a detached root).
     pub(crate) fn create(&mut self, data: NodeData, parent: Option<NodeId>) -> NodeId {
         self.direction_sources |= notes_direction(&data);
+        self.inert_sources |= notes_inert(&data);
         let parent = parent.filter(|&p| self.get(p).is_some());
         if parent.is_some() {
             self.state_epoch += 1;
@@ -1145,6 +1155,9 @@ impl RealmArena {
             } else if *slot == Some(id) {
                 *slot = None;
             }
+        }
+        if bits & STATE_FOCUSED != 0 {
+            state.focus_start = Some(id);
         }
         // (…and a dialog shown modally goes on top, one closed off)
         if was_modal != (bits & STATE_MODAL != 0) {
@@ -1700,6 +1713,9 @@ fn arena_and_engine<'s>(
 // Whether a node can decide a directionality of its own (`is_rtl`): a `dir` on it, or its being a `<bdi>` or a telephone
 // `<input>` — a telephone one only: almost every app page has an input, and each one latched the whole realm into the
 // per-element walk (a 1500-row append 290 → 530 ms).
+fn notes_inert(n: &NodeData) -> bool {
+    n.kind == NodeKind::Element && n.plain_attr("inert").is_some()
+}
 fn notes_direction(n: &NodeData) -> bool {
     n.kind == NodeKind::Element
         && (n.plain_attr("dir").is_some() || n.is_html_named("bdi") || (n.is_html_named("input") && n.input_type() == "tel"))
@@ -1710,6 +1726,7 @@ fn notes_direction(n: &NodeData) -> bool {
 fn before_attribute_write(arena: &mut RealmArena, engine: Option<&mut crate::style::StyleEngine>, id: NodeId, names: &[&str]) {
     // (…and a `type` written may make an input a telephone one: latched on the write, as the value lands after this)
     arena.direction_sources |= names.contains(&"dir") || (names.contains(&"type") && arena.get(id).is_some_and(|n| n.is_html_named("input")));
+    arena.inert_sources |= names.contains(&"inert");
     if names.iter().any(|n| attribute_reads_state(n)) {
         arena.state_epoch += 1;
     }
@@ -1850,6 +1867,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setCustomStates", set_custom_states, context_id);
     register(scope, ns, "setTarget", set_target, context_id);
     register(scope, ns, "setFocusRingHidden", set_focus_ring_hidden, context_id);
+    register(scope, ns, "setFocusStart", set_focus_start, context_id);
     register(scope, ns, "query", query, context_id);
     register(scope, ns, "matchesId", matches_id, context_id);
     register(scope, ns, "closestId", closest_id, context_id);
@@ -2518,6 +2536,17 @@ fn set_focus_ring_hidden(
     realm(scope, cid).set_focus_ring_hidden(hidden);
 }
 
+// __dom.setFocusStart(nid): the realm document's sequential focus navigation starting point is that node (`focus_start`).
+fn set_focus_start(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let node = nid_arg(scope, &args, 0);
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).focus_start = node;
+}
+
 // __dom.inspectNode(nid) -> [kind, localName, data, parentNid, state, hostNid, value, childNid, …] (`value` undefined
 // while clean), or null for a dead nid.
 // The arena as it stands, for the verify mode that holds it against the JS tree (`CSIM_ARENA_VERIFY`); nothing else
@@ -2745,8 +2774,9 @@ fn sync_attrs(
         node.attributes = attrs;
         node.attr_changed(None);
         // (…with or without an engine to hear of it: the parser's `dir` is what `is_rtl` must not miss)
-        let notes = notes_direction(node);
-        arena.direction_sources |= notes;
+        let (direction, inert) = (notes_direction(node), notes_inert(node));
+        arena.direction_sources |= direction;
+        arena.inert_sources |= inert;
     }
 }
 

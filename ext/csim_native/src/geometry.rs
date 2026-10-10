@@ -727,7 +727,7 @@ fn exact(m: [f64; 16]) -> M4 {
     m.map(|v| if (v - v.round()).abs() < 1e-12 { v.round() } else { v })
 }
 // `translate`, `rotate` and `scale`, as the transform functions they are.
-fn individual_transforms(b: &style::properties::style_structs::Box) -> Vec<style::values::computed::TransformOperation> {
+pub(crate) fn individual_transforms(b: &style::properties::style_structs::Box) -> Vec<style::values::computed::TransformOperation> {
     use style::values::computed::transform::{Rotate, Scale, Translate};
     use style::values::computed::TransformOperation as Op;
     let mut ops = Vec::new();
@@ -873,8 +873,12 @@ pub(crate) fn frame_viewport(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]>
 }
 
 // `id`'s CLIENT RECTS as `getClientRects` answers them: one per line an inline box broke over, else its border box —
-// where the page's scrolling carried each, under every transform on the way. None where it generates no box.
+// where the page's scrolling carried each, under every transform on the way — or a graphics element's one bounding box
+// (CSSOM View: "an associated SVG layout box"). None where it generates no box.
 pub(crate) fn client_rects(arena: &RealmArena, id: NodeId) -> Option<Vec<[f64; 4]>> {
+    if crate::svg_geometry::outer_svg(arena, id).is_some() {
+        return crate::svg_geometry::client_rect(arena, id).map(|r| vec![r]);
+    }
     let style = box_style(arena, id)?;
     if is_boxless(arena, id, &style) {
         return None;

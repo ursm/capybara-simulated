@@ -18,6 +18,11 @@ module Capybara
     # real driver's ElementClickInterceptedError.
     class ClickIntercepted < Capybara::ElementNotFound; end
 
+    # Raised when `set` targets a control the user cannot reach — an inert one (behind a modal dialog, under `inert`),
+    # which takes no focus and so no typing (WebDriver "element not interactable": Element Send Keys refuses an element
+    # that is not keyboard-interactable). Retryable as ClickIntercepted is: the dialog may be closing.
+    class ElementNotInteractable < Capybara::ElementNotFound; end
+
     # Raised by `save_screenshot` when the page could not be rastered: it painted nothing.
     class ScreenshotFailed < Capybara::CapybaraError; end
 

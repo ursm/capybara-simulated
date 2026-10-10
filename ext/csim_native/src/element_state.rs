@@ -997,6 +997,9 @@ impl RealmArena {
     pub(crate) fn is_inert(&self, id: NodeId) -> bool {
         let up = |c: &NodeId| self.get(*c).and_then(|n| n.assigned_slot.filter(|&s| self.get(s).is_some()).or(n.parent).or(n.host));
         let modal = self.modals.iter().rev().copied().find(|&m| self.get(m).is_some());
+        if modal.is_none() && !self.inert_sources {
+            return false;
+        }
         let mut in_modal = modal.is_none();
         for e in std::iter::successors(Some(id), up) {
             let Some(n) = self.get(e) else { break };

@@ -384,3 +384,5 @@ svg|linearGradient, svg|radialGradient, svg|script, svg|style, svg|symbol {
   display: none !important;
 }
 svg|a:any-link { cursor: pointer; }
+/* (…an SVG element's transform origin its user space's, an outer `<svg>`'s its box's centre as any CSS box's) */
+svg|*:not(svg|svg), svg|*:not(svg|foreignObject) > svg|svg { transform-origin: 0 0; }
