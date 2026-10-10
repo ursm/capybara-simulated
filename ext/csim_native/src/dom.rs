@@ -312,7 +312,8 @@ pub(crate) const STATE_UPGRADED: u32 = 1 << 18;
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its
 // first and last child, its previous and next sibling, and the element ones of those — and the bindings' own upward
 // steps: a node's parent or, for a shadow root, its host; its tree's root (a shadow root the root of its own); and its
-// shadow-including root — and a document's head and body (HTML §3.1.3).
+// shadow-including root — a document's head and body (HTML §3.1.3) — and the trees a node owns beside its children: a
+// host's shadow root, a template's contents, and the other way, a shadow root's host or a template contents' template.
 pub(crate) const RELATIVE_PARENT: u32 = 0;
 const RELATIVE_PARENT_ELEMENT: u32 = 1;
 pub(crate) const RELATIVE_FIRST_CHILD: u32 = 2;
@@ -328,6 +329,9 @@ const RELATIVE_ROOT: u32 = 11;
 const RELATIVE_SHADOW_INCLUDING_ROOT: u32 = 12;
 const RELATIVE_HEAD: u32 = 13;
 const RELATIVE_BODY: u32 = 14;
+const RELATIVE_SHADOW_ROOT: u32 = 15;
+const RELATIVE_HOST: u32 = 16;
+const RELATIVE_TEMPLATE_CONTENT: u32 = 17;
 
 
 impl NodeData {
@@ -1634,6 +1638,9 @@ impl RealmArena {
             // HTML `html`)
             RELATIVE_HEAD => self.document_part(id, false, &|n| n.is_html_named("head")),
             RELATIVE_BODY => self.document_part(id, true, &|n| n.is_html_named("body") || n.is_html_named("frameset")),
+            RELATIVE_SHADOW_ROOT => self.get(id)?.shadow_root.filter(|&s| self.get(s).is_some()),
+            RELATIVE_HOST => self.get(id).and_then(|n| n.host.or(n.template_host)).filter(|&h| self.get(h).is_some()),
+            RELATIVE_TEMPLATE_CONTENT => self.get(id)?.template_content.filter(|&c| self.get(c).is_some()),
             _ => None,
         }
     }
