@@ -1909,6 +1909,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register_fast(scope, ns, "state", state, STATE_FAST, context_id);
     register_fast(scope, ns, "realmOf", realm_of, REALM_OF_FAST, context_id);
     register_fast(scope, ns, "isConnected", is_connected, IS_CONNECTED_FAST, context_id);
+    register_fast(scope, ns, "contains", contains, CONTAINS_FAST, context_id);
+    register_fast(scope, ns, "shadowIncludingContains", shadow_including_contains, SHADOW_INCLUDING_CONTAINS_FAST, context_id);
     register(scope, ns, "setArena", set_arena, context_id);
     register(scope, ns, "arenaOf", arena_of, context_id);
     register(scope, ns, "setNaturalSize", set_natural_size, context_id);
@@ -2140,6 +2142,40 @@ const IS_CONNECTED_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction:
         v8::fast_api::Int64Representation::Number,
     ),
 )];
+// __dom.contains(nid, otherNid) / __dom.shadowIncludingContains(nid, otherNid) -> whether the other node is the node or
+// one of its descendants (DOM §4.2.1 "inclusive descendant": a shadow tree's nodes are no host's) — or, the second, its
+// shadow-including inclusive descendant.
+fn contains(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (a, b) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1));
+    rv.set_bool(a.zip(b).is_some_and(|(a, b)| crate::ranges::contains(&dom(scope).arena, a, b)));
+}
+fn shadow_including_contains(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (a, b) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1));
+    rv.set_bool(a.zip(b).is_some_and(|(a, b)| dom(scope).arena.shadow_including_ancestor(a, b)));
+}
+fn fast_pair(a: f64, b: f64) -> Option<(NodeId, NodeId)> {
+    let id = |n: f64| if n >= 0.0 { NodeId::from_i64(n as i64) } else { None };
+    id(a).zip(id(b))
+}
+fn contains_fast(_receiver: v8::Local<v8::Value>, a: f64, b: f64, options: *mut v8::fast_api::FastApiCallbackOptions) -> bool {
+    fast_dom(options).zip(fast_pair(a, b)).is_some_and(|(d, (a, b))| crate::ranges::contains(&d.arena, a, b))
+}
+fn shadow_including_contains_fast(_receiver: v8::Local<v8::Value>, a: f64, b: f64, options: *mut v8::fast_api::FastApiCallbackOptions) -> bool {
+    fast_dom(options).zip(fast_pair(a, b)).is_some_and(|(d, (a, b))| d.arena.shadow_including_ancestor(a, b))
+}
+const PAIR_PREDICATE: v8::fast_api::CFunctionInfo = v8::fast_api::CFunctionInfo::new(
+    v8::fast_api::Type::Bool.as_info(),
+    &[
+        v8::fast_api::Type::V8Value.as_info(),
+        v8::fast_api::Type::Float64.as_info(),
+        v8::fast_api::Type::Float64.as_info(),
+        v8::fast_api::Type::CallbackOptions.as_info(),
+    ],
+    v8::fast_api::Int64Representation::Number,
+);
+const CONTAINS_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new(contains_fast as _, &PAIR_PREDICATE)];
+const SHADOW_INCLUDING_CONTAINS_FAST: &[v8::fast_api::CFunction] =
+    &[v8::fast_api::CFunction::new(shadow_including_contains_fast as _, &PAIR_PREDICATE)];
 // __dom.setArena(arena) / __dom.arenaOf(realm) -> the calling realm's arena object, for as long as the realm keeps it
 // and sets no other; a realm's, or undefined for one that set none or is gone.
 fn set_arena(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
