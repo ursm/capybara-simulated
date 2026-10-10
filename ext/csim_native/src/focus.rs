@@ -53,6 +53,10 @@ fn candidate(arena: &RealmArena, id: NodeId, n: &NodeData) -> bool {
 fn tabindex(n: &NodeData) -> Option<i64> {
     n.plain_attr("tabindex").and_then(crate::validity::parse_html_integer).filter(|t| i32::try_from(*t).is_ok())
 }
+// Whether a focusable element is left out of the sequential order: a negative `tabindex`, or a `<dialog>` with none.
+fn out_of_sequence(n: &NodeData) -> bool {
+    tabindex(n).map_or(n.is_html_named("dialog"), |t| t < 0)
+}
 // An editing host itself (element_state.rs `editing_host`): one its own attribute makes one, asking no ancestor.
 fn editing_host(arena: &RealmArena, id: NodeId) -> bool {
     arena.get(id).is_some_and(|n| n.contenteditable_state() == Some(true))
@@ -120,7 +124,7 @@ impl Navigator<'_> {
     fn classify(&mut self, el: NodeId) -> Option<Item> {
         let n = self.arena.get(el)?;
         let tabindex = tabindex(n);
-        let negative = tabindex.map_or(n.is_html_named("dialog"), |t| t < 0);
+        let negative = out_of_sequence(n);
         let group = if negative { 0 } else { tabindex.unwrap_or(0) };
         let owner = |kind, sub| Some(Item { el, kind, sub: Some(sub), included: !negative, group, tree_pos: 0 });
         if n.is_html_named("slot") {
@@ -373,7 +377,8 @@ pub(crate) fn focusable_area(engine: &mut StyleEngine, arena: &RealmArena, host:
     }
 }
 // HTML's "focus delegate" of `target` — a shadow host's in its shadow tree, none where that does not delegate focus; any
-// other element's among its own descendants (what the dialog focusing steps focus): the autofocus delegate — the first
+// other element's among its own descendants (what the dialog focusing steps focus, a dialog's from those in the
+// sequential order — whatwg/html#8199): the autofocus delegate — the first
 // descendant carrying `autofocus` that is a focusable area or stands for one — else the first descendant that is one or
 // stands for one, in tree order: the tree's own descendants, a nested shadow host standing for its own focusable area
 // (so the path to what is found delegates focus at every shadow boundary), a slotted node none of the tree's.
@@ -382,7 +387,7 @@ pub(crate) fn focus_delegate(engine: &mut StyleEngine, arena: &RealmArena, targe
         Some(_) => delegating_root(arena, target)?,
         None => target,
     };
-    let mut area = |engine: &mut StyleEngine, id: NodeId| {
+    let area = |engine: &mut StyleEngine, id: NodeId| {
         if focusable(engine, arena, id, now) { Some(id) } else { focusable_area(engine, arena, id, now) }
     };
     let autofocus = descendants(arena, root).into_iter().filter(|&d| arena.get(d).is_some_and(|n| n.plain_attr("autofocus").is_some()));
@@ -391,7 +396,12 @@ pub(crate) fn focus_delegate(engine: &mut StyleEngine, arena: &RealmArena, targe
             return Some(found);
         }
     }
-    descendants(arena, root).into_iter().find_map(|d| area(engine, d))
+    // (…a dialog's only among those in the sequential order: a `tabindex=-1` button is passed over for the next)
+    let dialog = arena.get(target)?.is_html_named("dialog");
+    descendants(arena, root).into_iter().find_map(|d| match area(engine, d) {
+        Some(found) if dialog && found == d && arena.get(d).is_some_and(out_of_sequence) => None,
+        other => other,
+    })
 }
 fn delegating_root(arena: &RealmArena, host: NodeId) -> Option<NodeId> {
     arena.get(host)?.shadow_root.filter(|&r| arena.get(r).is_some_and(|r| r.delegates_focus))

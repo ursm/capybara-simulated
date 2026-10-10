@@ -365,12 +365,12 @@ impl<'a> Painting<'a> {
         let in_viewport = x >= 0.0 && y >= 0.0 && x <= w && y <= h;
         // (…and where a modal dialog is shown, its `::backdrop` under it in the top layer, over the whole viewport and
         // answering as the dialog: what the rest of the document — inert, so hit nowhere — would have been; none where
-        // the dialog is inert itself, or its backdrop generates no box)
+        // the dialog is inert itself, or its backdrop generates no box. The root under it all: Chrome answers `html` for
+        // `elementsFromPoint` past the backdrop, and for a point with no backdrop over it.)
         if let Some(modal) = self.arena.modals.iter().rev().copied().find(|&m| self.has_box(m)) {
             if in_viewport && !out.contains(&modal) && (all || out.is_empty()) && !self.arena.is_inert(modal) && self.has_backdrop(modal) {
                 out.push(modal);
             }
-            return out;
         }
         if in_viewport && self.has_box(root) && !out.contains(&root) && (all || out.is_empty()) {
             out.push(root);

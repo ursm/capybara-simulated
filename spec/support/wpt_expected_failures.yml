@@ -4996,19 +4996,8 @@ html/semantics/interactive-elements/the-dialog-element/backdrop-inherits.html:
 - "== html/semantics/interactive-elements/the-dialog-element/backdrop-inherits-ref.html"
 html/semantics/interactive-elements/the-dialog-element/backdrop-stacking-order.html:
 - "== html/semantics/interactive-elements/the-dialog-element/backdrop-stacking-order-ref.html"
-html/semantics/interactive-elements/the-dialog-element/child-sequential-focus.html:
-- Only keyboard-focusable elements should get dialog initial focus including in nested
-  buttons.
-- Only keyboard-focusable elements should get dialog initial focus including in subtrees.
-- Only keyboard-focusable elements should get dialog initial focus.
 html/semantics/interactive-elements/the-dialog-element/dialog-active-document.html:
 - showModal should throw when the document isn't active
-html/semantics/interactive-elements/the-dialog-element/dialog-autofocus-multiple-times.html:
-- "[harness] TIMEOUT"
-- autofocus is run every time a dialog is opened
-html/semantics/interactive-elements/the-dialog-element/dialog-autofocus.html:
-- "[harness] TIMEOUT"
-- autofocus when a modal dialog is opened
 html/semantics/interactive-elements/the-dialog-element/dialog-canceling.html:
 - Modal dialogs should close when the escape key is pressed.
 html/semantics/interactive-elements/the-dialog-element/dialog-focus-previous-outside.html:
@@ -5158,9 +5147,6 @@ html/semantics/interactive-elements/the-dialog-element/modal-dialog-selection.ht
 - By default, text inside a modal dialog can be selected
 html/semantics/interactive-elements/the-dialog-element/removed-element-is-removed-from-top-layer.html:
 - "== html/semantics/interactive-elements/the-dialog-element/removed-element-is-removed-from-top-layer-ref.html"
-html/semantics/interactive-elements/the-dialog-element/show-modal-focusing-steps.html:
-- "[harness] TIMEOUT"
-- focus when a modal dialog is opened
 html/semantics/interactive-elements/the-dialog-element/toggle-events.html:
 - "[harness] ERROR"
 - dialog.show() should not open if beforetoggle calls showPopover
@@ -6045,9 +6031,6 @@ shadow-dom/focus/click-focus-slot-ancestor.html:
 - Select on non-focusable non-editable slot in a contenteditable shadow DOM and inside
   focusable div will select text
 - Select on non-focusable slot inside focusable div will select text
-shadow-dom/focus/focus-pseudo-matches-on-shadow-host.html:
-- "[harness] TIMEOUT"
-- "[harness] no subtests"
 shadow-dom/focus/focus-scroll-under-delegatesFocus.html:
 - "[harness] TIMEOUT"
 - delegatesFocus shouldn't cause extra focus steps

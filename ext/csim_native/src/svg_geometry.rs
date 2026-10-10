@@ -262,7 +262,56 @@ enum Shape {
     Ellipse([f64; 4]),
     // A line, a polyline, a polygon, a path: its subpaths, each its points (curves flattened) and whether it is closed;
     // and its exact bounding box.
-    Path(Vec<(Vec<[f64; 2]>, bool)>, Option<[f64; 4]>),
+    Path(std::rc::Rc<Subpaths>, Option<[f64; 4]>),
+}
+type Subpaths = Vec<(Vec<[f64; 2]>, bool)>;
+
+// A path's geometry by its data, flattened once: a page's paths are asked of at every hit and every client rect, and a
+// chart's thousands re-flattened at each (5,000 paths: a click 1.9 → 6.5 ms). Keyed on the computed `d`'s command list
+// — the one the style engine shares between restyles of the same declaration, held here so its address stays its own
+// — or on the attribute's text where the style has none. Emptied whole past `PATH_MEMO_LIMIT` entries.
+enum PathKey {
+    Computed(usize),
+    Attribute(String),
+}
+const PATH_MEMO_LIMIT: usize = 20_000;
+thread_local! {
+    static PATH_MEMO: std::cell::RefCell<(std::collections::HashMap<usize, (style::ArcSlice<style::values::specified::svg_path::PathCommand>, std::rc::Rc<Subpaths>, Option<[f64; 4]>)>, std::collections::HashMap<String, (std::rc::Rc<Subpaths>, Option<[f64; 4]>)>)> = Default::default();
+}
+fn path_geometry(n: &NodeData, s: Option<&ComputedValues>) -> (std::rc::Rc<Subpaths>, Option<[f64; 4]>) {
+    let computed = match s.map(|s| &s.get_svg().d) {
+        Some(style::values::specified::svg::DProperty::Path(data)) => Some(&data.0),
+        _ => None,
+    };
+    let key = match computed {
+        Some(commands) => PathKey::Computed(commands.as_ptr() as usize),
+        None => PathKey::Attribute(n.plain_attr("d").unwrap_or("").to_string()),
+    };
+    let hit = PATH_MEMO.with_borrow(|(by_commands, by_text)| match &key {
+        PathKey::Computed(at) => by_commands.get(at).map(|(_, p, b)| (p.clone(), *b)),
+        PathKey::Attribute(text) => by_text.get(text).cloned(),
+    });
+    if let Some(found) = hit {
+        return found;
+    }
+    let segs = segments(&path_data(n, s));
+    let geometry = (std::rc::Rc::new(flatten(&segs)), bbox_of(&segs));
+    PATH_MEMO.with_borrow_mut(|(by_commands, by_text)| {
+        if by_commands.len() + by_text.len() >= PATH_MEMO_LIMIT {
+            by_commands.clear();
+            by_text.clear();
+        }
+        match (key, computed) {
+            (PathKey::Computed(at), Some(commands)) => {
+                by_commands.insert(at, (commands.clone(), geometry.0.clone(), geometry.1));
+            }
+            (PathKey::Attribute(text), _) => {
+                by_text.insert(text, geometry.clone());
+            }
+            _ => {}
+        }
+    });
+    geometry
 }
 fn shape(n: &NodeData, s: Option<&ComputedValues>, vp: [f64; 2]) -> Option<Shape> {
     let svg = s.map(|s| s.get_svg());
@@ -300,17 +349,16 @@ fn shape(n: &NodeData, s: Option<&ComputedValues>, vp: [f64; 2]) -> Option<Shape
         "line" => {
             let pts = vec![[attr("x1", vp[0]), attr("y1", vp[1])], [attr("x2", vp[0]), attr("y2", vp[1])]];
             let b = union_points(pts.iter().copied());
-            Shape::Path(vec![(pts, false)], b)
+            Shape::Path(std::rc::Rc::new(vec![(pts, false)]), b)
         }
         "polyline" | "polygon" => {
             let pts: Vec<[f64; 2]> = numbers(n.plain_attr("points").unwrap_or("")).chunks_exact(2).map(|p| [p[0], p[1]]).collect();
             let b = union_points(pts.iter().copied());
-            Shape::Path(vec![(pts, &*n.local_name == "polygon")], b)
+            Shape::Path(std::rc::Rc::new(vec![(pts, &*n.local_name == "polygon")]), b)
         }
         "path" => {
-            let d = path_data(n, s);
-            let segs = segments(&d);
-            Shape::Path(flatten(&segs), bbox_of(&segs))
+            let (subpaths, bbox) = path_geometry(n, s);
+            Shape::Path(subpaths, bbox)
         }
         _ => return None,
     })
@@ -490,6 +538,11 @@ fn takes_point(s: Option<&ComputedValues>, sh: &Shape, ux: f64, uy: f64, vp: [f6
         _ => 0.5,
     };
     let nonzero = !matches!(svg.fill_rule, style::values::generics::basic_shape::FillRule::Evenodd);
+    // (…none outside its bounding box, grown by the stroke it takes: a path's edges are not walked for those)
+    let margin = if stroke { half.max(0.0) } else { 0.0 } + 1e-6;
+    if shape_bbox(sh).is_some_and(|[x0, y0, x1, y1]| ux < x0 - margin || ux > x1 + margin || uy < y0 - margin || uy > y1 + margin) {
+        return false;
+    }
     (fill && in_fill(sh, ux, uy, nonzero)) || (stroke && half > 0.0 && in_stroke(sh, ux, uy, half))
 }
 fn in_fill(sh: &Shape, x: f64, y: f64, nonzero: bool) -> bool {
@@ -502,7 +555,7 @@ fn in_fill(sh: &Shape, x: f64, y: f64, nonzero: bool) -> bool {
                 return true;
             }
             let mut winding = 0i32;
-            for (pts, _) in subpaths {
+            for (pts, _) in subpaths.iter() {
                 for i in 0..pts.len() {
                     let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
                     if a[1] <= y && b[1] > y && cross(a, b, [x, y]) > 0.0 {
@@ -909,13 +962,13 @@ mod tests {
 
     #[test]
     fn path_hits() {
-        let square = Shape::Path(flatten(&segments("M0 0 H10 V10 H0 Z")), None);
+        let square = Shape::Path(std::rc::Rc::new(flatten(&segments("M0 0 H10 V10 H0 Z"))), None);
         assert!(in_fill(&square, 5.0, 5.0, true));
         assert!(!in_fill(&square, 15.0, 5.0, true));
         assert!(in_stroke(&square, 10.2, 5.0, 0.5));
         assert!(!in_stroke(&square, 5.0, 5.0, 0.5));
         // (a stroke-only zig-zag: on its line, not in its hull)
-        let zig = Shape::Path(flatten(&segments("M4 6h16M4 12h16")), None);
+        let zig = Shape::Path(std::rc::Rc::new(flatten(&segments("M4 6h16M4 12h16"))), None);
         assert!(in_stroke(&zig, 10.0, 6.4, 1.0));
         assert!(!in_stroke(&zig, 10.0, 9.0, 1.0));
     }

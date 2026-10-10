@@ -11,6 +11,7 @@ RSpec.describe 'Inert nodes' do
       <!doctype html><meta charset=utf-8><style>body{margin:0}</style>
       <input id=behind><button id=b onclick="window.clicked = true">b</button>
       <div inert><input id=sub></div>
+      <input type=file id=upload><input type=checkbox id=cb>
       <dialog id=d><button id=close onclick="setTimeout(() => d.close(), 200)">close</button></dialog>
     HTML
   }
@@ -27,6 +28,11 @@ RSpec.describe 'Inert nodes' do
     session.execute_script('d.showModal()')
     expect(session.evaluate_script('[document.elementFromPoint(5, 5).id, (behind.focus(), document.activeElement.id)]')).to eq(%w[d close])
     expect { session.find('#behind').set('x') }.to raise_error(Capybara::Simulated::ElementNotInteractable)
+    # (…a checkbox's `set` is a click, intercepted; a file input takes its files inert or not, as chromedriver attaches
+    # to an uploader's input left outside the modal)
+    expect { session.find('#cb').set(true) }.to raise_error(Capybara::Simulated::ClickIntercepted)
+    session.find('#upload').set(__FILE__)
+    expect(session.evaluate_script('[upload.files.length, document.elementsFromPoint(5, 5).map((e) => e.localName)]')).to eq([1, %w[dialog html]])
     session.click_button 'close'
     session.fill_in 'behind', with: 'typed'
     expect(session.evaluate_script('[behind.value, document.getElementById("d").open]')).to eq(['typed', false])
