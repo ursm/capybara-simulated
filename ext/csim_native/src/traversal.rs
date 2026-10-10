@@ -2,10 +2,8 @@
 // DOM §4.4), and the traversals of a TreeWalker and a NodeIterator (DOM §6) — over node trees, which a shadow root is the
 // root of.
 //
-// A traversal's filter is the page's: the engine calls it on each node `whatToShow` shows, and it may change the tree
-// as it runs, which the traversal then goes on over. Where a node is, the page side is told as the steps the traversal
-// took from where it last was — up to the parent, down to the first or last child, across to the next or previous
-// sibling — which it takes in its own tree to have the object it hands the filter (and the node it answers with).
+// A traversal's filter is the page's: the engine calls it on each node `whatToShow` shows, handing it the node's
+// object, and it may change the tree as it runs, which the traversal then goes on over.
 
 use crate::dom::{nid_arg, realm_id, NodeData, NodeId, NodeKind, RealmArena, Relation};
 
@@ -51,27 +49,31 @@ fn position(arena: &RealmArena, other: &Side, this: &Side) -> u32 {
 
 // ── traversal (DOM §6) ──────────────────────────────────────────────────────────────────────────────────────────
 
-// What the page side is told of where a traversal is: a status (0 for none; else 1, or 2 where a NodeIterator is before
-// the node) and the steps to the node — one number where they fit, the status under base-5 digits of the steps from the
-// first up, under a leading 1; else an array, the status and the steps.
-fn answer_value<'s>(scope: &mut v8::PinScope<'s, '_>, status: u8, steps: &[u8]) -> v8::Local<'s, v8::Value> {
-    // (…5^21 · 3 < 2^53)
-    if steps.len() <= 21 {
-        let code = steps.iter().rev().fold(1.0, |code, &s| code * 5.0 + s as f64);
-        return v8::Number::new(scope, code * 3.0 + status as f64).into();
+// The object of the node `id` — which its handle holds — or undefined for one whose object V8 dropped.
+fn node_object<'s>(scope: &mut v8::PinScope<'s, '_>, id: NodeId) -> v8::Local<'s, v8::Value> {
+    let held = crate::dom::dom(scope).arena.get(id).and_then(|n| crate::node_handle::held(&n.link));
+    match held.and_then(|h| h.get(scope)) {
+        Some(object) => object.into(),
+        None => v8::undefined(scope).into(),
     }
-    let all: Vec<f64> = std::iter::once(status as f64).chain(steps.iter().map(|&s| s as f64)).collect();
-    crate::dom::f64_array(scope, &all).into()
+}
+// What the page side is told of where a traversal is: 0 for nowhere, else `[status, node]` — a status 1, or 2 where a
+// NodeIterator is before the node.
+fn answer_value<'s>(scope: &mut v8::PinScope<'s, '_>, status: u8, node: Option<NodeId>) -> v8::Local<'s, v8::Value> {
+    let Some(node) = node.filter(|_| status != 0) else { return v8::Integer::new(scope, 0).into() };
+    let status = v8::Integer::new(scope, i32::from(status)).into();
+    let object = node_object(scope, node);
+    v8::Array::new_with_elements(scope, &[status, object]).into()
 }
 
-// A step from one node to the next, as the page side takes it.
+// A step from one node to the next.
 #[derive(Clone, Copy)]
 enum Step {
-    Parent = 0,
-    FirstChild = 1,
-    LastChild = 2,
-    NextSibling = 3,
-    PreviousSibling = 4,
+    Parent,
+    FirstChild,
+    LastChild,
+    NextSibling,
+    PreviousSibling,
 }
 
 const FILTER_ACCEPT: u32 = 1;
@@ -93,15 +95,14 @@ fn neighbour(arena: &RealmArena, id: NodeId, step: Step) -> Option<NodeId> {
     }
 }
 
-// Where a traversal is: its node, and the steps to it the page side has not taken yet.
+// Where a traversal is: its node.
 struct Walk<'s> {
     cid: i32,
     root: NodeId,
     what_to_show: u32,
-    // The page's filter (None for none): handed the steps, it takes them and answers for the node it reaches.
+    // The page's filter (None for none): handed a node's object, it answers for it.
     filter: Option<v8::Local<'s, v8::Function>>,
     node: NodeId,
-    steps: Vec<u8>,
     // Whether a NodeIterator is before the node, where its filter moved it.
     moved_before: Option<bool>,
     // A TreeWalker's current node — the filter may set it as it runs.
@@ -132,7 +133,6 @@ impl<'s> Walk<'s> {
         match self.peek(scope, self.node, step) {
             Some(next) => {
                 self.node = next;
-                self.steps.push(step as u8);
                 true
             }
             None => false,
@@ -146,10 +146,9 @@ impl<'s> Walk<'s> {
             return Ok(FILTER_SKIP);
         }
         let Some(filter) = self.filter else { return Ok(FILTER_ACCEPT) };
-        let steps = answer_value(scope, 0, &self.steps);
-        self.steps.clear();
+        let node = node_object(scope, self.node);
         let undefined = v8::undefined(scope).into();
-        let answer = filter.call(scope, undefined, &[steps]);
+        let answer = filter.call(scope, undefined, &[node]);
         if let Some((node, before)) = MOVED.take() {
             self.node = node;
             self.moved_before = Some(before);
@@ -161,7 +160,7 @@ impl<'s> Walk<'s> {
     }
     // What the traversal answers: the node it ended on (`found`), with a status, or none.
     fn answer<'v>(&self, scope: &mut v8::PinScope<'v, '_>, found: bool, status: u8) -> v8::Local<'v, v8::Value> {
-        answer_value(scope, if found { status } else { 0 }, if found { &self.steps } else { &[] })
+        answer_value(scope, if found { status } else { 0 }, Some(self.node))
     }
 
     // TreeWalker `parentNode()`.
@@ -284,7 +283,7 @@ impl<'s> Walk<'s> {
         if !skip && self.go(scope, Step::FirstChild) {
             return true;
         }
-        let (from, steps) = (self.node, self.steps.len());
+        let from = self.node;
         while Some(self.node) != within {
             if self.go(scope, Step::NextSibling) {
                 return true;
@@ -294,7 +293,6 @@ impl<'s> Walk<'s> {
             }
         }
         self.node = from;
-        self.steps.truncate(steps);
         false
     }
     // The node before the current one in tree order within the root (the root itself included), taken.
@@ -352,9 +350,8 @@ const ITERATOR_PREVIOUS: u32 = 8;
 // __dom.traverse(kind, rootNid, currentNid, whatToShow, filter, before) -> a TreeWalker's (`kind` 0-6: parentNode,
 // firstChild, lastChild, nextSibling, previousSibling, nextNode, previousNode) or a NodeIterator's (7 nextNode, 8
 // previousNode; `before` its pointer) traversal from the current node (the iterator's reference): where it ends, as
-// `answer_value` says — a status 1, or for an iterator 1 + whether it is before its new reference, and the steps from
-// where `filter` last took them. `filter(steps)` takes the steps to the node it answers for (FILTER_ACCEPT / REJECT /
-// SKIP) — and tells where it moved that node to, for an iterator (`traverseFrom`), or where it set the walker's current
+// `answer_value` says — a status 1, or for an iterator 1 + whether it is before its new reference, and the node.
+// `filter(node)` answers for the node it is handed (FILTER_ACCEPT / REJECT / SKIP) — and tells where it moved that node to, for an iterator (`traverseFrom`), or where it set the walker's current
 // node (`traverseCurrent`); null for no filter. Nothing, where
 // the filter threw.
 fn traverse<'s>(scope: &mut v8::PinScope<'s, '_>, args: v8::FunctionCallbackArguments<'s>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -363,7 +360,7 @@ fn traverse<'s>(scope: &mut v8::PinScope<'s, '_>, args: v8::FunctionCallbackArgu
     let what_to_show = args.get(3).uint32_value(scope).unwrap_or(0);
     let filter = v8::Local::<v8::Function>::try_from(args.get(4)).ok();
     let before = args.get(5).is_true();
-    let mut walk = Walk { cid: realm_id(scope, &args), root, what_to_show, filter, node, steps: Vec::new(), moved_before: None, current: node };
+    let mut walk = Walk { cid: realm_id(scope, &args), root, what_to_show, filter, node, moved_before: None, current: node };
     let found = match kind {
         PARENT_NODE => walk.parent_node(scope).map(|f| f.then_some(1)),
         FIRST_CHILD | LAST_CHILD => walk.children(scope, kind == FIRST_CHILD).map(|f| f.then_some(1)),
@@ -397,7 +394,7 @@ fn traverse_current(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 
 // __dom.iteratorPreRemove(removedNid, rootNid, referenceNid, before) -> the NodeIterator "pre-removing steps" for the
 // removal of `removedNid`: null where the iterator stays as it is, else where its reference is then, as `answer_value`
-// says — 1, or 2 where it is before it, and the steps to it from the removed node.
+// says — 1, or 2 where it is before it, and the node.
 fn iterator_pre_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     let (Some(removed), Some(root), Some(reference)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1), nid_arg(scope, &args, 2)) else { return };
@@ -410,7 +407,7 @@ fn iterator_pre_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     if contains(removed, root) || !contains(removed, reference) {
         return;
     }
-    let mut walk = Walk { cid, root, what_to_show: 0, filter: None, node: removed, steps: Vec::new(), moved_before: None, current: removed };
+    let mut walk = Walk { cid, root, what_to_show: 0, filter: None, node: removed, moved_before: None, current: removed };
     // (…before it: the first node following the removed one and not in it, under the root)
     if before {
         if walk.following(scope, Some(root), true) {
@@ -431,7 +428,7 @@ fn iterator_pre_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 
 // __dom.iteratorPreRemoveAll(parentNid, rootNid, referenceNid, before) -> the NodeIterator pre-removing steps for the
 // removal of every child of `parentNid`, one after another, at once: null where the iterator stays as it is, else where
-// its reference is then, as `iteratorPreRemove` answers, from the parent. A reference under the parent goes — the
+// its reference is then, as `iteratorPreRemove` answers. A reference under the parent goes — the
 // children before its own gone first, and each following one in turn the reference while it is before it — to what
 // follows the last child under the root, before it; else to the parent, after it.
 fn iterator_pre_remove_all(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -448,12 +445,12 @@ fn iterator_pre_remove_all(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     if child.is_none_or(|c| matches!(arena.relation(c, root), Some(Relation::Same | Relation::Ancestor))) {
         return;
     }
-    let mut walk = Walk { cid, root, what_to_show: 0, filter: None, node: parent, steps: Vec::new(), moved_before: None, current: parent };
+    let mut walk = Walk { cid, root, what_to_show: 0, filter: None, node: parent, moved_before: None, current: parent };
     if before && walk.go(scope, Step::LastChild) && walk.following(scope, Some(root), true) {
         let answer = walk.answer(scope, true, 2);
         return rv.set(answer);
     }
-    let answer = answer_value(scope, 1, &[]);
+    let answer = answer_value(scope, 1, Some(parent));
     rv.set(answer);
 }
 
