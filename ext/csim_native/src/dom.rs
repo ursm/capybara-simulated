@@ -1967,6 +1967,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "childAt", child_at, context_id);
     register(scope, ns, "childNodes", child_nodes, context_id);
     register_fast(scope, ns, "childCount", child_count, CHILD_COUNT_FAST, context_id);
+    register_fast(scope, ns, "childIndex", child_index_op, CHILD_INDEX_FAST, context_id);
     register_fast(scope, ns, "contains", contains, CONTAINS_FAST, context_id);
     register_fast(scope, ns, "shadowIncludingContains", shadow_including_contains, SHADOW_INCLUDING_CONTAINS_FAST, context_id);
     register(scope, ns, "setArena", set_arena, context_id);
@@ -2231,6 +2232,34 @@ fn child_nodes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let kids = realm(scope, cid).get(id).map(|n| n.children.clone()).unwrap_or_default();
     rv.set(nodes_value(scope, cid, id, &kids));
 }
+// __dom.childIndex(parentNid, childNid) -> the child's index among the parent's children, -1 for no child of it (a
+// fast call: the arena keeps each child's position).
+fn child_index_of(arena: &RealmArena, parent: NodeId, child: NodeId) -> i32 {
+    match arena.get(child) {
+        Some(c) if c.parent == Some(parent) => arena.child_index(child) as i32,
+        _ => -1,
+    }
+}
+fn child_index_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (parent, child) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1));
+    rv.set_int32(parent.zip(child).map_or(-1, |(p, c)| child_index_of(&dom(scope).arena, p, c)));
+}
+fn child_index_fast(_receiver: v8::Local<v8::Value>, parent: f64, child: f64, options: *mut v8::fast_api::FastApiCallbackOptions) -> i32 {
+    fast_dom(options).zip(fast_pair(parent, child)).map_or(-1, |(d, (p, c))| child_index_of(&d.arena, p, c))
+}
+const CHILD_INDEX_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new(
+    child_index_fast as _,
+    &v8::fast_api::CFunctionInfo::new(
+        v8::fast_api::Type::Int32.as_info(),
+        &[
+            v8::fast_api::Type::V8Value.as_info(),
+            v8::fast_api::Type::Float64.as_info(),
+            v8::fast_api::Type::Float64.as_info(),
+            v8::fast_api::Type::CallbackOptions.as_info(),
+        ],
+        v8::fast_api::Int64Representation::Number,
+    ),
+)];
 // __dom.childCount(nid, elements) -> how many children the node has — element ones alone, with `elements`.
 fn child_count(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = nid_arg(scope, &args, 0);
