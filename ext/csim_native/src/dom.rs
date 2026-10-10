@@ -3415,8 +3415,8 @@ fn xpath_prefixes(
 }
 
 // __dom.xpathEvaluate(expression, contextNid, attrKey, html, namespaces, resultType) -> a number, string or boolean,
-// or for a node-set [key, node, key, node, …] in document order (each node its object; `key` an attribute's store key,
-// null for the node itself). The context is the node
+// or for a node-set [keys, nodes] in document order (the nodes as `nodes_value` answers them; each key an attribute's
+// store key, null for the node itself). The context is the node
 // `contextNid`, or its attribute stored under `attrKey` (a string); `namespaces` a flat [prefix, uri, …] array.
 // Throws a TypeError for a value of the wrong type; `undefined` for a context the arena does not hold.
 fn xpath_evaluate(
@@ -3478,20 +3478,17 @@ fn xpath_evaluate(
             scope.throw_exception(error);
         }
         Ok(Err(pairs)) => {
-            // (…the nodes' objects found first, before anything is allocated: a collection in between could take a
-            // handle)
-            let held: Vec<_> = pairs.iter().map(|&(n, _)| dom(scope).arena.get(n).and_then(|d| crate::node_handle::held(&d.link))).collect();
-            let objects: Vec<Option<v8::Local<v8::Object>>> = held.iter().map(|h| h.as_ref().and_then(|h| h.get(scope))).collect();
-            let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(pairs.len() * 2);
-            for ((_, key), object) in pairs.iter().zip(objects) {
-                let Some(object) = object else { continue };
-                items.push(match key.as_deref().and_then(|k| v8::String::new(scope, k)) {
+            let ids: Vec<NodeId> = pairs.iter().map(|&(n, _)| n).collect();
+            let keys: Vec<v8::Local<v8::Value>> = pairs
+                .iter()
+                .map(|(_, key)| match key.as_deref().and_then(|k| v8::String::new(scope, k)) {
                     Some(k) => k.into(),
                     None => v8::null(scope).into(),
-                });
-                items.push(object.into());
-            }
-            rv.set(v8::Array::new_with_elements(scope, &items).into());
+                })
+                .collect();
+            let keys = v8::Array::new_with_elements(scope, &keys).into();
+            let nodes = nodes_value(scope, cid, &ids);
+            rv.set(v8::Array::new_with_elements(scope, &[keys, nodes]).into());
         }
         Ok(Ok(crate::xpath::Answer::Number(n))) => rv.set_double(n),
         Ok(Ok(crate::xpath::Answer::Bool(b))) => rv.set_bool(b),

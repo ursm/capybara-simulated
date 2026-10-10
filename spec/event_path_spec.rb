@@ -5,8 +5,7 @@ require_relative 'support/session_teardown'
 
 # An event's path through shadow trees is the engine's (event_path.rs): a slotted node's next its slot, a shadow root's
 # its host unless the event is not composed, the target retargeted for each listener as the path crosses into a lighter
-# tree, and the relatedTarget against each node — in a document (the nodes answered as themselves) or not (by their paths,
-# from the target's tree or the relatedTarget's). Each expectation below is Chrome's.
+# tree, and the relatedTarget against each node — in a document or not. Each expectation below is Chrome's.
 RSpec.describe 'the event path through shadow trees' do
   let(:session) { simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] }) }
 

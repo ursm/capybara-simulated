@@ -41,19 +41,7 @@ RSpec.describe 'element state in the native arena' do
 
   # The ids `sel` matches natively, in document order.
   def native_ids(sel)
-    session.evaluate_script(<<~JS)
-      (() => {
-        // (…the matches themselves, in a document; else each one's path from it: a length, then child indices)
-        const paths = __dom.query(document._nid, #{sel.to_json}, false), out = [];
-        if (Array.isArray(paths)) return paths.map((n) => n.id);
-        for (let at = 0; at < paths.length; at += paths[at] + 1) {
-          let n = document;
-          for (let k = 1; k <= paths[at]; k++) n = n.childNodes[paths[at + k]];
-          out.push(n ? n.id : '?');
-        }
-        return out;
-      })()
-    JS
+    session.evaluate_script("__dom.query(document._nid, #{sel.to_json}, false).map((n) => n.id)")
   end
 
   before { session.visit '/' }
@@ -291,14 +279,7 @@ RSpec.describe 'element state in the native arena' do
       ms = session.evaluate_script(<<~JS)
         (() => {
           const t = performance.now();
-          // (…the matches themselves, in a document; else each one's path)
-          const count = (paths) => {
-            if (Array.isArray(paths)) return paths.length;
-            let n = 0;
-            for (let at = 0; at < paths.length; at += paths[at] + 1) n++;
-            return n;
-          };
-          const nat = count(__dom.query(document._nid, ':indeterminate', false)) + count(__dom.query(document._nid, ':default', false));
+          const nat = __dom.query(document._nid, ':indeterminate', false).length + __dom.query(document._nid, ':default', false).length;
           return [nat, performance.now() - t];
         })()
       JS

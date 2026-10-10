@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
 # The native selector engine (selector.rs) answers every selector there is — there is no other engine to hand one to:
-# `query` returns the elements a selector matches (each as its path from the root), and `null` for one it does not parse
-# (a SyntaxError).
+# `query` returns the elements a selector matches, and `null` for one it does not parse (a SyntaxError).
 
 require 'capybara/simulated'
 require 'rack'
@@ -40,12 +39,7 @@ RSpec.describe 'native selector engine' do
     session.evaluate_script(<<~JS)
       (() => {
         const answer = __dom.query(document._nid, #{sel.to_json}, false);
-        if (answer === null) return 'INVALID';
-        // (…the matches themselves, in a document; else each one's path: a length, then child indices)
-        if (Array.isArray(answer)) return answer.length;
-        let n = 0;
-        for (let at = 0; at < answer.length; at += answer[at] + 1) n++;
-        return n;
+        return answer === null ? 'INVALID' : answer.length;
       })()
     JS
   end
