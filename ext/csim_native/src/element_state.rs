@@ -331,7 +331,7 @@ impl RealmArena {
             if form_id.is_empty() {
                 return None;
             }
-            let hit = self.find_in_tree(self.root_of(id), |_, e| e.same_attr("id", n, "form"))?;
+            let hit = self.element_by_id(self.root_of(id), &n.plain_attr_units("form")?)?;
             return self.get(hit).is_some_and(|f| f.is_html_named("form")).then_some(hit);
         }
         let mut cur = self.parent_of(id);
@@ -890,34 +890,25 @@ impl RealmArena {
             if target.is_empty() {
                 return None;
             }
-            let hit = self.find_in_tree(self.root_of(label), |_, e| e.same_attr("id", n, "for"))?;
+            let hit = self.element_by_id(self.root_of(label), &n.plain_attr_units("for")?)?;
             return self.is_labelable(hit).then_some(hit);
         }
         n.children.iter().find_map(|&c| self.find_in_tree(c, |c, _| self.is_labelable(c)))
     }
     // A labelable element's labels (its `labels`), in tree order: the HTML labels of its tree whose labeled control it
     // is — none for an element that is not labelable.
-    // One walk of the tree: a label with a `for` labels the control where that names its id and it is the first element
-    // of the tree with that id; any other where the control is its first labelable descendant.
     pub(crate) fn labels_of(&self, control: NodeId) -> Vec<NodeId> {
-        let Some(me) = self.get(control).filter(|_| self.is_labelable(control)) else { return Vec::new() };
-        let named = me.plain_attr("id").is_some_and(|id| !id.is_empty());
-        let (mut labels, mut first_with_id, mut passed) = (Vec::new(), true, false);
+        if !self.is_labelable(control) {
+            return Vec::new();
+        }
+        let mut labels = Vec::new();
         self.find_in_tree(self.root_of(control), |c, n| {
-            if c == control {
-                passed = true;
-            } else if named && !passed && n.same_attr("id", me, "id") {
-                first_with_id = false;
-            }
-            if n.is_html_named("label") {
-                let by_for = n.plain_attr("for").is_some();
-                if (by_for && named && n.same_attr("for", me, "id")) || (!by_for && self.labeled_control(c) == Some(control)) {
-                    labels.push((c, by_for));
-                }
+            if n.is_html_named("label") && self.labeled_control(c) == Some(control) {
+                labels.push(c);
             }
             false
         });
-        labels.into_iter().filter(|&(_, by_for)| first_with_id || !by_for).map(|(c, _)| c).collect()
+        labels
     }
     // Interactive content (HTML §3.2.5.2.7), as a label's activation behaviour asks: an event targeted at it, or inside
     // it, is its own, not the label's.

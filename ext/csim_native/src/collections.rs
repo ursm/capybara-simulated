@@ -97,25 +97,39 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 fn element_by_id(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let id = utf16_arg(scope, args.get(1));
-    // (…the attribute as the arena holds it: UTF-16 where it has a lone surrogate, else its string — no copy per element)
-    let matches = |node: &NodeData| match node.get_attr_u16("id") {
-        Some(units) => units == &id[..],
-        None => node.plain_attr("id").is_some_and(|v| v.encode_utf16().eq(id.iter().copied())),
-    };
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    let mut stack = vec![root];
-    let mut found = None;
-    while let Some(n) = stack.pop() {
-        let Some(node) = arena.get(n) else { continue };
-        if node.kind == NodeKind::Element && matches(node) {
-            found = Some(n);
-            break;
-        }
-        stack.extend(node.children.iter().rev());
-    }
+    let found = arena.element_by_id(root, &id);
     let answer = crate::dom::nodes_value(scope, cid, root, found.as_slice());
     rv.set(answer);
+}
+
+impl RealmArena {
+    // The first element of `root`'s tree in tree order, `root` itself included, whose id is `id` (exactly, as UTF-16 —
+    // a lone surrogate included): from the tree's id map, made in one walk the first time it is asked after the arena
+    // changed (`id_index`).
+    pub(crate) fn element_by_id(&self, root: NodeId, id: &[u16]) -> Option<NodeId> {
+        let mut memo = self.id_index.borrow_mut();
+        if memo.0 != self.mutations {
+            memo.1.clear();
+            memo.0 = self.mutations;
+        }
+        let ids = memo.1.entry(root).or_insert_with(|| {
+            let mut ids = std::collections::HashMap::new();
+            let mut stack = vec![root];
+            while let Some(n) = stack.pop() {
+                let Some(node) = self.get(n) else { continue };
+                if node.kind == NodeKind::Element {
+                    if let Some(units) = node.plain_attr_units("id") {
+                        ids.entry(units).or_insert(n);
+                    }
+                }
+                stack.extend(node.children.iter().rev());
+            }
+            ids
+        });
+        ids.get(id).copied()
+    }
 }
 
 const CLASSES: u32 = 0;

@@ -7,7 +7,7 @@
 // took from where it last was — up to the parent, down to the first or last child, across to the next or previous
 // sibling — which it takes in its own tree to have the object it hands the filter (and the node it answers with).
 
-use crate::dom::{nid_arg, realm_id, NodeId, RealmArena, Relation};
+use crate::dom::{nid_arg, realm_id, NodeId, NodeKind, RealmArena, Relation};
 
 const DISCONNECTED: u32 = 0x01;
 const PRECEDING: u32 = 0x02;
@@ -464,6 +464,68 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "traverseFrom", traverse_from, context_id);
     crate::dom::register(scope, ns, "traverseCurrent", traverse_current, context_id);
     crate::dom::register(scope, ns, "iteratorPreRemove", iterator_pre_remove, context_id);
+    crate::dom::register(scope, ns, "isEqualNode", is_equal_node, context_id);
+    crate::dom::register(scope, ns, "textContent", text_content, context_id);
+}
+
+impl RealmArena {
+    // DOM §4.4 "equals": two nodes of one type — a doctype by its name and identifiers, an element by its namespace,
+    // prefix, local name and attributes (each of one in the other, by namespace, local name and value, in any order), a
+    // processing instruction by its target and data, character data by its data — with as many children, each equal.
+    pub(crate) fn is_equal_node(&self, a: NodeId, b: NodeId) -> bool {
+        let (Some(x), Some(y)) = (self.get(a), self.get(b)) else { return false };
+        if x.node_type() != y.node_type() {
+            return false;
+        }
+        let same = match x.kind {
+            NodeKind::Element => {
+                let (xs, ys) = (x.attribute_list(), y.attribute_list());
+                x.ns == y.ns
+                    && x.prefix == y.prefix
+                    && x.name_u16 == y.name_u16
+                    && x.local_name == y.local_name
+                    && xs.len() == ys.len()
+                    && xs.iter().all(|p| ys.iter().any(|q| p.ns == q.ns && p.local == q.local && p.value == q.value))
+            }
+            NodeKind::ProcessingInstruction => x.local_name == y.local_name && x.data == y.data,
+            NodeKind::Text | NodeKind::Comment => x.data == y.data,
+            NodeKind::Other => x.data == y.data && x.doctype_ids == y.doctype_ids,
+            NodeKind::Document | NodeKind::Fragment => true,
+        };
+        same && x.children.len() == y.children.len()
+            && x.children.iter().zip(&y.children).all(|(&c, &d)| self.is_equal_node(c, d))
+    }
+    // DOM's "descendant text content": the data of the node's Text descendants (CDATA sections included), in tree order.
+    pub(crate) fn text_content(&self, id: NodeId) -> Vec<u16> {
+        let mut out = Vec::new();
+        let mut stack = vec![id];
+        while let Some(c) = stack.pop() {
+            let Some(n) = self.get(c) else { continue };
+            if n.kind == NodeKind::Text {
+                out.extend_from_slice(&n.data);
+            } else {
+                stack.extend(n.children.iter().rev());
+            }
+        }
+        out
+    }
+}
+
+// __dom.isEqualNode(a, b) -> whether the two nodes are equal (`is_equal_node`).
+fn is_equal_node(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let (Some(a), Some(b)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return rv.set_bool(false) };
+    rv.set_bool(crate::dom::realm(scope, cid).is_equal_node(a, b));
+}
+
+// __dom.textContent(nid) -> the node's descendant text content (`text_content`).
+fn text_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let text = crate::dom::realm(scope, cid).text_content(id);
+    if let Some(string) = v8::String::new_from_two_byte(scope, &text, v8::NewStringType::Normal) {
+        rv.set(string.into());
+    }
 }
 
 // __dom.comparePosition(node1, attr1, tie1, node2, attr2, tie2) -> `node2.compareDocumentPosition(node1)` of two

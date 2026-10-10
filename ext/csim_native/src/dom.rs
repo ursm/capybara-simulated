@@ -675,6 +675,9 @@ pub(crate) struct RealmArena {
     // life, as a block parsed under one lock can never be read under another, and an element keeps its `style` block
     // into another realm's tree.
     pub(crate) style_lock: crate::style::StyleLock,
+    // Per tree root, the first element of each id, as of `mutations` (collections.rs `element_by_id`): a page's
+    // `getElementById` asked one walk of its tree per call, a document's whole, where browsers keep an id map.
+    pub(crate) id_index: std::cell::RefCell<(u64, std::collections::HashMap<NodeId, std::collections::HashMap<Vec<u16>, NodeId>>)>,
     // Per tree root, the facts element_state.rs asks of every control in turn, as of `mutations` (`form_facts`).
     pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
     // Each element's resolved directionality asked so far, true for rtl, as of `mutations` (`is_rtl`)…
