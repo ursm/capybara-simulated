@@ -13,6 +13,10 @@ publish = false
 [lib]
 crate-type = ["cdylib"]
 
+[build-dependencies]
+# build.rs compiles src/v8_shim.cc.
+cc = "1"
+
 [dependencies]
 # rusty_racer as a LIBRARY (not its gem .so): we call install_classes from our own
 # magnus init and register the DOM via set_realm_init_hook. Path dep during

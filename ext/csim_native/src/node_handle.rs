@@ -16,8 +16,10 @@
 // properties (`_id`, `_parent`, …), so no node made and dropped could die young — measured, a node churn +11-18% and its
 // heap 4x; a weak handle per node cost +10% too. A node in a document is held alive by it anyway, and one made and
 // dropped never is in one: so the engine hands back such a node's object itself (`held`, `dom.rs nodes_value`), and
-// finds any other by its path in the JS tree (`RealmArena::push_path`) — until a node's object is a bare wrapper, its
-// state the engine's: then every trace can be droppable, and the tree keep its objects.
+// finds any other by its path in the JS tree (`RealmArena::push_path`). The reference is DROPPABLE (src/v8_shim.cc):
+// it holds an object with state of its own as a strong one does, and once a node's object is a bare wrapper, its state
+// the engine's, a scavenge may drop it young and the handle hold it no more (`csim_node_reset_root`) — the step that lets
+// the tree keep every node's object.
 //
 // A node leaving its document is let go at once — its handle answers for it no more — but its reference is dropped only
 // at the next node made (`let_go`), unless it is back: a node a script moves leaves its document and returns within one
@@ -38,6 +40,26 @@ const TAG: u16 = 1;
 
 // What marks an object as a node's (its internal field 0): no other object carries this address.
 static BRAND: u8 = 0;
+
+// src/v8_shim.cc: a DROPPABLE TracedReference, and the roots handler that resets one when a scavenge drops the young,
+// unmodified wrapper it held — which every reference to a node's object is. While a node object carries its own state
+// as properties no scavenge drops it, and a droppable reference holds it as a strong one does; once the object is a bare
+// wrapper, its state the engine's, V8 may drop it and the handle make it anew (Blink's model).
+unsafe extern "C" {
+    fn csim_traced_reset_droppable(this: *mut v8::TracedReference<v8::Object>, isolate: v8::UnsafeRawIsolatePtr, other: *const v8::Object);
+    fn csim_install_roots_handler(isolate: v8::UnsafeRawIsolatePtr, tag: u16);
+    fn csim_traced_clear(this: *mut v8::TracedReference<v8::Object>);
+}
+// V8 dropped the wrapper of the handle `wrappable` (filed under TAG): its reference goes, and it holds its object no more.
+#[unsafe(no_mangle)]
+extern "C" fn csim_node_reset_root(wrappable: *mut std::ffi::c_void) {
+    // SAFETY: the roots handler unwrapped this pointer under TAG, which only NodeHandles are wrapped under; V8 calls it
+    // on the main thread, outside any borrow of the handle.
+    let handle = unsafe { &*(wrappable as *const NodeHandle) };
+    handle.held.set(false);
+    // SAFETY: as above; V8 resets the reference it reports dropped only through this call's embedder.
+    unsafe { csim_traced_clear(handle.object.get()) };
+}
 
 pub(crate) struct NodeHandle {
     // The arena slot the node holds, or none yet; and the queue of the isolate whose arena that is. A node registered
@@ -261,6 +283,9 @@ pub(crate) fn base_function<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::
         None => {
             let t = v8::FunctionTemplate::new(scope, construct);
             t.set_class_name(v8::String::new(scope, "NodeBase")?);
+            // (…and the isolate's roots handler, for the droppable references its handles hold their objects by)
+            // SAFETY: the isolate is live, and keeps the handler for its life.
+            unsafe { csim_install_roots_handler(scope.as_raw_isolate_ptr(), TAG) };
             t.instance_template(scope).set_internal_field_count(1);
             let global = v8::Global::new(scope, t);
             crate::dom::dom(scope).node_template = Some(global);
@@ -281,9 +306,10 @@ pub(crate) fn hold_objects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
         let h = unsafe { ptr.as_ref() };
         h.held.set(true);
         // (…one let go and not yet dropped keeps the reference it has)
-        let slot = unsafe { &mut *h.object.get() };
-        if slot.get(scope) != Some(obj) {
-            slot.reset(scope, Some(obj));
+        let slot = h.object.get();
+        // SAFETY: the main thread writes the reference; `obj` is a live local.
+        if unsafe { (*slot).get(scope) } != Some(obj) {
+            unsafe { csim_traced_reset_droppable(slot, scope.as_raw_isolate_ptr(), &*obj as *const v8::Object) };
         }
     }
 }

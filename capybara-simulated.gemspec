@@ -25,6 +25,8 @@ Gem::Specification.new do |spec|
     'vendor/js/*.js',
     'Cargo.toml', 'Cargo.lock',                     # the Rust workspace root (rb-sys builds from here)
     'ext/csim_native/src/*.rs',                     # the native extension's source (V8 engine + DOM + layout)
+    'ext/csim_native/src/*.cc',                     # …and its C++ shim over V8 (build.rs compiles it)
+    'ext/csim_native/build.rs',
     'ext/csim_native/Cargo.toml',
     'ext/csim_native/extconf.rb',
     'exe/*',
