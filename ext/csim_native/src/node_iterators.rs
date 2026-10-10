@@ -195,7 +195,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "iteratorInit", iterator_init, context_id);
     register(scope, ns, "iteratorReference", iterator_reference, context_id);
     register(scope, ns, "iteratorBefore", iterator_before, context_id);
-    register(scope, ns, "iteratorsRemovingAll", iterators_removing_all, context_id);
     register(scope, ns, "iteratorsLive", iterators_live, context_id);
 }
 
@@ -236,14 +235,11 @@ fn iterator_before(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set_bool(before);
 }
 
-// __dom.iteratorsRemovingAll(parentNid): the pre-removing steps for the removal of every child of the parent, one after
-// another, over every live iterator.
-fn iterators_removing_all(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(parent) = nid_arg(scope, &args, 0) else { return };
+// …and the pre-removing steps for the removal of every child of `parent`, one after another, over every live iterator.
+pub(crate) fn removing_all(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId) {
     if iterators(scope).live == 0 {
         return;
     }
-    let cid = crate::dom::realm_id(scope, &args);
     let d = crate::dom::dom(scope);
     let arena: &RealmArena = d.arena.enter(cid);
     d.iterators.pre_remove(|root, p| crate::traversal::pre_remove_all(arena, parent, root, p));

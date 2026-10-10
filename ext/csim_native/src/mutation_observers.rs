@@ -245,7 +245,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moRemoveTransients", remove_transients, context_id);
     crate::dom::register(scope, ns, "moInterested", interested, context_id);
     crate::dom::register(scope, ns, "moAddTransients", add_transients, context_id);
-    crate::dom::register(scope, ns, "moAddTransientsOfChildren", add_transients_of_children, context_id);
     crate::dom::register(scope, ns, "moRealm", realm_of, context_id);
     crate::dom::register(scope, ns, "moPend", pend, context_id);
     crate::dom::register(scope, ns, "moQueue", queue, context_id);
@@ -391,11 +390,9 @@ fn add_transients(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
 }
 
-// __dom.moAddTransientsOfChildren(parentNid) -> `moAddTransients` for each child of the parent, as they are all removed
-// at once (the observers given one, `observer_list`).
-fn add_transients_of_children(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(parent) = nid_arg(scope, &args, 0) else { return };
-    let arena = arena(scope, &args);
+// "Add transient registered observers" for each child of `parent`, as they are all removed: the observers given one,
+// each once.
+pub(crate) fn transients_of_children(arena: &mut RealmArena, parent: NodeId) -> Vec<u32> {
     let mut given: Vec<u32> = Vec::new();
     if !arena.observers.lists.is_empty() {
         let children = arena.get(parent).map_or_else(Vec::new, |p| p.children.clone());
@@ -407,9 +404,7 @@ fn add_transients_of_children(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
             }
         }
     }
-    if let Some(list) = observer_list(scope, &given) {
-        rv.set(list);
-    }
+    given
 }
 
 // Observers, as the bindings are handed them: an array of their numbers, or none for none.

@@ -75,7 +75,7 @@ RSpec.describe 'native arena reclamation (generational)' do
   end
 
   it 'keeps the cascade correct over a churned + reclaimed arena' do
-    # Insert then remove many subtrees under a live element (real syncChildren churn + detached nodes
+    # Insert then remove many subtrees under a live element (real insertChild churn + detached nodes
     # to reclaim), pumping between rounds, then style a SURVIVING element via a class rule. If a reused
     # slot had aliased a stale edge, native cascade matching over the arena would resolve the wrong
     # element; getComputedStyle reads the cascade, so a correct colour proves the arena stayed sound.

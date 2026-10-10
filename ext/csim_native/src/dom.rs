@@ -7,10 +7,9 @@
 // reached via `dom(scope)`), independent of rusty_racer's IsolateState.
 //
 // `Dom` holds ONE `RealmArena` for every realm's nodes, with each realm's own state (keyed by rusty_racer's
-// context_id; see `install` / `realm`). The JS side (native-query-shadow.js) builds
-// the arena's copy of a document (importNode + syncChildren) and keeps it current at the DOM
-// mutation seams; the Servo `selectors` matcher (selector.rs), the style engine (style.rs) and the layout
-// walk (walk.rs) read a RealmArena directly. The store stays in JS; the arena is its READER copy.
+// context_id; see `install` / `realm`). It is the tree: every node joins it at its making, and the bindings'
+// tree accessors and edge writes (tree.js, through native-query-shadow.js) are its ops; the Servo `selectors` matcher
+// (selector.rs), the style engine (style.rs) and the layout walk (walk.rs) read a RealmArena directly.
 //
 // GENERATIONAL ARENA. A node lives in a SLOT (`Vec<Slot>`); a slot carries a `gen` counter and, when
 // free, an empty `data`. A `NodeId` is a `(index, gen)` pair — and so is every INTERNAL edge
@@ -1529,6 +1528,38 @@ impl RealmArena {
     // by nothing a layout walk or a memo keys on — the change itself is the parent's, which `get_mut` stamped. Stamped
     // as a change of each, every sibling after a removed child was walked again rather than spliced back (a 400-item
     // list, `remove()` of the 200th: 203 records walked, 3 once it is not).
+    // `nodes`, in order, `parent`'s children before `before` (the last, where it is none or no child of it) — each taken
+    // from where it is first: one splice of the list and one reindex past it, where an insertion each reindexed the list
+    // after it each time. A node that is the parent or an ancestor of it, or a second time, is left out.
+    pub(crate) fn insert_children(&mut self, parent: NodeId, nodes: &[NodeId], before: Option<NodeId>) {
+        if self.get(parent).is_none() {
+            return;
+        }
+        self.state_epoch += 1;
+        let mut ancestors = Vec::new();
+        let mut a = Some(parent);
+        while let Some(n) = a {
+            ancestors.push(n);
+            a = self.get(n).and_then(|d| d.parent);
+        }
+        let mut seen = std::collections::HashSet::with_capacity(nodes.len());
+        let nodes: Vec<NodeId> =
+            nodes.iter().copied().filter(|&n| self.get(n).is_some() && !ancestors.contains(&n) && seen.insert(n)).collect();
+        for &n in &nodes {
+            self.detach(n);
+        }
+        let len = self.get(parent).map_or(0, |p| p.children.len());
+        let at = before.filter(|&b| self.parent_of(b) == Some(parent)).map_or(len, |b| self.child_index(b));
+        if let Some(p) = self.get_mut(parent) {
+            p.children.splice(at..at, nodes.iter().copied());
+        }
+        for &n in &nodes {
+            if let Some(c) = self.get_mut(n) {
+                c.parent = Some(parent);
+            }
+        }
+        self.reindex_children(parent, at, false);
+    }
     fn reindex_children(&mut self, parent: NodeId, from: usize, one: bool) {
         let (len, first) = self.get(parent).map_or((0, 0), |p| (p.children.len(), p.first_position));
         for i in from..len {
@@ -1933,8 +1964,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     let key = v8::String::new(scope, "realmId").expect("a short string");
     let id = v8::Integer::new(scope, context_id);
     ns.set(scope, key.into(), id.into());
-    // Bulk import + id-level query: build the arena from an already-parsed page (importNode /
-    // syncChildren) and match over it natively (query / matchesId).
+    // A node's making, and the id-level queries over the tree (query / matchesId).
     register(scope, ns, "importNode", import_node, context_id);
     // Every other node kind, character-data changes, and the parser's per-node tree steps.
     register(scope, ns, "createNode", create_node, context_id);
@@ -1942,6 +1972,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "appendData", append_data, context_id);
     register(scope, ns, "insertChild", insert_child, context_id);
     register(scope, ns, "removeChild", remove_child, context_id);
+    register(scope, ns, "removeChildren", remove_children, context_id);
+    register(scope, ns, "insertChildren", insert_children, context_id);
     register(scope, ns, "inspectNode", inspect_node, context_id);
     // Element state no attribute carries, for the state pseudo-classes (`:checked`, `:focus`, `:hover`, …).
     register(scope, ns, "setState", set_state, context_id);
@@ -2076,10 +2108,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::reflect::install(scope, ns, context_id);
     crate::document_encoding::install(scope, ns, context_id);
     register(scope, ns, "nowNanos", now_nanos, context_id);
-    // Incremental-sync primitives (the store-flip F1 foundation): keep the arena current
-    // as the DOM mutates, instead of rebuilding it. syncChildren relinks one parent's
-    // element children; setAttr/removeAttr mirror attribute writes.
-    register(scope, ns, "syncChildren", sync_children, context_id);
+    // A node's attributes written wholesale, and their namespaces.
     register(scope, ns, "syncAttrs", sync_attrs, context_id);
     register(scope, ns, "setAttrNamespace", set_attr_namespace, context_id);
     // The store-flip's native-backed `_attrs`: __dom.attrsView(nid) -> an interceptor object over
@@ -2480,17 +2509,66 @@ fn insert_child(
     };
     let before = nid_arg(scope, &args, 2);
     let cid = realm_id(scope, &args);
+    insert_nodes(scope, cid, parent, &[child], before);
+}
+
+// __dom.insertChildren(parentNid, [nid, …], beforeNid): the nodes, in order, the parent's children before `beforeNid`
+// (-1: last) — at once.
+fn insert_children(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(parent) = nid_arg(scope, &args, 0) else { return };
+    let nodes = nids_arg(scope, args.get(1));
+    let before = nid_arg(scope, &args, 2);
+    let cid = realm_id(scope, &args);
+    insert_nodes(scope, cid, parent, &nodes, before);
+}
+
+// DOM "insert"'s edges: `nodes` the children of `parent` before `before` (last where it is none) — taken from where they
+// are first — and the live ranges' insert steps for them, and the style engine told of each list that changed.
+fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, nodes: &[NodeId], before: Option<NodeId>) {
     let (arena, mut engine) = arena_and_engine(scope, cid);
-    let old = arena.parent_of(child);
-    if let (Some(engine), Some(_)) = (engine.as_deref_mut(), old) {
-        engine.node_left(arena, child);
+    // (…one — the commonest insertion, a node at a time — allocating nothing)
+    if let [node] = *nodes {
+        let old = arena.parent_of(node);
+        if let (Some(engine), Some(_)) = (engine.as_deref_mut(), old) {
+            engine.node_left(arena, node);
+        }
+        arena.insert_child(parent, node, before);
+        if let Some(engine) = engine {
+            if let Some(o) = old.filter(|&o| o != parent) {
+                engine.children_changed(arena, o);
+            }
+            engine.children_changed(arena, parent);
+        }
+        if before.is_some() && arena.parent_of(node) == Some(parent) {
+            let index = arena.child_index(node) as u32;
+            crate::ranges::inserted(scope, parent, index, 1);
+        }
+        return;
     }
-    arena.insert_child(parent, child, before);
+    let old: Vec<NodeId> = nodes.iter().filter_map(|&n| arena.parent_of(n)).collect();
+    if let Some(engine) = engine.as_deref_mut() {
+        for &n in nodes.iter().filter(|&&n| arena.parent_of(n).is_some()) {
+            engine.node_left(arena, n);
+        }
+    }
+    arena.insert_children(parent, nodes, before);
+    // (…where they went, past the first: a boundary in the parent after it moves by them)
+    let index = nodes.first().filter(|&&n| arena.parent_of(n) == Some(parent)).map(|&n| arena.child_index(n));
+    let inserted = nodes.iter().filter(|&&n| arena.parent_of(n) == Some(parent)).count() as u32;
     if let Some(engine) = engine {
-        if let Some(o) = old.filter(|&o| o != parent) {
+        let mut changed: Vec<NodeId> = Vec::new();
+        for o in old.into_iter().filter(|&o| o != parent) {
+            if !changed.contains(&o) {
+                changed.push(o);
+            }
+        }
+        for o in changed {
             engine.children_changed(arena, o);
         }
         engine.children_changed(arena, parent);
+    }
+    if let Some(index) = index.filter(|_| before.is_some()) {
+        crate::ranges::inserted(scope, parent, index as u32, inserted);
     }
 }
 
@@ -2959,8 +3037,15 @@ fn remove_child(
         return;
     };
     let cid = realm_id(scope, &args);
-    // (…the NodeIterators' pre-removing steps first, with the node still where it was)
+    // (…the NodeIterators' pre-removing steps and the live ranges' removing steps first, with the node still where it was)
     crate::node_iterators::removing(scope, cid, child);
+    let at = {
+        let arena = realm(scope, cid);
+        arena.parent_of(child).map(|p| (p, arena.child_index(child) as u32))
+    };
+    if let Some((parent, index)) = at {
+        crate::ranges::removing(scope, cid, parent, child, index);
+    }
     let (arena, mut engine) = arena_and_engine(scope, cid);
     let old = arena.parent_of(child);
     if let Some(engine) = engine.as_deref_mut() {
@@ -2977,103 +3062,33 @@ fn remove_child(
     }
 }
 
-// __dom.syncChildren(parentNid, childNids): make parentNid's children EXACTLY `childNids` (in tree order).
-// Each child is detached from any current parent first, so a MOVED node — still listed under its
-// old parent until that parent is itself synced — is re-homed correctly whichever order the two
-// syncs arrive in. The single structural-sync primitive the incremental (parse + mutation) arena
-// upkeep drives. New nodes are created with
-// importNode(parent = -1) first, then linked here.
-fn sync_children(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(parent) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let mut raw: Vec<NodeId> = Vec::new();
-    if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
-        for i in 0..arr.length() {
-            if let Some(id) = arr.get_index(scope, i).and_then(|v| v.integer_value(scope)).and_then(NodeId::from_i64) {
-                raw.push(id);
-            }
-        }
-    }
+// __dom.removeChildren(parentNid) -> [children, observers]: every child of the parent removed, one after another, as
+// "replace all" removes them — the NodeIterators' and live ranges' steps for them, the mutation observers' transient
+// registrations they take (`observers`, as `observer_list` answers), and the children, as `nodes_value` answers them.
+fn remove_children(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(parent) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
-    let (st, engine) = arena_and_engine(scope, cid);
-    if st.get(parent).is_none() {
-        return;
-    }
-    st.state_epoch += 1;
-    st.id_epoch += 1;
-    // Sanitize the delta: keep only LIVE children (a stale id would plant a dangling edge), drop the
-    // parent itself (a self-cycle) and duplicates (a node can't be its own sibling), preserving order.
-    // The matcher assumes an ACYCLIC tree; these cheap checks kill the footguns a malformed delta could
-    // plant. A transient ANCESTOR inversion during a multi-parent move (child re-homed before its old
-    // parent is re-synced) is legitimate and self-heals, so it is NOT rejected here — the invariant is
-    // "mirror an acyclic tree and sync every affected parent before the next query."
-    let mut seen: std::collections::HashSet<NodeId> = std::collections::HashSet::with_capacity(raw.len());
-    let mut kids: Vec<NodeId> = Vec::with_capacity(raw.len());
-    for &k in &raw {
-        if k != parent && st.get(k).is_some() && seen.insert(k) {
-            kids.push(k);
-        }
-    }
-    // Take each incoming child from a DIFFERENT current parent (a same-parent reorder skips this) — every old parent
-    // once, however many of its children arrive: a fragment handing over its whole list child by child would shift and
-    // reindex the rest per child.
-    let mut old_parents: Vec<NodeId> = Vec::new();
-    let mut arrived: Vec<NodeId> = Vec::new();
-    for &k in &kids {
-        let Some(kn) = st.get_mut(k) else { continue };
-        if kn.parent != Some(parent) {
-            if let Some(op) = kn.parent.replace(parent) {
-                arrived.push(k);
-                if !old_parents.contains(&op) {
-                    old_parents.push(op);
-                }
+    let arena = realm(scope, cid);
+    let kids = arena.get(parent).map_or_else(Vec::new, |p| p.children.clone());
+    let given = crate::mutation_observers::transients_of_children(arena, parent);
+    if !kids.is_empty() {
+        crate::node_iterators::removing_all(scope, cid, parent);
+        crate::ranges::removing_all(scope, cid, parent);
+        let (arena, mut engine) = arena_and_engine(scope, cid);
+        // (…from the last: each leaves the end of the list, which moves no other)
+        for &child in kids.iter().rev() {
+            if let Some(engine) = engine.as_deref_mut() {
+                engine.node_left(arena, child);
             }
+            arena.detach(child);
+        }
+        if let Some(engine) = engine {
+            engine.children_changed(arena, parent);
         }
     }
-    for &op in &old_parents {
-        let Some(list) = st.get(op).map(|o| o.children.clone()) else { continue };
-        let kept: Vec<NodeId> = list.into_iter().filter(|&c| st.get(c).is_some_and(|n| n.parent == Some(op))).collect();
-        if let Some(o) = st.get_mut(op) {
-            o.children = kept;
-        }
-        st.reindex_children(op, 0, false);
-    }
-    // Null the .parent of children DROPPED from this parent (were here, gone now, still pointing
-    // here). Otherwise a detached subtree keeps a phantom upward chain and an element-rooted query
-    // inside it could match an ancestor it no longer has. A child that MOVED to another parent was
-    // already retained-out above, so it isn't in the old list here; only truly-dropped ones are nulled
-    // (and a later syncChildren re-homing one re-sets its parent).
-    let dropped: Vec<NodeId> = match st.get(parent) {
-        Some(p) => p.children.iter().copied().filter(|c| !seen.contains(c)).collect(),
-        None => Vec::new(),
-    };
-    let left = dropped.clone();
-    for d in dropped {
-        if st.get(d).and_then(|node| node.parent) == Some(parent) {
-            if let Some(dn) = st.get_mut(d) {
-                dn.parent = None;
-                crate::node_handle::unlink(&dn.link);
-            }
-        }
-    }
-    if let Some(p) = st.get_mut(parent) {
-        p.children = kids;
-    }
-    st.reindex_children(parent, 0, false);
-    if let Some(engine) = engine {
-        for &n in arrived.iter().chain(&left) {
-            engine.node_left(st, n);
-        }
-        for op in old_parents {
-            engine.children_changed(st, op);
-        }
-        engine.children_changed(st, parent);
-    }
+    let nodes = nodes_value(scope, cid, &kids);
+    let observers = crate::mutation_observers::observer_list(scope, &given).unwrap_or_else(|| v8::undefined(scope).into());
+    rv.set(v8::Array::new_with_elements(scope, &[nodes, observers]).into());
 }
 
 // __dom.syncAttrs(nodeNid, attrsFlat): replace a node's attributes with the flat [name, value, …]

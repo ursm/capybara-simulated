@@ -40,7 +40,7 @@ RSpec.describe 'native arena upkeep' do
   end
 
   it 'applies a single append without relisting the parent' do
-    listed = crossed(%w[syncChildren insertChild], <<~JS, units: 'a => Array.isArray(a[1]) ? a[1].length : 1')
+    listed = crossed(%w[insertChildren insertChild], <<~JS, units: 'a => Array.isArray(a[1]) ? a[1].length : 1')
       const ul = document.createElement('ul');
       for (let i = 0; i < 2000; i++) { ul.appendChild(document.createElement('li')); ul.appendChild(document.createTextNode(' ')); }
       document.getElementById('h').appendChild(ul);

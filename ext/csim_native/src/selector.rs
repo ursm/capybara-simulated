@@ -710,8 +710,8 @@ pub fn query(arena: &RealmArena, root: NodeId, scope: NodeId, list: &SelectorLis
     // most once, so a pop count past the slot count means a `children` cycle was planted, and we break
     // rather than spin the isolate forever (no V8 interrupt reaches native code). It does NOT bound the
     // crate's ANCESTOR walk (repeated parent_element for descendant/sibling combinators, inside a single
-    // matches_selector_list) — that relies on the arena being ACYCLIC, which it is: the arena mirrors the
-    // always-acyclic JS DOM, and sync_children rejects self-cycles + stale/duplicate edges. Only a buggy
+    // matches_selector_list) — that relies on the arena being ACYCLIC, which it is: an insertion refuses the parent or
+    // an ancestor of it (`insert_child` / `insert_children`), as the DOM's pre-insertion validity does. Only a buggy
     // driver planting a genuine parent-chain cycle (never a real DOM) could hang that walk; the same
     // acyclicity assumption Servo itself makes. matches_compiled / matches_text share it.
     let cap = arena.slot_count().saturating_add(1);

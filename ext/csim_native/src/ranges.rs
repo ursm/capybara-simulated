@@ -252,9 +252,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "rangeSet", range_set, context_id);
     register(scope, ns, "rangeContainer", range_container, context_id);
     register(scope, ns, "rangeOffset", range_offset, context_id);
-    register(scope, ns, "rangesInsert", ranges_insert, context_id);
-    register(scope, ns, "rangesRemove", ranges_remove, context_id);
-    register(scope, ns, "rangesRemoveAll", ranges_remove_all, context_id);
     register(scope, ns, "rangesReplaceData", ranges_replace_data, context_id);
     register(scope, ns, "rangesSplit", ranges_split, context_id);
     register(scope, ns, "rangesMerge", ranges_merge, context_id);
@@ -636,12 +633,9 @@ fn follow(scope: &mut v8::PinScope<'_, '_>, moved: Vec<(*const RangeHandle, usiz
     }
 }
 
-// __dom.rangesInsert(parentNid, index, count) — `count` nodes were inserted into the parent at `index`: a boundary in it
-// past that point shifts by them.
-fn ranges_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(parent) = nid_arg(scope, &args, 0) else { return };
-    let index = args.get(1).uint32_value(scope).unwrap_or(0);
-    let count = args.get(2).uint32_value(scope).unwrap_or(0);
+// The live ranges' insert steps (DOM §4.2.3 "insert"): `count` nodes were inserted into `parent` at `index` — a boundary
+// in it past that point shifts by them. Run by the engine's insertion (dom.rs `insertChild` / `insertChildren`).
+pub(crate) fn inserted(scope: &mut v8::PinScope<'_, '_>, parent: NodeId, index: u32, count: u32) {
     let r = ranges(scope);
     r.sweep();
     for (id, w) in r.at(parent) {
@@ -663,20 +657,22 @@ fn inside(arena: &RealmArena, r: &Ranges, node: NodeId) -> Vec<(u32, usize)> {
     out
 }
 
-// __dom.rangesRemove(parentNid, parent, nid, index) — the node `nid` (at `index` in the parent, whose object `parent` is)
-// is about to be removed: a boundary inside it collapses to (parent, index), and one in the parent past it shifts left.
-fn ranges_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(parent), Some(node)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2)) else { return };
-    let Ok(parent_obj) = v8::Local::<v8::Object>::try_from(args.get(1)) else { return };
-    let index = args.get(3).uint32_value(scope).unwrap_or(0);
-    let cid = realm_id(scope, &args);
+// The parent's object, for the boundaries a removal moves into it — read before any range's handle is.
+fn parent_object<'s>(scope: &mut v8::PinScope<'s, '_>, parent: NodeId) -> Option<v8::Local<'s, v8::Object>> {
+    v8::Local::<v8::Object>::try_from(crate::dom::node_value(scope, Some(parent))).ok()
+}
+
+// …and their removing steps: `node`, at `index` in `parent`, is about to be removed — a boundary inside it collapses to
+// (parent, index), and one in the parent past it shifts left. Run by the engine's removal (dom.rs `removeChild`).
+pub(crate) fn removing(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node: NodeId, index: u32) {
+    if ranges(scope).by_node.is_empty() {
+        return;
+    }
+    let Some(parent_obj) = parent_object(scope, parent) else { return };
     let d = crate::dom::dom(scope);
     let arena = d.arena.enter(cid);
     let r = &mut d.ranges;
     r.sweep();
-    if r.by_node.is_empty() {
-        return;
-    }
     for (id, w) in r.at(parent) {
         let p = r.point(id, w);
         if p.offset > index {
@@ -688,19 +684,17 @@ fn ranges_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     follow(scope, moved, parent_obj);
 }
 
-// __dom.rangesRemoveAll(parentNid, parent) — every child of the parent (object `parent`) is about to be removed, one after
-// another, as "replace all" removes them: a boundary inside any collapses to (parent, 0), as does one in the parent.
-fn ranges_remove_all(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(parent) = nid_arg(scope, &args, 0) else { return };
-    let Ok(parent_obj) = v8::Local::<v8::Object>::try_from(args.get(1)) else { return };
-    let cid = realm_id(scope, &args);
+// …for every child of `parent`, about to be removed one after another, as "replace all" removes them: a boundary inside
+// any collapses to (parent, 0), as does one in the parent.
+pub(crate) fn removing_all(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId) {
+    if ranges(scope).by_node.is_empty() {
+        return;
+    }
+    let Some(parent_obj) = parent_object(scope, parent) else { return };
     let d = crate::dom::dom(scope);
     let arena = d.arena.enter(cid);
     let r = &mut d.ranges;
     r.sweep();
-    if r.by_node.is_empty() {
-        return;
-    }
     let points: Vec<_> = inside(arena, r, parent).into_iter().filter(|&(id, w)| r.point(id, w).node != parent).collect();
     for (id, w) in r.at(parent) {
         r.place(id, w, Boundary { node: parent, offset: 0 });
