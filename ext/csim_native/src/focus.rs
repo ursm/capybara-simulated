@@ -50,9 +50,9 @@ fn candidate(arena: &RealmArena, id: NodeId, n: &NodeData) -> bool {
 fn tabindex(n: &NodeData) -> Option<i64> {
     n.plain_attr("tabindex").and_then(crate::validity::parse_html_integer).filter(|t| i32::try_from(*t).is_ok())
 }
-// An editing host itself (element_state.rs `editing_host`).
+// An editing host itself (element_state.rs `editing_host`): one its own attribute makes one, asking no ancestor.
 fn editing_host(arena: &RealmArena, id: NodeId) -> bool {
-    arena.editing_host(id) == Some(id)
+    arena.get(id).is_some_and(|n| n.contenteditable_state() == Some(true))
 }
 // Inert: the element or an element it is a flat-tree descendant of carries `inert` — up through the slot a node is
 // assigned to, and from a shadow root to its host (Chrome and Firefox, measured: an `inert` around the slot makes its

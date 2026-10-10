@@ -1004,16 +1004,11 @@ impl RealmArena {
         let mut cur = Some(id);
         while let Some(c) = cur {
             let n = self.get(c).filter(|n| n.kind == NodeKind::Element)?;
-            // (…an HTML element's attribute alone: another's says nothing, inheriting its parent's)
-            if let Some(v) = n.plain_attr("contenteditable").filter(|_| n.is_html()) {
-                if v.is_empty() || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("plaintext-only") {
-                    return Some(c);
-                }
-                if v.eq_ignore_ascii_case("false") {
-                    return None;
-                }
+            match n.contenteditable_state() {
+                Some(true) => return Some(c),
+                Some(false) => return None,
+                None => cur = self.parent_of(c),
             }
-            cur = self.parent_of(c);
         }
         None
     }

@@ -357,6 +357,17 @@ impl NodeData {
     pub(crate) fn is_html_named(&self, name: &str) -> bool {
         self.is_html() && &*self.local_name == name
     }
+    // Whether its own `contenteditable` says it is an editing host or says nothing (HTML §6.8.1): an HTML element's, in
+    // the true or plaintext-only state, Some(true); in the false state Some(false); missing, invalid or another
+    // namespace's, None — its parent's then.
+    pub(crate) fn contenteditable_state(&self) -> Option<bool> {
+        let v = self.plain_attr("contenteditable").filter(|_| self.is_html())?;
+        if v.is_empty() || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("plaintext-only") {
+            Some(true)
+        } else {
+            v.eq_ignore_ascii_case("false").then_some(false)
+        }
+    }
     // A hyperlink: an HTML `<a>` / `<area>` with an `href` in no namespace (a `<link>` is none), or an SVG `<a>` with that
     // or an XLink `href` (SVG 1.1's `xlink:href`, or one set unprefixed by `setAttributeNS`) — what `:link` matches and
     // a click follows.
