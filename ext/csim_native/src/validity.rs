@@ -419,7 +419,7 @@ impl RealmArena {
     // selected — inserted selected, or set so — which wins over the others: every option initialised first; then the
     // others cleared where `just` is selected; with none selected, a drop-down box's first option not disabled
     // selected; with more than one, all but the last in tree order cleared. The options whose state it changes, with their new
-    // state — which the caller writes, as the element objects mirror it.
+    // state (`apply_option_states` writes them).
     pub(crate) fn selectedness(&self, select: NodeId, just: Option<NodeId>) -> Vec<(NodeId, u32)> {
         if self.get(select).is_none_or(|n| !n.is_html_named("select") || n.plain_attr("multiple").is_some()) {
             return Vec::new();
@@ -448,6 +448,27 @@ impl RealmArena {
             }
         }
         (0..options.len()).filter(|&i| state[i] != before[i]).map(|i| (options[i], state[i])).collect()
+    }
+    // Options' new states written; the options whose selectedness they changed.
+    pub(crate) fn apply_option_states(&mut self, states: Vec<(NodeId, u32)>) -> Vec<NodeId> {
+        let mut changed = Vec::new();
+        for (o, next) in states {
+            let Some(had) = self.get(o).map(|n| n.state) else { continue };
+            if next != had {
+                self.set_state(o, next);
+            }
+            if (next ^ had) & STATE_SELECTED != 0 {
+                changed.push(o);
+            }
+        }
+        changed
+    }
+    // …and every option of `select` (or `select` itself, an option) initialised from its `selected` attribute where
+    // nothing has done it yet (`option_initialised`).
+    pub(crate) fn initialise_options(&mut self, select: NodeId) -> Vec<NodeId> {
+        let options = if self.get(select).is_some_and(|n| n.is_html_named("option")) { vec![select] } else { self.list_of_options(select) };
+        let states = options.into_iter().map(|o| (o, self.option_initialised(o))).collect();
+        self.apply_option_states(states)
     }
     // An option's value: its `value` attribute, else its text — as the code units the page sees, a lone surrogate
     // included.
@@ -561,7 +582,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "isListBox", is_list_box, context_id);
     crate::dom::register(scope, ns, "isSubmitButton", is_submit_button, context_id);
     crate::dom::register(scope, ns, "selectedness", selectedness, context_id);
-    crate::dom::register(scope, ns, "optionInitialised", option_initialised, context_id);
+    crate::dom::register(scope, ns, "initialiseOptions", initialise_options, context_id);
     crate::dom::register(scope, ns, "optionDisabled", option_disabled, context_id);
     crate::dom::register(scope, ns, "radioGroup", radio_group, context_id);
     crate::dom::register(scope, ns, "formOwner", form_owner, context_id);
@@ -732,30 +753,25 @@ fn option_disabled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set_bool(crate::dom::realm(scope, cid).option_disabled(option));
 }
 
-// __dom.selectedness(selectNid, justNid) -> [index, state, index, state, …]: the options of the select's list of
-// options whose state the selectedness setting algorithm (`selectedness`) changes, by their index there, with their new
-// state; `justNid` -1 for none.
+// __dom.selectedness(selectNid, justNid) -> the options whose selectedness the selectedness setting algorithm changed
+// (`selectedness`, its states written), as `nodes_value` answers.
 fn selectedness(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let just = crate::dom::nid_arg(scope, &args, 1);
     let arena = crate::dom::realm(scope, cid);
-    let options = arena.list_of_options(select);
-    let items: Vec<v8::Local<v8::Value>> = arena
-        .selectedness(select, just)
-        .into_iter()
-        .flat_map(|(o, state)| [options.iter().position(|&x| x == o).unwrap_or(0) as f64, f64::from(state)])
-        .map(|n| v8::Number::new(scope, n).into())
-        .collect();
-    let array = v8::Array::new_with_elements(scope, &items);
-    rv.set(array.into());
+    let states = arena.selectedness(select, just);
+    let changed = arena.apply_option_states(states);
+    rv.set(crate::dom::nodes_value(scope, cid, select, &changed));
 }
 
-// __dom.optionInitialised(nid) -> the option's state with its selectedness initialised (`option_initialised`).
-fn option_initialised(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.initialiseOptions(nid) -> the options — of a select, or an option itself — whose selectedness their
+// initialisation changed (`initialise_options`), as `nodes_value` answers.
+fn initialise_options(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
-    let Some(option) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    rv.set_uint32(crate::dom::realm(scope, cid).option_initialised(option));
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let changed = crate::dom::realm(scope, cid).initialise_options(id);
+    rv.set(crate::dom::nodes_value(scope, cid, id, &changed));
 }
 
 // __dom.isSubmitButton(nid) -> whether the element is a submit button (`element_state::is_submit_button`).
