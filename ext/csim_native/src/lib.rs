@@ -15,6 +15,7 @@ mod canvas;
 mod canvas_path;
 mod caret;
 mod clone;
+mod connection_steps;
 mod collections;
 mod css;
 mod css_animations;

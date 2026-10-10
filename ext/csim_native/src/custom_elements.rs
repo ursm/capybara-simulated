@@ -2,17 +2,17 @@
 // adopted and move callbacks — in shadow-including tree order: those an upgrade has been tried on (`STATE_UPGRADED`).
 // The bindings run the callbacks.
 
-use crate::dom::{nid_arg, realm_id, NodeId, NodeKind, RealmArena, STATE_UPGRADED};
+use crate::dom::{nid_arg, realm_id, NodeData, NodeId, NodeKind, RealmArena, STATE_UPGRADED};
 
 impl RealmArena {
-    // The elements among `root`'s shadow-including inclusive descendants an upgrade has been tried on, in
-    // shadow-including tree order (a host, then its shadow tree, then its children).
-    pub(crate) fn upgraded_elements_in(&self, root: NodeId) -> Vec<NodeId> {
+    // The elements among `root`'s shadow-including inclusive descendants that `pick` takes, in shadow-including tree
+    // order (a host, then its shadow tree, then its children).
+    pub(crate) fn shadow_including_elements(&self, root: NodeId, pick: impl Fn(&NodeData) -> bool) -> Vec<NodeId> {
         let mut out = Vec::new();
         let mut stack = vec![root];
         while let Some(id) = stack.pop() {
             let Some(n) = self.get(id) else { continue };
-            if n.kind == NodeKind::Element && n.state & STATE_UPGRADED != 0 {
+            if n.kind == NodeKind::Element && pick(n) {
                 out.push(id);
             }
             stack.extend(n.children.iter().rev());
@@ -21,6 +21,10 @@ impl RealmArena {
             }
         }
         out
+    }
+    // …those an upgrade has been tried on.
+    pub(crate) fn upgraded_elements_in(&self, root: NodeId) -> Vec<NodeId> {
+        self.shadow_including_elements(root, |n| n.state & STATE_UPGRADED != 0)
     }
 }
 
