@@ -1623,9 +1623,9 @@ impl RealmArena {
     }
     pub(crate) fn child_count(&self, id: NodeId, elements: bool) -> u32 {
         let Some(n) = self.get(id) else { return 0 };
-        // (…live ones: a stale edge counts as none, as in the element view)
-        let live = n.children.iter().filter(|&&c| if elements { self.is_element(c) } else { self.get(c).is_some() });
-        live.count() as u32
+        // (…all of them, at once: a node a page holds has no stale child — its children's handles are its handle's
+        // edges, so none was collected under it — and the count is read in a loop that changes the list)
+        if elements { n.children.iter().filter(|&&c| self.is_element(c)).count() as u32 } else { n.children.len() as u32 }
     }
     pub(crate) fn last_element_child(&self, id: NodeId) -> Option<NodeId> {
         let node = self.get(id)?;
@@ -1964,6 +1964,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register_fast(scope, ns, "realmOf", realm_of, REALM_OF_FAST, context_id);
     register_fast(scope, ns, "isConnected", is_connected, IS_CONNECTED_FAST, context_id);
     register(scope, ns, "relativeNode", relative_node, context_id);
+    register(scope, ns, "childAt", child_at, context_id);
+    register(scope, ns, "childNodes", child_nodes, context_id);
     register_fast(scope, ns, "childCount", child_count, CHILD_COUNT_FAST, context_id);
     register_fast(scope, ns, "contains", contains, CONTAINS_FAST, context_id);
     register_fast(scope, ns, "shadowIncludingContains", shadow_including_contains, SHADOW_INCLUDING_CONTAINS_FAST, context_id);
@@ -2209,6 +2211,25 @@ fn relative_node(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     if let Some(object) = held.get(scope) {
         rv.set(object.into());
     }
+}
+// __dom.childAt(nid, index) -> the node's index-th child, its object; null past the last (a `childNodes` item);
+// undefined for one whose object V8 dropped.
+fn child_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let index = args.get(1).uint32_value(scope).unwrap_or(u32::MAX) as usize;
+    let arena = &dom(scope).arena;
+    let Some(&child) = arena.get(id).and_then(|n| n.children.get(index)) else { return rv.set_null() };
+    let Some(held) = arena.get(child).and_then(|n| crate::node_handle::held(&n.link)) else { return };
+    if let Some(object) = held.get(scope) {
+        rv.set(object.into());
+    }
+}
+// __dom.childNodes(nid) -> the node's children, as `nodes_value` answers.
+fn child_nodes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let kids = realm(scope, cid).get(id).map(|n| n.children.clone()).unwrap_or_default();
+    rv.set(nodes_value(scope, cid, id, &kids));
 }
 // __dom.childCount(nid, elements) -> how many children the node has — element ones alone, with `elements`.
 fn child_count(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
