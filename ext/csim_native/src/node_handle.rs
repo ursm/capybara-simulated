@@ -80,6 +80,9 @@ pub(crate) struct NodeHandle {
     // not yet dropped (`let_go`); empty otherwise.
     object: UnsafeCell<v8::TracedReference<v8::Object>>,
     held: Cell<bool>,
+    // Its event listeners (events.js: type → list), once it has any — the node's state, not its object's
+    // (`listenerStore`, and `listenerStores` for a dispatch's whole path in one call).
+    listeners: UnsafeCell<v8::TracedReference<v8::Object>>,
 }
 
 unsafe impl GarbageCollected for NodeHandle {
@@ -90,6 +93,7 @@ unsafe impl GarbageCollected for NodeHandle {
         self.owned.trace(visitor);
         // SAFETY: written on the main thread only, between collections' marking steps as TracedReference allows.
         visitor.trace(unsafe { &*self.object.get() });
+        visitor.trace(unsafe { &*self.listeners.get() });
     }
     fn get_name(&self) -> &'static std::ffi::CStr {
         c"NodeHandle"
@@ -238,6 +242,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         owned: Edge::new(),
         object: UnsafeCell::new(v8::TracedReference::empty()),
         held: Cell::new(false),
+        listeners: UnsafeCell::new(v8::TracedReference::empty()),
     };
     let heap = scope.get_cpp_heap().expect("NodeBase is installed only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
@@ -297,6 +302,38 @@ pub(crate) fn base_function<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::
         }
     };
     template.get_function(scope)
+}
+
+// `__dom.listenerStore(node[, store])`: the node's listener store, or undefined for none; with `store`, it becomes that
+// (an object) or none (anything else).
+pub(crate) fn listener_store(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(ptr) = handle_of(scope, args.get(0)) else { return };
+    let slot = unsafe { ptr.as_ref() }.listeners.get();
+    if args.length() > 1 {
+        let store = v8::Local::<v8::Object>::try_from(args.get(1)).ok();
+        // SAFETY: the main thread writes the reference; the handle lives while the object, an argument, does.
+        unsafe { (*slot).reset(scope, store) };
+        return;
+    }
+    // SAFETY: as above.
+    if let Some(store) = unsafe { (*slot).get(scope) } {
+        rv.set(store.into());
+    }
+}
+// `__dom.listenerStores(nodes)` -> each node's listener store at its index (undefined for none): a dispatch's whole
+// path in one call.
+pub(crate) fn listener_stores(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(nodes) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
+    let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
+    let stores: Vec<v8::Local<v8::Value>> = (0..nodes.length())
+        .map(|i| {
+            let node = nodes.get_index(scope, i)?;
+            // SAFETY: the main thread writes the reference; the handle lives while its object, in the array, does.
+            handle_of(scope, node).and_then(|ptr| unsafe { (*ptr.as_ref().listeners.get()).get(scope) }).map(Into::into)
+        })
+        .map(|store| store.unwrap_or(undefined))
+        .collect();
+    rv.set(v8::Array::new_with_elements(scope, &stores).into());
 }
 
 // `__dom.holdObjects(nodes)` / `__dom.releaseObjects(nodes)`: the nodes (their objects, as a script holds them) are now

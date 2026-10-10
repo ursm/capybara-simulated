@@ -1984,6 +1984,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::intersection::install(scope, ns, context_id);
     crate::resize_observation::install(scope, ns, context_id);
     crate::editing::install(scope, ns, context_id);
+    register(scope, ns, "listenerStore", crate::node_handle::listener_store, context_id);
+    register(scope, ns, "listenerStores", crate::node_handle::listener_stores, context_id);
     crate::resolved::install(scope, ns, context_id);
     crate::mime::install(scope, ns, context_id);
     crate::font_faces::install(scope, ns, context_id);
