@@ -184,7 +184,7 @@ fn ranges<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Ranges {
 
 // Whether `node` is an inclusive ancestor of `of` in its node tree — not across a shadow root, whose tree is its own (a
 // range inside one is not disturbed by its host's removal).
-fn contains(arena: &RealmArena, node: NodeId, of: NodeId) -> bool {
+pub(crate) fn contains(arena: &RealmArena, node: NodeId, of: NodeId) -> bool {
     let mut cur = Some(of);
     while let Some(n) = cur {
         if n == node {
@@ -428,10 +428,13 @@ fn range_common_ancestor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let Some([s, e]) = entry_points(scope, args.get(0)) else { return };
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    let (cs, ce) = (arena.chain(s.node), arena.chain(e.node));
-    let shared = cs.iter().zip(&ce).take_while(|(x, y)| x == y).count();
-    let common = if shared == 0 { s.node } else { cs[shared - 1] };
-    rv.set_double(common.to_f64());
+    rv.set_double(common_ancestor(arena, s.node, e.node).to_f64());
+}
+// The nearest inclusive ancestor of `a` that is an inclusive ancestor of `b` too — `a` where they share no tree.
+pub(crate) fn common_ancestor(arena: &RealmArena, a: NodeId, b: NodeId) -> NodeId {
+    let (ca, cb) = (arena.chain(a), arena.chain(b));
+    let shared = ca.iter().zip(&cb).take_while(|(x, y)| x == y).count();
+    if shared == 0 { a } else { ca[shared - 1] }
 }
 
 // The node after `id` in tree order — into its children first unless `skip_children` — within `id`'s tree.

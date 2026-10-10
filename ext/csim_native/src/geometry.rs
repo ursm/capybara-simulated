@@ -1362,7 +1362,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "scrollSize", scroll_size_op, context_id);
     register(scope, ns, "scrollRange", scroll_range_op, context_id);
     register(scope, ns, "clientBox", client_box_op, context_id);
-    register(scope, ns, "observedSizes", observed_sizes_op, context_id);
     register(scope, ns, "frameViewport", frame_viewport_op, context_id);
     register(scope, ns, "usedInsets", used_insets_op, context_id);
     register(scope, ns, "clientRects", client_rects_op, context_id);
@@ -1462,11 +1461,6 @@ fn used_insets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // viewport a frame element gives the document inside it (`frame_viewport`) — written to the Float64Array `out`.
 fn client_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, client_box);
-}
-// __dom.observedSizes(nid, out) -> whether `nid` has a box a ResizeObserver measures: its sizes (`observed_sizes`)
-// written to the Float64Array `out`.
-fn observed_sizes_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    answer_into(scope, &args, rv, observed_sizes);
 }
 fn frame_viewport_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, frame_viewport);

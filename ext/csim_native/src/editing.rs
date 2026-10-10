@@ -12,16 +12,19 @@ const BLOCK_CONTAINER_TAGS: [&str; 20] = [
     "h3", "h4", "h5", "h6", "li",
 ];
 
+// (…by its local name, ASCII-lowercased, in any namespace: the tag the commands always compared)
+fn tag_is(arena: &RealmArena, id: NodeId, accept: &dyn Fn(&str) -> bool) -> bool {
+    arena.get(id).is_some_and(|n| n.kind == NodeKind::Element && accept(&n.local_name.to_ascii_lowercase()))
+}
 fn is_block_container(arena: &RealmArena, id: NodeId) -> bool {
-    arena.get(id).is_some_and(|n| n.kind == NodeKind::Element && BLOCK_CONTAINER_TAGS.contains(&&*n.local_name))
+    tag_is(arena, id, &|t| BLOCK_CONTAINER_TAGS.contains(&t))
 }
 
 impl RealmArena {
     // Where a command starts from: `node` where the host holds it (or is it), else the host — a selection outside the
     // host never sends a walk past it.
     fn edit_anchor(&self, host: NodeId, node: NodeId) -> NodeId {
-        let inside = matches!(self.relation(host, node), Some(crate::dom::Relation::Same | crate::dom::Relation::Ancestor));
-        if inside { node } else { host }
+        if crate::ranges::contains(self, host, node) { node } else { host }
     }
 
     // The nearest element at or above `from` (the anchor of the selection's start, entering the child at `offset`
@@ -52,7 +55,7 @@ impl RealmArena {
         if sc == ec && is_text(sc) {
             return if so < eo { vec![(sc, so, eo)] } else { Vec::new() };
         }
-        let Some(common) = self.common_ancestor(sc, ec) else { return Vec::new() };
+        let common = crate::ranges::common_ancestor(self, sc, ec);
         let before_or_at = |a: (NodeId, u32), b: (NodeId, u32)| crate::ranges::compare_points(self, a, b).is_some_and(|o| o != std::cmp::Ordering::Greater);
         let mut out = Vec::new();
         let mut stack = vec![common];
@@ -71,12 +74,6 @@ impl RealmArena {
         }
         out
     }
-
-    // The inclusive ancestor of `a` that is an ancestor of `b` too, nearest first.
-    fn common_ancestor(&self, a: NodeId, b: NodeId) -> Option<NodeId> {
-        let chain = self.chain(b);
-        self.chain(a).into_iter().rev().find(|n| chain.contains(n))
-    }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -88,10 +85,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 const BLOCK: i32 = 0;
 const LIST_ITEM: i32 = 1;
 const BLOCKQUOTE: i32 = 2;
-const ANCHOR: i32 = 3;
 
 // __dom.editAncestor(hostNid, nodeNid, offset, descend, kind) -> [the element] or [] (`edit_ancestor`): of kind 0 a
-// block container, 1 a list item in an `<ol>` / `<ul>`, 2 a `<blockquote>`, 3 an `<a>`, as `nodes_value` answers.
+// block container, 1 a list item in an `<ol>` / `<ul>`, 2 a `<blockquote>`, as `nodes_value` answers.
 fn edit_ancestor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(host), Some(node)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
     let offset = args.get(2).uint32_value(scope).unwrap_or(0);
@@ -99,11 +95,9 @@ fn edit_ancestor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let kind = args.get(4).int32_value(scope).unwrap_or(BLOCK);
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    let named = |id: NodeId, tag: &str| arena.get(id).is_some_and(|n| n.is_html_named(tag));
     let found = arena.edit_ancestor(host, node, offset, descend, &|id| match kind {
-        LIST_ITEM => named(id, "li") && arena.parent_of(id).is_some_and(|p| named(p, "ol") || named(p, "ul")),
-        BLOCKQUOTE => named(id, "blockquote"),
-        ANCHOR => named(id, "a"),
+        LIST_ITEM => tag_is(arena, id, &|t| t == "li") && arena.parent_of(id).is_some_and(|p| tag_is(arena, p, &|t| t == "ol" || t == "ul")),
+        BLOCKQUOTE => tag_is(arena, id, &|t| t == "blockquote"),
         _ => is_block_container(arena, id),
     });
     let root = arena.shadow_including_root(host);
