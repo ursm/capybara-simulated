@@ -84,7 +84,8 @@ pub(crate) struct NodeHandle {
     // (`listenerStore`, and `listenerStores` for a dispatch's whole path in one call).
     listeners: UnsafeCell<v8::TracedReference<v8::Object>>,
     // The rest of what the bindings keep for it that is script objects, not the engine's data, made when first needed
-    // (`rareData`, Blink's rare data): its [SameObject] collections, a file input's files, a template's contents.
+    // (`rareData`, Blink's rare data): its [SameObject] collections and style declaration, a file input's files, the
+    // string a control's live value was last given.
     rare: UnsafeCell<v8::TracedReference<v8::Object>>,
 }
 

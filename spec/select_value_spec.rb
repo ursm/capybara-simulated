@@ -172,7 +172,8 @@ RSpec.describe 'picking a disabled option' do
 
   # A cloned select's options are inserted into it as appending them would be — initialised from their `selected`
   # attributes, the clone's selectedness set, none of the source's script-made selection carried — and a select in a
-  # template's contents is set as its options are parsed into it. Chrome: [0, 0, "true,false,false", 1, "2"].
+  # template's contents, or in a DOMParser's document, is set as its options are parsed into it. Chrome: [0, 0,
+  # "true,false,false", 1, "2", [1, 0]].
   it 'sets the selectedness of a cloned select and of one in a template' do
     got = session.evaluate_script(<<~JS)
       (() => {
@@ -186,10 +187,12 @@ RSpec.describe 'picking a disabled option' do
         t.innerHTML = '<template><select><option>1<option selected>2</select></template>';
         const ts = t.firstChild.content.querySelector('select');
         out.push(ts.selectedIndex, ts.value);
+        const parsed = new DOMParser().parseFromString('<select><option>1<option selected>2</select><select><option>a<option>b</select>', 'text/html');
+        out.push([...parsed.querySelectorAll('select')].map((x) => x.selectedIndex));
         return out;
       })()
     JS
-    expect(got).to eq([0, 0, 'true,false,false', 1, '2'])
+    expect(got).to eq([0, 0, 'true,false,false', 1, '2', [1, 0]])
   end
 
   it 'refuses to unselect a disabled option' do
