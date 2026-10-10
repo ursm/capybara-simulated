@@ -27,4 +27,11 @@ RSpec.describe 'Text control selection' do
     JS
     expect(got).to eq(['abcZ', [3, 4, 'none'], 'Ztp://a', 8, 'XYZo world', [0, 7, 'none']])
   end
+
+  it 'types into a clean field from its sanitized value' do
+    session.visit '/'
+    session.find('#url').send_keys(:end, 'Q')
+    session.find('#nl').send_keys(:end, 'Q')
+    expect(session.evaluate_script('[url.value, nl.value]')).to eq(['http://aQ', 'abcdQ'])
+  end
 end
