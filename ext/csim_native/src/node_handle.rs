@@ -340,6 +340,7 @@ impl ListenerTypes {
 pub(crate) fn install_listeners(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "listenerStore", listener_store, context_id);
     crate::dom::register(scope, ns, "listenerStores", listener_stores, context_id);
+    crate::dom::register(scope, ns, "dispatchPath", dispatch_path, context_id);
     crate::dom::register(scope, ns, "noteListenerType", note_listener_type, context_id);
     crate::dom::register(scope, ns, "listenerTypeKnown", listener_type_known, context_id);
     crate::dom::register(scope, ns, "rareData", rare_data, context_id);
@@ -454,6 +455,43 @@ fn set_subtree_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
         // writes the reference.
         unsafe { (*(*h).document.get()).reset(scope, doc) };
     }
+}
+
+// `__dom.dispatchPath(targetNid)` -> [path, stores] for a dispatch at a node in a document with no shadow tree in it:
+// the target and its ancestors up to the document, their objects — each held, as a node in a document is — and each
+// one's listener store (undefined for none); undefined where a node of it is not held (a tree in no document), whose
+// path the bindings walk.
+fn dispatch_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    // (…the handles found first, while the arena is borrowed: reading the references allocates nothing a collection
+    // could take one in until they are all read)
+    let handles: Option<Vec<*const NodeHandle>> = {
+        let arena = &crate::dom::dom(scope).arena;
+        let mut out = Vec::new();
+        let mut cur = Some(target);
+        let mut all_held = true;
+        while let Some(id) = cur {
+            match arena.get(id).and_then(|n| n.link.handle()).filter(|h| h.held.get()) {
+                Some(h) => out.push(h as *const NodeHandle),
+                None => all_held = false,
+            }
+            cur = arena.parent_of(id);
+        }
+        all_held.then_some(out)
+    };
+    let Some(handles) = handles else { return };
+    let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
+    let mut path = Vec::with_capacity(handles.len());
+    let mut stores = Vec::with_capacity(handles.len());
+    for &h in &handles {
+        // SAFETY: a held handle's object is alive (its reference holds it); the main thread wrote the references.
+        let Some(object) = (unsafe { (*(*h).object.get()).get(scope) }) else { return };
+        path.push(object.into());
+        stores.push(unsafe { (*(*h).listeners.get()).get(scope) }.map_or(undefined, Into::into));
+    }
+    let path = v8::Array::new_with_elements(scope, &path).into();
+    let stores = v8::Array::new_with_elements(scope, &stores).into();
+    rv.set(v8::Array::new_with_elements(scope, &[path, stores]).into());
 }
 
 // `__dom.noteListenerType(type)`: a node has a listener of `type` — a type none had before, counted.
