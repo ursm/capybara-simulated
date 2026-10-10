@@ -3,7 +3,7 @@
 // selectedness, a media element's resource, a `nonce` to hide, a custom element to upgrade or call back — so the
 // bindings run each step for those and walk none of the rest.
 
-use crate::dom::{nid_arg, realm_id, NodeData, NodeId, RealmArena, STATE_UPGRADED};
+use crate::dom::{nid_arg, realm_id, NodeData, NodeId, NodeKind, RealmArena, STATE_UPGRADED};
 
 // The elements whose local name (ASCII-lowercased, in any namespace — the steps tell an SVG `<script>` or `<use>` by
 // it) gives them a connection step.
@@ -17,13 +17,14 @@ const STEP_TAGS: [&str; 15] = [
 // name has a hyphen; a built-in an `is` value), or one an upgrade was tried on, to call back.
 pub(crate) fn has_connection_step(n: &NodeData) -> bool {
     let name: &str = &n.local_name;
-    STEP_TAGS.iter().any(|t| name.eq_ignore_ascii_case(t))
-        || name.contains('-')
-        || n.is_value.is_some()
-        || n.state & STATE_UPGRADED != 0
-        || n.plain_attr("is").is_some()
-        || n.plain_attr("nonce").is_some_and(|v| !v.is_empty())
-        || n.plain_attr("style").is_some_and(|v| v.contains("url("))
+    n.kind == NodeKind::Element
+        && (STEP_TAGS.iter().any(|t| name.eq_ignore_ascii_case(t))
+            || name.contains('-')
+            || n.is_value.is_some()
+            || n.state & STATE_UPGRADED != 0
+            || n.plain_attr("is").is_some()
+            || n.plain_attr("nonce").is_some_and(|v| !v.is_empty())
+            || n.plain_attr("style").is_some_and(|v| v.contains("url(")))
 }
 
 impl RealmArena {

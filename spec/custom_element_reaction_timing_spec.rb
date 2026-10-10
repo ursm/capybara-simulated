@@ -115,4 +115,25 @@ RSpec.describe 'custom element reaction timing' do
     JS
     expect(got).to eq([true, true, 'x-Ö'])
   end
+
+  # A shadow tree the parser's custom element built in its constructor connects once, each element of it: one a
+  # `connectedCallback` inserts beside it is connected by its own insertion, not again by the walk that found its
+  # sibling (it read the tree live, and called back the inserted one twice). Chrome: ["xa=1", "xb=n1", "end=1"].
+  it 'calls back an element a shadow tree\'s callback inserts once' do
+    html = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8><script>
+        window.log = [];
+        customElements.define('x-a', class extends HTMLElement {
+          connectedCallback() { log.push('xa=1'); const b = document.createElement('x-b'); b.id = 'n1'; this.after(b); }
+        });
+        customElements.define('x-b', class extends HTMLElement { connectedCallback() { log.push('xb=' + this.id); } });
+        customElements.define('x-host', class extends HTMLElement {
+          constructor() { super(); this.attachShadow({mode: 'open'}).innerHTML = '<x-a></x-a><p></p>'; }
+        });
+      </script><body><x-host></x-host><script>log.push('end=1');</script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    expect(s.evaluate_script('log')).to eq(['xa=1', 'xb=n1', 'end=1'])
+  end
 end
