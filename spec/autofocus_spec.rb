@@ -40,4 +40,23 @@ RSpec.describe 'Autofocus' do
     expect(session).to have_css('#out', text: 'dyn2')
     expect(session.evaluate_script('out.textContent')).to eq("dyn d\ndyn2 d")
   end
+
+  it "finds a candidate in a shadow tree — a declarative one, one set by innerHTML, one inside a host appended" do
+    pages['/shadow'] = <<~'HTML'
+      <!doctype html><meta charset=utf-8><body><x-h id=dsd><template shadowrootmode=open><input autofocus></template></x-h>
+    HTML
+    pages['/inner'] = <<~'HTML'
+      <!doctype html><meta charset=utf-8><body><div id=h></div><script>h.attachShadow({mode: 'open'}).innerHTML = '<input autofocus>'</script>
+    HTML
+    pages['/appended'] = <<~'HTML'
+      <!doctype html><meta charset=utf-8><body><script>
+        const h = document.createElement('div'); h.id = 'h'; h.attachShadow({mode: 'open'}).innerHTML = '<input autofocus>';
+        document.body.append(h);
+      </script>
+    HTML
+    {'/shadow' => 'dsd', '/inner' => 'h', '/appended' => 'h'}.each do |path, host|
+      session.visit path
+      expect(session.evaluate_script('[document.activeElement.id, document.activeElement.shadowRoot?.activeElement.localName]')).to eq([host, 'input']), path
+    end
+  end
 end

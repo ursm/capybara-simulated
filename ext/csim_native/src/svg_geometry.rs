@@ -270,45 +270,40 @@ type Subpaths = Vec<(Vec<[f64; 2]>, bool)>;
 // chart's thousands re-flattened at each (5,000 paths: a click 1.9 → 6.5 ms). Keyed on the computed `d`'s command list
 // — the one the style engine shares between restyles of the same declaration, held here so its address stays its own
 // — or on the attribute's text where the style has none. Emptied whole past `PATH_MEMO_LIMIT` entries.
-enum PathKey {
-    Computed(usize),
-    Attribute(String),
-}
 const PATH_MEMO_LIMIT: usize = 20_000;
-thread_local! {
-    static PATH_MEMO: std::cell::RefCell<(std::collections::HashMap<usize, (style::ArcSlice<style::values::specified::svg_path::PathCommand>, std::rc::Rc<Subpaths>, Option<[f64; 4]>)>, std::collections::HashMap<String, (std::rc::Rc<Subpaths>, Option<[f64; 4]>)>)> = Default::default();
+type PathCommands = style::ArcSlice<style::values::specified::svg_path::PathCommand>;
+type PathGeometry = (std::rc::Rc<Subpaths>, Option<[f64; 4]>);
+#[derive(Default)]
+struct PathMemo {
+    by_commands: std::collections::HashMap<usize, (PathCommands, PathGeometry)>,
+    by_text: std::collections::HashMap<String, PathGeometry>,
 }
-fn path_geometry(n: &NodeData, s: Option<&ComputedValues>) -> (std::rc::Rc<Subpaths>, Option<[f64; 4]>) {
+thread_local! {
+    static PATH_MEMO: std::cell::RefCell<PathMemo> = Default::default();
+}
+fn path_geometry(n: &NodeData, s: Option<&ComputedValues>) -> PathGeometry {
     let computed = match s.map(|s| &s.get_svg().d) {
         Some(style::values::specified::svg::DProperty::Path(data)) => Some(&data.0),
         _ => None,
     };
-    let key = match computed {
-        Some(commands) => PathKey::Computed(commands.as_ptr() as usize),
-        None => PathKey::Attribute(n.plain_attr("d").unwrap_or("").to_string()),
-    };
-    let hit = PATH_MEMO.with_borrow(|(by_commands, by_text)| match &key {
-        PathKey::Computed(at) => by_commands.get(at).map(|(_, p, b)| (p.clone(), *b)),
-        PathKey::Attribute(text) => by_text.get(text).cloned(),
+    let text = n.plain_attr("d").unwrap_or("");
+    let hit = PATH_MEMO.with_borrow(|memo| match computed {
+        Some(commands) => memo.by_commands.get(&(commands.as_ptr() as usize)).map(|(_, g)| g.clone()),
+        None => memo.by_text.get(text).cloned(),
     });
     if let Some(found) = hit {
         return found;
     }
     let segs = segments(&path_data(n, s));
-    let geometry = (std::rc::Rc::new(flatten(&segs)), bbox_of(&segs));
-    PATH_MEMO.with_borrow_mut(|(by_commands, by_text)| {
-        if by_commands.len() + by_text.len() >= PATH_MEMO_LIMIT {
-            by_commands.clear();
-            by_text.clear();
+    let geometry: PathGeometry = (std::rc::Rc::new(flatten(&segs)), bbox_of(&segs));
+    PATH_MEMO.with_borrow_mut(|memo| {
+        if memo.by_commands.len() + memo.by_text.len() >= PATH_MEMO_LIMIT {
+            *memo = PathMemo::default();
         }
-        match (key, computed) {
-            (PathKey::Computed(at), Some(commands)) => {
-                by_commands.insert(at, (commands.clone(), geometry.0.clone(), geometry.1));
-            }
-            (PathKey::Attribute(text), _) => {
-                by_text.insert(text, geometry.clone());
-            }
-            _ => {}
+        if let Some(commands) = computed {
+            memo.by_commands.insert(commands.as_ptr() as usize, (commands.clone(), geometry.clone()));
+        } else {
+            memo.by_text.insert(text.to_string(), geometry.clone());
         }
     });
     geometry
