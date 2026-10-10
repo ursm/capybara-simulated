@@ -48,6 +48,8 @@ pub(crate) struct Observers {
     // has a registered observer — which a change must then ask about, whichever realm's script made it — [1] whether
     // the agent's mutation observer microtask is queued, [2] whether observers are being notified.
     flags: Option<v8::SharedRef<v8::BackingStore>>,
+    // The realm whose microtask queue holds the agent's mutation observer microtask, while one does (`moQueue`).
+    queued_in: Option<i32>,
 }
 
 const ANY_REGISTERED: usize = 0;
@@ -108,7 +110,7 @@ impl Observers {
 
     // Realm `cid` is gone — a frame removed or navigated, a page left: its observers observe nothing more, as nothing
     // can notify them, and nothing of it is pending. (Its notification microtask, where it had one queued, went with it:
-    // the next change queues another.)
+    // the next change queues another; one another realm queued stays.)
     pub(crate) fn drop_realm(&mut self, cid: i32) {
         let gone: Vec<u32> = self.realms.iter().filter(|&(_, &c)| c == cid).map(|(&o, _)| o).collect();
         for observer in gone {
@@ -116,8 +118,11 @@ impl Observers {
             self.realms.remove(&observer);
         }
         self.pending.retain(|&c| c != cid);
-        if let Some(flags) = &self.flags {
-            flags[MICROTASK_QUEUED].set(0);
+        if self.queued_in == Some(cid) {
+            self.queued_in = None;
+            if let Some(flags) = &self.flags {
+                flags[MICROTASK_QUEUED].set(0);
+            }
         }
     }
 
@@ -243,6 +248,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moAddTransientsOfChildren", add_transients_of_children, context_id);
     crate::dom::register(scope, ns, "moRealm", realm_of, context_id);
     crate::dom::register(scope, ns, "moPend", pend, context_id);
+    crate::dom::register(scope, ns, "moQueue", queue, context_id);
     crate::dom::register(scope, ns, "moTakePending", take_pending, context_id);
     crate::dom::register(scope, ns, "moHasPending", has_pending, context_id);
     crate::dom::register(scope, ns, "moDropRealm", drop_realm, context_id);
@@ -263,6 +269,16 @@ fn pend(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_
     let pending = &mut crate::dom::dom(scope).arena.observers.pending;
     if !pending.contains(&cid) {
         pending.push(cid);
+    }
+}
+
+// __dom.moQueue(): the agent's mutation observer microtask is queued, in the calling realm's queue (flag [1]).
+fn queue(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let observers = &mut crate::dom::dom(scope).arena.observers;
+    observers.queued_in = Some(cid);
+    if let Some(flags) = &observers.flags {
+        flags[MICROTASK_QUEUED].set(1);
     }
 }
 

@@ -557,4 +557,16 @@ RSpec.describe 'Image button selected coordinate' do
     session.execute_script('setTimeout(() => i.click())')
     expect(session).to have_text('q=im.x=0&im.y=0')
   end
+
+  # (…and the origin for a key's activation, and for a submission after the user's: Chrome 155, 0,0 each)
+  it "submits the origin for a key's activation and for a later submission" do
+    session.visit '/'
+    session.find('#i').send_keys(:enter)
+    expect(session).to have_text('q=im.x=0&im.y=0')
+    session.visit '/'
+    session.execute_script("i.form.addEventListener('submit', (e) => { if (!window.once) { window.once = true; e.preventDefault(); } })")
+    session.find('#i').click
+    session.execute_script('setTimeout(() => i.form.requestSubmit(i))')
+    expect(session).to have_text('q=im.x=0&im.y=0')
+  end
 end
