@@ -80,19 +80,17 @@ const FILTER_ACCEPT: u32 = 1;
 const FILTER_REJECT: u32 = 2;
 const FILTER_SKIP: u32 = 3;
 
+// …the node a step from `id` reaches: the tree's accessors' answer (`RealmArena::relative`), so a traversal sees the
+// tree they do.
 fn neighbour(arena: &RealmArena, id: NodeId, step: Step) -> Option<NodeId> {
-    let sibling = |by: isize| {
-        let parent = arena.parent_of(id)?;
-        let i = arena.child_index(id).checked_add_signed(by)?;
-        arena.get(parent)?.children.get(i).copied()
-    };
-    match step {
-        Step::Parent => arena.parent_of(id),
-        Step::FirstChild => arena.get(id)?.children.first().copied(),
-        Step::LastChild => arena.get(id)?.children.last().copied(),
-        Step::NextSibling => sibling(1),
-        Step::PreviousSibling => sibling(-1),
-    }
+    use crate::dom::{RELATIVE_FIRST_CHILD, RELATIVE_LAST_CHILD, RELATIVE_NEXT, RELATIVE_PARENT, RELATIVE_PREVIOUS};
+    arena.relative(id, match step {
+        Step::Parent => RELATIVE_PARENT,
+        Step::FirstChild => RELATIVE_FIRST_CHILD,
+        Step::LastChild => RELATIVE_LAST_CHILD,
+        Step::NextSibling => RELATIVE_NEXT,
+        Step::PreviousSibling => RELATIVE_PREVIOUS,
+    })
 }
 
 // Where a traversal is: its node.
@@ -351,9 +349,9 @@ const ITERATOR_PREVIOUS: u32 = 8;
 // firstChild, lastChild, nextSibling, previousSibling, nextNode, previousNode) or a NodeIterator's (7 nextNode, 8
 // previousNode; `before` its pointer) traversal from the current node (the iterator's reference): where it ends, as
 // `answer_value` says — a status 1, or for an iterator 1 + whether it is before its new reference, and the node.
-// `filter(node)` answers for the node it is handed (FILTER_ACCEPT / REJECT / SKIP) — and tells where it moved that node to, for an iterator (`traverseFrom`), or where it set the walker's current
-// node (`traverseCurrent`); null for no filter. Nothing, where
-// the filter threw.
+// `filter(node)` answers for the node it is handed (FILTER_ACCEPT / REJECT / SKIP) — and tells where it moved that node
+// to, for an iterator (`traverseFrom`), or where it set the walker's current node (`traverseCurrent`); null for no
+// filter. Nothing, where the filter threw.
 fn traverse<'s>(scope: &mut v8::PinScope<'s, '_>, args: v8::FunctionCallbackArguments<'s>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(root), Some(node)) = (nid_arg(scope, &args, 1), nid_arg(scope, &args, 2)) else { return };
     let kind = args.get(0).uint32_value(scope).unwrap_or(u32::MAX);

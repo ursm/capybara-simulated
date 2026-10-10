@@ -311,12 +311,12 @@ pub(crate) const STATE_UPGRADED: u32 = 1 << 18;
 
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its
 // first and last child, its previous and next sibling, and the element ones of those.
-const RELATIVE_PARENT: u32 = 0;
+pub(crate) const RELATIVE_PARENT: u32 = 0;
 const RELATIVE_PARENT_ELEMENT: u32 = 1;
-const RELATIVE_FIRST_CHILD: u32 = 2;
-const RELATIVE_LAST_CHILD: u32 = 3;
-const RELATIVE_PREVIOUS: u32 = 4;
-const RELATIVE_NEXT: u32 = 5;
+pub(crate) const RELATIVE_FIRST_CHILD: u32 = 2;
+pub(crate) const RELATIVE_LAST_CHILD: u32 = 3;
+pub(crate) const RELATIVE_PREVIOUS: u32 = 4;
+pub(crate) const RELATIVE_NEXT: u32 = 5;
 const RELATIVE_FIRST_ELEMENT: u32 = 6;
 const RELATIVE_LAST_ELEMENT: u32 = 7;
 const RELATIVE_PREVIOUS_ELEMENT: u32 = 8;
@@ -1633,8 +1633,9 @@ impl RealmArena {
     }
     // The node DOM's tree accessors name from `id` (`relativeNode`'s kinds).
     pub(crate) fn relative(&self, id: NodeId, kind: u32) -> Option<NodeId> {
-        let first_child = |n: &NodeData| n.children.first().copied();
-        let last_child = |n: &NodeData| n.children.last().copied();
+        // (…the live ones, a stale edge stepped over)
+        let first_child = |n: &NodeData| n.children.iter().copied().find(|&c| self.get(c).is_some());
+        let last_child = |n: &NodeData| n.children.iter().rev().copied().find(|&c| self.get(c).is_some());
         match kind {
             RELATIVE_PARENT => self.parent_of(id),
             RELATIVE_PARENT_ELEMENT => self.parent_of(id).filter(|&p| self.is_element(p)),
