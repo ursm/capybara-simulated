@@ -1680,8 +1680,9 @@ pub(crate) struct Dom {
     // `hover` by (style.rs `Screen`).
     pub(crate) touch_input: bool,
     // Each realm's arena object — its `__dom` and the realm's answers about its own nodes — which a reader in another
-    // realm holding one of them asks through (`setArena` / `arenaOf`; native-query-shadow.js `liveArenaOf`).
-    pub(crate) arenas: std::collections::HashMap<i32, v8::Global<v8::Object>>,
+    // realm holding one of them asks through (`setArena` / `arenaOf`; native-query-shadow.js `liveArenaOf`). Held
+    // weakly: the realm holds its own, and one navigated away from is collected with it.
+    pub(crate) arenas: std::collections::HashMap<i32, v8::Weak<v8::Object>>,
 }
 
 // Borrow the isolate's Dom, lazily creating the slot on first touch. rusty_v8
@@ -2120,18 +2121,22 @@ const REALM_OF_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new
         v8::fast_api::Int64Representation::Number,
     ),
 )];
-// __dom.setArena(arena) / __dom.arenaOf(realm) -> the calling realm's arena object, kept until the realm is dropped or
-// sets another; a realm's, or undefined for one that set none.
+// __dom.setArena(arena) / __dom.arenaOf(realm) -> the calling realm's arena object, for as long as the realm keeps it
+// and sets no other; a realm's, or undefined for one that set none or is gone.
 fn set_arena(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(arena) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
     let cid = realm_id(scope, &args);
-    let global = v8::Global::new(scope, arena);
-    dom(scope).arenas.insert(cid, global);
+    let weak = v8::Weak::new(scope, arena);
+    let arenas = &mut dom(scope).arenas;
+    arenas.retain(|_, w| !w.is_empty());
+    arenas.insert(cid, weak);
 }
 fn arena_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(cid) = args.get(0).int32_value(scope) else { return };
-    let Some(arena) = dom(scope).arenas.get(&cid).cloned() else { return };
-    rv.set(v8::Local::new(scope, arena).into());
+    let Some(weak) = dom(scope).arenas.get(&cid).cloned() else { return };
+    if let Some(arena) = weak.to_local(scope) {
+        rv.set(arena.into());
+    }
 }
 
 // __dom.importNode(localName, ns, parentNid, attrsFlat, prefix, node) -> nid. Adds an ELEMENT to the arena — the eager
