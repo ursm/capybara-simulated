@@ -1900,7 +1900,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "inspectNode", inspect_node, context_id);
     // Element state no attribute carries, for the state pseudo-classes (`:checked`, `:focus`, `:hover`, …).
     register(scope, ns, "setState", set_state, context_id);
-    register(scope, ns, "state", state, context_id);
+    register_fast(scope, ns, "state", state, STATE_FAST, context_id);
     register(scope, ns, "setNaturalSize", set_natural_size, context_id);
     register(scope, ns, "linkPseudoBox", link_pseudo_box, context_id);
     register(scope, ns, "directionality", directionality, context_id);
@@ -2070,6 +2070,30 @@ pub(crate) fn register(
         assert!(!ns.has_own_property(scope, k.into()).unwrap_or(false), "__dom.{name} registered twice");
         ns.set(scope, k.into(), f.into());
     }
+}
+
+// …and one with a FAST path (V8's fast API calls): optimised code calls `fast` directly, with no handle scope and no
+// arguments object — for an op a hot loop asks of plain numbers, answering a number. Its callback options give it the
+// isolate, and so the engine's state; anything the fast signature does not take falls back to `callback`.
+pub(crate) fn register_fast(
+    scope: &mut v8::PinScope<'_, '_>,
+    ns: v8::Local<'_, v8::Object>,
+    name: &str,
+    callback: impl v8::MapFnTo<v8::FunctionCallback>,
+    fast: &'static [v8::fast_api::CFunction],
+    context_id: i32,
+) {
+    let data: v8::Local<v8::Value> = v8::Integer::new(scope, context_id).into();
+    let template = v8::FunctionTemplate::builder(callback).data(data).build_fast(scope, fast);
+    if let (Some(f), Some(k)) = (template.get_function(scope), v8::String::new(scope, name)) {
+        assert!(!ns.has_own_property(scope, k.into()).unwrap_or(false), "__dom.{name} registered twice");
+        ns.set(scope, k.into(), f.into());
+    }
+}
+// The engine's state, for a fast path (`register_fast`).
+pub(crate) fn fast_dom<'a>(options: *mut v8::fast_api::FastApiCallbackOptions<'a>) -> Option<&'a Dom> {
+    // SAFETY: V8 hands a fast call its options, whose isolate is the one calling, on its thread.
+    unsafe { (*options).isolate_unchecked() }.get_slot::<Dom>()
 }
 
 // __dom.importNode(localName, ns, parentNid, attrsFlat, prefix, node) -> nid. Adds an ELEMENT to the arena — the eager
@@ -2253,12 +2277,23 @@ fn set_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 }
 
 // __dom.state(nid) -> the element's state bits (`STATE_*`): what a script or the user did to it that no attribute
-// records, the engine's alone.
+// records, the engine's alone. (A node's slot is the isolate's, whichever realm asks.)
 fn state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
-    let cid = realm_id(scope, &args);
-    rv.set_uint32(realm(scope, cid).get(id).map_or(0, |n| n.state));
+    rv.set_uint32(dom(scope).arena.get(id).map_or(0, |n| n.state));
 }
+fn state_fast(_receiver: v8::Local<v8::Value>, nid: f64, options: *mut v8::fast_api::FastApiCallbackOptions) -> u32 {
+    let id = if nid >= 0.0 { NodeId::from_i64(nid as i64) } else { None };
+    fast_dom(options).and_then(|d| d.arena.get(id?)).map_or(0, |n| n.state)
+}
+const STATE_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new(
+    state_fast as _,
+    &v8::fast_api::CFunctionInfo::new(
+        v8::fast_api::Type::Uint32.as_info(),
+        &[v8::fast_api::Type::V8Value.as_info(), v8::fast_api::Type::Float64.as_info(), v8::fast_api::Type::CallbackOptions.as_info()],
+        v8::fast_api::Int64Representation::Number,
+    ),
+)];
 
 // __dom.setValue(nid, value): a form control's live value — a string once dirty, `undefined` back to its default.
 fn set_value(
