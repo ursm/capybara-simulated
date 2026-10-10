@@ -45,6 +45,7 @@ mod layout;
 mod legacy;
 mod mime;
 mod mutation;
+mod mutation_observers;
 mod namespaces;
 mod node_handle;
 mod numbers;

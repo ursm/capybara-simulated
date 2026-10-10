@@ -694,6 +694,8 @@ pub(crate) struct RealmArena {
     parser_form_owners: std::collections::HashMap<NodeId, NodeId>,
     // A custom element's custom states (`ElementInternals.states`, `:state()`), for the few elements that have any.
     custom_states: std::collections::HashMap<NodeId, Vec<String>>,
+    // Every node's registered observer list, and each mutation observer's nodes (mutation_observers.rs).
+    pub(crate) observers: crate::mutation_observers::Observers,
     // Moves with every write to the arena (a node made or freed, any `get_mut`): what a memo of it keys on.
     pub(crate) mutations: u64,
     // The lock the style engines' rules and every element's parsed declarations are read under — ONE for the isolate's
@@ -863,6 +865,7 @@ impl RealmArena {
         let slots = &self.slots;
         self.parser_form_owners.retain(|id, _| live(slots, id));
         self.custom_states.retain(|id, _| live(slots, id));
+        self.observers.retain(|id| live(slots, id));
     }
 }
 
@@ -1005,6 +1008,7 @@ impl RealmArena {
         if !self.custom_states.is_empty() {
             self.custom_states.remove(&id);
         }
+        self.observers.forget(id);
         // …and the slot it was assigned to no longer lists it: a change to the slot's flat children.
         if let Some(s) = assigned_slot.and_then(|s| self.get_mut(s)) {
             s.assigned.retain(|&n| n != id);
@@ -1771,6 +1775,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::token_list::install(scope, ns, context_id);
     // …and the element lists named by a filter (collections.rs)
     crate::collections::install(scope, ns, context_id);
+    crate::mutation_observers::install(scope, ns, context_id);
     // …and the tree mutation algorithms' checks (mutation.rs)
     crate::mutation::install(scope, ns, context_id);
     // …and where one node is against another (traversal.rs)
@@ -2542,11 +2547,12 @@ pub(crate) fn utf16_value<'s>(scope: &mut v8::PinScope<'s, '_>, units: &[u16]) -
     }
 }
 
-// __dom.removeChild(childNid): the child leaves its parent (and keeps its own subtree).
+// __dom.removeChild(childNid) -> the child leaves its parent (and keeps its own subtree); the observers it took transient
+// registrations of (`mutation_observers::observer_list`).
 fn remove_child(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let Some(child) = nid_arg(scope, &args, 0) else {
         return;
@@ -2560,6 +2566,11 @@ fn remove_child(
     arena.detach(child);
     if let (Some(engine), Some(o)) = (engine, old) {
         engine.children_changed(arena, o);
+    }
+    // …and the mutation observers' transient registrations it takes out of its parent's subtree.
+    let given = old.map_or_else(Vec::new, |o| arena.add_transient_observers(child, o));
+    if let Some(list) = crate::mutation_observers::observer_list(scope, &given) {
+        rv.set(list);
     }
 }
 
