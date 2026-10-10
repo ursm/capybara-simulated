@@ -58,6 +58,7 @@ mod reflect;
 // Bringing a box into view: the scroll boxes that move, and to where (`scrollIntoView`, a driver's scroll-if-needed).
 // What is rendered, and the text it renders (`innerText`, the visible text a driver reads).
 mod rendered;
+mod resize_observation;
 mod resolved;
 mod scroll_boxes;
 mod scroll_into_view;
