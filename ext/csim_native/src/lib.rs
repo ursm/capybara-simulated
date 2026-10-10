@@ -55,6 +55,7 @@ mod reflect;
 // What is rendered, and the text it renders (`innerText`, the visible text a driver reads).
 mod rendered;
 mod resolved;
+mod scroll_boxes;
 mod scroll_into_view;
 mod selector;
 mod serialize;

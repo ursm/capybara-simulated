@@ -5259,7 +5259,7 @@ fn auto_or_zero(v: &style::values::computed::Size) -> bool {
         _ => false,
     }
 }
-fn scrolls(o: Overflow) -> bool {
+pub(crate) fn scrolls(o: Overflow) -> bool {
     matches!(o, Overflow::Scroll | Overflow::Auto | Overflow::Hidden)
 }
 // The white-space mode (`WS_MODE[whiteSpaceOf(el)]`) — the six `white-space` values the longhands spell.
