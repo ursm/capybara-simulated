@@ -47,6 +47,7 @@ RSpec.describe 'Scroll boxes' do
       <div class=c><span id=plain>x</span></div>
       <div class=c><div style="display:contents"><span id=contents>x</span></div></div>
       <div class=c id=host><span id=slotted>x</span></div>
+      <div class=c><div id=boxless style="display:contents">y</div></div>
       <script>host.attachShadow({mode: 'open'}).innerHTML = '<slot></slot>';</script>
     HTML
     session = simulated_session(->(_) { [200, {'content-type' => 'text/html'}, [html]] })
@@ -61,5 +62,15 @@ RSpec.describe 'Scroll boxes' do
       })
     JS
     expect(got.uniq.length).to eq(1)
+    # (…and a target with no box is its own origin, the empty rect's: Chrome 2,2 for a point 2,2 into the viewport)
+    boxless = session.evaluate_script(<<~JS)
+      (() => {
+        let seen = null;
+        boxless.addEventListener('click', (e) => { seen = [e.offsetX, e.offsetY]; }, { once: true });
+        boxless.dispatchEvent(new MouseEvent('click', { clientX: 2, clientY: 2 }));
+        return seen;
+      })()
+    JS
+    expect(boxless).to eq([2, 2])
   end
 end

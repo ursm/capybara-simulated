@@ -79,4 +79,28 @@ RSpec.describe 'MutationObserver bindings' do
     JS
     expect(got).to eq([['c:a', 'g:b'], [nil, 'old', nil], 2, false, []])
   end
+
+  # (…an observer's records are its own realm's to queue, whichever realm's script made the change: Chrome
+  # 2026-10-10, `a:fs.x` / `c:fs` and `a:q.x`)
+  it 'tells an observer of another realm of the changes this one makes' do
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0], seen = [];
+      const f = document.createElement('iframe');
+      f.srcdoc = '<p id=fs></p>';
+      f.onload = () => {
+        const w = f.contentWindow, fs = w.document.getElementById('fs');
+        new MutationObserver((rs) => rs.forEach((r) => seen.push(`main ${r.type} ${r.target.id || r.target.nodeName}`)))
+          .observe(fs, { attributes: true, childList: true });
+        new w.MutationObserver((rs) => rs.forEach((r) => seen.push(`frame ${r.type} ${r.target.id}`)))
+          .observe(document.getElementById('d'), { attributes: true });
+        fs.setAttribute('x', '1');
+        fs.append(document.createElement('b'));
+        w.eval("parent.document.getElementById('d').setAttribute('x', '1')");
+        setTimeout(() => done(seen.sort()), 0);
+      };
+      document.body.append(f);
+    JS
+    expect(got).to eq(['frame attributes d', 'main attributes fs', 'main childList fs'])
+  end
 end

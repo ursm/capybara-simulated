@@ -25,7 +25,7 @@ fn units(s: &str) -> Vec<u16> {
 
 impl RealmArena {
     // The entry list of `form`, submitted by `submitter`, in the character encoding `encoding` (what a `_charset_`
-    // hidden field with no value takes); `colour` the style engine's reading of a colour field's value.
+    // hidden field takes); `colour` the style engine's reading of a colour field's value.
     pub(crate) fn entry_list(&self, form: NodeId, submitter: Option<NodeId>, encoding: &[u16], colour: &dyn Fn(&str) -> String) -> Vec<Entry> {
         let mut out = Vec::new();
         for field in self.form_submittables(form, submitter) {
@@ -57,8 +57,8 @@ impl RealmArena {
                         out.push(Entry::Files(name, field));
                         continue;
                     }
-                    // (…a `_charset_` hidden field with no value: the encoding)
-                    "hidden" if String::from_utf16_lossy(&name).eq_ignore_ascii_case("_charset_") && attr("value", "").is_empty() => {
+                    // (…a `_charset_` hidden field: the encoding, whatever its value — Chrome too)
+                    "hidden" if String::from_utf16_lossy(&name).eq_ignore_ascii_case("_charset_") => {
                         (encoding.to_vec(), true)
                     }
                     ty => (self.input_value_units(n, ty, colour), DIRNAME_INPUT_TYPES.contains(&ty)),

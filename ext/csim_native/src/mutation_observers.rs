@@ -37,6 +37,9 @@ pub(crate) struct Observers {
     // Each observer's node list — where it is registered — and transient node set.
     nodes: HashMap<u32, Vec<NodeId>>,
     transient: HashMap<u32, Vec<NodeId>>,
+    // Each observer's realm — the one whose bindings made it, and hold its callback and record queue — by its number,
+    // the isolate's: a change one realm's script makes may interest an observer another's made.
+    realms: HashMap<u32, i32>,
     next: u32,
 }
 
@@ -203,6 +206,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moRemoveTransients", remove_transients, context_id);
     crate::dom::register(scope, ns, "moInterested", interested, context_id);
     crate::dom::register(scope, ns, "moAddTransients", add_transients, context_id);
+    crate::dom::register(scope, ns, "moAddTransientsOfChildren", add_transients_of_children, context_id);
+    crate::dom::register(scope, ns, "moRealm", realm_of, context_id);
 }
 
 // The arena of the realm a binding is called in.
@@ -211,11 +216,21 @@ fn arena<'s>(scope: &'s mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArg
     crate::dom::realm(scope, cid)
 }
 
-// __dom.moCreate() -> a new observer's number, the isolate's.
+// __dom.moCreate() -> a new observer's number, the isolate's, of the realm calling.
 fn create(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let store = &mut arena(scope, &args).observers;
+    let cid = realm_id(scope, &args);
+    let store = &mut crate::dom::realm(scope, cid).observers;
     store.next += 1;
+    store.realms.insert(store.next, cid);
     rv.set_uint32(store.next);
+}
+
+// __dom.moRealm(observer) -> the context id of the realm that made the observer, or undefined.
+fn realm_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let observer = args.get(0).uint32_value(scope).unwrap_or(0);
+    if let Some(&cid) = arena(scope, &args).observers.realms.get(&observer) {
+        rv.set_int32(cid);
+    }
 }
 
 // __dom.moObserve(observer, nid, flags, filter) — `filter` the attribute names given, or null.
@@ -280,6 +295,27 @@ fn interested(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 fn add_transients(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(node), Some(parent)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
     let given = arena(scope, &args).add_transient_observers(node, parent);
+    if let Some(list) = observer_list(scope, &given) {
+        rv.set(list);
+    }
+}
+
+// __dom.moAddTransientsOfChildren(parentNid) -> `moAddTransients` for each child of the parent, as they are all removed
+// at once (the observers given one, `observer_list`).
+fn add_transients_of_children(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(parent) = nid_arg(scope, &args, 0) else { return };
+    let arena = arena(scope, &args);
+    let mut given: Vec<u32> = Vec::new();
+    if !arena.observers.lists.is_empty() {
+        let children = arena.get(parent).map_or_else(Vec::new, |p| p.children.clone());
+        for child in children {
+            for observer in arena.add_transient_observers(child, parent) {
+                if !given.contains(&observer) {
+                    given.push(observer);
+                }
+            }
+        }
+    }
     if let Some(list) = observer_list(scope, &given) {
         rv.set(list);
     }

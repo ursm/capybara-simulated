@@ -513,4 +513,17 @@ RSpec.describe 'FormData binding' do
     session.find(:css, '#b').click
     expect(session.text).to eq('a=1&s=v')
   end
+
+  # (HTML "construct the entry list": a hidden `_charset_` field submits the encoding whatever its value; Chrome
+  # 2026-10-10: UTF-8)
+  it 'gives a hidden _charset_ control the encoding whatever its value' do
+    result = session.evaluate_script(<<~JS)
+      (function () {
+        const f = document.createElement('form');
+        f.innerHTML = '<input type=hidden name=_charset_ value=keep>';
+        return [...new FormData(f)];
+      })()
+    JS
+    expect(result).to eq([%w[_charset_ UTF-8]])
+  end
 end

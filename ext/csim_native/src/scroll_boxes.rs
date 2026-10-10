@@ -97,7 +97,8 @@ fn propagated_overflow(arena: &RealmArena, id: NodeId, style: &ComputedValues) -
 // The box whose padding edge a mouse event's offset is measured from: `id`'s own, or — a non-replaced inline box having
 // none — that of the nearest box up the flat tree that is not one (Chrome and Firefox, MouseEvent-prototype-offsetX-
 // offsetY: a span's offset is from its container's, an `<img>`'s from its own); an element that generates no box at
-// all — `display: contents`, a `<slot>` — passed over on the way, as the layout passes it.
+// all — `display: contents`, a `<slot>` — passed over on the way, as the layout passes it. A target with no box keeps
+// itself, its origin the empty rect's (Chrome: a `display: contents` div's offset is the point's from the viewport's).
 pub(crate) fn padding_edge_box(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, now: f64) -> NodeId {
     engine.flush(arena, now);
     let mut at = id;
@@ -105,7 +106,7 @@ pub(crate) fn padding_edge_box(engine: &mut StyleEngine, arena: &RealmArena, id:
         let Some(node) = arena.get(at) else { return at };
         let display = primary_style(arena, at).map(|s| s.get_box().walk_display(node.rendering_tag()));
         let boxless = matches!(display, None | Some(Display::Contents | Display::None));
-        if !boxless && (display != Some(Display::Inline) || replaced_or_control(arena, at, node)) {
+        if (at == id && boxless) || (!boxless && (display != Some(Display::Inline) || replaced_or_control(arena, at, node))) {
             return at;
         }
         match crate::geometry::flat_parent(arena, at).filter(|&p| arena.get(p).is_some_and(|n| n.kind == NodeKind::Element)) {
