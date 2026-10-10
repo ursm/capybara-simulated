@@ -1,8 +1,8 @@
 // The numeric IDL attributes that reflect a content attribute (HTML §2.6.1, "reflecting content attributes in IDL
 // attributes"), read off the element as the engine holds it: a `long`'s, an `unsigned long`'s and a `double`'s getter
 // steps, by the kind its [Reflect…] extended attributes make it — and a `<meter>`'s and a `<progress>`'s numbers, which
-// their content attributes make the same way. The setters stay the bindings' (reflect.js): writing an attribute runs a
-// page's reactions.
+// their content attributes make the same way — and a form control's `autocomplete`, the autofill detail tokens its
+// attribute holds. The setters stay the bindings' (reflect.js): writing an attribute runs a page's reactions.
 
 use crate::dom::{nid_arg, realm, realm_id, register};
 use crate::validity::{parse_html_integer, parse_non_negative};
@@ -11,6 +11,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "reflectNumber", reflect_number, context_id);
     register(scope, ns, "meterValue", meter_value, context_id);
     register(scope, ns, "progressValue", progress_value, context_id);
+    register(scope, ns, "autofill", autofill_op, context_id);
 }
 
 // The kinds, as reflect.js names them.
@@ -151,6 +152,65 @@ fn progress_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set_double(values.get(which).copied().unwrap_or(f64::NAN));
 }
 
+// HTML §4.10.18.7.1 autofill: the field names, the ones a contact token (home, work, …) may precede, and those tokens.
+const AUTOFILL_FIELD_NAMES: [&str; 55] = [
+    "name", "honorific-prefix", "given-name", "additional-name", "family-name", "honorific-suffix", "nickname", "username",
+    "new-password", "current-password", "one-time-code", "organization-title", "organization", "street-address",
+    "address-line1", "address-line2", "address-line3", "address-level4", "address-level3", "address-level2",
+    "address-level1", "country", "country-name", "postal-code", "cc-name", "cc-given-name", "cc-additional-name",
+    "cc-family-name", "cc-number", "cc-exp", "cc-exp-month", "cc-exp-year", "cc-csc", "cc-type", "transaction-currency",
+    "transaction-amount", "language", "bday", "bday-day", "bday-month", "bday-year", "sex", "url", "photo", "tel",
+    "tel-country-code", "tel-national", "tel-area-code", "tel-local", "tel-local-prefix", "tel-local-suffix",
+    "tel-extension", "email", "impp", "webauthn",
+];
+const AUTOFILL_CONTACT_FIELDS: [&str; 10] =
+    ["tel", "tel-country-code", "tel-national", "tel-area-code", "tel-local", "tel-local-prefix", "tel-local-suffix", "tel-extension", "email", "impp"];
+const AUTOFILL_CONTACT: [&str; 5] = ["home", "work", "mobile", "fax", "pager"];
+
+// The `autocomplete` IDL attribute's getter (§4.10.18.7.1, "the autofill processing model"): the attribute's tokens,
+// ASCII-lowercased, read from the end — an optional `webauthn`, a field name, a contact token where the field takes
+// one, `shipping` / `billing`, a `section-*` — and serialized canonically; a lone `on` / `off` as it is, but for a
+// control wearing the autofill ANCHOR mantle (a hidden input), whose is empty; anything else, or a token left over,
+// empty.
+pub(crate) fn autofill(value: &str, anchor_mantle: bool) -> String {
+    let tokens: Vec<String> = value.split(|c| matches!(c, '\t' | '\n' | '\x0C' | '\r' | ' ')).filter(|t| !t.is_empty()).map(|t| t.to_ascii_lowercase()).collect();
+    if let [only] = &tokens[..] {
+        if only == "on" || only == "off" {
+            return if anchor_mantle { String::new() } else { only.clone() };
+        }
+    }
+    let mut rest = &tokens[..];
+    let mut take = |accept: &dyn Fn(&str) -> bool| -> Option<String> {
+        let (last, before) = rest.split_last()?;
+        accept(last).then(|| {
+            rest = before;
+            last.clone()
+        })
+    };
+    let credential = if tokens.len() > 1 { take(&|t| t == "webauthn") } else { None };
+    let Some(field) = take(&|t| AUTOFILL_FIELD_NAMES.contains(&t)) else { return String::new() };
+    let contact = take(&|t| AUTOFILL_CONTACT.contains(&t) && AUTOFILL_CONTACT_FIELDS.contains(&field.as_str()));
+    let mode = take(&|t| t == "shipping" || t == "billing");
+    let section = take(&|t| t.starts_with("section-"));
+    if !rest.is_empty() {
+        return String::new();
+    }
+    [section, mode, contact, Some(field), credential].into_iter().flatten().collect::<Vec<_>>().join(" ")
+}
+
+// __dom.autofill(nid) -> the control's `autocomplete` (`autofill`), a hidden input wearing the anchor mantle.
+fn autofill_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let Some(n) = arena.get(id) else { return };
+    let anchor = n.is_html_named("input") && n.input_type() == "hidden";
+    let value = autofill(n.plain_attr("autocomplete").unwrap_or(""), anchor);
+    if let Some(s) = v8::String::new(scope, &value) {
+        rv.set(s.into());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,5 +254,17 @@ mod tests {
         assert_eq!(progress_values(attrs(&[("value", "3"), ("max", "4")]), true), [3.0, 4.0, 0.75]);
         assert_eq!(progress_values(attrs(&[("value", "-1"), ("max", "0")]), true), [0.0, 1.0, 0.0]);
         assert_eq!(progress_values(attrs(&[("value", "9")]), true), [1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn autofill_tokens() {
+        assert_eq!(autofill(" Section-A  Shipping HOME tel webauthn", false), "section-a shipping home tel webauthn");
+        assert_eq!(autofill("on", false), "on");
+        assert_eq!(autofill("off", true), "");
+        assert_eq!(autofill("home name", false), "");
+        assert_eq!(autofill("billing email", false), "billing email");
+        assert_eq!(autofill("webauthn", false), "webauthn");
+        assert_eq!(autofill("x email", false), "");
+        assert_eq!(autofill("", false), "");
     }
 }

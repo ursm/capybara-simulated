@@ -895,6 +895,7 @@ impl RealmArena {
         let slots = &self.slots;
         self.parser_form_owners.retain(|id, _| live(slots, id));
         self.custom_states.retain(|id, _| live(slots, id));
+        self.text_selections.retain(|id, _| live(slots, id));
         self.observers.retain(|id| live(slots, id));
     }
 }
@@ -1035,6 +1036,9 @@ impl RealmArena {
         }
         if !self.parser_form_owners.is_empty() {
             self.parser_form_owners.remove(&id);
+        }
+        if !self.text_selections.is_empty() {
+            self.text_selections.remove(&id);
         }
         if !self.custom_states.is_empty() {
             self.custom_states.remove(&id);
