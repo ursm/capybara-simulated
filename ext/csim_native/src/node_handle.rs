@@ -87,6 +87,9 @@ pub(crate) struct NodeHandle {
     // (`rareData`, Blink's rare data): its [SameObject] collections and style declaration, a file input's files, the
     // string a control's live value was last given.
     rare: UnsafeCell<v8::TracedReference<v8::Object>>,
+    // Its node document (DOM §4.4), the document object — none for a document itself, which is its own — that adoption
+    // changes (`nodeDocument` / `setNodeDocument`): an Attr's too, which has no slot in the arena.
+    document: UnsafeCell<v8::TracedReference<v8::Object>>,
 }
 
 unsafe impl GarbageCollected for NodeHandle {
@@ -99,6 +102,7 @@ unsafe impl GarbageCollected for NodeHandle {
         visitor.trace(unsafe { &*self.object.get() });
         visitor.trace(unsafe { &*self.listeners.get() });
         visitor.trace(unsafe { &*self.rare.get() });
+        visitor.trace(unsafe { &*self.document.get() });
     }
     fn get_name(&self) -> &'static std::ffi::CStr {
         c"NodeHandle"
@@ -249,6 +253,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         held: Cell::new(false),
         listeners: UnsafeCell::new(v8::TracedReference::empty()),
         rare: UnsafeCell::new(v8::TracedReference::empty()),
+        document: UnsafeCell::new(v8::TracedReference::empty()),
     };
     let heap = scope.get_cpp_heap().expect("NodeBase is installed only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
@@ -338,6 +343,8 @@ pub(crate) fn install_listeners(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<
     crate::dom::register(scope, ns, "noteListenerType", note_listener_type, context_id);
     crate::dom::register(scope, ns, "listenerTypeKnown", listener_type_known, context_id);
     crate::dom::register(scope, ns, "rareData", rare_data, context_id);
+    crate::dom::register(scope, ns, "nodeDocument", node_document, context_id);
+    crate::dom::register(scope, ns, "setNodeDocument", set_node_document, context_id);
     let store = {
         let types = &mut crate::dom::dom(scope).arena.listener_types;
         let gained = types.gained;
@@ -401,6 +408,26 @@ fn rare_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         unsafe { (*slot).reset(scope, Some(record)) };
         rv.set(record.into());
     }
+}
+
+// `__dom.nodeDocument(node)` -> its node document, null for none — undefined for an object with no handle (a generated
+// box's holder, the snapshot's warm-up's node), which keeps its own.
+fn node_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(ptr) = handle_of(scope, args.get(0)) else { return };
+    // SAFETY: the main thread writes the reference; the handle lives while the object, an argument, does.
+    match unsafe { (*ptr.as_ref().document.get()).get(scope) } {
+        Some(doc) => rv.set(doc.into()),
+        None => rv.set_null(),
+    }
+}
+// `__dom.setNodeDocument(node, doc)` -> whether the node has a handle to keep it: its node document becomes `doc` (none
+// for anything but an object).
+fn set_node_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(ptr) = handle_of(scope, args.get(0)) else { return rv.set_bool(false) };
+    let doc = v8::Local::<v8::Object>::try_from(args.get(1)).ok();
+    // SAFETY: as above.
+    unsafe { (*ptr.as_ref().document.get()).reset(scope, doc) };
+    rv.set_bool(true);
 }
 
 // `__dom.noteListenerType(type)`: a node has a listener of `type` — a type none had before, counted.
