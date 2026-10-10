@@ -3163,7 +3163,8 @@ fn matches_id(
 }
 
 // __dom.closest(nid, selector, quirks, xml) -> the nearest inclusive ancestor element matching (Element.closest, `:scope`
-// the element itself), as `node_value` answers it, -1 for none; `null` / `undefined` as matchesId.
+// the element itself), as `node_value` answers it, -1 for none; `false` for an invalid selector (the caller's
+// SyntaxError), `undefined` as matchesId.
 fn closest(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -3179,7 +3180,7 @@ fn closest(
     match crate::selector::matches_text(realm(scope, cid), id, &selector, None, quirks, html_doc, true, true) {
         Some(Some(hit)) => rv.set(node_value(scope, Some(hit))),
         Some(None) => rv.set_int32(-1),
-        None => rv.set_null(),
+        None => rv.set_bool(false),
     }
 }
 
