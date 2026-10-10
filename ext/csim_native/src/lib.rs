@@ -62,6 +62,7 @@ mod slots;
 // The style engine: stylo over the arena.
 mod style;
 mod style_fonts;
+mod tables;
 mod text;
 mod text_codec;
 mod token_list;
