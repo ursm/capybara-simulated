@@ -423,12 +423,12 @@ fn range_collapsed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set_bool(s.node == e.node && s.offset == e.offset);
 }
 
-// __dom.rangeCommonAncestor(range) -> the nid of the nearest inclusive ancestor of both its containers.
+// __dom.rangeCommonAncestor(range) -> the nearest inclusive ancestor of both its containers, as `node_value` answers it.
 fn range_common_ancestor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some([s, e]) = entry_points(scope, args.get(0)) else { return };
     let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    rv.set_double(common_ancestor(arena, s.node, e.node).to_f64());
+    let found = common_ancestor(crate::dom::realm(scope, cid), s.node, e.node);
+    rv.set(crate::dom::node_value(scope, Some(found)));
 }
 // The nearest inclusive ancestor of `a` that is an inclusive ancestor of `b` too — `a` where they share no tree.
 pub(crate) fn common_ancestor(arena: &RealmArena, a: NodeId, b: NodeId) -> NodeId {

@@ -311,7 +311,8 @@ pub(crate) const STATE_UPGRADED: u32 = 1 << 18;
 
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its
 // first and last child, its previous and next sibling, and the element ones of those — and the bindings' own upward
-// step, a node's parent or, for a shadow root, its host.
+// steps: a node's parent or, for a shadow root, its host; its tree's root (a shadow root the root of its own); and its
+// shadow-including root.
 pub(crate) const RELATIVE_PARENT: u32 = 0;
 const RELATIVE_PARENT_ELEMENT: u32 = 1;
 pub(crate) const RELATIVE_FIRST_CHILD: u32 = 2;
@@ -323,6 +324,8 @@ const RELATIVE_LAST_ELEMENT: u32 = 7;
 const RELATIVE_PREVIOUS_ELEMENT: u32 = 8;
 const RELATIVE_NEXT_ELEMENT: u32 = 9;
 const RELATIVE_PARENT_OR_HOST: u32 = 10;
+const RELATIVE_ROOT: u32 = 11;
+const RELATIVE_SHADOW_INCLUDING_ROOT: u32 = 12;
 
 
 impl NodeData {
@@ -1623,6 +1626,8 @@ impl RealmArena {
             RELATIVE_PREVIOUS_ELEMENT => self.prev_element_sibling(id),
             RELATIVE_NEXT_ELEMENT => self.next_element_sibling(id),
             RELATIVE_PARENT_OR_HOST => self.parent_of(id).or_else(|| self.get(id)?.host),
+            RELATIVE_ROOT => self.get(id).map(|_| self.root_of(id)),
+            RELATIVE_SHADOW_INCLUDING_ROOT => self.get(id).map(|_| self.shadow_including_root(id)),
             _ => None,
         }
     }
@@ -1950,7 +1955,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setFocusStart", set_focus_start, context_id);
     register(scope, ns, "query", query, context_id);
     register(scope, ns, "matchesId", matches_id, context_id);
-    register(scope, ns, "closestId", closest_id, context_id);
+    register(scope, ns, "closest", closest, context_id);
     register(scope, ns, "selectorValid", selector_valid, context_id);
     register(scope, ns, "xpathPrefixes", xpath_prefixes, context_id);
     register(scope, ns, "xpathEvaluate", xpath_evaluate, context_id);
@@ -3157,9 +3162,9 @@ fn matches_id(
     }
 }
 
-// __dom.closestId(nid, selector, quirks, xml) -> the nid of the nearest inclusive ancestor element matching (Element.closest,
-// `:scope` the element itself), -1 for none; `null` / `undefined` as matchesId.
-fn closest_id(
+// __dom.closest(nid, selector, quirks, xml) -> the nearest inclusive ancestor element matching (Element.closest, `:scope`
+// the element itself), as `node_value` answers it, -1 for none; `null` / `undefined` as matchesId.
+fn closest(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
@@ -3172,12 +3177,11 @@ fn closest_id(
     let quirks = args.get(2).is_true();
     let html_doc = !args.get(3).is_true();
     match crate::selector::matches_text(realm(scope, cid), id, &selector, None, quirks, html_doc, true, true) {
-        Some(Some(hit)) => set_nid(scope, &mut rv, hit),
+        Some(Some(hit)) => rv.set(node_value(scope, Some(hit))),
         Some(None) => rv.set_int32(-1),
         None => rv.set_null(),
     }
 }
-
 
 // __dom.selectorValid(text) -> bool: a selector this engine parses — `CSS.supports('selector(…)')`.
 fn selector_valid(
