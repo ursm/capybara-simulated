@@ -243,6 +243,22 @@ RSpec.describe 'CSS animation and transition events' do
     expect(log.index { _1.start_with?('animationcancel:grow') }).to be < log.index { _1.start_with?('animationstart:shrink') }
   end
 
+  # Whichever realm's script listens: a frame's `addEventListener` on this document's element hears the event with its
+  # animation, which is made only where something could hear it (the listener counted the frame's realm alone).
+  it "gives the event its animation for a listener another realm added" do
+    s = page('<div id="a"></div><iframe srcdoc="<!doctype html><body>"></iframe>')
+    s.execute_script(<<~JS)
+      window.log = [];
+      setInterval(() => {}, 1000);
+      const a = document.getElementById('a');
+      document.querySelector('iframe').contentWindow.EventTarget.prototype.addEventListener.call(a, 'animationstart', (e) => {
+        window.log.push(e.animation && e.animation.animationName);
+      });
+      a.className = 'go';
+    JS
+    expect(drain(s, 2)).to eq(['grow'])
+  end
+
   # The event interfaces themselves: readonly attributes, a required `type`, and the WebIDL
   # conversions (`null` is the string "null"; a non-finite `elapsedTime` is a TypeError).
   it 'constructs the event interfaces as WebIDL says' do
