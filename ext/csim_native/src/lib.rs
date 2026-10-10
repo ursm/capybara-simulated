@@ -39,6 +39,7 @@ mod geometry;
 mod hints;
 mod hit_test;
 mod input_value;
+mod intersection;
 mod html_parse;
 mod image_decode;
 mod image_encode;

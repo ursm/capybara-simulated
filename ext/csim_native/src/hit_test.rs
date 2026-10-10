@@ -590,41 +590,50 @@ fn clipped_at(arena: &RealmArena, id: NodeId, x: f64, y: f64) -> bool {
     }
 }
 // Is `id`'s rendered box CLIPPED AWAY whole — outside the padding box of a box that clips it (in its containing-block
-// chain, as `clipped_at` reads it), in an axis that box clips? What `isObscured` and an intersection observation ask
-// before they ask of a point.
+// chain, as `clipped_at` reads it), in an axis that box clips? What `isObscured` asks before it asks of a point.
 pub(crate) fn clipped_away(arena: &RealmArena, id: NodeId) -> bool {
     use crate::layout::{CLIP_X, CLIP_Y};
     let Some([ex, ey, ew, eh]) = crate::geometry::rendered_box(arena, id) else { return false };
+    let mut away = false;
+    clipping_ancestors(arena, id, |at, clip| {
+        if clip != 0 {
+            let Some([px, py, pw, ph]) = clip_rect(arena, at) else { return false };
+            away = (clip & CLIP_X != 0 && (ex + ew <= px || ex >= px + pw)) || (clip & CLIP_Y != 0 && (ey + eh <= py || ey >= py + ph));
+        }
+        !away
+    });
+    away
+}
+// The boxes `id`'s containing-block chain passes up through, nearest first — an out-of-flow box's containing block, any
+// other's box parent — each told to `visit` with the axes it CLIPS in (`CLIP_X` / `CLIP_Y`, or 0): `visit` answers
+// whether to go on.
+pub(crate) fn clipping_ancestors(arena: &RealmArena, id: NodeId, mut visit: impl FnMut(NodeId, u8) -> bool) {
+    use crate::layout::{CLIP_X, CLIP_Y};
     let mut at = id;
     loop {
-        let Some(node) = arena.get(at) else { return false };
+        let Some(node) = arena.get(at) else { return };
         let next = match laid(arena, node) {
             Some(b) if b.out_of_flow != 0 => node.containing_block,
             _ => box_parent(arena, at),
         };
-        let Some(next) = next else { return false };
-        let Some(nb) = arena.get(next).and_then(|n| laid(arena, n)) else {
-            at = next;
-            continue;
-        };
-        let clip = nb.clip & (CLIP_X | CLIP_Y);
-        if clip != 0 {
-            let Some([bx, by, bw, bh]) = laid_out_box(arena, next) else { return false };
-            let e = nb.edges.unwrap_or([0.0; 12]);
-            let padding = [bx + e[7], by + e[4], (bw - e[7] - e[5]).max(0.0), (bh - e[4] - e[6]).max(0.0)];
-            let [px, py, pw, ph] = match transform_chain(arena, next) {
-                Some(m) => crate::geometry::transformed_rect(&m, padding),
-                None => padding,
-            };
-            if clip & CLIP_X != 0 && (ex + ew <= px || ex >= px + pw) {
-                return true;
-            }
-            if clip & CLIP_Y != 0 && (ey + eh <= py || ey >= py + ph) {
-                return true;
-            }
+        let Some(next) = next else { return };
+        let clip = arena.get(next).and_then(|n| laid(arena, n)).map_or(0, |b| b.clip & (CLIP_X | CLIP_Y));
+        if !visit(next, clip) {
+            return;
         }
         at = next;
     }
+}
+// …and the box a clipping one clips to: its padding box, in viewport coordinates (transformed).
+pub(crate) fn clip_rect(arena: &RealmArena, id: NodeId) -> Option<[f64; 4]> {
+    let nb = arena.get(id).and_then(|n| laid(arena, n))?;
+    let [bx, by, bw, bh] = laid_out_box(arena, id)?;
+    let e = nb.edges.unwrap_or([0.0; 12]);
+    let padding = [bx + e[7], by + e[4], (bw - e[7] - e[5]).max(0.0), (bh - e[4] - e[6]).max(0.0)];
+    Some(match transform_chain(arena, id) {
+        Some(m) => crate::geometry::transformed_rect(&m, padding),
+        None => padding,
+    })
 }
 
 // The nearest flat-tree ancestor that holds a box of the current layout — an inline box's fragments included where
