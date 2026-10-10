@@ -73,4 +73,17 @@ RSpec.describe 'template content semantics' do
       expect(session).not_to have_css('#r-from-template-select')
     end
   end
+
+  # In an XML document a template's innerHTML is its contents serialized as XML (DOM Parsing: an HTML `<template>`'s
+  # children are its contents'), as Chrome writes it — not its own (empty) child list.
+  it 'serializes an XHTML template\'s contents as its innerHTML' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const x = new DOMParser().parseFromString('<r xmlns="http://www.w3.org/1999/xhtml"><template id="t"><p>x</p><template><i>n</i></template></template></r>', 'application/xhtml+xml');
+        return x.getElementById('t').innerHTML;
+      })()
+    JS
+    expect(got).to eq('<p xmlns="http://www.w3.org/1999/xhtml">x</p><template xmlns="http://www.w3.org/1999/xhtml"><i>n</i></template>')
+  end
 end

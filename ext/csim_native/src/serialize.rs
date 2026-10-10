@@ -521,12 +521,14 @@ impl XmlWriter<'_> {
     }
 }
 
-// `id` serialized as XML — or, `inner`, its children — requiring it well-formed where `well_formed`.
+// `id` serialized as XML — or, `inner`, its children (an HTML `<template>`'s: its contents') — requiring it well-formed
+// where `well_formed`.
 pub(crate) fn xml(arena: &RealmArena, id: NodeId, inner: bool, well_formed: bool) -> Result<Vec<u16>, Refused> {
     let mut w = XmlWriter { arena, well_formed, prefix_index: 1, out: Vec::new() };
     let map: Rc<PrefixMap> = Rc::new(vec![(XML_NS.to_string(), vec!["xml".to_string()])]);
-    let stack = match arena.get(id) {
-        Some(n) if inner => n.children.iter().rev().map(|&c| XmlTask::Node(c, None, map.clone())).collect(),
+    let parent = arena.get(id).map(|n| if n.is_html_named("template") { n.template_content.and_then(|c| arena.get(c)) } else { Some(n) });
+    let stack = match parent {
+        Some(n) if inner => n.map_or(Vec::new(), |n| n.children.iter().rev().map(|&c| XmlTask::Node(c, None, map.clone())).collect()),
         Some(_) => vec![XmlTask::Node(id, None, map)],
         None => Vec::new(),
     };
