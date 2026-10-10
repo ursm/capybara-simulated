@@ -10,22 +10,15 @@
 // them: its parent, its first child and its next sibling (Blink's layout), written by the arena as its children change
 // (`relink`), so a node is kept alive by the tree it is in the way its JS object's references once kept it.
 //
-// The handle leads back to its object only while the node is in a document (`holdObjects` / `releaseObjects`, as
-// handles.js registers and unregisters it). Traced from the handle, as Blink traces a wrapper, an object is a ROOT in every scavenge: V8 drops
-// a young traced object only where it is an unmodified API object, and every node object carries its own state as
-// properties (`_id`, `_parent`, …), so no node made and dropped could die young — measured, a node churn +11-18% and its
-// heap 4x; a weak handle per node cost +10% too. A node in a document is held alive by it anyway, and one made and
-// dropped never is in one: so the engine hands back such a node's object itself (`held`, `dom.rs nodes_value`), and
-// finds any other by its path in the JS tree (`RealmArena::push_path`). The reference is DROPPABLE (src/v8_shim.cc):
-// it holds an object with state of its own as a strong one does, and once a node's object is a bare wrapper, its state
-// the engine's, a scavenge may drop it young and the handle hold it no more (`csim_node_reset_root`) — the step that lets
-// the tree keep every node's object.
-//
-// A node leaving its document is let go at once — its handle answers for it no more — but its reference is dropped only
-// at the next node made (`let_go`), unless it is back: a node a script moves leaves its document and returns within one
-// call, and a traced reference made again for each node moved cost ~1 us a 6-node subtree. A removed node is so let go
-// before any scavenge that could have kept it, as the next node is made sooner (and a long run of removals with none
-// made is let go every 4,096 nodes).
+// The handle leads back to its object from the node's making (`object`, the one a script holds — a `<form>`'s or a
+// `<select>`'s Proxy, a document's, once made: `setNodeObject`), so the engine can hand back any node's object —
+// detached ones too — rather than a path the bindings walk. Traced from the handle, as Blink traces a wrapper, an object
+// is a ROOT in every scavenge: V8 drops a young traced object only where it is an unmodified API object, and node
+// objects still carry state of their own as properties, so no node made and dropped dies young — measured
+// 2026-10-11: +13-16% on a churn microbench (200k createElement), ~1% on the app suites. The reference is DROPPABLE
+// (src/v8_shim.cc): it holds an object with state of its own as a strong one does, and once a node's object is a bare
+// wrapper, its state the engine's, a scavenge may drop it young (`csim_node_reset_root`) — and the handle then makes
+// it anew.
 
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -60,7 +53,6 @@ extern "C" fn csim_node_reset_root(wrappable: *mut std::ffi::c_void) {
     let raw = wrappable as *mut _;
     let Some(ptr) = (unsafe { v8::cppgc::UnsafePtr::<NodeHandle>::new(&raw) }) else { return };
     let handle = unsafe { ptr.as_ref() };
-    handle.held.set(false);
     // SAFETY: as above; V8 resets the reference it reports dropped only through this call's embedder.
     unsafe { csim_traced_clear(handle.object.get()) };
 }
@@ -76,10 +68,8 @@ pub(crate) struct NodeHandle {
     // The tree it owns outside its children: a host's shadow root, a `<template>`'s contents — whose root's `parent` is
     // its owner, the other way.
     owned: Edge,
-    // Its object — the one a script holds (a `<form>`'s Proxy) — while the node is in a document (`held`), or let go and
-    // not yet dropped (`let_go`); empty otherwise.
+    // Its object — the one a script holds (a `<form>`'s Proxy) — from its making; empty once V8 dropped a bare one.
     object: UnsafeCell<v8::TracedReference<v8::Object>>,
-    held: Cell<bool>,
     // Its event listeners (events.js: type → list), once it has any — the node's state, not its object's
     // (`listenerStore`, and `listenerStores` for a dispatch's whole path in one call).
     listeners: UnsafeCell<v8::TracedReference<v8::Object>>,
@@ -236,10 +226,6 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         return;
     }
     let obj = args.this();
-    // (…a node made: the nodes let go since are dropped now — see the header)
-    if !crate::dom::dom(scope).let_go.is_empty() {
-        let_go(scope);
-    }
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
     let handle = NodeHandle {
@@ -250,7 +236,6 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         next: Edge::new(),
         owned: Edge::new(),
         object: UnsafeCell::new(v8::TracedReference::empty()),
-        held: Cell::new(false),
         listeners: UnsafeCell::new(v8::TracedReference::empty()),
         rare: UnsafeCell::new(v8::TracedReference::empty()),
         document: UnsafeCell::new(v8::TracedReference::empty()),
@@ -260,6 +245,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     unsafe {
         let ptr = v8::cppgc::make_garbage_collected(heap, handle);
         v8::Object::wrap::<TAG, NodeHandle>(scope, obj, &ptr);
+        csim_traced_reset_droppable(ptr.as_ref().object.get(), scope.as_raw_isolate_ptr(), &*obj as *const v8::Object);
     }
 }
 
@@ -457,10 +443,10 @@ fn set_subtree_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     }
 }
 
-// `__dom.dispatchPath(targetNid)` -> [path, stores] for a dispatch at a node in a document: the target and its
-// ancestors up to the document, their objects — each held, as a node in a document is — and each one's listener store
-// (undefined for none); undefined where a node of it is not held (a tree in no document), whose path the bindings
-// walk; null where the path crosses a shadow root, which the flat tree's event path (event_path.rs) retargets across.
+// `__dom.dispatchPath(targetNid)` -> [path, stores] for a dispatch at a node: the target and its ancestors up to its
+// root, their objects, and each one's listener store (undefined for none); undefined where a node of it has no object
+// (V8 dropped a bare one), whose path the bindings walk; null where the path crosses a shadow root, which the flat
+// tree's event path (event_path.rs) retargets across.
 fn dispatch_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return };
     // (…the handles found first, while the arena is borrowed: reading the references allocates nothing a collection
@@ -469,26 +455,26 @@ fn dispatch_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         let arena = &crate::dom::dom(scope).arena;
         let mut out = Vec::new();
         let mut cur = Some(target);
-        let mut held = true;
-        while let Some(id) = cur.filter(|_| held) {
+        let mut whole = true;
+        while let Some(id) = cur.filter(|_| whole) {
             let Some(n) = arena.get(id) else { break };
             if n.host.is_some() {
                 return rv.set_null();
             }
-            match n.link.handle().filter(|h| h.held.get()) {
+            match n.link.handle() {
                 Some(h) => out.push(h as *const NodeHandle),
-                None => held = false,
+                None => whole = false,
             }
             cur = arena.parent_of(id);
         }
-        held.then_some(out)
+        whole.then_some(out)
     };
     let Some(handles) = handles else { return };
     let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
     let mut path = Vec::with_capacity(handles.len());
     let mut stores = Vec::with_capacity(handles.len());
     for &h in &handles {
-        // SAFETY: a held handle's object is alive (its reference holds it); the main thread wrote the references.
+        // SAFETY: a handle's object is alive while its reference holds it; the main thread wrote the references.
         let Some(object) = (unsafe { (*(*h).object.get()).get(scope) }) else { return };
         path.push(object.into());
         stores.push(unsafe { (*(*h).listeners.get()).get(scope) }.map_or(undefined, Into::into));
@@ -513,74 +499,37 @@ fn listener_type_known(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     rv.set_bool(crate::dom::dom(scope).arena.listener_types.types.contains(&ty));
 }
 
-// `__dom.holdObjects(nodes)` / `__dom.releaseObjects(nodes)`: the nodes (their objects, as a script holds them) are now
-// in a document — their handles hold their objects — or are no longer.
-pub(crate) fn hold_objects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Ok(nodes) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
-    for i in 0..nodes.length() {
-        let Some(value) = nodes.get_index(scope, i) else { continue };
-        let (Some(ptr), Ok(obj)) = (handle_of(scope, value), v8::Local::<v8::Object>::try_from(value)) else { continue };
-        // SAFETY: the handle lives while its object does, which the array holds; the main thread writes the reference.
-        let h = unsafe { ptr.as_ref() };
-        h.held.set(true);
-        // (…one let go and not yet dropped keeps the reference it has)
-        let slot = h.object.get();
-        // SAFETY: the main thread writes the reference; `obj` is a live local.
-        if unsafe { (*slot).get(scope) } != Some(obj) {
-            unsafe { csim_traced_reset_droppable(slot, scope.as_raw_isolate_ptr(), &*obj as *const v8::Object) };
-        }
-    }
+// `__dom.setNodeObject(object)`: the object a script holds for the node becomes `object` — the Proxy a `<form>`, a
+// `<select>` or a document is made into once its node is (the target the handle wraps).
+pub(crate) fn set_node_object(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let value = args.get(0);
+    let (Some(ptr), Ok(obj)) = (handle_of(scope, value), v8::Local::<v8::Object>::try_from(value)) else { return };
+    // SAFETY: the handle lives while its object does, an argument; the main thread writes the reference.
+    unsafe { csim_traced_reset_droppable(ptr.as_ref().object.get(), scope.as_raw_isolate_ptr(), &*obj as *const v8::Object) };
 }
-// …and the nodes among them an element state is on (`STATE_*`), whose removing steps may have state to undo — or
-// undefined for none.
-pub(crate) fn release_objects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// `__dom.statedNodes(nodes)` -> the nodes among them an element state is on (`STATE_*`), whose removing steps may have
+// state to undo, as a subtree leaves its document — or undefined for none.
+pub(crate) fn stated_nodes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(nodes) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
     let mut stated = Vec::new();
     for i in 0..nodes.length() {
         let Some(value) = nodes.get_index(scope, i) else { continue };
         let Some(ptr) = handle_of(scope, value) else { continue };
-        // SAFETY: as above.
-        let h = unsafe { ptr.as_ref() };
-        let Some(nid) = h.nid.get() else { continue };
-        let d = crate::dom::dom(scope);
-        if d.arena.get(nid).is_some_and(|n| n.state != 0) {
+        // SAFETY: the handle lives while its object, in the array, does.
+        let Some(nid) = unsafe { ptr.as_ref() }.nid.get() else { continue };
+        if crate::dom::dom(scope).arena.get(nid).is_some_and(|n| n.state != 0) {
             stated.push(value);
         }
-        if h.held.replace(false) {
-            d.let_go.push(nid);
-        }
-    }
-    if crate::dom::dom(scope).let_go.len() >= 4096 {
-        let_go(scope);
     }
     if !stated.is_empty() {
         rv.set(v8::Array::new_with_elements(scope, &stated).into());
     }
 }
 
-// Drop the references of the nodes let go and not back since (`release_objects`).
-pub(crate) fn let_go(scope: &mut v8::PinScope<'_, '_>) {
-    let d = crate::dom::dom(scope);
-    let gone = std::mem::take(&mut d.let_go);
-    // (…the handles found first, while the arena is borrowed: dropping a reference allocates nothing a collection could
-    // take one in)
-    let handles: Vec<*const NodeHandle> = gone
-        .iter()
-        .filter_map(|&nid| d.arena.get(nid).and_then(|n| n.link.handle()))
-        .filter(|h| !h.held.get())
-        .map(|h| h as *const NodeHandle)
-        .collect();
-    for h in handles {
-        // SAFETY: as above; the main thread writes the reference.
-        unsafe { (*(*h).object.get()).reset(scope, None) };
-    }
-}
-
-// Where the object of the node whose handle `link` is lies, while the node is in a document — read with the scope once
-// the arena is let go (`HeldObject::get`), and before anything is allocated on the JS heap (a collection in between could
-// take the handle).
+// Where the object of the node whose handle `link` is lies — read with the scope once the arena is let go
+// (`HeldObject::get`), and before anything is allocated on the JS heap (a collection in between could take the handle).
 pub(crate) fn held(link: &Link) -> Option<HeldObject> {
-    link.handle().filter(|h| h.held.get()).map(|h| HeldObject(h.object.get()))
+    link.handle().map(|h| HeldObject(h.object.get()))
 }
 pub(crate) struct HeldObject(*const v8::TracedReference<v8::Object>);
 

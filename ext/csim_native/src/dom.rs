@@ -1654,8 +1654,6 @@ impl RealmArena {
 pub(crate) struct Dom {
     // The slots of the nodes V8 collected, to be freed (`node_handle::reclaim`).
     pub(crate) reclaim: std::sync::Arc<crate::node_handle::Reclaim>,
-    // The handles of nodes that left a document, whose references go at the next node made (`node_handle::let_go`).
-    pub(crate) let_go: Vec<NodeId>,
     // Every realm's nodes, and each realm's state (`RealmArena`).
     pub(crate) arena: RealmArena,
     // The store-flip's native-backed `_attrs`: a full named-interceptor view over a node's
@@ -1713,9 +1711,9 @@ pub(crate) fn realm<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> &'s mu
     dom(scope).arena.enter(cid)
 }
 
-// Nodes the engine answers with, under `anchor`, to the page side: their objects, where every one is in a document (its
-// handle holds its object, node_handle.rs) — else each one's path from the anchor (`RealmArena::push_path`), a
-// Float64Array the page side walks (native-query-shadow.js `nodesAtPaths`).
+// Nodes the engine answers with, under `anchor`, to the page side: their objects, which their handles hold from their
+// making (node_handle.rs) — else, where V8 dropped a bare one, each one's path from the anchor
+// (`RealmArena::push_path`), a Float64Array the page side walks (native-query-shadow.js `nodesAtPaths`).
 pub(crate) fn nodes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, anchor: NodeId, ids: &[NodeId]) -> v8::Local<'s, v8::Value> {
     if let Some(objects) = held_objects(scope, cid, ids) {
         return objects;
@@ -1743,7 +1741,7 @@ pub(crate) fn nodes_value_anchored<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i3
     }
     f64_array(scope, &out).into()
 }
-// The objects of `ids`, where every one is held.
+// The objects of `ids`, where every one has one.
 fn held_objects<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, ids: &[NodeId]) -> Option<v8::Local<'s, v8::Value>> {
     let arena = realm(scope, cid);
     let held: Option<Vec<crate::node_handle::HeldObject>> =
@@ -2042,8 +2040,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "attrsView", attrs_view, context_id);
     register(scope, ns, "adoptSubtree", adopt_subtree, context_id);
     // …and a node's object, held by its handle while the node is in a document (node_handle.rs)
-    register(scope, ns, "holdObjects", crate::node_handle::hold_objects, context_id);
-    register(scope, ns, "releaseObjects", crate::node_handle::release_objects, context_id);
+    register(scope, ns, "setNodeObject", crate::node_handle::set_node_object, context_id);
+    register(scope, ns, "statedNodes", crate::node_handle::stated_nodes, context_id);
     register(scope, ns, "nodesUnder", nodes_under, context_id);
     register(scope, ns, "handleEdgesMismatch", handle_edges_mismatch, context_id);
     // Free a disposed realm's state and nodes — csim calls this before tearing down a frame realm (main
