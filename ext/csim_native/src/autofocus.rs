@@ -141,8 +141,7 @@ fn next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     let Some(next) = arena.autofocus_next(top, focused) else { return };
-    let root = arena.shadow_including_root(next);
-    rv.set(crate::dom::nodes_value(scope, cid, root, &[next]));
+    rv.set(crate::dom::nodes_value(scope, cid, &[next]));
 }
 
 // __dom.atFragment(docNid, …) -> whether any of the documents is at a fragment (`at_fragment`).

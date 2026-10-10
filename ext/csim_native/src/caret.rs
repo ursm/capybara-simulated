@@ -174,10 +174,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "caretWord", caret_word, context_id);
 }
 
-// [nodes, offsets…] for points of `nodes` — the nodes as `nodes_value` answers from their tree's root.
+// [nodes, offsets…] for points of `nodes` — the nodes as `nodes_value` answers them.
 fn points<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, nodes: &[NodeId], offsets: &[u32]) -> v8::Local<'s, v8::Value> {
-    let root = crate::dom::realm(scope, cid).root_of(nodes[0]);
-    let mut values = vec![crate::dom::nodes_value(scope, cid, root, nodes)];
+    let mut values = vec![crate::dom::nodes_value(scope, cid, nodes)];
     values.extend(offsets.iter().map(|&o| -> v8::Local<'_, v8::Value> { v8::Integer::new_from_unsigned(scope, o).into() }));
     v8::Array::new_with_elements(scope, &values).into()
 }

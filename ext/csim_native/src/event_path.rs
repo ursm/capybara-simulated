@@ -114,8 +114,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // __dom.retarget(aNid, bNid) -> DOM "retarget" the node `aNid` against the node `bNid` (null for something else, a
-// Window, which no shadow root is an ancestor of): the node, as `nodes_value` answers it from `aNid`'s shadow-including
-// root.
+// Window, which no shadow root is an ancestor of): the node, as `nodes_value` answers it.
 fn retarget_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(a) = nid_arg(scope, &args, 0) else { return };
     let b = nid_arg(scope, &args, 1);
@@ -133,15 +132,12 @@ fn retarget_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         }
     };
     let Related::Node(found) = found else { return };
-    let anchor = arena.shadow_including_root(a);
-    let answer = crate::dom::nodes_value(scope, cid, anchor, &[found]);
-    rv.set(answer);
+    rv.set(crate::dom::nodes_value(scope, cid, &[found]));
 }
 
 // __dom.eventPath(targetNid, relatedNid, relatedOther, composed) -> [nodes, steps]: the event path from the target (the
 // relatedTarget a node `relatedNid`, else none, or with `relatedOther` something no retargeting moves). `nodes` are the
-// nodes it names, as `nodes_value` answers them — or, where one is in no document, as paths each after which tree it is
-// in (0 the target's shadow-including root's, 1 the relatedTarget's); `steps` five numbers a step: its node, the target
+// nodes it names, as `nodes_value` answers them; `steps` five numbers a step: its node, the target
 // its listeners see, its relatedTarget (an index into `nodes`; -1 none, -2 the event's own), whether it is a closed
 // shadow root, and whether it is a slot in a closed tree. Empty, where the event is not dispatched.
 fn event_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -176,11 +172,7 @@ fn event_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         out.push(s.root_closed as u8 as f64);
         out.push(s.slot_closed as u8 as f64);
     }
-    let anchors = [Some(arena.shadow_including_root(target)), match related {
-        Related::Node(r) => Some(arena.shadow_including_root(r)),
-        _ => None,
-    }];
-    let nodes_answer = crate::dom::nodes_value_anchored(scope, cid, &anchors, &nodes);
+    let nodes_answer = crate::dom::nodes_value(scope, cid, &nodes);
     let steps_answer = crate::dom::f64_array(scope, &out);
     let answer = v8::Array::new_with_elements(scope, &[nodes_answer, steps_answer.into()]);
     rv.set(answer.into());

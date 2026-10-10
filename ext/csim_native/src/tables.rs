@@ -99,7 +99,7 @@ const FIRST_NON_HEADER: u32 = 7;
 
 // __dom.tableParts(nid, part) -> a table's rows (0), a section's rows (1), a row's cells (2), a table's bodies (3), its
 // first caption (4), thead (5) or tfoot (6) child, its first child neither a caption nor a colgroup (7) — in tree
-// order, as `nodes_value` answers them from `nid`.
+// order, as `nodes_value` answers them.
 fn table_parts(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let Some(id) = nid_arg(scope, &args, 0) else { return };
@@ -117,7 +117,7 @@ fn table_parts(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         FIRST_NON_HEADER => arena.first_non_header_child(id).into_iter().collect(),
         _ => Vec::new(),
     };
-    rv.set(nodes_value(scope, cid, id, &parts));
+    rv.set(nodes_value(scope, cid, &parts));
 }
 
 // __dom.tableIndex(nid, which) -> a row's rowIndex (0) or sectionRowIndex (1), a cell's cellIndex (2).

@@ -1,8 +1,7 @@
 // The element lists the DOM names by a filter (DOM §4.2.6, HTML §3.1.3): `getElementsByClassName`, `getElementsByTagName`
 // and its namespaced form, the document's `getElementsByName`, and its legacy collections (`forms`, `images`, `links`, `scripts`, `anchors`,
 // `embeds`) — the scope's descendant elements in tree order (not into a shadow tree or a template's contents) that the
-// filter takes, answered as `nodes_value` says (their objects, or their paths from the scope), which the live
-// collections wrap.
+// filter takes, answered as `nodes_value` says (their objects), which the live collections wrap.
 
 use std::collections::HashMap;
 
@@ -121,7 +120,7 @@ fn element_by_id(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     let found = arena.element_by_id(root, &id);
-    let answer = crate::dom::nodes_value(scope, cid, root, found.as_slice());
+    let answer = crate::dom::nodes_value(scope, cid, found.as_slice());
     rv.set(answer);
 }
 
@@ -132,7 +131,7 @@ fn document_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let name = utf16_arg(scope, args.get(1));
     let cid = realm_id(scope, &args);
     let found = crate::dom::realm(scope, cid).document_named(doc, &name);
-    rv.set(crate::dom::nodes_value(scope, cid, doc, &found));
+    rv.set(crate::dom::nodes_value(scope, cid, &found));
 }
 
 // __dom.documentNames(docNid) -> [name] — the document's supported property names (`RealmArena::document_names`).
@@ -155,7 +154,7 @@ fn window_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let kind = args.get(2).int32_value(scope).unwrap_or(2);
     let cid = realm_id(scope, &args);
     let found = crate::dom::realm(scope, cid).window_named(doc, &name, kind);
-    rv.set(crate::dom::nodes_value(scope, cid, doc, &found));
+    rv.set(crate::dom::nodes_value(scope, cid, &found));
 }
 
 // The ids of each tree asked for them since the last change that can move one (`id_epoch`: a node linked, unlinked or
@@ -428,13 +427,13 @@ fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         SHADOW_HOSTS => {
             let cid = realm_id(scope, &args);
             let ids = crate::dom::realm(scope, cid).shadow_including_elements(root, |n| n.shadow_root.is_some());
-            return rv.set(crate::dom::nodes_value(scope, cid, root, &ids));
+            return rv.set(crate::dom::nodes_value(scope, cid, &ids));
         }
         _ => return,
     };
     let cid = realm_id(scope, &args);
     let ids = collect(crate::dom::realm(scope, cid), root, &filter);
-    let answer = crate::dom::nodes_value(scope, cid, root, &ids);
+    let answer = crate::dom::nodes_value(scope, cid, &ids);
     rv.set(answer);
 }
 

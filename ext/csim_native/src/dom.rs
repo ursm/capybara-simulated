@@ -133,7 +133,7 @@ fn nodes_under(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         .filter(|&id| arena.get(id).is_some() && arena.shadow_including_ancestor(root, id))
         .collect();
     let kept_nids: Vec<f64> = kept.iter().map(|id| id.to_f64()).collect();
-    let nodes = nodes_value(scope, cid, root, &kept);
+    let nodes = nodes_value(scope, cid, &kept);
     let kept_nids = f64_array(scope, &kept_nids);
     let answer = v8::Array::new_with_elements(scope, &[kept_nids.into(), nodes]);
     rv.set(answer.into());
@@ -1351,33 +1351,6 @@ impl RealmArena {
             }
         }
     }
-    // Where `id` is in the JS tree: its path from `anchor`, appended to `out` as its length and then its steps down — a
-    // child's index, -1 for a host's shadow root, -2 for a template's contents — or a length of -1 where `anchor` is not
-    // above it. How a slot the engine answers with is found as the object a script holds (node_handle.rs).
-    pub(crate) fn push_path(&self, anchor: NodeId, id: NodeId, out: &mut Vec<f64>) {
-        let at = out.len();
-        out.push(0.0);
-        let mut cur = id;
-        while cur != anchor {
-            let Some(n) = self.get(cur) else { break };
-            let (step, up) = match (n.parent, n.host, n.template_host) {
-                (Some(p), _, _) => (self.child_index(cur) as f64, p),
-                (None, Some(h), _) => (-1.0, h),
-                (None, None, Some(t)) => (-2.0, t),
-                _ => break,
-            };
-            out.push(step);
-            cur = up;
-        }
-        if cur != anchor {
-            out.truncate(at);
-            out.push(-1.0);
-            return;
-        }
-        out[at] = (out.len() - at - 1) as f64;
-        out[at + 1..].reverse();
-    }
-
     // `template`'s contents are `content` (or none) — and the handles' edges between them.
     pub(crate) fn set_template_content(&mut self, template: NodeId, content: Option<NodeId>) {
         let content = content.filter(|&c| self.get(c).is_some());
@@ -1767,44 +1740,18 @@ pub(crate) fn realm<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> &'s mu
     dom(scope).arena.enter(cid)
 }
 
-// Nodes the engine answers with, under `anchor`, to the page side: their objects, which their handles hold from their
-// making (node_handle.rs) — else, where V8 dropped a bare one, each one's path from the anchor
-// (`RealmArena::push_path`), a Float64Array the page side walks (native-query-shadow.js `nodesAtPaths`).
-pub(crate) fn nodes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, anchor: NodeId, ids: &[NodeId]) -> v8::Local<'s, v8::Value> {
-    if let Some(objects) = held_objects(scope, cid, ids) {
-        return objects;
-    }
+// Nodes the engine answers with, to the page side: their objects, which their handles hold from their making
+// (node_handle.rs) — `null` for one whose object V8 dropped (none is yet: node_handle.rs says why).
+pub(crate) fn nodes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, ids: &[NodeId]) -> v8::Local<'s, v8::Value> {
     let arena = realm(scope, cid);
-    let mut out = Vec::new();
-    for &id in ids {
-        arena.push_path(anchor, id, &mut out);
-    }
-    f64_array(scope, &out).into()
-}
-// …and from one of several anchors: where not every one is held, each node's path after the index of the anchor it is
-// under (the first; or 0 and a path of -1 for none).
-pub(crate) fn nodes_value_anchored<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, anchors: &[Option<NodeId>], ids: &[NodeId]) -> v8::Local<'s, v8::Value> {
-    if let Some(objects) = held_objects(scope, cid, ids) {
-        return objects;
-    }
-    let arena = realm(scope, cid);
-    let mut out = Vec::new();
-    for &id in ids {
-        let root = arena.shadow_including_root(id);
-        let at = anchors.iter().position(|&a| a == Some(root)).unwrap_or(0);
-        out.push(at as f64);
-        arena.push_path(anchors[at].unwrap_or(root), id, &mut out);
-    }
-    f64_array(scope, &out).into()
-}
-// The objects of `ids`, where every one has one.
-fn held_objects<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, ids: &[NodeId]) -> Option<v8::Local<'s, v8::Value>> {
-    let arena = realm(scope, cid);
-    let held: Option<Vec<crate::node_handle::HeldObject>> =
+    let held: Vec<Option<crate::node_handle::HeldObject>> =
         ids.iter().map(|&id| arena.get(id).and_then(|n| crate::node_handle::held(&n.link))).collect();
     // (…the objects read before anything is allocated: a collection in between could take a handle)
-    let objects: Vec<v8::Local<'s, v8::Value>> = held?.iter().map(|h| h.get(scope).map(Into::into)).collect::<Option<_>>()?;
-    Some(v8::Array::new_with_elements(scope, &objects).into())
+    let objects: Vec<v8::Local<'s, v8::Value>> = held
+        .iter()
+        .map(|h| h.as_ref().and_then(|h| h.get(scope)).map_or_else(|| v8::null(scope).into(), Into::into))
+        .collect();
+    v8::Array::new_with_elements(scope, &objects).into()
 }
 
 // The arena for realm `cid` and its style engine, for a change the engine has to hear of — the engine's change hooks
@@ -2230,7 +2177,7 @@ fn child_nodes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let Some(id) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
     let kids = realm(scope, cid).get(id).map(|n| n.children.clone()).unwrap_or_default();
-    rv.set(nodes_value(scope, cid, id, &kids));
+    rv.set(nodes_value(scope, cid, &kids));
 }
 // __dom.childIndex(parentNid, childNid) -> the child's index among the parent's children, -1 for no child of it (a
 // fast call: the arena keeps each child's position).
@@ -2788,11 +2735,10 @@ fn nids_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -
         .filter_map(|i| arr.get_index(scope, i).and_then(|v| v.integer_value(scope)).and_then(NodeId::from_i64))
         .collect()
 }
-// __dom.assignSlots(rootNid, [slotNid, …]) -> [slot, count, node, …, slot, …]: assign the slots of the shadow tree
-// `rootNid` (-1 for none) and the slots listed (ones that left it, assigned what their own tree now gives them), and
-// answer each slot whose assigned nodes changed with the nodes that left it — for the caller's `slotchange` and layout
-// marks. A slot listed is answered by its index in the list, any other by -1 and its path; a node by its path. Every
-// path is from the shadow-including root of the tree `rootNid` is in — or, without one, of the slot's.
+// __dom.assignSlots(rootNid, [slotNid, …]) -> [nodes, counts]: assign the slots of the shadow tree `rootNid` (-1 for
+// none) and the slots listed (ones that left it, assigned what their own tree now gives them), and answer each slot
+// whose assigned nodes changed with the nodes that left it — for the caller's `slotchange` and layout marks: `nodes`
+// each such slot and then the nodes that left it, as `nodes_value` answers them, and `counts` how many left each.
 fn assign_slots(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2810,23 +2756,16 @@ fn assign_slots(
             engine.slot_assignment_changed(arena, slot);
         }
     });
-    let tree = root.map(|r| arena.shadow_including_root(r));
-    let mut out = Vec::new();
+    let mut nodes = Vec::new();
+    let mut counts = Vec::with_capacity(changed.len());
     for c in &changed {
-        let anchor = tree.unwrap_or_else(|| arena.shadow_including_root(c.slot));
-        match extra.iter().position(|&s| s == c.slot) {
-            Some(i) => out.push(i as f64),
-            None => {
-                out.push(-1.0);
-                arena.push_path(anchor, c.slot, &mut out);
-            }
-        }
-        out.push(c.left.len() as f64);
-        for &n in &c.left {
-            arena.push_path(anchor, n, &mut out);
-        }
+        nodes.push(c.slot);
+        nodes.extend_from_slice(&c.left);
+        counts.push(c.left.len() as f64);
     }
-    rv.set(f64_array(scope, &out).into());
+    let nodes = nodes_value(scope, cid, &nodes);
+    let counts = f64_array(scope, &counts);
+    rv.set(v8::Array::new_with_elements(scope, &[nodes, counts.into()]).into());
 }
 
 // __dom.setManualAssigned(slotNid, [nid, …]): the nodes `assign()`ed to a slot, in that order (those in this arena).
@@ -2843,29 +2782,29 @@ fn set_manual_assigned(
     }
 }
 
-// __dom.assignedSlotOf(nid, anchorNid) -> the slot a slottable is assigned to (HTML "find a slot"), none or it, as
-// `nodes_value` answers from `anchorNid` (the slottable's host, where the caller walks it from).
+// __dom.assignedSlotOf(nid) -> the slot a slottable is assigned to (HTML "find a slot"), none or it, as `nodes_value`
+// answers.
 fn assigned_slot_of(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let (Some(id), Some(anchor)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
     let slot = arena.get(id).and_then(|n| n.assigned_slot).filter(|&s| arena.get(s).is_some());
-    let answer = nodes_value(scope, cid, anchor, slot.as_slice());
+    let answer = nodes_value(scope, cid, slot.as_slice());
     rv.set(answer);
 }
 
-// __dom.assignedNodesOf(slotNid, flatten, anchorNid) -> a slot's assigned nodes ("find slottables"), or with `flatten`
-// its flattened ones ("find flattened slottables"), as `nodes_value` answers them from `anchorNid`.
+// __dom.assignedNodesOf(slotNid, flatten) -> a slot's assigned nodes ("find slottables"), or with `flatten` its flattened
+// ones ("find flattened slottables"), as `nodes_value` answers them.
 fn assigned_nodes_of(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let (Some(slot), Some(anchor)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2)) else { return };
+    let Some(slot) = nid_arg(scope, &args, 0) else { return };
     let flatten = args.get(1).is_true();
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
@@ -2876,7 +2815,7 @@ fn assigned_nodes_of(
     } else {
         arena.get(slot).map_or(Vec::new(), |s| s.assigned.clone())
     };
-    let answer = nodes_value(scope, cid, anchor, &ids);
+    let answer = nodes_value(scope, cid, &ids);
     rv.set(answer);
 }
 
@@ -3189,7 +3128,7 @@ fn query(
     let html_doc = !args.get(5).is_true();
     match crate::selector::query_text(realm(scope, cid), root, scope_el, &selector, first_only, quirks, html_doc) {
         Some(ids) => {
-            let answer = nodes_value(scope, cid, root, &ids);
+            let answer = nodes_value(scope, cid, &ids);
             rv.set(answer);
         }
         None => rv.set_null(),

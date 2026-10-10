@@ -158,19 +158,19 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // __dom.formEntries(formNid, submitterNid, encoding, x, y) -> [entries, nodes] — `x`, `y` an image submitter's selected
 // coordinate: `entries` flat, three to an entry — `0, name,
 // value` a string entry, `1, name, k` the files of `nodes[k]`, `2, null, k` the custom element `nodes[k]`'s — and
-// `nodes` those elements, as `nodes_value` answers from the form's tree.
+// `nodes` those elements, as `nodes_value` answers them.
 fn form_entries(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(form) = nid_arg(scope, &args, 0) else { return };
     let submitter = nid_arg(scope, &args, 1);
     let encoding = crate::dom::utf16_arg(scope, args.get(2));
     let at = (args.get(3).int32_value(scope).unwrap_or(0), args.get(4).int32_value(scope).unwrap_or(0));
     let cid = crate::dom::realm_id(scope, &args);
-    let (entries, tree) = {
+    let entries = {
         let d = crate::dom::dom(scope);
         let arena: &RealmArena = d.arena.enter(cid);
         let engine = d.styles.get(&cid);
         let colour = |v: &str| crate::input_value::colour_value(engine, arena, v);
-        (arena.entry_list(form, submitter, at, &encoding, &colour), arena.form_tree(form))
+        arena.entry_list(form, submitter, at, &encoding, &colour)
     };
     let (mut flat, mut nodes): (Vec<v8::Local<'_, v8::Value>>, Vec<NodeId>) = (Vec::new(), Vec::new());
     for entry in entries {
@@ -194,6 +194,6 @@ fn form_entries(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         flat.push(value);
     }
     let entries = v8::Array::new_with_elements(scope, &flat).into();
-    let nodes = crate::dom::nodes_value(scope, cid, tree, &nodes);
+    let nodes = crate::dom::nodes_value(scope, cid, &nodes);
     rv.set(v8::Array::new_with_elements(scope, &[entries, nodes]).into());
 }

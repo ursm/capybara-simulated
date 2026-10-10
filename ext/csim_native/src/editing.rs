@@ -100,12 +100,11 @@ fn edit_ancestor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         BLOCKQUOTE => tag_is(arena, id, &|t| t == "blockquote"),
         _ => is_block_container(arena, id),
     });
-    let root = arena.shadow_including_root(host);
-    rv.set(crate::dom::nodes_value(scope, cid, root, found.as_slice()));
+    rv.set(crate::dom::nodes_value(scope, cid, found.as_slice()));
 }
 
 // __dom.editCoveredText(startNid, startOffset, endNid, endOffset) -> [nodes, slices] (`covered_text`): the text nodes,
-// as `nodes_value` answers from the start's tree, and a Float64Array of their slices, `[from, to]` each.
+// as `nodes_value` answers them, and a Float64Array of their slices, `[from, to]` each.
 fn edit_covered_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(sc), Some(ec)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2)) else { return };
     let so = args.get(1).uint32_value(scope).unwrap_or(0);
@@ -113,10 +112,9 @@ fn edit_covered_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     let runs = arena.covered_text((sc, so), (ec, eo));
-    let root = arena.shadow_including_root(sc);
     let nodes: Vec<NodeId> = runs.iter().map(|r| r.0).collect();
     let slices: Vec<f64> = runs.iter().flat_map(|r| [f64::from(r.1), f64::from(r.2)]).collect();
-    let nodes_value = crate::dom::nodes_value(scope, cid, root, &nodes);
+    let nodes_value = crate::dom::nodes_value(scope, cid, &nodes);
     let slices_value = crate::dom::f64_array(scope, &slices).into();
     rv.set(v8::Array::new_with_elements(scope, &[nodes_value, slices_value]).into());
 }

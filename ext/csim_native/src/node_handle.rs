@@ -12,13 +12,14 @@
 //
 // The handle leads back to its object from the node's making (`object`, the one a script holds — a `<form>`'s or a
 // `<select>`'s Proxy, a document's, once made: `setNodeObject`), so the engine can hand back any node's object —
-// detached ones too — rather than a path the bindings walk. Traced from the handle, as Blink traces a wrapper, an object
+// detached ones too (`nodes_value`, dom.rs). Traced from the handle, as Blink traces a wrapper, an object
 // is a ROOT in every scavenge: V8 drops a young traced object only where it is an unmodified API object, and node
 // objects still carry state of their own as properties, so no node made and dropped dies young — measured
 // 2026-10-11: +13-16% on a churn microbench (200k createElement), ~1% on the app suites. The reference is DROPPABLE
 // (src/v8_shim.cc): it holds an object with state of its own as a strong one does, and once a node's object is a bare
 // wrapper, its state the engine's, a scavenge may drop it young (`csim_node_reset_root`), and the handle answers for it
-// no more: an answer then falls back to the node's path, a dispatch to the JS walk (making it anew is still to come).
+// no more: an answer then holds null in its place, a dispatch falls back to the JS walk (making it anew is still to
+// come). None does while a node object carries state of its own (measured 2026-10-11: not once across the spec suite).
 
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -445,7 +446,7 @@ fn set_subtree_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 
 // `__dom.dispatchPath(targetNid)` -> [path, stores] for a dispatch at a node: the target and its ancestors up to its
 // root, their objects, and each one's listener store (undefined for none); undefined where a node of it has no object
-// (V8 dropped a bare one), whose path the bindings walk; null where the path crosses a shadow root, which the flat
+// (V8 dropped a bare one), which the bindings' own walk then answers; null where the path crosses a shadow root, which the flat
 // tree's event path (event_path.rs) retargets across.
 fn dispatch_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return };

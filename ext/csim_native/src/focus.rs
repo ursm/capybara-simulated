@@ -466,25 +466,17 @@ fn dialog_focusing_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
     let cid = crate::dom::realm_id(scope, &args);
     dialog_opening(crate::dom::realm(scope, cid), dialog);
     let control = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| dialog_focus_control(engine, arena, dialog, now)).unwrap_or(dialog);
-    let root = crate::dom::realm(scope, cid).shadow_including_root(dialog);
-    rv.set(crate::dom::nodes_value(scope, cid, root, &[control]));
+    rv.set(crate::dom::nodes_value(scope, cid, &[control]));
 }
 
-// __dom.dialogFocusRestore(dialogNid, wasModal, docNid, …) -> [k, [the element focus goes back to]]
-// (`dialog_focus_restore`), as `nodes_value` answers from the k-th of the documents given — or undefined for none, or
-// for one in none of them.
+// __dom.dialogFocusRestore(dialogNid, wasModal) -> [the element focus goes back to] or [] (`dialog_focus_restore`), as
+// `nodes_value` answers.
 fn dialog_focus_restore_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(dialog) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let was_modal = args.get(1).is_true();
-    let docs: Vec<Option<NodeId>> = (2..args.length()).map(|i| crate::dom::nid_arg(scope, &args, i)).collect();
     let cid = crate::dom::realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let Some(previous) = dialog_focus_restore(arena, dialog, was_modal) else { return };
-    let root = arena.shadow_including_root(previous);
-    let Some(k) = docs.iter().position(|&d| d == Some(root)) else { return };
-    let answer = crate::dom::nodes_value(scope, cid, root, &[previous]);
-    let index = v8::Integer::new(scope, k as i32).into();
-    rv.set(v8::Array::new_with_elements(scope, &[index, answer]).into());
+    let previous = dialog_focus_restore(crate::dom::realm(scope, cid), dialog, was_modal);
+    rv.set(crate::dom::nodes_value(scope, cid, previous.as_slice()));
 }
 
 // __dom.focusableArea(hostNid, now) -> [what focusing the delegating host focuses] or [] (`focusable_area`), as
@@ -493,8 +485,7 @@ fn focusable_area_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let Some(host) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let found = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| focusable_area(engine, arena, host, now)).flatten();
     let cid = crate::dom::realm_id(scope, &args);
-    let root = crate::dom::realm(scope, cid).shadow_including_root(host);
-    rv.set(crate::dom::nodes_value(scope, cid, root, found.as_slice()));
+    rv.set(crate::dom::nodes_value(scope, cid, found.as_slice()));
 }
 
 // __dom.focusable(nid, now) -> whether the element is a focusable area (`focusable`); undefined where the realm has no

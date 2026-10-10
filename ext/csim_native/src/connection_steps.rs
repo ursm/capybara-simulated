@@ -45,7 +45,7 @@ fn connection_step_elements(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
     let ids = crate::dom::realm(scope, cid).connection_step_elements(root);
-    rv.set(crate::dom::nodes_value(scope, cid, root, &ids));
+    rv.set(crate::dom::nodes_value(scope, cid, &ids));
 }
 
 // __dom.hasConnectionStep(nid) -> whether connecting the element runs a step of its own (`has_connection_step`) — a

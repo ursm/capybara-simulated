@@ -632,14 +632,14 @@ fn activation_target(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let cid = crate::dom::realm_id(scope, &args);
     let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let arena = crate::dom::realm(scope, cid);
-    let (root, found) = (arena.shadow_including_root(target), arena.activation_target(target));
-    rv.set(crate::dom::nodes_value(scope, cid, root, found.as_slice()));
+    let found = arena.activation_target(target);
+    rv.set(crate::dom::nodes_value(scope, cid, found.as_slice()));
 }
 
 // __dom.implicitSubmissionForm(nid) -> [the form Enter in the control submits] or []
 // (`element_state::implicit_submission_form`).
 fn implicit_submission_form(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    nodes_from_root(scope, &args, rv, |arena, id| arena.implicit_submission_form(id).into_iter().collect());
+    nodes_answer(scope, &args, rv, |arena, id| arena.implicit_submission_form(id).into_iter().collect());
 }
 
 // __dom.isLabelable(nid) -> whether the element is labelable (`element_state::is_labelable`).
@@ -652,16 +652,16 @@ fn is_labelable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 // __dom.labeledControl / labelsOf / labelToActivate(nid) -> the node(s) `element_state` answers: a label's labeled
 // control, a control's labels, the label a click activates.
 fn labeled_control(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    nodes_from_root(scope, &args, rv, |arena, id| arena.labeled_control(id).into_iter().collect());
+    nodes_answer(scope, &args, rv, |arena, id| arena.labeled_control(id).into_iter().collect());
 }
 fn labels_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    nodes_from_root(scope, &args, rv, |arena, id| arena.labels_of(id));
+    nodes_answer(scope, &args, rv, |arena, id| arena.labels_of(id));
 }
 fn label_to_activate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    nodes_from_root(scope, &args, rv, |arena, id| arena.label_to_activate(id).into_iter().collect());
+    nodes_answer(scope, &args, rv, |arena, id| arena.label_to_activate(id).into_iter().collect());
 }
-// (…what `answer` gives of a node, as `nodes_value` answers it from the node's root)
-fn nodes_from_root(
+// (…what `answer` gives of a node, as `nodes_value` answers it)
+fn nodes_answer(
     scope: &mut v8::PinScope<'_, '_>,
     args: &v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
@@ -670,18 +670,18 @@ fn nodes_from_root(
     let cid = crate::dom::realm_id(scope, args);
     let Some(id) = crate::dom::nid_arg(scope, args, 0) else { return };
     let arena = crate::dom::realm(scope, cid);
-    let (root, nodes) = (arena.root_of(id), answer(arena, id));
-    rv.set(crate::dom::nodes_value(scope, cid, root, &nodes));
+    let nodes = answer(arena, id);
+    rv.set(crate::dom::nodes_value(scope, cid, &nodes));
 }
 
 // __dom.editingHost(nid) -> [the node's editing host] or [] (`element_state::editing_host`).
 fn editing_host(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    nodes_from_root(scope, &args, rv, |arena, id| arena.editing_host(id).into_iter().collect());
+    nodes_answer(scope, &args, rv, |arena, id| arena.editing_host(id).into_iter().collect());
 }
 
 // __dom.formOwner(nid) -> [the control's form owner] or [] (`element_state::form_owner`).
 fn form_owner(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    nodes_from_root(scope, &args, rv, |arena, id| arena.form_owner(id).into_iter().collect());
+    nodes_answer(scope, &args, rv, |arena, id| arena.form_owner(id).into_iter().collect());
 }
 
 // __dom.defaultButton(nid) -> [the form's default button] or [] (`element_state::default_button_of`), from the form's
@@ -690,8 +690,8 @@ fn default_button(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let cid = crate::dom::realm_id(scope, &args);
     let Some(form) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let arena = crate::dom::realm(scope, cid);
-    let (tree, button) = (arena.form_tree(form), arena.default_button_of(form));
-    rv.set(crate::dom::nodes_value(scope, cid, tree, button.as_slice()));
+    let button = arena.default_button_of(form);
+    rv.set(crate::dom::nodes_value(scope, cid, button.as_slice()));
 }
 
 // __dom.formNamed(formNid, name) -> the form's named elements of `name` (`element_state::form_named`), from its tree.
@@ -700,8 +700,8 @@ fn form_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let Some(form) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let name = crate::dom::utf16_arg(scope, args.get(1));
     let arena = crate::dom::realm(scope, cid);
-    let (tree, named) = (arena.form_tree(form), arena.form_named(form, &name));
-    rv.set(crate::dom::nodes_value(scope, cid, tree, &named));
+    let named = arena.form_named(form, &name);
+    rv.set(crate::dom::nodes_value(scope, cid, &named));
 }
 // __dom.isFormNamedCandidate(formNid, nid) -> whether the element is one of the form's named elements.
 fn is_form_named_candidate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -717,7 +717,7 @@ fn fieldset_listed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let cid = crate::dom::realm_id(scope, &args);
     let Some(fieldset) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let listed = crate::dom::realm(scope, cid).fieldset_listed(fieldset);
-    rv.set(crate::dom::nodes_value(scope, cid, fieldset, &listed));
+    rv.set(crate::dom::nodes_value(scope, cid, &listed));
 }
 
 // __dom.formSubmittables(formNid, submitterNid) -> the elements the form's entry list takes values of
@@ -727,8 +727,8 @@ fn form_submittables(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let Some(form) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let submitter = crate::dom::nid_arg(scope, &args, 1);
     let arena = crate::dom::realm(scope, cid);
-    let (tree, elements) = (arena.form_tree(form), arena.form_submittables(form, submitter));
-    rv.set(crate::dom::nodes_value(scope, cid, tree, &elements));
+    let elements = arena.form_submittables(form, submitter);
+    rv.set(crate::dom::nodes_value(scope, cid, &elements));
 }
 
 // __dom.formListed(nid) -> the form's listed elements (`element_state::form_listed`), from the form's tree.
@@ -736,13 +736,13 @@ fn form_listed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let cid = crate::dom::realm_id(scope, &args);
     let Some(form) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let arena = crate::dom::realm(scope, cid);
-    let (tree, listed) = (arena.form_tree(form), arena.form_listed(form));
-    rv.set(crate::dom::nodes_value(scope, cid, tree, &listed));
+    let listed = arena.form_listed(form);
+    rv.set(crate::dom::nodes_value(scope, cid, &listed));
 }
 
 // __dom.radioGroup(nid) -> a radio's group, itself included, in tree order (`element_state::radio_group`).
 fn radio_group(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    nodes_from_root(scope, &args, rv, RealmArena::radio_group);
+    nodes_answer(scope, &args, rv, RealmArena::radio_group);
 }
 
 // __dom.optionDisabled(nid) -> whether an option is disabled for its select's selectedness and entry list
@@ -762,7 +762,7 @@ fn selectedness(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let arena = crate::dom::realm(scope, cid);
     let states = arena.selectedness(select, just);
     let changed = arena.apply_option_states(states);
-    rv.set(crate::dom::nodes_value(scope, cid, select, &changed));
+    rv.set(crate::dom::nodes_value(scope, cid, &changed));
 }
 
 // __dom.initialiseOptions(nid) -> the options — of a select, or an option itself — whose selectedness their
@@ -771,7 +771,7 @@ fn initialise_options(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let cid = crate::dom::realm_id(scope, &args);
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let changed = crate::dom::realm(scope, cid).initialise_options(id);
-    rv.set(crate::dom::nodes_value(scope, cid, id, &changed));
+    rv.set(crate::dom::nodes_value(scope, cid, &changed));
 }
 
 // __dom.isSubmitButton(nid) -> whether the element is a submit button (`element_state::is_submit_button`).
@@ -794,7 +794,7 @@ fn list_of_options(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let cid = crate::dom::realm_id(scope, &args);
     let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let ids = crate::dom::realm(scope, cid).list_of_options(select);
-    rv.set(crate::dom::nodes_value(scope, cid, select, &ids));
+    rv.set(crate::dom::nodes_value(scope, cid, &ids));
 }
 
 // __dom.selectedOptions(selectNid, first) -> its selected options (`selected_options`), as `nodes_value` answers.
@@ -803,7 +803,7 @@ fn selected_options(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let first = args.get(1).is_true();
     let ids: Vec<NodeId> = crate::dom::realm(scope, cid).selected_options(select, first).into_iter().map(|(_, o)| o).collect();
-    rv.set(crate::dom::nodes_value(scope, cid, select, &ids));
+    rv.set(crate::dom::nodes_value(scope, cid, &ids));
 }
 
 // __dom.selectedIndex(selectNid) -> the index of its first selected option, -1 with none.
@@ -821,14 +821,14 @@ fn select_index(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let index = args.get(1).integer_value(scope).unwrap_or(-1);
     let changed = crate::dom::realm(scope, cid).select_option(select, |_, i, _| i as i64 == index);
-    rv.set(crate::dom::nodes_value(scope, cid, select, &changed));
+    rv.set(crate::dom::nodes_value(scope, cid, &changed));
 }
 fn select_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let value = crate::dom::utf16_arg(scope, args.get(1));
     let changed = crate::dom::realm(scope, cid).select_option(select, |arena, _, o| arena.option_value(o) == value);
-    rv.set(crate::dom::nodes_value(scope, cid, select, &changed));
+    rv.set(crate::dom::nodes_value(scope, cid, &changed));
 }
 
 // __dom.validityFlags(nid) -> the constraints the element suffers from (`validity`), its ValidityState's flags in IDL

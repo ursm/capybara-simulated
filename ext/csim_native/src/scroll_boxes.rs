@@ -129,7 +129,7 @@ fn scrolling_element_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let quirks = args.get(1).is_true();
     let found = with_engine(scope, &args, 2, |engine, arena, now| scrolling_element(engine, arena, doc, quirks, now)).flatten();
     let cid = crate::dom::realm_id(scope, &args);
-    rv.set(crate::dom::nodes_value(scope, cid, doc, found.as_slice()));
+    rv.set(crate::dom::nodes_value(scope, cid, found.as_slice()));
 }
 
 // __dom.holdsScrollOffset(nid, quirks, now) -> whether the element keeps a scroll offset (`holds_scroll_offset`), its
@@ -147,6 +147,5 @@ fn padding_edge_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let Some(id) = nid_arg(scope, &args, 0) else { return };
     let found = with_engine(scope, &args, 1, |engine, arena, now| padding_edge_box(engine, arena, id, now)).unwrap_or(id);
     let cid = crate::dom::realm_id(scope, &args);
-    let root = crate::dom::realm(scope, cid).shadow_including_root(id);
-    rv.set(crate::dom::nodes_value(scope, cid, root, &[found]));
+    rv.set(crate::dom::nodes_value(scope, cid, &[found]));
 }

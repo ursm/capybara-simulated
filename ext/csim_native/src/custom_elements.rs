@@ -47,7 +47,7 @@ fn upgraded_elements_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
     let ids = crate::dom::realm(scope, cid).upgraded_elements_in(root);
-    rv.set(crate::dom::nodes_value(scope, cid, root, &ids));
+    rv.set(crate::dom::nodes_value(scope, cid, &ids));
 }
 
 // __dom.upgradeCandidates(rootNid, localName, isValue) -> the upgrade candidates of a definition under the root
@@ -58,7 +58,7 @@ fn upgrade_candidates(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let is = (!args.get(2).is_null_or_undefined()).then(|| crate::dom::utf16_arg(scope, args.get(2)));
     let cid = realm_id(scope, &args);
     let ids = crate::dom::realm(scope, cid).upgrade_candidates(root, &local_name, is.as_deref());
-    rv.set(crate::dom::nodes_value(scope, cid, root, &ids));
+    rv.set(crate::dom::nodes_value(scope, cid, &ids));
 }
 
 #[cfg(test)]
