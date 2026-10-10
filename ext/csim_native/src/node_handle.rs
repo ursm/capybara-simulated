@@ -345,6 +345,7 @@ pub(crate) fn install_listeners(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<
     crate::dom::register(scope, ns, "rareData", rare_data, context_id);
     crate::dom::register(scope, ns, "nodeDocument", node_document, context_id);
     crate::dom::register(scope, ns, "setNodeDocument", set_node_document, context_id);
+    crate::dom::register(scope, ns, "setSubtreeDocument", set_subtree_document, context_id);
     let store = {
         let types = &mut crate::dom::dom(scope).arena.listener_types;
         let gained = types.gained;
@@ -428,6 +429,31 @@ fn set_node_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     // SAFETY: as above.
     unsafe { (*ptr.as_ref().document.get()).reset(scope, doc) };
     rv.set_bool(true);
+}
+
+// `__dom.setSubtreeDocument(rootNid, doc)`: the node document of the root and of every node of its tree under it (not a
+// shadow tree's, nor a template's contents) becomes `doc` — a document's own subtree re-owned in one call.
+fn set_subtree_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(root) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let doc = v8::Local::<v8::Object>::try_from(args.get(1)).ok();
+    // (…the handles found first, while the arena is borrowed: setting a reference allocates nothing a collection could
+    // take one in)
+    let handles: Vec<*const NodeHandle> = {
+        let arena = &crate::dom::dom(scope).arena;
+        let mut out = Vec::new();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            let Some(n) = arena.get(id) else { continue };
+            out.extend(n.link.handle().map(|h| h as *const NodeHandle));
+            stack.extend(n.children.iter().copied());
+        }
+        out
+    };
+    for h in handles {
+        // SAFETY: the handles live while their nodes do, which the arena holds linked under `root`; the main thread
+        // writes the reference.
+        unsafe { (*(*h).document.get()).reset(scope, doc) };
+    }
 }
 
 // `__dom.noteListenerType(type)`: a node has a listener of `type` — a type none had before, counted.
