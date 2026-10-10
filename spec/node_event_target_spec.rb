@@ -55,6 +55,27 @@ RSpec.describe 'Node as an EventTarget' do
     expect(got).to eq('I 3')
   end
 
+  # (…a node reached later in the path is asked for its listeners as the dispatch reaches it: one no listener had been on,
+  # given one by a listener — of a type a node had, or of one none had — fires all the same; Chrome 155.0.8059.39)
+  it 'fires a listener added during the dispatch to a node it has yet to reach' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const a = document.body.appendChild(document.createElement('div'));
+        const b = a.appendChild(document.createElement('div')), c = b.appendChild(document.createElement('div'));
+        const log = [];
+        c.addEventListener('zz', () => { log.push('c'); a.addEventListener('zz', () => log.push('a-late')); });
+        c.dispatchEvent(new Event('zz', {bubbles: true}));
+        c.addEventListener('q1', () => {
+          b.addEventListener('q1', () => log.push('b-late-capture'), true);
+          a.addEventListener('q1', () => log.push('a-bubble'));
+        });
+        c.dispatchEvent(new Event('q1', {bubbles: true}));
+        return log.join(',');
+      })()
+    JS
+    expect(got).to eq('c,a-late,a-bubble')
+  end
+
   it 'constructs no Node of its own' do
     expect(session.evaluate_script('(() => { try { new Node(); } catch (e) { return e.message; } })()')).to eq("Failed to construct 'Node': Illegal constructor")
   end
