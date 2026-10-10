@@ -451,8 +451,9 @@ impl RealmArena {
     }
     // HTML's "ask for a reset" (§4.10.7) of a tree change: `nodes` inserted into `parent` (`inserted`), or removed from
     // it. Where one of them is an option or an optgroup, or `parent` is a select or an optgroup, the select they are (or
-    // were) in runs the selectedness setting algorithm — a just-inserted selected option, the last such in order (its
-    // own or an inserted optgroup's), winning over the incumbent, each initialised from its `selected` attribute first.
+    // were) in runs the selectedness setting algorithm — a just-inserted selected option winning over the incumbent: the
+    // last of the select's list of options an inserted node holds (or is), each of those initialised from its
+    // `selected` attribute first.
     // The select, and the options whose selectedness changed; None where no select is affected.
     pub(crate) fn ask_for_reset(&mut self, parent: NodeId, nodes: &[NodeId], inserted: bool) -> Option<(NodeId, Vec<NodeId>)> {
         let named = |a: &Self, id: NodeId, name: &str| a.get(id).is_some_and(|n| n.is_html_named(name));
@@ -476,18 +477,13 @@ impl RealmArena {
         let mut changed = Vec::new();
         let mut just = None;
         if inserted {
-            for &n in nodes {
-                let mut options = Vec::new();
-                if named(self, n, "option") {
-                    options.push(n);
-                } else if named(self, n, "optgroup") {
-                    self.descendant_options(n, &mut options);
+            for o in self.list_of_options(select) {
+                if !nodes.iter().any(|&n| crate::ranges::contains(self, n, o)) {
+                    continue;
                 }
-                for o in options {
-                    changed.extend(self.initialise_options(o));
-                    if self.get(o).is_some_and(|d| d.state & STATE_SELECTED != 0) {
-                        just = Some(o);
-                    }
+                changed.extend(self.initialise_options(o));
+                if self.get(o).is_some_and(|d| d.state & STATE_SELECTED != 0) {
+                    just = Some(o);
                 }
             }
         }
@@ -498,15 +494,6 @@ impl RealmArena {
             }
         }
         Some((select, changed))
-    }
-    // The HTML options under `id`, in tree order.
-    fn descendant_options(&self, id: NodeId, out: &mut Vec<NodeId>) {
-        for &c in self.get(id).map_or(&[][..], |n| &n.children[..]) {
-            if self.get(c).is_some_and(|n| n.is_html_named("option")) {
-                out.push(c);
-            }
-            self.descendant_options(c, out);
-        }
     }
     // Options' new states written; the options whose selectedness they changed.
     pub(crate) fn apply_option_states(&mut self, states: Vec<(NodeId, u32)>) -> Vec<NodeId> {
