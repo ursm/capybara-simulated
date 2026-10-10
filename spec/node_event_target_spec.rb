@@ -76,6 +76,28 @@ RSpec.describe 'Node as an EventTarget' do
     expect(got).to eq('c,a-late,a-bubble')
   end
 
+  # (…and which realm's script added a listener is no matter: a node adopted from a frame keeps the frame's, and a frame
+  # node given one by this realm's addEventListener fires it on the frame's dispatch)
+  it "fires a listener another realm's script added" do
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const f = document.body.appendChild(document.createElement('iframe'));
+      f.onload = () => {
+        const log = [], fd = f.contentDocument;
+        const el = fd.createElement('div');
+        el.addEventListener('xa', () => log.push('adopted'));
+        const child = el.appendChild(document.createElement('span'));
+        document.body.appendChild(el);
+        child.dispatchEvent(new Event('xa', {bubbles: true}));
+        EventTarget.prototype.addEventListener.call(fd.body, 'xb', () => log.push('frame-body'));
+        fd.body.appendChild(fd.createElement('i')).dispatchEvent(new f.contentWindow.Event('xb', {bubbles: true}));
+        done(log.join(','));
+      };
+      f.srcdoc = '<!doctype html><body>';
+    JS
+    expect(got).to eq('adopted,frame-body')
+  end
+
   it 'constructs no Node of its own' do
     expect(session.evaluate_script('(() => { try { new Node(); } catch (e) { return e.message; } })()')).to eq("Failed to construct 'Node': Illegal constructor")
   end

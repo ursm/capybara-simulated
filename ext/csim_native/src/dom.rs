@@ -698,6 +698,9 @@ pub(crate) struct RealmArena {
     pub(crate) observers: crate::mutation_observers::Observers,
     // Each top-level document's autofocus candidates (autofocus.rs).
     pub(crate) autofocus: crate::autofocus::Autofocus,
+    // The event types a node has ever had a listener of, and how often a node has gained a store or a type one
+    // (node_handle.rs).
+    pub(crate) listener_types: crate::node_handle::ListenerTypes,
     // Each open dialog's "previously focused element": what its document had focused as it opened, which closing it
     // gives focus back to — whichever realm's script opens and closes it (focus.rs).
     pub(crate) previously_focused: std::collections::HashMap<NodeId, NodeId>,
@@ -1984,8 +1987,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::intersection::install(scope, ns, context_id);
     crate::resize_observation::install(scope, ns, context_id);
     crate::editing::install(scope, ns, context_id);
-    register(scope, ns, "listenerStore", crate::node_handle::listener_store, context_id);
-    register(scope, ns, "listenerStores", crate::node_handle::listener_stores, context_id);
+    crate::node_handle::install_listeners(scope, ns, context_id);
     crate::resolved::install(scope, ns, context_id);
     crate::mime::install(scope, ns, context_id);
     crate::font_faces::install(scope, ns, context_id);

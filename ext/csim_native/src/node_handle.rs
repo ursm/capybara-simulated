@@ -304,13 +304,54 @@ pub(crate) fn base_function<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::
     template.get_function(scope)
 }
 
+// What a dispatch asks before it asks for its path's listener stores: the event types a node has ever had a listener of,
+// and a count of the stores and types nodes have gained (`listenersGen`, a view on one buffer each realm's bindings read
+// without a call) — the isolate's, as a node's store is: a node adopted from a frame keeps its listeners, and a
+// listener one realm adds is one any other's dispatch fires.
+#[derive(Default)]
+pub(crate) struct ListenerTypes {
+    types: std::collections::HashSet<String>,
+    gained: u32,
+    view: Option<v8::SharedRef<v8::BackingStore>>,
+}
+
+impl ListenerTypes {
+    fn gained(&mut self) {
+        self.gained = self.gained.wrapping_add(1);
+        if let Some(view) = &self.view {
+            for (cell, byte) in view.iter().zip(self.gained.to_ne_bytes()) {
+                cell.set(byte);
+            }
+        }
+    }
+}
+
+pub(crate) fn install_listeners(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "listenerStore", listener_store, context_id);
+    crate::dom::register(scope, ns, "listenerStores", listener_stores, context_id);
+    crate::dom::register(scope, ns, "noteListenerType", note_listener_type, context_id);
+    crate::dom::register(scope, ns, "listenerTypeKnown", listener_type_known, context_id);
+    let store = {
+        let types = &mut crate::dom::dom(scope).arena.listener_types;
+        let gained = types.gained;
+        types.view.get_or_insert_with(|| v8::ArrayBuffer::new_backing_store_from_vec(gained.to_ne_bytes().to_vec()).make_shared()).clone()
+    };
+    let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
+    if let (Some(view), Some(key)) = (v8::Uint32Array::new(scope, buffer, 0, 1), v8::String::new(scope, "listenersGen")) {
+        ns.set(scope, key.into(), view.into());
+    }
+}
+
 // `__dom.listenerStore(node[, store])`: the node's listener store, or undefined for none; with `store`, it becomes that
-// (an object) or none (anything else).
-pub(crate) fn listener_store(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// (an object) or none (anything else) — one gained, counted.
+fn listener_store(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(ptr) = handle_of(scope, args.get(0)) else { return };
     let slot = unsafe { ptr.as_ref() }.listeners.get();
     if args.length() > 1 {
         let store = v8::Local::<v8::Object>::try_from(args.get(1)).ok();
+        if store.is_some() {
+            crate::dom::dom(scope).arena.listener_types.gained();
+        }
         // SAFETY: the main thread writes the reference; the handle lives while the object, an argument, does.
         unsafe { (*slot).reset(scope, store) };
         return;
@@ -320,9 +361,10 @@ pub(crate) fn listener_store(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
         rv.set(store.into());
     }
 }
+
 // `__dom.listenerStores(nodes)` -> each node's listener store at its index (undefined for none): a dispatch's whole
 // path in one call.
-pub(crate) fn listener_stores(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+fn listener_stores(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(nodes) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
     let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
     let stores: Vec<v8::Local<v8::Value>> = (0..nodes.length())
@@ -334,6 +376,21 @@ pub(crate) fn listener_stores(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
         .map(|store| store.unwrap_or(undefined))
         .collect();
     rv.set(v8::Array::new_with_elements(scope, &stores).into());
+}
+
+// `__dom.noteListenerType(type)`: a node has a listener of `type` — a type none had before, counted.
+fn note_listener_type(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let ty = args.get(0).to_rust_string_lossy(scope);
+    let types = &mut crate::dom::dom(scope).arena.listener_types;
+    if types.types.insert(ty) {
+        types.gained();
+    }
+}
+
+// `__dom.listenerTypeKnown(type)` -> whether a node has ever had a listener of `type`.
+fn listener_type_known(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let ty = args.get(0).to_rust_string_lossy(scope);
+    rv.set_bool(crate::dom::dom(scope).arena.listener_types.types.contains(&ty));
 }
 
 // `__dom.holdObjects(nodes)` / `__dom.releaseObjects(nodes)`: the nodes (their objects, as a script holds them) are now

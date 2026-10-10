@@ -273,7 +273,7 @@
   }
   function chainHasNonPassive(target, type) {
     for (var n = target; n; ) {
-      if (n._listeners && listHasNonPassive(n._listeners[type])) return true;
+      if (listHasNonPassive(W.__csimListenersFor(n, type))) return true;
       if (n.nodeType === 9) break;                 // Document — element walk done
       // Climb via _parent; only fall back to ownerDocument for a CONNECTED node
       // (a detached node's event never propagates to the live document, so we
@@ -296,7 +296,7 @@
     var stack = [root], guard = 0;
     while (stack.length && guard++ < 200000) {
       var el = stack.pop();
-      if (el._listeners && el._listeners[type] && el._listeners[type].length) return el;
+      if (W.__csimListenersFor(el, type).length) return el;
       var kids = el.children;
       if (kids) for (var i = kids.length - 1; i >= 0; i--) stack.push(kids[i]);
     }
@@ -335,7 +335,7 @@
     var el = elementWithListenerFor(type);
     if (el) return el;
     var d = D();
-    if (d && d._listeners && d._listeners[type] && d._listeners[type].length) return d;  // listener on document
+    if (d && W.__csimListenersFor(d, type).length) return d;  // listener on document
     return null;
   }
   function fireWheelOn(target, dx, dy) {
