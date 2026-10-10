@@ -1679,6 +1679,9 @@ pub(crate) struct Dom {
     // Whether the session's pointer is a touchscreen (`setTouchInput`): what every realm's device answers `pointer` /
     // `hover` by (style.rs `Screen`).
     pub(crate) touch_input: bool,
+    // Each realm's arena object — its `__dom` and the realm's answers about its own nodes — which a reader in another
+    // realm holding one of them asks through (`setArena` / `arenaOf`; native-query-shadow.js `liveArenaOf`).
+    pub(crate) arenas: std::collections::HashMap<i32, v8::Global<v8::Object>>,
 }
 
 // Borrow the isolate's Dom, lazily creating the slot on first touch. rusty_v8
@@ -1847,7 +1850,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     ensure_templates(scope);
     // A new context for a realm id the arena has seen (main's, at every warm reset): nothing of the old context is
     // reachable from it any more, so its nodes go now, as they would one by one as V8 collected them.
-    dom(scope).arena.realm_begins(context_id);
+    let d = dom(scope);
+    d.arena.realm_begins(context_id);
+    d.arenas.remove(&context_id);
     // What the style engine parses — a property, a selector — is what a page's CSSOM may ask about before any style is
     // computed (an inline script runs before the first flush), so the switches that decide it are set first.
     crate::style::enable_properties();
@@ -1901,6 +1906,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // Element state no attribute carries, for the state pseudo-classes (`:checked`, `:focus`, `:hover`, …).
     register(scope, ns, "setState", set_state, context_id);
     register_fast(scope, ns, "state", state, STATE_FAST, context_id);
+    register_fast(scope, ns, "realmOf", realm_of, REALM_OF_FAST, context_id);
+    register(scope, ns, "setArena", set_arena, context_id);
+    register(scope, ns, "arenaOf", arena_of, context_id);
     register(scope, ns, "setNaturalSize", set_natural_size, context_id);
     register(scope, ns, "linkPseudoBox", link_pseudo_box, context_id);
     register(scope, ns, "directionality", directionality, context_id);
@@ -2093,6 +2101,37 @@ pub(crate) fn register_fast(
 pub(crate) fn fast_dom<'a>(options: *mut v8::fast_api::FastApiCallbackOptions<'a>) -> Option<&'a Dom> {
     // SAFETY: V8 hands a fast call its options, whose isolate is the one calling, on its thread.
     unsafe { (*options).isolate_unchecked() }.get_slot::<Dom>()
+}
+
+// __dom.realmOf(nid) -> the realm whose tree the node is in, whose state answers for it (-1 for none).
+fn realm_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = nid_arg(scope, &args, 0).and_then(|id| dom(scope).arena.get(id).map(|n| n.realm));
+    rv.set_int32(realm.unwrap_or(-1));
+}
+fn realm_of_fast(_receiver: v8::Local<v8::Value>, nid: f64, options: *mut v8::fast_api::FastApiCallbackOptions) -> i32 {
+    let id = if nid >= 0.0 { NodeId::from_i64(nid as i64) } else { None };
+    fast_dom(options).and_then(|d| d.arena.get(id?)).map_or(-1, |n| n.realm)
+}
+const REALM_OF_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new(
+    realm_of_fast as _,
+    &v8::fast_api::CFunctionInfo::new(
+        v8::fast_api::Type::Int32.as_info(),
+        &[v8::fast_api::Type::V8Value.as_info(), v8::fast_api::Type::Float64.as_info(), v8::fast_api::Type::CallbackOptions.as_info()],
+        v8::fast_api::Int64Representation::Number,
+    ),
+)];
+// __dom.setArena(arena) / __dom.arenaOf(realm) -> the calling realm's arena object, kept until the realm is dropped or
+// sets another; a realm's, or undefined for one that set none.
+fn set_arena(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(arena) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
+    let cid = realm_id(scope, &args);
+    let global = v8::Global::new(scope, arena);
+    dom(scope).arenas.insert(cid, global);
+}
+fn arena_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(cid) = args.get(0).int32_value(scope) else { return };
+    let Some(arena) = dom(scope).arenas.get(&cid).cloned() else { return };
+    rv.set(v8::Local::new(scope, arena).into());
 }
 
 // __dom.importNode(localName, ns, parentNid, attrsFlat, prefix, node) -> nid. Adds an ELEMENT to the arena — the eager
@@ -4044,6 +4083,7 @@ fn drop_realm(
         d.arena.drop_realm(id);
         d.styles.remove(&id);          // (…and its style engine)
         d.walk_reuse.remove(&id);      // (…and its Rust walk's last pass)
+        d.arenas.remove(&id);          // (…and its arena object, which holds its global's `__dom`)
         crate::text_codec::drop_realm(scope, id);   // (…and the stream decoders it left open)
     }
 }
