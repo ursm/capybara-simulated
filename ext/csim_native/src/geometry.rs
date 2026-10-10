@@ -491,7 +491,7 @@ fn offset_parent(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
         }
         // (…one in a shadow tree `id` is not in is no offset parent of its: slotted content is not told of a positioned
         // box inside the shadow tree it is slotted through, open or closed — `offsetParent-across-shadow-boundaries`)
-        let hidden = !shadow_including_ancestor(arena, p, id);
+        let hidden = !arena.shadow_including_ancestor(p, id);
         if hidden && box_style(arena, p).is_some_and(|s| s.get_box().clone_position() == Position::Fixed) && !contained(p) {
             return None;
         }
@@ -504,17 +504,6 @@ fn offset_parent(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
         at = flat_parent(arena, p);
     }
     None
-}
-// Is `ancestor` one of `node`'s shadow-including inclusive ancestors?
-fn shadow_including_ancestor(arena: &RealmArena, ancestor: NodeId, node: NodeId) -> bool {
-    let mut at = Some(node);
-    while let Some(n) = at {
-        if n == ancestor {
-            return true;
-        }
-        at = arena.get(n).and_then(|d| d.parent.or(d.host));
-    }
-    false
 }
 // Is `id` its document's BODY: the root `<html>`'s `<body>` child?
 fn is_body(arena: &RealmArena, id: NodeId) -> bool {

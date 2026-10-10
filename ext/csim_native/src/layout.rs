@@ -2219,7 +2219,11 @@ fn line_layout(
             line_frags.clear();
             line_empties.clear();
             line_gaps.clear();
-            hang_gap = None;
+            // (…where the macro closes the last line, nothing reads it after: the reset is for the line to come)
+            #[allow(unused_assignments)]
+            {
+                hang_gap = None;
+            }
             tail_gaps.clear();
             total += line_h;
             line_no += 1;

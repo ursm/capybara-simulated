@@ -698,6 +698,9 @@ pub(crate) struct RealmArena {
     pub(crate) observers: crate::mutation_observers::Observers,
     // Each top-level document's autofocus candidates (autofocus.rs).
     pub(crate) autofocus: crate::autofocus::Autofocus,
+    // Each open dialog's "previously focused element": what its document had focused as it opened, which closing it
+    // gives focus back to — whichever realm's script opens and closes it (focus.rs).
+    pub(crate) previously_focused: std::collections::HashMap<NodeId, NodeId>,
     // Moves with every write to the arena (a node made or freed, any `get_mut`): what a memo of it keys on.
     pub(crate) mutations: u64,
     // The lock the style engines' rules and every element's parsed declarations are read under — ONE for the isolate's
@@ -745,8 +748,6 @@ pub(crate) struct RealmState {
     // the element focus last moved to — kept as focus leaves it for the viewport (Chrome: Tab after `blur()` goes on
     // from the blurred element) — or the node a press that focused nothing landed on (`setFocusStart`).
     pub(crate) focus_start: Option<NodeId>,
-    // Each open dialog's "previously focused element": what was focused as it opened, which closing it gives focus back to.
-    pub(crate) previously_focused: std::collections::HashMap<NodeId, NodeId>,
     // The modal dialogs, in the order they were shown — the top layer's: the last blocks the document (`is_inert`).
     pub(crate) modals: Vec<NodeId>,
     // Whether the focus shows NO ring (not `:focus-visible`): only after a pointer focus of a non-text control.
@@ -849,6 +850,7 @@ impl RealmArena {
         self.state = RealmState { faces, sheets, state_epoch: state_epoch + 1, ..RealmState::default() };
         self.observers.drop_realm(cid);
         self.free_realm_nodes(cid);
+        self.forget_dead_focus_records();
         // (…and what the isolate latched for any realm's page, where this is the only realm left)
         if self.parked.is_empty() {
             self.has_shadow_hosts = false;
@@ -868,7 +870,7 @@ impl RealmArena {
         }
         self.observers.drop_realm(cid);
         self.free_realm_nodes(cid);
-        self.autofocus_forget_dead();
+        self.forget_dead_focus_records();
     }
     // How many nodes the realm an op works in has made and not freed.
     pub(crate) fn realm_node_count(&self) -> usize {
@@ -1136,6 +1138,9 @@ impl RealmArena {
     pub(crate) fn create(&mut self, data: NodeData, parent: Option<NodeId>) -> NodeId {
         self.direction_sources |= notes_direction(&data);
         self.inert_sources |= notes_inert(&data);
+        if data.kind == NodeKind::Element && data.plain_attr("autofocus").is_some() {
+            self.autofocus.note_source();
+        }
         let parent = parent.filter(|&p| self.get(p).is_some());
         if parent.is_some() {
             self.state_epoch += 1;
@@ -1282,12 +1287,12 @@ impl RealmArena {
         }
         false
     }
-    // The root of `id`'s tree, shadow-including: a shadow root's host is its parent here (not a template's contents':
-    // they are a tree of their own). (`root_of`, element_state.rs, is the plain one.)
     // Realm `cid`'s state, whichever realm the arena is in.
     pub(crate) fn realm_state(&self, cid: i32) -> Option<&RealmState> {
         if cid == self.cur { Some(&self.state) } else { self.parked.get(&cid) }
     }
+    // The root of `id`'s tree, shadow-including: a shadow root's host is its parent here (not a template's contents':
+    // they are a tree of their own). (`root_of`, element_state.rs, is the plain one.)
     pub(crate) fn shadow_including_root(&self, mut id: NodeId) -> NodeId {
         loop {
             id = self.root_of(id);
@@ -1736,6 +1741,9 @@ fn before_attribute_write(arena: &mut RealmArena, engine: Option<&mut crate::sty
     // (…and a `type` written may make an input a telephone one: latched on the write, as the value lands after this)
     arena.direction_sources |= names.contains(&"dir") || (names.contains(&"type") && arena.get(id).is_some_and(|n| n.is_html_named("input")));
     arena.inert_sources |= names.contains(&"inert");
+    if names.contains(&"autofocus") {
+        arena.autofocus.note_source();
+    }
     if names.iter().any(|n| attribute_reads_state(n)) {
         arena.state_epoch += 1;
     }
@@ -2784,9 +2792,12 @@ fn sync_attrs(
         node.attributes = attrs;
         node.attr_changed(None);
         // (…with or without an engine to hear of it: the parser's `dir` is what `is_rtl` must not miss)
-        let (direction, inert) = (notes_direction(node), notes_inert(node));
+        let (direction, inert, autofocus) = (notes_direction(node), notes_inert(node), node.plain_attr("autofocus").is_some());
         arena.direction_sources |= direction;
         arena.inert_sources |= inert;
+        if autofocus {
+            arena.autofocus.note_source();
+        }
     }
 }
 

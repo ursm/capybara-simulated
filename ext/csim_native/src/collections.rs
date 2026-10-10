@@ -212,10 +212,9 @@ impl RealmArena {
             }
             return walked(found);
         }
-        let mut visited = 0;
         if !memo.maps.contains_key(&root) {
             let mut ids: HashMap<Vec<u16>, Vec<NodeId>> = HashMap::new();
-            (visited, _) = self.each_element_from(root, |n, node| {
+            let (visited, _) = self.each_element_from(root, |n, node| {
                 if let Some(units) = node.plain_attr_units("id") {
                     ids.entry(units).or_default().push(n);
                 }

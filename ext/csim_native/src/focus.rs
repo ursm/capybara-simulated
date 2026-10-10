@@ -371,7 +371,7 @@ fn tree_order(arena: &RealmArena, a: NodeId, b: NodeId) -> Ordering {
 // shape, a scrollable region, a navigable's document — are not asked here.) None for any other element.
 pub(crate) fn focusable_area(engine: &mut StyleEngine, arena: &RealmArena, host: NodeId, now: f64) -> Option<NodeId> {
     delegating_root(arena, host)?;
-    match arena.focus.filter(|&f| shadow_including_inclusive_ancestor(arena, host, f)) {
+    match arena.focus.filter(|&f| arena.shadow_including_ancestor(host, f)) {
         Some(focused) => Some(focused),
         None => focus_delegate(engine, arena, host, now),
     }
@@ -417,17 +417,6 @@ fn descendants(arena: &RealmArena, root: NodeId) -> Vec<NodeId> {
     }
     out
 }
-// Is `ancestor` one of `node`'s shadow-including inclusive ancestors?
-fn shadow_including_inclusive_ancestor(arena: &RealmArena, ancestor: NodeId, node: NodeId) -> bool {
-    let mut at = Some(node);
-    while let Some(n) = at {
-        if n == ancestor {
-            return true;
-        }
-        at = arena.get(n).and_then(|d| d.parent.or(d.host));
-    }
-    false
-}
 
 // ── the ops ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -447,12 +436,25 @@ pub(crate) fn dialog_focus_control(engine: &mut StyleEngine, arena: &RealmArena,
     }
     focus_delegate(engine, arena, dialog, now).unwrap_or(dialog)
 }
-// …and, closing it, its previously focused element — taken — where focus goes back to it: the dialog was modal, or holds
-// the focus (a shadow-including inclusive descendant of it is focused).
+// The element the document `dialog` is in has focused — its realm's, whichever realm asks.
+fn document_focus(arena: &RealmArena, dialog: NodeId) -> Option<NodeId> {
+    let doc = arena.get(arena.shadow_including_root(dialog)).filter(|d| d.kind == NodeKind::Document)?;
+    arena.realm_state(doc.realm)?.focus
+}
+// …its "previously focused element", kept as it opens: what its document has focused…
+pub(crate) fn dialog_opening(arena: &mut RealmArena, dialog: NodeId) {
+    match document_focus(arena, dialog) {
+        Some(focused) => arena.previously_focused.insert(dialog, focused),
+        None => arena.previously_focused.remove(&dialog),
+    };
+}
+// …and, closing it, that element — taken — where focus goes back to it: still in a document, and the dialog was modal
+// or holds the focus (a shadow-including inclusive descendant of it is focused).
 pub(crate) fn dialog_focus_restore(arena: &mut RealmArena, dialog: NodeId, was_modal: bool) -> Option<NodeId> {
     let previous = arena.previously_focused.remove(&dialog)?;
-    let holds = arena.focus.is_some_and(|f| shadow_including_inclusive_ancestor(arena, dialog, f));
-    (was_modal || holds).then_some(previous)
+    let in_document = arena.get(arena.shadow_including_root(previous)).is_some_and(|r| r.kind == NodeKind::Document);
+    let holds = document_focus(arena, dialog).is_some_and(|f| arena.shadow_including_ancestor(dialog, f));
+    (in_document && (was_modal || holds)).then_some(previous)
 }
 
 // __dom.dialogFocusingSteps(dialogNid, now) -> [the control to focus] (`dialog_focus_control`), as `nodes_value`
@@ -460,26 +462,27 @@ pub(crate) fn dialog_focus_restore(arena: &mut RealmArena, dialog: NodeId, was_m
 fn dialog_focusing_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(dialog) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    match arena.focus {
-        Some(focused) => arena.previously_focused.insert(dialog, focused),
-        None => arena.previously_focused.remove(&dialog),
-    };
+    dialog_opening(crate::dom::realm(scope, cid), dialog);
     let control = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| dialog_focus_control(engine, arena, dialog, now)).unwrap_or(dialog);
     let root = crate::dom::realm(scope, cid).shadow_including_root(dialog);
     rv.set(crate::dom::nodes_value(scope, cid, root, &[control]));
 }
 
-// __dom.dialogFocusRestore(dialogNid, wasModal) -> [the element focus goes back to] (`dialog_focus_restore`), as
-// `nodes_value` answers, or undefined for none.
+// __dom.dialogFocusRestore(dialogNid, wasModal, docNid, …) -> [k, [the element focus goes back to]]
+// (`dialog_focus_restore`), as `nodes_value` answers from the k-th of the documents given — or undefined for none, or
+// for one in none of them.
 fn dialog_focus_restore_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(dialog) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let was_modal = args.get(1).is_true();
+    let docs: Vec<Option<NodeId>> = (2..args.length()).map(|i| crate::dom::nid_arg(scope, &args, i)).collect();
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    let Some(previous) = dialog_focus_restore(arena, dialog, was_modal).filter(|&p| arena.get(p).is_some()) else { return };
+    let Some(previous) = dialog_focus_restore(arena, dialog, was_modal) else { return };
     let root = arena.shadow_including_root(previous);
-    rv.set(crate::dom::nodes_value(scope, cid, root, &[previous]));
+    let Some(k) = docs.iter().position(|&d| d == Some(root)) else { return };
+    let answer = crate::dom::nodes_value(scope, cid, root, &[previous]);
+    let index = v8::Integer::new(scope, k as i32).into();
+    rv.set(v8::Array::new_with_elements(scope, &[index, answer]).into());
 }
 
 // __dom.focusableArea(hostNid, now) -> [what focusing the delegating host focuses] or [] (`focusable_area`), as

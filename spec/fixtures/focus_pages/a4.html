@@ -1,0 +1,6 @@
+<!doctype html><meta charset=utf-8><body><script>const ae=(d)=>{const e=d.activeElement;return e?(e.id||e.tagName):"null"};const fin=(s)=>{const o=document.createElement("pre");o.id="out";o.textContent=s+" done";document.body.append(o)};
+const f=document.createElement('iframe');document.body.append(f);
+const i=f.contentDocument.createElement('input');i.id='fi';i.autofocus=true;f.contentDocument.body.append(i);
+const t=document.createElement('input');t.id='top';t.autofocus=true;document.body.append(t);
+f.remove();
+function F(){fin(ae(document))} setTimeout(()=>requestAnimationFrame(()=>requestAnimationFrame(()=>F())),300);</script>

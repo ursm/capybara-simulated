@@ -111,6 +111,11 @@ pub(crate) fn valid_doctype_name(name: &[u16]) -> bool {
     code_points(name).all(|c| !forbidden(c, u32::MAX))
 }
 
+// Whether `units` are the ASCII string `s`, unit for unit.
+fn ascii_eq(units: &[u16], s: &str) -> bool {
+    units.len() == s.len() && units.iter().zip(s.bytes()).all(|(&u, b)| u == u16::from(b))
+}
+
 // Why "validate and extract" refused a qualified name.
 #[derive(Debug, PartialEq)]
 pub(crate) enum NameError {
@@ -135,13 +140,12 @@ pub(crate) fn validate_and_extract(namespace: Option<Vec<u16>>, qualified: &[u16
     if !(if attribute { valid_attribute_local_name(local) } else { valid_element_local_name(local) }) {
         return Err(NameError::LocalName);
     }
-    let is = |ns: &Option<Vec<u16>>, uri: &str| ns.as_deref() == Some(&units(uri)[..]);
-    let xmlns = units("xmlns");
-    let xmlns_named = qualified == &xmlns[..] || prefix == Some(&xmlns[..]);
+    let is = |ns: &Option<Vec<u16>>, uri: &str| ns.as_deref().is_some_and(|n| ascii_eq(n, uri));
+    let xmlns_named = ascii_eq(qualified, "xmlns") || prefix.is_some_and(|p| ascii_eq(p, "xmlns"));
     if prefix.is_some() && namespace.is_none() {
         return Err(NameError::NoNamespace);
     }
-    if prefix == Some(&units("xml")[..]) && !is(&namespace, XML_NS) {
+    if prefix.is_some_and(|p| ascii_eq(p, "xml")) && !is(&namespace, XML_NS) {
         return Err(NameError::Xml);
     }
     if xmlns_named && !is(&namespace, XMLNS_NS) {

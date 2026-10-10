@@ -1,0 +1,9 @@
+<!doctype html><meta charset=utf-8><body><input id=p><iframe id=f></iframe><script>const ae=(d)=>{const e=d.activeElement;return e?(e.id||e.tagName):"null"};const fin=(s)=>{const o=document.createElement("pre");o.id="out";o.textContent=s+" done";document.body.append(o)};
+const r=[];try{
+const fd=f.contentDocument;const q=fd.createElement('input');q.id='q';fd.body.append(q);
+const D=document.createElement('dialog');D.innerHTML='<button id=db>x</button>';fd.body.append(D);
+p.focus();q.focus();r.push(ae(document)+':'+ae(fd));
+D.showModal();r.push(ae(document)+':'+ae(fd));D.close();r.push(ae(document)+':'+ae(fd));
+D.show();r.push(ae(document)+':'+ae(fd));D.close();r.push(ae(document)+':'+ae(fd));
+}catch(e){r.push('ERR '+e)}
+setTimeout(()=>fin(r.join(' ')),300);</script>

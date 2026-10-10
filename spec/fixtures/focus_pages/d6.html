@@ -1,0 +1,9 @@
+<html><head><meta charset=utf-8></head><body><input id=victim><input id=p><dialog id=dl><button id=db>x</button></dialog><script>
+const ae=(d)=>{const e=d.activeElement;return e?(e.id||e.tagName):"null"};
+const fin=(s)=>{const o=document.createElement("pre");o.id="out";o.textContent=s+" done";document.body.append(o)};
+const r=[];const P=p;
+P.focus();dl.showModal();r.push(ae(document));
+const R=document.createElement('div');const a=document.createElement('span');R.append(a);const b=document.createElement('span');const c=document.createElement('span');a.append(b,c);c.append(P);
+r.push(ae(document));dl.close();r.push(ae(document));
+setTimeout(()=>fin(r.join(' ')),300);
+</script>
