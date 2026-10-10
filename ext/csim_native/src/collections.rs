@@ -143,13 +143,13 @@ fn window_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set(crate::dom::nodes_value(scope, cid, doc, &found));
 }
 
-// The ids of each tree asked for them since the arena last changed. A walk for an id stops at its element, and a page
-// mostly asks for one between writes — `getElementById(x).setAttribute(…)`, every write a change of the arena — so a map,
-// a walk of the whole tree, is made only for a tree asked more often than that between two changes: the label of every
-// control of a form, a loop of reads.
+// The ids of each tree asked for them since the last change that can move one (`id_epoch`: a node linked, unlinked or
+// freed, an `id` written). A walk for an id stops at its element, and a page building a tree asks for one between
+// insertions — so a map, a walk of the whole tree, is made only for a tree asked more often than that between two such
+// changes: the label of every control of a form, a loop of reads, `getElementById(x).setAttribute(…)` over and over.
 #[derive(Default)]
 pub(crate) struct IdIndex {
-    mutations: u64,
+    epoch: u64,
     asks: u32,
     maps: HashMap<NodeId, HashMap<Vec<u16>, Vec<NodeId>>>,
 }
@@ -183,10 +183,10 @@ impl RealmArena {
     // from a walk.
     fn with_ids<R>(&self, root: NodeId, indexed: impl FnOnce(&HashMap<Vec<u16>, Vec<NodeId>>) -> R, walk: impl FnOnce() -> R) -> R {
         let mut memo = self.id_index.borrow_mut();
-        if memo.mutations != self.mutations {
+        if memo.epoch != self.id_epoch {
             memo.maps.clear();
             memo.asks = 0;
-            memo.mutations = self.mutations;
+            memo.epoch = self.id_epoch;
         }
         memo.asks += 1;
         if memo.asks <= WALKS_BEFORE_INDEX && !memo.maps.contains_key(&root) {

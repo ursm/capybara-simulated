@@ -41,15 +41,29 @@ pub(crate) struct Observers {
 }
 
 impl Observers {
-    // A freed node's list goes with it.
+    // A freed node's list goes with it, and its place in the node list or transient node set of each observer it named.
     pub(crate) fn forget(&mut self, id: NodeId) {
-        if !self.lists.is_empty() {
-            self.lists.remove(&id);
+        if self.lists.is_empty() {
+            return;
+        }
+        if let Some(list) = self.lists.remove(&id) {
+            self.unlist(id, &list);
         }
     }
     // …and those of nodes freed wholesale.
     pub(crate) fn retain(&mut self, live: impl Fn(&NodeId) -> bool) {
-        self.lists.retain(|id, _| live(id));
+        let freed: Vec<NodeId> = self.lists.keys().copied().filter(|id| !live(id)).collect();
+        for id in freed {
+            self.forget(id);
+        }
+    }
+    fn unlist(&mut self, id: NodeId, list: &[Registered]) {
+        for r in list {
+            let lists = if r.source.is_none() { &mut self.nodes } else { &mut self.transient };
+            if let Some(nodes) = lists.get_mut(&r.observer) {
+                nodes.retain(|&n| n != id);
+            }
+        }
     }
 }
 

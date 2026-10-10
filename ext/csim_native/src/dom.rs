@@ -703,8 +703,12 @@ pub(crate) struct RealmArena {
     // into another realm's tree.
     pub(crate) style_lock: crate::style::StyleLock,
     // Per tree root, the elements of each id, made once a tree is asked for ids often between changes
-    // (collections.rs `IdIndex`).
+    // (collections.rs `IdIndex`)…
     pub(crate) id_index: std::cell::RefCell<crate::collections::IdIndex>,
+    // …and what those changes are: moves with every one that can change which element of a tree has an id — a node
+    // linked or unlinked, freed, an `id` attribute written — and with nothing else (`mutations` moves with every write,
+    // a layout's and a `data-` attribute's alike, where `getElementById(x).setAttribute(…)` is how a page asks).
+    pub(crate) id_epoch: u64,
     // Per tree root, the facts element_state.rs asks of every control in turn, as of `mutations` (`form_facts`).
     pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
     // Each element's resolved directionality asked so far, true for rtl, as of `mutations` (`is_rtl`)…
@@ -852,6 +856,7 @@ impl RealmArena {
     // Free every node realm `cid` made.
     fn free_realm_nodes(&mut self, cid: i32) {
         self.mutations += 1;
+        self.id_epoch += 1;
         for idx in self.realm_nodes.remove(&cid).unwrap_or_default() {
             let slot = &mut self.slots[idx as usize];
             slot.data = None;
@@ -994,6 +999,7 @@ impl RealmArena {
             return;
         }
         self.mutations += 1;
+        self.id_epoch += 1;
         self.unlist(id.idx);
         let slot = &mut self.slots[id.idx as usize];
         let (assigned_slot, pseudo_boxes) = slot.data.as_ref().map_or((None, [None; 2]), |n| (n.assigned_slot, n.pseudo_boxes));
@@ -1049,6 +1055,7 @@ impl RealmArena {
     // nav is O(1). The one place children are linked (create / import), so a position can never drift
     // from the list.
     fn link_child(&mut self, parent: NodeId, child: NodeId) {
+        self.id_epoch += 1;
         let (pos, first) = match self.get(parent) {
             Some(p) => (p.children.len(), p.first_position),
             None => return,
@@ -1333,6 +1340,7 @@ impl RealmArena {
     // first or the last child is O(1) and any other costs only the shift of the ones after it.
     pub(crate) fn detach(&mut self, child: NodeId) {
         self.state_epoch += 1;
+        self.id_epoch += 1;
         let Some(old) = self.get(child).and_then(|n| n.parent) else { return };
         let at = self.child_index(child);
         let (mut from, mut one) = (at, true);
@@ -1392,6 +1400,7 @@ impl RealmArena {
             return;
         }
         self.state_epoch += 1;
+        self.id_epoch += 1;
         let mut p = Some(parent);
         while let Some(a) = p {
             if a == child {
@@ -1687,6 +1696,9 @@ fn before_attribute_write(arena: &mut RealmArena, engine: Option<&mut crate::sty
     arena.direction_sources |= names.contains(&"dir") || (names.contains(&"type") && arena.get(id).is_some_and(|n| n.is_html_named("input")));
     if names.iter().any(|n| attribute_reads_state(n)) {
         arena.state_epoch += 1;
+    }
+    if names.iter().any(|n| store_key_names(n, "id")) {
+        arena.id_epoch += 1;
     }
     if let Some(engine) = engine {
         engine.attributes_will_change(arena, id, names);
@@ -2602,6 +2614,7 @@ fn sync_children(
         return;
     }
     st.state_epoch += 1;
+    st.id_epoch += 1;
     // Sanitize the delta: keep only LIVE children (a stale id would plant a dangling edge), drop the
     // parent itself (a self-cycle) and duplicates (a node can't be its own sibling), preserving order.
     // The matcher assumes an ACYCLIC tree; these cheap checks kill the footguns a malformed delta could
@@ -2687,6 +2700,8 @@ fn sync_attrs(
     let (attributes, attr_u16) = read_attrs_flat(scope, args.get(1));
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
+    // (…which can write or drop an id, whichever the names)
+    arena.id_epoch += 1;
     // Every name the element had or will have — a wholesale write can add, drop or change any of them — listed only
     // for an engine to hear of: this is the parser's per-element write, which allocates nothing more without one.
     match engine {

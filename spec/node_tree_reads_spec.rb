@@ -54,9 +54,19 @@ RSpec.describe 'Node tree reads' do
         document.body.append(e);
         const after = [1, 2, 3].map(() => document.getElementById('p') === e);
         e.id = 'q';
-        return [seen, before, after, document.getElementById('p'), document.getElementById('q') === e];
+        const renamed = [document.getElementById('p'), document.getElementById('q') === e];
+        // (…a map made by a run of reads, through writes that move no id, then ones that do)
+        for (let i = 0; i < 3; i++) document.getElementById('q').setAttribute('data-i', i);
+        const earlier = document.createElement('i');
+        earlier.id = 'q';
+        document.body.prepend(earlier);
+        const first = document.getElementById('q') === earlier;
+        earlier.removeAttribute('id');
+        const back = document.getElementById('q') === e;
+        e.remove();
+        return [seen, before, after, renamed, first, back, document.getElementById('q')];
       })()
     JS
-    expect(got).to eq([[true, true, true, true], [nil, nil, nil], [true, true, true], nil, true])
+    expect(got).to eq([[true, true, true, true], [nil, nil, nil], [true, true, true], [nil, true], true, true, nil])
   end
 end
