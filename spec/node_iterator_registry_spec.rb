@@ -33,8 +33,8 @@ RSpec.describe 'NodeIterator registry' do
     expect(got).to eq([1, 'r', false, 'b'])
   end
 
-  # Its handle traces its reference's object, so a reference the tree no longer holds — taken out of it by an ancestor's
-  # removal the iterator's root is not under — is the same object after a collection.
+  # Its reference is always in its root's tree, which the root its slots hold keeps, edge by edge — so a reference held
+  # by nothing else is the same object after a collection.
   it 'keeps its reference alive and itself, whatever else holds it' do
     session.visit '/'
     session.execute_script(<<~JS)
