@@ -365,10 +365,68 @@ fn tree_order(arena: &RealmArena, a: NodeId, b: NodeId) -> Ordering {
     place(x).cmp(&place(y))
 }
 
+// HTML "get the focus delegate" of a shadow host whose shadow root delegates focus, as its focusing steps ask it: the
+// shadow tree's focused element, where it has one (a focused descendant keeps focus rather than going to the first),
+// else the first focusable element of the tree carrying `autofocus`, else the first focusable one — in tree order, the
+// tree's own (a slotted node is the host's, not the tree's; a slot's fallback is the tree's), a nested host that
+// delegates focus searched by ITS shadow tree in the same way, its focused element first, and one that does not by its
+// own children.
+pub(crate) fn focus_delegate(engine: &mut StyleEngine, arena: &RealmArena, host: NodeId, now: f64) -> Option<NodeId> {
+    let root = arena.get(host)?.shadow_root.filter(|&r| arena.get(r).is_some_and(|r| r.delegates_focus))?;
+    active_in(arena, root)
+        .or_else(|| delegate_scan(engine, arena, root, true, now))
+        .or_else(|| delegate_scan(engine, arena, root, false, now))
+}
+// …the first in `root`'s tree — with `autofocus` alone, where `autofocus_only`.
+fn delegate_scan(engine: &mut StyleEngine, arena: &RealmArena, root: NodeId, autofocus_only: bool, now: f64) -> Option<NodeId> {
+    let children = |id: NodeId| arena.get(id).map_or_else(Vec::new, |n| n.children.iter().rev().copied().collect());
+    let mut stack = children(root);
+    while let Some(id) = stack.pop() {
+        let Some(n) = arena.get(id).filter(|n| n.kind == NodeKind::Element) else { continue };
+        if (!autofocus_only || n.plain_attr("autofocus").is_some()) && focusable(engine, arena, id, now) {
+            return Some(id);
+        }
+        match n.shadow_root.filter(|&r| arena.get(r).is_some_and(|r| r.delegates_focus)) {
+            Some(nested) => {
+                if !autofocus_only {
+                    if let Some(active) = active_in(arena, nested) {
+                        return Some(active);
+                    }
+                }
+                stack.extend(children(nested));
+            }
+            None => stack.extend(children(id)),
+        }
+    }
+    None
+}
+// The focused element of a shadow root's tree (its `activeElement`): the focused element retargeted to the tree — a
+// host in it, of a shadow tree the focus is in — where it is in or under the tree.
+fn active_in(arena: &RealmArena, root: NodeId) -> Option<NodeId> {
+    let mut node = arena.focus?;
+    loop {
+        let tree = arena.root_of(node);
+        if tree == root {
+            return Some(node);
+        }
+        node = arena.get(tree)?.host?;
+    }
+}
+
 // ── the ops ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "focusable", focusable_op, context_id);
     crate::dom::register(scope, ns, "nextFocus", next_focus_op, context_id);
+    crate::dom::register(scope, ns, "focusDelegate", focus_delegate_op, context_id);
+}
+
+// __dom.focusDelegate(hostNid, now) -> [the host's focus delegate] or [] (`focus_delegate`), as `nodes_value` answers.
+fn focus_delegate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(host) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let found = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| focus_delegate(engine, arena, host, now)).flatten();
+    let cid = crate::dom::realm_id(scope, &args);
+    let root = crate::dom::realm(scope, cid).shadow_including_root(host);
+    rv.set(crate::dom::nodes_value(scope, cid, root, found.as_slice()));
 }
 
 // __dom.focusable(nid, now) -> whether the element is a focusable area (`focusable`); undefined where the realm has no

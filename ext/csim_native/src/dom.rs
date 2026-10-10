@@ -146,7 +146,6 @@ pub(crate) struct ShadowInit {
     pub(crate) closed: bool,
 }
 
-// An attribute of the DOM's attribute list (`NodeData::attribute_list`): its namespace, prefix, local name and value.
 // An element's name as the DOM holds it, UTF-16 throughout (`NodeData::name_u16`).
 #[derive(PartialEq)]
 pub(crate) struct ExactName {
@@ -155,6 +154,7 @@ pub(crate) struct ExactName {
     pub(crate) prefix: Option<Vec<u16>>,
 }
 
+// An attribute of the DOM's attribute list (`NodeData::attribute_list`): its namespace, prefix, local name and value.
 pub(crate) struct Attribute {
     pub(crate) ns: Option<String>,
     pub(crate) prefix: Option<String>,
