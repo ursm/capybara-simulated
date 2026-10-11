@@ -142,4 +142,45 @@ RSpec.describe 'DOM mutation algorithms' do
     JS
     expect(got).to eq([])
   end
+
+  # A fragment parse's custom elements are upgraded as it makes them (HTML "create an element" enqueues the upgrade), so
+  # ahead of the children the setter removes: a disconnectedCallback sees the new element upgraded. Chrome:
+  # ["ctor new", "conn new", "disc old new=true"].
+  it "upgrades a fragment parse's elements before it disconnects the children it replaces" do
+    got = run('<div id=p></div>', <<~JS)
+      (() => {
+        const log = [];
+        class X extends HTMLElement {
+          constructor() { super(); log.push('ctor ' + this.getAttribute('id')); }
+          connectedCallback() { log.push('conn ' + this.id); }
+          disconnectedCallback() { log.push('disc ' + this.id + ' new=' + (document.getElementById('new') instanceof X)); }
+        }
+        customElements.define('x-f', X);
+        const p = document.getElementById('p');
+        p.innerHTML = '<x-f id=old></x-f>';
+        log.length = 0;
+        p.innerHTML = '<x-f id=new></x-f>';
+        return log;
+      })()
+    JS
+    expect(got).to eq(['ctor new', 'conn new', 'disc old new=true'])
+  end
+
+  # insertAdjacentHTML inserts the fragment it parsed: one insertion, one record — and its custom elements upgraded
+  # where the element is not connected. Chrome: [1, true].
+  it 'inserts what insertAdjacentHTML parsed as one fragment' do
+    got = run('<div id=p></div>', <<~JS)
+      (() => {
+        customElements.define('x-g', class extends HTMLElement {});
+        const p = document.getElementById('p');
+        const mo = new MutationObserver(() => {});
+        mo.observe(p, { childList: true });
+        p.insertAdjacentHTML('beforeend', '<i>a</i><b>b</b>');
+        const detached = document.createElement('div');
+        detached.insertAdjacentHTML('beforeend', '<x-g></x-g>');
+        return [mo.takeRecords().length, detached.firstChild instanceof customElements.get('x-g')];
+      })()
+    JS
+    expect(got).to eq([1, true])
+  end
 end
