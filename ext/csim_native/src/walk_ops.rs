@@ -15,10 +15,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // __dom.layoutBuild(rootNid, fontGeneration, rootCbW, rootCbH, texts, check): a whole layout pass the Rust walk builds
 // from the arena and the style engine — its records, runs and tables — and lays out (the root placed natively), its
 // boxes kept in the arena for the geometry (geometry.rs `store_layout`): answered `true` — or where `texts` asks, for a
-// pass a painter records, each text piece as it draws it, `[rows, texts, steps]`: `[x, y, baseline, width, justify, owner
-// nid, placeholder, steps at, steps]`, the texts, and the pen steps of the pieces drawn a character at a time
-// (`paint_rows`). Or `[family, bucket, …]` — the faces the walk needs first, for the JS side to resolve (`walkFace`) and
-// ask again — or `{boxes}`, the generated boxes it needs linked, or the walk's decline, a string.
+// pass a painter records, each text piece as it draws it, `[rows, texts, steps, owners]`: `[x, y, baseline, width,
+// justify, owner, placeholder, steps at, steps]` — the owner -2 for none, -1 for the element `owners` holds at the
+// piece's index, 0 / 1 for that element's `::before` / `::after` — the texts, the pen steps of the pieces drawn a
+// character at a time (`paint_rows`), and the elements. Or `[family, bucket, …]` — the faces the walk needs first, for
+// the JS side to resolve (`walkFace`) and ask again — or `{boxes: [element, which, …]}`, the generated boxes it needs
+// linked (`which` 1 an `::after`), or the walk's decline, a string.
 fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let Some(root) = NodeId::from_i64(args.get(0).number_value(scope).unwrap_or(-1.0) as i64) else { return };
@@ -70,10 +72,18 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
             return;
         }
         Outcome::NeedsBoxes(boxes) => {
-            // (…as `{boxes: [nid, which, …]}`)
+            // (…as `{boxes: [element, which, …]}`)
+            let ids: Vec<NodeId> = boxes.chunks(2).filter_map(|p| NodeId::from_i64(p[0] as i64)).collect();
+            let elements = crate::dom::nodes_value(scope, cid, &ids);
+            let Ok(elements) = v8::Local::<v8::Array>::try_from(elements) else { return };
+            let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(boxes.len());
+            for (k, p) in boxes.chunks(2).enumerate() {
+                items.push(elements.get_index(scope, k as u32).unwrap_or_else(|| v8::null(scope).into()));
+                items.push(v8::Number::new(scope, p[1]).into());
+            }
             let out = v8::Object::new(scope);
             let key = v8::String::new(scope, "boxes").unwrap();
-            let list: v8::Local<v8::Value> = f64_array(scope, &boxes).into();
+            let list: v8::Local<v8::Value> = v8::Array::new_with_elements(scope, &items).into();
             out.set(scope, key.into(), list);
             rv.set(out.into());
             return;
@@ -135,9 +145,25 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         crate::geometry::store_layout(arena, &laid, &inline_nids, &anon);
     }
     // (…answered `true` — the boxes are the arena's now — or, for a pass that paints, as the painter's text pieces:
-    // `[rows, texts, steps]`)
+    // `[rows, texts, steps, owners]`, each piece's owner an element and, in its row, whether it is one of its generated
+    // boxes)
     match painted {
-        Some((rows, strings, steps)) => {
+        Some((mut rows, strings, steps)) => {
+            let mut owners: Vec<Option<NodeId>> = Vec::with_capacity(strings.len());
+            if let Some(arena) = dom(scope).arena.enter_known(cid) {
+                for row in rows.chunks_mut(9) {
+                    let owner = NodeId::from_i64(row[5] as i64).and_then(|o| arena.get(o).map(|n| (o, n.generated_of)));
+                    let (element, code) = match owner {
+                        None => (None, -2.0),
+                        Some((_, Some((el, which)))) => (Some(el), f64::from(which)),
+                        Some((o, None)) => (Some(o), -1.0),
+                    };
+                    row[5] = code;
+                    owners.push(element);
+                }
+            }
+            let owners: Vec<v8::Local<v8::Value>> = owners.into_iter().map(|o| crate::dom::node_value(scope, o)).collect();
+            let owners: v8::Local<v8::Value> = v8::Array::new_with_elements(scope, &owners).into();
             let rows: v8::Local<v8::Value> = f64_array(scope, &rows).into();
             let list = v8::Array::new(scope, strings.len() as i32);
             for (k, t) in strings.iter().enumerate() {
@@ -145,7 +171,7 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
                 list.set_index(scope, k as u32, v.into());
             }
             let steps: v8::Local<v8::Value> = f64_array(scope, &steps).into();
-            let items: [v8::Local<v8::Value>; 3] = [rows, list.into(), steps];
+            let items: [v8::Local<v8::Value>; 4] = [rows, list.into(), steps, owners];
             rv.set(v8::Array::new_with_elements(scope, &items).into());
         }
         None => rv.set(v8::Boolean::new(scope, true).into()),

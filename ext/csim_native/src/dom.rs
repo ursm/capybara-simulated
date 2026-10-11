@@ -1997,6 +1997,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "relativeNode", relative_node, context_id);
     register(scope, ns, "childAt", child_at, context_id);
     register(scope, ns, "subtreeNodes", subtree_nodes, context_id);
+    register(scope, ns, "nodeOf", node_of, context_id);
     register(scope, ns, "childNodes", child_nodes, context_id);
     register_fast(scope, ns, "childCount", child_count, CHILD_COUNT_FAST, context_id);
     register_fast(scope, ns, "childIndex", child_index_op, CHILD_INDEX_FAST, context_id);
@@ -2245,6 +2246,12 @@ fn child_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let arena = &dom(scope).arena;
     let found = arena.get(id).and_then(|n| n.children.get(index).copied());
     rv.set(node_value(scope, found));
+}
+// __dom.nodeOf(nid) -> the node with the nid, as `node_value` answers it — for an answer that names nodes by nid (a
+// geometry read's offset parent, a scroll plan's scrollers).
+fn node_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = nid_arg(scope, &args, 0);
+    rv.set(node_value(scope, id));
 }
 // __dom.subtreeNodes(nid) -> the node and its shadow-including descendants, as `nodes_value` answers them: in tree
 // order, a host's shadow tree before its light children (not into a template's contents).
