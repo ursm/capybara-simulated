@@ -50,15 +50,21 @@ impl Reactions {
             }
         }
     }
-    // A page of the main realm's begins: no call runs (a terminated one left its depth), and nothing is owed.
-    pub(crate) fn reset(&mut self) {
-        self.levels.clear();
-        self.backup.clear();
-        self.backup_queued = false;
-        self.queues.clear();
-        for at in [DEPTH, DEEPEST, BACKUP] {
-            self.set(at, 0);
+    // A page of the main realm's begins: no call runs (a terminated one left its depth), so the elements its element
+    // queues held are the backup element queue's — whose microtask, too, may have gone with the call.
+    pub(crate) fn unwind(&mut self) {
+        for level in self.levels.drain(..) {
+            self.backup.extend(level);
         }
+        self.set(DEPTH, 0);
+        self.set(DEEPEST, 0);
+        self.microtask_lost();
+    }
+    // The backup element queue's microtask taken as lost: a checkpoint runs the queue where it holds an element
+    // (`ceStack[2]`).
+    fn microtask_lost(&mut self) {
+        self.backup_queued = false;
+        self.set(BACKUP, i32::from(!self.backup.is_empty()));
     }
     // The reactions owed to the elements `gone` names — a dropped realm's — let go of; and the backup element queue's
     // microtask taken as lost, which a realm leaving may take with it (a checkpoint runs the queue then: `ceStack[2]`).
@@ -68,8 +74,17 @@ impl Reactions {
         for level in &mut self.levels {
             level.retain(|&(id, _)| !gone(id));
         }
-        self.backup_queued = false;
+        self.microtask_lost();
+    }
+    // The elements of the backup element queue `of` names, taken — all of them its microtask no longer queued.
+    pub(crate) fn take_backup(&mut self, of: impl Fn(NodeId) -> bool) -> Vec<(NodeId, v8::Global<v8::Value>)> {
+        let (taken, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.backup).into_iter().partition(|&(id, _)| of(id));
+        self.backup = kept;
+        if self.backup.is_empty() {
+            self.backup_queued = false;
+        }
         self.set(BACKUP, i32::from(!self.backup.is_empty()));
+        taken
     }
     // …and those of a node freed (a queue nothing drained: its element went with its realm's script mid-call).
     pub(crate) fn forget_node(&mut self, id: NodeId) {
@@ -86,7 +101,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceEnqueue", ce_enqueue, context_id);
     register(scope, ns, "ceTakeQueue", ce_take_queue, context_id);
     register(scope, ns, "ceTakeBackup", ce_take_backup, context_id);
-    register(scope, ns, "ceTakeReactions", ce_take_reactions, context_id);
+    register(scope, ns, "ceTakeReaction", ce_take_reaction, context_id);
     register(scope, ns, "ceClear", ce_clear, context_id);
     // (…and the stack's depth and deepest queue, a view on the isolate's one buffer)
     let store = {
@@ -147,28 +162,34 @@ fn ce_take_queue(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set(elements(scope, queue));
 }
 
-// __dom.ceTakeBackup() -> the backup element queue, taken, its microtask no longer queued.
-fn ce_take_backup(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let reactions = &mut dom(scope).arena.ce_reactions;
-    let queue = std::mem::take(&mut reactions.backup);
-    reactions.backup_queued = false;
-    reactions.set(BACKUP, 0);
+// __dom.ceTakeBackup() -> the backup element queue, taken, its microtask no longer queued. __dom.ceTakeBackup(cid) ->
+// only the elements realm `cid` made, which goes before the microtask can run (a frame navigated, synchronously here).
+fn ce_take_backup(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = if args.length() > 0 { args.get(0).int32_value(scope) } else { None };
+    let arena = &mut dom(scope).arena;
+    let queue = match realm {
+        None => arena.ce_reactions.take_backup(|_| true),
+        Some(cid) => arena.take_backup_of(cid),
+    };
     rv.set(elements(scope, queue));
 }
 
-// __dom.ceTakeReactions(nid) -> `[callback, args, callback, args, …]`: the element's reactions, taken from its queue —
+// __dom.ceTakeReaction(nid) -> `[callback, args]`: the first of the element's reactions, taken from its queue —
 // undefined once it is empty (HTML "invoke custom element reactions": an element's reactions run until none is left,
-// those its callbacks enqueue included, which a later take hands over).
-fn ce_take_reactions(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// those its callbacks enqueue included). One at a time, as the rest stay the queue's: a callback's own [CEReactions]
+// call runs them, before what it enqueued itself.
+fn ce_take_reaction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return };
-    let Some(queue) = dom(scope).arena.ce_reactions.queues.remove(&id) else { return };
-    let mut flat: Vec<v8::Local<'_, v8::Value>> = Vec::with_capacity(queue.len() * 2);
-    for reaction in queue {
-        flat.push(v8::Local::new(scope, reaction.callback));
-        let list: Vec<v8::Local<'_, v8::Value>> = reaction.args.into_iter().map(|a| v8::Local::new(scope, a)).collect();
-        flat.push(v8::Array::new_with_elements(scope, &list).into());
+    let queues = &mut dom(scope).arena.ce_reactions.queues;
+    let Some(queue) = queues.get_mut(&id) else { return };
+    let Some(reaction) = queue.pop_front() else { return };
+    if queue.is_empty() {
+        queues.remove(&id);
     }
-    rv.set(v8::Array::new_with_elements(scope, &flat).into());
+    let callback = v8::Local::new(scope, reaction.callback);
+    let list: Vec<v8::Local<'_, v8::Value>> = reaction.args.into_iter().map(|a| v8::Local::new(scope, a)).collect();
+    let list = v8::Array::new_with_elements(scope, &list);
+    rv.set(v8::Array::new_with_elements(scope, &[callback, list.into()]).into());
 }
 
 // __dom.ceClear(nid) — the element's reaction queue emptied (HTML "upgrade an element": a constructor that failed leaves

@@ -515,8 +515,11 @@ module Capybara
         # element — this is its only eviction, and it covers the reload (dispose +
         # recreate) path too, where the old id would otherwise leak in the set.
         ctx.eval_void("globalThis.__csimChildRealmIds && globalThis.__csimChildRealmIds.delete(#{id.to_i});") rescue nil
-        # What nothing can run any more goes, which the engine keeps: its mutation observers (nothing can notify them), and
-        # its timers, whose handlers held its global (`RealmArena::discard_realm`).
+        # The custom element reactions the backup element queue owes its elements run first, as its microtask would have
+        # before the old document went. Then what nothing can run any more goes, which the engine keeps: its mutation
+        # observers (nothing can notify them), its timers, whose handlers held its global, and the reactions still owed
+        # (`RealmArena::discard_realm`).
+        ctx.eval_void("globalThis.__csimRunBackupReactionsOf && globalThis.__csimRunBackupReactionsOf(#{id.to_i});") rescue nil
         ctx.eval_void("globalThis.__dom && globalThis.__dom.discardRealm(#{id.to_i});") rescue nil
         fr = frame_realms.delete(id)
         fr.dispose rescue nil if fr

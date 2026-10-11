@@ -159,4 +159,58 @@ RSpec.describe 'custom element reaction timing' do
     JS
     expect(got).to eq(['p-x:a=1', 'q-x:b=2'])
   end
+
+  # An element's reactions run one at a time, the rest staying its queue's: a callback's own [CEReactions] call runs them
+  # before what it enqueued itself. Chrome: {"typeNested": ["type", "value", "data-x"], "upgradeNested": ["a", "b",
+  # "conn", "c"]}.
+  it "runs an element's queued reactions before those a callback enqueues" do
+    html = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8><body><x-u a="1" b="2"></x-u><script>
+        window.R = {};
+        { const log = [];
+          class XT extends HTMLInputElement {
+            static get observedAttributes() { return ['type', 'value', 'data-x']; }
+            attributeChangedCallback(n) { log.push(n); if (n === 'type') this.setAttribute('data-x', '1'); }
+          }
+          customElements.define('x-t', XT, { extends: 'input' });
+          const ti = document.createElement('input', { is: 'x-t' }); document.body.append(ti);
+          ti.value = 'vv'; log.length = 0; ti.setAttribute('type', 'checkbox'); R.typeNested = log; }
+        { const log = [];
+          class XU extends HTMLElement {
+            static get observedAttributes() { return ['a', 'b', 'c']; }
+            attributeChangedCallback(n) { log.push(n); if (n === 'a') this.setAttribute('c', '3'); }
+            connectedCallback() { log.push('conn'); }
+          }
+          customElements.define('x-u', XU); R.upgradeNested = log; }
+      </script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    expect(s.evaluate_script('R')).to eq('typeNested' => %w[type value data-x], 'upgradeNested' => %w[a b conn c])
+  end
+
+  # A frame navigated in the same call as a click that owes its element a reaction on the backup element queue still
+  # calls it back: the old document's microtask runs before it goes. Chrome: ["frame-acb"].
+  it "calls back a navigated frame's element the backup element queue holds" do
+    html = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8><body><iframe id="f" srcdoc="<p>frame</p>"></iframe><script>
+        window.L = [];
+        onload = () => {
+          const f = document.getElementById('f'); const w = f.contentWindow;
+          class FD extends w.HTMLDetailsElement {
+            static get observedAttributes() { return ['open']; }
+            attributeChangedCallback() { window.L.push('frame-acb'); }
+          }
+          w.customElements.define('f-d', FD, { extends: 'details' });
+          const fd = w.document.createElement('details', { is: 'f-d' }); fd.innerHTML = '<summary>s</summary>';
+          w.document.body.append(fd);
+          fd.firstChild.click();
+          f.srcdoc = '<p>other</p>';
+        };
+      </script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    expect(s.evaluate_script('L')).to eq(['frame-acb'])
+  end
 end

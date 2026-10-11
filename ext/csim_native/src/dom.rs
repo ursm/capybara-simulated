@@ -691,6 +691,11 @@ struct Slot {
     data: Option<NodeData>,
 }
 
+// The realm that made node `id`, where it is not freed.
+fn live_node_realm(slots: &[Slot], id: NodeId) -> Option<i32> {
+    slots.get(id.idx as usize).filter(|s| s.generation == id.generation).and_then(|s| s.data.as_ref()).map(|n| n.realm)
+}
+
 // The isolate's node arena: every realm's nodes, in one slot space, so a node keeps its id whichever realm's tree it is
 // in. The selector matcher reads it through NodeRef with direct slot indexing (no per-node-access map lookup).
 // Element-tree navigation lives here: every navigation and deref goes through `get` (gen-checked), so a stale edge
@@ -926,13 +931,16 @@ impl RealmArena {
         self.discard_timers(cid);
         self.forget_reactions_of(cid);
     }
-    // The custom element reactions owed to realm `cid`'s elements let go of (ce_reactions.rs `forget`).
+    // The custom element reactions owed to realm `cid`'s elements — or to a node already freed — let go of
+    // (ce_reactions.rs `forget`).
     pub(crate) fn forget_reactions_of(&mut self, cid: i32) {
         let slots = &self.slots;
-        let of_realm = |id: NodeId| {
-            slots.get(id.idx as usize).filter(|s| s.generation == id.generation).and_then(|s| s.data.as_ref()).is_none_or(|n| n.realm == cid)
-        };
-        self.ce_reactions.forget(of_realm);
+        self.ce_reactions.forget(|id| live_node_realm(slots, id).is_none_or(|realm| realm == cid));
+    }
+    // The elements of the backup element queue realm `cid` made, taken (ce_reactions.rs `take_backup`).
+    pub(crate) fn take_backup_of(&mut self, cid: i32) -> Vec<(NodeId, v8::Global<v8::Value>)> {
+        let slots = &self.slots;
+        self.ce_reactions.take_backup(|id| live_node_realm(slots, id) == Some(cid))
     }
     // Realm `cid` is gone: its state, and the nodes it made.
     pub(crate) fn drop_realm(&mut self, cid: i32) {
@@ -4462,12 +4470,12 @@ fn reset_arena(
 ) {
     let cid = realm_id(scope, &args);
     realm(scope, cid).reset();
-    // (…and the custom element reactions: all of them for a page of the main realm's, a frame's own for a frame's)
+    // (…and the custom element reactions it is owed: the backup element queue ran first — `invalidateArena` — as the old
+    // page's microtask would have before it went; and a page of the main realm's begins with no call running)
     if cid == 0 {
-        dom(scope).arena.ce_reactions.reset();
-    } else {
-        dom(scope).arena.forget_reactions_of(cid);
+        dom(scope).arena.ce_reactions.unwind();
     }
+    dom(scope).arena.forget_reactions_of(cid);
     crate::text_codec::drop_realm(scope, cid);   // (…a page's stream decoders die with it)
     dom(scope).walk_reuse.remove(&cid);
     // …and the style engine forgets the nodes it held (its sheets stay until the new page sets its own).
