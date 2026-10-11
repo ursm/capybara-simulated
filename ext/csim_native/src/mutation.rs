@@ -1,8 +1,9 @@
 // The DOM's tree mutation algorithms (DOM §4.2.3): what makes an insertion or a replacement valid — the "ensure
 // pre-insertion validity" steps and the replace algorithm's checks — over the arena's trees, and the change of a parent's
-// children each of them makes (`change_children`): the engine's edges in the order the algorithms write them, and the
-// steps the bindings take in between — adopting, the removing and insertion steps, the mutation record, the custom
-// element reactions — called back where they fall.
+// children each of them makes (`change_children`): the engine's edges and steps in the order the algorithms write and
+// run them, the bindings' steps in its course (a frame's discarding, a select's reset) called back where they fall, and
+// those it ends with — the mutation record, the custom element reactions, the connection walk — the bindings' to take as
+// it returns.
 
 use crate::dom::{nid_arg, node_value, nodes_value, realm, realm_id, NodeId, NodeKind, RealmArena};
 
@@ -274,21 +275,25 @@ fn change_children(
     nodes: &[NodeId],
     node_list: v8::Local<'_, v8::Array>,
     child: Option<NodeId>,
+    adopt_all: bool,
     steps: v8::Local<'_, v8::Array>,
-) -> Option<Result<Vec<NodeId>, u32>> {
+) -> Option<Result<Changed, u32>> {
     let connected = realm(scope, cid).is_connected(parent);
-    let removed = match removing {
-        Removing::None => Vec::new(),
-        Removing::All => crate::dom::take_all(scope, cid, parent),
+    let (removed, siblings) = match removing {
+        Removing::None => (Vec::new(), None),
+        Removing::All => (crate::dom::take_all(scope, cid, parent), None),
         Removing::Child(r) => {
-            if realm(scope, cid).parent_of(r) != Some(parent) {
+            let arena = realm(scope, cid);
+            if arena.parent_of(r) != Some(parent) {
                 return Some(Err(REMOVED_NOT_A_CHILD));
             }
+            let siblings = (arena.sibling(r, -1), arena.sibling(r, 1));
             crate::dom::take_out(scope, cid, r);
-            vec![r]
+            (vec![r], Some(siblings))
         }
     };
     for &r in &removed {
+        realm(scope, cid).parser_form_owners_removed(r);
         removing_steps(scope, steps, r)?;
     }
     if !removed.is_empty() && affects_selectedness(realm(scope, cid), parent, &removed) {
@@ -297,7 +302,7 @@ fn change_children(
         let all = v8::Boolean::new(scope, matches!(removing, Removing::All)).into();
         step(scope, steps, STEP_REMOVED_FROM, &[parent_object, list, all])?;
     }
-    if matches!(removing, Removing::All) && !nodes.is_empty() {
+    if adopt_all {
         let parent_object = node_value(scope, Some(parent));
         step(scope, steps, STEP_ADOPT, &[parent_object, node_list.into()])?;
     }
@@ -306,8 +311,9 @@ fn change_children(
     let refused = gone && !matches!(removing, Removing::None);
     let added: &[NodeId] = if refused { &[] } else { nodes };
     if !added.is_empty() {
-        // (…each a node of the parent's realm's trees from now on — one another realm made, with all it holds)
-        for &n in added {
+        // (…each a node of the parent's realm's trees from now on — one another realm made, with all it holds; and the
+        // parent itself, kept in this realm where the realm it was in is gone)
+        for n in std::iter::once(parent).chain(added.iter().copied()) {
             let arena = realm(scope, cid);
             if arena.get(n).is_some_and(|d| d.realm != cid) && arena.adopt(n) {
                 let parent_object = node_value(scope, Some(parent));
@@ -315,10 +321,8 @@ fn change_children(
             }
         }
         crate::dom::insert_nodes(scope, cid, parent, added, if gone { None } else { child });
-        let sources: Vec<NodeId> = {
-            let arena = realm(scope, cid);
-            added.iter().copied().filter(|&n| arena.get(n).is_some_and(|d| d.is_html_named("source"))).collect()
-        };
+        let arena = realm(scope, cid);
+        let sources: Vec<NodeId> = added.iter().copied().filter(|&n| arena.get(n).is_some_and(|d| d.is_html_named("source"))).collect();
         for n in sources {
             let (node, parent_object) = (node_value(scope, Some(n)), node_value(scope, Some(parent)));
             step(scope, steps, STEP_SOURCE_INSERTED, &[node, parent_object])?;
@@ -326,14 +330,24 @@ fn change_children(
     }
     let flags = (if connected { CHANGE_CONNECTED } else { 0 }) | (if refused { CHANGE_REFUSED } else { 0 });
     crate::dom::dom(scope).arena.change_flags.set(flags);
-    Some(Ok(removed))
+    Some(Ok(Changed { removed, siblings }))
 }
 
-// __dom.changeChildren(parentNid, removing, nodes, childNid, steps) -> the removed nodes (as `nodes_value` answers;
-// undefined for none), or `REMOVED_NOT_A_CHILD`: `change_children`, `removing` -1 for no child, -2 for every child, else
-// the child's nid; `nodes` the nodes to insert; `childNid` -1 for none; `steps` the bindings' steps, by index
-// (`STEP_*`). Whether the parent was connected, and whether the change was refused, in `changeFlags`.
+// What a change of children took out: the nodes, and — one child's — the siblings it had, which its record carries.
+struct Changed {
+    removed: Vec<NodeId>,
+    siblings: Option<(Option<NodeId>, Option<NodeId>)>,
+}
+
+// __dom.changeChildren(parentNid, removing, nodes, childNid, adoptAll, steps) -> what it took out — the removed nodes
+// (as `nodes_value` answers), or, one child's, `[child, previousSibling, nextSibling]`; undefined for none — or
+// `REMOVED_NOT_A_CHILD`: `change_children`, `removing` -1 for no child, -2 for every child, else the child's nid; `nodes`
+// the nodes to insert; `childNid` -1 for none; `adoptAll` whether replace all's nodes are to be adopted (the bindings
+// know where none is: each already a parentless node of the parent's document); `steps` the bindings' steps, by index
+// (`STEP_*`). Whether the parent was connected, and whether the change was refused, in `changeFlags` — cleared first,
+// where the change throws before it begins.
 fn change_children_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    crate::dom::dom(scope).arena.change_flags.set(0);
     let Some(parent) = nid_arg(scope, &args, 0) else { return };
     let removing = match args.get(1).integer_value(scope) {
         Some(-1) => Removing::None,
@@ -343,7 +357,7 @@ fn change_children_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
             None => return,
         },
     };
-    let (Ok(node_list), Ok(steps)) = (v8::Local::<v8::Array>::try_from(args.get(2)), v8::Local::<v8::Array>::try_from(args.get(4))) else { return };
+    let (Ok(node_list), Ok(steps)) = (v8::Local::<v8::Array>::try_from(args.get(2)), v8::Local::<v8::Array>::try_from(args.get(5))) else { return };
     let mut nodes = Vec::with_capacity(node_list.length() as usize);
     for i in 0..node_list.length() {
         let Some(node) = node_list.get_index(scope, i) else { return };
@@ -352,9 +366,14 @@ fn change_children_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         nodes.push(nid);
     }
     let child = nid_arg(scope, &args, 3);
+    let adopt_all = matches!(removing, Removing::All) && !nodes.is_empty() && args.get(4).is_true();
     let cid = realm_id(scope, &args);
-    match change_children(scope, cid, parent, removing, &nodes, node_list, child, steps) {
-        Some(Ok(removed)) => {
+    match change_children(scope, cid, parent, removing, &nodes, node_list, child, adopt_all, steps) {
+        Some(Ok(Changed { removed, siblings: Some((previous, next)) })) => {
+            let items = [node_value(scope, removed.first().copied()), node_value(scope, previous), node_value(scope, next)];
+            rv.set(v8::Array::new_with_elements(scope, &items).into());
+        }
+        Some(Ok(Changed { removed, siblings: None })) => {
             if !removed.is_empty() {
                 let list = nodes_value(scope, cid, &removed);
                 rv.set(list);

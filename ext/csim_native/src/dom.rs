@@ -1643,6 +1643,27 @@ impl RealmArena {
             }
         }
     }
+    // HTML's removing steps of a form-associated element — `root` or one in its subtree, taken out of its tree: a form the
+    // parser's form element pointer gave it that is no longer in its tree is its form owner no more ("reset the form
+    // owner", which unsets its parser inserted flag: from now on its owner derives from its ancestors and its `form`
+    // attribute alone). Its insertion steps leave such an owner be — the flag is set — so the fragment a markup setter
+    // parsed keeps the owners its parse gave. (No walk where the parser gave none: on any page but a mis-nested form's.)
+    pub(crate) fn parser_form_owners_removed(&mut self, root: NodeId) {
+        if self.parser_form_owners.is_empty() {
+            return;
+        }
+        let mut stack = vec![root];
+        while let Some(n) = stack.pop() {
+            let Some(node) = self.get(n) else { continue };
+            stack.extend(node.children.iter().copied());
+            stack.extend(node.shadow_root);
+            if let Some(&form) = self.parser_form_owners.get(&n) {
+                if self.root_of(form) != self.root_of(n) {
+                    self.set_parser_form_owner(n, None);
+                }
+            }
+        }
+    }
     // A child `parent` had moved elsewhere: its style block updated (sheet_owners.rs), its text entry cursor clamped to
     // the text left (text_selection.rs) — as a removal of it does (`take_out`).
     pub(crate) fn children_removed(&mut self, parent: NodeId) {

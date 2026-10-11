@@ -147,6 +147,26 @@ RSpec.describe 'FormData "formdata" event, USV conversion, _charset_' do
     expect(got).to eq([[true, true], nil, nil])
   end
 
+  # …and so does removing it, or inserting an ancestor of it: "when a form-associated element or one of its ancestors is
+  # inserted" — or removed. Chrome 155: [[true, true], nil, nil].
+  it "resets a parser-given form owner as the control or an ancestor of it moves" do
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend',
+        '<table><form id=f><tr><td><div id=w><input id=i></div><input id=j></td></tr></form></table>');
+    JS
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const f = document.getElementById('f'), i = document.getElementById('i'), j = document.getElementById('j');
+        const before = [i.form === f, j.form === f];
+        j.remove();
+        const removed = j.form;
+        document.body.appendChild(document.getElementById('w'));
+        return [before, removed, i.form];
+      })()
+    JS
+    expect(got).to eq([[true, true], nil, nil])
+  end
+
   it 'gives a hidden _charset_ control the UTF-8 encoding name' do
     charset = session.evaluate_script(<<~JS)
       (function () {
