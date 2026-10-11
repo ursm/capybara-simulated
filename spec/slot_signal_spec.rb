@@ -97,4 +97,25 @@ RSpec.describe 'slot change signals and mutation observer turns' do
     JS
     expect(got).to eq(%w[d a])
   end
+
+  # A host adopted into a frame's document is the frame's: the frame's tree writes assign its slots.
+  it 'assigns the slots of a host adopted into a frame' do
+    html = %(<!DOCTYPE html><meta charset=utf-8><iframe id=f srcdoc='<!DOCTYPE html><meta charset=utf-8><div id=d></div>'></iframe>)
+    frame_session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    frame_session.visit '/'
+    got = frame_session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const f = document.getElementById('f');
+      const run = () => {
+        const fd = f.contentDocument;
+        const h = document.createElement('div');
+        h.attachShadow({mode: 'open'}).innerHTML = '<slot></slot>';
+        fd.getElementById('d').appendChild(h);
+        const c = h.appendChild(fd.createElement('i'));
+        done([h.shadowRoot.firstChild.assignedNodes().length, c.assignedSlot === h.shadowRoot.firstChild]);
+      };
+      if (f.contentDocument && f.contentDocument.getElementById('d')) run(); else f.onload = run;
+    JS
+    expect(got).to eq([1, true])
+  end
 end

@@ -865,8 +865,11 @@ impl RealmArena {
                 node.realm_pos = pos;
             }
             let node = self.get(n).expect("a live node");
+            // (…a shadow host among them makes the realm one whose writes run the slot steps)
+            let host = node.shadow_root.is_some();
             stack.extend(node.children.iter().copied());
             stack.extend(node.shadow_root.into_iter().chain(node.template_content).chain(node.pseudo_boxes.into_iter().flatten()));
+            self.state.shadow_hosts |= host;
         }
     }
     // A new context is realm `cid`: whatever an earlier context of that id made is unreachable, and its state with it.
