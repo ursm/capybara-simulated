@@ -31,6 +31,8 @@ const CONNECTED: usize = 0;
 const DISCONNECTED: usize = 1;
 const CONNECTED_MOVE: usize = 2;
 const ATTRIBUTE_CHANGED: usize = 4;
+const FORM_ASSOCIATED: usize = 5;
+const FORM_DISABLED: usize = 7;
 const CALLBACKS: usize = 9;
 
 // A custom element definition, as the engine needs it: the bindings' object for it (its name, local name and constructor,
@@ -85,6 +87,9 @@ pub(crate) struct Reactions {
     definitions: Vec<Option<Definition>>,
     custom: HashMap<NodeId, u32>,
     registries: Vec<Option<Registry>>,
+    // Each form-associated custom element's form owner and disabled state as its callbacks were last told them (none
+    // before the first: no owner, enabled) — what a reset compares the element's new ones with.
+    form_states: HashMap<NodeId, (Option<NodeId>, bool)>,
     // Each realm's window registry (its `customElements`, the latest context's of a realm id): the registry of a node with
     // neither a registry set nor a node document.
     window_registries: HashMap<i32, u32>,
@@ -129,6 +134,7 @@ impl Reactions {
     // then: `ceStack[2]`).
     pub(crate) fn forget(&mut self, gone: impl Fn(NodeId) -> bool) {
         self.custom.retain(|&id, _| !gone(id));
+        self.form_states.retain(|&id, _| !gone(id));
         self.queues.retain(|&id, _| !gone(id));
         self.backup.retain(|&(id, _)| !gone(id));
         for level in &mut self.levels {
@@ -182,6 +188,7 @@ impl Reactions {
     // …and those of a node freed (a queue nothing drained: its element went with its realm's script mid-call).
     pub(crate) fn forget_node(&mut self, id: NodeId) {
         self.custom.remove(&id);
+        self.form_states.remove(&id);
         if self.queues.remove(&id).is_some() {
             self.backup.retain(|&(n, _)| n != id);
             for level in &mut self.levels {
@@ -310,6 +317,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceSetRegistry", ce_set_registry, context_id);
     register(scope, ns, "ceKeepNull", ce_keep_null, context_id);
     register(scope, ns, "ceRestamp", ce_restamp, context_id);
+    register(scope, ns, "ceFormStateReset", ce_form_state_reset, context_id);
     register(scope, ns, "ceSetKeepNull", ce_set_keep_null, context_id);
     // (…and the stack's depth and deepest queue, a view on the isolate's one buffer)
     let store = {
@@ -774,4 +782,52 @@ fn ce_restamp(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         // SAFETY: the handles of the root's tree, which the arena holds; nothing in between runs script.
         unsafe { &*h }.set_registry(scope, code, object);
     }
+}
+
+// What a form-associated custom element's reset re-derives (`ceFormStateReset`): its form owner, its disabled state.
+const FORM_OWNER: u32 = 1;
+const FORM_DISABLED_STATE: u32 = 2;
+
+// __dom.ceFormStateReset(nid, element, which) -> whether its form owner changed (bit 0) and whether the backup element
+// queue's microtask is to be queued (bit 1): a form-associated custom element's form owner (HTML "reset the form owner",
+// `which` & 1) and disabled state (`which` & 2) re-derived, and where either is another than its callbacks were last
+// told, its formAssociatedCallback (the new owner) or formDisabledCallback (whether it is disabled) enqueued.
+fn ce_form_state_reset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
+    let which = args.get(2).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let (owner, disabled) = {
+        let arena = realm(scope, cid);
+        if arena.get(id).is_none_or(|n| n.state & crate::dom::STATE_FORM_ASSOCIATED == 0) {
+            return rv.set_uint32(0);
+        }
+        (arena.form_owner(id), arena.is_actually_disabled(id))
+    };
+    let (told_owner, told_disabled) = dom(scope).arena.ce_reactions.form_states.get(&id).copied().unwrap_or((None, false));
+    let owner_changed = which & FORM_OWNER != 0 && owner != told_owner;
+    let disabled_changed = which & FORM_DISABLED_STATE != 0 && disabled != told_disabled;
+    if !owner_changed && !disabled_changed {
+        return rv.set_uint32(0);
+    }
+    let next = (if owner_changed { owner } else { told_owner }, if disabled_changed { disabled } else { told_disabled });
+    dom(scope).arena.ce_reactions.form_states.insert(id, next);
+    let element = v8::Global::new(scope, args.get(1));
+    let mut queue = false;
+    if owner_changed {
+        let weak = dom(scope).arena.ce_reactions.callback_of(id, FORM_ASSOCIATED);
+        if let Some(callback) = weak_global(scope, weak) {
+            let owner = crate::dom::node_value(scope, owner);
+            let owner = v8::Global::new(scope, owner);
+            queue |= dom(scope).arena.ce_reactions.enqueue(id, element.clone(), callback, vec![owner]);
+        }
+    }
+    if disabled_changed {
+        let weak = dom(scope).arena.ce_reactions.callback_of(id, FORM_DISABLED);
+        if let Some(callback) = weak_global(scope, weak) {
+            let flag: v8::Local<'_, v8::Value> = v8::Boolean::new(scope, disabled).into();
+            let flag = v8::Global::new(scope, flag);
+            queue |= dom(scope).arena.ce_reactions.enqueue(id, element, callback, vec![flag]);
+        }
+    }
+    rv.set_uint32(u32::from(owner_changed) | (u32::from(queue) << 1));
 }
