@@ -126,45 +126,30 @@ RSpec.describe 'FormData "formdata" event, USV conversion, _charset_' do
     expect(got).to eq(['fostered=1', 'a=1&s=go'])
   end
 
-  # The form the parser's pointer gave a control is its form owner only until a script inserts the control again — in
-  # place, or into a frame's document and back (HTML "reset the form owner"). Chrome 155: [[true, true], nil, nil].
-  it "resets a parser-given form owner as a script inserts the control" do
-    session.execute_script(<<~JS)
-      document.body.insertAdjacentHTML('beforeend',
-        '<table><form id=t><tr><td><input id=a><input id=b></td></tr></form></table><iframe id=fr srcdoc="<p>f</p>"></iframe>');
-    JS
-    session.within_frame('fr') { session.has_text?('f') }
-    got = session.evaluate_script(<<~JS)
+  # The form the document parser's form element pointer gave a control (`<table><form>…<input>`: the form no ancestor of
+  # it) is its form owner until the control, or an ancestor of it, is taken out of the form's tree — HTML's removing
+  # steps reset it, its insertion steps leave it be — whether it is put back in place, moved into a frame's document and
+  # back, or moved inside a wrapper. (A fragment's parse — `insertAdjacentHTML` — gives such a control no form owner in
+  # Chrome or Firefox: another case.) Chrome 155, the markup parsed with the page: [[true, true, true, true], nil, nil,
+  # nil, nil].
+  it 'keeps a parser-given form owner until the control leaves its form\'s tree' do
+    page = '<!DOCTYPE html><meta charset="utf-8"><body><table><form id=f><tr><td><input id=a><input id=b>' \
+           '<div id=w><input id=i></div><input id=j></td></tr></form></table><iframe id=fr srcdoc="<p>f</p>"></iframe>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] }).tap {|ss| ss.visit '/' }
+    s.within_frame('fr') { s.has_text?('f') }
+    got = s.evaluate_script(<<~JS)
       (() => {
-        const a = document.getElementById('a'), b = document.getElementById('b'), t = document.getElementById('t');
-        const before = [a.form === t, b.form === t];
+        const f = document.getElementById('f'), [a, b, i, j] = ['a', 'b', 'i', 'j'].map((id) => document.getElementById(id));
+        const before = [a, b, i, j].map((c) => c.form === f);
         a.parentNode.appendChild(a);
         document.getElementById('fr').contentDocument.body.append(b);
         document.body.append(b);
-        return [before, a.form, b.form];
-      })()
-    JS
-    expect(got).to eq([[true, true], nil, nil])
-  end
-
-  # …and so does removing it, or inserting an ancestor of it: "when a form-associated element or one of its ancestors is
-  # inserted" — or removed. Chrome 155: [[true, true], nil, nil].
-  it "resets a parser-given form owner as the control or an ancestor of it moves" do
-    session.execute_script(<<~JS)
-      document.body.insertAdjacentHTML('beforeend',
-        '<table><form id=f><tr><td><div id=w><input id=i></div><input id=j></td></tr></form></table>');
-    JS
-    got = session.evaluate_script(<<~JS)
-      (() => {
-        const f = document.getElementById('f'), i = document.getElementById('i'), j = document.getElementById('j');
-        const before = [i.form === f, j.form === f];
         j.remove();
-        const removed = j.form;
         document.body.appendChild(document.getElementById('w'));
-        return [before, removed, i.form];
+        return [before, a.form, b.form, j.form, i.form];
       })()
     JS
-    expect(got).to eq([[true, true], nil, nil])
+    expect(got).to eq([[true, true, true, true], nil, nil, nil, nil])
   end
 
   it 'gives a hidden _charset_ control the UTF-8 encoding name' do
