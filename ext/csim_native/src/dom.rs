@@ -2806,11 +2806,27 @@ fn write_data(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgum
     let Some(data) = args.get(1).to_string(scope) else { return };
     write_data_of(scope, args.get(0), data, appended);
 }
-// …`node`'s (the object): the node's data, or `appended` to it.
-pub(crate) fn write_data_of(scope: &mut v8::PinScope<'_, '_>, node: v8::Local<'_, v8::Value>, data: v8::Local<'_, v8::String>, appended: bool) {
-    let Some(id) = crate::node_handle::wrote_data(scope, node, data, appended) else { return };
-    let units = utf16_arg(scope, data.into());
+// …or `units` spliced over `count` code units at `offset` of node `id`'s data, in the arena alone (its handle's string
+// made again when next read: node_handle.rs `forget_data`).
+pub(crate) fn splice_data(scope: &mut v8::PinScope<'_, '_>, id: NodeId, offset: usize, count: usize, units: &[u16]) {
     let Some(cid) = dom(scope).arena.get(id).map(|n| n.realm) else { return };
+    let (arena, engine) = arena_and_engine(scope, cid);
+    arena.state_epoch += 1;
+    let mut had_text = false;
+    if let Some(node) = arena.get_mut(id) {
+        had_text = !node.data.is_empty();
+        node.data.splice(offset..offset + count, units.iter().copied());
+    }
+    text_changed(arena, engine, id, had_text);
+    if let Some(p) = arena.parent_of(id) {
+        arena.style_block_changed(p);
+    }
+}
+// …`node`'s (the object): the node's data, or `appended` to it. Whether that changed it.
+pub(crate) fn write_data_of(scope: &mut v8::PinScope<'_, '_>, node: v8::Local<'_, v8::Value>, data: v8::Local<'_, v8::String>, appended: bool) -> bool {
+    let Some(id) = crate::node_handle::wrote_data(scope, node, data, appended) else { return false };
+    let units = utf16_arg(scope, data.into());
+    let Some(cid) = dom(scope).arena.get(id).map(|n| n.realm) else { return false };
     let (arena, engine) = arena_and_engine(scope, cid);
     // (…data written as it was changes no text — but a `<style>`'s block is updated all the same, as by any write)
     let unchanged = if appended { units.is_empty() } else { arena.get(id).is_some_and(|n| n.data == units) };
@@ -2831,6 +2847,7 @@ pub(crate) fn write_data_of(scope: &mut v8::PinScope<'_, '_>, node: v8::Local<'_
     if let Some(p) = arena.parent_of(id) {
         arena.style_block_changed(p);
     }
+    !unchanged
 }
 
 // __dom.insertChild(parentNid, childNid, beforeNid): the child is moved to `parentNid`, before `beforeNid` (a live child

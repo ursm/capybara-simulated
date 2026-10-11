@@ -14,53 +14,59 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "replaceData", replace_data_op, context_id);
 }
 
-// Why "replace data" throws (an IndexSizeError): the offset is past the data.
+// Why "replace data" throws: the offset is past the data (an IndexSizeError), or the data it would make is longer than
+// a string can be (a RangeError, as V8's own string operations throw — and before anything changed).
 const OFFSET_PAST_DATA: u32 = 1;
+const TOO_LONG: u32 = 2;
 
-// __dom.replaceData(node, offset, count, data) -> `OFFSET_PAST_DATA`, or undefined: DOM "replace data" of `node` (the
-// object), `count` code units from `offset` replaced with `data` (a string).
+// __dom.replaceData(node, offset, count, data) -> `OFFSET_PAST_DATA`, `TOO_LONG`, or undefined: DOM "replace data" of
+// `node` (the object), `count` code units from `offset` replaced with `data` (a string).
 fn replace_data_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let node = args.get(0);
     let Some(id) = crate::node_handle::nid_of(scope, node) else { return };
-    let (Some(old), Some(data)) = (crate::node_handle::data_string(scope, node), args.get(3).to_string(scope)) else { return };
-    let length = old.length() as u32;
-    let offset = args.get(1).uint32_value(scope).unwrap_or(0);
+    let Some(data) = args.get(3).to_string(scope) else { return };
+    let Some((cid, length)) = crate::dom::dom(scope).arena.get(id).map(|n| (n.realm, n.data.len())) else { return };
+    let offset = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
     if offset > length {
         return rv.set_uint32(OFFSET_PAST_DATA);
     }
-    let count = args.get(2).uint32_value(scope).unwrap_or(0).min(length - offset);
+    let count = (args.get(2).uint32_value(scope).unwrap_or(0) as usize).min(length - offset);
+    if length - count + data.length() > v8::String::MAX_LENGTH {
+        return rv.set_uint32(TOO_LONG);
+    }
     let caller = realm_id(scope, &args);
-    let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) else { return };
-    // (…the record first, with the data the node had)
-    let undefined: v8::Local<'_, v8::Value> = v8::undefined(scope).into();
-    let kind = v8::Integer::new(scope, 2).into();
-    let fields = [kind, node, undefined, undefined, undefined, undefined, undefined, undefined, old.into()];
-    crate::mutation_observers::queue_record(scope, cid, id, &fields);
-    crate::ranges::replace_data(scope, id, offset, count, data.length() as u32);
-    // (…an append the cons of the two strings — an `appendData` loop and the parser's coalescing copy nothing — and a
-    // replacement of the whole, the `data` setter's, the string given)
-    let appended = offset == length;
-    let replaced = if appended || (offset == 0 && count == length) {
-        data
+    // (…the record first, with the data the node had — its string made only where an observer is to have it)
+    if realm(scope, cid).observers.observing() {
+        let Some(old) = crate::node_handle::data_string(scope, node) else { return };
+        let undefined: v8::Local<'_, v8::Value> = v8::undefined(scope).into();
+        let kind = v8::Integer::new(scope, 2).into();
+        let fields = [kind, node, undefined, undefined, undefined, undefined, undefined, undefined, old.into()];
+        crate::mutation_observers::queue_record(scope, cid, id, &fields);
+    }
+    crate::ranges::replace_data(scope, id, offset as u32, count as u32, data.length() as u32);
+    // (…an append the cons of the two strings — an `appendData` loop and the parser's coalescing copy nothing — a
+    // replacement of the whole, the `data` setter's, the string given; any other a splice of the arena's code units, the
+    // node's string made of them again when next read)
+    let new_length = length - count + data.length();
+    let changed = if offset == length {
+        crate::dom::write_data_of(scope, node, data, true)
+    } else if offset == 0 && count == length {
+        crate::dom::write_data_of(scope, node, data, false)
     } else {
-        let units = |s: v8::Local<'_, v8::String>, scope: &mut v8::PinScope<'_, '_>| {
-            let mut u = vec![0u16; s.length()];
-            s.write_v2(scope, 0, &mut u, v8::WriteFlags::empty());
-            u
-        };
-        let mut whole = units(old, scope);
-        whole.splice(offset as usize..(offset + count) as usize, units(data, scope));
-        let Some(s) = v8::String::new_from_two_byte(scope, &whole, v8::NewStringType::Normal) else { return };
-        s
+        let mut units = vec![0u16; data.length()];
+        data.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
+        let same = crate::dom::dom(scope).arena.get(id).is_some_and(|n| n.data[offset..offset + count] == units[..]);
+        if !same {
+            crate::node_handle::forget_data(scope, node);
+            crate::dom::splice_data(scope, id, offset, count, &units);
+        }
+        !same
     };
-    let changed = if appended { data.length() != 0 } else { !replaced.strict_equals(old.into()) };
-    crate::dom::write_data_of(scope, node, replaced, appended);
     let arena = realm(scope, cid);
     let parent = arena.parent_of(id);
     if changed {
         arena.generations.bump(GEN_DIRTY);
-        let emptied = (length == 0) != (length - count + data.length() as u32 == 0);
-        if emptied && parent.is_some_and(|p| arena.is_element(p)) {
+        if (length == 0) != (new_length == 0) && parent.is_some_and(|p| arena.is_element(p)) {
             arena.generations.bump(GEN_SUBTREE_MARKS);
             arena.generations.bump(GEN_DIRTY);
         }
@@ -71,7 +77,9 @@ fn replace_data_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     }
     let arena = realm(scope, cid);
     arena.renew_sheet(id);
-    if let Some(style) = parent.filter(|&p| arena.get(p).is_some_and(|n| &*n.local_name == "style")) {
+    // (…a `<style>` parent's block updated — the style elements that own a sheet, sheet_owners.rs)
+    let style_element = |n: &crate::dom::NodeData| &*n.local_name == "style" && crate::sheet_owners::is_sheet_owner(n);
+    if let Some(style) = parent.filter(|&p| arena.get(p).is_some_and(style_element)) {
         let in_shadow = arena.get(arena.root_of(style)).is_some_and(|r| r.host.is_some());
         let callers = &realm(scope, caller).generations;
         callers.bump(GEN_TREE);
@@ -79,4 +87,3 @@ fn replace_data_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         crate::dom::dom(scope).arena.observers.note(if in_shadow { CASCADE_VERSION } else { CASCADE_REFRESH });
     }
 }
-

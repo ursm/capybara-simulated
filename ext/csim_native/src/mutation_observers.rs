@@ -77,6 +77,10 @@ pub(crate) const CASCADE_VERSION: usize = 7;
 const FLAGS: usize = 8;
 
 impl Observers {
+    // Whether any node has a registered observer: a change with none asks no more.
+    pub(crate) fn observing(&self) -> bool {
+        !self.lists.is_empty()
+    }
     // A write's own steps changed an element's state (flag [4]).
     pub(crate) fn note_state_changed(&self) {
         self.note(STATE_CHANGED);
@@ -407,7 +411,7 @@ fn record(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
 // …the engine's: `fields` the record's, `[type, target, addedNodes, removedNodes, previousSibling, nextSibling,
 // attributeName, attributeNamespace, oldValue]`.
 pub(crate) fn queue_record(scope: &mut v8::PinScope<'_, '_>, cid: i32, target: NodeId, fields: &[v8::Local<'_, v8::Value>; 9]) -> bool {
-    if crate::dom::realm(scope, cid).observers.lists.is_empty() {
+    if !crate::dom::realm(scope, cid).observers.observing() {
         return false;
     }
     let kind = fields[0].uint32_value(scope).unwrap_or(0);

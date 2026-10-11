@@ -501,6 +501,12 @@ pub(crate) fn data_string<'s>(scope: &mut v8::PinScope<'s, '_>, node: v8::Local<
 // …and a write of it: `data` (a string) is what the node holds now — or, `appended`, what was appended to it — the slot
 // whose data the caller writes answered, none for a node that has none yet (a CharacterData's constructor writes its data
 // before its slot is made, which takes it from here: `registerNativeNode`).
+// …or none: the node's data spliced in the arena, which a read makes the string of again (`data_string`).
+pub(crate) fn forget_data(scope: &mut v8::PinScope<'_, '_>, node: v8::Local<'_, v8::Value>) {
+    let Some(ptr) = handle_of(scope, node) else { return };
+    // SAFETY: as `node_data`.
+    unsafe { (*ptr.as_ref().data.get()).reset(scope, None) };
+}
 pub(crate) fn wrote_data(scope: &mut v8::PinScope<'_, '_>, node: v8::Local<'_, v8::Value>, data: v8::Local<'_, v8::String>, appended: bool) -> Option<NodeId> {
     let ptr = handle_of(scope, node)?;
     // SAFETY: as `node_data`.
