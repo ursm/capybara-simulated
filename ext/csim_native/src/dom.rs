@@ -1687,7 +1687,7 @@ impl RealmArena {
         found
     }
     // Is `node` `ancestor` or in its subtree, shadow trees included?
-    fn under(&self, node: NodeId, ancestor: NodeId) -> bool {
+    pub(crate) fn under(&self, node: NodeId, ancestor: NodeId) -> bool {
         let mut at = Some(node);
         while let Some(n) = at {
             if n == ancestor {

@@ -161,20 +161,8 @@ fn move_refusal(arena: &RealmArena, node: NodeId, node_type: u32, parent: NodeId
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "insertionRefusal", insertion_refusal, context_id);
-    crate::dom::register(scope, ns, "moveRefusal", move_refusal_op, context_id);
     crate::dom::register(scope, ns, "changeChildren", change_children_op, context_id);
-}
-
-// __dom.moveRefusal(nodeNid, nodeType, parentNid, parentType, childNid) -> 0 where `moveBefore` of the node into the
-// parent before `childNid` (-1 for none) is valid, else why not (`Refusal`).
-fn move_refusal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(node), Some(parent)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2)) else { return rv.set_uint32(Refusal::MoveTree as u32) };
-    let node_type = args.get(1).uint32_value(scope).unwrap_or(0);
-    let parent_type = args.get(3).uint32_value(scope).unwrap_or(0);
-    let child = (args.get(4).number_value(scope) != Some(-1.0)).then(|| nid_arg(scope, &args, 4));
-    let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    rv.set_uint32(move_refusal(arena, node, node_type, parent, parent_type, child).map_or(0, |r| r as u32));
+    crate::dom::register(scope, ns, "moveChild", move_child_op, context_id);
 }
 
 // __dom.insertionRefusal(nodeNid, nodeType, parentNid, parentType, childNid, replace) -> 0 where the insertion of the
@@ -382,4 +370,45 @@ fn change_children_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         Some(Err(refusal)) => rv.set_uint32(refusal),
         None => {}
     }
+}
+
+// DOM "move" (`moveBefore`) of `node` into `parent` before `child` (none: last) — the checks passed — as its edges and
+// the engine's moving steps go: out of its old parent and into the new one with the live ranges' and NodeIterators'
+// steps of each (it stays connected: no removing or insertion steps), a form the parser gave a control in it no longer
+// its owner where they are no longer in the same tree (HTML's moving steps), and the focused or hovered element moved
+// with it — the old ancestors' `:focus-within` / `:hover` ending and the new ones' beginning, a flip of state no setter
+// sees (`note_state_changed`). The parent it left and the siblings it had there, which the removal's record carries.
+fn move_child(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node: NodeId, child: Option<NodeId>) -> (Option<NodeId>, Option<NodeId>, Option<NodeId>) {
+    let arena = realm(scope, cid);
+    // (…"if child is node, set child to node's next sibling": a move before itself is none)
+    let child = if child == Some(node) { arena.sibling(node, 1) } else { child };
+    let old = arena.parent_of(node);
+    let (previous, next) = (arena.sibling(node, -1), arena.sibling(node, 1));
+    if old.is_some() {
+        crate::dom::take_out(scope, cid, node);
+    }
+    crate::dom::insert_nodes(scope, cid, parent, &[node], child);
+    let arena = realm(scope, cid);
+    arena.parser_form_owners_removed(node);
+    let carried = |id: Option<NodeId>| id.is_some_and(|f| arena.under(f, node));
+    if old != Some(parent) && (carried(arena.focus) || carried(arena.hover)) {
+        arena.observers.note_state_changed();
+    }
+    (old, previous, next)
+}
+
+// __dom.moveChild(nodeNid, nodeType, parentNid, parentType, childNid) -> `[oldParent, previousSibling, nextSibling]`
+// (`move_child`), or why the move is refused (`Refusal`, the checks of "move": `move_refusal`); `childNid` -1 for none.
+fn move_child_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(node), Some(parent)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2)) else { return rv.set_uint32(Refusal::MoveTree as u32) };
+    let node_type = args.get(1).uint32_value(scope).unwrap_or(0);
+    let parent_type = args.get(3).uint32_value(scope).unwrap_or(0);
+    let child = (args.get(4).number_value(scope) != Some(-1.0)).then(|| nid_arg(scope, &args, 4));
+    let cid = realm_id(scope, &args);
+    if let Some(refusal) = move_refusal(realm(scope, cid), node, node_type, parent, parent_type, child) {
+        return rv.set_uint32(refusal as u32);
+    }
+    let (old, previous, next) = move_child(scope, cid, parent, node, child.flatten());
+    let items = [node_value(scope, old), node_value(scope, previous), node_value(scope, next)];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
