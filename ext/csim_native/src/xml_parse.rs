@@ -74,11 +74,20 @@ fn is_js_space(c: u16) -> bool {
 fn is_word(c: u16) -> bool {
     c < 0x80 && (c as u8).is_ascii_alphanumeric() || c == u16::from(b'_')
 }
-// XML's name productions, their ASCII part (a non-ASCII name is not flagged: valid ones are many).
+// XML's name productions (XML 1.0 §2.3 NameStartChar / NameChar, Namespaces §3 NCName: no colon) — a lone surrogate in
+// none.
+fn is_name_start(c: char) -> bool {
+    matches!(c, 'A'..='Z' | '_' | 'a'..='z' | '\u{C0}'..='\u{D6}' | '\u{D8}'..='\u{F6}' | '\u{F8}'..='\u{2FF}'
+        | '\u{370}'..='\u{37D}' | '\u{37F}'..='\u{1FFF}' | '\u{200C}'..='\u{200D}' | '\u{2070}'..='\u{218F}'
+        | '\u{2C00}'..='\u{2FEF}' | '\u{3001}'..='\u{D7FF}' | '\u{F900}'..='\u{FDCF}' | '\u{FDF0}'..='\u{FFFD}'
+        | '\u{10000}'..='\u{EFFFF}')
+}
+fn is_name_char(c: char) -> bool {
+    is_name_start(c) || matches!(c, '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')
+}
 fn is_nc_name(s: &[u16]) -> bool {
-    let Some((&first, rest)) = s.split_first() else { return false };
-    (first < 0x80 && (first as u8).is_ascii_alphabetic() || first == u16::from(b'_'))
-        && rest.iter().all(|&c| is_word(c) || c == u16::from(b'.') || c == u16::from(b'-'))
+    let mut chars = char::decode_utf16(s.iter().copied());
+    matches!(chars.next(), Some(Ok(c)) if is_name_start(c)) && chars.all(|c| c.is_ok_and(is_name_char))
 }
 fn is_q_name(s: &[u16]) -> bool {
     match s.iter().position(|&c| c == u16::from(b':')) {
@@ -101,6 +110,9 @@ fn find_unit(s: &[u16], from: usize, c: u8) -> Option<usize> {
 // The text with its character references decoded: `&amp;` `&lt;` `&gt;` `&quot;` `&apos;` `&nbsp;`, `&#n;` and `&#xh;`
 // (a lower-case `x`); any other `&` kept. A reference to no character makes the source not well-formed (`err`).
 fn decode(text: &[u16], err: &mut bool) -> Units {
+    if !text.contains(&u16::from(b'&')) {
+        return text.to_vec();
+    }
     let mut out = Vec::with_capacity(text.len());
     let mut i = 0;
     while i < text.len() {
@@ -117,8 +129,12 @@ fn decode(text: &[u16], err: &mut bool) -> Units {
     out
 }
 fn reference(s: &[u16], err: &mut bool) -> Option<(Units, usize)> {
-    // (…a reference is short: no `;` near, none — a run of bare `&`s scans no further than that each)
-    let end = s.iter().take(32).position(|&c| c == u16::from(b';'))?;
+    // (…its name the units a reference's can be — `#`, `x`, ASCII letters and digits — to its `;`: a run of bare `&`s
+    // scans no further than the next unit that cannot be one)
+    let end = 1 + s[1..].iter().position(|&c| !(c < 0x80 && ((c as u8).is_ascii_alphanumeric() || c == u16::from(b'#'))))?;
+    if s[end] != u16::from(b';') {
+        return None;
+    }
     let name = String::from_utf16(&s[1..end]).ok()?;
     let ch = match name.as_str() {
         "amp" => '&',
@@ -231,52 +247,58 @@ fn tag_end(s: &[u16], lt: usize) -> Option<usize> {
 // DOCTYPE.
 #[allow(clippy::type_complexity)]
 fn doctype(decl: &[u16]) -> Option<Option<(Units, Units, Units)>> {
-    let text = String::from_utf16_lossy(decl);
-    let lower = text.to_ascii_lowercase();
-    if !(lower.starts_with("doctype") && text[7..].chars().next().is_none_or(|c| c.is_whitespace())) {
+    let is_doctype = decl.len() >= 7
+        && decl[..7].iter().zip("doctype".bytes()).all(|(&c, b)| c < 0x80 && (c as u8).to_ascii_lowercase() == b)
+        && decl.get(7).is_none_or(|&c| is_js_space(c));
+    if !is_doctype {
         return Some(None);
     }
     // (…the internal subset left out: from the first `[` to the last `]`)
-    let bare = match (text.find('['), text.rfind(']')) {
-        (Some(a), Some(b)) if b > a => format!("{}{}", &text[..a], &text[b + 1..]),
-        _ => text.clone(),
+    let bare: Units = match (decl.iter().position(|&c| c == u16::from(b'[')), decl.iter().rposition(|&c| c == u16::from(b']'))) {
+        (Some(a), Some(b)) if b > a => decl[..a].iter().chain(&decl[b + 1..]).copied().collect(),
+        _ => decl.to_vec(),
     };
     // (…its words as `"[^"]*"|'[^']*'|\S+` reads them: a quoted literal whole, an unclosed quote a word like any other)
-    let chars: Vec<char> = bare.chars().collect();
-    let mut parts: Vec<String> = Vec::new();
+    let mut parts: Vec<&[u16]> = Vec::new();
     let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        if c.is_whitespace() {
+    while i < bare.len() {
+        let c = bare[i];
+        if is_js_space(c) {
             i += 1;
             continue;
         }
-        if c == '"' || c == '\'' {
-            if let Some(close) = chars[i + 1..].iter().position(|&d| d == c) {
-                parts.push(chars[i..i + 2 + close].iter().collect());
+        if c == u16::from(b'"') || c == u16::from(b'\'') {
+            if let Some(close) = bare[i + 1..].iter().position(|&d| d == c) {
+                parts.push(&bare[i..i + 2 + close]);
                 i += 2 + close;
                 continue;
             }
         }
-        let word_end = chars[i..].iter().position(|d| d.is_whitespace()).map_or(chars.len(), |p| p + i);
-        parts.push(chars[i..word_end].iter().collect());
+        let word_end = bare[i..].iter().position(|&d| is_js_space(d)).map_or(bare.len(), |p| p + i);
+        parts.push(&bare[i..word_end]);
         i = word_end;
     }
-    let unquote = |x: Option<&String>| -> String {
-        let x = x.map(String::as_str).unwrap_or("");
-        let x = x.strip_prefix(['"', '\'']).unwrap_or(x);
-        x.strip_suffix(['"', '\'']).unwrap_or(x).to_string()
+    let quote = |c: u16| c == u16::from(b'"') || c == u16::from(b'\'');
+    let unquote = |x: Option<&&[u16]>| -> Units {
+        let mut x: &[u16] = x.copied().unwrap_or(&[]);
+        if x.first().is_some_and(|&c| quote(c)) {
+            x = &x[1..];
+        }
+        if x.last().is_some_and(|&c| quote(c)) {
+            x = &x[..x.len() - 1];
+        }
+        x.to_vec()
     };
-    let name = parts.get(1).cloned().unwrap_or_default();
-    let keyword = parts.get(2).map(|k| k.to_ascii_uppercase()).unwrap_or_default();
+    let name = parts.get(1).map(|p| p.to_vec()).unwrap_or_default();
+    let keyword = parts.get(2).map(|k| String::from_utf16_lossy(k).to_ascii_uppercase()).unwrap_or_default();
     let (public, system) = match keyword.as_str() {
         "PUBLIC" if parts.len() < 5 => return None,
         "PUBLIC" => (unquote(parts.get(3)), unquote(parts.get(4))),
         "SYSTEM" if parts.len() < 4 => return None,
-        "SYSTEM" => (String::new(), unquote(parts.get(3))),
-        _ => (String::new(), String::new()),
+        "SYSTEM" => (Vec::new(), unquote(parts.get(3))),
+        _ => (Vec::new(), Vec::new()),
     };
-    Some(Some((units(&name), units(&public), units(&system))))
+    Some(Some((name, public, system)))
 }
 
 // The general entities of a literal value a DOCTYPE's internal subset declares (`<!ENTITY name "value">`), into
@@ -613,8 +635,8 @@ fn parse_into(src: &[u16], steps: &mut Steps, scope: Scope, fragment: bool, top:
 }
 
 // The in-scope namespace declarations of `context` — a fragment's context element, or a shadow root's host — its own
-// and its ancestors' `xmlns` / `xmlns:foo`, the nearest winning, and where none declares the default, the context's own
-// namespace (one `createElementNS` made carries no `xmlns`).
+// and its ancestors' prefixes and `xmlns` / `xmlns:foo` declarations, the nearest winning, and where none declares the
+// default, the context's own namespace (one `createElementNS` made carries no `xmlns`).
 fn context_scope(arena: &crate::dom::RealmArena, context: crate::dom::NodeId) -> Scope {
     let mut scope = Scope::new();
     scope.insert(units("xml"), Some(units(XML_NS)));
@@ -627,13 +649,18 @@ fn context_scope(arena: &crate::dom::RealmArena, context: crate::dom::NodeId) ->
     }
     for &id in chain.iter().rev() {
         let Some(n) = arena.get(id) else { continue };
-        for (name, value) in &n.attributes {
-            let value = (!value.is_empty()).then(|| units(value));
-            if name == "xmlns" {
-                scope.insert(Vec::new(), value);
-            } else if let Some(prefix) = name.strip_prefix("xmlns:") {
-                scope.insert(units(prefix), value);
+        // (…an element's own prefix names its namespace, declared or not: `createElementNS('urn:x', 'c:e')`'s `c`)
+        if let Some(prefix) = n.prefix.as_deref() {
+            scope.insert(units(prefix), (!n.ns.is_empty()).then(|| units(&n.ns)));
+        }
+        // (…and a declaration is an attribute in the XMLNS namespace — `setAttribute('xmlns', …)` makes one in none,
+        // which declares nothing — its value exactly)
+        for (key, attr_ns, local) in &n.attr_ns {
+            if attr_ns != XMLNS_NS {
+                continue;
             }
+            let value = n.get_attr(key).map(|v| n.get_attr_u16(key).map_or_else(|| units(v), <[u16]>::to_vec)).filter(|v| !v.is_empty());
+            scope.insert(if local == "xmlns" { Vec::new() } else { units(local) }, value);
         }
     }
     if !scope.contains_key(&Vec::new()) {

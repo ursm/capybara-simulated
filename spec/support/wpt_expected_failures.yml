@@ -2226,8 +2226,6 @@ dom/idlharness.window.js:
 - XSLTProcessor must be primary interface of new XSLTProcessor()
 dom/nodes/Node-cloneNode-document-allow-declarative-shadow-roots.window.js:
 - cloneNode() and document's allow declarative shadow roots
-dom/nodes/ParentNode-querySelector-All-xht.xht:
-- 'Selectors-API Test Suite: XHTML'
 dom/nodes/insertion-removing-steps/insertion-removing-steps-iframe.window.js:
 - 'Insertion steps: load event fires synchronously *after* iframe DOM insertion, as
   part of the iframe element''s insertion steps'
@@ -6382,8 +6380,6 @@ xhr/send-authentication-cors-setrequestheader-no-cred.htm:
 xhr/send-conditional-cors.htm:
 - 304 with appropriate CORS header
 - 304 without appropriate CORS header
-xhr/send-entity-body-document.htm:
-- XML document, windows-1252
 xhr/xmlhttprequest-timeout-worker-aborted.html:
 - "[harness] TIMEOUT"
 - "[harness] TIMEOUT"

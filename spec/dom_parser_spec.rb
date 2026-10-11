@@ -114,4 +114,27 @@ RSpec.describe 'DOMParser bindings' do
     JS
     expect(got).to eq([1, 0, 1])
   end
+
+  # …a character reference however many leading zeros it has; a name of XML's NameStartChar / NameChar beyond ASCII; a
+  # fragment's context element's own prefix in scope; and an `xmlns` attribute in no namespace (`setAttribute`) declares
+  # nothing — the context's own namespace is the default. Chrome 155: ["A", "élément", "v", "urn:ctx", "urn:x"].
+  it 'parses XML names, references and a fragment context as XML says' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const parse = (s) => new DOMParser().parseFromString(s, 'application/xml');
+        const long = parse('<a>&#' + '0'.repeat(40) + '65;</a>').documentElement.textContent;
+        const named = parse('<élément attré="v"/>').documentElement;
+        const d = parse('<r/>');
+        const e = d.createElementNS('urn:ctx', 'c:e');
+        d.documentElement.append(e);
+        e.innerHTML = '<c:b/>';
+        const sp = d.createElementNS('urn:x', 'sp');
+        sp.setAttribute('xmlns', 'urn:def');
+        d.documentElement.append(sp);
+        sp.innerHTML = '<b/>';
+        return [long, named.localName, named.getAttribute('attré'), e.firstChild.namespaceURI, sp.firstChild.namespaceURI];
+      })()
+    JS
+    expect(got).to eq(['A', 'élément', 'v', 'urn:ctx', 'urn:x'])
+  end
 end
