@@ -4685,10 +4685,9 @@ fn attr_get(
     let Some(id) = holder_node_id(scope, args) else {
         return v8::Intercepted::kNo;
     };
-    let cid = holder_realm_id(scope, args);
     // Prefer the lossless UTF-16 override (a value that carried a lone surrogate); else the UTF-8. Clone
     // the chosen representation out of the node borrow so the V8 string can be built with the scope after.
-    let value: Option<Result<Vec<u16>, String>> = realm(scope, cid).get(id).and_then(|n| {
+    let value: Option<Result<Vec<u16>, String>> = dom(scope).arena.get(id).and_then(|n| {
         match n.get_attr_u16(name) {
             Some(u) => Some(Ok(u.to_vec())),
             None => n.get_attr(name).map(|v| Err(v.to_string())),
@@ -4763,8 +4762,7 @@ fn attr_query(
     let Some(id) = holder_node_id(scope, args) else {
         return v8::Intercepted::kNo;
     };
-    let cid = holder_realm_id(scope, args);
-    let present = realm(scope, cid).get(id).is_some_and(|n| n.get_attr(name).is_some());
+    let present = dom(scope).arena.get(id).is_some_and(|n| n.get_attr(name).is_some());
     if present {
         // PropertyAttribute::NONE (0) = enumerable + writable + configurable.
         rv.set_uint32(0);
@@ -4813,8 +4811,8 @@ fn attrs_enumerate(
     let Some(id) = holder_node_id(scope, &args) else {
         return;
     };
-    let cid = holder_realm_id(scope, &args);
-    let names: Vec<String> = realm(scope, cid)
+    let names: Vec<String> = dom(scope)
+        .arena
         .get(id)
         .map(|n| n.attributes.iter().map(|(k, _)| k.clone()).collect())
         .unwrap_or_default();
@@ -4847,8 +4845,7 @@ fn attr_descriptor(
     let Some(id) = holder_node_id(scope, args) else {
         return v8::Intercepted::kNo;
     };
-    let cid = holder_realm_id(scope, args);
-    let value: Option<Result<Vec<u16>, String>> = realm(scope, cid).get(id).and_then(|n| {
+    let value: Option<Result<Vec<u16>, String>> = dom(scope).arena.get(id).and_then(|n| {
         match n.get_attr_u16(name) {
             Some(u) => Some(Ok(u.to_vec())),
             None => n.get_attr(name).map(|v| Err(v.to_string())),
@@ -4896,10 +4893,10 @@ fn holder_node_id(
     NodeId::from_i64(value.integer_value(scope)?)
 }
 
-// The realm whose state the interceptor works in: the one the node's slot is in now — which adoption into another realm's
-// tree moves (`RealmArena::adopt`), so a write to an adopted element's attributes reaches the style engine and the slot
-// steps of the tree it is in — else the one stamped into the holder's internal field 1 as the view was made (0, the
-// main realm, if absent).
+// The realm whose state a WRITE through the view works in: the one the node's slot is in now — which adoption into
+// another realm's tree moves (`RealmArena::adopt`), so a write to an adopted element's attributes reaches the style
+// engine and the slot steps of the tree it is in — else the one stamped into the holder's internal field 1 as the view
+// was made (0, the main realm, if absent). A read needs no realm's state: the node is the isolate's arena's.
 fn holder_realm_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::PropertyCallbackArguments<'_>) -> i32 {
     if let Some(realm) = holder_node_id(scope, args).and_then(|id| dom(scope).arena.get(id).map(|n| n.realm)) {
         return realm;
