@@ -29,4 +29,35 @@ RSpec.describe 'script element types' do
     # Chrome: the same, in the same order.
     expect(s.evaluate_script('ran')).to eq(%w[jscript spaced lang15 emptytype x-ecma livescript dyn:text/jscript dyn:text/javascript])
   end
+
+  # A parser marks its script once: one the adoption agency moves after its empty body left it unstarted is prepared by
+  # the text set on it, at once. Chrome: ["aa-ran", "after-aa"].
+  it "prepares an empty parsed script the parser moved, when text is set on it" do
+    html = '<!doctype html><meta charset=utf-8><body><script>window.L = [];</script><b><p><script id=aa></script></b>' \
+           "<script>aa.textContent = \"L.push('aa-ran')\"; L.push('after-aa');</script>"
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    expect(s.evaluate_script('L')).to eq(%w[aa-ran after-aa])
+  end
+
+  # Scripting is disabled for a script whose node document has no browsing context: preparing it marks it "already
+  # started" and runs nothing, so it runs no more once moved into the page. Chrome: ["moving", "moved"].
+  it 'runs no script prepared in a document without a browsing context' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        window.L = [];
+        const hd = document.implementation.createHTMLDocument('');
+        const script = hd.createElement('script');
+        script.text = "L.push('inert-ran')";
+        hd.body.append(script);
+        L.push('moving');
+        document.body.append(script);
+        L.push('moved');
+        return L;
+      })()
+    JS
+    expect(got).to eq(%w[moving moved])
+  end
 end

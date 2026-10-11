@@ -75,7 +75,8 @@ impl RealmArena {
     // not connected, and one whose type runs as nothing here (a data block; an import map or speculation rules, which
     // only a parse registers) do nothing; any other is "already started" from here (and run by the after-parse pass's
     // reckoning), and does nothing as a classic script marked `nomodule`, fires `error` with an empty `src`, and else runs.
-    pub(crate) fn prepare_script(&mut self, id: NodeId) -> u32 {
+    // (…and, `scripting` false — its node document has no browsing context — "already started" and nothing more: step 19)
+    pub(crate) fn prepare_script(&mut self, id: NodeId, scripting: bool) -> u32 {
         let Some(n) = self.get(id) else { return PREPARE_NONE };
         if n.script_flags & SCRIPT_ALREADY_STARTED != 0 {
             return PREPARE_NONE;
@@ -94,7 +95,7 @@ impl RealmArena {
         if let Some(n) = self.get_mut_quietly(id) {
             n.script_flags |= SCRIPT_ALREADY_STARTED | SCRIPT_RUN;
         }
-        match (nomodule, src, ty) {
+        match (nomodule || !scripting, src, ty) {
             (true, _, _) => PREPARE_NONE,
             (_, Some(true), _) => PREPARE_ERROR,
             (_, _, MODULE) => PREPARE_MODULE,
@@ -133,11 +134,12 @@ fn set_script_flags_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     }
 }
 
-// __dom.prepareScript(nid) -> what preparing the script element found it is to do (`prepare_script`: `PREPARE_NONE`, …).
+// __dom.prepareScript(nid, scripting) -> what preparing the script element found it is to do (`prepare_script`: `PREPARE_NONE`, …).
 fn prepare_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(PREPARE_NONE) };
     let cid = crate::dom::realm_id(scope, &args);
-    rv.set_uint32(crate::dom::realm(scope, cid).prepare_script(id));
+    let scripting = args.get(1).is_true();
+    rv.set_uint32(crate::dom::realm(scope, cid).prepare_script(id, scripting));
 }
 
 #[cfg(test)]
