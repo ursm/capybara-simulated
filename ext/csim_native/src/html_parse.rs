@@ -40,7 +40,7 @@ const OP_POP: i32 = 14; // handle
 const OP_FORM: i32 = 15; // element, form
 const OP_SELECTED_CONTENT: i32 = 16; // option
 const OP_SCRIPT_STARTED: i32 = 17; // script
-const OP_SHADOW_ROOT: i32 = 18; // host, template, root
+const OP_SHADOW_ROOT: i32 = 18; // host, template, root, parent
 
 // A namespace by number: the ones the parser ever gives an element or an attribute.
 fn ns_code(ns: &Namespace) -> i32 {
@@ -249,12 +249,19 @@ impl TreeSink for Sink {
     }
     // A `<template shadowrootmode>` the tree builder put on the stack of open elements alone: whether the host takes the
     // shadow root is the page side's to decide (it may host one already, a custom element's constructor having attached
-    // it, or be one whose definition disables shadow), where it is — and where it does not, it inserts the template into
-    // the host as any other, its children going into its contents after all.
+    // it, or be one whose definition disables shadow), where it is — and where it does not, it inserts the template as
+    // any other, its children going into its contents after all: into the host, or into its contents, a template's (a
+    // declarative one's, its shadow root — `parent` says which).
     fn attach_declarative_shadow(&self, host: &u32, template: &u32, _attrs: &[Attribute]) -> bool {
         let root = self.new_handle(Node::default());
-        self.nodes.borrow_mut()[*template as usize].contents = root;
-        self.push([Operand::Int(OP_SHADOW_ROOT), Operand::Int(*host as i32), Operand::Int(*template as i32), Operand::Int(root as i32)]);
+        let mut nodes = self.nodes.borrow_mut();
+        nodes[*template as usize].contents = root;
+        let parent = match nodes[*host as usize].contents {
+            0 => *host,
+            contents => contents,
+        };
+        drop(nodes);
+        self.push([OP_SHADOW_ROOT, *host as i32, *template as i32, root as i32, parent as i32].map(Operand::Int));
         true
     }
     fn maybe_clone_an_option_into_selectedcontent(&self, option: &u32) {

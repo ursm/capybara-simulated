@@ -1248,7 +1248,7 @@ impl RealmArena {
         }
         // (…and the elements set as its references)
         if !self.explicit_elements.is_empty() {
-            self.explicit_elements.retain(|&(host, _), _| host != id);
+            self.forget_all_explicit_elements(id);
         }
         // (…and an open dialogs list: a document's freed, or a dialog of one)
         if !self.open_dialogs.is_empty() {

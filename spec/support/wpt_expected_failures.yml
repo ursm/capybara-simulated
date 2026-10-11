@@ -1980,9 +1980,6 @@ custom-elements/reactions/Document.html:
   element from a contenteditable element
 - write on Document must enqueue disconnectedCallback when removing a custom element
 - writeln on Document must enqueue disconnectedCallback when removing a custom element
-custom-elements/registries/Element-customElementRegistry-exceptions.html:
-- customElementRegistry on a failed custom element created by parser should return
-  the specified custom regsitry
 custom-elements/registries/Element-innerHTML.html:
 - createContextualFragment on a range inside a template should use null registry even
   when the template has a scoped registry

@@ -43,6 +43,13 @@ impl RealmArena {
         }
     }
 
+    // …and every one of them, `id` freed.
+    pub(crate) fn forget_all_explicit_elements(&mut self, id: NodeId) {
+        for index in 0..ATTRIBUTES.len() as u8 {
+            self.explicit_elements.remove(&(id, index));
+        }
+    }
+
     // Whether `candidate` is a valid explicitly set reference of `host`: an element whose tree is a shadow-including
     // inclusive ancestor of `host`'s — the same tree, or one reached up through shadow hosts (not one in a shadow tree
     // below, a detached subtree while `host` is connected, another document).
