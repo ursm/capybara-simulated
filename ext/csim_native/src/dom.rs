@@ -732,6 +732,50 @@ impl SharedWord {
     }
 }
 
+// The generations a realm's bindings key their memos on (mutation-observer.js, cascade.js), by index (`GEN_*`): u32s in
+// a buffer the realm's `__dom` views (`generations`), which the bindings move and the engine moves with them — read
+// from the buffer each time, as either may have written it last.
+#[derive(Default)]
+pub(crate) struct Generations {
+    buffer: Option<v8::SharedRef<v8::BackingStore>>,
+}
+// …the sequence of the last change a layout has to see; how many subtree-wide layout marks there were (a diagnostic);
+// the settle generation (every observable change); the tree's (that and every parser change); the nodes' (that but a
+// text's data); the structure's (an insertion or removal, nothing else); the style state's (a state no other moves).
+pub(crate) const GEN_DIRTY: usize = 0;
+pub(crate) const GEN_SUBTREE_MARKS: usize = 1;
+pub(crate) const GEN_SETTLE: usize = 2;
+pub(crate) const GEN_TREE: usize = 3;
+pub(crate) const GEN_NODES: usize = 4;
+pub(crate) const GEN_STRUCTURE: usize = 5;
+pub(crate) const GEN_STYLE_STATE: usize = 6;
+const GENERATIONS: usize = 7;
+
+impl Generations {
+    pub(crate) fn bump(&self, which: usize) {
+        let Some(buffer) = &self.buffer else { return };
+        let cells = &buffer[which * 4..which * 4 + 4];
+        let mut bytes = [0u8; 4];
+        for (byte, cell) in bytes.iter_mut().zip(cells) {
+            *byte = cell.get();
+        }
+        for (cell, byte) in cells.iter().zip(u32::from_ne_bytes(bytes).wrapping_add(1).to_ne_bytes()) {
+            cell.set(byte);
+        }
+    }
+    // …the buffer, made as the realm's bindings first view it: every generation 0, but the structure's, 1.
+    fn store(&mut self) -> v8::SharedRef<v8::BackingStore> {
+        self.buffer
+            .get_or_insert_with(|| {
+                let mut words = [0u32; GENERATIONS];
+                words[GEN_STRUCTURE] = 1;
+                let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_ne_bytes()).collect();
+                v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared()
+            })
+            .clone()
+    }
+}
+
 // …a realm's `__dom.<name>`: a Uint32Array of one over a word's buffer.
 pub(crate) fn view_word(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, name: &str, store: v8::SharedRef<v8::BackingStore>) {
     let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
@@ -861,6 +905,8 @@ pub(crate) struct RealmState {
     pub(crate) target: Option<(NodeId, Vec<String>)>,
     // The realm's style sheets, parsed under the arena's lock (sheets.rs): what its engine cascades and CSSOM reads.
     pub(crate) sheets: crate::sheets::SheetStore,
+    // The generations its bindings key their memos on (`Generations`).
+    pub(crate) generations: Generations,
     // The `marginwidth` / `marginheight` of the frame this realm's document sits in, which its body takes its margins
     // from where it declares none (HTML §15.3.2) — pushed in by the parent realm (`setContainerMargins`).
     pub(crate) container_margins: [Option<String>; 2],
@@ -2328,6 +2374,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     view_word(scope, ns, "edgeGen", edges);
     let changes = dom(scope).arena.change_flags.store();
     view_word(scope, ns, "changeFlags", changes);
+    // (…and the realm's generations, its own)
+    let generations = realm(scope, context_id).generations.store();
+    let buffer = v8::ArrayBuffer::with_backing_store(scope, &generations);
+    if let (Some(view), Some(key)) = (v8::Uint32Array::new(scope, buffer, 0, GENERATIONS), v8::String::new(scope, "generations")) {
+        ns.set(scope, key.into(), view.into());
+    }
     crate::change_on_blur::install(scope, ns, context_id);
     crate::custom_elements::install(scope, ns, context_id);
     crate::details::install(scope, ns, context_id);
