@@ -2152,7 +2152,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "adoptSubtree", adopt_subtree, context_id);
     // …and a node's object, held by its handle from its making (node_handle.rs)
     register(scope, ns, "setNodeObject", crate::node_handle::set_node_object, context_id);
-    register(scope, ns, "statedNodes", crate::node_handle::stated_nodes, context_id);
+    register(scope, ns, "leavingElements", leaving_elements, context_id);
     register(scope, ns, "nodesUnder", nodes_under, context_id);
     register(scope, ns, "handleEdgesMismatch", handle_edges_mismatch, context_id);
     // Free a disposed realm's state and nodes — csim calls this before tearing down a frame realm (main
@@ -2288,6 +2288,29 @@ fn subtree_nodes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         stack.extend(node.shadow_root);
     }
     rv.set(nodes_value(scope, cid, &out));
+}
+// __dom.leavingElements(nid, kind) -> the elements of the node's shadow-including subtree whose removing steps a subtree
+// leaving its document runs, in tree order: (kind 0) those an element state is on (`STATE_*`), which may have state to
+// undo; (kind 1) the HTML `<iframe>`s and `<frame>`s, whose browsing contexts are discarded — or undefined for none.
+fn leaving_elements(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let frames = args.get(1).int32_value(scope) == Some(1);
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let mut found = Vec::new();
+    let mut stack = vec![id];
+    while let Some(n) = stack.pop() {
+        let Some(node) = arena.get(n) else { continue };
+        let wanted = if frames { node.is_html_named("iframe") || node.is_html_named("frame") } else { node.state != 0 };
+        if wanted {
+            found.push(n);
+        }
+        stack.extend(node.children.iter().rev().copied());
+        stack.extend(node.shadow_root);
+    }
+    if !found.is_empty() {
+        rv.set(nodes_value(scope, cid, &found));
+    }
 }
 // __dom.childNodes(nid) -> the node's children, as `nodes_value` answers.
 fn child_nodes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

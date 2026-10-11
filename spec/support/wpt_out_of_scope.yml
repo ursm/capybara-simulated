@@ -47330,20 +47330,6 @@ html/semantics/forms/the-label-element/control-active-with-multiple-clicks.html:
     pointer backend and the transient :active UI state are deliberately unmodeled
     (CLAUDE.md rule 1); there is no rendering/interaction engine to observe `:active`
     during a held mousedown.
-html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.html:
-- name: Click forwarded from label to control preserves pointer metadata
-  reason: A label-forwarded click must carry pointer-event metadata (coordinates/buttons)
-    — pointer automation / pointer-event metadata not modeled.
-- name: Click forwarded from label.click() is not trusted
-  reason: The file drives a test_driver pointer sequence (preserves-pointer-metadata)
-    that hangs without a pointer backend; the runner force-timeout then makes the
-    sibling subtest non-deterministic — out-of-scope on pointer automation.
-html/semantics/forms/the-label-element/proxy-modifier-click-to-associated-element.tentative.html:
-- name: label with for attribute should proxy click events to the associated element
-    on click
-  reason: Unratified WPT .tentative spec; the label->control click proxy already works
-    for real clicks (apps unaffected) — the failing subtest is a test_driver modifier-click
-    harness edge. Deferred until it ratifies (then re-enters in-scope).
 html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-popup-appearance.tentative.html:
 - name: "== html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-popup-appearance-ref.html"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

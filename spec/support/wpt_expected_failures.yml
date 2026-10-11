@@ -4629,8 +4629,6 @@ html/semantics/forms/the-input-element/selection-pointer.html:
 - Selecting texts across <input type=time> should not cancel selection
 - Selecting texts across <input type=url> should not cancel selection
 - Selecting texts across <input type=week> should not cancel selection
-html/semantics/forms/the-label-element/label-forwarded-click-pointer-properties.html:
-- "[harness] TIMEOUT"
 html/semantics/forms/the-meter-element/meter-appearance-none-even-less-good-value-rendering.html:
 - "!= html/semantics/forms/the-meter-element/reference/meter-appearance-auto-even-less-good-value-rendering.html"
 html/semantics/forms/the-meter-element/meter-appearance-none-optimum-value-rendering.html:

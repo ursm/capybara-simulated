@@ -507,25 +507,6 @@ pub(crate) fn set_node_object(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
     // SAFETY: the handle lives while its object does, an argument; the main thread writes the reference.
     unsafe { csim_traced_reset_droppable(ptr.as_ref().object.get(), scope.as_raw_isolate_ptr(), &*obj as *const v8::Object) };
 }
-// `__dom.statedNodes(nodes)` -> the nodes among them an element state is on (`STATE_*`), whose removing steps may have
-// state to undo, as a subtree leaves its document — or undefined for none.
-pub(crate) fn stated_nodes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Ok(nodes) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
-    let mut stated = Vec::new();
-    for i in 0..nodes.length() {
-        let Some(value) = nodes.get_index(scope, i) else { continue };
-        let Some(ptr) = handle_of(scope, value) else { continue };
-        // SAFETY: the handle lives while its object, in the array, does.
-        let Some(nid) = unsafe { ptr.as_ref() }.nid.get() else { continue };
-        if crate::dom::dom(scope).arena.get(nid).is_some_and(|n| n.state != 0) {
-            stated.push(value);
-        }
-    }
-    if !stated.is_empty() {
-        rv.set(v8::Array::new_with_elements(scope, &stated).into());
-    }
-}
-
 // Where the object of the node whose handle `link` is lies — read with the scope once the arena is let go
 // (`HeldObject::get`), and before anything is allocated on the JS heap (a collection in between could take the handle).
 pub(crate) fn held(link: &Link) -> Option<HeldObject> {
