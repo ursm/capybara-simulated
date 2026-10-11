@@ -970,7 +970,7 @@ impl RealmArena {
     // activation behaviour, whatever its state's input activation behaviour is), the summary of its details, and a label with a
     // labeled control. (A select has none; Chrome and Firefox, which follow a link past a button or a text input,
     // depart from the HTML text here, which this follows.)
-    pub(crate) fn is_click_activatable(&self, id: NodeId) -> bool {
+    fn is_click_activatable(&self, id: NodeId) -> bool {
         let Some(n) = self.get(id).filter(|n| n.kind == NodeKind::Element) else { return false };
         if n.is_hyperlink() {
             return true;
@@ -986,24 +986,27 @@ impl RealmArena {
             }
     }
     // A click's activation target (DOM dispatch): the nearest element with activation behaviour on its event path — the
-    // target, or, the click bubbling, an ancestor on the flat tree's way up (a slotted node's slot, a shadow root's
-    // host), out of the target's own shadow tree only for a composed click.
+    // target, or, the click bubbling, an ancestor the way the event path climbs (a node's assigned slot, else its parent,
+    // else a shadow root's host), out of the target's own shadow tree only for a composed click. A summary is passed by
+    // where the click came through interactive content inside it — a `<select>`, a `<label>`, a `<video controls>` — as
+    // Chrome and Firefox pass it (WPT the-summary-element/interactive-content).
     pub(crate) fn activation_target(&self, target: NodeId, bubbles: bool, composed: bool) -> Option<NodeId> {
         let target_root = self.root_of(target);
+        let mut through_interactive = false;
         let mut cur = Some(target);
         while let Some(c) = cur {
-            if self.is_click_activatable(c) {
+            let n = self.get(c)?;
+            if self.is_click_activatable(c) && !(through_interactive && n.is_html_named("summary")) {
                 return Some(c);
             }
             if !bubbles {
                 return None;
             }
-            let parent = self.get(c)?.parent;
-            let out_of_root = parent.filter(|&p| self.get(p).is_some_and(|pn| pn.kind != NodeKind::Element && pn.host.is_some()));
-            if !composed && out_of_root == Some(target_root) {
+            through_interactive |= self.is_interactive_content(n);
+            if !composed && c == target_root && n.kind != NodeKind::Element && n.host.is_some() {
                 return None;
             }
-            cur = crate::geometry::flat_parent(self, c);
+            cur = n.assigned_slot.filter(|&s| self.get(s).is_some()).or(n.parent).or(n.host);
         }
         None
     }

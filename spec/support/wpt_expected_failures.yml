@@ -5183,14 +5183,6 @@ html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-correc
 - "== html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-correct-order-remove-readd-ref.html"
 html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-dynamic.html:
 - "== html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-dynamic-ref.html"
-html/semantics/interactive-elements/the-summary-element/interactive-content.html:
-- Clicking a <label> doesn't open <details>
-- Clicking a <video> doesn't open <details>
-- Clicking an <audio> element doesn't open <details>
-- Clicking an <img> with a 'usemap' attribute doesn't open <details>
-- Clicking in a <textarea> doesn't open <details>
-- Clicking in an <iframe> doesn't open <details>
-- Clicking the content of an <embed> doesn't open <details>
 html/webappapis/scripting/events/compile-event-handler-settings-objects.html:
 - The entry settings object while executing the compiled callback via Web IDL's invoke
   must be that of the node document
