@@ -1936,8 +1936,6 @@ custom-elements/form-associated/disabled-delegatesFocus.html:
 - Focus events fire on disabled form-associated custom elements with delegatesFocus
 custom-elements/form-associated/form-disabled-callback.html:
 - Relationship with FIELDSET
-custom-elements/form-associated/form-reset-callback.html:
-- Clicking a reset button invokes formResetCallback in a microtask
 custom-elements/htmlconstructor/newtarget-customized-builtins.html:
 - If prototype is not object (5), derives the fallback from NewTarget's GetFunctionRealm
   (customized built-in elements)
