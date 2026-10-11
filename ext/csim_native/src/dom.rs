@@ -732,11 +732,11 @@ pub(crate) struct RealmArena {
     pub(crate) previously_focused: std::collections::HashMap<NodeId, NodeId>,
     // Each text control's selection, once it has one (text_selection.rs).
     pub(crate) text_selections: std::collections::HashMap<NodeId, crate::text_selection::TextSelection>,
-    // The radio buttons that have been checked, by their name (element_state.rs `note_radio`) — kept so the radio buttons'
-    // insertion steps find the checked ones of a group in its size, not the tree's: the parser inserts a checked radio a
-    // row, and a walk of the document for each was quadratic. An entry may since have been unchecked, renamed, moved or
-    // freed, which a lookup sees and drops.
-    pub(crate) checked_radios: std::collections::HashMap<Vec<u16>, Vec<NodeId>>,
+    // The radio buttons that have been checked, by their name and form owner (element_state.rs `note_radio`) — kept so
+    // the radio buttons' steps find the checked ones of a group in its size, not the tree's: the parser inserts a checked
+    // radio a row, and a walk of the document for each was quadratic. An entry may since have been unchecked, renamed or
+    // moved, which a lookup sees and drops; a freed one goes as it is freed.
+    pub(crate) checked_radios: std::collections::HashMap<(Vec<u16>, Option<NodeId>), Vec<NodeId>>,
     // Moves with every write to the arena (a node made or freed, any `get_mut`): what a memo of it keys on.
     pub(crate) mutations: u64,
     // The lock the style engines' rules and every element's parsed declarations are read under — ONE for the isolate's
@@ -1073,6 +1073,17 @@ impl RealmArena {
             self.id_epoch += 1;
         }
         self.id_index.get_mut().forget(id);
+        // (…and a checked radio's entry, under its name)
+        if !self.checked_radios.is_empty() {
+            if let Some(name) = self.get(id).filter(|n| n.is_html_named("input")).and_then(|n| n.plain_attr_units("name")) {
+                self.checked_radios.retain(|(n, _), ids| {
+                    if *n == name {
+                        ids.retain(|&o| o != id);
+                    }
+                    !ids.is_empty()
+                });
+            }
+        }
         self.unlist(id.idx);
         let slot = &mut self.slots[id.idx as usize];
         let (assigned_slot, pseudo_boxes) = slot.data.as_ref().map_or((None, [None; 2]), |n| (n.assigned_slot, n.pseudo_boxes));
@@ -1207,6 +1218,9 @@ impl RealmArena {
     }
 
     // A new node, appended to `parent` when that is live (a stale parent nid leaves it a detached root).
+    // (A node made in place under `parent` is linked with none of DOM "insert"'s steps — `insert_nodes`' slot and
+    // insertion steps — which a node made for a parse or a clone and then inserted gets: the bindings make every node
+    // with no parent.)
     pub(crate) fn create(&mut self, data: NodeData, parent: Option<NodeId>) -> NodeId {
         self.direction_sources |= notes_direction(&data);
         self.inert_sources |= notes_inert(&data);
@@ -2683,8 +2697,10 @@ fn set_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let next = (had & !mask) | (bits & mask);
     if next != had {
         arena.set_state(id, next);
-        if mask & (STATE_CHECKED | STATE_CHECKED_DIRTY) != 0 {
-            arena.note_radio(id);
+        // (…a radio's checkedness set to true unchecks the rest of its group, whatever set it — a click, `.checked`, a
+        // form's reset — §4.10.5.1.15)
+        if mask & (STATE_CHECKED | STATE_CHECKED_DIRTY) != 0 && arena.radio_steps(id) {
+            arena.observers.note_state_changed();
         }
     }
     rv.set_uint32(had);
@@ -3028,13 +3044,13 @@ fn slot_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, nodes:
     }
 }
 // The steps of an attribute write the engine runs after it: the slot steps (`slot_attribute_steps`), and a radio
-// button's, whose `checked`, `name`, `type` or `form` written may make it a checked one of a group (`radio_attribute_steps`),
+// button's, whose `checked`, `name`, `type` or `form` written may make it a checked one of a group (`radio_steps`),
 // whose state change the bindings hear of (`note_state_changed`).
 fn attribute_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, names: &[&str]) {
     slot_attribute_steps(scope, cid, id, names);
     if names.iter().any(|n| matches!(*n, "checked" | "name" | "type" | "form")) {
         let arena = realm(scope, cid);
-        if arena.radio_attribute_steps(id) {
+        if arena.radio_steps(id) {
             arena.observers.note_state_changed();
         }
     }

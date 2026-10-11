@@ -64,4 +64,24 @@ RSpec.describe 'the radio buttons\' insertion steps' do
     JS
     expect(got).to eq([[true, true], [false, true]])
   end
+
+  # A radio's checkedness set to true unchecks the rest of its group whatever set it — a form's reset, which sets each
+  # one's anew, the last winning — and in whatever tree it is (Chrome and Firefox).
+  it 'unchecks the rest of the group as a reset or a detached tree\'s attribute checks one' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const f = document.querySelector('form');
+        f.reset();
+        const r = [a1.checked, a2.checked];
+        const d = document.createElement('div');
+        d.innerHTML = '<input type=radio name=z checked><input type=radio name=z>';
+        const [x, y] = d.children;
+        y.setAttribute('checked', '');
+        r.push(x.checked, y.checked);
+        return r;
+      })()
+    JS
+    expect(got).to eq([false, true, false, true])
+  end
 end
