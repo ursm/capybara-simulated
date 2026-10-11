@@ -1898,16 +1898,8 @@ css/cssom/stylesheet-same-origin.sub.html:
 - Origin-clean check in loading error CSSOM Stylesheets
 custom-elements/CustomElementRegistry-constructor-and-callbacks-are-held-strongly.html:
 - adoptedCallback
-- attributeChangedCallback
 - connectedCallback
 - disconnectedCallback
-custom-elements/attribute-changed-callback.html:
-- Mutating attributeChangedCallback after calling customElements.define must not affect
-  the callback being invoked
-- Mutating observedAttributes after calling customElements.define must not affect
-  the set of attributes for which attributedChangedCallback is invoked
-- attributedChangedCallback must be enqueued for attributes specified in a non-Array
-  iterable observedAttributes
 custom-elements/connected-callbacks-html-fragment-parsing.html:
 - Inserting a custom element into a cloned document using HTML fragment parsing must
   enqueue a custom element upgrade reaction, not synchronously invoke its constructor
@@ -1931,7 +1923,6 @@ custom-elements/connected-callbacks-html-fragment-parsing.html:
   a custom element upgrade reaction, not synchronously invoke its constructor
 custom-elements/cross-realm-callback-report-exception.html:
 - adoptedCallback
-- attributeChangedCallback
 - connectedCallback
 - constructor
 - disconnectedCallback

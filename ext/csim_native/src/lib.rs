@@ -14,6 +14,7 @@ mod av1;
 mod canvas;
 mod canvas_path;
 mod caret;
+mod ce_reactions;
 mod clone;
 mod connection_steps;
 mod collections;

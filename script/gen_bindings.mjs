@@ -655,7 +655,8 @@ const RUNTIME = [
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
-  'defineLength', 'defineUnscopables', 'unforgeableMembers', 'defaultJSONOf', 'defineSetlike', 'defineMaplike'
+  'defineLength', 'defineUnscopables', 'unforgeableMembers', 'defaultJSONOf', 'defineSetlike', 'defineMaplike',
+  'ceEnter', 'ceLeave'
 ];
 
 const all = await parseAll();
@@ -727,8 +728,8 @@ for (const spec of Object.keys(EDITORS_DRAFT_ADDITIONS)) {
 }
 
 // The extended attributes a binding here makes what IDL says of, by where they stand; any other is an error.
-// [CEReactions]: an implementation's writes run their reactions as each returns (handleAttributeChanges) — which is
-// the operation's return where it writes once, as every one generated here does. [Reflect]: the implementation reflects
+// [CEReactions]: the custom element reactions its steps enqueue run as it returns — an element queue pushed as it
+// begins and popped as it returns (`ceEnter` / `ceLeave`, webidl.js: `withCEReactions`). [Reflect]: the implementation reflects
 // the content attribute. [SameObject] / [NewObject]: what the implementation returns. [Exposed]: the global the
 // interface object is put on — and, of a member, whether its interface's has it at all (membersOf). [SecureContext]: exposed, every realm here being a secure context
 // (`isSecureContext`, platform-globals.js). The rest the generator makes as Web IDL says.
@@ -1383,13 +1384,13 @@ function generateInterface(def, options = {}) {
         // (…an enumeration's: a string it has not is ignored, not an error — Web IDL §3.7.6)
         const value = `enumValue(v, ${JSON.stringify(enums.get(m.idlType.idlType))}, ${failure({ iface: name, member: m.name })})`;
         const v = m.idlType.nullable ? `v == null ? null : ${value}` : value;
-        out.push(`    set ${key}(v) { const self = ${self}; const value = ${v}; if (value !== undefined) ${setImpl}(self, value); }`);
+        out.push(`    set ${key}(v) { const self = ${self}; const value = ${v}; if (value !== undefined) { ${withCEReactions(m, `${setImpl}(self, value);`)} } }`);
       } else if (!m.readonly && reflection) {
         const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
-        out.push(`    set ${key}(v) { const self = ${self}; v = ${v}; ${reflection.set}; }`);
+        out.push(`    set ${key}(v) { const self = ${self}; v = ${v}; ${withCEReactions(m, `${reflection.set};`)} }`);
       } else if (!m.readonly) {
         const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
-        out.push(`    set ${key}(v) { ${setImpl}(${self}, ${v}); }`);
+        out.push(`    set ${key}(v) { ${ceReactionsOf(m) ? `const self = ${self}; const value = ${v}; ${withCEReactions(m, `${setImpl}(self, value);`)}` : `${setImpl}(${self}, ${v});`} }`);
       }
       continue;
     }
@@ -1642,6 +1643,13 @@ function argName(a) {
   return RESERVED.has(a.name) || a.name.startsWith('IS_') ? `${a.name}_` : a.name;
 }
 
+// A member's steps (`steps`, statements) as [CEReactions] makes them where it has the attribute: an element queue pushed
+// on the custom element reactions stack as they begin, popped as they return, and the reactions they enqueued run.
+const ceReactionsOf = (m) => (m.extAttrs || []).some((e) => e.name === 'CEReactions');
+function withCEReactions(m, steps) {
+  return ceReactionsOf(m) ? `{ const ce = ceEnter(); try { ${steps} } finally { ceLeave(ce); } }` : steps;
+}
+
 // An operation: its required arguments its parameters (so its `length` is their count, Web IDL §3.7.7), the optional
 // ones read from `arguments`, a variadic one the rest — each converted, and handed to the implementation.
 function operation(iface, m, checks, selfCheck, implName = m.name) {
@@ -1654,7 +1662,8 @@ function operation(iface, m, checks, selfCheck, implName = m.name) {
   const converted = convertArguments(iface, m, checks, (a) => ((a.variadic && rest) || (!a.optional && !a.variadic) ? argName(a) : null));
   // (…`this` checked first, then the arguments counted — Web IDL's order, as Chrome's)
   const check = requiredCount ? `required(arguments, ${requiredCount}, '${m.name}', '${iface}'); ` : '';
-  const steps = `const self = ${selfCheck(promiseOf(m) && `Failed to execute '${m.name}' on '${iface}': `)}; ${check}return impl.${implName}(${['self', ...converted].join(', ')});`;
+  const call = withCEReactions(m, `return impl.${implName}(${['self', ...converted].join(', ')});`);
+  const steps = `const self = ${selfCheck(promiseOf(m) && `Failed to execute '${m.name}' on '${iface}': `)}; ${check}${call}`;
   return `${m.name}(${params}) { ${promiseOf(m) ? rejecting(steps) : steps} }`;
 }
 
@@ -1694,7 +1703,7 @@ function overloadedOperation(iface, group, checks, selfCheck) {
   const implName = (m) => `${name}_${m.arguments.length ? m.arguments.map((a) => a.name).join('_') : 'none'}`;
   const lines = [`const self = ${selfCheck(promise && `Failed to execute '${name}' on '${iface}': `)};`];
   if (overloads.required) lines.push(`required(arguments, ${overloads.required}, '${name}', '${iface}');`);
-  const call = (m) => `return impl.${implName(m)}(${['self', ...convertArguments(iface, m, checks, () => null)].join(', ')});`;
+  const call = (m) => withCEReactions(m, `return impl.${implName(m)}(${['self', ...convertArguments(iface, m, checks, () => null)].join(', ')});`);
   lines.push(...overloadSwitch(iface, name, overloads, 'arguments', checks, call, `Failed to execute '${name}' on '${iface}': `));
   const body = promise ? ['try {', ...lines.map((l) => `  ${l}`), '} catch (e) {', '  return rejectedPromise(e);', '}'] : lines;
   return [`${name}(${params}) {`, ...body.map((l) => `      ${l}`), `    }`].join('\n');

@@ -739,6 +739,8 @@ pub(crate) struct RealmArena {
     pub(crate) checked_radios: std::collections::HashMap<(Vec<u16>, Option<NodeId>), Vec<NodeId>>,
     // The keys of the tasks the platform queues on the realms' timer lists, the isolate's (timers.rs).
     pub(crate) task_keys: crate::timers::TaskKeys,
+    // The custom element reactions: each element's reaction queue, and the agent's reactions stack (ce_reactions.rs).
+    pub(crate) ce_reactions: crate::ce_reactions::Reactions,
     // Moves with every write to the arena (a node made or freed, any `get_mut`): what a memo of it keys on.
     pub(crate) mutations: u64,
     // The lock the style engines' rules and every element's parsed declarations are read under — ONE for the isolate's
@@ -2040,6 +2042,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::collections::install(scope, ns, context_id);
     crate::mutation_observers::install(scope, ns, context_id);
     crate::timers::install(scope, ns, context_id);
+    crate::ce_reactions::install(scope, ns, context_id);
     crate::scroll_boxes::install(scope, ns, context_id);
     crate::form_entries::install(scope, ns, context_id);
     crate::caret::install(scope, ns, context_id);
