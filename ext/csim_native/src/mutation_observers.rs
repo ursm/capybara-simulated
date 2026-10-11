@@ -1,8 +1,9 @@
 // Mutation observers (DOM §4.3): every node's registered observer list — transient registered observers included —
 // each observer's node list and transient node set, and which observers a mutation interests ("queue a mutation
-// record"). The observers themselves, their callbacks and record queues, are the bindings' (mutation-observer.js), which
-// name each by the number `create` gave it; the lists live with the nodes, so the ancestor walks a record and a removal
-// make are the arena's.
+// record") — and each observer's record queue, and which observers are pending. The observers themselves and their
+// callbacks are the bindings' (mutation-observer.js), which name each by the number `create` gave it, and which make a
+// MutationRecord of each record as it is taken; the lists live with the nodes, so the ancestor walks a record and a
+// removal make are the arena's.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -41,8 +42,14 @@ pub(crate) struct Observers {
     // the isolate's: a change one realm's script makes may interest an observer another's made.
     realms: HashMap<u32, i32>,
     next: u32,
-    // The realms with records, transient registrations or signaled slots waiting to be notified — the agent's pending
-    // mutation observers, by realm (which holds them): one notification, in whichever realm it runs, takes them all.
+    // Each observer's record queue: each record as the bindings make a MutationRecord of it (`record`) — `[type, target,
+    // addedNodes, removedNodes, previousSibling, nextSibling, attributeName, attributeNamespace, oldValue]`, one array
+    // for every observer it was queued for — and whether the observer takes its old value.
+    records: HashMap<u32, Vec<(v8::Global<v8::Array>, bool)>>,
+    // The agent's pending mutation observers: those with records or transient registrations since they were notified…
+    notify: Vec<u32>,
+    // …and the realms with pending observers or signaled slots, which hold them: one notification, in whichever realm
+    // it runs, takes them all.
     pending: Vec<i32>,
     // What every realm's bindings read without a call (`moFlags`, a view each of the one buffer): [0] whether any node
     // has a registered observer — which a change must then ask about, whichever realm's script made it — [1] whether
@@ -56,6 +63,18 @@ const ANY_REGISTERED: usize = 0;
 const MICROTASK_QUEUED: usize = 1;
 
 impl Observers {
+    // `observer` is pending, and so is its realm.
+    fn pend_observer(&mut self, observer: u32) {
+        if !self.notify.contains(&observer) {
+            self.notify.push(observer);
+        }
+        if let Some(&cid) = self.realms.get(&observer) {
+            if !self.pending.contains(&cid) {
+                self.pending.push(cid);
+            }
+        }
+    }
+
     // (…[0] kept as the lists are)
     fn sync(&self) {
         if let Some(flags) = &self.flags {
@@ -81,8 +100,11 @@ impl Observers {
         self.sync();
     }
 
-    // "disconnect": every registered observer of `observer` dropped, from its node list and its transient node set.
+    // "disconnect": every registered observer of `observer` dropped, from its node list and its transient node set, and
+    // its record queue emptied.
     fn disconnect(&mut self, observer: u32) {
+        self.records.remove(&observer);
+        self.notify.retain(|&o| o != observer);
         let nodes = self.nodes.remove(&observer).into_iter().flatten();
         for node in nodes.chain(self.transient.remove(&observer).into_iter().flatten()) {
             if let Some(list) = self.lists.get_mut(&node) {
@@ -234,6 +256,9 @@ impl RealmArena {
                 pending.push(observer);
             }
         }
+        for &observer in &pending {
+            store.pend_observer(observer);
+        }
         pending
     }
 }
@@ -243,9 +268,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moObserve", observe, context_id);
     crate::dom::register(scope, ns, "moDisconnect", disconnect, context_id);
     crate::dom::register(scope, ns, "moRemoveTransients", remove_transients, context_id);
-    crate::dom::register(scope, ns, "moInterested", interested, context_id);
+    crate::dom::register(scope, ns, "moRecord", record, context_id);
+    crate::dom::register(scope, ns, "moTakeRecords", take_records, context_id);
+    crate::dom::register(scope, ns, "moTakeBatch", take_batch, context_id);
     crate::dom::register(scope, ns, "moAddTransients", add_transients, context_id);
-    crate::dom::register(scope, ns, "moRealm", realm_of, context_id);
     crate::dom::register(scope, ns, "moPend", pend, context_id);
     crate::dom::register(scope, ns, "moQueue", queue, context_id);
     crate::dom::register(scope, ns, "moTakePending", take_pending, context_id);
@@ -315,14 +341,6 @@ fn create(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     rv.set_uint32(store.next);
 }
 
-// __dom.moRealm(observer) -> the context id of the realm that made the observer, or undefined.
-fn realm_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let observer = args.get(0).uint32_value(scope).unwrap_or(0);
-    if let Some(&cid) = arena(scope, &args).observers.realms.get(&observer) {
-        rv.set_int32(cid);
-    }
-}
-
 // __dom.moObserve(observer, nid, flags, filter) — `filter` the attribute names given, or null.
 fn observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let observer = args.get(0).uint32_value(scope).unwrap_or(0);
@@ -352,32 +370,71 @@ fn remove_transients(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     arena(scope, &args).observers.remove_transients(observer);
 }
 
-// __dom.moInterested(nid, type, name, namespaced) -> the interested observers, each as `observer * 2 + wantsOldValue`:
-// the one number where there is one, as most changes have (no array made per mutation), an array of them where there are
-// more, undefined for none — `type` 0 a childList record, 1 an attributes one (of the local name `name`, with a namespace
-// or not), 2 a characterData one.
-fn interested(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.moRecord(nid, target, type, addedNodes, removedNodes, previousSibling, nextSibling, attributeName,
+// attributeNamespace, oldValue) -> whether a record was queued: DOM "queue a mutation record" of a change to `target`
+// (slot `nid`) — `type` 0 childList, 1 attributes, 2 characterData — for each interested observer, which is pending from
+// then on, its realm with it.
+fn record(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(target) = nid_arg(scope, &args, 0) else { return };
     if arena(scope, &args).observers.lists.is_empty() {
         return;
     }
-    let kind = args.get(1).uint32_value(scope).unwrap_or(0);
-    let name = if kind == 1 { utf16_arg(scope, args.get(2)) } else { Vec::new() };
+    let kind = args.get(2).uint32_value(scope).unwrap_or(0);
+    let name = if kind == 1 { utf16_arg(scope, args.get(7)) } else { Vec::new() };
     let change = match kind {
         0 => Change::ChildList,
-        1 => Change::Attributes(&name, args.get(3).boolean_value(scope)),
+        1 => Change::Attributes(&name, !args.get(8).is_null_or_undefined()),
         _ => Change::CharacterData,
     };
     let found = arena(scope, &args).interested_observers(target, &change);
-    let packed = |&(o, old): &(u32, bool)| f64::from(o) * 2.0 + f64::from(u8::from(old));
-    match found.as_slice() {
-        [] => {}
-        [one] => rv.set_double(packed(one)),
-        many => {
-            let numbers: Vec<v8::Local<'_, v8::Value>> = many.iter().map(|o| v8::Number::new(scope, packed(o)).into()).collect();
-            rv.set(v8::Array::new_with_elements(scope, &numbers).into());
-        }
+    if found.is_empty() {
+        return;
     }
+    // (…as `[type, target, …]`: the type before the target, the rest in the order given)
+    let fields: Vec<v8::Local<'_, v8::Value>> = [2, 1, 3, 4, 5, 6, 7, 8, 9].iter().map(|&i| args.get(i)).collect();
+    let tuple = v8::Array::new_with_elements(scope, &fields);
+    let held = v8::Global::new(scope, tuple);
+    let store = &mut arena(scope, &args).observers;
+    for (observer, old) in found {
+        store.records.entry(observer).or_default().push((held.clone(), old));
+        store.pend_observer(observer);
+    }
+    rv.set_bool(true);
+}
+
+// An observer's records, taken: `[record, takesOldValue, …]` as `record` queued them.
+fn taken<'s>(scope: &mut v8::PinScope<'s, '_>, records: Vec<(v8::Global<v8::Array>, bool)>) -> v8::Local<'s, v8::Array> {
+    let mut flat: Vec<v8::Local<'s, v8::Value>> = Vec::with_capacity(records.len() * 2);
+    for (tuple, old) in records {
+        flat.push(v8::Local::new(scope, tuple).into());
+        flat.push(v8::Boolean::new(scope, old).into());
+    }
+    v8::Array::new_with_elements(scope, &flat)
+}
+
+// __dom.moTakeRecords(observer) -> its records (`taken`), its queue emptied — `takeRecords()`.
+fn take_records(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let observer = args.get(0).uint32_value(scope).unwrap_or(0);
+    let records = arena(scope, &args).observers.records.remove(&observer).unwrap_or_default();
+    rv.set(taken(scope, records).into());
+}
+
+// __dom.moTakeBatch() -> the calling realm's pending observers, each as `[observer, records]` (`taken`), in the order
+// they were made — no longer pending, their queues emptied: a notification's part in this realm.
+fn take_batch(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let store = &mut arena(scope, &args).observers;
+    let (mut mine, rest): (Vec<u32>, Vec<u32>) = store.notify.iter().partition(|o| store.realms.get(o) == Some(&cid));
+    store.notify = rest;
+    mine.sort_unstable();
+    let batch: Vec<(u32, Vec<(v8::Global<v8::Array>, bool)>)> =
+        mine.into_iter().map(|o| (o, store.records.remove(&o).unwrap_or_default())).collect();
+    let mut out: Vec<v8::Local<'_, v8::Value>> = Vec::with_capacity(batch.len() * 2);
+    for (observer, records) in batch {
+        out.push(v8::Integer::new_from_unsigned(scope, observer).into());
+        out.push(taken(scope, records).into());
+    }
+    rv.set(v8::Array::new_with_elements(scope, &out).into());
 }
 
 // __dom.moAddTransients(nid, parentNid) -> the observers `add_transient_observers` gave a transient registered observer
