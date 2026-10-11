@@ -136,6 +136,25 @@ RSpec.describe 'HTML element bindings' do
     expect(session.evaluate_script("[cancels, a.open, b.open, b.closedBy]")).to eq([['b', 'a'], false, false, 'none'])
   end
 
+  # A user's click activates the window (HTML "activation notification", at its mousedown): an activation-gated API takes
+  # it, and a dialog shown after it has a close watcher group of its own, which Escape closes alone. Chrome 155, real
+  # clicks: [[true, "ok", false], true, false].
+  it "activates the window at a user's click" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend', `
+        <input type=color id=c>
+        <button id=go onclick="window.r = [navigator.userActivation.isActive]; try { c.showPicker(); r.push('ok') } catch (e) { r.push(e.name) } r.push(navigator.userActivation.isActive)">go</button>
+        <button id=oa onclick="a.showModal()">open a</button>
+        <dialog id=a>a <button id=ob onclick="b.showModal()">open b</button></dialog><dialog id=b>b</dialog>`);
+    JS
+    session.click_button 'go'
+    session.click_button 'open a'
+    session.click_button 'open b'
+    session.find('body').send_keys(:escape)
+    expect(session.evaluate_script('[r, a.open, b.open]')).to eq([[true, 'ok', false], true, false])
+  end
+
   it 'clones a node into its own node document' do
     session.visit '/'
     got = session.evaluate_script(<<~JS)

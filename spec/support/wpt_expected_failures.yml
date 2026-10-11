@@ -4610,8 +4610,7 @@ html/semantics/forms/the-select-element/customizable-select/button-in-popover.ht
   clicked.
 - Non-interactive content in the popover should not close the popover when clicked.
 html/semantics/forms/the-select-element/customizable-select/checkmark-animation-002.html:
-- "== html/semantics/forms/the-select-element/customizable-select/checkmark-animation-002-ref.html
-  (never ready to capture)"
+- "== html/semantics/forms/the-select-element/customizable-select/checkmark-animation-002-ref.html"
 html/semantics/forms/the-select-element/customizable-select/checkmark-animation.html:
 - "::checkmark pseudo-element animates"
 html/semantics/forms/the-select-element/customizable-select/closed-listbox-rendering.html:
