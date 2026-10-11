@@ -27,18 +27,20 @@ pub(crate) struct Timers {
     order: BTreeSet<(Due, u64, i64)>,
     last_id: i64,
     seq: u64,
-    // How many of the realm's event loop steps are running (`timerStep`), and whether its context was disposed while one
-    // was: a step goes on with what is due in it — a frame's script removing its own iframe, mid-step, still has the
+    // How many of the realm's event loop steps are running (`timerStep`): a step goes on with what is due in it though
+    // the realm's context is disposed during it — a frame's script removing its own iframe, mid-step, still has the
     // request it sent fail as the step runs on — and the list goes as it ends.
     stepping: u32,
-    discarded: bool,
 }
 
-// The isolate's task keys: the last one handed out, and the realm each live one is of.
+// The isolate's task keys: the last one handed out, and the realm each live one is of; and the realms whose contexts
+// are disposed, which take no timer from then on but in a step still running (code of theirs a page still calls — a
+// `setTimeout` it kept, a frame's function after its iframe is removed — would pin their global for good).
 #[derive(Default)]
 pub(crate) struct TaskKeys {
     last: i64,
     realms: HashMap<i64, i32>,
+    discarded: std::collections::HashSet<i32>,
 }
 
 // A due time, ordered as the number it is — `total_cmp`, which every comparison of it goes through.
@@ -91,12 +93,24 @@ impl RealmArena {
         }
         self.task_keys.realms.retain(|_, &mut c| c != cid);
     }
-    // …or its context disposed: gone now, or as the step running in it ends (`stepping`).
+    // …or its context disposed: gone now, or as the step running in it ends (`stepping`) — and none taken after.
     pub(crate) fn discard_timers(&mut self, cid: i32) {
-        match self.timers_of(cid) {
-            Some(timers) if timers.stepping > 0 => timers.discarded = true,
-            _ => self.drop_timers(cid),
+        self.task_keys.discarded.insert(cid);
+        if !self.timers_of(cid).is_some_and(|t| t.stepping > 0) {
+            self.drop_timers(cid);
         }
+    }
+    // …or begun anew, in a new context: it takes timers again.
+    pub(crate) fn timers_begin(&mut self, cid: i32) {
+        self.task_keys.discarded.remove(&cid);
+        self.drop_timers(cid);
+    }
+    // Whether realm `cid` takes a timer: not one dropped, nor one disposed, but in a step still running in it.
+    fn takes_timers(&mut self, cid: i32) -> bool {
+        if self.is_dropped(cid) {
+            return false;
+        }
+        !self.task_keys.discarded.contains(&cid) || self.timers_of(cid).is_some_and(|t| t.stepping > 0)
     }
 }
 
@@ -110,7 +124,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // __dom.timerStep(begins) — an event loop step of the calling realm's begins, or ends: one ending in a realm whose
-// context was disposed during it takes its timers with it (`discard_timers`).
+// context was disposed takes its timers with it (`discard_timers`).
 fn timer_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let begins = args.get(0).is_true();
     let cid = realm_id(scope, &args);
@@ -121,7 +135,7 @@ fn timer_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         return;
     }
     timers.stepping = timers.stepping.saturating_sub(1);
-    if timers.stepping == 0 && timers.discarded {
+    if timers.stepping == 0 && arena.task_keys.discarded.contains(&cid) {
         arena.drop_timers(cid);
     }
 }
@@ -138,16 +152,22 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let task = args.get(4).is_true();
     let cid = realm_id(scope, &args);
     let arena = &mut dom(scope).arena;
+    let takes = arena.takes_timers(cid);
     let key = if task {
         arena.task_keys.last -= 1;
-        arena.task_keys.realms.insert(arena.task_keys.last, cid);
+        if takes {
+            arena.task_keys.realms.insert(arena.task_keys.last, cid);
+        }
         arena.task_keys.last
     } else {
         let timers = &mut arena.enter(cid).timers;
         timers.last_id += 1;
         timers.last_id
     };
-    arena.enter(cid).timers.add(key, (handler, list), due, period);
+    // (…a realm that takes none answers with a key all the same, which names nothing)
+    if takes {
+        arena.enter(cid).timers.add(key, (handler, list), due, period);
+    }
     rv.set_double(key as f64);
 }
 

@@ -888,7 +888,7 @@ impl RealmArena {
             return;
         }
         self.enter(cid);
-        self.drop_timers(cid);
+        self.timers_begin(cid);
         // (…afresh, but its faces table and sheet store in place: the realm's style engine, which outlives the context,
         // holds the one, and the ids the other hands out are never to be handed out again — a late drop of the old
         // context's sheet would free the new page's)

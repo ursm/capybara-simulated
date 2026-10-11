@@ -47,6 +47,28 @@ RSpec.describe 'A frame realm navigated away from' do
     expect(run_collected(script)).to eq([true, 'true'])
   end
 
+  # …and one its code, still called after its iframe is gone, gave a timer then — through a `setTimeout` it kept: a
+  # disposed realm takes no timer outside a step of its own still running (timers.rs `takes_timers`).
+  it 'is collected though its code added a timer after its iframe was removed' do
+    script = <<~'RUBY'
+      require 'capybara/simulated'
+      app = ->(env) {
+        body = env['PATH_INFO'] == '/' ? '<!doctype html><meta charset=utf-8><body><iframe id=f src="/f/0"></iframe>' :
+          '<!doctype html><meta charset=utf-8><body><p>frame</p><script>const kept = setTimeout; ' \
+          'window.go = () => { frameElement.remove(); try { kept(() => {}, 1e9); } catch (_) {} };</script>'
+        [200, {'content-type' => 'text/html'}, [body]]
+      }
+      s = Capybara::Session.new(:simulated, app)
+      s.visit '/'
+      s.within_frame('f') { s.has_text?('frame') }
+      first = s.evaluate_script("document.getElementById('f').contentWindow.__dom.realmId")
+      s.execute_script("document.getElementById('f').contentWindow.go()")
+      s.visit '/'
+      puts s.evaluate_script("(() => { gc(); gc(); return __dom.arenaOf(#{first}) === undefined; })()")
+    RUBY
+    expect(run_collected(script)).to eq([true, 'true'])
+  end
+
   def run_collected(script)
     env = {'CSIM_V8_FLAGS' => 'expose-gc', 'CSIM_SNAPSHOT_CACHE' => 'off'}
     out, status = Open3.capture2e(env, RbConfig.ruby, '-rbundler/setup', '-Ilib', '-e', script, chdir: File.expand_path('..', __dir__))
