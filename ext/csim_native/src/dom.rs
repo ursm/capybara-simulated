@@ -732,6 +732,11 @@ pub(crate) struct RealmArena {
     pub(crate) previously_focused: std::collections::HashMap<NodeId, NodeId>,
     // Each text control's selection, once it has one (text_selection.rs).
     pub(crate) text_selections: std::collections::HashMap<NodeId, crate::text_selection::TextSelection>,
+    // The radio buttons that have been checked, by their name (element_state.rs `note_radio`) — kept so the radio buttons'
+    // insertion steps find the checked ones of a group in its size, not the tree's: the parser inserts a checked radio a
+    // row, and a walk of the document for each was quadratic. An entry may since have been unchecked, renamed, moved or
+    // freed, which a lookup sees and drops.
+    pub(crate) checked_radios: std::collections::HashMap<Vec<u16>, Vec<NodeId>>,
     // Moves with every write to the arena (a node made or freed, any `get_mut`): what a memo of it keys on.
     pub(crate) mutations: u64,
     // The lock the style engines' rules and every element's parsed declarations are read under — ONE for the isolate's
@@ -931,6 +936,10 @@ impl RealmArena {
         self.parser_form_owners.retain(|id, _| live(slots, id));
         self.custom_states.retain(|id, _| live(slots, id));
         self.text_selections.retain(|id, _| live(slots, id));
+        self.checked_radios.retain(|_, ids| {
+            ids.retain(|id| live(slots, id));
+            !ids.is_empty()
+        });
         self.observers.retain(|id| live(slots, id));
     }
 }
@@ -2674,6 +2683,9 @@ fn set_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let next = (had & !mask) | (bits & mask);
     if next != had {
         arena.set_state(id, next);
+        if mask & (STATE_CHECKED | STATE_CHECKED_DIRTY) != 0 {
+            arena.note_radio(id);
+        }
     }
     rv.set_uint32(had);
 }
@@ -3015,6 +3027,18 @@ fn slot_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, nodes:
         crate::mutation_observers::signal(scope, parent);
     }
 }
+// The steps of an attribute write the engine runs after it: the slot steps (`slot_attribute_steps`), and a radio
+// button's, whose `checked`, `name` or `type` written may make it a checked one of a group (`radio_attribute_steps`),
+// whose state change the bindings hear of (`note_state_changed`).
+fn attribute_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, names: &[&str]) {
+    slot_attribute_steps(scope, cid, id, names);
+    if names.iter().any(|n| matches!(*n, "checked" | "name" | "type")) {
+        let arena = realm(scope, cid);
+        if arena.radio_attribute_steps(id) {
+            arena.observers.note_state_changed();
+        }
+    }
+}
 // …and the attribute change steps': a slottable's `slot` changed, so the slot it was assigned is assigned anew and then
 // the one that takes it now (DOM "slottable" attribute change steps: its old slot's `slotchange` first) — the rest of
 // its parent's shadow tree is; and a slot's `name`, so its tree is.
@@ -3312,6 +3336,7 @@ fn sync_attrs(
     if reassigns {
         slot_attribute_steps(scope, cid, id, &["slot", "name"]);
     }
+    realm(scope, cid).note_radio(id);
 }
 
 // __dom.setAttrNamespace(nodeNid, key, ns, localName): the attribute stored under `key` is in namespace `ns` with that
@@ -4748,7 +4773,7 @@ fn attr_set(
     if let Some(node) = arena.get_mut(id) {
         node.set_attr_full(name, utf8, u16);
     }
-    slot_attribute_steps(scope, cid, id, &[name]);
+    attribute_steps(scope, cid, id, &[name]);
     v8::Intercepted::kYes
 }
 
@@ -4808,7 +4833,7 @@ fn attr_delete(
     if let Some(node) = arena.get_mut(id) {
         node.remove_attr(name);
     }
-    slot_attribute_steps(scope, cid, id, &[name]);
+    attribute_steps(scope, cid, id, &[name]);
     rv.set_bool(true);
     v8::Intercepted::kYes
 }

@@ -28,4 +28,40 @@ RSpec.describe 'the radio buttons\' insertion steps' do
     JS
     expect(got).to eq([false, true, false, true, false, false, true])
   end
+
+  # The steps run as a `checked` is added to a radio whose checkedness is not dirty, and they make dirty only the one they
+  # uncheck: one never checked keeps following its attribute (Chrome and Firefox).
+  it 'unchecks the checked rest of the group as a checked attribute is added, leaving the others clean' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        d.innerHTML = '<input type=radio name=c id=c1><input type=radio name=c id=c2 checked>';
+        const r = [];
+        c2.removeAttribute('checked');
+        c1.setAttribute('checked', '');
+        r.push(c1.checked, c2.checked);
+        c2.defaultChecked = true;
+        r.push(c1.checked, c2.checked);
+        return r;
+      })()
+    JS
+    expect(got).to eq([true, false, false, true])
+  end
+
+  # A radio in a shadow tree "becomes connected" with its host: the host's insertion runs its steps.
+  it 'runs the steps of the radios in a shadow tree as its host is connected' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const host = document.createElement('div');
+        const a = document.createElement('input'), b = document.createElement('input');
+        for (const x of [a, b]) { x.type = 'radio'; x.name = 'z'; x.checked = true; }
+        host.attachShadow({mode: 'open'}).append(a, b);
+        const before = [a.checked, b.checked];
+        d.append(host);
+        return [before, [a.checked, b.checked]];
+      })()
+    JS
+    expect(got).to eq([[true, true], [false, true]])
+  end
 end

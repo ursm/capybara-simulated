@@ -250,39 +250,81 @@ impl RealmArena {
         });
         group
     }
-    // The radio buttons' insertion steps (HTML §4.10.5.1.15, "when … the element is inserted"): a checked one inserted —
-    // among `nodes` or in a subtree of one — unchecks the rest of its group, the last in tree order winning: each is
-    // visited in reverse tree order, and one an earlier visit unchecked is passed by. One neither connected nor with a
-    // form owner has no group to uncheck. Whether a radio's checkedness changed.
+    // The radio buttons' insertion steps (HTML §4.10.5.1.15: a checked one that "becomes connected" or whose "form owner
+    // changes" unchecks the rest of its group): of the radios among `nodes` and their shadow-including descendants, each
+    // checked one unchecks the checked others of its group, the last in tree order winning — each is visited in reverse
+    // tree order, and one an earlier visit unchecked is passed by. One neither connected nor with a form owner has no
+    // group to uncheck. Whether a radio's checkedness changed.
     pub(crate) fn radio_insertion_steps(&mut self, nodes: &[NodeId]) -> bool {
-        let checked_radio = |n: &NodeData| n.is_html_named("input") && n.input_type() == "radio" && n.plain_attr("name").is_some();
         let mut radios = Vec::new();
         for &root in nodes {
             let mut stack = vec![root];
             while let Some(c) = stack.pop() {
-                let Some(n) = self.get(c).filter(|n| n.kind == NodeKind::Element) else { continue };
-                if checked_radio(n) && self.is_checked(c) {
+                let Some(n) = self.get(c) else { continue };
+                if n.is_html_named("input") && n.input_type() == "radio" && self.is_checked(c) {
                     radios.push(c);
                 }
                 stack.extend(n.children.iter().rev());
+                stack.extend(n.shadow_root);
             }
+        }
+        for &r in &radios {
+            self.note_radio(r);
         }
         let mut changed = false;
         for &r in radios.iter().rev() {
-            if !self.is_checked(r) || !(self.is_connected(r) || self.form_owner(r).is_some()) {
-                continue;
-            }
-            for other in self.radio_group(r).into_iter().filter(|&o| o != r) {
-                let was = self.is_checked(other);
-                let Some(state) = self.get(other).map(|n| n.state) else { continue };
-                let unchecked = (state | STATE_CHECKED_DIRTY) & !STATE_CHECKED;
-                if unchecked != state {
-                    self.set_state(other, unchecked);
-                }
-                changed |= was;
-            }
+            changed |= self.uncheck_group_mates(r);
         }
         changed
+    }
+    // …and a radio button's steps as its `checked` (to a checkedness not dirty), `name` or `type` is written — the same
+    // §4.10.5.1.15 phenomena: its checkedness set to true, its name changed. Whether a radio's checkedness changed.
+    pub(crate) fn radio_attribute_steps(&mut self, id: NodeId) -> bool {
+        self.note_radio(id);
+        self.uncheck_group_mates(id)
+    }
+    // Where `id` is a checked radio button with a group — connected, or with a form owner — the checked others of its
+    // group unchecked. Whether any was.
+    fn uncheck_group_mates(&mut self, id: NodeId) -> bool {
+        let radio = self.get(id).is_some_and(|n| n.is_html_named("input") && n.input_type() == "radio");
+        if !radio || !self.is_checked(id) || !(self.is_connected(id) || self.form_owner(id).is_some()) {
+            return false;
+        }
+        let mates = self.checked_group_mates(id);
+        for &other in &mates {
+            let Some(state) = self.get(other).map(|n| n.state) else { continue };
+            self.set_state(other, (state | STATE_CHECKED_DIRTY) & !STATE_CHECKED);
+        }
+        !mates.is_empty()
+    }
+    // `id`, where it is a checked radio button with a name, among the checked radios (`checked_radios`) — called where one
+    // can become checked: inserted, its state or an attribute it reads written.
+    pub(crate) fn note_radio(&mut self, id: NodeId) {
+        let Some(n) = self.get(id).filter(|n| n.is_html_named("input") && n.input_type() == "radio") else { return };
+        let Some(name) = radio_name(n) else { return };
+        if !self.is_checked(id) {
+            return;
+        }
+        let ids = self.checked_radios.entry(name).or_default();
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    // The other checked radio buttons of `id`'s group — its name, form owner and tree — from the checked radios, those
+    // that no longer are dropped.
+    fn checked_group_mates(&mut self, id: NodeId) -> Vec<NodeId> {
+        let Some(name) = self.get(id).and_then(radio_name) else { return Vec::new() };
+        let Some(mut ids) = self.checked_radios.remove(&name) else { return Vec::new() };
+        ids.retain(|&o| {
+            self.get(o).is_some_and(|n| n.is_html_named("input") && n.input_type() == "radio" && radio_name(n).as_ref() == Some(&name))
+                && self.is_checked(o)
+        });
+        let (root, owner) = (self.root_of(id), self.form_owner(id));
+        let mates = ids.iter().copied().filter(|&o| o != id && self.root_of(o) == root && self.form_owner(o) == owner).collect();
+        if !ids.is_empty() {
+            self.checked_radios.insert(name, ids);
+        }
+        mates
     }
     // Does `id`'s radio button group — its name, form owner and tree — hold a checked radio? A nameless radio is its own
     // group.
