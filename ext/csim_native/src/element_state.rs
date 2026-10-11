@@ -979,6 +979,32 @@ impl RealmArena {
                 _ => false,
             }
     }
+    // The hyperlink a click on `target` follows (HTML's `<a>` / `<area>` activation behaviour), where the click's
+    // activation target is one: the target, or — the click bubbling — its nearest ancestor `<a>` / `<area>` (out of a
+    // shadow tree through its host), unless an element whose activation behaviour comes first is on the way: a checkbox
+    // or radio button, a details' summary, a label with a labeled control (one activation target a click — Chrome, and
+    // DOM dispatch). None for an `<a>` with no `href`.
+    pub(crate) fn followed_link(&self, target: NodeId, bubbles: bool) -> Option<NodeId> {
+        let mut cur = Some(target);
+        while let Some(c) = cur {
+            let n = self.get(c).filter(|n| n.kind == NodeKind::Element)?;
+            if matches!(&*n.local_name, "a" | "area") && (n.is_html() || n.ns == ns!(svg)) {
+                return n.is_hyperlink().then_some(c);
+            }
+            let first = n.is_html()
+                && match &*n.local_name {
+                    "input" => n.plain_attr("type").is_some_and(|t| t.eq_ignore_ascii_case("checkbox") || t.eq_ignore_ascii_case("radio")),
+                    "summary" => self.is_details_summary(c),
+                    "label" => self.labeled_control(c).is_some(),
+                    _ => false,
+                };
+            if first || !bubbles {
+                return None;
+            }
+            cur = n.parent.or(n.host);
+        }
+        None
+    }
     // A click's activation target (DOM dispatch): the nearest element with activation behaviour on its path from
     // `target` — itself or, the click bubbling, an ancestor across shadow trees and slots (the flat tree's parents, as
     // the composed path runs).
