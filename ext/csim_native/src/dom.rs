@@ -924,11 +924,21 @@ impl RealmArena {
     pub(crate) fn discard_realm(&mut self, cid: i32) {
         self.observers.drop_realm(cid);
         self.discard_timers(cid);
+        self.forget_reactions_of(cid);
+    }
+    // The custom element reactions owed to realm `cid`'s elements let go of (ce_reactions.rs `forget`).
+    pub(crate) fn forget_reactions_of(&mut self, cid: i32) {
+        let slots = &self.slots;
+        let of_realm = |id: NodeId| {
+            slots.get(id.idx as usize).filter(|s| s.generation == id.generation).and_then(|s| s.data.as_ref()).is_none_or(|n| n.realm == cid)
+        };
+        self.ce_reactions.forget(of_realm);
     }
     // Realm `cid` is gone: its state, and the nodes it made.
     pub(crate) fn drop_realm(&mut self, cid: i32) {
         // (…and its timers, now and from then on: `is_dropped` refuses it any, where a disposal's mark did)
         self.drop_timers(cid);
+        self.forget_reactions_of(cid);
         self.task_keys.discarded.remove(&cid);
         self.dropped.insert(cid);
         self.parked.remove(&cid);
@@ -1098,6 +1108,7 @@ impl RealmArena {
             self.id_epoch += 1;
         }
         self.id_index.get_mut().forget(id);
+        self.ce_reactions.forget_node(id);
         // (…and a checked radio's entry, under its name)
         if !self.checked_radios.is_empty() {
             if let Some(name) = self.get(id).filter(|n| n.is_html_named("input")).and_then(|n| n.plain_attr_units("name")) {
@@ -4451,6 +4462,12 @@ fn reset_arena(
 ) {
     let cid = realm_id(scope, &args);
     realm(scope, cid).reset();
+    // (…and the custom element reactions: all of them for a page of the main realm's, a frame's own for a frame's)
+    if cid == 0 {
+        dom(scope).arena.ce_reactions.reset();
+    } else {
+        dom(scope).arena.forget_reactions_of(cid);
+    }
     crate::text_codec::drop_realm(scope, cid);   // (…a page's stream decoders die with it)
     dom(scope).walk_reuse.remove(&cid);
     // …and the style engine forgets the nodes it held (its sheets stay until the new page sets its own).

@@ -136,4 +136,27 @@ RSpec.describe 'custom element reaction timing' do
     s.visit '/'
     expect(s.evaluate_script('log')).to eq(['xa=1', 'xb=n1', 'end=1'])
   end
+
+  # One constructor two scoped registries define is two definitions, each with the observed attributes it was defined
+  # with: the element calls back by its own registry's, not by the definition the constructor was defined with last.
+  # Chrome: ["p-x:a=1", "q-x:b=2"].
+  it "calls back by the definition of the element's registry" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const log = [];
+        class X extends HTMLElement { attributeChangedCallback(n, o, v) { log.push(this.localName + ':' + n + '=' + v); } }
+        X.observedAttributes = ['a'];
+        const r1 = new CustomElementRegistry(); r1.define('p-x', X);
+        X.observedAttributes = ['b'];
+        const r2 = new CustomElementRegistry(); r2.define('q-x', X);
+        const e1 = document.createElement('p-x', {customElementRegistry: r1});
+        const e2 = document.createElement('q-x', {customElementRegistry: r2});
+        for (const e of [e1, e2]) { e.setAttribute('a', '1'); e.setAttribute('b', '2'); }
+        return log;
+      })()
+    JS
+    expect(got).to eq(['p-x:a=1', 'q-x:b=2'])
+  end
 end

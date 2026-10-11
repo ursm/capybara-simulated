@@ -729,7 +729,7 @@ for (const spec of Object.keys(EDITORS_DRAFT_ADDITIONS)) {
 
 // The extended attributes a binding here makes what IDL says of, by where they stand; any other is an error.
 // [CEReactions]: the custom element reactions its steps enqueue run as it returns — an element queue pushed as it
-// begins and popped as it returns (`ceEnter` / `ceLeave`, webidl.js: `withCEReactions`). [Reflect]: the implementation reflects
+// begins and popped as it returns (`withCEReactions`: webidl.js `ceEnter` / `ceLeave`). [Reflect]: the implementation reflects
 // the content attribute. [SameObject] / [NewObject]: what the implementation returns. [Exposed]: the global the
 // interface object is put on — and, of a member, whether its interface's has it at all (membersOf). [SecureContext]: exposed, every realm here being a secure context
 // (`isSecureContext`, platform-globals.js). The rest the generator makes as Web IDL says.
