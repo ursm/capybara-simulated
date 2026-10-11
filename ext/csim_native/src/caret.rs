@@ -71,16 +71,66 @@ impl RealmArena {
         None
     }
 
-    // ArrowLeft / ArrowRight: the caret at (`node`, `offset`) one character back (on, with `forward`) — across to the
-    // adjacent text leaf at a text node's edge, or from an element boundary.
+    // ArrowLeft / ArrowRight, and `Selection.modify` by a character: the caret at (`node`, `offset`) one character back
+    // (on, with `forward`) — within its text, else at the next caret stop in its editing host (the document, outside
+    // one), as Chrome steps: across an inline edge it takes that stop's first character too (`ab|<b>cd</b>` →
+    // `<b>c|d</b>`: the two places either side of the edge are one place on the line, an empty leaf none at all), across
+    // a line's end — a block's edge or a `<br>` — it stops at the stop's edge; an atom (an image) is a stop it passes.
     pub(crate) fn caret_step(&self, node: NodeId, offset: u32, forward: bool) -> Option<(NodeId, u32)> {
         let n = self.get(node)?;
-        let len = if is_text(n) { n.data.len() as u32 } else { 0 };
-        if is_text(n) && if forward { offset < len } else { offset > 0 } {
-            return Some((node, if forward { offset + 1 } else { offset - 1 }));
+        let element = if n.kind == NodeKind::Element { Some(node) } else { n.parent };
+        let host = element.and_then(|e| self.editing_host(e));
+        let (mut at, mut index) = if is_text(n) {
+            let len = n.data.len() as u32;
+            if if forward { offset < len } else { offset > 0 } {
+                return Some((node, if forward { offset + 1 } else { offset - 1 }));
+            }
+            (n.parent?, self.child_index(node) + usize::from(forward))
+        } else {
+            (node, offset as usize)
+        };
+        let mut line_end = false;
+        loop {
+            let container = self.get(at)?;
+            let next = if forward { container.children.get(index).copied() } else { index.checked_sub(1).map(|i| container.children[i]) };
+            let Some(child) = next else {
+                // (…out of the container, to the place after (before) it in its parent — never out of the host)
+                if Some(at) == host {
+                    return None;
+                }
+                line_end |= self.is_block(at);
+                let parent = container.parent?;
+                index = self.child_index(at) + usize::from(forward);
+                at = parent;
+                continue;
+            };
+            let c = self.get(child)?;
+            match c.kind {
+                NodeKind::Text if c.data.is_empty() => {}
+                NodeKind::Text => {
+                    let len = c.data.len() as u32;
+                    let edge = if forward { 0 } else { len };
+                    return Some((child, if line_end { edge } else if forward { 1 } else { len - 1 }));
+                }
+                NodeKind::Element if &*c.local_name == "br" => line_end = true,
+                NodeKind::Element if c.children.is_empty() && CARET_VOID_TAGS.contains(&&*c.local_name) => {
+                    let i = self.child_index(child);
+                    return Some((at, (i + usize::from(forward != line_end)) as u32));
+                }
+                NodeKind::Element => {
+                    line_end |= self.is_block(child);
+                    at = child;
+                    index = if forward { 0 } else { c.children.len() };
+                    continue;
+                }
+                _ => {}
+            }
+            index = if forward { index + 1 } else { index - 1 };
         }
-        let leaf = self.adjacent_text_leaf(node, forward)?;
-        Some((leaf, if forward { 0 } else { self.get(leaf)?.data.len() as u32 }))
+    }
+    // Whether `id` is a block, by its tag (`rendered::is_block_tag`).
+    fn is_block(&self, id: NodeId) -> bool {
+        self.get(id).is_some_and(|n| n.kind == NodeKind::Element && crate::rendered::is_block_tag(&n.local_name))
     }
 
     // Home / End: the caret at the start (end, with `end`) of the block holding `node` — its first (last) caret stop, or
