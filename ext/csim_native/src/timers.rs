@@ -1,4 +1,5 @@
-// A realm's timers (HTML "map of active timers", §8.6) and the tasks the platform queues on the same list: each its
+// A realm's timers (HTML "map of active timers", §8.6), the tasks the platform queues on the same list, and its
+// animation frame callbacks (`frames`): each its
 // handler — a function, or a string run as a script — with its arguments, when it falls due on the realm's virtual
 // clock, and the period it repeats at. They run in the order they fall due, and those due at once in the order they
 // were scheduled — an interval keeps its place among them as it repeats. The bindings run each as its turn comes
@@ -27,6 +28,12 @@ pub(crate) struct Timers {
     order: BTreeSet<(Due, u64, i64)>,
     last_id: i64,
     seq: u64,
+    // Its animation frame callbacks (HTML "map of animation frame callbacks"), by the id `requestAnimationFrame` gave
+    // each, in the order they were requested — and those of the frame being run, taken as it began (one requested by
+    // a callback of it runs in the next), each as its turn comes, which a cancel by an earlier one still reaches.
+    frames: Vec<(u32, v8::Global<v8::Value>)>,
+    running: std::collections::VecDeque<(u32, v8::Global<v8::Value>)>,
+    last_frame: u32,
     // How many of the realm's event loop steps are running (`timerStep`): a step goes on with what is due in it though
     // the realm's context is disposed during it — a frame's script removing its own iframe, mid-step, still has the
     // request it sent fail as the step runs on — and the list goes as it ends.
@@ -121,6 +128,59 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "timerCount", timer_count, context_id);
     register(scope, ns, "timerNextDue", timer_next_due, context_id);
     register(scope, ns, "timerStep", timer_step, context_id);
+    register(scope, ns, "frameAdd", frame_add, context_id);
+    register(scope, ns, "frameCancel", frame_cancel, context_id);
+    register(scope, ns, "frameBegin", frame_begin, context_id);
+    register(scope, ns, "frameNext", frame_next, context_id);
+    register(scope, ns, "frameCount", frame_count, context_id);
+}
+
+// __dom.frameAdd(callback) -> its id: an animation frame callback of the calling realm's — none kept for a realm that
+// takes no timers (`takes_timers`), which answers with an id all the same.
+fn frame_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let callback = v8::Global::new(scope, args.get(0));
+    let cid = realm_id(scope, &args);
+    let arena = &mut dom(scope).arena;
+    let takes = arena.takes_timers(cid);
+    let timers = &mut arena.enter(cid).timers;
+    timers.last_frame += 1;
+    if takes {
+        timers.frames.push((timers.last_frame, callback));
+    }
+    rv.set_uint32(timers.last_frame);
+}
+
+// __dom.frameCancel(id) — the calling realm's callback of that id cancelled, whether still to be run in this frame or
+// in the next.
+fn frame_cancel(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = args.get(0).uint32_value(scope) else { return };
+    let cid = realm_id(scope, &args);
+    let timers = &mut dom(scope).arena.enter(cid).timers;
+    timers.frames.retain(|&(f, _)| f != id);
+    timers.running.retain(|&(f, _)| f != id);
+}
+
+// __dom.frameBegin() -> how many callbacks the frame now beginning runs: those requested so far, taken.
+fn frame_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let timers = &mut dom(scope).arena.enter(cid).timers;
+    let frame = std::mem::take(&mut timers.frames);
+    timers.running.extend(frame);
+    rv.set_uint32(timers.running.len() as u32);
+}
+
+// __dom.frameNext() -> the frame's next callback not cancelled, taken, or undefined once it has run them all.
+fn frame_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let Some((_, callback)) = dom(scope).arena.enter(cid).timers.running.pop_front() else { return };
+    let callback = v8::Local::new(scope, callback);
+    rv.set(callback);
+}
+
+// __dom.frameCount() -> how many callbacks the calling realm has requested for a frame to come.
+fn frame_count(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_uint32(dom(scope).arena.enter(cid).timers.frames.len() as u32);
 }
 
 // __dom.timerStep(begins) — an event loop step of the calling realm's begins, or ends: one ending in a realm whose
