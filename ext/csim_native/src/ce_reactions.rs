@@ -484,12 +484,12 @@ fn ce_look_up(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
 }
 
-// __dom.ceSetDefinition(nid, definition) — the element custom by `definition` (the bindings' object for it: HTML
+// __dom.ceSetDefinition(nid, id, definition) — the element custom by `definition` (the bindings' object for it, `id` its: HTML
 // "upgrade an element" step 3, an element constructed custom), where it is still the engine's — its realm not gone, its
 // slot not another's since; none for null (a failed upgrade takes it back).
 fn ce_set_definition(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return };
-    let def = definition_id(scope, args.get(1));
+    let def = definition_id(scope, args.get(1), args.get(2));
     let custom = &mut dom(scope).arena.ce_reactions.custom;
     match def {
         Some(def) => custom.insert(id, def),
@@ -497,17 +497,16 @@ fn ce_set_definition(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     };
 }
 
-// __dom.ceDefinitionLive(definition) -> whether the bindings' object `definition` is still a definition of the engine's:
+// __dom.ceDefinitionLive(id, definition) -> whether the bindings' object `definition` is still definition `id` of the engine's:
 // one whose realm went is no more (HTML's element constructor finds none for its NewTarget then).
 fn ce_definition_live(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_bool(definition_id(scope, args.get(0)).is_some());
+    rv.set_bool(definition_id(scope, args.get(0), args.get(1)).is_some());
 }
 
-// The id of the definition the bindings' object `value` is — its `id`, where that slot still holds it.
-fn definition_id(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<u32> {
-    let object = v8::Local::<v8::Object>::try_from(value).ok()?;
-    let key = v8::String::new(scope, "id")?;
-    let id = object.get(scope, key.into())?.uint32_value(scope)?;
+// `id`, where that slot still holds the bindings' object `value` (a definition object keeps the id it was given, which a
+// slot a realm freed may be another's by now).
+fn definition_id(scope: &mut v8::PinScope<'_, '_>, id: v8::Local<'_, v8::Value>, value: v8::Local<'_, v8::Value>) -> Option<u32> {
+    let id = id.uint32_value(scope).filter(|_| id.is_number())?;
     let held = dom(scope).arena.ce_reactions.definition_object(id)?;
     // SAFETY: as `weak_local`'s.
     (unsafe { &*held } == &value).then_some(id)
