@@ -33,10 +33,14 @@ const CONNECTED_MOVE: usize = 2;
 const ATTRIBUTE_CHANGED: usize = 4;
 const CALLBACKS: usize = 9;
 
-// A custom element definition, as the engine needs it: the callbacks it captured, and the attributes it observes by
-// local name, in code units as a DOMString compares — the realm that defined it, which takes it when it goes.
+// A custom element definition, as the engine needs it: the bindings' object for it (its name, local name and constructor,
+// what a lookup answers with), the callbacks it captured, and the attributes it observes by local name, in code units as
+// a DOMString compares — the realm that defined it, which takes it when it goes.
 struct Definition {
     realm: i32,
+    object: v8::Global<v8::Value>,
+    // (…an autonomous custom element's: its local name its name, where a customized built-in's extends another)
+    autonomous: bool,
     callbacks: Vec<Option<v8::Global<v8::Value>>>,
     observed: HashSet<Vec<u16>>,
 }
@@ -48,11 +52,14 @@ pub(crate) const NULL: u32 = 2;
 const FIRST_REGISTRY: u32 = 3;
 
 // A CustomElementRegistry: its object, and whether it is scoped (every one a page constructs, not a window's) — the
-// realm that made it, which takes it when it goes.
+// realm that made it, which takes it when it goes — and its definitions, by name and, for a customized built-in, by the
+// local name it extends and its name (HTML "look up a custom element definition").
 struct Registry {
     realm: i32,
     object: v8::Global<v8::Value>,
     scoped: bool,
+    named: HashMap<Vec<u16>, u32>,
+    builtins: HashMap<Vec<u16>, HashMap<Vec<u16>, u32>>,
 }
 
 // One callback a custom element is owed: the callback, and its arguments.
@@ -175,7 +182,25 @@ impl Reactions {
     }
     // Whether `code` is a registry that is not scoped — a window's, which an insertion into template contents takes away.
     fn is_window_registry(&self, code: u32) -> bool {
-        code >= FIRST_REGISTRY && self.registries.get((code - FIRST_REGISTRY) as usize).and_then(Option::as_ref).is_some_and(|r| !r.scoped)
+        self.registry(code).is_some_and(|r| !r.scoped)
+    }
+    // The registry `code` names, where it is one its realm has not taken with it.
+    fn registry(&self, code: u32) -> Option<&Registry> {
+        code.checked_sub(FIRST_REGISTRY).and_then(|i| self.registries.get(i as usize)).and_then(Option::as_ref)
+    }
+    // The object of definition `id`.
+    fn definition_object(&self, id: u32) -> Option<&v8::Global<v8::Value>> {
+        self.definitions.get(id as usize).and_then(Option::as_ref).map(|d| &d.object)
+    }
+    // HTML "look up a custom element definition" in registry `code`: an autonomous one named `local_name` whose local name
+    // is its name, else a customized built-in extending `local_name` named `is`.
+    fn look_up(&self, code: u32, local_name: &[u16], is: Option<&[u16]>) -> Option<u32> {
+        let registry = self.registry(code)?;
+        let autonomous = |id: &&u32| self.definitions.get(**id as usize).and_then(Option::as_ref).is_some_and(|d| d.autonomous);
+        if let Some(&id) = registry.named.get(local_name).filter(autonomous) {
+            return Some(id);
+        }
+        registry.builtins.get(local_name).and_then(|m| m.get(is?)).copied()
     }
     // The definition of custom element `id`.
     fn definition_of(&self, id: NodeId) -> Option<&Definition> {
@@ -236,6 +261,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceSubtreeHook", ce_subtree_hook, context_id);
     register(scope, ns, "ceAttributeChanged", ce_attribute_changed, context_id);
     register(scope, ns, "ceMakeRegistry", ce_make_registry, context_id);
+    register(scope, ns, "ceNamed", ce_named, context_id);
+    register(scope, ns, "ceLookUp", ce_look_up, context_id);
     register(scope, ns, "ceRegistryOf", ce_registry_of, context_id);
     register(scope, ns, "ceSetRegistry", ce_set_registry, context_id);
     // (…and the stack's depth and deepest queue, a view on the isolate's one buffer)
@@ -312,12 +339,17 @@ fn held_list(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) 
     }
 }
 
-// __dom.ceDefine(callbacks, observed) -> the definition's id: a custom element definition made in the calling realm —
+// __dom.ceDefine(registry, name, localName, definition, callbacks, observed) -> the definition's id: a custom element
+// definition made in the calling realm, in registry `registry` (its code) — `definition` the bindings' object for it,
 // `callbacks` its callbacks in `CALLBACKS` order (undefined for one it has not), `observed` the local names of the
 // attributes it observes.
 fn ce_define(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = realm_id(scope, &args);
-    let mut callbacks: Vec<Option<v8::Global<v8::Value>>> = held_list(scope, args.get(0))
+    let code = args.get(0).uint32_value(scope).unwrap_or(UNSET);
+    let name = utf16_arg(scope, args.get(1));
+    let local_name = utf16_arg(scope, args.get(2));
+    let object = v8::Global::new(scope, args.get(3));
+    let mut callbacks: Vec<Option<v8::Global<v8::Value>>> = held_list(scope, args.get(4))
         .into_iter()
         .map(|g| {
             let local = v8::Local::new(scope, &g);
@@ -325,16 +357,48 @@ fn ce_define(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         })
         .collect();
     callbacks.resize_with(CALLBACKS, || None);
-    let observed = match v8::Local::<v8::Array>::try_from(args.get(1)) {
+    let observed = match v8::Local::<v8::Array>::try_from(args.get(5)) {
         Ok(a) => {
             let names: Vec<v8::Local<'_, v8::Value>> = (0..a.length()).filter_map(|i| a.get_index(scope, i)).collect();
             names.into_iter().map(|v| utf16_arg(scope, v)).collect()
         }
         Err(_) => HashSet::new(),
     };
-    let definitions = &mut dom(scope).arena.ce_reactions.definitions;
-    definitions.push(Some(Definition { realm, callbacks, observed }));
-    rv.set_int32(definitions.len() as i32 - 1);
+    let reactions = &mut dom(scope).arena.ce_reactions;
+    let id = reactions.definitions.len() as u32;
+    let autonomous = local_name == name;
+    reactions.definitions.push(Some(Definition { realm, object, autonomous, callbacks, observed }));
+    if let Some(registry) = code.checked_sub(FIRST_REGISTRY).and_then(|i| reactions.registries.get_mut(i as usize)).and_then(Option::as_mut) {
+        if !autonomous {
+            registry.builtins.entry(local_name).or_default().insert(name.clone(), id);
+        }
+        registry.named.insert(name, id);
+    }
+    rv.set_uint32(id);
+}
+
+// __dom.ceNamed(registry, name) -> the bindings' object for registry `registry`'s definition named `name`, or undefined.
+fn ce_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let code = args.get(0).uint32_value(scope).unwrap_or(UNSET);
+    let name = utf16_arg(scope, args.get(1));
+    let reactions = &dom(scope).arena.ce_reactions;
+    let found = reactions.registry(code).and_then(|r| r.named.get(&name)).and_then(|&id| reactions.definition_object(id)).cloned();
+    if let Some(object) = found {
+        rv.set(v8::Local::new(scope, object));
+    }
+}
+
+// __dom.ceLookUp(registry, localName, isValue) -> the bindings' object for the definition HTML "look up a custom element
+// definition" finds in registry `registry` (`look_up`; `isValue` undefined for none), or undefined.
+fn ce_look_up(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let code = args.get(0).uint32_value(scope).unwrap_or(UNSET);
+    let local_name = utf16_arg(scope, args.get(1));
+    let is = (!args.get(2).is_null_or_undefined()).then(|| utf16_arg(scope, args.get(2)));
+    let reactions = &dom(scope).arena.ce_reactions;
+    let found = reactions.look_up(code, &local_name, is.as_deref()).and_then(|id| reactions.definition_object(id)).cloned();
+    if let Some(object) = found {
+        rv.set(v8::Local::new(scope, object));
+    }
 }
 
 // __dom.ceSetDefinition(nid, id) — the element custom by definition `id` (HTML "upgrade an element" step 3, an element
@@ -441,7 +505,7 @@ fn ce_make_registry(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let object = v8::Global::new(scope, args.get(0));
     let scoped = args.get(1).is_true();
     let registries = &mut dom(scope).arena.ce_reactions.registries;
-    registries.push(Some(Registry { realm, object, scoped }));
+    registries.push(Some(Registry { realm, object, scoped, named: HashMap::new(), builtins: HashMap::new() }));
     rv.set_uint32(FIRST_REGISTRY + registries.len() as u32 - 1);
 }
 
