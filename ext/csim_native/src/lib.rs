@@ -18,6 +18,7 @@ mod caret;
 mod ce_reactions;
 mod change_on_blur;
 mod character_data;
+mod element_references;
 mod clone;
 mod connection_steps;
 mod collections;

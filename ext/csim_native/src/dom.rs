@@ -833,6 +833,8 @@ pub(crate) struct RealmArena {
     pub(crate) previously_focused: std::collections::HashMap<NodeId, NodeId>,
     // Each focused text control's value as it was focused, and whether the user edited it since (change_on_blur.rs).
     pub(crate) change_baselines: crate::change_on_blur::ChangeBaselines,
+    // The elements set through an element reference's IDL attribute, by element and attribute (element_references.rs).
+    pub(crate) explicit_elements: crate::element_references::ExplicitElements,
     // Each text control's selection, once it has one (text_selection.rs).
     pub(crate) text_selections: std::collections::HashMap<NodeId, crate::text_selection::TextSelection>,
     // The radio buttons that have been checked, by their name and form owner (element_state.rs `note_radio`) — kept so
@@ -1100,6 +1102,7 @@ impl RealmArena {
         self.custom_states.retain(|id, _| live(slots, id));
         self.text_selections.retain(|id, _| live(slots, id));
         self.change_baselines.retain(|id, _| live(slots, id));
+        self.explicit_elements.retain(|(id, _), _| live(slots, id));
         self.previously_focused.retain(|dialog, focused| live(slots, dialog) && live(slots, focused));
         self.checked_radios.retain(|_, ids| {
             ids.retain(|id| live(slots, id));
@@ -1242,6 +1245,10 @@ impl RealmArena {
         // (…and what a focused text control armed for its blur)
         if !self.change_baselines.is_empty() {
             self.change_baselines.remove(&id);
+        }
+        // (…and the elements set as its references)
+        if !self.explicit_elements.is_empty() {
+            self.explicit_elements.retain(|&(host, _), _| host != id);
         }
         // (…and an open dialogs list: a document's freed, or a dialog of one)
         if !self.open_dialogs.is_empty() {
@@ -2383,6 +2390,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     }
     crate::change_on_blur::install(scope, ns, context_id);
     crate::character_data::install(scope, ns, context_id);
+    crate::element_references::install(scope, ns, context_id);
     crate::xml_parse::install(scope, ns, context_id);
     crate::custom_elements::install(scope, ns, context_id);
     crate::details::install(scope, ns, context_id);
@@ -3314,13 +3322,15 @@ fn slot_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, nodes:
         crate::mutation_observers::signal(scope, parent);
     }
 }
-// The steps of an attribute write the engine runs after it: the slot steps (`slot_attribute_steps`), and a radio
-// button's (`radio_steps`), whose state change the bindings hear of (`note_state_changed`) — as its `name`, `type` or
-// `form` written changed its group, or its `checked` its checkedness from false (`was_checked`) to true: one dirty has
-// a checkedness of its own, which its attribute no longer sets.
+// The steps of an attribute write the engine runs after it: the slot steps (`slot_attribute_steps`), an element
+// reference's (its explicitly set elements forgotten, element_references.rs), and a radio button's (`radio_steps`),
+// whose state change the bindings hear of (`note_state_changed`) — as its `name`, `type` or `form` written changed its
+// group, or its `checked` its checkedness from false (`was_checked`) to true: one dirty has a checkedness of its own,
+// which its attribute no longer sets.
 fn attribute_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, names: &[&str], was_checked: bool) {
     slot_attribute_steps(scope, cid, id, names);
     let arena = realm(scope, cid);
+    arena.forget_explicit_elements(id, names);
     let regrouped = names.iter().any(|n| matches!(*n, "name" | "type" | "form"));
     let checked = names.contains(&"checked") && !was_checked && arena.is_checked(id);
     if (regrouped || checked) && arena.radio_steps(id) {
