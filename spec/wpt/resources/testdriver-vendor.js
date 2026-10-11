@@ -101,9 +101,10 @@
   // globalThis), so `popup.navigator.userActivation.isActive` reads true there.
   window.test_driver.bless = function (intent, fn, context) {
     if (context && context !== window && typeof context === 'object') {
-      try { context.__csimTransientActivation = true; } catch (e) {}
+      try { context.__csimTransientActivation = true; context.__csimUserActivations = (context.__csimUserActivations || 0) + 1; } catch (e) {}
     } else {
       globalThis.__csimTransientActivation = true;
+      globalThis.__csimUserActivations = (globalThis.__csimUserActivations || 0) + 1;   // (…which a close watcher's group follows)
     }
     try {
       return Promise.resolve(typeof fn === 'function' ? fn() : undefined);

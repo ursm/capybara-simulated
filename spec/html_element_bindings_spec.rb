@@ -120,7 +120,10 @@ RSpec.describe 'HTML element bindings' do
     expect(got).to be(true)
   end
 
-  it 'closes the dialog opened last on Escape' do
+  # Shown with no user activation in between, both dialogs' close watchers are one group, which Escape goes through the
+  # last first: b's cancel, then a's (HTML "process close watchers"). Chrome 155, with no user activation before the
+  # setup: [["b", "a"], false, false, "none"].
+  it 'closes every dialog of the last close watcher group on Escape, the last opened first' do
     session.visit '/'
     session.execute_script(<<~JS)
       document.body.insertAdjacentHTML('beforeend', '<dialog id=a closedby=any>a</dialog><dialog id=b>b</dialog>');
@@ -130,7 +133,7 @@ RSpec.describe 'HTML element bindings' do
       document.getElementById('b').showModal();
     JS
     session.find('body').send_keys(:escape)
-    expect(session.evaluate_script("[cancels, a.open, b.open, b.closedBy]")).to eq([['b'], true, false, 'none'])
+    expect(session.evaluate_script("[cancels, a.open, b.open, b.closedBy]")).to eq([['b', 'a'], false, false, 'none'])
   end
 
   it 'clones a node into its own node document' do
@@ -151,7 +154,9 @@ RSpec.describe 'HTML element bindings' do
   end
 
   # A removed dialog leaves its document's open dialogs; put back, it is on them again (its setup steps) — a modeless one
-  # now, whose close request is none, which takes Escape and keeps both open. Chrome 155: [true, true].
+  # now, whose close request is none. Shown with no user activation in between, both close watchers are one group, which
+  # Escape goes through the last first: b's, disabled, passes it on, and a closes (HTML "process close watchers"). Chrome
+  # 155, with no user activation before the setup: [false, true].
   it 'takes a removed dialog off the open dialogs, and a reinserted one back' do
     session.visit '/'
     session.execute_script(<<~JS)
@@ -163,7 +168,7 @@ RSpec.describe 'HTML element bindings' do
       document.body.append(b);
     JS
     session.find('body').send_keys(:escape)
-    expect(session.evaluate_script('[a.open, b.open]')).to eq([true, true])
+    expect(session.evaluate_script('[a.open, b.open]')).to eq([false, true])
   end
 
   it "fires a link's load once, as it is connected or its href changes" do

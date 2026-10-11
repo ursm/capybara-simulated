@@ -745,8 +745,9 @@ pub(crate) struct RealmArena {
     // radio a row, and a walk of the document for each was quadratic. An entry may since have been unchecked, renamed or
     // moved, which a lookup sees and drops; a freed one goes as it is freed.
     pub(crate) checked_radios: std::collections::HashMap<(Vec<u16>, Option<NodeId>), Vec<NodeId>>,
-    // Each document's open dialogs list (HTML §4.11.4), by the document's slot, in the order they opened (dialogs.rs).
-    pub(crate) open_dialogs: std::collections::HashMap<NodeId, Vec<NodeId>>,
+    // Each document's open dialogs list (HTML §4.11.4), by the document's slot, in the order they opened, with the close
+    // watcher groups their dialogs' close watchers are in (dialogs.rs).
+    pub(crate) open_dialogs: std::collections::HashMap<NodeId, crate::dialogs::OpenDialogs>,
     // The keys of the tasks the platform queues on the realms' timer lists, the isolate's (timers.rs).
     pub(crate) task_keys: crate::timers::TaskKeys,
     // The custom element reactions: each element's reaction queue, and the agent's reactions stack (ce_reactions.rs).
@@ -1126,6 +1127,13 @@ impl RealmArena {
         self.id_index.get_mut().forget(id);
         self.ce_reactions.forget_node(id);
         // (…and a checked radio's entry, under its name)
+        // (…and an open dialogs list: a document's freed, or a dialog of one)
+        if !self.open_dialogs.is_empty() {
+            self.open_dialogs.remove(&id);
+            for list in self.open_dialogs.values_mut() {
+                list.dialogs.retain(|&(d, _)| d != id);
+            }
+        }
         if !self.checked_radios.is_empty() {
             if let Some(name) = self.get(id).filter(|n| n.is_html_named("input")).and_then(|n| n.plain_attr_units("name")) {
                 self.checked_radios.retain(|(n, _), ids| {
