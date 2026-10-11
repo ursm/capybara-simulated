@@ -491,9 +491,9 @@ pub(crate) fn generated_text_of(arena: &RealmArena, id: NodeId, which: usize) ->
     let node = arena.get(id).filter(|n| n.kind == NodeKind::Element && !NO_GENERATED_CONTENT.contains(&n.rendering_tag()))?;
     crate::style::eager_pseudo(arena, id, &PSEUDOS[which]).and_then(|style| generated_text(&style, node))
 }
-// What a generated box's `content` renders, or None for none: its strings, an `attr()` of its
-// element (its fallback where the element has none), the quote marks `quotes` gives — and nothing for a counter or an
-// image, nor for the alternative text past `/`.
+// What a generated box's `content` renders, or None for none: its strings, an `attr()` of its element (its fallback
+// where the element has none), the quote marks `quotes` gives — and nothing for a counter or an image, nor for the
+// alternative text past `/`.
 fn generated_text(style: &ComputedValues, element: &crate::dom::NodeData) -> Option<Vec<u16>> {
     use style::values::generics::counters::{GenericContent, GenericContentItem as Item};
     use style::values::specified::list::Quotes;

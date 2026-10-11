@@ -116,7 +116,13 @@
   // an element. A real backend routes through WebDriver; the in-process driver
   // exposes the same capabilities its Ruby side uses (the click resolver and the
   // key-send engine) as handle-keyed bridge entry points. We obtain a handle for
-  // the passed Node via __csimRegisterNode, then call them directly.
+  // the passed Node via __csimRegisterNode, then call them directly — the ones of
+  // the window whose document holds it (a frame's element, clicked from its parent,
+  // is that frame's to resolve: a realm answers for its own nodes' handles).
+  function windowOf(element) {
+    const doc = element && (element.ownerDocument || element);
+    return (doc && doc.defaultView) || globalThis;
+  }
 
   // WebDriver "normalised keys" — the special code points (Unicode PUA U+E0xx)
   // map to the bridge's named-key atoms; everything else is printable text.
@@ -179,7 +185,8 @@
   }
 
   window.test_driver.send_keys = function (element, keys) {
-    const h = globalThis.__csimRegisterNode && globalThis.__csimRegisterNode(element);
+    const w = windowOf(element);
+    const h = w.__csimRegisterNode && w.__csimRegisterNode(element);
     // Dispatch the keys on the NEXT task, not synchronously — real
     // test_driver.send_keys is async, so a test that wires up an EventWatcher
     // AFTER calling send_keys (e.g. `Promise.all([send_keys(...), watcher.wait_for(...)])`,
@@ -189,7 +196,7 @@
     return new Promise((resolve, reject) => {
       const run = () => {
         try {
-          if (h && typeof globalThis.__csimSendKeys === 'function') globalThis.__csimSendKeys(h, parseKeys(keys));
+          if (h && typeof w.__csimSendKeys === 'function') w.__csimSendKeys(h, parseKeys(keys));
         } catch (e) { reject(e); return; }
         if (typeof globalThis.setTimeout === 'function') globalThis.setTimeout(resolve, 0);
         else resolve();
@@ -201,14 +208,15 @@
 
   window.test_driver.click = function (element) {
     try {
-      const h = globalThis.__csimRegisterNode && globalThis.__csimRegisterNode(element);
+      const w = windowOf(element);
+      const h = w.__csimRegisterNode && w.__csimRegisterNode(element);
       // __csimClickResolve runs the trusted mousedown→mouseup→click sequence
       // (+ checkbox/radio activation + focus). leavePending keeps any resulting
       // submit/navigate intent in its pending slot so the driver's drain actions
       // it — this JS-side click discards the return value the Ruby click path
       // would otherwise consume (so without it a target=_blank submit is lost).
-      if (h && typeof globalThis.__csimClickResolve === 'function') {
-        globalThis.__csimClickResolve(h, null, { leavePending: true });
+      if (h && typeof w.__csimClickResolve === 'function') {
+        w.__csimClickResolve(h, null, { leavePending: true });
       }
       return settleThen();
     } catch (e) {
