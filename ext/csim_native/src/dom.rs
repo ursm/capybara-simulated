@@ -2203,6 +2203,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::autofocus::install(scope, ns, context_id);
     crate::custom_elements::install(scope, ns, context_id);
     crate::details::install(scope, ns, context_id);
+    crate::adopt::install(scope, ns, context_id);
     crate::connection_steps::install(scope, ns, context_id);
     crate::text_selection::install(scope, ns, context_id);
     crate::intersection::install(scope, ns, context_id);

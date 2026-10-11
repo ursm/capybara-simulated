@@ -52,7 +52,7 @@ struct Definition {
 pub(crate) const UNSET: u32 = 0;
 pub(crate) const TRACKING: u32 = 1;
 pub(crate) const NULL: u32 = 2;
-const FIRST_REGISTRY: u32 = 3;
+pub(crate) const FIRST_REGISTRY: u32 = 3;
 
 // A CustomElementRegistry: its object — held weakly: it lives while a script holds it or a node is associated with it
 // (node_handle.rs) — and whether it is scoped (every one a page constructs, not a window's), and its definitions, by name
@@ -210,7 +210,7 @@ impl Reactions {
         false
     }
     // Whether `code` is a registry that is not scoped — a window's, which an insertion into template contents takes away.
-    fn is_window_registry(&self, code: u32) -> bool {
+    pub(crate) fn is_window_registry(&self, code: u32) -> bool {
         self.registry(code).is_some_and(|r| !r.scoped)
     }
     // The registry `code` names, where it is one its realm has not taken with it.
@@ -308,6 +308,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceDefinitionFor", ce_definition_for, context_id);
     register(scope, ns, "ceRegistryOf", ce_registry_of, context_id);
     register(scope, ns, "ceSetRegistry", ce_set_registry, context_id);
+    register(scope, ns, "ceKeepNull", ce_keep_null, context_id);
+    register(scope, ns, "ceSetKeepNull", ce_set_keep_null, context_id);
     // (…and the stack's depth and deepest queue, a view on the isolate's one buffer)
     let store = {
         let reactions = &mut dom(scope).arena.ce_reactions;
@@ -726,4 +728,17 @@ pub(crate) fn release_registries(scope: &mut v8::PinScope<'_, '_>, released: Vec
         let h = unsafe { &*h };
         h.set_registry(scope, h.registry(), None);
     }
+}
+
+// __dom.ceKeepNull(shadowRoot) / ceSetKeepNull(shadowRoot, keep) — whether the shadow root keeps its null registry as it
+// is adopted (HTML "keep custom element registry null": a declarative `shadowrootcustomelementregistry` root's).
+fn ce_keep_null(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = crate::node_handle::handle_of(scope, args.get(0)) else { return rv.set_bool(false) };
+    // SAFETY: the handle lives while its object, an argument, does.
+    rv.set_bool(unsafe { handle.as_ref() }.keep_null());
+}
+fn ce_set_keep_null(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
+    // SAFETY: as above.
+    unsafe { handle.as_ref() }.set_keep_null(args.get(1).is_true());
 }

@@ -96,6 +96,9 @@ pub(crate) struct NodeHandle {
     // associated with it — or a script holds it — and no longer.
     registry_object: UnsafeCell<v8::TracedReference<v8::Object>>,
     window_registry_object: UnsafeCell<v8::TracedReference<v8::Object>>,
+    // …and, for a shadow root, whether it keeps its null registry as it is adopted (a declarative
+    // `shadowrootcustomelementregistry` root's: HTML "keep custom element registry null").
+    keep_null: Cell<bool>,
 }
 
 impl NodeHandle {
@@ -111,6 +114,22 @@ impl NodeHandle {
     // …a code with no registry of its own (none set, the tracking null), which an insertion moves between.
     pub(crate) fn set_registry_state(&self, code: u32) {
         self.registry.set(code);
+    }
+    pub(crate) fn keep_null(&self) -> bool {
+        self.keep_null.get()
+    }
+    pub(crate) fn set_keep_null(&self, keep: bool) {
+        self.keep_null.set(keep);
+    }
+    // Its node document becomes `doc`.
+    pub(crate) fn set_document(&self, scope: &mut v8::PinScope<'_, '_>, doc: Option<v8::Local<'_, v8::Object>>) {
+        // SAFETY: the main thread writes the reference, as TracedReference allows between marking steps.
+        unsafe { (*self.document.get()).reset(scope, doc) };
+    }
+    // The registry object its association holds.
+    pub(crate) fn registry_object<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Object>> {
+        // SAFETY: as `document`'s.
+        unsafe { (*self.registry_object.get()).get(scope) }
     }
     pub(crate) fn window_registry(&self) -> u32 {
         self.window_registry.get()
@@ -295,6 +314,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         window_registry: Cell::new(0),
         registry_object: UnsafeCell::new(v8::TracedReference::empty()),
         window_registry_object: UnsafeCell::new(v8::TracedReference::empty()),
+        keep_null: Cell::new(false),
     };
     let heap = scope.get_cpp_heap().expect("NodeBase is installed only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.

@@ -7,6 +7,7 @@
 // engine itself stays a pure V8 binding with no DOM knowledge.
 
 // The Web Animations model: the timeline, animations and their effects' timing; and the ops a JS handle asks it with.
+mod adopt;
 mod animation_ops;
 mod animations;
 mod autofocus;
