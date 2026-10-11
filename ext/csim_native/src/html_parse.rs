@@ -8,7 +8,8 @@
 //
 // A node is named by a HANDLE: 0 is the document (or a fragment parse's stand-in for one), 1 a fragment's context
 // element, 2 its form element pointer, and every node the parse makes takes the next number. A template's contents
-// are a handle of their own, made with the template.
+// are a handle of their own, made with the template — or, a declarative shadow root's template (`OP_SHADOW_ROOT`), the
+// shadow root it attaches to its host, which its children are parsed straight into.
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -39,6 +40,7 @@ const OP_POP: i32 = 14; // handle
 const OP_FORM: i32 = 15; // element, form
 const OP_SELECTED_CONTENT: i32 = 16; // option
 const OP_SCRIPT_STARTED: i32 = 17; // script
+const OP_SHADOW_ROOT: i32 = 18; // host, template, root
 
 // A namespace by number: the ones the parser ever gives an element or an attribute.
 fn ns_code(ns: &Namespace) -> i32 {
@@ -92,15 +94,18 @@ struct Node {
 pub(crate) struct Sink {
     nodes: RefCell<Vec<Node>>,
     ops: RefCell<Vec<Operand>>,
+    // Whether the parse's document allows declarative shadow roots (HTML's "allow declarative shadow roots"): a
+    // navigated-to document's parse and `setHTMLUnsafe`'s, not `innerHTML`'s or DOMParser's.
+    declarative: bool,
 }
 
 impl Sink {
-    fn new(context: Option<QualName>) -> Sink {
+    fn new(context: Option<QualName>, declarative: bool) -> Sink {
         // (handle 0, the document; 1 and 2 a fragment's context element and form element pointer)
         let mut nodes = vec![Node::default(), Node::default(), Node::default()];
         nodes[1].name = context.map(Box::new);
         nodes[2].name = Some(Box::new(QualName::new(None, html5ever::ns!(html), html5ever::local_name!("form"))));
-        Sink { nodes: RefCell::new(nodes), ops: RefCell::new(Vec::new()) }
+        Sink { nodes: RefCell::new(nodes), ops: RefCell::new(Vec::new()), declarative }
     }
     fn push(&self, items: impl IntoIterator<Item = Operand>) {
         self.ops.borrow_mut().extend(items);
@@ -240,7 +245,17 @@ impl TreeSink for Sink {
         self.nodes.borrow()[*handle as usize].annotation_xml_integration_point
     }
     fn allow_declarative_shadow_roots(&self, _intended_parent: &u32) -> bool {
-        false
+        self.declarative
+    }
+    // A `<template shadowrootmode>` the tree builder put on the stack of open elements alone: whether the host takes the
+    // shadow root is the page side's to decide (it may host one already, a custom element's constructor having attached
+    // it, or be one whose definition disables shadow), where it is — and where it does not, it inserts the template into
+    // the host as any other, its children going into its contents after all.
+    fn attach_declarative_shadow(&self, host: &u32, template: &u32, _attrs: &[Attribute]) -> bool {
+        let root = self.new_handle(Node::default());
+        self.nodes.borrow_mut()[*template as usize].contents = root;
+        self.push([Operand::Int(OP_SHADOW_ROOT), Operand::Int(*host as i32), Operand::Int(*template as i32), Operand::Int(root as i32)]);
+        true
     }
     fn maybe_clone_an_option_into_selectedcontent(&self, option: &u32) {
         self.push([Operand::Int(OP_SELECTED_CONTENT), Operand::Int(*option as i32)]);
@@ -424,11 +439,12 @@ fn steps<'s>(scope: &mut v8::PinScope<'s, '_>, id: u32, status: i32, with_id: bo
     v8::Array::new_with_elements(scope, &items)
 }
 
-// __dom.htmlParse(html, wellFormed, scripting, contextNs, contextLocalName, withForm, quirks, srcdoc) -> [id, steps…,
-// status]. A document parse — of an iframe srcdoc document with `srcdoc`, which no missing or legacy doctype puts in
-// quirks mode — or, given the namespace (as `ns_code` numbers it) and local name of the element whose content it is, a
-// fragment parse in that context (handle 1; handle 2 its form element pointer, `withForm`), in its document's mode
-// (`quirks` 0 no-quirks, 1 limited-quirks, 2 quirks).
+// __dom.htmlParse(html, wellFormed, scripting, contextNs, contextLocalName, withForm, quirks, srcdoc, declarative) ->
+// [id, steps…, status]. A document parse — of an iframe srcdoc document with `srcdoc`, which no missing or legacy
+// doctype puts in quirks mode — or, given the namespace (as `ns_code` numbers it) and local name of the element whose
+// content it is, a fragment parse in that context (handle 1; handle 2 its form element pointer, `withForm`), in its
+// document's mode (`quirks` 0 no-quirks, 1 limited-quirks, 2 quirks); with `declarative`, one that attaches declarative
+// shadow roots.
 fn html_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     // (…a parse that panicked starting is parse 0, which there is none of, its input run out)
     parser_op(scope, None, &mut rv, &[0, -1], |scope, rv| {
@@ -445,14 +461,15 @@ fn html_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
             _ => QuirksMode::NoQuirks,
         };
         let iframe_srcdoc = args.get(7).boolean_value(scope);
+        let declarative = args.get(8).boolean_value(scope);
         let opts = TreeBuilderOpts { scripting_enabled: scripting, iframe_srcdoc, quirks_mode, ..Default::default() };
         // (…the text is decoded already, its byte order mark gone with the decoding: a U+FEFF left is text)
         let tokenizer_opts = TokenizerOpts { discard_bom: false, ..Default::default() };
         let tokenizer = match &context {
-            None => Tokenizer::new(TreeBuilder::new(Sink::new(None), opts), tokenizer_opts),
+            None => Tokenizer::new(TreeBuilder::new(Sink::new(None, declarative), opts), tokenizer_opts),
             Some((ns, local)) => {
                 let name = QualName::new(None, namespace_of(*ns), LocalName::from(local.as_str()));
-                let builder = TreeBuilder::new_for_fragment(Sink::new(Some(name)), 1, with_form.then_some(2), opts);
+                let builder = TreeBuilder::new_for_fragment(Sink::new(Some(name), declarative), 1, with_form.then_some(2), opts);
                 let initial_state = Some(builder.tokenizer_state_for_context_elem(scripting));
                 Tokenizer::new(builder, TokenizerOpts { initial_state, ..tokenizer_opts })
             }

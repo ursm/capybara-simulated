@@ -1998,10 +1998,6 @@ custom-elements/registries/initial-about-blank.window.js:
 custom-elements/registries/per-document.html:
 - Navigating from the initial about:blank must replace window.customElements
 custom-elements/registries/scoped-custom-element-registry-customelementregistry-attribute-in-xhtml.xhtml:
-- XHTML fragment parser should create a custom element candidate with null registry
-  if customelementregistry is set
-- XHTML fragment parser should create a defined custom element with null registry
-  if customelementregistry is set
 - XHTML parser should create a custom element candidate with null registry if customelementregistry
   is set
 - XHTML parser should create a defined custom element with null registry if customelementregistry
@@ -5927,12 +5923,6 @@ shadow-dom/HighlightRegistry-highlightsFromPoint.html:
 - CSS.highlights.highlightsFromPoint() handles slotted light DOM content correctly.
 - CSS.highlights.highlightsFromPoint() returns Highlights present at a given point
   inside a shadow tree in the right order.
-shadow-dom/declarative/innerhtml-before-closing-tag.html:
-- "[harness] ERROR"
-- "[harness] no subtests"
-shadow-dom/declarative/move-template-before-closing-tag.html:
-- "[harness] ERROR"
-- "[harness] no subtests"
 shadow-dom/dragenter-related-target.html:
 - dragleave relatedTarget should be retargeted to shadow host when entering shadow
   DOM
