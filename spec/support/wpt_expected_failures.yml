@@ -1896,27 +1896,6 @@ css/cssom/stylesheet-same-origin.sub.html:
 - Origin-clean check in cross-origin CSSOM Stylesheets (redirect from same-origin
   to cross-origin)
 - Origin-clean check in loading error CSSOM Stylesheets
-custom-elements/connected-callbacks-html-fragment-parsing.html:
-- Inserting a custom element into a cloned document using HTML fragment parsing must
-  enqueue a custom element upgrade reaction, not synchronously invoke its constructor
-- Inserting a custom element into a document created by createHTMLDocument using HTML
-  fragment parsing must enqueue a custom element upgrade reaction, not synchronously
-  invoke its constructor
-- Inserting a custom element into a new document using HTML fragment parsing must
-  enqueue a custom element upgrade reaction, not synchronously invoke its constructor
-- Inserting a custom element into an HTML document created by createDocument using
-  HTML fragment parsing must enqueue a custom element upgrade reaction, not synchronously
-  invoke its constructor
-- Inserting a custom element into an HTML document fetched by XHR using HTML fragment
-  parsing must enqueue a custom element upgrade reaction, not synchronously invoke
-  its constructor
-- Inserting a custom element into the document of an iframe using HTML fragment parsing
-  must enqueue a custom element upgrade reaction, not synchronously invoke its constructor
-- Inserting a custom element into the document of the template elements using HTML
-  fragment parsing must enqueue a custom element upgrade reaction, not synchronously
-  invoke its constructor
-- Inserting a custom element into the document using HTML fragment parsing must enqueue
-  a custom element upgrade reaction, not synchronously invoke its constructor
 custom-elements/cross-realm-callback-report-exception.html:
 - constructor
 custom-elements/custom-element-reaction-queue.html:

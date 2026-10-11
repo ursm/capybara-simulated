@@ -17,7 +17,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::dom::{dom, nid_arg, realm, realm_id, register, NodeId};
+use crate::dom::{dom, nid_arg, realm, realm_id, register, utf16_arg, NodeId};
 
 // A definition's callbacks, by what they are called for — the bindings' order (custom-elements.js `CALLBACKS`), of which
 // these the engine names.
@@ -28,11 +28,11 @@ const ATTRIBUTE_CHANGED: usize = 4;
 const CALLBACKS: usize = 9;
 
 // A custom element definition, as the engine needs it: the callbacks it captured, and the attributes it observes by
-// local name — the realm that defined it, which takes it when it goes.
+// local name, in code units as a DOMString compares — the realm that defined it, which takes it when it goes.
 struct Definition {
     realm: i32,
     callbacks: Vec<Option<v8::Global<v8::Value>>>,
-    observed: HashSet<String>,
+    observed: HashSet<Vec<u16>>,
 }
 
 // One callback a custom element is owed: the callback, and its arguments.
@@ -166,6 +166,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceSetDefinition", ce_set_definition, context_id);
     register(scope, ns, "ceHasCallback", ce_has_callback, context_id);
     register(scope, ns, "ceHook", ce_hook, context_id);
+    register(scope, ns, "ceEnqueueUpgrade", ce_enqueue_upgrade, context_id);
     register(scope, ns, "ceSubtreeHook", ce_subtree_hook, context_id);
     register(scope, ns, "ceAttributeChanged", ce_attribute_changed, context_id);
     // (…and the stack's depth and deepest queue, a view on the isolate's one buffer)
@@ -256,7 +257,10 @@ fn ce_define(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         .collect();
     callbacks.resize_with(CALLBACKS, || None);
     let observed = match v8::Local::<v8::Array>::try_from(args.get(1)) {
-        Ok(a) => (0..a.length()).filter_map(|i| a.get_index(scope, i)).map(|v| v.to_rust_string_lossy(scope)).collect(),
+        Ok(a) => {
+            let names: Vec<v8::Local<'_, v8::Value>> = (0..a.length()).filter_map(|i| a.get_index(scope, i)).collect();
+            names.into_iter().map(|v| utf16_arg(scope, v)).collect()
+        }
         Err(_) => HashSet::new(),
     };
     let definitions = &mut dom(scope).arena.ce_reactions.definitions;
@@ -293,6 +297,17 @@ fn ce_hook(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let element = v8::Global::new(scope, args.get(1));
     let list = held_list(scope, args.get(3));
     rv.set_bool(dom(scope).arena.ce_reactions.enqueue(id, element, callback, list));
+}
+
+// __dom.ceEnqueueUpgrade(nid, element, upgrade, args) -> whether the backup element queue's microtask is to be queued: HTML
+// "enqueue a custom element upgrade reaction" — `upgrade`, the bindings' steps that upgrade the element, called on it with
+// `args` (its definition's constructor) as its reactions run.
+fn ce_enqueue_upgrade(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let element = v8::Global::new(scope, args.get(1));
+    let upgrade = v8::Global::new(scope, args.get(2));
+    let list = held_list(scope, args.get(3));
+    rv.set_bool(dom(scope).arena.ce_reactions.enqueue(id, element, upgrade, list));
 }
 
 // __dom.ceSubtreeHook(rootNid, which, args) -> whether the backup element queue's microtask is to be queued: `which`
@@ -336,7 +351,7 @@ fn ce_subtree_hook(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 // observes the attribute (HTML "handle attribute changes" step 2).
 fn ce_attribute_changed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    let name = args.get(2).to_rust_string_lossy(scope);
+    let name = utf16_arg(scope, args.get(2));
     let callback = {
         let reactions = &dom(scope).arena.ce_reactions;
         reactions
