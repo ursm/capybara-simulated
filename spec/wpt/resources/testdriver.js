@@ -122,13 +122,13 @@
     ];
   }
   // Splice `insert` over a text control's selection, collapse the caret after it,
-  // and mark the control edited so a later blur fires `change` (the engine sets the
-  // same flag on user input; a raw `value=` assignment would leave it unset).
+  // and mark the control edited — the engine's (`changeEdited`, as on user input) — so a later
+  // blur fires `change` (a raw `value=` assignment would leave it unedited).
   function spliceTextCtl(target, insert) {
     var caret = ctlCaret(target), s = caret[0], e = caret[1], cur = target.value || '';
     target.value = cur.slice(0, s) + insert + cur.slice(e);
     try { target.selectionStart = target.selectionEnd = s + insert.length; } catch (_) {}
-    if (target._changeBaseline !== undefined) target._editedSinceFocus = true;
+    W.__dom.changeEdited(target._nid, true);
   }
   // The editing-event envelope every editing key produces: fire the cancelable
   // beforeinput, run `mutate` (unless it was canceled), then fire the
@@ -186,7 +186,7 @@
         else if (forward && s < cur.length) { target.value = cur.slice(0, s) + cur.slice(s + 1); pos = s; }
         else if (!forward && s > 0)         { target.value = cur.slice(0, s - 1) + cur.slice(s); pos = s - 1; }
         try { target.selectionStart = target.selectionEnd = pos; } catch (_) {}
-        if (target._changeBaseline !== undefined) target._editedSinceFocus = true;
+        W.__dom.changeEdited(target._nid, true);
       } else if (sel && sel.rangeCount && !sel.isCollapsed) {
         sel.getRangeAt(0).deleteContents();
       }

@@ -30,6 +30,23 @@ RSpec.describe 'change on blur' do
     expect(s.evaluate_script('log')).to eq(['a'])
   end
 
+  # The value compared is the one the `value` getter reads — sanitized: an "e" typed into a number field, a space into an
+  # email one, leaves the value "" it was focused with, so no `change`. Chrome 155 (real keys): [[], "", ""].
+  it 'compares the sanitized value' do
+    s = session_for(<<~HTML)
+      <input id=n type=number><input id=e type=email>
+      <script>
+        window.log = [];
+        for (const id of ['n', 'e']) document.getElementById(id).addEventListener('change', () => log.push(id));
+      </script>
+    HTML
+    s.find('#n').send_keys('e')
+    s.execute_script('document.activeElement.blur()')
+    s.find('#e').send_keys(' ')
+    s.execute_script('document.activeElement.blur()')
+    expect(s.evaluate_script("[log, document.getElementById('n').value, document.getElementById('e').value]")).to eq([[], '', ''])
+  end
+
   # A focused control taken out of its document loses focus with no event (HTML's focus fixup rule; Firefox and WebKit
   # alike), and what it had armed with it: focused again and blurred, it fires none. Chrome 155 fires `change` and `blur`
   # as it is removed — a Blink behavior its own intent ("Stop sending blur events on element removal") is retiring.

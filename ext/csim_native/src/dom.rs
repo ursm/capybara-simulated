@@ -995,6 +995,8 @@ impl RealmArena {
         self.parser_form_owners.retain(|id, _| live(slots, id));
         self.custom_states.retain(|id, _| live(slots, id));
         self.text_selections.retain(|id, _| live(slots, id));
+        self.change_baselines.retain(|id, _| live(slots, id));
+        self.previously_focused.retain(|dialog, focused| live(slots, dialog) && live(slots, focused));
         self.checked_radios.retain(|_, ids| {
             ids.retain(|id| live(slots, id));
             !ids.is_empty()
@@ -1133,7 +1135,6 @@ impl RealmArena {
         }
         self.id_index.get_mut().forget(id);
         self.ce_reactions.forget_node(id);
-        // (…and a checked radio's entry, under its name)
         // (…and what a focused text control armed for its blur)
         if !self.change_baselines.is_empty() {
             self.change_baselines.remove(&id);
@@ -1145,6 +1146,7 @@ impl RealmArena {
                 list.dialogs.retain(|&(d, _)| d != id);
             }
         }
+        // (…and a checked radio's entry, under its name)
         if !self.checked_radios.is_empty() {
             if let Some(name) = self.get(id).filter(|n| n.is_html_named("input")).and_then(|n| n.plain_attr_units("name")) {
                 self.checked_radios.retain(|(n, _), ids| {

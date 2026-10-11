@@ -429,8 +429,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // __dom.documentFocus(docNid, hover) -> the element the realm of the document has focused (or, `hover`, hovered) — its
-// state (`RealmState::focus` / `hover`, which STATE_FOCUSED / STATE_HOVERED written there name), whichever realm asks —
-// as `node_value` answers it, or null: where it is still, a removal it left with not yet told (`subtreeLeft` asks).
+// state (`RealmState::focus` / `hover`, which STATE_FOCUSED / STATE_HOVERED written there name — and which a removal's
+// steps take off the elements that leave: dialogs.rs `removing_steps`), whichever realm asks — as `node_value` answers
+// it, or null.
 fn document_focus_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_null() };
     let hover = args.get(1).is_true();
