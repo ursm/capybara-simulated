@@ -1934,8 +1934,6 @@ custom-elements/form-associated/ElementInternals-reportValidity-delegatesFocus.h
 - "!= custom-elements/form-associated/ElementInternals-reportValidity-delegatesFocus-notref.html"
 custom-elements/form-associated/disabled-delegatesFocus.html:
 - Focus events fire on disabled form-associated custom elements with delegatesFocus
-custom-elements/form-associated/form-disabled-callback.html:
-- Relationship with FIELDSET
 custom-elements/htmlconstructor/newtarget-customized-builtins.html:
 - If prototype is not object (5), derives the fallback from NewTarget's GetFunctionRealm
   (customized built-in elements)
@@ -2001,12 +1999,8 @@ custom-elements/reactions/Animation.html:
 custom-elements/reactions/Document.html:
 - execCommand on Document must enqueue a disconnected reaction when deleting a custom
   element from a contenteditable element
-- open on Document must enqueue disconnectedCallback when removing a custom element
 - write on Document must enqueue disconnectedCallback when removing a custom element
 - writeln on Document must enqueue disconnectedCallback when removing a custom element
-custom-elements/reactions/ShadowRoot.html:
-- innerHTML on ShadowRoot must enqueue disconnectedCallback when removing a custom
-  element
 custom-elements/registries/Element-customElementRegistry-exceptions.html:
 - customElementRegistry on a failed custom element created by parser should return
   the specified custom regsitry

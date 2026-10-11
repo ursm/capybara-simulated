@@ -315,7 +315,11 @@ RSpec.describe 'element state in the native arena' do
       expect(session.evaluate_script('window.__shadowState')).to eq([false, false])
     end
 
-    it 'carries nothing out of a conversion that threw' do
+    # A conversion that throws has done what it did before it threw (DOM "convert nodes into a node": each node appended
+    # to the fragment in turn, adopted as it goes in), and the reactions it enqueued run as the call returns, thrown or
+    # not ([CEReactions]). Firefox: ["adopted", "threw", "parent:#document-fragment:true"]; Chrome adopts nothing and
+    # leaves the node in no parent, which is no step of the spec's.
+    it 'runs the reactions of a conversion that threw' do
       got = session.evaluate_script(<<~JS)
         (() => {
           const log = [];
@@ -324,11 +328,11 @@ RSpec.describe 'element state in the native arena' do
           log.length = 0;
           const root = document.body.appendChild(document.createElement('div'));
           try { root.append(e, document); } catch (_) { log.push('threw'); }
-          document.body.appendChild(document.createElement('p'));
+          log.push('parent:' + (e.parentNode && e.parentNode.nodeName) + ':' + (e.ownerDocument === document));
           return log;
         })()
       JS
-      expect(got).to eq(%w[threw])
+      expect(got).to eq(%w[adopted threw parent:#document-fragment:true])
     end
 
     it "runs a variadic insertion's adoptedCallback with the node in its new parent" do
