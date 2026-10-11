@@ -57,9 +57,6 @@ impl RealmArena {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "sheetGen", sheet_gen_op, context_id);
     crate::dom::register(scope, ns, "renewSheet", renew_sheet_op, context_id);
-    // (…and how many tree changes renewed one: `RealmArena::sheet_renewals`)
-    let renewals = crate::dom::dom(scope).arena.sheet_renewals.store();
-    crate::dom::view_word(scope, ns, "sheetRenewals", renewals);
 }
 
 // __dom.sheetGen(nid) -> how many sheets the owner has had (`NodeData::sheet_gen`): its sheet is the one of this count.

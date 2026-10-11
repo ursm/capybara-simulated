@@ -817,7 +817,8 @@ pub(crate) struct RealmArena {
     pub(crate) observers: crate::mutation_observers::Observers,
     // Each top-level document's autofocus candidates (autofocus.rs).
     pub(crate) autofocus: crate::autofocus::Autofocus,
-    // How many changes of the tree gave a sheet owner a new sheet (sheet_owners.rs)…
+    // How many changes of the tree gave a sheet owner a new sheet (sheet_owners.rs), which a change's record asks of
+    // (mutation.rs `record_child_list`)…
     pub(crate) sheet_renewals: SharedWord,
     // …how many wrote a tree's edges — a node linked or unlinked, anywhere, by whichever realm's code: what the bindings'
     // collections of a parent's children key on (`edgeGen`)…

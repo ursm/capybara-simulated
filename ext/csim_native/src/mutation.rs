@@ -5,7 +5,8 @@
 // those it ends with — the mutation record, the custom element reactions, the connection walk — the bindings' to take as
 // it returns.
 
-use crate::dom::{nid_arg, node_value, nodes_value, realm, realm_id, NodeId, NodeKind, RealmArena};
+use crate::dom::{nid_arg, node_value, nodes_value, realm, realm_id, NodeId, NodeKind, RealmArena, GEN_DIRTY, GEN_NODES, GEN_SETTLE, GEN_STRUCTURE, GEN_SUBTREE_MARKS, GEN_TREE};
+use crate::mutation_observers::{CASCADE_REFRESH, CASCADE_VERSION, OBSERVATIONS};
 
 // DOM node types, as the page side names them.
 const ELEMENT: u32 = 1;
@@ -163,6 +164,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "insertionRefusal", insertion_refusal, context_id);
     crate::dom::register(scope, ns, "changeChildren", change_children_op, context_id);
     crate::dom::register(scope, ns, "moveChild", move_child_op, context_id);
+    crate::dom::register(scope, ns, "recordChildList", record_child_list_op, context_id);
 }
 
 // __dom.insertionRefusal(nodeNid, nodeType, parentNid, parentType, childNid, replace) -> 0 where the insertion of the
@@ -258,6 +260,7 @@ fn removing_steps(scope: &mut v8::PinScope<'_, '_>, steps: v8::Local<'_, v8::Arr
 fn change_children(
     scope: &mut v8::PinScope<'_, '_>,
     cid: i32,
+    caller: i32,
     parent: NodeId,
     removing: Removing,
     nodes: &[NodeId],
@@ -265,7 +268,8 @@ fn change_children(
     child: Option<NodeId>,
     adopt_all: bool,
     steps: v8::Local<'_, v8::Array>,
-) -> Option<Result<Changed, u32>> {
+) -> Option<Result<Vec<NodeId>, u32>> {
+    let renewals = crate::dom::dom(scope).arena.sheet_renewals.get();
     let connected = realm(scope, cid).is_connected(parent);
     let (removed, siblings) = match removing {
         Removing::None => (Vec::new(), None),
@@ -316,24 +320,21 @@ fn change_children(
             step(scope, steps, STEP_SOURCE_INSERTED, &[node, parent_object])?;
         }
     }
+    if !removed.is_empty() || !added.is_empty() {
+        record_child_list(scope, caller, parent, added, &removed, siblings, Some(renewals));
+    }
     let flags = (if connected { CHANGE_CONNECTED } else { 0 }) | (if refused { CHANGE_REFUSED } else { 0 });
     crate::dom::dom(scope).arena.change_flags.set(flags);
-    Some(Ok(Changed { removed, siblings }))
+    Some(Ok(removed))
 }
 
-// What a change of children took out: the nodes, and — one child's — the siblings it had, which its record carries.
-struct Changed {
-    removed: Vec<NodeId>,
-    siblings: Option<(Option<NodeId>, Option<NodeId>)>,
-}
-
-// __dom.changeChildren(parentNid, removing, nodes, childNid, adoptAll, steps) -> what it took out — the removed nodes
-// (as `nodes_value` answers), or, one child's, `[child, previousSibling, nextSibling]`; undefined for none — or
-// `REMOVED_NOT_A_CHILD`: `change_children`, `removing` -1 for no child, -2 for every child, else the child's nid; `nodes`
-// the nodes to insert; `childNid` -1 for none; `adoptAll` whether replace all's nodes are to be adopted (the bindings
-// know where none is: each already a parentless node of the parent's document); `steps` the bindings' steps, by index
-// (`STEP_*`). Whether the parent was connected, and whether the change was refused, in `changeFlags` — cleared first,
-// where the change throws before it begins.
+// __dom.changeChildren(parentNid, removing, nodes, childNid, adoptAll, steps, callerRealm) -> the removed nodes (as
+// `nodes_value` answers; undefined for none), or `REMOVED_NOT_A_CHILD`: `change_children`, `removing` -1 for no child,
+// -2 for every child, else the child's nid; `nodes` the nodes to insert; `childNid` -1 for none; `adoptAll` whether
+// replace all's nodes are to be adopted (the bindings know where none is: each already a parentless node of the parent's
+// document); `steps` the bindings' steps, by index (`STEP_*`); `callerRealm` the realm whose code made the change, whose
+// generations its record moves. Whether the parent was connected, and whether the change was refused, in `changeFlags` —
+// cleared first, where the change throws before it begins.
 fn change_children_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     crate::dom::dom(scope).arena.change_flags.set(0);
     let Some(parent) = nid_arg(scope, &args, 0) else { return };
@@ -356,12 +357,9 @@ fn change_children_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let child = nid_arg(scope, &args, 3);
     let adopt_all = matches!(removing, Removing::All) && !nodes.is_empty() && args.get(4).is_true();
     let cid = realm_id(scope, &args);
-    match change_children(scope, cid, parent, removing, &nodes, node_list, child, adopt_all, steps) {
-        Some(Ok(Changed { removed, siblings: Some((previous, next)) })) => {
-            let items = [node_value(scope, removed.first().copied()), node_value(scope, previous), node_value(scope, next)];
-            rv.set(v8::Array::new_with_elements(scope, &items).into());
-        }
-        Some(Ok(Changed { removed, siblings: None })) => {
+    let caller = args.get(6).int32_value(scope).unwrap_or(cid);
+    match change_children(scope, cid, caller, parent, removing, &nodes, node_list, child, adopt_all, steps) {
+        Some(Ok(removed)) => {
             if !removed.is_empty() {
                 let list = nodes_value(scope, cid, &removed);
                 rv.set(list);
@@ -376,11 +374,12 @@ fn change_children_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 // the engine's moving steps go: out of its old parent and into the new one with the live ranges' and NodeIterators'
 // steps of each (it stays connected: none of the bindings' removing or insertion steps — the engine's radio group and
 // registry steps of an insertion run, as Chrome's do: a checked radio moved into another group unchecks the rest of it),
-// a form the parser gave a control in it no longer
-// its owner where they are no longer in the same tree (HTML's moving steps), and the focused or hovered element moved
-// with it — the old ancestors' `:focus-within` / `:hover` ending and the new ones' beginning, a flip of state no setter
-// sees (`note_state_changed`). The parent it left and the siblings it had there, which the removal's record carries.
-fn move_child(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node: NodeId, child: Option<NodeId>) -> (Option<NodeId>, Option<NodeId>, Option<NodeId>) {
+// recorded as a removal from the old parent and an insertion into the new one; a form the parser gave a control in it
+// no longer its owner where they are no longer in the same tree (HTML's moving steps); and the focused or hovered
+// element moved with it — the old ancestors' `:focus-within` / `:hover` ending and the new ones' beginning, a flip of
+// state no setter sees (`note_state_changed`). The parent it left.
+fn move_child(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, parent: NodeId, node: NodeId, child: Option<NodeId>) -> Option<NodeId> {
+    let renewals = crate::dom::dom(scope).arena.sheet_renewals.get();
     let arena = realm(scope, cid);
     // (…"if child is node, set child to node's next sibling": a move before itself is none)
     let child = if child == Some(node) { arena.sibling(node, 1) } else { child };
@@ -390,17 +389,23 @@ fn move_child(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node: 
         crate::dom::take_out(scope, cid, node);
     }
     crate::dom::insert_nodes(scope, cid, parent, &[node], child);
+    // (…a removal from the old parent and an insertion into the new one, to an observer)
+    if let Some(old) = old {
+        record_child_list(scope, caller, old, &[], &[node], Some((previous, next)), None);
+    }
+    record_child_list(scope, caller, parent, &[node], &[], None, Some(renewals));
     let arena = realm(scope, cid);
     arena.parser_form_owners_removed(node);
     let carried = |id: Option<NodeId>| id.is_some_and(|f| arena.shadow_including_ancestor(node, f));
     if old != Some(parent) && (carried(arena.focus) || carried(arena.hover)) {
         arena.observers.note_state_changed();
     }
-    (old, previous, next)
+    old
 }
 
-// __dom.moveChild(nodeNid, nodeType, parentNid, parentType, childNid) -> `[oldParent, previousSibling, nextSibling]`
-// (`move_child`), or why the move is refused (`Refusal`, the checks of "move": `move_refusal`); `childNid` -1 for none.
+// __dom.moveChild(nodeNid, nodeType, parentNid, parentType, childNid, callerRealm) -> the parent the node left (`move_child`;
+// null for none), or why the move is refused (`Refusal`, the checks of "move": `move_refusal`); `childNid` -1 for none,
+// `callerRealm` the realm whose code moved it, whose generations its records move.
 fn move_child_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(node), Some(parent)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2)) else { return rv.set_uint32(Refusal::MoveTree as u32) };
     let node_type = args.get(1).uint32_value(scope).unwrap_or(0);
@@ -410,7 +415,88 @@ fn move_child_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     if let Some(refusal) = move_refusal(realm(scope, cid), node, node_type, parent, parent_type, child) {
         return rv.set_uint32(refusal as u32);
     }
-    let (old, previous, next) = move_child(scope, cid, parent, node, child.flatten());
-    let items = [node_value(scope, old), node_value(scope, previous), node_value(scope, next)];
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
+    let caller = args.get(5).int32_value(scope).unwrap_or(cid);
+    let old = move_child(scope, cid, caller, parent, node, child.flatten());
+    rv.set(node_value(scope, old));
+}
+
+// DOM "queue a tree mutation record" for a change of `target`'s children — `added` put in, `removed` taken out, the
+// siblings either side (`siblings`; for an insertion alone, those of the nodes it put in where they still are) — and what
+// moves with it: the target realm's layout marks (the target, its subtree where it is an element or a shadow root — what
+// the selectors read of a child list, positions, `:empty`, a `:has()` above — and each node put in with its subtree,
+// measured where it is now); the calling realm's settle, tree, nodes and structure generations and the observations a
+// change schedules; and, where the change gave a sheet owner a new sheet (the count `renewals` was at as it began), the
+// cascade — the version too on a page with shadow trees, whose sheets are handed to the style engine by it.
+pub(crate) fn record_child_list(
+    scope: &mut v8::PinScope<'_, '_>,
+    caller: i32,
+    target: NodeId,
+    added: &[NodeId],
+    removed: &[NodeId],
+    siblings: Option<(Option<NodeId>, Option<NodeId>)>,
+    renewals: Option<u32>,
+) {
+    let Some(cid) = crate::dom::dom(scope).arena.get(target).map(|n| n.realm) else { return };
+    let arena = realm(scope, cid);
+    let generations = &arena.generations;
+    generations.bump(GEN_DIRTY);
+    if arena.get(target).is_some_and(|n| n.kind == NodeKind::Element || n.host.is_some()) {
+        generations.bump(GEN_SUBTREE_MARKS);
+    }
+    for _ in added {
+        generations.bump(GEN_SUBTREE_MARKS);
+        generations.bump(GEN_DIRTY);
+    }
+    let in_shadow = arena.get(arena.root_of(target)).is_some_and(|r| r.host.is_some());
+    let callers = realm(scope, caller);
+    for which in [GEN_SETTLE, GEN_TREE, GEN_NODES, GEN_STRUCTURE] {
+        callers.generations.bump(which);
+    }
+    let shadow_hosts = callers.shadow_hosts;
+    let dom = crate::dom::dom(scope);
+    dom.arena.observers.note(OBSERVATIONS);
+    if renewals.is_some_and(|r| r != dom.arena.sheet_renewals.get()) {
+        dom.arena.observers.note(if in_shadow { CASCADE_VERSION } else { CASCADE_REFRESH });
+        if shadow_hosts {
+            dom.arena.observers.note(CASCADE_VERSION);
+        }
+    }
+    if !realm(scope, cid).observers.observing() {
+        return;
+    }
+    let (previous, next) = siblings.unwrap_or_else(|| {
+        let arena = realm(scope, cid);
+        let still = |n: &NodeId| arena.parent_of(*n) == Some(target);
+        (added.first().filter(|n| still(n)).and_then(|&n| arena.sibling(n, -1)), added.last().filter(|n| still(n)).and_then(|&n| arena.sibling(n, 1)))
+    });
+    let kind = v8::Integer::new(scope, 0).into();
+    let target_object = node_value(scope, Some(target));
+    let (added, removed) = (nodes_value(scope, cid, added), nodes_value(scope, cid, removed));
+    let (previous, next) = (node_value(scope, previous), node_value(scope, next));
+    let null: v8::Local<'_, v8::Value> = v8::null(scope).into();
+    let fields = [kind, target_object, added, removed, previous, next, null, null, null];
+    crate::mutation_observers::queue_record(scope, cid, target, &fields);
+}
+
+// __dom.recordChildList(targetNid, added, removed, previousSibling, nextSibling) — a change of the target's children
+// made outside the DOM's mutation algorithms (the parser's, with an observer to hear of it): `record_child_list`, its
+// siblings undefined for an insertion's own, and no sheet renewal of its own to ask about.
+fn record_child_list_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(target) = nid_arg(scope, &args, 0) else { return };
+    let ids = |scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>| -> Vec<NodeId> {
+        let Ok(list) = v8::Local::<v8::Array>::try_from(v) else { return Vec::new() };
+        let mut ids = Vec::with_capacity(list.length() as usize);
+        for i in 0..list.length() {
+            if let Some(nid) = list.get_index(scope, i).and_then(|n| crate::node_handle::nid_of(scope, n)) {
+                ids.push(nid);
+            }
+        }
+        ids
+    };
+    let (added, removed) = (ids(scope, args.get(1)), ids(scope, args.get(2)));
+    let siblings = (!args.get(3).is_undefined() || !args.get(4).is_undefined()).then(|| {
+        (crate::node_handle::nid_of(scope, args.get(3)), crate::node_handle::nid_of(scope, args.get(4)))
+    });
+    let caller = realm_id(scope, &args);
+    record_child_list(scope, caller, target, &added, &removed, siblings, None);
 }
