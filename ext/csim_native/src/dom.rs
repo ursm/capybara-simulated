@@ -3028,11 +3028,11 @@ fn slot_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, nodes:
     }
 }
 // The steps of an attribute write the engine runs after it: the slot steps (`slot_attribute_steps`), and a radio
-// button's, whose `checked`, `name` or `type` written may make it a checked one of a group (`radio_attribute_steps`),
+// button's, whose `checked`, `name`, `type` or `form` written may make it a checked one of a group (`radio_attribute_steps`),
 // whose state change the bindings hear of (`note_state_changed`).
 fn attribute_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, names: &[&str]) {
     slot_attribute_steps(scope, cid, id, names);
-    if names.iter().any(|n| matches!(*n, "checked" | "name" | "type")) {
+    if names.iter().any(|n| matches!(*n, "checked" | "name" | "type" | "form")) {
         let arena = realm(scope, cid);
         if arena.radio_attribute_steps(id) {
             arena.observers.note_state_changed();

@@ -277,8 +277,9 @@ impl RealmArena {
         }
         changed
     }
-    // …and a radio button's steps as its `checked` (to a checkedness not dirty), `name` or `type` is written — the same
-    // §4.10.5.1.15 phenomena: its checkedness set to true, its name changed. Whether a radio's checkedness changed.
+    // …and a radio button's steps as its `checked` (to a checkedness not dirty), `name`, `type` or `form` is written — the
+    // same §4.10.5.1.15 phenomena: its checkedness set to true, its name or its form owner changed. Whether a radio's
+    // checkedness changed.
     pub(crate) fn radio_attribute_steps(&mut self, id: NodeId) -> bool {
         self.note_radio(id);
         self.uncheck_group_mates(id)
