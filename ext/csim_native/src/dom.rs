@@ -2504,26 +2504,14 @@ pub(crate) fn utf16_arg(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8:
     u
 }
 
-// __dom.setData(nid, data): a Text / Comment node's character data became `data`.
+// __dom.setData(node, data): a character data node's data became `data` (a string) — the one the node holds from now on
+// (node_handle.rs `wrote_data`).
 fn set_data(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let data = utf16_arg(scope, args.get(1));
-    let cid = realm_id(scope, &args);
-    let (arena, engine) = arena_and_engine(scope, cid);
-    // (Text is a state input: a textarea's default value, an option's.)
-    arena.state_epoch += 1;
-    let mut had_text = false;
-    if let Some(node) = arena.get_mut(id) {
-        had_text = !node.data.is_empty();
-        node.data = data;
-    }
-    text_changed(arena, engine, id, had_text);
+    write_data(scope, &args, false);
 }
 
 // A text node's data moved: all a selector can see of it is whether there is any (`:empty`, and a `:has()` asking
@@ -2539,24 +2527,33 @@ fn text_changed(arena: &mut RealmArena, engine: Option<&mut crate::style::StyleE
     }
 }
 
-// __dom.appendData(nid, data): `data` was appended to a Text / Comment node's character data — the parser's text
-// coalescing and `appendData`, which a whole-string setData per append made quadratic.
+// __dom.appendData(node, data): `data` was appended to a character data node's data — the parser's text coalescing and
+// `appendData`, which a whole-string setData per append made quadratic (the string it holds is the two strings joined, a
+// cons string, which no append copies either).
 fn append_data(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let data = utf16_arg(scope, args.get(1));
-    let cid = realm_id(scope, &args);
+    write_data(scope, &args, true);
+}
+// …both, in the realm the node's slot is in, whose style engine hears of it.
+fn write_data(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, appended: bool) {
+    let Some(data) = args.get(1).to_string(scope) else { return };
+    let Some(id) = crate::node_handle::wrote_data(scope, args.get(0), data, appended) else { return };
+    let units = utf16_arg(scope, data.into());
+    let Some(cid) = dom(scope).arena.get(id).map(|n| n.realm) else { return };
     let (arena, engine) = arena_and_engine(scope, cid);
+    // (Text is a state input: a textarea's default value, an option's.)
     arena.state_epoch += 1;
     let mut had_text = false;
     if let Some(node) = arena.get_mut(id) {
         had_text = !node.data.is_empty();
-        node.data.extend_from_slice(&data);
+        if appended {
+            node.data.extend_from_slice(&units);
+        } else {
+            node.data = units;
+        }
     }
     text_changed(arena, engine, id, had_text);
 }

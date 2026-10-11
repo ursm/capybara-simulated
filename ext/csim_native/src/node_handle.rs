@@ -81,6 +81,10 @@ pub(crate) struct NodeHandle {
     // Its node document (DOM §4.4), the document object — none for a document itself, which is its own — that adoption
     // changes (`nodeDocument` / `setNodeDocument`): an Attr's too, which has no slot in the arena.
     document: UnsafeCell<v8::TracedReference<v8::Object>>,
+    // A character data node's data as the string a script reads (`nodeData`): the one it was last given, or the one made
+    // from the arena's the first time it is read since — the arena's is the data, this is its string, kept so a read is
+    // no copy. Empty until either.
+    data: UnsafeCell<v8::TracedReference<v8::String>>,
 }
 
 unsafe impl GarbageCollected for NodeHandle {
@@ -94,6 +98,7 @@ unsafe impl GarbageCollected for NodeHandle {
         visitor.trace(unsafe { &*self.listeners.get() });
         visitor.trace(unsafe { &*self.rare.get() });
         visitor.trace(unsafe { &*self.document.get() });
+        visitor.trace(unsafe { &*self.data.get() });
     }
     fn get_name(&self) -> &'static std::ffi::CStr {
         c"NodeHandle"
@@ -240,6 +245,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         listeners: UnsafeCell::new(v8::TracedReference::empty()),
         rare: UnsafeCell::new(v8::TracedReference::empty()),
         document: UnsafeCell::new(v8::TracedReference::empty()),
+        data: UnsafeCell::new(v8::TracedReference::empty()),
     };
     let heap = scope.get_cpp_heap().expect("NodeBase is installed only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
@@ -330,6 +336,7 @@ pub(crate) fn install_listeners(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<
     crate::dom::register(scope, ns, "noteListenerType", note_listener_type, context_id);
     crate::dom::register(scope, ns, "listenerTypeKnown", listener_type_known, context_id);
     crate::dom::register(scope, ns, "rareData", rare_data, context_id);
+    crate::dom::register(scope, ns, "nodeData", node_data, context_id);
     crate::dom::register(scope, ns, "nodeDocument", node_document, context_id);
     crate::dom::register(scope, ns, "setNodeDocument", set_node_document, context_id);
     crate::dom::register(scope, ns, "setSubtreeDocument", set_subtree_document, context_id);
@@ -396,6 +403,34 @@ fn rare_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         unsafe { (*slot).reset(scope, Some(record)) };
         rv.set(record.into());
     }
+}
+
+// `__dom.nodeData(node)` -> a character data node's data (`data`): the string it holds, or one made from the arena's and
+// held.
+fn node_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(ptr) = handle_of(scope, args.get(0)) else { return };
+    // SAFETY: the handle lives while its object, an argument, does; the main thread writes the reference.
+    let h = unsafe { ptr.as_ref() };
+    if let Some(s) = unsafe { (*h.data.get()).get(scope) } {
+        return rv.set(s.into());
+    }
+    let units = h.nid.get().and_then(|id| crate::dom::dom(scope).arena.get(id).map(|n| n.data.clone())).unwrap_or_default();
+    let Some(s) = v8::String::new_from_two_byte(scope, &units, v8::NewStringType::Normal) else { return };
+    // SAFETY: as above.
+    unsafe { (*h.data.get()).reset(scope, Some(s)) };
+    rv.set(s.into());
+}
+// …and a write of it: `data` (a string) is what the node holds now — or, `appended`, what was appended to it — the slot
+// whose data the caller writes answered, none for a node that has none yet (a CharacterData's constructor writes its data
+// before its slot is made, which takes it from here: `registerNativeNode`).
+pub(crate) fn wrote_data(scope: &mut v8::PinScope<'_, '_>, node: v8::Local<'_, v8::Value>, data: v8::Local<'_, v8::String>, appended: bool) -> Option<NodeId> {
+    let ptr = handle_of(scope, node)?;
+    // SAFETY: as `node_data`.
+    let h = unsafe { ptr.as_ref() };
+    let held = if appended { unsafe { (*h.data.get()).get(scope) }.and_then(|s| v8::String::concat(scope, s, data)) } else { Some(data) };
+    // SAFETY: as above.
+    unsafe { (*h.data.get()).reset(scope, held) };
+    h.nid.get()
 }
 
 // `__dom.nodeDocument(node)` -> its node document, null for none — undefined for an object with no handle (an
