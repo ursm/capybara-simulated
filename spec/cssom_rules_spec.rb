@@ -224,6 +224,84 @@ RSpec.describe 'CSSOM rules' do
     expect(got).to eq([nil, false, true, nil, false, true, nil])
   end
 
+  # …and keeps what it had: an orphaned sheet's `title` is its owner's as it last had the sheet. A `<link>` whose `rel` is
+  # set to the value it has keeps its sheet; one whose `type` changes obtains another. Chrome 155:
+  # [null, "tt", "print", true, false].
+  it "leaves an orphaned sheet its title, and renews a link's sheet on a type change only" do
+    got = page('').evaluate_script(<<~JS)
+      (() => {
+        const e = document.createElement('style');
+        e.media = 'print';
+        e.title = 'tt';
+        e.textContent = 'p {}';
+        document.head.append(e);
+        const old = e.sheet;
+        e.firstChild.data = 'p {}';
+        const l = document.head.appendChild(document.createElement('link'));
+        l.rel = 'stylesheet';
+        l.href = 'data:text/css,a{}';
+        let sheet = l.sheet;
+        l.setAttribute('rel', 'stylesheet');
+        const sameRel = l.sheet === sheet;
+        sheet = l.sheet;
+        l.setAttribute('type', 'text/css');
+        return [old.ownerNode, old.title, old.media.mediaText, sameRel, l.sheet === sheet];
+      })()
+    JS
+    expect(got).to eq([nil, 'tt', 'print', true, false])
+  end
+
+  # A shadow tree's `<style>` taken out with its host and put back obtains a new sheet too — the edit a script made of the
+  # one before gone from the cascade — and a `<style>` moved deep in a subtree declares new FontFaces whether or not a
+  # script ever held its sheet. Chrome 155: [1, "rgb(0, 0, 0)", false].
+  it "renews the sheets of a moved subtree's shadow trees and its fonts" do
+    got = page('').evaluate_script(<<~JS)
+      (() => {
+        const host = document.body.appendChild(document.createElement('div'));
+        const sr = host.attachShadow({ mode: 'open' });
+        sr.innerHTML = '<style>span {}</style><span>s</span>';
+        const ss = sr.querySelector('style');
+        ss.sheet.insertRule('span { color: rgb(5, 0, 0) }', 1);
+        getComputedStyle(sr.querySelector('span')).color;
+        host.remove();
+        document.body.append(host);
+        const w = document.body.appendChild(document.createElement('div'));
+        w.innerHTML = '<style>@font-face { font-family: Foo; src: url(x.woff) }</style>';
+        const face = () => Array.from(document.fonts).find((f) => f.family.includes('Foo'));
+        const f0 = face();
+        w.remove();
+        document.body.append(w);
+        return [ss.sheet.cssRules.length, getComputedStyle(sr.querySelector('span')).color, face() === f0];
+      })()
+    JS
+    expect(got).to eq([1, 'rgb(0, 0, 0)', false])
+  end
+
+  # A frame's `<style>` put into the parent's document has ONE sheet, whichever realm's code reads it: the frame's `sheet`
+  # and the parent's `styleSheets` hand out the same object, its owner node the style. Chrome 155: [true, true, "fs"].
+  it "hands out one sheet for an owner adopted from a frame" do
+    app = lambda {|env|
+      body = if env['PATH_INFO'] == '/frame'
+        '<!DOCTYPE html><meta charset="utf-8"><style id=fs>p { color: rgb(0, 0, 9) }</style>'
+      else
+        '<!DOCTYPE html><meta charset="utf-8"><iframe id=fr src="/frame"></iframe>'
+      end
+      [200, {'content-type' => 'text/html'}, [body]]
+    }
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    s.within_frame('fr') { s.has_css?('style', visible: :all) }
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const fs = document.getElementById('fr').contentDocument.getElementById('fs');
+        document.head.append(fs);
+        const listed = document.styleSheets[document.styleSheets.length - 1];
+        const own = fs.sheet;
+        return [listed === own, document.styleSheets[document.styleSheets.length - 1] === own, own.ownerNode.id];
+      })()
+    JS
+    expect(got).to eq([true, true, 'fs'])
+  end
+
   # A `<link>` disabled and enabled again obtains its sheet again: a new one, without the edit a script made of the old,
   # which has no owner from the moment it was disabled. (Chrome: the same, each value.)
   it 'obtains a new sheet for a link enabled again' do

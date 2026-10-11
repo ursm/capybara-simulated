@@ -2659,18 +2659,22 @@ fn write_data(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgum
     let units = utf16_arg(scope, data.into());
     let Some(cid) = dom(scope).arena.get(id).map(|n| n.realm) else { return };
     let (arena, engine) = arena_and_engine(scope, cid);
-    // (Text is a state input: a textarea's default value, an option's.)
-    arena.state_epoch += 1;
-    let mut had_text = false;
-    if let Some(node) = arena.get_mut(id) {
-        had_text = !node.data.is_empty();
-        if appended {
-            node.data.extend_from_slice(&units);
-        } else {
-            node.data = units;
+    // (…data written as it was changes no text — but a `<style>`'s block is updated all the same, as by any write)
+    let unchanged = if appended { units.is_empty() } else { arena.get(id).is_some_and(|n| n.data == units) };
+    if !unchanged {
+        // (Text is a state input: a textarea's default value, an option's.)
+        arena.state_epoch += 1;
+        let mut had_text = false;
+        if let Some(node) = arena.get_mut(id) {
+            had_text = !node.data.is_empty();
+            if appended {
+                node.data.extend_from_slice(&units);
+            } else {
+                node.data = units;
+            }
         }
+        text_changed(arena, engine, id, had_text);
     }
-    text_changed(arena, engine, id, had_text);
     if let Some(p) = arena.parent_of(id) {
         arena.style_block_changed(p);
     }
