@@ -11,6 +11,7 @@ use crate::node_handle::NodeHandle;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "adoptInto", adopt_into, context_id);
+    crate::dom::register(scope, ns, "importInto", import_into, context_id);
 }
 
 // What the walk changes of one node's registry association: its new code, and the node whose registry object it takes
@@ -113,4 +114,64 @@ fn adopt_into(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         handle.set_registry(scope, r.code, object);
     }
     rv.set(nodes_value(scope, cid, &steps));
+}
+
+// __dom.importInto(rootNid, document, sourceInert, fallback, fallbackRegistry) -> the elements with an `id` or a `name` of a
+// clone `Document.importNode` made, as `nodes_value` answers: each of its shadow-including inclusive descendants given
+// `document` as its node document, and the registry association HTML "clone a node" gives it with a fallback registry —
+// `fallback` (a code; `fallbackRegistry` its registry where it is one), the option's where it gives another than the
+// document's window registry, else none set: an element with the null registry or the template contents' null, or none
+// set from a document without a browsing context (`sourceInert`), takes the fallback; one with a window's registry
+// tracks the document; a scoped one keeps it. A shadow root maps as an element does, and one with the null registry keeps
+// it and shields its tree from the fallback ("preserve null-ness").
+fn import_into(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(root) = nid_arg(scope, &args, 0) else { return };
+    let doc = v8::Local::<v8::Object>::try_from(args.get(1)).ok();
+    let source_inert = args.get(2).is_true();
+    let fallback = args.get(3).uint32_value(scope).unwrap_or(UNSET);
+    let fallback_registry = v8::Local::<v8::Object>::try_from(args.get(4)).ok().filter(|_| fallback >= FIRST_REGISTRY);
+    let cid = realm_id(scope, &args);
+    let (handles, mapped, named) = {
+        let arena = realm(scope, cid);
+        let reactions = &arena.ce_reactions;
+        let mut handles: Vec<*const NodeHandle> = Vec::new();
+        let mut mapped: Vec<(*const NodeHandle, u32)> = Vec::new();
+        let mut named: Vec<NodeId> = Vec::new();
+        let mut stack = vec![(root, false)];
+        while let Some((id, shielded)) = stack.pop() {
+            let Some(n) = arena.get(id) else { continue };
+            let shadow_root = n.kind == NodeKind::Fragment && n.host.is_some();
+            let mut shields = shielded;
+            if let Some(h) = n.link.handle() {
+                handles.push(h);
+                let code = h.registry();
+                if shadow_root && code == NULL {
+                    shields = true;
+                } else if !shielded && (n.kind == NodeKind::Element || shadow_root) {
+                    if code == NULL || code == TRACKING || (code == UNSET && source_inert) {
+                        mapped.push((h, fallback));
+                    } else if reactions.is_window_registry(code) {
+                        mapped.push((h, UNSET));
+                    }
+                }
+            }
+            if n.kind == NodeKind::Element && (n.plain_attr("id").is_some() || n.plain_attr("name").is_some()) {
+                named.push(id);
+            }
+            stack.extend(n.children.iter().rev().map(|&c| (c, shields && shadow_root || shielded)));
+            if let Some(sr) = n.shadow_root {
+                stack.push((sr, shielded));
+            }
+        }
+        (handles, mapped, named)
+    };
+    for h in handles {
+        // SAFETY: the clone's handles, which the arena holds while they are in its tree; nothing in between runs script.
+        unsafe { &*h }.set_document(scope, doc);
+    }
+    for (h, code) in mapped {
+        // SAFETY: as above.
+        unsafe { &*h }.set_registry(scope, code, fallback_registry.filter(|_| code >= FIRST_REGISTRY));
+    }
+    rv.set(nodes_value(scope, cid, &named));
 }
