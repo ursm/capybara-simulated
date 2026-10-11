@@ -309,6 +309,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceRegistryOf", ce_registry_of, context_id);
     register(scope, ns, "ceSetRegistry", ce_set_registry, context_id);
     register(scope, ns, "ceKeepNull", ce_keep_null, context_id);
+    register(scope, ns, "ceRestamp", ce_restamp, context_id);
     register(scope, ns, "ceSetKeepNull", ce_set_keep_null, context_id);
     // (…and the stack's depth and deepest queue, a view on the isolate's one buffer)
     let store = {
@@ -741,4 +742,36 @@ fn ce_set_keep_null(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let Some(handle) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
     // SAFETY: as above.
     unsafe { handle.as_ref() }.set_keep_null(args.get(1).is_true());
+}
+
+// __dom.ceRestamp(rootNid, match, code, registry, elementsOnly) — the registry association of the root and of each node of
+// its tree under it (not a shadow tree's, nor a template's contents; elements only where `elementsOnly`) whose association
+// `match` names — a bit per code, `1 << UNSET` and on — becomes `code` (`registry`'s, where it is one): what a parse or a
+// declarative shadow root stamps on the nodes it made.
+fn ce_restamp(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(root) = nid_arg(scope, &args, 0) else { return };
+    let matching = args.get(1).uint32_value(scope).unwrap_or(0);
+    let code = args.get(2).uint32_value(scope).unwrap_or(UNSET);
+    let object = v8::Local::<v8::Object>::try_from(args.get(3)).ok().filter(|_| code >= FIRST_REGISTRY);
+    let elements_only = args.get(4).is_true();
+    let cid = realm_id(scope, &args);
+    let handles: Vec<*const crate::node_handle::NodeHandle> = {
+        let arena = realm(scope, cid);
+        let mut out = Vec::new();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            let Some(n) = arena.get(id) else { continue };
+            if let Some(h) = n.link.handle().filter(|_| !elements_only || n.kind == crate::dom::NodeKind::Element) {
+                if h.registry() < FIRST_REGISTRY && matching & (1 << h.registry()) != 0 {
+                    out.push(h as *const _);
+                }
+            }
+            stack.extend(n.children.iter().copied());
+        }
+        out
+    };
+    for h in handles {
+        // SAFETY: the handles of the root's tree, which the arena holds; nothing in between runs script.
+        unsafe { &*h }.set_registry(scope, code, object);
+    }
 }
