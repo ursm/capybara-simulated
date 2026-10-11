@@ -89,14 +89,44 @@ pub(crate) struct NodeHandle {
     // set, the template contents' tracking null, the null registry, or a registry — kept here as the node document is,
     // whichever arena slot the node holds.
     registry: Cell<u32>,
+    // …and, for a document with a browsing context, its window's registry (none for one without): what a node of it with
+    // no registry set has.
+    window_registry: Cell<u32>,
+    // The registries those codes name, held: the engine's table holds them weakly, so a registry lives while a node is
+    // associated with it — or a script holds it — and no longer.
+    registry_object: UnsafeCell<v8::TracedReference<v8::Object>>,
+    window_registry_object: UnsafeCell<v8::TracedReference<v8::Object>>,
 }
 
 impl NodeHandle {
     pub(crate) fn registry(&self) -> u32 {
         self.registry.get()
     }
-    pub(crate) fn set_registry(&self, code: u32) {
+    // …`code`, which names `object` where it is a registry.
+    pub(crate) fn set_registry(&self, scope: &mut v8::PinScope<'_, '_>, code: u32, object: Option<v8::Local<'_, v8::Object>>) {
         self.registry.set(code);
+        // SAFETY: the main thread writes the reference, as TracedReference allows between marking steps.
+        unsafe { (*self.registry_object.get()).reset(scope, object) };
+    }
+    // …a code with no registry of its own (none set, the tracking null), which an insertion moves between.
+    pub(crate) fn set_registry_state(&self, code: u32) {
+        self.registry.set(code);
+    }
+    pub(crate) fn window_registry(&self) -> u32 {
+        self.window_registry.get()
+    }
+    pub(crate) fn set_window_registry(&self, scope: &mut v8::PinScope<'_, '_>, code: u32, object: Option<v8::Local<'_, v8::Object>>) {
+        self.window_registry.set(code);
+        // SAFETY: as above.
+        unsafe { (*self.window_registry_object.get()).reset(scope, object) };
+    }
+    pub(crate) fn nid(&self) -> Option<NodeId> {
+        self.nid.get()
+    }
+    // Its node document's object, where it has one.
+    pub(crate) fn document<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Object>> {
+        // SAFETY: the main thread writes the reference; the handle lives while the caller holds its object.
+        unsafe { (*self.document.get()).get(scope) }
     }
 }
 
@@ -112,6 +142,8 @@ unsafe impl GarbageCollected for NodeHandle {
         visitor.trace(unsafe { &*self.rare.get() });
         visitor.trace(unsafe { &*self.document.get() });
         visitor.trace(unsafe { &*self.data.get() });
+        visitor.trace(unsafe { &*self.registry_object.get() });
+        visitor.trace(unsafe { &*self.window_registry_object.get() });
     }
     fn get_name(&self) -> &'static std::ffi::CStr {
         c"NodeHandle"
@@ -260,6 +292,9 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         document: UnsafeCell::new(v8::TracedReference::empty()),
         data: UnsafeCell::new(v8::TracedReference::empty()),
         registry: Cell::new(0),
+        window_registry: Cell::new(0),
+        registry_object: UnsafeCell::new(v8::TracedReference::empty()),
+        window_registry_object: UnsafeCell::new(v8::TracedReference::empty()),
     };
     let heap = scope.get_cpp_heap().expect("NodeBase is installed only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.

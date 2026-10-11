@@ -935,7 +935,7 @@ impl RealmArena {
     // (ce_reactions.rs `forget`).
     pub(crate) fn forget_reactions_of(&mut self, cid: i32) {
         let slots = &self.slots;
-        self.ce_reactions.forget(cid, |id| live_node_realm(slots, id).is_none_or(|realm| realm == cid));
+        self.ce_reactions.forget(|id| live_node_realm(slots, id).is_none_or(|realm| realm == cid));
     }
     // The elements of the backup element queue realm `cid` made, taken (ce_reactions.rs `take_backup`).
     pub(crate) fn take_backup_of(&mut self, cid: i32) -> Vec<(NodeId, v8::Global<v8::Value>)> {
@@ -1879,6 +1879,15 @@ pub(crate) struct Dom {
     // realm holding one of them asks through (`setArena` / `arenaOf`; native-query-shadow.js `liveArenaOf`). Held
     // weakly: the realm holds its own, and one navigated away from is collected with it.
     pub(crate) arenas: std::collections::HashMap<i32, v8::Weak<v8::Object>>,
+}
+
+// The isolate's slots go after V8 has disposed it (`OwnedIsolate`'s drop), and a weak handle's drop resets its node,
+// which is freed memory by then (a strong one checks its isolate first): what holds weak handles is let go of whole.
+impl Drop for Dom {
+    fn drop(&mut self) {
+        std::mem::forget(std::mem::take(&mut self.arenas));
+        self.arena.ce_reactions.leak_weak_handles();
+    }
 }
 
 // Borrow the isolate's Dom, lazily creating the slot on first touch. rusty_v8

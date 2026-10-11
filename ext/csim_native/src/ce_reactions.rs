@@ -35,13 +35,13 @@ const CALLBACKS: usize = 9;
 
 // A custom element definition, as the engine needs it: the bindings' object for it (its name, local name and constructor,
 // what a lookup answers with), the callbacks it captured, and the attributes it observes by local name, in code units as
-// a DOMString compares — the realm that defined it, which takes it when it goes.
+// a DOMString compares. The object and the callbacks are held weakly — the bindings' object holds the callbacks, and its
+// registry holds it — so a definition lives with its registry, and a realm's with the realm.
 struct Definition {
-    realm: i32,
-    object: v8::Global<v8::Value>,
+    object: v8::Weak<v8::Value>,
     // (…an autonomous custom element's: its local name its name, where a customized built-in's extends another)
     autonomous: bool,
-    callbacks: Vec<Option<v8::Global<v8::Value>>>,
+    callbacks: Vec<Option<v8::Weak<v8::Value>>>,
     observed: HashSet<Vec<u16>>,
 }
 
@@ -51,15 +51,14 @@ pub(crate) const TRACKING: u32 = 1;
 pub(crate) const NULL: u32 = 2;
 const FIRST_REGISTRY: u32 = 3;
 
-// A CustomElementRegistry: its object, and whether it is scoped (every one a page constructs, not a window's) — the
-// realm that made it, which takes it when it goes — and its definitions, by name and, for a customized built-in, by the
-// local name it extends and its name (HTML "look up a custom element definition").
+// A CustomElementRegistry: its object — held weakly: it lives while a script holds it or a node is associated with it
+// (node_handle.rs) — and whether it is scoped (every one a page constructs, not a window's), and its definitions, by name
+// and, for a customized built-in, by the local name it extends and its name (HTML "look up a custom element definition").
 struct Registry {
-    realm: i32,
-    object: v8::Global<v8::Value>,
+    object: v8::Weak<v8::Value>,
     scoped: bool,
-    named: HashMap<Vec<u16>, u32>,
-    builtins: HashMap<Vec<u16>, HashMap<Vec<u16>, u32>>,
+    named: HashMap<String, u32>,
+    builtins: HashMap<String, HashMap<String, u32>>,
 }
 
 // One callback a custom element is owed: the callback, and its arguments.
@@ -82,6 +81,9 @@ pub(crate) struct Reactions {
     definitions: Vec<Option<Definition>>,
     custom: HashMap<NodeId, u32>,
     registries: Vec<Option<Registry>>,
+    // Each realm's window registry (its `customElements`, the latest context's of a realm id): the registry of a node with
+    // neither a registry set nor a node document.
+    window_registries: HashMap<i32, u32>,
 }
 
 const DEPTH: usize = 0;
@@ -118,20 +120,10 @@ impl Reactions {
         self.backup_queued = false;
         self.set(BACKUP, i32::from(!self.backup.is_empty()));
     }
-    // The reactions owed to the elements `gone` names — a dropped realm's — let go of, with their definitions and those
-    // realm `cid` made; and the backup element queue's microtask taken as lost, which a realm leaving may take with it (a
-    // checkpoint runs the queue then: `ceStack[2]`).
-    pub(crate) fn forget(&mut self, cid: i32, gone: impl Fn(NodeId) -> bool) {
-        for def in &mut self.definitions {
-            if def.as_ref().is_some_and(|d| d.realm == cid) {
-                *def = None;
-            }
-        }
-        for registry in &mut self.registries {
-            if registry.as_ref().is_some_and(|r| r.realm == cid) {
-                *registry = None;
-            }
-        }
+    // The reactions owed to the elements `gone` names — a dropped realm's — let go of, with their definitions; and the
+    // backup element queue's microtask taken as lost, which a realm leaving may take with it (a checkpoint runs the queue
+    // then: `ceStack[2]`).
+    pub(crate) fn forget(&mut self, gone: impl Fn(NodeId) -> bool) {
         self.custom.retain(|&id, _| !gone(id));
         self.queues.retain(|&id, _| !gone(id));
         self.backup.retain(|&(id, _)| !gone(id));
@@ -149,6 +141,11 @@ impl Reactions {
         }
         self.set(BACKUP, i32::from(!self.backup.is_empty()));
         taken
+    }
+    // The weak handles the definitions and registries hold, let go of with no reset: the isolate is gone (`Dom`'s drop).
+    pub(crate) fn leak_weak_handles(&mut self) {
+        std::mem::forget(std::mem::take(&mut self.definitions));
+        std::mem::forget(std::mem::take(&mut self.registries));
     }
     // …and those of a node freed (a queue nothing drained: its element went with its realm's script mid-call).
     pub(crate) fn forget_node(&mut self, id: NodeId) {
@@ -189,12 +186,12 @@ impl Reactions {
         code.checked_sub(FIRST_REGISTRY).and_then(|i| self.registries.get(i as usize)).and_then(Option::as_ref)
     }
     // The object of definition `id`.
-    fn definition_object(&self, id: u32) -> Option<&v8::Global<v8::Value>> {
+    fn definition_object(&self, id: u32) -> Option<&v8::Weak<v8::Value>> {
         self.definitions.get(id as usize).and_then(Option::as_ref).map(|d| &d.object)
     }
     // HTML "look up a custom element definition" in registry `code`: an autonomous one named `local_name` whose local name
     // is its name, else a customized built-in extending `local_name` named `is`.
-    fn look_up(&self, code: u32, local_name: &[u16], is: Option<&[u16]>) -> Option<u32> {
+    fn look_up(&self, code: u32, local_name: &str, is: Option<&str>) -> Option<u32> {
         let registry = self.registry(code)?;
         let autonomous = |id: &&u32| self.definitions.get(**id as usize).and_then(Option::as_ref).is_some_and(|d| d.autonomous);
         if let Some(&id) = registry.named.get(local_name).filter(autonomous) {
@@ -207,7 +204,7 @@ impl Reactions {
         self.custom.get(&id).and_then(|&d| self.definitions.get(d as usize)).and_then(Option::as_ref)
     }
     // Its definition's `which` callback, where it has one.
-    fn callback_of(&self, id: NodeId, which: usize) -> Option<&v8::Global<v8::Value>> {
+    fn callback_of(&self, id: NodeId, which: usize) -> Option<&v8::Weak<v8::Value>> {
         self.definition_of(id).and_then(|d| d.callbacks.get(which)).and_then(Option::as_ref)
     }
 }
@@ -240,7 +237,7 @@ impl crate::dom::RealmArena {
             let Some(n) = self.get(id) else { continue };
             if let Some(h) = n.link.handle() {
                 if let Some(code) = change(h.registry()) {
-                    h.set_registry(code);
+                    h.set_registry_state(code);
                 }
             }
             stack.extend(n.children.iter().copied());
@@ -263,6 +260,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceMakeRegistry", ce_make_registry, context_id);
     register(scope, ns, "ceNamed", ce_named, context_id);
     register(scope, ns, "ceLookUp", ce_look_up, context_id);
+    register(scope, ns, "ceSetWindowRegistry", ce_set_window_registry, context_id);
+    register(scope, ns, "ceWindowRegistry", ce_window_registry, context_id);
+    register(scope, ns, "ceRegistryFor", ce_registry_for, context_id);
+    register(scope, ns, "ceDefinitionFor", ce_definition_for, context_id);
     register(scope, ns, "ceRegistryOf", ce_registry_of, context_id);
     register(scope, ns, "ceSetRegistry", ce_set_registry, context_id);
     // (…and the stack's depth and deepest queue, a view on the isolate's one buffer)
@@ -344,18 +345,16 @@ fn held_list(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) 
 // `callbacks` its callbacks in `CALLBACKS` order (undefined for one it has not), `observed` the local names of the
 // attributes it observes.
 fn ce_define(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let realm = realm_id(scope, &args);
     let code = args.get(0).uint32_value(scope).unwrap_or(UNSET);
-    let name = utf16_arg(scope, args.get(1));
-    let local_name = utf16_arg(scope, args.get(2));
-    let object = v8::Global::new(scope, args.get(3));
-    let mut callbacks: Vec<Option<v8::Global<v8::Value>>> = held_list(scope, args.get(4))
-        .into_iter()
-        .map(|g| {
-            let local = v8::Local::new(scope, &g);
-            local.is_function().then_some(g)
-        })
-        .collect();
+    let name = args.get(1).to_rust_string_lossy(scope);
+    let local_name = args.get(2).to_rust_string_lossy(scope);
+    let object = v8::Weak::new(scope, args.get(3));
+    let given: Vec<v8::Local<'_, v8::Value>> = match v8::Local::<v8::Array>::try_from(args.get(4)) {
+        Ok(a) => (0..a.length()).filter_map(|i| a.get_index(scope, i)).collect(),
+        Err(_) => Vec::new(),
+    };
+    let mut callbacks: Vec<Option<v8::Weak<v8::Value>>> =
+        given.into_iter().map(|f| f.is_function().then(|| v8::Weak::new(scope, f))).collect();
     callbacks.resize_with(CALLBACKS, || None);
     let observed = match v8::Local::<v8::Array>::try_from(args.get(5)) {
         Ok(a) => {
@@ -367,7 +366,7 @@ fn ce_define(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let reactions = &mut dom(scope).arena.ce_reactions;
     let id = reactions.definitions.len() as u32;
     let autonomous = local_name == name;
-    reactions.definitions.push(Some(Definition { realm, object, autonomous, callbacks, observed }));
+    reactions.definitions.push(Some(Definition { object, autonomous, callbacks, observed }));
     if let Some(registry) = code.checked_sub(FIRST_REGISTRY).and_then(|i| reactions.registries.get_mut(i as usize)).and_then(Option::as_mut) {
         if !autonomous {
             registry.builtins.entry(local_name).or_default().insert(name.clone(), id);
@@ -380,11 +379,11 @@ fn ce_define(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 // __dom.ceNamed(registry, name) -> the bindings' object for registry `registry`'s definition named `name`, or undefined.
 fn ce_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let code = args.get(0).uint32_value(scope).unwrap_or(UNSET);
-    let name = utf16_arg(scope, args.get(1));
+    let name = args.get(1).to_rust_string_lossy(scope);
     let reactions = &dom(scope).arena.ce_reactions;
     let found = reactions.registry(code).and_then(|r| r.named.get(&name)).and_then(|&id| reactions.definition_object(id)).cloned();
-    if let Some(object) = found {
-        rv.set(v8::Local::new(scope, object));
+    if let Some(object) = found.and_then(|w| w.to_local(scope)) {
+        rv.set(object);
     }
 }
 
@@ -392,12 +391,12 @@ fn ce_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 // definition" finds in registry `registry` (`look_up`; `isValue` undefined for none), or undefined.
 fn ce_look_up(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let code = args.get(0).uint32_value(scope).unwrap_or(UNSET);
-    let local_name = utf16_arg(scope, args.get(1));
-    let is = (!args.get(2).is_null_or_undefined()).then(|| utf16_arg(scope, args.get(2)));
+    let local_name = args.get(1).to_rust_string_lossy(scope);
+    let is = (!args.get(2).is_null_or_undefined()).then(|| args.get(2).to_rust_string_lossy(scope));
     let reactions = &dom(scope).arena.ce_reactions;
     let found = reactions.look_up(code, &local_name, is.as_deref()).and_then(|id| reactions.definition_object(id)).cloned();
-    if let Some(object) = found {
-        rv.set(v8::Local::new(scope, object));
+    if let Some(object) = found.and_then(|w| w.to_local(scope)) {
+        rv.set(object);
     }
 }
 
@@ -426,7 +425,8 @@ fn ce_has_callback(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 fn ce_hook(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let which = args.get(2).int32_value(scope).unwrap_or(-1).max(0) as usize;
-    let Some(callback) = dom(scope).arena.ce_reactions.callback_of(id, which).cloned() else { return rv.set_bool(false) };
+    let weak = dom(scope).arena.ce_reactions.callback_of(id, which).cloned();
+    let Some(callback) = weak.and_then(|w| w.to_global(scope)) else { return rv.set_bool(false) };
     let element = v8::Global::new(scope, args.get(1));
     let list = held_list(scope, args.get(3));
     rv.set_bool(dom(scope).arena.ce_reactions.enqueue(id, element, callback, list));
@@ -461,12 +461,13 @@ fn ce_subtree_hook(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let list = held_list(scope, args.get(2));
     let mut queue = false;
     for id in elements {
-        let callbacks: Vec<v8::Global<v8::Value>> = {
+        let weak: Vec<v8::Weak<v8::Value>> = {
             let reactions = &dom(scope).arena.ce_reactions;
             let mv = which == CONNECTED_MOVE && reactions.callback_of(id, CONNECTED_MOVE).is_none();
             let order: &[usize] = if mv { &[DISCONNECTED, CONNECTED] } else { std::slice::from_ref(&which) };
             order.iter().filter_map(|&w| reactions.callback_of(id, w).cloned()).collect()
         };
+        let callbacks: Vec<v8::Global<v8::Value>> = weak.into_iter().filter_map(|w| w.to_global(scope)).collect();
         if callbacks.is_empty() {
             continue;
         }
@@ -492,7 +493,7 @@ fn ce_attribute_changed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
             .filter(|d| d.observed.contains(&name))
             .and_then(|d| d.callbacks[ATTRIBUTE_CHANGED].clone())
     };
-    let Some(callback) = callback else { return rv.set_bool(false) };
+    let Some(callback) = callback.and_then(|w| w.to_global(scope)) else { return rv.set_bool(false) };
     let element = v8::Global::new(scope, args.get(1));
     let list = [args.get(2), args.get(3), args.get(4), args.get(5)].map(|v| v8::Global::new(scope, v)).to_vec();
     rv.set_bool(dom(scope).arena.ce_reactions.enqueue(id, element, callback, list));
@@ -502,11 +503,15 @@ fn ce_attribute_changed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 // association names it by.
 fn ce_make_registry(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = realm_id(scope, &args);
-    let object = v8::Global::new(scope, args.get(0));
+    let object = v8::Weak::new(scope, args.get(0));
     let scoped = args.get(1).is_true();
     let registries = &mut dom(scope).arena.ce_reactions.registries;
-    registries.push(Some(Registry { realm, object, scoped, named: HashMap::new(), builtins: HashMap::new() }));
-    rv.set_uint32(FIRST_REGISTRY + registries.len() as u32 - 1);
+    registries.push(Some(Registry { object, scoped, named: HashMap::new(), builtins: HashMap::new() }));
+    let code = FIRST_REGISTRY + registries.len() as u32 - 1;
+    if !scoped {
+        dom(scope).arena.ce_reactions.window_registries.insert(realm, code);
+    }
+    rv.set_uint32(code);
 }
 
 // __dom.ceRegistryOf(node, trackingNull) -> the node's registry association: undefined for none set, `trackingNull` (the
@@ -520,20 +525,93 @@ fn ce_registry_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         UNSET => {}
         TRACKING => rv.set(args.get(1)),
         NULL => rv.set_null(),
-        _ => {
-            let object = dom(scope).arena.ce_reactions.registries.get((code - FIRST_REGISTRY) as usize).and_then(Option::as_ref).map(|r| r.object.clone());
-            if let Some(object) = object {
-                rv.set(v8::Local::new(scope, object));
-            }
-        }
+        _ => rv.set(registry_value(scope, code)),
     }
 }
 
-// __dom.ceSetRegistry(node, code) — the node's registry association becomes `code` (`UNSET`, `TRACKING`, `NULL`, or a
-// registry's from `ceMakeRegistry`).
+// __dom.ceSetRegistry(node, code, registry) — the node's registry association becomes `code` (`UNSET`, `TRACKING`,
+// `NULL`, or `registry`'s from `ceMakeRegistry`), which the node then holds.
 fn ce_set_registry(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(handle) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
     let code = args.get(1).uint32_value(scope).unwrap_or(UNSET);
+    let object = v8::Local::<v8::Object>::try_from(args.get(2)).ok().filter(|_| code >= FIRST_REGISTRY);
     // SAFETY: as above.
-    unsafe { handle.as_ref() }.set_registry(code);
+    unsafe { handle.as_ref() }.set_registry(scope, code, object);
+}
+
+// The value a registry code is to the bindings: null for none (`UNSET` or `NULL` — a window's of a document without a
+// browsing context), else the registry, undefined for one its realm took with it.
+fn registry_value<'s>(scope: &mut v8::PinScope<'s, '_>, code: u32) -> v8::Local<'s, v8::Value> {
+    if code < FIRST_REGISTRY {
+        return v8::null(scope).into();
+    }
+    let object = dom(scope).arena.ce_reactions.registry(code).map(|r| r.object.clone());
+    object.and_then(|w| w.to_local(scope)).map_or_else(|| v8::undefined(scope).into(), Into::into)
+}
+
+// The registry of the node `value` is the object of, as HTML resolves it (an element's, a shadow root's, a document's):
+// its own where one is set — none for the null registry or the template contents' null — else its node document's window
+// registry (a document's own), or, for a node with no document, the calling realm's window registry.
+fn registry_for(scope: &mut v8::PinScope<'_, '_>, cid: i32, value: v8::Local<'_, v8::Value>) -> Option<u32> {
+    let handle = crate::node_handle::handle_of(scope, value)?;
+    // SAFETY: the handle lives while its object, an argument, does.
+    let handle = unsafe { handle.as_ref() };
+    match handle.registry() {
+        UNSET => {}
+        TRACKING | NULL => return Some(NULL),
+        code => return Some(code),
+    }
+    if let Some(doc) = handle.document(scope) {
+        let doc = crate::node_handle::handle_of(scope, doc.into())?;
+        // SAFETY: as above — the document is held by the node's handle.
+        return Some(unsafe { doc.as_ref() }.window_registry());
+    }
+    let is_document = handle.nid().and_then(|id| dom(scope).arena.get(id)).is_some_and(|n| n.kind == crate::dom::NodeKind::Document);
+    if is_document {
+        return Some(handle.window_registry());
+    }
+    dom(scope).arena.ce_reactions.window_registries.get(&cid).copied()
+}
+
+// __dom.ceSetWindowRegistry(document, code, registry) — the document's window registry: `code` (`registry`'s) for one
+// with a browsing context, `UNSET` for one without.
+fn ce_set_window_registry(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
+    let code = args.get(1).uint32_value(scope).unwrap_or(UNSET);
+    let object = v8::Local::<v8::Object>::try_from(args.get(2)).ok().filter(|_| code >= FIRST_REGISTRY);
+    // SAFETY: the handle lives while its object, an argument, does.
+    unsafe { handle.as_ref() }.set_window_registry(scope, code, object);
+}
+
+// __dom.ceWindowRegistry(document) -> the document's window registry, null for a document without a browsing context.
+fn ce_window_registry(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = crate::node_handle::handle_of(scope, args.get(0)) else { return rv.set_null() };
+    // SAFETY: as above.
+    let code = unsafe { handle.as_ref() }.window_registry();
+    rv.set(registry_value(scope, code));
+}
+
+// __dom.ceRegistryFor(node) -> the node's registry, as `registry_for` resolves it: null for the null registry.
+fn ce_registry_for(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let code = registry_for(scope, cid, args.get(0)).unwrap_or(NULL);
+    rv.set(registry_value(scope, code));
+}
+
+// __dom.ceDefinitionFor(element, isValue) -> the bindings' object for the definition HTML "look up a custom element
+// definition" finds for the element in its registry — an HTML element, by its local name and is value — or undefined.
+fn ce_definition_for(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let Some(handle) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
+    // SAFETY: as above.
+    let Some(id) = unsafe { handle.as_ref() }.nid() else { return };
+    let Some(code) = registry_for(scope, cid, args.get(0)) else { return };
+    let is = (!args.get(1).is_null_or_undefined()).then(|| args.get(1).to_rust_string_lossy(scope));
+    let d = dom(scope);
+    let Some(n) = d.arena.get(id).filter(|n| n.kind == crate::dom::NodeKind::Element && n.is_html()) else { return };
+    let reactions = &d.arena.ce_reactions;
+    let found = reactions.look_up(code, &n.local_name, is.as_deref()).and_then(|d| reactions.definition_object(d)).cloned();
+    if let Some(object) = found.and_then(|w| w.to_local(scope)) {
+        rv.set(object);
+    }
 }
