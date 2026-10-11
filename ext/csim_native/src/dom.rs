@@ -2732,6 +2732,7 @@ fn insertion_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, nodes: &[NodeId])
     if arena.radio_insertion_steps(nodes) {
         arena.observers.note_state_changed();
     }
+    arena.registry_insertion_steps(nodes);
 }
 
 // __dom.setState(nid, mask, bits) -> the bits it had: the element's state bits (`STATE_*`) under `mask` become `bits`.

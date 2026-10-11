@@ -85,6 +85,19 @@ pub(crate) struct NodeHandle {
     // from the arena's the first time it is read since — the arena's is the data, this is its string, kept so a read is
     // no copy. Empty until either.
     data: UnsafeCell<v8::TracedReference<v8::String>>,
+    // Its custom element registry (HTML: an element's, a shadow root's, a document's), as ce_reactions.rs codes it — none
+    // set, the template contents' tracking null, the null registry, or a registry — kept here as the node document is,
+    // whichever arena slot the node holds.
+    registry: Cell<u32>,
+}
+
+impl NodeHandle {
+    pub(crate) fn registry(&self) -> u32 {
+        self.registry.get()
+    }
+    pub(crate) fn set_registry(&self, code: u32) {
+        self.registry.set(code);
+    }
 }
 
 unsafe impl GarbageCollected for NodeHandle {
@@ -154,7 +167,7 @@ thread_local! {
 pub(crate) struct Link(Option<WeakPersistent<NodeHandle>>);
 
 impl Link {
-    fn handle(&self) -> Option<&NodeHandle> {
+    pub(crate) fn handle(&self) -> Option<&NodeHandle> {
         self.0.as_ref().and_then(|w| w.get())
     }
 }
@@ -246,6 +259,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         rare: UnsafeCell::new(v8::TracedReference::empty()),
         document: UnsafeCell::new(v8::TracedReference::empty()),
         data: UnsafeCell::new(v8::TracedReference::empty()),
+        registry: Cell::new(0),
     };
     let heap = scope.get_cpp_heap().expect("NodeBase is installed only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
@@ -258,7 +272,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 
 // The handle `value` wraps — through the Proxy a `<form>` is (its target is the node's object) — or None for anything
 // that is no node's object: the brand is checked first, as `unwrap` reads garbage from an object it never wrapped.
-fn handle_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<v8::cppgc::UnsafePtr<NodeHandle>> {
+pub(crate) fn handle_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<v8::cppgc::UnsafePtr<NodeHandle>> {
     let value = match v8::Local::<v8::Proxy>::try_from(value) {
         Ok(proxy) => proxy.get_target(scope),
         Err(_) => value,

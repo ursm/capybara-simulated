@@ -14,6 +14,12 @@
 // defined (HTML "define" step 14, a later write to the prototype changing nothing it calls) and the attributes it
 // observes, which a custom element is given as it becomes one (`ceSetDefinition`). So a tree change enqueues what it
 // owes the custom elements it moved with no walk of the bindings' (`ceSubtreeHook`).
+//
+// A node's custom element registry (HTML: an element's, a shadow root's, a document's) is its handle's, coded: none set
+// (`UNSET`: it tracks its node document's), the template contents' null (`TRACKING`: its tree's document has none, but
+// the node takes its new tree's as it goes into one that is no template's contents), the null registry (`NULL`, which
+// stays) or a registry (`FIRST_REGISTRY` on, an index into `registries`). An insertion carries the tracking null in and
+// out of template contents with no walk of the bindings' (`registry_insertion_steps`).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -35,6 +41,20 @@ struct Definition {
     observed: HashSet<Vec<u16>>,
 }
 
+// The codes of a node's registry association.
+pub(crate) const UNSET: u32 = 0;
+pub(crate) const TRACKING: u32 = 1;
+pub(crate) const NULL: u32 = 2;
+const FIRST_REGISTRY: u32 = 3;
+
+// A CustomElementRegistry: its object, and whether it is scoped (every one a page constructs, not a window's) — the
+// realm that made it, which takes it when it goes.
+struct Registry {
+    realm: i32,
+    object: v8::Global<v8::Value>,
+    scoped: bool,
+}
+
 // One callback a custom element is owed: the callback, and its arguments.
 struct Reaction {
     callback: v8::Global<v8::Value>,
@@ -54,6 +74,7 @@ pub(crate) struct Reactions {
     // Every definition made (an index is its id), and the definition of each custom element.
     definitions: Vec<Option<Definition>>,
     custom: HashMap<NodeId, u32>,
+    registries: Vec<Option<Registry>>,
 }
 
 const DEPTH: usize = 0;
@@ -97,6 +118,11 @@ impl Reactions {
         for def in &mut self.definitions {
             if def.as_ref().is_some_and(|d| d.realm == cid) {
                 *def = None;
+            }
+        }
+        for registry in &mut self.registries {
+            if registry.as_ref().is_some_and(|r| r.realm == cid) {
+                *registry = None;
             }
         }
         self.custom.retain(|&id, _| !gone(id));
@@ -147,6 +173,10 @@ impl Reactions {
         }
         false
     }
+    // Whether `code` is a registry that is not scoped — a window's, which an insertion into template contents takes away.
+    fn is_window_registry(&self, code: u32) -> bool {
+        code >= FIRST_REGISTRY && self.registries.get((code - FIRST_REGISTRY) as usize).and_then(Option::as_ref).is_some_and(|r| !r.scoped)
+    }
     // The definition of custom element `id`.
     fn definition_of(&self, id: NodeId) -> Option<&Definition> {
         self.custom.get(&id).and_then(|&d| self.definitions.get(d as usize)).and_then(Option::as_ref)
@@ -154,6 +184,42 @@ impl Reactions {
     // Its definition's `which` callback, where it has one.
     fn callback_of(&self, id: NodeId, which: usize) -> Option<&v8::Global<v8::Value>> {
         self.definition_of(id).and_then(|d| d.callbacks.get(which)).and_then(Option::as_ref)
+    }
+}
+
+impl crate::dom::RealmArena {
+    // The registry association of node `id` (`UNSET` for one with no handle).
+    fn registry_of(&self, id: NodeId) -> u32 {
+        self.get(id).and_then(|n| n.link.handle()).map_or(UNSET, |h| h.registry())
+    }
+    // The insertion steps of the registry associations (DOM "insert" step 7.1's adopt, HTML's template contents owner
+    // document): a node going into a tree that is no template's contents out of one that is leaves the tracking null —
+    // its subtree's tracking nodes take their new tree's document's — and one going into template contents takes it,
+    // every node of its subtree with none set or a window's registry (a scoped one, or the null one, stays).
+    pub(crate) fn registry_insertion_steps(&self, nodes: &[NodeId]) {
+        for &node in nodes {
+            let Some(parent) = self.parent_of(node) else { continue };
+            let (into, code) = (self.registry_of(parent), self.registry_of(node));
+            if code == TRACKING && into != TRACKING {
+                self.set_registries(node, |c| (c == TRACKING).then_some(UNSET));
+            } else if into == TRACKING && code != TRACKING {
+                self.set_registries(node, |c| (c == UNSET || self.ce_reactions.is_window_registry(c)).then_some(TRACKING));
+            }
+        }
+    }
+    // The registry association of `root` and each node of its tree under it (not a shadow tree's, nor a template's
+    // contents), where `change` gives it another.
+    fn set_registries(&self, root: NodeId, change: impl Fn(u32) -> Option<u32>) {
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            let Some(n) = self.get(id) else { continue };
+            if let Some(h) = n.link.handle() {
+                if let Some(code) = change(h.registry()) {
+                    h.set_registry(code);
+                }
+            }
+            stack.extend(n.children.iter().copied());
+        }
     }
 }
 
@@ -169,6 +235,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceEnqueueUpgrade", ce_enqueue_upgrade, context_id);
     register(scope, ns, "ceSubtreeHook", ce_subtree_hook, context_id);
     register(scope, ns, "ceAttributeChanged", ce_attribute_changed, context_id);
+    register(scope, ns, "ceMakeRegistry", ce_make_registry, context_id);
+    register(scope, ns, "ceRegistryOf", ce_registry_of, context_id);
+    register(scope, ns, "ceSetRegistry", ce_set_registry, context_id);
     // (…and the stack's depth and deepest queue, a view on the isolate's one buffer)
     let store = {
         let reactions = &mut dom(scope).arena.ce_reactions;
@@ -363,4 +432,44 @@ fn ce_attribute_changed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let element = v8::Global::new(scope, args.get(1));
     let list = [args.get(2), args.get(3), args.get(4), args.get(5)].map(|v| v8::Global::new(scope, v)).to_vec();
     rv.set_bool(dom(scope).arena.ce_reactions.enqueue(id, element, callback, list));
+}
+
+// __dom.ceMakeRegistry(registry, scoped) -> its code: a CustomElementRegistry made in the calling realm, which a node's
+// association names it by.
+fn ce_make_registry(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = realm_id(scope, &args);
+    let object = v8::Global::new(scope, args.get(0));
+    let scoped = args.get(1).is_true();
+    let registries = &mut dom(scope).arena.ce_reactions.registries;
+    registries.push(Some(Registry { realm, object, scoped }));
+    rv.set_uint32(FIRST_REGISTRY + registries.len() as u32 - 1);
+}
+
+// __dom.ceRegistryOf(node, trackingNull) -> the node's registry association: undefined for none set, `trackingNull` (the
+// bindings' sentinel) for the template contents' tracking null, null for the null registry, else the registry — undefined
+// too for one its realm took with it.
+fn ce_registry_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
+    // SAFETY: the handle lives while its object, an argument, does.
+    let code = unsafe { handle.as_ref() }.registry();
+    match code {
+        UNSET => {}
+        TRACKING => rv.set(args.get(1)),
+        NULL => rv.set_null(),
+        _ => {
+            let object = dom(scope).arena.ce_reactions.registries.get((code - FIRST_REGISTRY) as usize).and_then(Option::as_ref).map(|r| r.object.clone());
+            if let Some(object) = object {
+                rv.set(v8::Local::new(scope, object));
+            }
+        }
+    }
+}
+
+// __dom.ceSetRegistry(node, code) — the node's registry association becomes `code` (`UNSET`, `TRACKING`, `NULL`, or a
+// registry's from `ceMakeRegistry`).
+fn ce_set_registry(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
+    let code = args.get(1).uint32_value(scope).unwrap_or(UNSET);
+    // SAFETY: as above.
+    unsafe { handle.as_ref() }.set_registry(code);
 }
