@@ -1,9 +1,9 @@
 // The DOM's tree mutation algorithms (DOM §4.2.3): what makes an insertion or a replacement valid — the "ensure
 // pre-insertion validity" steps and the replace algorithm's checks — over the arena's trees, and the change of a parent's
-// children each of them makes (`change_children`; DOM "move", `moveBefore`'s, `move_child`): the engine's edges and
-// steps in the order the algorithms write and run them, the bindings' steps in its course (a frame's discarding, a select's reset) called back where they fall, and
-// those it ends with — the mutation record, the custom element reactions, the connection walk — the bindings' to take as
-// it returns.
+// children each of them makes (`change_children`; DOM "move", `moveBefore`'s, `move_child`): the engine's edges, steps
+// and record in the order the algorithms write and run them (`record_child_list`), the bindings' steps in its course (a
+// frame's discarding, a select's reset) called back where they fall, and those it ends with — the custom element
+// reactions, the connection walk — the bindings' to take as it returns.
 
 use crate::dom::{nid_arg, node_value, nodes_value, realm, realm_id, NodeId, NodeKind, RealmArena, GEN_DIRTY, GEN_NODES, GEN_SETTLE, GEN_STRUCTURE, GEN_SUBTREE_MARKS, GEN_TREE};
 use crate::mutation_observers::{CASCADE_REFRESH, CASCADE_VERSION, OBSERVATIONS};
@@ -189,7 +189,7 @@ fn insertion_refusal(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 // parent's realm (`shadowHosted(parent)`), the browsing contexts of a removed subtree's frames discarded — their unload
 // runs script, which may take more out (`discardFrames(frames)`) — the select a removal asks for a reset
 // (`removedFrom(parent, removed, all)`), and a `<source>`'s insertion step (`sourceInserted(node, parent)`). What the
-// change ends with — the mutation record, the removed nodes' disconnection, the inserted ones' insertion, connection and
+// change ends with past its record — the removed nodes' disconnection, the inserted ones' insertion, connection and
 // post-connection steps — the bindings take as it returns (`changeFlags`).
 const STEP_ADOPT: u32 = 0;
 const STEP_SHADOW_HOSTED: u32 = 1;
@@ -269,7 +269,7 @@ fn change_children(
     adopt_all: bool,
     steps: v8::Local<'_, v8::Array>,
 ) -> Option<Result<Vec<NodeId>, u32>> {
-    let renewals = crate::dom::dom(scope).arena.sheet_renewals.get();
+    let renewals = crate::dom::dom(scope).arena.sheet_renewals;
     let connected = realm(scope, cid).is_connected(parent);
     let (removed, siblings) = match removing {
         Removing::None => (Vec::new(), None),
@@ -379,7 +379,7 @@ fn change_children_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 // element moved with it — the old ancestors' `:focus-within` / `:hover` ending and the new ones' beginning, a flip of
 // state no setter sees (`note_state_changed`). The parent it left.
 fn move_child(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, parent: NodeId, node: NodeId, child: Option<NodeId>) -> Option<NodeId> {
-    let renewals = crate::dom::dom(scope).arena.sheet_renewals.get();
+    let renewals = crate::dom::dom(scope).arena.sheet_renewals;
     let arena = realm(scope, cid);
     // (…"if child is node, set child to node's next sibling": a move before itself is none)
     let child = if child == Some(node) { arena.sibling(node, 1) } else { child };
@@ -455,13 +455,14 @@ pub(crate) fn record_child_list(
     let shadow_hosts = callers.shadow_hosts;
     let dom = crate::dom::dom(scope);
     dom.arena.observers.note(OBSERVATIONS);
-    if renewals.is_some_and(|r| r != dom.arena.sheet_renewals.get()) {
+    if renewals.is_some_and(|r| r != dom.arena.sheet_renewals) {
         dom.arena.observers.note(if in_shadow { CASCADE_VERSION } else { CASCADE_REFRESH });
         if shadow_hosts {
             dom.arena.observers.note(CASCADE_VERSION);
         }
     }
-    if !realm(scope, cid).observers.observing() {
+    // (…the record's arrays made only where an observer is to have it)
+    if !crate::mutation_observers::observed(realm(scope, cid), target, &crate::mutation_observers::Change::ChildList) {
         return;
     }
     let (previous, next) = siblings.unwrap_or_else(|| {

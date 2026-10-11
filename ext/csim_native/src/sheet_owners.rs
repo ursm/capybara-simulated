@@ -44,7 +44,7 @@ impl RealmArena {
             renewed |= self.renew_sheet(id);
         }
         if renewed {
-            self.sheet_renewals.bump();
+            self.sheet_renewals = self.sheet_renewals.wrapping_add(1);
         }
     }
 

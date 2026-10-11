@@ -408,6 +408,10 @@ fn record(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     let cid = realm_id(scope, &args);
     rv.set_bool(queue_record(scope, cid, target, &fields));
 }
+// …whether any observer is interested in `change` of `target` — so a record of it is worth making.
+pub(crate) fn observed(arena: &RealmArena, target: NodeId, change: &Change<'_>) -> bool {
+    arena.observers.observing() && !arena.interested_observers(target, change).is_empty()
+}
 // …the engine's: `fields` the record's, `[type, target, addedNodes, removedNodes, previousSibling, nextSibling,
 // attributeName, attributeNamespace, oldValue]`.
 pub(crate) fn queue_record(scope: &mut v8::PinScope<'_, '_>, cid: i32, target: NodeId, fields: &[v8::Local<'_, v8::Value>; 9]) -> bool {
