@@ -925,7 +925,9 @@ impl RealmArena {
     }
     // Realm `cid` is gone: its state, and the nodes it made.
     pub(crate) fn drop_realm(&mut self, cid: i32) {
+        // (…and its timers, now and from then on: `is_dropped` refuses it any, where a disposal's mark did)
         self.drop_timers(cid);
+        self.task_keys.discarded.remove(&cid);
         self.dropped.insert(cid);
         self.parked.remove(&cid);
         if self.cur == cid {

@@ -40,7 +40,7 @@ pub(crate) struct Timers {
 pub(crate) struct TaskKeys {
     last: i64,
     realms: HashMap<i64, i32>,
-    discarded: std::collections::HashSet<i32>,
+    pub(crate) discarded: std::collections::HashSet<i32>,
 }
 
 // A due time, ordered as the number it is — `total_cmp`, which every comparison of it goes through.
