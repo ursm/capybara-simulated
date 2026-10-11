@@ -103,4 +103,34 @@ RSpec.describe 'custom element registries in the engine' do
     JS
     expect(got).to eq([nil, nil])
   end
+
+  # DOM "adopt" walks in tree order: a null element takes its parent's registry as the walk left it — a parent of the null
+  # registry adopted into a window's leaves it the window's — and of that, the effective global one: none for a scoped
+  # parent's (step 3.3.2). Chrome: ["window window window", "window window"] (and "R window window" for the scoped
+  # parent, which the spec has "R null null").
+  it "gives a null element its parent's registry as the adopt left it" do
+    s = session_for('/' => '<!doctype html><meta charset=utf-8><body><iframe id=fr srcdoc="<p>f</p>"></iframe>')
+    s.within_frame('fr') { s.has_text?('f') }
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const fw = document.getElementById('fr').contentWindow, fd = fw.document;
+        const name = (r) => r === null ? 'null' : r === fw.customElements ? 'window' : r === customElements ? 'here' : 'R';
+        const nul = (tag) => document.createElement(tag, { customElementRegistry: null });
+        const a = nul('div'), b = a.appendChild(nul('span')), c = b.appendChild(nul('i'));
+        fd.adoptNode(a);
+        const host = document.createElement('div');
+        const root = host.attachShadow({ mode: 'open', customElementRegistry: null });
+        const p = root.appendChild(nul('p'));
+        fd.adoptNode(host);
+        const R = new CustomElementRegistry();
+        const x = document.createElement('div', { customElementRegistry: R });
+        const y = x.appendChild(nul('span')), z = y.appendChild(nul('i'));
+        fd.adoptNode(x);
+        return [[a, b, c].map((e) => name(e.customElementRegistry)).join(' '),
+                [root, p].map((e) => name(e.customElementRegistry)).join(' '),
+                [x, y, z].map((e) => name(e.customElementRegistry)).join(' ')];
+      })()
+    JS
+    expect(got).to eq(['window window window', 'window window', 'R null null'])
+  end
 end

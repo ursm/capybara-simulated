@@ -126,11 +126,6 @@ impl NodeHandle {
         // SAFETY: the main thread writes the reference, as TracedReference allows between marking steps.
         unsafe { (*self.document.get()).reset(scope, doc) };
     }
-    // The registry object its association holds.
-    pub(crate) fn registry_object<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Object>> {
-        // SAFETY: as `document`'s.
-        unsafe { (*self.registry_object.get()).get(scope) }
-    }
     pub(crate) fn window_registry(&self) -> u32 {
         self.window_registry.get()
     }

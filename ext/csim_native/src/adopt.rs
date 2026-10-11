@@ -14,14 +14,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "importInto", import_into, context_id);
 }
 
-// What the walk changes of one node's registry association: its new code, and the node whose registry object it takes
-// with it (its parent's, for a null one that takes its parent's scoped registry).
-struct Registry {
-    handle: *const NodeHandle,
-    code: u32,
-    from: Option<*const NodeHandle>,
-}
-
 // What an adopt is: of a template's contents into another inert template document (`CONTENTS`: node documents alone, the
 // contents' registries as they are), into the same document (`SAME`), another one (`CROSS`), or another whose window
 // registry is another (`CROSS_REGISTRY`).
@@ -47,13 +39,16 @@ fn adopt_into(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let reactions = &arena.ce_reactions;
         let scoped = |code: u32| code >= FIRST_REGISTRY && !reactions.is_window_registry(code);
         let mut handles: Vec<*const NodeHandle> = Vec::new();
-        let mut registries: Vec<Registry> = Vec::new();
+        let mut registries: Vec<(*const NodeHandle, u32)> = Vec::new();
         let mut steps: Vec<NodeId> = Vec::new();
-        // (…in tree order, so a null element's parent has had its own adopting steps when it is asked for its registry)
-        let mut stack = vec![root];
-        while let Some(id) = stack.pop() {
+        // (…in tree order, each node with its parent's association as the walk left it — none for one with no parent or an
+        // exclusive fragment's child — which a null element is asked for)
+        let association = |p: NodeId| arena.get(p).filter(|pn| !(pn.kind == NodeKind::Fragment && pn.host.is_none())).and_then(|pn| pn.link.handle()).map(|h| h.registry());
+        let mut stack = vec![(root, arena.parent_of(root).and_then(association))];
+        while let Some((id, parent)) = stack.pop() {
             let Some(n) = arena.get(id) else { continue };
             let shadow_root = n.kind == NodeKind::Fragment && n.host.is_some();
+            let mut decided = None;
             if let Some(h) = n.link.handle().filter(|_| kind == CONTENTS) {
                 handles.push(h);
             } else if let Some(h) = n.link.handle() {
@@ -74,30 +69,26 @@ fn adopt_into(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
                                 next = UNSET;
                             }
                         } else if next == NULL {
-                            // A null element's is its parent's — a root's or a fragment's child's the document's — so one
-                            // in a shadow root kept null stays null.
-                            let parent = arena.parent_of(id).and_then(|p| arena.get(p).map(|pn| (p, pn)));
-                            let from = parent.filter(|(_, pn)| !(pn.kind == NodeKind::Fragment && pn.host.is_none())).and_then(|(_, pn)| pn.link.handle());
-                            let inherited = from.map_or(UNSET, |p| p.registry());
-                            if inherited == NULL || scoped(inherited) {
-                                registries.push(Registry { handle: h, code: inherited, from: from.map(|p| p as *const _) });
-                                next = code;   // (…set with its object below)
-                            } else {
-                                next = UNSET;
-                            }
+                            // A null element's is its parent's effective global registry (DOM "adopt" step 3.3.2) — a
+                            // root's or an exclusive fragment's child's the document's: the window's, which none set
+                            // tracks; none for a null or a scoped one — so one in a tree kept null stays null.
+                            let inherited = parent.unwrap_or(UNSET);
+                            next = if inherited == NULL || scoped(inherited) { NULL } else { UNSET };
                         }
                     }
                 }
                 if next != code {
-                    registries.push(Registry { handle: h, code: next, from: None });
+                    registries.push((h, next));
                 }
+                decided = Some(next);
             }
             let template = n.is_html_named("template");
             if (kind == CONTENTS && template) || (cross && (shadow_root || template || n.plain_attr("id").is_some() || n.plain_attr("name").is_some())) {
                 steps.push(id);
             }
-            stack.extend(n.children.iter().rev().copied());
-            stack.extend(n.shadow_root);
+            let own = (!(n.kind == NodeKind::Fragment && n.host.is_none())).then_some(decided.unwrap_or(UNSET));
+            stack.extend(n.children.iter().rev().map(|&c| (c, own)));
+            stack.extend(n.shadow_root.map(|sr| (sr, own)));
         }
         (handles, registries, steps)
     };
@@ -107,11 +98,9 @@ fn adopt_into(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         // walk and here runs script or a collection.
         unsafe { &*h }.set_document(scope, doc);
     }
-    for r in registries {
-        // SAFETY: as above.
-        let handle = unsafe { &*r.handle };
-        let object = r.from.and_then(|p| unsafe { &*p }.registry_object(scope)).filter(|_| r.code >= FIRST_REGISTRY);
-        handle.set_registry(scope, r.code, object);
+    for (h, code) in registries {
+        // SAFETY: as above. (…a code the walk gives is none set or the null registry, which holds no object)
+        unsafe { &*h }.set_registry(scope, code, None);
     }
     rv.set(nodes_value(scope, cid, &steps));
 }
