@@ -73,12 +73,9 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         }
         Outcome::NeedsBoxes(boxes) => {
             // (…as `{boxes: [element, which, …]}`)
-            let ids: Vec<NodeId> = boxes.chunks(2).filter_map(|p| NodeId::from_i64(p[0] as i64)).collect();
-            let elements = crate::dom::nodes_value(scope, cid, &ids);
-            let Ok(elements) = v8::Local::<v8::Array>::try_from(elements) else { return };
             let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(boxes.len());
-            for (k, p) in boxes.chunks(2).enumerate() {
-                items.push(elements.get_index(scope, k as u32).unwrap_or_else(|| v8::null(scope).into()));
+            for p in boxes.chunks(2) {
+                items.push(crate::dom::node_value(scope, NodeId::from_i64(p[0] as i64)));
                 items.push(v8::Number::new(scope, p[1]).into());
             }
             let out = v8::Object::new(scope);

@@ -477,8 +477,20 @@ impl RealmArena {
         let mut changed = Vec::new();
         let mut just = None;
         if inserted {
+            // (…each listed option held by an inserted node, its ancestors up to the select looked up in them)
+            let inserted: std::collections::HashSet<NodeId> = nodes.iter().copied().collect();
+            let held = |a: &Self, o: NodeId| {
+                let mut at = Some(o);
+                while let Some(n) = at.filter(|&n| n != select) {
+                    if inserted.contains(&n) {
+                        return true;
+                    }
+                    at = a.parent_of(n);
+                }
+                false
+            };
             for o in self.list_of_options(select) {
-                if !nodes.iter().any(|&n| crate::ranges::contains(self, n, o)) {
+                if !held(self, o) {
                     continue;
                 }
                 changed.extend(self.initialise_options(o));
