@@ -106,8 +106,9 @@ RSpec.describe 'custom element registries in the engine' do
 
   # DOM "adopt" walks in tree order: a null element takes its parent's registry as the walk left it — a parent of the null
   # registry adopted into a window's leaves it the window's — and of that, the effective global one: none for a scoped
-  # parent's (step 3.3.2). Chrome: ["window window window", "window window"] (and "R window window" for the scoped
-  # parent, which the spec has "R null null").
+  # parent's (step 3.3.2). Chrome: ["window window window", "window null", "R window window"] — it departs from the spec
+  # in both of the last two: the `<p>` asks its shadow root, which the walk has re-pointed, and a scoped parent's
+  # effective global registry is none.
   it "gives a null element its parent's registry as the adopt left it" do
     s = session_for('/' => '<!doctype html><meta charset=utf-8><body><iframe id=fr srcdoc="<p>f</p>"></iframe>')
     s.within_frame('fr') { s.has_text?('f') }
