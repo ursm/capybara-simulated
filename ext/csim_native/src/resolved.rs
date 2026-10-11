@@ -83,13 +83,17 @@ pub(crate) fn resolved_value(engine: &mut StyleEngine, arena: &RealmArena, id: N
     let Some(style) = engine.computed_style(arena, id, pseudo, now) else { return Resolved::None };
     // (…a box only where the element is rendered: one that is not has none, whatever the last layout left it)
     let rendered = pseudo.is_some() || crate::rendered::rendered(engine, arena, id, true, false, None, now);
-    let reader = Reader { engine, arena, id, style: &style, boxed: if rendered { box_of(arena, id, pseudo) } else { None } };
-    // (…and a `::before` / `::after` that renders with no slot made for its box yet is laid out first, which makes one:
-    // dom.rs `link_generated`)
-    let unmade = || generated_index(pseudo).is_some_and(|which| crate::walk::generated_text_of(arena, id, which).is_some());
-    if !laid_out && reader.boxed.is_none() && unmade() {
+    let boxed = if rendered { box_of(arena, id, pseudo) } else { None };
+    // (…and a `::before` / `::after` that renders with no slot made for its box yet is laid out first, which makes one —
+    // dom.rs `link_generated` — where its element renders: the walk enters no other, and makes it none)
+    let unmade = !laid_out
+        && boxed.is_none()
+        && generated_index(pseudo).is_some_and(|which| crate::walk::generated_text_of(arena, id, which).is_some())
+        && crate::rendered::rendered(engine, arena, id, true, false, None, now);
+    if unmade {
         return Resolved::NeedsLayout;
     }
+    let reader = Reader { engine, arena, id, style: &style, boxed };
     let needs_layout = rendered
         && match property.as_shorthand() {
             Ok(shorthand) => shorthand.longhands().any(|l| reader.needs_layout(l)),

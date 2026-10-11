@@ -286,8 +286,8 @@ pub(crate) enum Outcome {
     Built(Built),
     Declined(&'static str),
     NeedsFaces,
-    // …and the generated boxes that render with no node linked for them yet — each as its element's nid and 0 for
-    // `::before`, 1 for `::after` — for the JS side to make (`pseudoNodeFor`) and walk again.
+    // …and the generated boxes that render with no slot made for them yet — each as its element's nid and 0 for
+    // `::before`, 1 for `::after` — for the op to make (`RealmArena::link_generated`) and walk again.
     NeedsBoxes(Vec<(NodeId, usize)>),
 }
 
@@ -412,10 +412,10 @@ pub(crate) fn build(arena: &RealmArena, engine: Option<&StyleEngine>, root: Node
 
 type Step = Result<(), &'static str>;
 
-// A pass's GENERATED CONTENT (`pseudoNodeFor`): each `::before` / `::after` box that renders, the element it is of, and
-// the text its `content` makes of the style engine's value. The box is a slot of its own, made the first time it
-// renders (`RealmArena::link_generated`), so the record names a node the geometry keeps; its text is the one node the walk makes itself,
-// since no tree holds one — an id of its own generation, which no arena node has.
+// A pass's GENERATED CONTENT: each `::before` / `::after` box that renders, the element it is of, and the text its
+// `content` makes of the style engine's value. The box is a slot of its own, made the first time it renders
+// (`RealmArena::link_generated`), so the record names a node the geometry keeps; its text is the one node the walk
+// makes itself, since no tree holds one — an id of its own generation, which no arena node has.
 //
 // An element's boxes are resolved the first time the walk asks for its children (`boxes_of`, from `push_children`) —
 // never for a subtree the walk does not enter — and a box that renders with no slot made for it is noted then, for the
@@ -491,7 +491,7 @@ pub(crate) fn generated_text_of(arena: &RealmArena, id: NodeId, which: usize) ->
     let node = arena.get(id).filter(|n| n.kind == NodeKind::Element && !NO_GENERATED_CONTENT.contains(&n.rendering_tag()))?;
     crate::style::eager_pseudo(arena, id, &PSEUDOS[which]).and_then(|style| generated_text(&style, node))
 }
-// What a generated box's `content` renders (`generatedContentOf`), or None for none: its strings, an `attr()` of its
+// What a generated box's `content` renders, or None for none: its strings, an `attr()` of its
 // element (its fallback where the element has none), the quote marks `quotes` gives — and nothing for a counter or an
 // image, nor for the alternative text past `/`.
 fn generated_text(style: &ComputedValues, element: &crate::dom::NodeData) -> Option<Vec<u16>> {

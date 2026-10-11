@@ -1081,7 +1081,7 @@ impl RealmArena {
             s.assigned.retain(|&n| n != id);
         }
         // …and its generated boxes' slots go with it: a `::before` / `::after` is no node of its own, held by nothing but
-        // its element (style-proxy.js `pseudoNodeFor`)
+        // its element (`link_generated`)
         for b in pseudo_boxes.into_iter().flatten() {
             self.free_node(b);
         }
@@ -1212,17 +1212,19 @@ impl RealmArena {
     }
 
     // The slot of `el`'s generated box `which` (0 `::before`, 1 `::after`), made the first time it renders and kept for
-    // the element's life: no part of the DOM, and no object holds it — it is freed with its element (`free`), and adopted
-    // with it — but a box like any other, which the walk names its record by and the geometry keeps.
+    // the element's life, in its realm: no part of the DOM, and no object holds it — it is freed with its element
+    // (`free_node`), and adopted with it — but a box like any other, which the walk names its record by and the geometry
+    // keeps.
     pub(crate) fn link_generated(&mut self, el: NodeId, which: usize) -> NodeId {
         if let Some(at) = self.get(el).and_then(|n| n.pseudo_boxes[which]).filter(|&b| self.get(b).is_some()) {
             return at;
         }
         let name = if which == 0 { "::before" } else { "::after" };
+        let realm = self.get(el).map_or(self.cur, |n| n.realm);
         let at = self.alloc(NodeData {
             local_name: LocalName::from(name),
             ns: ns!(html),
-            realm: self.cur,
+            realm,
             generated_of: Some((el, which as u8)),
             ..NodeData::of_kind(NodeKind::Element, Vec::new())
         });

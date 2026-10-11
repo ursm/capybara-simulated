@@ -72,8 +72,7 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
             rv.set(s.into());
             return;
         }
-        // (…never the boxes it needed made: the loop above made them)
-        Outcome::NeedsBoxes(_) => return,
+        Outcome::NeedsBoxes(_) => unreachable!("the loop above made every generated box the walk asked for"),
         Outcome::NeedsFaces => {
             let wanted = arena.faces.with(|faces| faces.missing.clone());
             rv.set(faces_answer(scope, &wanted).into());
