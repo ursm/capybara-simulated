@@ -2009,6 +2009,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "appendData", append_data, context_id);
     register(scope, ns, "insertChild", insert_child, context_id);
     register(scope, ns, "removeChild", remove_child, context_id);
+    register(scope, ns, "remove", remove, context_id);
     register(scope, ns, "removeChildren", remove_children, context_id);
     register(scope, ns, "insertChildren", insert_children, context_id);
     register(scope, ns, "inspectNode", inspect_node, context_id);
@@ -3094,7 +3095,29 @@ fn remove_child(
         return;
     };
     let cid = realm_id(scope, &args);
-    // (…the NodeIterators' pre-removing steps and the live ranges' removing steps first, with the node still where it was)
+    if let Some(list) = take_out(scope, cid, child) {
+        rv.set(list);
+    }
+}
+// __dom.remove(parentNid, childNid) -> DOM "remove" of a child of the parent, the `removeChild` op's steps, answered as
+// what the steps after it need: `[previousSibling, nextSibling, wasConnected, observers]` — the siblings it had, whether
+// the parent was connected, the observers as `removeChild` answers them — or undefined where it is no child of the parent.
+fn remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(parent), Some(child)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    if arena.parent_of(child) != Some(parent) {
+        return;
+    }
+    let (prev, next, connected) = (arena.sibling(child, -1), arena.sibling(child, 1), arena.is_connected(parent));
+    let observers = take_out(scope, cid, child).unwrap_or_else(|| v8::undefined(scope).into());
+    let (prev, next) = (node_value(scope, prev), node_value(scope, next));
+    let connected = v8::Boolean::new(scope, connected).into();
+    rv.set(v8::Array::new_with_elements(scope, &[prev, next, connected, observers]).into());
+}
+// …both: the NodeIterators' pre-removing steps and the live ranges' removing steps, with the node still where it was;
+// the node unlinked, which its style engine hears of; and the observers it took transient registrations of.
+fn take_out<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, child: NodeId) -> Option<v8::Local<'s, v8::Value>> {
     crate::node_iterators::removing(scope, cid, child);
     let at = {
         let arena = realm(scope, cid);
@@ -3112,11 +3135,8 @@ fn remove_child(
     if let (Some(engine), Some(o)) = (engine, old) {
         engine.children_changed(arena, o);
     }
-    // …and the mutation observers' transient registrations it takes out of its parent's subtree.
     let given = old.map_or_else(Vec::new, |o| arena.add_transient_observers(child, o));
-    if let Some(list) = crate::mutation_observers::observer_list(scope, &given) {
-        rv.set(list);
-    }
+    crate::mutation_observers::observer_list(scope, &given)
 }
 
 // __dom.removeChildren(parentNid) -> [children, observers]: every child of the parent removed, one after another, as
