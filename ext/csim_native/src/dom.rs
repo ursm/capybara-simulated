@@ -935,7 +935,7 @@ impl RealmArena {
     // (ce_reactions.rs `forget`).
     pub(crate) fn forget_reactions_of(&mut self, cid: i32) {
         let slots = &self.slots;
-        self.ce_reactions.forget(|id| live_node_realm(slots, id).is_none_or(|realm| realm == cid));
+        self.ce_reactions.forget(cid, |id| live_node_realm(slots, id).is_none_or(|realm| realm == cid));
     }
     // The elements of the backup element queue realm `cid` made, taken (ce_reactions.rs `take_backup`).
     pub(crate) fn take_backup_of(&mut self, cid: i32) -> Vec<(NodeId, v8::Global<v8::Value>)> {
