@@ -10,14 +10,6 @@ use web_atoms::ns;
 
 use crate::dom::{nid_arg, NodeData, NodeId, NodeKind, RealmArena};
 
-#[derive(Default)]
-pub(crate) struct SheetOwners {
-    // How many changes of the tree gave an owner a new sheet, and the counter every realm's bindings read that from with
-    // no call (`sheetRenewals`, a view each): a mutation that moved it changed which sheets the cascade takes.
-    count: u32,
-    counter: Option<v8::SharedRef<v8::BackingStore>>,
-}
-
 // A node that owns a style sheet: an HTML or SVG `<style>`, an HTML `<link>` (the elements of the cascade's list of them,
 // collections.rs `SheetOwners`), an `<?xml-stylesheet?>`.
 pub(crate) fn is_sheet_owner(n: &NodeData) -> bool {
@@ -52,13 +44,7 @@ impl RealmArena {
             renewed |= self.renew_sheet(id);
         }
         if renewed {
-            let owners = &mut self.sheet_owners;
-            owners.count = owners.count.wrapping_add(1);
-            if let Some(counter) = &owners.counter {
-                for (cell, byte) in counter.iter().zip(owners.count.to_ne_bytes()) {
-                    cell.set(byte);
-                }
-            }
+            self.sheet_renewals.bump();
         }
     }
 
@@ -71,19 +57,9 @@ impl RealmArena {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "sheetGen", sheet_gen_op, context_id);
     crate::dom::register(scope, ns, "renewSheet", renew_sheet_op, context_id);
-    // (…and the counter, a view on the isolate's one buffer)
-    let store = {
-        let owners = &mut crate::dom::dom(scope).arena.sheet_owners;
-        let count = owners.count;
-        owners
-            .counter
-            .get_or_insert_with(|| v8::ArrayBuffer::new_backing_store_from_vec(count.to_ne_bytes().to_vec()).make_shared())
-            .clone()
-    };
-    let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
-    if let (Some(view), Some(key)) = (v8::Uint32Array::new(scope, buffer, 0, 1), v8::String::new(scope, "sheetRenewals")) {
-        ns.set(scope, key.into(), view.into());
-    }
+    // (…and how many tree changes renewed one: `RealmArena::sheet_renewals`)
+    let renewals = crate::dom::dom(scope).arena.sheet_renewals.store();
+    crate::dom::view_counter(scope, ns, "sheetRenewals", renewals);
 }
 
 // __dom.sheetGen(nid) -> how many sheets the owner has had (`NodeData::sheet_gen`): its sheet is the one of this count.

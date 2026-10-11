@@ -702,6 +702,38 @@ fn live_node_realm(slots: &[Slot], id: NodeId) -> Option<i32> {
     slots.get(id.idx as usize).filter(|s| s.generation == id.generation).and_then(|s| s.data.as_ref()).map(|n| n.realm)
 }
 
+// A count the bindings read with no call: one u32 in a buffer every realm's `__dom` views under a name (`view_counter`),
+// which moves as the engine says (`bump`) — what a memo of the bindings keys on.
+#[derive(Default)]
+pub(crate) struct SharedCounter {
+    count: u32,
+    buffer: Option<v8::SharedRef<v8::BackingStore>>,
+}
+
+impl SharedCounter {
+    pub(crate) fn bump(&mut self) {
+        self.count = self.count.wrapping_add(1);
+        if let Some(buffer) = &self.buffer {
+            for (cell, byte) in buffer.iter().zip(self.count.to_ne_bytes()) {
+                cell.set(byte);
+            }
+        }
+    }
+    // …the buffer it is held in, which a realm's `__dom` views (`view_counter`).
+    pub(crate) fn store(&mut self) -> v8::SharedRef<v8::BackingStore> {
+        let count = self.count;
+        self.buffer.get_or_insert_with(|| v8::ArrayBuffer::new_backing_store_from_vec(count.to_ne_bytes().to_vec()).make_shared()).clone()
+    }
+}
+
+// …a realm's `__dom.<name>`: a Uint32Array of one over a counter's buffer.
+pub(crate) fn view_counter(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, name: &str, store: v8::SharedRef<v8::BackingStore>) {
+    let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
+    if let (Some(view), Some(key)) = (v8::Uint32Array::new(scope, buffer, 0, 1), v8::String::new(scope, name)) {
+        ns.set(scope, key.into(), view.into());
+    }
+}
+
 // The isolate's node arena: every realm's nodes, in one slot space, so a node keeps its id whichever realm's tree it is
 // in. The selector matcher reads it through NodeRef with direct slot indexing (no per-node-access map lookup).
 // Element-tree navigation lives here: every navigation and deref goes through `get` (gen-checked), so a stale edge
@@ -735,8 +767,11 @@ pub(crate) struct RealmArena {
     pub(crate) observers: crate::mutation_observers::Observers,
     // Each top-level document's autofocus candidates (autofocus.rs).
     pub(crate) autofocus: crate::autofocus::Autofocus,
-    // Whether a script holds a style sheet of an owner's (sheet_owners.rs).
-    pub(crate) sheet_owners: crate::sheet_owners::SheetOwners,
+    // How many changes of the tree gave a sheet owner a new sheet (sheet_owners.rs)…
+    pub(crate) sheet_renewals: SharedCounter,
+    // …and how many wrote a tree's edges — a node linked or unlinked, anywhere, by whichever realm's code: what the
+    // bindings' collections of a parent's children key on (`edgeGen`).
+    pub(crate) edge_gen: SharedCounter,
     // The event types a node has ever had a listener of, and how often a node has gained a store or a type one
     // (node_handle.rs).
     pub(crate) listener_types: crate::node_handle::ListenerTypes,
@@ -1560,6 +1595,7 @@ impl RealmArena {
         self.state_epoch += 1;
         self.ids_moved(child);
         let Some(old) = self.get(child).and_then(|n| n.parent) else { return };
+        self.edge_gen.bump();
         let at = self.child_index(child);
         let (mut from, mut one) = (at, true);
         if let Some(o) = self.get_mut(old) {
@@ -1626,6 +1662,7 @@ impl RealmArena {
             p = self.get(a).and_then(|n| n.parent);
         }
         self.detach(child);
+        self.edge_gen.bump();
         // `before`'s place, by its position when it is a child of `parent`.
         let pos = match (before.and_then(|b| self.get(b).map(|n| (b, n))), self.get(parent)) {
             (Some((b, bn)), Some(pn)) if bn.parent == Some(parent) => {
@@ -1688,6 +1725,7 @@ impl RealmArena {
         for &n in &nodes {
             self.detach(n);
         }
+        self.edge_gen.bump();
         let len = self.get(parent).map_or(0, |p| p.children.len());
         let at = before.filter(|&b| self.parent_of(b) == Some(parent)).map_or(len, |b| self.child_index(b));
         let count = nodes.len();
@@ -2247,6 +2285,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::focus::install(scope, ns, context_id);
     crate::autofocus::install(scope, ns, context_id);
     crate::sheet_owners::install(scope, ns, context_id);
+    let edges = dom(scope).arena.edge_gen.store();
+    view_counter(scope, ns, "edgeGen", edges);
     crate::change_on_blur::install(scope, ns, context_id);
     crate::custom_elements::install(scope, ns, context_id);
     crate::details::install(scope, ns, context_id);
