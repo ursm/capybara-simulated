@@ -53,6 +53,7 @@ mod legacy;
 mod mime;
 mod mutation;
 mod mutation_observers;
+mod timers;
 mod namespaces;
 mod node_handle;
 mod numbers;

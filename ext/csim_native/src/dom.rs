@@ -799,6 +799,9 @@ pub(crate) struct RealmState {
     // The `marginwidth` / `marginheight` of the frame this realm's document sits in, which its body takes its margins
     // from where it declares none (HTML §15.3.2) — pushed in by the parent realm (`setContainerMargins`).
     pub(crate) container_margins: [Option<String>; 2],
+    // Its timers and the tasks the platform queues on their list (timers.rs) — a page's, which a new one's realm state
+    // starts without.
+    pub(crate) timers: crate::timers::Timers,
     // The faces its families resolve to, which its walks and its style engine's font metrics read (`SharedFaces`).
     pub(crate) faces: crate::walk::SharedFaces,
     // How many elements a restyle REPLACED the style of since this side last took them (`note_restyled`,
@@ -2016,6 +2019,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // …and the element lists named by a filter (collections.rs)
     crate::collections::install(scope, ns, context_id);
     crate::mutation_observers::install(scope, ns, context_id);
+    crate::timers::install(scope, ns, context_id);
     crate::scroll_boxes::install(scope, ns, context_id);
     crate::form_entries::install(scope, ns, context_id);
     crate::caret::install(scope, ns, context_id);
