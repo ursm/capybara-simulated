@@ -4896,9 +4896,14 @@ fn holder_node_id(
     NodeId::from_i64(value.integer_value(scope)?)
 }
 
-// The realm context_id stamped into the holder's internal field 1 (attrsView), so the interceptor
-// works in the OWNER realm's state. Defaults to 0 (main) if absent.
+// The realm whose state the interceptor works in: the one the node's slot is in now — which adoption into another realm's
+// tree moves (`RealmArena::adopt`), so a write to an adopted element's attributes reaches the style engine and the slot
+// steps of the tree it is in — else the one stamped into the holder's internal field 1 as the view was made (0, the
+// main realm, if absent).
 fn holder_realm_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::PropertyCallbackArguments<'_>) -> i32 {
+    if let Some(realm) = holder_node_id(scope, args).and_then(|id| dom(scope).arena.get(id).map(|n| n.realm)) {
+        return realm;
+    }
     args.holder()
         .get_internal_field(scope, 1)
         .and_then(|d| v8::Local::<v8::Value>::try_from(d).ok())
