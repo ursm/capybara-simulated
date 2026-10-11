@@ -115,13 +115,13 @@ RSpec.describe 'node handles' do
     expect(s.evaluate_script('__changes')).to eq(1)   # (…the first assignment's, a microtask later: none for a move)
   end
 
-  # A `::before` is no node of its own: its box's slot belongs to its element, and goes with it.
+  # A `::before` is no node of its own: its box's slot, the engine's, belongs to its element, and goes with it.
   it "frees a generated box's slot with its element's" do
     s = page('<style>.g::before { content: "x" }</style><div id=g class=g>g</div>')
     s.execute_script(<<~JS)
       const g = document.getElementById('g');
       g.getBoundingClientRect();   // (…laid out: the box is made as it renders)
-      window.__box = g._pseudoNodes.before._nid;
+      window.__box = __dom.pseudoBox(g._nid, 0);
       window.__live = __dom.inspectNode(__box) != null;
       g.remove();
     JS

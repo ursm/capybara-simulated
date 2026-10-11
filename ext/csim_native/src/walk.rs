@@ -4,7 +4,7 @@
 //
 // The VALUES come from the style engine; the MODEL rules are the walk's own — a line height rounded to whole px, a
 // baseline floored within its line box, a face bucketed to regular / bold × italic and resolved by the JS side
-// (`Outcome::NeedsFaces`), a generated box made by the JS side before its record can name it (`Outcome::NeedsBoxes`).
+// (`Outcome::NeedsFaces`), a generated box given a slot before its record can name it (`Outcome::NeedsBoxes`).
 //
 // A pass that built a subtree's records exactly as the last one did reuses them: an unchanged subtree is spliced back
 // from the last kept pass (`Walk::splice`), and its layout put back from the measure cache (`walk_reuse`).
@@ -288,7 +288,7 @@ pub(crate) enum Outcome {
     NeedsFaces,
     // …and the generated boxes that render with no node linked for them yet — each as its element's nid and 0 for
     // `::before`, 1 for `::after` — for the JS side to make (`pseudoNodeFor`) and walk again.
-    NeedsBoxes(Vec<f64>),
+    NeedsBoxes(Vec<(NodeId, usize)>),
 }
 
 // The programs a pass's records name (`[length, op, a, b, …]` at each one's offset), each once — the REALM's, kept
@@ -413,13 +413,13 @@ pub(crate) fn build(arena: &RealmArena, engine: Option<&StyleEngine>, root: Node
 type Step = Result<(), &'static str>;
 
 // A pass's GENERATED CONTENT (`pseudoNodeFor`): each `::before` / `::after` box that renders, the element it is of, and
-// the text its `content` makes of the style engine's value. The box is the node the JS side registered for it
-// (`linkPseudoBox`), so the record names a node the JS side holds; its text is the one node the walk makes itself,
+// the text its `content` makes of the style engine's value. The box is a slot of its own, made the first time it
+// renders (`RealmArena::link_generated`), so the record names a node the geometry keeps; its text is the one node the walk makes itself,
 // since no tree holds one — an id of its own generation, which no arena node has.
 //
 // An element's boxes are resolved the first time the walk asks for its children (`boxes_of`, from `push_children`) —
-// never for a subtree the walk does not enter — and a box that renders with no node linked for it is noted then, for the
-// pass to answer once the walk is done (`Outcome::NeedsBoxes`).
+// never for a subtree the walk does not enter — and a box that renders with no slot made for it is noted then, for the
+// pass to make once the walk is done and walk again (`Outcome::NeedsBoxes`).
 struct Generated<'a> {
     arena: &'a RealmArena,
     // (…the texts' home, which hands out references for as long as the walk runs)
@@ -433,9 +433,9 @@ struct GeneratedState<'a> {
     // …and each box's element, which of the two it is, and its text (none for an empty one).
     boxes: HashMap<NodeId, (NodeId, usize, Option<NodeId>)>,
     texts: Vec<&'a crate::dom::NodeData>,
-    // The boxes that render which the JS side has not linked to their element — none to name the record by — as
-    // `[element nid, 0 before / 1 after, …]`.
-    unlinked: Vec<f64>,
+    // The boxes that render with no slot made for them yet — none to name the record by — each its element and which
+    // (0 before, 1 after).
+    unlinked: Vec<(NodeId, usize)>,
 }
 const GENERATED_TEXT: u32 = u32::MAX;
 pub(crate) const PSEUDOS: [style::selector_parser::PseudoElement; 2] =
@@ -460,7 +460,7 @@ impl<'a> Generated<'a> {
                 let Some(text) = generated_text_of(self.arena, id, which) else { continue };
                 let mut st = self.state.borrow_mut();
                 let Some(at) = node.pseudo_boxes[which].filter(|&b| self.arena.get(b).is_some()) else {
-                    st.unlinked.extend([id.to_f64(), which as f64]);
+                    st.unlinked.push((id, which));
                     continue;
                 };
                 let text = (!text.is_empty()).then(|| {

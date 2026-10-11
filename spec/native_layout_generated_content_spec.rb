@@ -57,17 +57,19 @@ RSpec.describe 'native layout generated content' do
                   '<div style="width:max-content"><div class="p"><div style="width:30px;height:10px"></div></div></div>')
   end
 
-  # …the arena node is a box holder, not a DOM node. Nothing queries it, and nothing but the layout reads it — so
-  # a page that generates nothing allocates none at all, which is what keeps `getComputedStyle(el, '::before')` on
-  # an ordinary page from filling the arena with boxes that can never exist.
+  # …the arena node is a box's slot, not a DOM node, made by the walk the first time the box renders. Nothing queries
+  # it, and nothing but the layout reads it — so a page that generates nothing allocates none at all, which is what
+  # keeps `getComputedStyle(el, '::before')` on an ordinary page from filling the arena with boxes that can never exist.
   it 'allocates no arena node for a pseudo that renders nothing' do
     session = simulated_session(page('<div id="d" style="width:400px">x</div>'))
     session.visit '/'
     nid = session.evaluate_script(<<~JS)
       (function () {
-        globalThis.getComputedStyle(document.getElementById('d'), '::before').color;
-        const slot = document.getElementById('d')._pseudoNodes;
-        return slot && slot.before ? (slot.before._nid == null ? -1 : slot.before._nid) : -2;
+        const d = document.getElementById('d');
+        globalThis.getComputedStyle(d, '::before').color;
+        globalThis.getComputedStyle(d, '::before').width;
+        d.getBoundingClientRect();
+        return __dom.pseudoBox(d._nid, 0);
       })()
     JS
     expect(nid).to be < 0, "a pseudo that renders nothing took an arena slot: #{nid}"

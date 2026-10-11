@@ -19,8 +19,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // justify, owner, placeholder, steps at, steps]` — the owner -2 for none, -1 for the element `owners` holds at the
 // piece's index, 0 / 1 for that element's `::before` / `::after` — the texts, the pen steps of the pieces drawn a
 // character at a time (`paint_rows`), and the elements. Or `[family, bucket, …]` — the faces the walk needs first, for
-// the JS side to resolve (`walkFace`) and ask again — or `{boxes: [element, which, …]}`, the generated boxes it needs
-// linked (`which` 1 an `::after`), or the walk's decline, a string.
+// the JS side to resolve (`walkFace`) and ask again — or the walk's decline, a string.
 fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let Some(root) = NodeId::from_i64(args.get(0).number_value(scope).unwrap_or(-1.0) as i64) else { return };
@@ -41,12 +40,19 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let (maths, prior) = d.walk_reuse.entry(cid).or_default().for_walk(&generation);
     // (…but none for a pass that paints: a spliced subtree's runs carry no `PaintMark`)
     let prior = prior.filter(|_| !texts);
-    let (built, whole) = arena.faces.with(|faces| {
-        faces.at_generation(&generation);
-        let built = walk::build(arena, engine, root, basis, faces, maths, prior, texts);
-        let whole = (check && prior.is_some()).then(|| walk::build(arena, engine, root, basis, faces, maths, None, texts));
-        (built, whole)
-    });
+    let (built, whole) = loop {
+        let (built, whole) = arena.faces.with(|faces| {
+            faces.at_generation(&generation);
+            let built = walk::build(arena, engine, root, basis, faces, maths, prior, texts);
+            let whole = (check && prior.is_some()).then(|| walk::build(arena, engine, root, basis, faces, maths, None, texts));
+            (built, whole)
+        });
+        // (…the generated boxes it met that render with no slot to name them by: made, and the pass walked again)
+        let Outcome::NeedsBoxes(boxes) = &built else { break (built, whole) };
+        for &(el, which) in boxes {
+            arena.link_generated(el, which);
+        }
+    };
     // (…a whole walk that could not build what the spliced one built — it asked for a face, a box, or declined — is a
     // difference as much as a record that differs: the spliced one got past what the whole walk met)
     let mismatch = match (&built, &whole) {
@@ -66,23 +72,11 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
             rv.set(s.into());
             return;
         }
+        // (…never the boxes it needed made: the loop above made them)
+        Outcome::NeedsBoxes(_) => return,
         Outcome::NeedsFaces => {
             let wanted = arena.faces.with(|faces| faces.missing.clone());
             rv.set(faces_answer(scope, &wanted).into());
-            return;
-        }
-        Outcome::NeedsBoxes(boxes) => {
-            // (…as `{boxes: [element, which, …]}`)
-            let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(boxes.len());
-            for p in boxes.chunks(2) {
-                items.push(crate::dom::node_value(scope, NodeId::from_i64(p[0] as i64)));
-                items.push(v8::Number::new(scope, p[1]).into());
-            }
-            let out = v8::Object::new(scope);
-            let key = v8::String::new(scope, "boxes").unwrap();
-            let list: v8::Local<v8::Value> = v8::Array::new_with_elements(scope, &items).into();
-            out.set(scope, key.into(), list);
-            rv.set(out.into());
             return;
         }
     };

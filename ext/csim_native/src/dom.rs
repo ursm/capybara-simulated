@@ -258,8 +258,8 @@ pub(crate) struct NodeData {
     // An `<img>`'s natural size once its image has decoded, which the layout sizes it from; None while it has not —
     // no source, still loading, broken.
     pub(crate) natural_size: Option<NaturalSize>,
-    // An element's generated-content boxes, `::before` and `::after` — the nodes the JS side registered for them, which
-    // no tree holds (`linkPseudoBox`) — for the walk to lay out as its first and last children.
+    // An element's generated-content boxes, `::before` and `::after` — slots of their own, made the first time one renders
+    // (`link_generated`), which no tree holds — for the walk to lay out as its first and last children.
     pub(crate) pseudo_boxes: [Option<NodeId>; 2],
     // …and such a box's element and which of the two it is: its parent in the flat tree, and whose style it has.
     pub(crate) generated_of: Option<(NodeId, u8)>,
@@ -1211,6 +1211,27 @@ impl RealmArena {
         id
     }
 
+    // The slot of `el`'s generated box `which` (0 `::before`, 1 `::after`), made the first time it renders and kept for
+    // the element's life: no part of the DOM, and no object holds it — it is freed with its element (`free`), and adopted
+    // with it — but a box like any other, which the walk names its record by and the geometry keeps.
+    pub(crate) fn link_generated(&mut self, el: NodeId, which: usize) -> NodeId {
+        if let Some(at) = self.get(el).and_then(|n| n.pseudo_boxes[which]).filter(|&b| self.get(b).is_some()) {
+            return at;
+        }
+        let name = if which == 0 { "::before" } else { "::after" };
+        let at = self.alloc(NodeData {
+            local_name: LocalName::from(name),
+            ns: ns!(html),
+            realm: self.cur,
+            generated_of: Some((el, which as u8)),
+            ..NodeData::of_kind(NodeKind::Element, Vec::new())
+        });
+        if let Some(node) = self.get_mut_quietly(el) {
+            node.pseudo_boxes[which] = Some(at);
+        }
+        at
+    }
+
     // `id`'s state bits become `bits`. The realm's focused and hovered element is whichever carries that bit last.
     pub(crate) fn set_state(&mut self, id: NodeId, bits: u32) {
         self.state_epoch += 1;
@@ -2006,7 +2027,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setArena", set_arena, context_id);
     register(scope, ns, "arenaOf", arena_of, context_id);
     register(scope, ns, "setNaturalSize", set_natural_size, context_id);
-    register(scope, ns, "linkPseudoBox", link_pseudo_box, context_id);
+    register(scope, ns, "pseudoBox", pseudo_box, context_id);
     register(scope, ns, "directionality", directionality, context_id);
     register(scope, ns, "setTemplateContent", set_template_content, context_id);
     register(scope, ns, "setDoctype", set_doctype, context_id);
@@ -2079,7 +2100,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "canvasSpacing", canvas_spacing, context_id);
     register(scope, ns, "fontShorthandFamilies", font_shorthand_families, context_id);
     register(scope, ns, "setTouchInput", set_touch_input, context_id);
-    register(scope, ns, "styleGenerated", style_generated, context_id);
     register(scope, ns, "styleRestyled", style_restyled, context_id);
     register(scope, ns, "styleFlush", style_flush, context_id);
     register(scope, ns, "styleTick", style_tick, context_id);
@@ -2773,23 +2793,18 @@ fn set_container_margins(
 }
 
 
-// __dom.linkPseudoBox(nid, which, boxNid): the box an element's `::before` (0) or `::after` (1) generates.
-fn link_pseudo_box(
+// __dom.pseudoBox(nid, which) -> the slot of the box an element's `::before` (0) or `::after` (1) generates — -1 for one
+// that never rendered.
+fn pseudo_box(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let (Some(id), Some(pseudo)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2)) else {
-        return;
-    };
     let which = (args.get(1).number_value(scope).unwrap_or(0.0) as usize).min(1);
-    let cid = realm_id(scope, &args);
-    let arena = realm(scope, cid);
-    if let Some(node) = arena.get_mut(id) {
-        node.pseudo_boxes[which] = Some(pseudo);
-    }
-    if let Some(node) = arena.get_mut_quietly(pseudo) {
-        node.generated_of = Some((id, which as u8));
+    let at = nid_arg(scope, &args, 0).and_then(|id| dom(scope).arena.get(id)?.pseudo_boxes[which]);
+    match at.filter(|&b| dom(scope).arena.get(b).is_some()) {
+        Some(b) => set_nid(scope, &mut rv, b),
+        None => rv.set_int32(-1),
     }
 }
 
@@ -4080,33 +4095,6 @@ fn decl_supports_condition(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     rv.set_bool(crate::cssom_decl::supports_condition(&text));
 }
 
-
-// __dom.styleGenerated(nid, which, now) -> string | null: what the element's `::before` (0) or `::after` (1) renders as
-// the style engine styled it (`StyleEngine::generated`) — its text, empty for a box holding none — or null where it
-// generates no box. Undefined where the realm has no engine.
-fn style_generated(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let cid = realm_id(scope, &args);
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
-    let which = args.get(1).int32_value(scope).unwrap_or(0).clamp(0, 1) as usize;
-    let now = clock_arg(scope, &args, 2);
-    style_op(scope, cid, |scope| {
-        let d = dom(scope);
-        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
-        let text = engine.generated(arena, id, which, now);
-        let failures = engine.take_verify_failures();
-        if threw_verify_failures(scope, failures) {
-            return;
-        }
-        match text.and_then(|u| v8::String::new_from_two_byte(scope, &u, v8::NewStringType::Normal)) {
-            Some(js) => rv.set(js.into()),
-            None => rv.set_null(),
-        }
-    });
-}
 
 // __dom.styleRestyled() -> how many elements a restyle replaced the style of since the last call
 // (`RealmArena::note_restyled`), taken.

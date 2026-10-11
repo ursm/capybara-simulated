@@ -84,6 +84,12 @@ pub(crate) fn resolved_value(engine: &mut StyleEngine, arena: &RealmArena, id: N
     // (…a box only where the element is rendered: one that is not has none, whatever the last layout left it)
     let rendered = pseudo.is_some() || crate::rendered::rendered(engine, arena, id, true, false, None, now);
     let reader = Reader { engine, arena, id, style: &style, boxed: if rendered { box_of(arena, id, pseudo) } else { None } };
+    // (…and a `::before` / `::after` that renders with no slot made for its box yet is laid out first, which makes one:
+    // dom.rs `link_generated`)
+    let unmade = || generated_index(pseudo).is_some_and(|which| crate::walk::generated_text_of(arena, id, which).is_some());
+    if !laid_out && reader.boxed.is_none() && unmade() {
+        return Resolved::NeedsLayout;
+    }
     let needs_layout = rendered
         && match property.as_shorthand() {
             Ok(shorthand) => shorthand.longhands().any(|l| reader.needs_layout(l)),
@@ -104,11 +110,17 @@ pub(crate) fn resolved_value(engine: &mut StyleEngine, arena: &RealmArena, id: N
 // The node whose box a read measures: the element's, or the one its `::before` / `::after` generates (none for another
 // pseudo-element, which no box holds).
 fn box_of(arena: &RealmArena, id: NodeId, pseudo: Option<&str>) -> Option<NodeId> {
-    match pseudo.map(str::to_ascii_lowercase).as_deref() {
+    match pseudo {
         None => Some(id),
-        Some("before") => arena.get(id)?.pseudo_boxes[0],
-        Some("after") => arena.get(id)?.pseudo_boxes[1],
-        Some(_) => None,
+        Some(_) => arena.get(id)?.pseudo_boxes[generated_index(pseudo)?].filter(|&b| arena.get(b).is_some()),
+    }
+}
+// Which generated box a pseudo-element is: 0 `::before`, 1 `::after` — none for any other.
+fn generated_index(pseudo: Option<&str>) -> Option<usize> {
+    match pseudo.map(str::to_ascii_lowercase).as_deref() {
+        Some("before") => Some(0),
+        Some("after") => Some(1),
+        _ => None,
     }
 }
 
