@@ -936,6 +936,7 @@ impl RealmArena {
     pub(crate) fn forget_reactions_of(&mut self, cid: i32) {
         let slots = &self.slots;
         self.ce_reactions.forget(|id| live_node_realm(slots, id).is_none_or(|realm| realm == cid));
+        self.ce_reactions.forget_definitions_of(cid);
     }
     // The elements of the backup element queue realm `cid` made, taken (ce_reactions.rs `take_backup`).
     pub(crate) fn take_backup_of(&mut self, cid: i32) -> Vec<(NodeId, v8::Global<v8::Value>)> {
@@ -2741,7 +2742,10 @@ fn insertion_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, nodes: &[NodeId])
     if arena.radio_insertion_steps(nodes) {
         arena.observers.note_state_changed();
     }
-    arena.registry_insertion_steps(nodes);
+    let released = arena.registry_insertion_steps(nodes);
+    if !released.is_empty() {
+        crate::ce_reactions::release_registries(scope, released);
+    }
 }
 
 // __dom.setState(nid, mask, bits) -> the bits it had: the element's state bits (`STATE_*`) under `mask` become `bits`.

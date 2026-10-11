@@ -36,8 +36,11 @@ const CALLBACKS: usize = 9;
 // A custom element definition, as the engine needs it: the bindings' object for it (its name, local name and constructor,
 // what a lookup answers with), the callbacks it captured, and the attributes it observes by local name, in code units as
 // a DOMString compares. The object and the callbacks are held weakly — the bindings' object holds the callbacks, and its
-// registry holds it — so a definition lives with its registry, and a realm's with the realm.
+// registry holds it — so nothing of the engine's keeps a realm alive; and a definition goes with the realm that made it
+// (`forget_definitions_of`), its callbacks never run once its realm's page is left (Web IDL "check if we can run script").
 struct Definition {
+    // (…the realm that made it, which takes it with it: its callbacks run in no realm a page left)
+    realm: i32,
     object: v8::Weak<v8::Value>,
     // (…an autonomous custom element's: its local name its name, where a customized built-in's extends another)
     autonomous: bool,
@@ -59,6 +62,7 @@ struct Registry {
     scoped: bool,
     named: HashMap<String, u32>,
     builtins: HashMap<String, HashMap<String, u32>>,
+    // (…keyed by `name_key`)
 }
 
 // One callback a custom element is owed: the callback, and its arguments.
@@ -142,6 +146,34 @@ impl Reactions {
         self.set(BACKUP, i32::from(!self.backup.is_empty()));
         taken
     }
+    // The definitions realm `cid` made, let go of as it goes or a page of it begins — out of their registries too — and the
+    // registries no script holds nor node is associated with any more: a weak table's entries, swept.
+    pub(crate) fn forget_definitions_of(&mut self, cid: i32) {
+        let mut gone = HashSet::new();
+        for (id, def) in self.definitions.iter_mut().enumerate() {
+            if def.as_ref().is_some_and(|d| d.realm == cid || d.object.is_empty()) {
+                gone.insert(id as u32);
+                *def = None;
+            }
+        }
+        // (…an element custom by one names it no more: its slot is another's next)
+        if !gone.is_empty() {
+            self.custom.retain(|_, d| !gone.contains(d));
+        }
+        for registry in &mut self.registries {
+            if registry.as_ref().is_some_and(|r| r.object.is_empty()) {
+                *registry = None;
+            }
+            if let Some(r) = registry.as_mut().filter(|_| !gone.is_empty()) {
+                r.named.retain(|_, id| !gone.contains(id));
+                r.builtins.retain(|_, m| {
+                    m.retain(|_, id| !gone.contains(id));
+                    !m.is_empty()
+                });
+            }
+        }
+        self.window_registries.retain(|_, &mut code| code.checked_sub(FIRST_REGISTRY).and_then(|i| self.registries.get(i as usize)).is_some_and(Option::is_some));
+    }
     // The weak handles the definitions and registries hold, let go of with no reset: the isolate is gone (`Dom`'s drop).
     pub(crate) fn leak_weak_handles(&mut self) {
         std::mem::forget(std::mem::take(&mut self.definitions));
@@ -185,12 +217,14 @@ impl Reactions {
     fn registry(&self, code: u32) -> Option<&Registry> {
         code.checked_sub(FIRST_REGISTRY).and_then(|i| self.registries.get(i as usize)).and_then(Option::as_ref)
     }
-    // The object of definition `id`.
-    fn definition_object(&self, id: u32) -> Option<&v8::Weak<v8::Value>> {
-        self.definitions.get(id as usize).and_then(Option::as_ref).map(|d| &d.object)
+    // The object of definition `id` — as a pointer, which `weak_local` makes the scope's object of: its `to_local` needs
+    // the scope a borrow of the engine's state holds, and cloning the handle to get out of the borrow made one per lookup.
+    fn definition_object(&self, id: u32) -> Option<*const v8::Weak<v8::Value>> {
+        self.definitions.get(id as usize).and_then(Option::as_ref).map(|d| &d.object as *const _)
     }
     // HTML "look up a custom element definition" in registry `code`: an autonomous one named `local_name` whose local name
     // is its name, else a customized built-in extending `local_name` named `is`.
+    // (`local_name` and `is` as `name_key` keys them)
     fn look_up(&self, code: u32, local_name: &str, is: Option<&str>) -> Option<u32> {
         let registry = self.registry(code)?;
         let autonomous = |id: &&u32| self.definitions.get(**id as usize).and_then(Option::as_ref).is_some_and(|d| d.autonomous);
@@ -204,8 +238,8 @@ impl Reactions {
         self.custom.get(&id).and_then(|&d| self.definitions.get(d as usize)).and_then(Option::as_ref)
     }
     // Its definition's `which` callback, where it has one.
-    fn callback_of(&self, id: NodeId, which: usize) -> Option<&v8::Weak<v8::Value>> {
-        self.definition_of(id).and_then(|d| d.callbacks.get(which)).and_then(Option::as_ref)
+    fn callback_of(&self, id: NodeId, which: usize) -> Option<*const v8::Weak<v8::Value>> {
+        self.definition_of(id).and_then(|d| d.callbacks.get(which)).and_then(Option::as_ref).map(|w| w as *const _)
     }
 }
 
@@ -218,25 +252,32 @@ impl crate::dom::RealmArena {
     // document): a node going into a tree that is no template's contents out of one that is leaves the tracking null —
     // its subtree's tracking nodes take their new tree's document's — and one going into template contents takes it,
     // every node of its subtree with none set or a window's registry (a scoped one, or the null one, stays).
-    pub(crate) fn registry_insertion_steps(&self, nodes: &[NodeId]) {
+    // The handles whose registry it took away, which the caller lets go of their registry objects (`release_registries`).
+    pub(crate) fn registry_insertion_steps(&self, nodes: &[NodeId]) -> Vec<*const crate::node_handle::NodeHandle> {
+        let mut released = Vec::new();
         for &node in nodes {
             let Some(parent) = self.parent_of(node) else { continue };
             let (into, code) = (self.registry_of(parent), self.registry_of(node));
             if code == TRACKING && into != TRACKING {
-                self.set_registries(node, |c| (c == TRACKING).then_some(UNSET));
+                self.set_registries(node, |c| (c == TRACKING).then_some(UNSET), &mut released);
             } else if into == TRACKING && code != TRACKING {
-                self.set_registries(node, |c| (c == UNSET || self.ce_reactions.is_window_registry(c)).then_some(TRACKING));
+                self.set_registries(node, |c| (c == UNSET || self.ce_reactions.is_window_registry(c)).then_some(TRACKING), &mut released);
             }
         }
+        released
     }
     // The registry association of `root` and each node of its tree under it (not a shadow tree's, nor a template's
     // contents), where `change` gives it another.
-    fn set_registries(&self, root: NodeId, change: impl Fn(u32) -> Option<u32>) {
+    // (…`released` gets the handles whose registry that took away)
+    fn set_registries(&self, root: NodeId, change: impl Fn(u32) -> Option<u32>, released: &mut Vec<*const crate::node_handle::NodeHandle>) {
         let mut stack = vec![root];
         while let Some(id) = stack.pop() {
             let Some(n) = self.get(id) else { continue };
             if let Some(h) = n.link.handle() {
                 if let Some(code) = change(h.registry()) {
+                    if h.registry() >= FIRST_REGISTRY {
+                        released.push(h as *const _);
+                    }
                     h.set_registry_state(code);
                 }
             }
@@ -332,6 +373,37 @@ fn ce_clear(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     }
 }
 
+// The scope's object of a weak handle in the engine's tables (`definition_object`, `callback_of`), where it is alive.
+fn weak_local<'s>(scope: &mut v8::PinScope<'s, '_>, weak: Option<*const v8::Weak<v8::Value>>) -> Option<v8::Local<'s, v8::Value>> {
+    // SAFETY: the tables are the isolate's, which `to_local` reads nothing of, and the entry outlives this call (nothing in
+    // between frees one: an entry is let go of only as a realm goes or a page begins).
+    weak.and_then(|w| unsafe { (*w).to_local(scope) })
+}
+// …held.
+fn weak_global(scope: &mut v8::PinScope<'_, '_>, weak: Option<*const v8::Weak<v8::Value>>) -> Option<v8::Global<v8::Value>> {
+    weak_local(scope, weak).map(|l| v8::Global::new(scope, l))
+}
+
+// A custom element name as a definition is keyed by: its code units, a lone surrogate among them kept apart from the
+// U+FFFD a string makes of it (no valid custom element name has either, but one compares as the other).
+fn name_key(units: &[u16]) -> String {
+    let mut key = String::with_capacity(units.len());
+    for unit in char::decode_utf16(units.iter().copied()) {
+        match unit {
+            Ok(c) => key.push(c),
+            Err(e) => key.push_str(&format!("\0{:04x}", e.unpaired_surrogate())),
+        }
+    }
+    key
+}
+// …of an argument: a one-byte string — any name a page writes in ASCII — straight, as it holds no surrogate.
+fn name_key_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> String {
+    match v8::Local::<v8::String>::try_from(value) {
+        Ok(string) if string.is_onebyte() => string.to_rust_string_lossy(scope),
+        _ => name_key(&utf16_arg(scope, value)),
+    }
+}
+
 // The values of an array argument, held.
 fn held_list(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<v8::Global<v8::Value>> {
     match v8::Local::<v8::Array>::try_from(value) {
@@ -346,8 +418,9 @@ fn held_list(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) 
 // attributes it observes.
 fn ce_define(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let code = args.get(0).uint32_value(scope).unwrap_or(UNSET);
-    let name = args.get(1).to_rust_string_lossy(scope);
-    let local_name = args.get(2).to_rust_string_lossy(scope);
+    let realm = realm_id(scope, &args);
+    let name = name_key_arg(scope, args.get(1));
+    let local_name = name_key_arg(scope, args.get(2));
     let object = v8::Weak::new(scope, args.get(3));
     let given: Vec<v8::Local<'_, v8::Value>> = match v8::Local::<v8::Array>::try_from(args.get(4)) {
         Ok(a) => (0..a.length()).filter_map(|i| a.get_index(scope, i)).collect(),
@@ -364,9 +437,19 @@ fn ce_define(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         Err(_) => HashSet::new(),
     };
     let reactions = &mut dom(scope).arena.ce_reactions;
-    let id = reactions.definitions.len() as u32;
     let autonomous = local_name == name;
-    reactions.definitions.push(Some(Definition { object, autonomous, callbacks, observed }));
+    let definition = Some(Definition { realm, object, autonomous, callbacks, observed });
+    // (…in a slot one a realm took left, which nothing names any more: `forget_definitions_of`)
+    let id = match reactions.definitions.iter().position(Option::is_none) {
+        Some(free) => {
+            reactions.definitions[free] = definition;
+            free as u32
+        }
+        None => {
+            reactions.definitions.push(definition);
+            reactions.definitions.len() as u32 - 1
+        }
+    };
     if let Some(registry) = code.checked_sub(FIRST_REGISTRY).and_then(|i| reactions.registries.get_mut(i as usize)).and_then(Option::as_mut) {
         if !autonomous {
             registry.builtins.entry(local_name).or_default().insert(name.clone(), id);
@@ -379,10 +462,10 @@ fn ce_define(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 // __dom.ceNamed(registry, name) -> the bindings' object for registry `registry`'s definition named `name`, or undefined.
 fn ce_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let code = args.get(0).uint32_value(scope).unwrap_or(UNSET);
-    let name = args.get(1).to_rust_string_lossy(scope);
+    let name = name_key_arg(scope, args.get(1));
     let reactions = &dom(scope).arena.ce_reactions;
-    let found = reactions.registry(code).and_then(|r| r.named.get(&name)).and_then(|&id| reactions.definition_object(id)).cloned();
-    if let Some(object) = found.and_then(|w| w.to_local(scope)) {
+    let found = reactions.registry(code).and_then(|r| r.named.get(&name)).and_then(|&id| reactions.definition_object(id));
+    if let Some(object) = weak_local(scope, found) {
         rv.set(object);
     }
 }
@@ -391,11 +474,11 @@ fn ce_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 // definition" finds in registry `registry` (`look_up`; `isValue` undefined for none), or undefined.
 fn ce_look_up(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let code = args.get(0).uint32_value(scope).unwrap_or(UNSET);
-    let local_name = args.get(1).to_rust_string_lossy(scope);
-    let is = (!args.get(2).is_null_or_undefined()).then(|| args.get(2).to_rust_string_lossy(scope));
+    let local_name = name_key_arg(scope, args.get(1));
+    let is = (!args.get(2).is_null_or_undefined()).then(|| name_key_arg(scope, args.get(2)));
     let reactions = &dom(scope).arena.ce_reactions;
-    let found = reactions.look_up(code, &local_name, is.as_deref()).and_then(|id| reactions.definition_object(id)).cloned();
-    if let Some(object) = found.and_then(|w| w.to_local(scope)) {
+    let found = reactions.look_up(code, &local_name, is.as_deref()).and_then(|id| reactions.definition_object(id));
+    if let Some(object) = weak_local(scope, found) {
         rv.set(object);
     }
 }
@@ -425,8 +508,8 @@ fn ce_has_callback(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 fn ce_hook(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let which = args.get(2).int32_value(scope).unwrap_or(-1).max(0) as usize;
-    let weak = dom(scope).arena.ce_reactions.callback_of(id, which).cloned();
-    let Some(callback) = weak.and_then(|w| w.to_global(scope)) else { return rv.set_bool(false) };
+    let weak = dom(scope).arena.ce_reactions.callback_of(id, which);
+    let Some(callback) = weak_global(scope, weak) else { return rv.set_bool(false) };
     let element = v8::Global::new(scope, args.get(1));
     let list = held_list(scope, args.get(3));
     rv.set_bool(dom(scope).arena.ce_reactions.enqueue(id, element, callback, list));
@@ -461,13 +544,13 @@ fn ce_subtree_hook(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let list = held_list(scope, args.get(2));
     let mut queue = false;
     for id in elements {
-        let weak: Vec<v8::Weak<v8::Value>> = {
+        let weak: Vec<*const v8::Weak<v8::Value>> = {
             let reactions = &dom(scope).arena.ce_reactions;
             let mv = which == CONNECTED_MOVE && reactions.callback_of(id, CONNECTED_MOVE).is_none();
             let order: &[usize] = if mv { &[DISCONNECTED, CONNECTED] } else { std::slice::from_ref(&which) };
-            order.iter().filter_map(|&w| reactions.callback_of(id, w).cloned()).collect()
+            order.iter().filter_map(|&w| reactions.callback_of(id, w)).collect()
         };
-        let callbacks: Vec<v8::Global<v8::Value>> = weak.into_iter().filter_map(|w| w.to_global(scope)).collect();
+        let callbacks: Vec<v8::Global<v8::Value>> = weak.into_iter().filter_map(|w| weak_global(scope, Some(w))).collect();
         if callbacks.is_empty() {
             continue;
         }
@@ -491,9 +574,10 @@ fn ce_attribute_changed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
         reactions
             .definition_of(id)
             .filter(|d| d.observed.contains(&name))
-            .and_then(|d| d.callbacks[ATTRIBUTE_CHANGED].clone())
+            .and_then(|d| d.callbacks[ATTRIBUTE_CHANGED].as_ref())
+            .map(|w| w as *const _)
     };
-    let Some(callback) = callback.and_then(|w| w.to_global(scope)) else { return rv.set_bool(false) };
+    let Some(callback) = weak_global(scope, callback) else { return rv.set_bool(false) };
     let element = v8::Global::new(scope, args.get(1));
     let list = [args.get(2), args.get(3), args.get(4), args.get(5)].map(|v| v8::Global::new(scope, v)).to_vec();
     rv.set_bool(dom(scope).arena.ce_reactions.enqueue(id, element, callback, list));
@@ -606,12 +690,24 @@ fn ce_definition_for(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     // SAFETY: as above.
     let Some(id) = unsafe { handle.as_ref() }.nid() else { return };
     let Some(code) = registry_for(scope, cid, args.get(0)) else { return };
-    let is = (!args.get(1).is_null_or_undefined()).then(|| args.get(1).to_rust_string_lossy(scope));
+    let is = (!args.get(1).is_null_or_undefined()).then(|| name_key_arg(scope, args.get(1)));
     let d = dom(scope);
     let Some(n) = d.arena.get(id).filter(|n| n.kind == crate::dom::NodeKind::Element && n.is_html()) else { return };
+    // (…its local name as the arena has it, with no copy — but exactly where it carries a lone surrogate)
+    let exact = n.name_u16.as_ref().map(|e| name_key(&e.local));
     let reactions = &d.arena.ce_reactions;
-    let found = reactions.look_up(code, &n.local_name, is.as_deref()).and_then(|d| reactions.definition_object(d)).cloned();
-    if let Some(object) = found.and_then(|w| w.to_local(scope)) {
+    let found = reactions.look_up(code, exact.as_deref().unwrap_or(&n.local_name), is.as_deref()).and_then(|d| reactions.definition_object(d));
+    if let Some(object) = weak_local(scope, found) {
         rv.set(object);
+    }
+}
+
+// The registry objects the handles `registry_insertion_steps` took a registry away from held no longer — a node pinned to
+// a frame's window registry, moved into template contents, kept that realm alive.
+pub(crate) fn release_registries(scope: &mut v8::PinScope<'_, '_>, released: Vec<*const crate::node_handle::NodeHandle>) {
+    for h in released {
+        // SAFETY: the handles of nodes the insertion just moved, which the arena holds while they are in its trees.
+        let h = unsafe { &*h };
+        h.set_registry(scope, h.registry(), None);
     }
 }
