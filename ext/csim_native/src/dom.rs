@@ -737,6 +737,8 @@ pub(crate) struct RealmArena {
     // radio a row, and a walk of the document for each was quadratic. An entry may since have been unchecked, renamed or
     // moved, which a lookup sees and drops; a freed one goes as it is freed.
     pub(crate) checked_radios: std::collections::HashMap<(Vec<u16>, Option<NodeId>), Vec<NodeId>>,
+    // The keys of the tasks the platform queues on the realms' timer lists, the isolate's (timers.rs).
+    pub(crate) task_keys: crate::timers::TaskKeys,
     // Moves with every write to the arena (a node made or freed, any `get_mut`): what a memo of it keys on.
     pub(crate) mutations: u64,
     // The lock the style engines' rules and every element's parsed declarations are read under — ONE for the isolate's
@@ -886,6 +888,7 @@ impl RealmArena {
             return;
         }
         self.enter(cid);
+        self.drop_timers(cid);
         // (…afresh, but its faces table and sheet store in place: the realm's style engine, which outlives the context,
         // holds the one, and the ids the other hands out are never to be handed out again — a late drop of the old
         // context's sheet would free the new page's)
@@ -906,8 +909,23 @@ impl RealmArena {
     pub(crate) fn is_dropped(&self, cid: i32) -> bool {
         self.dropped.contains(&cid)
     }
+    // The realm whose state is entered, and a realm's parked state (none for the entered one, or one it has none of).
+    pub(crate) fn cur(&self) -> i32 {
+        self.cur
+    }
+    pub(crate) fn parked_state(&mut self, cid: i32) -> Option<&mut RealmState> {
+        self.parked.get_mut(&cid)
+    }
+    // Realm `cid`'s context is disposed — a frame removed or navigated, a window reloaded — while what its nodes are may
+    // live on in another realm's tree: what nothing can run any more goes — its mutation observers, and its timers,
+    // whose handlers held its global (as the step running in it ends, where one is).
+    pub(crate) fn discard_realm(&mut self, cid: i32) {
+        self.observers.drop_realm(cid);
+        self.discard_timers(cid);
+    }
     // Realm `cid` is gone: its state, and the nodes it made.
     pub(crate) fn drop_realm(&mut self, cid: i32) {
+        self.drop_timers(cid);
         self.dropped.insert(cid);
         self.parked.remove(&cid);
         if self.cur == cid {
@@ -2195,6 +2213,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // Free a disposed realm's state and nodes — csim calls this before tearing down a frame realm (main
     // reuses id 0). Takes an explicit id (the realm being dropped), not the caller's own.
     register(scope, ns, "dropRealm", drop_realm, context_id);
+    register(scope, ns, "discardRealm", discard_realm, context_id);
     // The layout walk's reuse counts (the pass itself, `layoutBuild`, is walk_ops.rs's).
     register(scope, ns, "layoutMeasureCounts", layout_measure_counts, context_id);
     // Native text metrics (fontations) for inline layout: register a font (fontconfig path or in-memory
@@ -4465,6 +4484,12 @@ fn handle_edges_mismatch(
 // __dom.dropRealm(id) — free realm `id`'s state and nodes entirely (not the caller's own). csim calls this as it
 // disposes a frame realm, so a page's frames don't accumulate across visits. Main (id 0) is not dropped — it reuses
 // its id across resets, cleared per page by resetArena.
+// __dom.discardRealm(cid) — realm `cid`'s context is disposed (`RealmArena::discard_realm`).
+fn discard_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    if let Some(cid) = args.get(0).int32_value(scope) {
+        dom(scope).arena.discard_realm(cid);
+    }
+}
 fn drop_realm(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,

@@ -515,8 +515,9 @@ module Capybara
         # element — this is its only eviction, and it covers the reload (dispose +
         # recreate) path too, where the old id would otherwise leak in the set.
         ctx.eval_void("globalThis.__csimChildRealmIds && globalThis.__csimChildRealmIds.delete(#{id.to_i});") rescue nil
-        # Its mutation observers observe nothing more: nothing can notify them (the engine's lists are the isolate's).
-        ctx.eval_void("globalThis.__dom && globalThis.__dom.moDropRealm(#{id.to_i});") rescue nil
+        # What nothing can run any more goes, which the engine keeps: its mutation observers (nothing can notify them), and
+        # its timers, whose handlers held its global (`RealmArena::discard_realm`).
+        ctx.eval_void("globalThis.__dom && globalThis.__dom.discardRealm(#{id.to_i});") rescue nil
         fr = frame_realms.delete(id)
         fr.dispose rescue nil if fr
         nil

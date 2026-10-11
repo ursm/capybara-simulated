@@ -301,7 +301,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moQueue", queue, context_id);
     crate::dom::register(scope, ns, "moTakePending", take_pending, context_id);
     crate::dom::register(scope, ns, "moHasPending", has_pending, context_id);
-    crate::dom::register(scope, ns, "moDropRealm", drop_realm, context_id);
     // (…and the flags, a view on the isolate's one buffer)
     let store = {
         let observers = &mut crate::dom::dom(scope).arena.observers;
@@ -339,12 +338,6 @@ fn has_pending(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArgu
     rv.set_bool(!crate::dom::dom(scope).arena.observers.pending.is_empty());
 }
 
-// __dom.moDropRealm(cid) — realm `cid` is gone (`Observers::drop_realm`).
-fn drop_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    if let Some(cid) = args.get(0).int32_value(scope) {
-        crate::dom::dom(scope).arena.observers.drop_realm(cid);
-    }
-}
 
 // The arena of the realm a binding is called in.
 fn arena<'s>(scope: &'s mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> &'s mut RealmArena {
