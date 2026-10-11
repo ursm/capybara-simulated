@@ -346,6 +346,37 @@ impl RealmArena {
             }
         }
     }
+    // The select whose list of options `option` is in (`collect_options` the other way): its parent, or past one
+    // optgroup, or past the elements a customizable select wraps them in — none across an option, a datalist, an hr or
+    // a second optgroup, or out of the elements.
+    pub(crate) fn option_select(&self, option: NodeId) -> Option<NodeId> {
+        let mut crossed_optgroup = false;
+        let mut cur = self.parent_of(option);
+        while let Some(c) = cur {
+            let n = self.get(c).filter(|n| n.kind == NodeKind::Element)?;
+            match if n.is_html() { &*n.local_name } else { "" } {
+                "select" => return Some(c),
+                "option" | "datalist" | "hr" => return None,
+                "optgroup" if crossed_optgroup => return None,
+                "optgroup" => crossed_optgroup = true,
+                _ => {}
+            }
+            cur = n.parent;
+        }
+        None
+    }
+    // `id` (`inclusive`) or its nearest ancestor that is an HTML element named `name` — none out of the elements.
+    pub(crate) fn html_ancestor(&self, id: NodeId, name: &str, inclusive: bool) -> Option<NodeId> {
+        let mut cur = if inclusive { Some(id) } else { self.parent_of(id) };
+        while let Some(c) = cur {
+            let n = self.get(c).filter(|n| n.kind == NodeKind::Element)?;
+            if n.is_html_named(name) {
+                return Some(c);
+            }
+            cur = n.parent;
+        }
+        None
+    }
     // An option's state with its selectedness initialised from its `selected` attribute where nothing has done it yet —
     // the default the attribute gives one that is not dirty — however the option entered the tree.
     pub(crate) fn option_initialised(&self, option: NodeId) -> u32 {
@@ -641,6 +672,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "isSubmitButton", is_submit_button, context_id);
     crate::dom::register(scope, ns, "selectedness", selectedness, context_id);
     crate::dom::register(scope, ns, "askForReset", ask_for_reset, context_id);
+    crate::dom::register(scope, ns, "optionSelect", option_select, context_id);
+    crate::dom::register(scope, ns, "htmlAncestor", html_ancestor, context_id);
     crate::dom::register(scope, ns, "initialiseOptions", initialise_options, context_id);
     crate::dom::register(scope, ns, "optionDisabled", option_disabled, context_id);
     crate::dom::register(scope, ns, "radioGroup", radio_group, context_id);
@@ -833,6 +866,24 @@ fn selectedness(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let states = arena.selectedness(select, just);
     let changed = arena.apply_option_states(states);
     rv.set(crate::dom::nodes_value(scope, cid, &changed));
+}
+
+// __dom.optionSelect(nid) -> the select whose list of options the option is in (`option_select`), as `node_value`
+// answers it — null for none.
+fn option_select(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let found = crate::dom::nid_arg(scope, &args, 0).and_then(|o| crate::dom::realm(scope, cid).option_select(o));
+    rv.set(crate::dom::node_value(scope, found));
+}
+
+// __dom.htmlAncestor(nid, name, inclusive) -> the node (`inclusive`) or its nearest ancestor that is an HTML element
+// named `name` (`html_ancestor`), as `node_value` answers it — null for none.
+fn html_ancestor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let name = args.get(1).to_rust_string_lossy(scope);
+    let inclusive = args.get(2).is_true();
+    let found = crate::dom::nid_arg(scope, &args, 0).and_then(|id| crate::dom::realm(scope, cid).html_ancestor(id, &name, inclusive));
+    rv.set(crate::dom::node_value(scope, found));
 }
 
 // __dom.askForReset(parentNid, [nid, …], inserted) -> [select, options] (`ask_for_reset`): the select the nodes'

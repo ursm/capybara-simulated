@@ -5101,8 +5101,6 @@ html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with
 html/semantics/interactive-elements/the-dialog-element/focus-after-close.html:
 - Focus should not scroll if the previously focused element is outside the viewport
 - "[harness] TIMEOUT"
-html/semantics/interactive-elements/the-dialog-element/form-submit-dialog-shadow.html:
-- "<form method=dialog> should not submit across shadow boundaries."
 html/semantics/interactive-elements/the-dialog-element/inert-focus-in-frames.html:
 - "[harness] ERROR"
 - "[harness] no subtests"
