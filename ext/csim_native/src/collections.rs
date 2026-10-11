@@ -71,11 +71,7 @@ impl Filter {
             }
             Filter::State(mask) => n.state & mask != 0,
             Filter::CustomCandidates => n.is_html() && (n.local_name.contains('-') || n.is_value.is_some()),
-            Filter::SheetOwners => match &*n.local_name {
-                "style" => n.ns == ns!(html) || n.ns == ns!(svg),
-                "link" => n.ns == ns!(html),
-                _ => false,
-            },
+            Filter::SheetOwners => crate::sheet_owners::is_sheet_owner(n),
         }
     }
 }

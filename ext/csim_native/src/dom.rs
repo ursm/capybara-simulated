@@ -224,6 +224,8 @@ pub(crate) struct NodeData {
     pub(crate) state: u32,
     // A script element's flags (HTML §4.12.1.1: "already started", parser-inserted, "force async" — script.rs `SCRIPT_*`).
     pub(crate) script_flags: u8,
+    // An HTML or SVG `<style>`'s, an HTML `<link>`'s count of the sheets it has had (sheet_owners.rs).
+    pub(crate) sheet_gen: u32,
     // A shadow root's host (None for every other node): the shadow-including ancestor chain `:focus` walks…
     pub(crate) host: Option<NodeId>,
     // …and a host's shadow root, the other way; and whether a shadow root delegates focus (`attachShadow`'s
@@ -361,6 +363,7 @@ impl NodeData {
             scroll: [0.0; 2],
             state: 0,
             script_flags: 0,
+            sheet_gen: 0,
             host: None,
             shadow_root: None,
             delegates_focus: false,
@@ -732,6 +735,8 @@ pub(crate) struct RealmArena {
     pub(crate) observers: crate::mutation_observers::Observers,
     // Each top-level document's autofocus candidates (autofocus.rs).
     pub(crate) autofocus: crate::autofocus::Autofocus,
+    // Whether a script holds a style sheet of an owner's (sheet_owners.rs).
+    pub(crate) sheet_owners: crate::sheet_owners::SheetOwners,
     // The event types a node has ever had a listener of, and how often a node has gained a store or a type one
     // (node_handle.rs).
     pub(crate) listener_types: crate::node_handle::ListenerTypes,
@@ -2216,6 +2221,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::rendered::install(scope, ns, context_id);
     crate::focus::install(scope, ns, context_id);
     crate::autofocus::install(scope, ns, context_id);
+    crate::sheet_owners::install(scope, ns, context_id);
     crate::custom_elements::install(scope, ns, context_id);
     crate::details::install(scope, ns, context_id);
     crate::adopt::install(scope, ns, context_id);
@@ -2665,6 +2671,9 @@ fn write_data(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgum
         }
     }
     text_changed(arena, engine, id, had_text);
+    if let Some(p) = arena.parent_of(id) {
+        arena.style_block_changed(p);
+    }
 }
 
 // __dom.insertChild(parentNid, childNid, beforeNid): the child is moved to `parentNid`, before `beforeNid` (a live child
@@ -2710,6 +2719,10 @@ fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node
             }
             engine.children_changed(arena, parent);
         }
+        if let Some(o) = old.filter(|&o| o != parent) {
+            arena.style_block_changed(o);
+        }
+        arena.sheet_owners_moved(parent, nodes);
         if before.is_some() && arena.parent_of(node) == Some(parent) {
             let index = arena.child_index(node) as u32;
             crate::ranges::inserted(scope, parent, index, 1);
@@ -2744,6 +2757,10 @@ fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node
         }
         engine.children_changed(arena, parent);
     }
+    for (o, _) in &left {
+        arena.style_block_changed(*o);
+    }
+    arena.sheet_owners_moved(parent, &inserted);
     if let Some(index) = index.filter(|_| before.is_some()) {
         crate::ranges::inserted(scope, parent, index as u32, inserted.len() as u32);
     }
@@ -3347,6 +3364,7 @@ fn take_out(scope: &mut v8::PinScope<'_, '_>, cid: i32, child: NodeId) {
         engine.children_changed(arena, o);
     }
     if let Some(o) = old {
+        arena.sheet_owners_moved(o, &[child]);
         arena.add_transient_observers(child, o);
         slot_steps(scope, cid, o, &[child], true);
     }
@@ -3375,6 +3393,7 @@ fn remove_children(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         if let Some(engine) = engine {
             engine.children_changed(arena, parent);
         }
+        arena.sheet_owners_moved(parent, &kids);
         slot_steps(scope, cid, parent, &kids, true);
     }
     rv.set(nodes_value(scope, cid, &kids));

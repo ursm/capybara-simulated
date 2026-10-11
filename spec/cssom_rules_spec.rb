@@ -194,6 +194,36 @@ RSpec.describe 'CSSOM rules' do
     expect(got).to eq(['rgb(3, 0, 0)', false, 'rgb(4, 0, 0)', nil, 1, 2, 'rgb(6, 0, 0)'])
   end
 
+  # The sheet an owner had has no owner node from the moment it obtains another — taken out deep in a subtree, its text
+  # written, an SVG `<style>` too — whether or not the owner's `sheet` is read again. Chrome 155:
+  # [null, false, true, null, false, true, null].
+  it 'leaves a sheet no owner node as its owner obtains another' do
+    got = page('').evaluate_script(<<~JS)
+      (() => {
+        const out = [], SVG = 'http://www.w3.org/2000/svg';
+        const wrap = document.body.appendChild(document.createElement('div'));
+        const s = wrap.appendChild(document.createElement('style'));
+        s.textContent = 'p {}';
+        const a = s.sheet;
+        wrap.remove();
+        out.push(a.ownerNode);
+        document.body.append(wrap);
+        const b = s.sheet;
+        out.push(b === a, b.ownerNode === s);
+        s.firstChild.data = 'p {}';
+        out.push(b.ownerNode, s.sheet === b);
+        const svg = document.body.appendChild(document.createElementNS(SVG, 'svg'));
+        const ss = svg.appendChild(document.createElementNS(SVG, 'g')).appendChild(document.createElementNS(SVG, 'style'));
+        ss.textContent = 'p {}';
+        const c = document.styleSheets[document.styleSheets.length - 1];
+        out.push(c.ownerNode === ss);
+        svg.remove();
+        return out.concat(c.ownerNode);
+      })()
+    JS
+    expect(got).to eq([nil, false, true, nil, false, true, nil])
+  end
+
   # A `<link>` disabled and enabled again obtains its sheet again: a new one, without the edit a script made of the old,
   # which has no owner from the moment it was disabled. (Chrome: the same, each value.)
   it 'obtains a new sheet for a link enabled again' do
