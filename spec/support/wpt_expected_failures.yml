@@ -1896,10 +1896,6 @@ css/cssom/stylesheet-same-origin.sub.html:
 - Origin-clean check in cross-origin CSSOM Stylesheets (redirect from same-origin
   to cross-origin)
 - Origin-clean check in loading error CSSOM Stylesheets
-custom-elements/CustomElementRegistry-constructor-and-callbacks-are-held-strongly.html:
-- adoptedCallback
-- connectedCallback
-- disconnectedCallback
 custom-elements/connected-callbacks-html-fragment-parsing.html:
 - Inserting a custom element into a cloned document using HTML fragment parsing must
   enqueue a custom element upgrade reaction, not synchronously invoke its constructor
@@ -1922,15 +1918,8 @@ custom-elements/connected-callbacks-html-fragment-parsing.html:
 - Inserting a custom element into the document using HTML fragment parsing must enqueue
   a custom element upgrade reaction, not synchronously invoke its constructor
 custom-elements/cross-realm-callback-report-exception.html:
-- adoptedCallback
-- connectedCallback
 - constructor
-- disconnectedCallback
 custom-elements/custom-element-reaction-queue.html:
-- Mutating another custom element inside adopted callback must invoke all pending
-  callbacks on the mutated element
-- Upgrading a custom element must not invoke attributeChangedCallback for the attribute
-  that is changed during upgrading
 - Upgrading a custom element must not invoke disconnectedCallback if the element is
   disconnected during upgrading
 - Upgrading a disconnected custom element must not invoke connectedCallback if the
@@ -1939,19 +1928,6 @@ custom-elements/element-internals-shadowroot.html:
 - ElementInternals *can* be called after constructor, upgrade case
 - ElementInternals cannot be called before constructor, upgrade case
 - ElementInternals.shadowRoot doesn't reveal pre-attached closed shadowRoot
-custom-elements/enqueue-custom-element-callback-reactions-inside-another-callback.html:
-- Adopting an element with adoptingCallback while it has a connectedCallback in its
-  custom element reaction queue must result in connectedCallback getting invoked before
-  the adoption completes
-- Connecting a element with connectedCallback while it has a disconnectedCallback
-  in its custom element reaction queue must result in disconnectedCallback getting
-  invoked before the insertion completes
-- Disconnecting an element with disconnectedCallback while it has a connectedCallback
-  in its custom element reaction queue must result in connectedCallback getting invoked
-  before the removal completes
-- Setting an observed attribute on an element with attributeChangedCallback while
-  it has a connectedCallback in its custom element reaction queue must result in connectedCallback
-  getting invoked before the attribute change completes
 custom-elements/form-associated/ElementInternals-reportValidity-bubble.html:
 - "!= custom-elements/form-associated/ElementInternals-reportValidity-bubble-notref.html"
 custom-elements/form-associated/ElementInternals-reportValidity-delegatesFocus.html:
@@ -2090,9 +2066,6 @@ custom-elements/upgrading/upgrade-custom-element-error-event.html:
   is reported to definition''s global'
 - 'customized built-in: exception thrown in constructor is reported to definition''s
   global'
-custom-elements/upgrading/upgrading-enqueue-reactions.html:
-- Upgrading a custom element must not invoke attributeChangedCallback and connectedCallback
-  when the element failed to upgrade
 custom-elements/upgrading/upgrading-parser-created-element.html:
 - HTMLElement constructor must throw an TypeError when the top of the construction
   stack is marked AlreadyConstructed due to a custom element constructor constructing
@@ -2280,8 +2253,6 @@ dom/idlharness.window.js:
 - 'XSLTProcessor interface: operation transformToDocument(Node)'
 - 'XSLTProcessor interface: operation transformToFragment(Node, Document)'
 - XSLTProcessor must be primary interface of new XSLTProcessor()
-dom/nodes/Node-appendChild-cereactions-vs-script.window.js:
-- Custom element reactions follow script execution
 dom/nodes/Node-cloneNode-document-allow-declarative-shadow-roots.window.js:
 - cloneNode() and document's allow declarative shadow roots
 dom/nodes/ParentNode-querySelector-All-xht.xht:

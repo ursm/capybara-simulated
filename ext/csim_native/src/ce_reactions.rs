@@ -54,6 +54,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceTakeQueue", ce_take_queue, context_id);
     register(scope, ns, "ceTakeBackup", ce_take_backup, context_id);
     register(scope, ns, "ceNextReaction", ce_next_reaction, context_id);
+    register(scope, ns, "ceClear", ce_clear, context_id);
     // (…and the stack's depth and deepest queue, a view on the isolate's one buffer)
     let store = {
         let reactions = &mut dom(scope).arena.ce_reactions;
@@ -134,4 +135,12 @@ fn ce_next_reaction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let list: Vec<v8::Local<'_, v8::Value>> = reaction.args.into_iter().map(|a| v8::Local::new(scope, a)).collect();
     let list = v8::Array::new_with_elements(scope, &list);
     rv.set(v8::Array::new_with_elements(scope, &[callback, list.into()]).into());
+}
+
+// __dom.ceClear(nid) — the element's reaction queue emptied (HTML "upgrade an element": a constructor that failed leaves
+// it none of the reactions its upgrade enqueued).
+fn ce_clear(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    if let Some(id) = nid_arg(scope, &args, 0) {
+        dom(scope).arena.ce_reactions.queues.remove(&id);
+    }
 }
