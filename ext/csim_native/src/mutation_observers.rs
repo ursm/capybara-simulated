@@ -59,7 +59,9 @@ pub(crate) struct Observers {
     // the agent's mutation observer microtask is queued, [2] whether observers are being notified, [3] whether anything
     // is pending — set as a realm becomes pending, cleared as the notification takes them all — which a change the
     // engine signaled a slot for asks the microtask to be queued by, [4] whether a write's own steps changed an element's
-    // state (a radio group unchecked by an insertion), which the bindings' generations have to hear of.
+    // state (a radio group unchecked by an insertion), which the bindings' generations have to hear of — and what of the
+    // bindings' a change the engine made asks for: [5] a rendering update's observations scheduled, [6] the document's
+    // cascade refreshed, [7] the cascade version moved (a shadow tree's sheet).
     flags: Option<v8::SharedRef<v8::BackingStore>>,
     // The realm whose microtask queue holds the agent's mutation observer microtask, while one does (`moQueue`).
     queued_in: Option<i32>,
@@ -69,12 +71,20 @@ const ANY_REGISTERED: usize = 0;
 const MICROTASK_QUEUED: usize = 1;
 const PENDING: usize = 3;
 const STATE_CHANGED: usize = 4;
+pub(crate) const OBSERVATIONS: usize = 5;
+pub(crate) const CASCADE_REFRESH: usize = 6;
+pub(crate) const CASCADE_VERSION: usize = 7;
+const FLAGS: usize = 8;
 
 impl Observers {
     // A write's own steps changed an element's state (flag [4]).
     pub(crate) fn note_state_changed(&self) {
+        self.note(STATE_CHANGED);
+    }
+    // …or a change asks for one of the bindings' steps (`OBSERVATIONS`, `CASCADE_REFRESH`, `CASCADE_VERSION`).
+    pub(crate) fn note(&self, flag: usize) {
         if let Some(flags) = &self.flags {
-            flags[STATE_CHANGED].set(1);
+            flags[flag].set(1);
         }
     }
     // `observer` is pending, and so is its realm.
@@ -304,10 +314,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     // (…and the flags, a view on the isolate's one buffer)
     let store = {
         let observers = &mut crate::dom::dom(scope).arena.observers;
-        observers.flags.get_or_insert_with(|| v8::ArrayBuffer::new_backing_store_from_vec(vec![0u8; 5]).make_shared()).clone()
+        observers.flags.get_or_insert_with(|| v8::ArrayBuffer::new_backing_store_from_vec(vec![0u8; FLAGS]).make_shared()).clone()
     };
     let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
-    if let (Some(view), Some(key)) = (v8::Uint8Array::new(scope, buffer, 0, 5), v8::String::new(scope, "moFlags")) {
+    if let (Some(view), Some(key)) = (v8::Uint8Array::new(scope, buffer, 0, FLAGS), v8::String::new(scope, "moFlags")) {
         ns.set(scope, key.into(), view.into());
     }
 }
@@ -389,30 +399,36 @@ fn remove_transients(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 // then on, its realm with it.
 fn record(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(target) = nid_arg(scope, &args, 0) else { return };
-    if arena(scope, &args).observers.lists.is_empty() {
-        return;
+    // (…as `[type, target, …]`: the type before the target, the rest in the order given)
+    let fields: [v8::Local<'_, v8::Value>; 9] = [2, 1, 3, 4, 5, 6, 7, 8, 9].map(|i| args.get(i));
+    let cid = realm_id(scope, &args);
+    rv.set_bool(queue_record(scope, cid, target, &fields));
+}
+// …the engine's: `fields` the record's, `[type, target, addedNodes, removedNodes, previousSibling, nextSibling,
+// attributeName, attributeNamespace, oldValue]`.
+pub(crate) fn queue_record(scope: &mut v8::PinScope<'_, '_>, cid: i32, target: NodeId, fields: &[v8::Local<'_, v8::Value>; 9]) -> bool {
+    if crate::dom::realm(scope, cid).observers.lists.is_empty() {
+        return false;
     }
-    let kind = args.get(2).uint32_value(scope).unwrap_or(0);
-    let name = if kind == 1 { utf16_arg(scope, args.get(7)) } else { Vec::new() };
+    let kind = fields[0].uint32_value(scope).unwrap_or(0);
+    let name = if kind == 1 { utf16_arg(scope, fields[6]) } else { Vec::new() };
     let change = match kind {
         0 => Change::ChildList,
-        1 => Change::Attributes(&name, !args.get(8).is_null_or_undefined()),
+        1 => Change::Attributes(&name, !fields[7].is_null_or_undefined()),
         _ => Change::CharacterData,
     };
-    let found = arena(scope, &args).interested_observers(target, &change);
+    let found = crate::dom::realm(scope, cid).interested_observers(target, &change);
     if found.is_empty() {
-        return;
+        return false;
     }
-    // (…as `[type, target, …]`: the type before the target, the rest in the order given)
-    let fields: Vec<v8::Local<'_, v8::Value>> = [2, 1, 3, 4, 5, 6, 7, 8, 9].iter().map(|&i| args.get(i)).collect();
-    let tuple = v8::Array::new_with_elements(scope, &fields);
+    let tuple = v8::Array::new_with_elements(scope, fields);
     let held = v8::Global::new(scope, tuple);
-    let store = &mut arena(scope, &args).observers;
+    let store = &mut crate::dom::realm(scope, cid).observers;
     for (observer, old) in found {
         store.records.entry(observer).or_default().push((held.clone(), old));
         store.pend_observer(observer);
     }
-    rv.set_bool(true);
+    true
 }
 
 // An observer's records, taken: `[record, takesOldValue, …]` as `record` queued them.

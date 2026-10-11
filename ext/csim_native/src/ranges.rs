@@ -252,7 +252,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "rangeSet", range_set, context_id);
     register(scope, ns, "rangeContainer", range_container, context_id);
     register(scope, ns, "rangeOffset", range_offset, context_id);
-    register(scope, ns, "rangesReplaceData", ranges_replace_data, context_id);
     register(scope, ns, "rangesSplit", ranges_split, context_id);
     register(scope, ns, "rangesMerge", ranges_merge, context_id);
     register(scope, ns, "rangesLive", ranges_live, context_id);
@@ -724,13 +723,9 @@ fn ranges_merge(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     follow(scope, moved, node_obj);
 }
 
-// __dom.rangesReplaceData(nid, offset, count, length) — `count` code units at `offset` of the node's data were replaced
-// by `length` units: a boundary inside the replaced span clamps to `offset`, one after it shifts by the difference.
-fn ranges_replace_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(node) = nid_arg(scope, &args, 0) else { return };
-    let offset = args.get(1).uint32_value(scope).unwrap_or(0);
-    let count = args.get(2).uint32_value(scope).unwrap_or(0);
-    let length = args.get(3).uint32_value(scope).unwrap_or(0);
+// DOM "replace data" steps 8-11 (character_data.rs): `count` code units at `offset` of the node's data were replaced by
+// `length` units — a boundary inside the replaced span clamps to `offset`, one after it shifts by the difference.
+pub(crate) fn replace_data(scope: &mut v8::PinScope<'_, '_>, node: NodeId, offset: u32, count: u32, length: u32) {
     let r = ranges(scope);
     r.sweep();
     for (id, w) in r.at(node) {

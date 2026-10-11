@@ -2381,6 +2381,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
         ns.set(scope, key.into(), view.into());
     }
     crate::change_on_blur::install(scope, ns, context_id);
+    crate::character_data::install(scope, ns, context_id);
     crate::custom_elements::install(scope, ns, context_id);
     crate::details::install(scope, ns, context_id);
     crate::adopt::install(scope, ns, context_id);
@@ -2803,7 +2804,11 @@ fn append_data(
 // …both, in the realm the node's slot is in, whose style engine hears of it.
 fn write_data(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, appended: bool) {
     let Some(data) = args.get(1).to_string(scope) else { return };
-    let Some(id) = crate::node_handle::wrote_data(scope, args.get(0), data, appended) else { return };
+    write_data_of(scope, args.get(0), data, appended);
+}
+// …`node`'s (the object): the node's data, or `appended` to it.
+pub(crate) fn write_data_of(scope: &mut v8::PinScope<'_, '_>, node: v8::Local<'_, v8::Value>, data: v8::Local<'_, v8::String>, appended: bool) {
+    let Some(id) = crate::node_handle::wrote_data(scope, node, data, appended) else { return };
     let units = utf16_arg(scope, data.into());
     let Some(cid) = dom(scope).arena.get(id).map(|n| n.realm) else { return };
     let (arena, engine) = arena_and_engine(scope, cid);

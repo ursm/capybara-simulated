@@ -34,8 +34,8 @@ RSpec.describe 'native arena upkeep' do
   end
 
   it 'sends appendData only what it appends' do
-    chars = crossed(%w[setData appendData], "const t = document.createTextNode(''); for (let i = 0; i < 5000; i++) t.appendData('ab')",
-                    units: 'a => a[1].length')
+    chars = crossed(%w[replaceData], "const t = document.createTextNode(''); for (let i = 0; i < 5000; i++) t.appendData('ab')",
+                    units: 'a => a[3].length')
     expect(chars).to eq(10_000)
   end
 

@@ -479,17 +479,24 @@ fn rare_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 // `__dom.nodeData(node)` -> a character data node's data (`data`): the string it holds, or one made from the arena's and
 // held.
 fn node_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(ptr) = handle_of(scope, args.get(0)) else { return };
-    // SAFETY: the handle lives while its object, an argument, does; the main thread writes the reference.
+    if let Some(s) = data_string(scope, args.get(0)) {
+        rv.set(s.into());
+    }
+}
+// …the character data of the node `node` is the object of, as the string its handle holds — made of the arena's code
+// units, and held, where it holds none yet.
+pub(crate) fn data_string<'s>(scope: &mut v8::PinScope<'s, '_>, node: v8::Local<'_, v8::Value>) -> Option<v8::Local<'s, v8::String>> {
+    let ptr = handle_of(scope, node)?;
+    // SAFETY: the handle lives while its object, which the caller holds, does; the main thread writes the reference.
     let h = unsafe { ptr.as_ref() };
     if let Some(s) = unsafe { (*h.data.get()).get(scope) } {
-        return rv.set(s.into());
+        return Some(s);
     }
     let units = h.nid.get().and_then(|id| crate::dom::dom(scope).arena.get(id).map(|n| n.data.clone())).unwrap_or_default();
-    let Some(s) = v8::String::new_from_two_byte(scope, &units, v8::NewStringType::Normal) else { return };
+    let s = v8::String::new_from_two_byte(scope, &units, v8::NewStringType::Normal)?;
     // SAFETY: as above.
     unsafe { (*h.data.get()).reset(scope, Some(s)) };
-    rv.set(s.into());
+    Some(s)
 }
 // …and a write of it: `data` (a string) is what the node holds now — or, `appended`, what was appended to it — the slot
 // whose data the caller writes answered, none for a node that has none yet (a CharacterData's constructor writes its data
