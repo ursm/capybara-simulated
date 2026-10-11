@@ -745,6 +745,8 @@ pub(crate) struct RealmArena {
     // radio a row, and a walk of the document for each was quadratic. An entry may since have been unchecked, renamed or
     // moved, which a lookup sees and drops; a freed one goes as it is freed.
     pub(crate) checked_radios: std::collections::HashMap<(Vec<u16>, Option<NodeId>), Vec<NodeId>>,
+    // Each document's open dialogs list (HTML §4.11.4), by the document's slot, in the order they opened (dialogs.rs).
+    pub(crate) open_dialogs: std::collections::HashMap<NodeId, Vec<NodeId>>,
     // The keys of the tasks the platform queues on the realms' timer lists, the isolate's (timers.rs).
     pub(crate) task_keys: crate::timers::TaskKeys,
     // The custom element reactions: each element's reaction queue, and the agent's reactions stack (ce_reactions.rs).
@@ -939,6 +941,8 @@ impl RealmArena {
     pub(crate) fn forget_reactions_of(&mut self, cid: i32) {
         let slots = &self.slots;
         self.ce_reactions.forget(|id| live_node_realm(slots, id).is_none_or(|realm| realm == cid));
+        // (…and its documents' open dialogs lists: a page of it begins with none)
+        self.open_dialogs.retain(|&doc, _| live_node_realm(slots, doc).is_some_and(|realm| realm != cid));
         self.ce_reactions.forget_definitions_of(cid);
     }
     // The elements of the backup element queue realm `cid` made, taken (ce_reactions.rs `take_backup`).
@@ -2208,6 +2212,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::details::install(scope, ns, context_id);
     crate::adopt::install(scope, ns, context_id);
     crate::script::install(scope, ns, context_id);
+    crate::dialogs::install(scope, ns, context_id);
     crate::connection_steps::install(scope, ns, context_id);
     crate::text_selection::install(scope, ns, context_id);
     crate::intersection::install(scope, ns, context_id);

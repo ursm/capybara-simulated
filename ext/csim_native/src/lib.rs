@@ -24,6 +24,7 @@ mod css_animations;
 mod css_transitions;
 mod custom_elements;
 mod details;
+mod dialogs;
 mod cssom_decl;
 mod cssom_rule;
 // The native author cascade: a realm's static rules, and one element's winning declarations in one pass.

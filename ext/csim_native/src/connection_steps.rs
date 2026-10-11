@@ -12,13 +12,15 @@ const STEP_TAGS: [&str; 15] = [
     "iframe", "frame", "meta",
 ];
 
-// Whether connecting `n` runs a step of its own: a tag that has one; a `nonce` to hide; an inline style with a `url()`,
+// Whether connecting `n` runs a step of its own: a tag that has one; an open dialog, which goes back on its document's open
+// dialogs list (its removing steps took it off); a `nonce` to hide; an inline style with a `url()`,
 // which a controlled document fetches; a custom element or a customized built-in to upgrade (a valid custom element
 // name has a hyphen; a built-in an `is` value), or one an upgrade was tried on, to call back.
 pub(crate) fn has_connection_step(n: &NodeData) -> bool {
     let name: &str = &n.local_name;
     n.kind == NodeKind::Element
         && (STEP_TAGS.iter().any(|t| name.eq_ignore_ascii_case(t))
+            || (n.is_html_named("dialog") && n.plain_attr("open").is_some())
             || name.contains('-')
             || n.is_value.is_some()
             || n.state & STATE_UPGRADED != 0

@@ -150,7 +150,9 @@ RSpec.describe 'HTML element bindings' do
     expect(got).to eq([true, true, true, true])
   end
 
-  it 'takes a removed dialog off the open dialogs' do
+  # A removed dialog leaves its document's open dialogs; put back, it is on them again (its setup steps) — a modeless one
+  # now, whose close request is none, which takes Escape and keeps both open. Chrome 155: [true, true].
+  it 'takes a removed dialog off the open dialogs, and a reinserted one back' do
     session.visit '/'
     session.execute_script(<<~JS)
       document.body.insertAdjacentHTML('beforeend', '<dialog id=a>a</dialog><dialog id=b>b</dialog>');
@@ -161,7 +163,7 @@ RSpec.describe 'HTML element bindings' do
       document.body.append(b);
     JS
     session.find('body').send_keys(:escape)
-    expect(session.evaluate_script('[a.open, b.open]')).to eq([false, true])
+    expect(session.evaluate_script('[a.open, b.open]')).to eq([true, true])
   end
 
   it "fires a link's load once, as it is connected or its href changes" do
