@@ -338,6 +338,13 @@ pub(crate) fn handle_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v
     unsafe { v8::Object::unwrap::<TAG, NodeHandle>(scope, obj) }
 }
 
+// The slot of the node `value` is the object of, where it is one with a slot.
+pub(crate) fn nid_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<NodeId> {
+    let ptr = handle_of(scope, value)?;
+    // SAFETY: the handle lives while its object does, which the caller holds.
+    unsafe { ptr.as_ref() }.nid()
+}
+
 // Bind the node `value` is the object of to slot `nid` — a no-op for an object that is no node's.
 pub(crate) fn bind(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>, nid: NodeId) {
     let Some(ptr) = handle_of(scope, value) else { return };

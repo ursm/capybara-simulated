@@ -702,32 +702,38 @@ fn live_node_realm(slots: &[Slot], id: NodeId) -> Option<i32> {
     slots.get(id.idx as usize).filter(|s| s.generation == id.generation).and_then(|s| s.data.as_ref()).map(|n| n.realm)
 }
 
-// A count the bindings read with no call: one u32 in a buffer every realm's `__dom` views under a name (`view_counter`),
-// which moves as the engine says (`bump`) — what a memo of the bindings keys on.
+// A word the bindings read with no call: one u32 in a buffer every realm's `__dom` views under a name (`view_word`), which
+// the engine sets — a count it moves (`bump`), what a memo of the bindings keys on, or flags it says something by (`set`).
 #[derive(Default)]
-pub(crate) struct SharedCounter {
-    count: u32,
+pub(crate) struct SharedWord {
+    value: u32,
     buffer: Option<v8::SharedRef<v8::BackingStore>>,
 }
 
-impl SharedCounter {
-    pub(crate) fn bump(&mut self) {
-        self.count = self.count.wrapping_add(1);
+impl SharedWord {
+    pub(crate) fn get(&self) -> u32 {
+        self.value
+    }
+    pub(crate) fn set(&mut self, value: u32) {
+        self.value = value;
         if let Some(buffer) = &self.buffer {
-            for (cell, byte) in buffer.iter().zip(self.count.to_ne_bytes()) {
+            for (cell, byte) in buffer.iter().zip(value.to_ne_bytes()) {
                 cell.set(byte);
             }
         }
     }
-    // …the buffer it is held in, which a realm's `__dom` views (`view_counter`).
+    pub(crate) fn bump(&mut self) {
+        self.set(self.value.wrapping_add(1));
+    }
+    // …the buffer it is held in, which a realm's `__dom` views (`view_word`).
     pub(crate) fn store(&mut self) -> v8::SharedRef<v8::BackingStore> {
-        let count = self.count;
-        self.buffer.get_or_insert_with(|| v8::ArrayBuffer::new_backing_store_from_vec(count.to_ne_bytes().to_vec()).make_shared()).clone()
+        let value = self.value;
+        self.buffer.get_or_insert_with(|| v8::ArrayBuffer::new_backing_store_from_vec(value.to_ne_bytes().to_vec()).make_shared()).clone()
     }
 }
 
-// …a realm's `__dom.<name>`: a Uint32Array of one over a counter's buffer.
-pub(crate) fn view_counter(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, name: &str, store: v8::SharedRef<v8::BackingStore>) {
+// …a realm's `__dom.<name>`: a Uint32Array of one over a word's buffer.
+pub(crate) fn view_word(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, name: &str, store: v8::SharedRef<v8::BackingStore>) {
     let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
     if let (Some(view), Some(key)) = (v8::Uint32Array::new(scope, buffer, 0, 1), v8::String::new(scope, name)) {
         ns.set(scope, key.into(), view.into());
@@ -768,10 +774,12 @@ pub(crate) struct RealmArena {
     // Each top-level document's autofocus candidates (autofocus.rs).
     pub(crate) autofocus: crate::autofocus::Autofocus,
     // How many changes of the tree gave a sheet owner a new sheet (sheet_owners.rs)…
-    pub(crate) sheet_renewals: SharedCounter,
-    // …and how many wrote a tree's edges — a node linked or unlinked, anywhere, by whichever realm's code: what the
-    // bindings' collections of a parent's children key on (`edgeGen`).
-    pub(crate) edge_gen: SharedCounter,
+    pub(crate) sheet_renewals: SharedWord,
+    // …how many wrote a tree's edges — a node linked or unlinked, anywhere, by whichever realm's code: what the bindings'
+    // collections of a parent's children key on (`edgeGen`)…
+    pub(crate) edge_gen: SharedWord,
+    // …and what the last change of a parent's children said of itself as it returned (mutation.rs `CHANGE_*`).
+    pub(crate) change_flags: SharedWord,
     // The event types a node has ever had a listener of, and how often a node has gained a store or a type one
     // (node_handle.rs).
     pub(crate) listener_types: crate::node_handle::ListenerTypes,
@@ -1635,6 +1643,28 @@ impl RealmArena {
             }
         }
     }
+    // A child `parent` had moved elsewhere: its style block updated (sheet_owners.rs), its text entry cursor clamped to
+    // the text left (text_selection.rs) — as a removal of it does (`take_out`).
+    pub(crate) fn children_removed(&mut self, parent: NodeId) {
+        self.style_block_changed(parent);
+        self.clamp_text_entry_cursor(parent);
+    }
+    // The elements of `id`'s shadow-including subtree whose removing steps a subtree leaving its document runs, in tree
+    // order (`leavingElements`): those an element state is on, or (`frames`) the HTML `<iframe>`s and `<frame>`s.
+    pub(crate) fn leaving_elements(&self, id: NodeId, frames: bool) -> Vec<NodeId> {
+        let mut found = Vec::new();
+        let mut stack = vec![id];
+        while let Some(n) = stack.pop() {
+            let Some(node) = self.get(n) else { continue };
+            let wanted = if frames { node.is_html_named("iframe") || node.is_html_named("frame") } else { node.state != 0 };
+            if wanted {
+                found.push(n);
+            }
+            stack.extend(node.children.iter().rev().copied());
+            stack.extend(node.shadow_root);
+        }
+        found
+    }
     // Is `node` `ancestor` or in its subtree, shadow trees included?
     fn under(&self, node: NodeId, ancestor: NodeId) -> bool {
         let mut at = Some(node);
@@ -2178,7 +2208,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "appendData", append_data, context_id);
     register(scope, ns, "insertChild", insert_child, context_id);
     register(scope, ns, "removeChild", remove_child, context_id);
-    register(scope, ns, "remove", remove, context_id);
     register(scope, ns, "removeChildren", remove_children, context_id);
     register(scope, ns, "insertChildren", insert_children, context_id);
     register(scope, ns, "inspectNode", inspect_node, context_id);
@@ -2286,7 +2315,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::autofocus::install(scope, ns, context_id);
     crate::sheet_owners::install(scope, ns, context_id);
     let edges = dom(scope).arena.edge_gen.store();
-    view_counter(scope, ns, "edgeGen", edges);
+    view_word(scope, ns, "edgeGen", edges);
+    let changes = dom(scope).arena.change_flags.store();
+    view_word(scope, ns, "changeFlags", changes);
     crate::change_on_blur::install(scope, ns, context_id);
     crate::custom_elements::install(scope, ns, context_id);
     crate::details::install(scope, ns, context_id);
@@ -2477,18 +2508,7 @@ fn leaving_elements(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let Some(id) = nid_arg(scope, &args, 0) else { return };
     let frames = args.get(1).int32_value(scope) == Some(1);
     let cid = realm_id(scope, &args);
-    let arena = realm(scope, cid);
-    let mut found = Vec::new();
-    let mut stack = vec![id];
-    while let Some(n) = stack.pop() {
-        let Some(node) = arena.get(n) else { continue };
-        let wanted = if frames { node.is_html_named("iframe") || node.is_html_named("frame") } else { node.state != 0 };
-        if wanted {
-            found.push(n);
-        }
-        stack.extend(node.children.iter().rev().copied());
-        stack.extend(node.shadow_root);
-    }
+    let found = realm(scope, cid).leaving_elements(id, frames);
     if !found.is_empty() {
         rv.set(nodes_value(scope, cid, &found));
     }
@@ -2774,7 +2794,7 @@ fn insert_children(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 // DOM "insert"'s edges: `nodes` the children of `parent` before `before` (last where it is none) — taken from where they
 // are first — and the live ranges' insert steps for them, the style engine told of each list that changed, and the slot
 // steps of each parent they left and of `parent` (`slot_steps`).
-fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, nodes: &[NodeId], before: Option<NodeId>) {
+pub(crate) fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, nodes: &[NodeId], before: Option<NodeId>) {
     let (arena, mut engine) = arena_and_engine(scope, cid);
     // (…one — the commonest insertion, a node at a time — allocating nothing)
     if let [node] = *nodes {
@@ -2790,7 +2810,7 @@ fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node
             engine.children_changed(arena, parent);
         }
         if let Some(o) = old.filter(|&o| o != parent) {
-            arena.style_block_changed(o);
+            arena.children_removed(o);
         }
         arena.sheet_owners_moved(parent, nodes);
         if before.is_some() && arena.parent_of(node) == Some(parent) {
@@ -2828,7 +2848,7 @@ fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node
         engine.children_changed(arena, parent);
     }
     for (o, _) in &left {
-        arena.style_block_changed(*o);
+        arena.children_removed(*o);
     }
     arena.sheet_owners_moved(parent, &inserted);
     if let Some(index) = index.filter(|_| before.is_some()) {
@@ -3396,26 +3416,12 @@ fn remove_child(
     let cid = realm_id(scope, &args);
     take_out(scope, cid, child);
 }
-// __dom.remove(parentNid, childNid) -> DOM "remove" of a child of the parent, the `removeChild` op's steps, answered as
-// what the steps after it need: `[previousSibling, nextSibling, wasConnected]` — the siblings it had and whether the
-// parent was connected — or undefined where it is no child of the parent.
-fn remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(parent), Some(child)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
-    let cid = realm_id(scope, &args);
-    let arena = realm(scope, cid);
-    if arena.parent_of(child) != Some(parent) {
-        return;
-    }
-    let (prev, next, connected) = (arena.sibling(child, -1), arena.sibling(child, 1), arena.is_connected(parent));
-    take_out(scope, cid, child);
-    let (prev, next) = (node_value(scope, prev), node_value(scope, next));
-    let connected = v8::Boolean::new(scope, connected).into();
-    rv.set(v8::Array::new_with_elements(scope, &[prev, next, connected]).into());
-}
-// …both: the NodeIterators' pre-removing steps and the live ranges' removing steps, with the node still where it was;
-// the node unlinked, which its style engine hears of; the mutation observers' transient registrations it takes, which
-// make them pending; and the slot steps of the parent it left (`slot_steps`).
-fn take_out(scope: &mut v8::PinScope<'_, '_>, cid: i32, child: NodeId) {
+// …its steps, and DOM "remove"'s edge (mutation.rs `change_children`): the NodeIterators' pre-removing steps and the live
+// ranges' removing steps, with the node still where it was; the node unlinked, which its style engine hears of; the
+// sheets it and the parent it left obtain (sheet_owners.rs) and that parent's text entry cursor (a textarea's); the
+// mutation observers' transient registrations it takes, which make them pending; and the slot steps of the parent it
+// left (`slot_steps`).
+pub(crate) fn take_out(scope: &mut v8::PinScope<'_, '_>, cid: i32, child: NodeId) {
     crate::node_iterators::removing(scope, cid, child);
     let at = {
         let arena = realm(scope, cid);
@@ -3435,6 +3441,7 @@ fn take_out(scope: &mut v8::PinScope<'_, '_>, cid: i32, child: NodeId) {
     }
     if let Some(o) = old {
         arena.sheet_owners_moved(o, &[child]);
+        arena.clamp_text_entry_cursor(o);
         arena.add_transient_observers(child, o);
         slot_steps(scope, cid, o, &[child], true);
     }
@@ -3446,6 +3453,11 @@ fn take_out(scope: &mut v8::PinScope<'_, '_>, cid: i32, child: NodeId) {
 fn remove_children(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(parent) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
+    let kids = take_all(scope, cid, parent);
+    rv.set(nodes_value(scope, cid, &kids));
+}
+// …the children taken out.
+pub(crate) fn take_all(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId) -> Vec<NodeId> {
     let arena = realm(scope, cid);
     let kids = arena.get(parent).map_or_else(Vec::new, |p| p.children.clone());
     crate::mutation_observers::transients_of_children(arena, parent);
@@ -3464,9 +3476,10 @@ fn remove_children(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
             engine.children_changed(arena, parent);
         }
         arena.sheet_owners_moved(parent, &kids);
+        arena.clamp_text_entry_cursor(parent);
         slot_steps(scope, cid, parent, &kids, true);
     }
-    rv.set(nodes_value(scope, cid, &kids));
+    kids
 }
 
 // __dom.syncAttrs(nodeNid, attrsFlat): replace a node's attributes with the flat [name, value, …]

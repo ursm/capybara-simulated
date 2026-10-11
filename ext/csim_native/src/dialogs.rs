@@ -80,7 +80,7 @@ impl RealmArena {
     // viewport's (the "focus fixup rule": no event, as Firefox and WebKit — Chrome's `blur` on a removal is a Blink
     // behavior its own intent is retiring) and what a focused text control armed for its blur is gone (change_on_blur.rs).
     // Whether they changed an element's state.
-    fn removing_steps(&mut self, root: NodeId) -> bool {
+    pub(crate) fn removing_steps(&mut self, root: NodeId) -> bool {
         const LEAVING: u32 = STATE_POPOVER_OPEN | STATE_MODAL | STATE_FOCUSED | STATE_HOVERED;
         let mut stack = vec![root];
         let (mut leave, mut dialogs) = (Vec::new(), Vec::new());

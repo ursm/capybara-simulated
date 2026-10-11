@@ -102,6 +102,16 @@ impl RealmArena {
         (clamped, true)
     }
 
+    // A child taken out of `id`: a non-dirty `<textarea>`'s value is its child text, so its text entry cursor is clamped
+    // to what is left — which an insertion after it does not restore: a replacement of its text leaves it at 0 (Chrome and
+    // Firefox; Firefox moves it to 0 for any removal).
+    pub(crate) fn clamp_text_entry_cursor(&mut self, id: NodeId) {
+        let clean_textarea = self.get(id).is_some_and(|n| n.is_html_named("textarea") && n.value.is_none());
+        if clean_textarea && self.text_selections.contains_key(&id) {
+            self.text_selection(id);
+        }
+    }
+
     // HTML "set the selection range" of `id` to `start`..`end` in `direction`: each clamped to the value's length, the
     // start no later than the end. Whether that changed it.
     pub(crate) fn set_text_selection(&mut self, id: NodeId, start: u32, end: u32, direction: Direction) -> bool {
