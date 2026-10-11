@@ -45,6 +45,31 @@ RSpec.describe 'custom element registries in the engine' do
     expect(got).to eq([])
   end
 
+  # …and its constructor constructs no element once the realm is gone — nor one custom by whichever definition took its
+  # place in the engine. Chrome: ["TypeError"].
+  it 'constructs no element of a definition whose realm is gone' do
+    frame = <<~HTML
+      <!doctype html><meta charset=utf-8><body><script>
+        class X extends HTMLElement {}
+        customElements.define('x-x', X);
+        parent.X = X;
+      </script>
+    HTML
+    main = '<!doctype html><meta charset=utf-8><body><iframe id=fr src="/frame"></iframe>'
+    s = session_for('/' => main, '/frame' => frame)
+    s.within_frame('fr') { s.has_css?('body') }
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        document.getElementById('fr').remove();
+        const log = [];
+        customElements.define('y-y', class extends HTMLElement { connectedCallback() { log.push('Y connected'); } });
+        try { document.body.append(new X()); } catch (e) { log.push(e.name); }
+        return log;
+      })()
+    JS
+    expect(got).to eq(['TypeError'])
+  end
+
   # A name with a lone surrogate is its code units, not the U+FFFD a string makes of it: a definition named with the
   # replacement character is for neither. Chrome: [false, false, false].
   it 'keys a definition by the code units of its name' do

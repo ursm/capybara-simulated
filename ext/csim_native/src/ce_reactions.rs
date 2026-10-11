@@ -293,6 +293,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceClear", ce_clear, context_id);
     register(scope, ns, "ceDefine", ce_define, context_id);
     register(scope, ns, "ceSetDefinition", ce_set_definition, context_id);
+    register(scope, ns, "ceDefinitionLive", ce_definition_live, context_id);
     register(scope, ns, "ceHasCallback", ce_has_callback, context_id);
     register(scope, ns, "ceHook", ce_hook, context_id);
     register(scope, ns, "ceEnqueueUpgrade", ce_enqueue_upgrade, context_id);
@@ -483,17 +484,33 @@ fn ce_look_up(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
 }
 
-// __dom.ceSetDefinition(nid, id) — the element custom by definition `id` (HTML "upgrade an element" step 3, an element
-// constructed custom); a negative `id` none (a failed upgrade takes it back).
+// __dom.ceSetDefinition(nid, definition) — the element custom by `definition` (the bindings' object for it: HTML
+// "upgrade an element" step 3, an element constructed custom), where it is still the engine's — its realm not gone, its
+// slot not another's since; none for null (a failed upgrade takes it back).
 fn ce_set_definition(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return };
-    let def = args.get(1).int32_value(scope).unwrap_or(-1);
+    let def = definition_id(scope, args.get(1));
     let custom = &mut dom(scope).arena.ce_reactions.custom;
-    if def < 0 {
-        custom.remove(&id);
-    } else {
-        custom.insert(id, def as u32);
-    }
+    match def {
+        Some(def) => custom.insert(id, def),
+        None => custom.remove(&id),
+    };
+}
+
+// __dom.ceDefinitionLive(definition) -> whether the bindings' object `definition` is still a definition of the engine's:
+// one whose realm went is no more (HTML's element constructor finds none for its NewTarget then).
+fn ce_definition_live(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(definition_id(scope, args.get(0)).is_some());
+}
+
+// The id of the definition the bindings' object `value` is — its `id`, where that slot still holds it.
+fn definition_id(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<u32> {
+    let object = v8::Local::<v8::Object>::try_from(value).ok()?;
+    let key = v8::String::new(scope, "id")?;
+    let id = object.get(scope, key.into())?.uint32_value(scope)?;
+    let held = dom(scope).arena.ce_reactions.definition_object(id)?;
+    // SAFETY: as `weak_local`'s.
+    (unsafe { &*held } == &value).then_some(id)
 }
 
 // __dom.ceHasCallback(nid, which) -> whether the element's definition has its `which` callback.
