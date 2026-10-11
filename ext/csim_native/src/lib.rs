@@ -16,6 +16,7 @@ mod canvas;
 mod canvas_path;
 mod caret;
 mod ce_reactions;
+mod change_on_blur;
 mod clone;
 mod connection_steps;
 mod collections;

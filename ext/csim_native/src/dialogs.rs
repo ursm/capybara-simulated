@@ -74,21 +74,21 @@ impl RealmArena {
         }
         found
     }
-    // The removing steps (HTML §4.11.4, §6.12) of `root`'s shadow-including inclusive descendants a removal takes out of a
-    // document: a showing popover hidden, a dialog modal no more and out of its open dialogs list — all quietly, with no
-    // toggle — and whether they changed an element's state (bit 0), and whether one that left was focused or hovered
-    // (bit 1), which the document's focus and hover follow (the bindings').
-    fn removing_steps(&mut self, root: NodeId) -> u32 {
+    // The removing steps (HTML §4.11.4, §6.12, §6.6.4) of `root`'s shadow-including inclusive descendants a removal takes
+    // out of a document: a showing popover hidden, a dialog modal no more and out of its open dialogs list — all quietly,
+    // with no toggle — and the document's focused and hovered element, where it left, neither any more: its focus is the
+    // viewport's (the "focus fixup rule": no event, as Firefox and WebKit — Chrome's `blur` on a removal is a Blink
+    // behavior its own intent is retiring) and what a focused text control armed for its blur is gone (change_on_blur.rs).
+    // Whether they changed an element's state.
+    fn removing_steps(&mut self, root: NodeId) -> bool {
+        const LEAVING: u32 = STATE_POPOVER_OPEN | STATE_MODAL | STATE_FOCUSED | STATE_HOVERED;
         let mut stack = vec![root];
-        let (mut hide, mut dialogs, mut left) = (Vec::new(), Vec::new(), false);
+        let (mut leave, mut dialogs) = (Vec::new(), Vec::new());
         while let Some(id) = stack.pop() {
             let Some(n) = self.get(id) else { continue };
             if n.kind == NodeKind::Element {
-                if n.state & (STATE_POPOVER_OPEN | STATE_MODAL) != 0 {
-                    hide.push((id, n.state & !(STATE_POPOVER_OPEN | STATE_MODAL)));
-                }
-                if n.state & (STATE_FOCUSED | STATE_HOVERED) != 0 {
-                    left = true;
+                if n.state & LEAVING != 0 {
+                    leave.push((id, n.state & !LEAVING));
                 }
                 if n.is_html_named("dialog") {
                     dialogs.push(id);
@@ -100,11 +100,12 @@ impl RealmArena {
         for dialog in dialogs {
             self.dialog_closed(dialog);
         }
-        let changed = !hide.is_empty();
-        for (id, bits) in hide {
+        let changed = !leave.is_empty();
+        for (id, bits) in leave {
+            self.change_baselines.remove(&id);
             self.set_state(id, bits);
         }
-        u32::from(changed) | (u32::from(left) << 1)
+        changed
     }
 }
 
@@ -145,12 +146,12 @@ fn topmost_dialog(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let found = realm(scope, cid).topmost_dialog(doc);
     rv.set(node_value(scope, found));
 }
-// __dom.removingSteps(rootNid) -> what the removing steps of the subtree did (`removing_steps`: bit 0 a state changed,
-// bit 1 a focused or hovered element left).
+// __dom.removingSteps(rootNid) -> whether the removing steps of the subtree changed an element's state
+// (`removing_steps`).
 fn removing_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(root) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
+    let Some(root) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     // (…in the realm whose tree it left, whose document's modal stack its dialogs leave, whichever realm's code removed it)
     let caller = realm_id(scope, &args);
     let cid = crate::dom::dom(scope).arena.get(root).map_or(caller, |n| n.realm);
-    rv.set_uint32(realm(scope, cid).removing_steps(root));
+    rv.set_bool(realm(scope, cid).removing_steps(root));
 }

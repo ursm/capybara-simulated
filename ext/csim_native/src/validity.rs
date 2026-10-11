@@ -137,7 +137,7 @@ impl RealmArena {
     }
     // An `<input>`'s value, sanitized for its type as the `value` getter returns it (`input_value::sanitize`) — for the
     // types a constraint reads the value of (a colour is none of them).
-    fn sanitized_value(&self, n: &NodeData, ty: &str) -> String {
+    pub(crate) fn sanitized_value(&self, n: &NodeData, ty: &str) -> String {
         crate::input_value::sanitize(ty, &self.raw_value(n), &crate::input_value::Attrs::of(n), &|v| v.to_string())
     }
 

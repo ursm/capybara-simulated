@@ -743,6 +743,8 @@ pub(crate) struct RealmArena {
     // Each open dialog's "previously focused element": what its document had focused as it opened, which closing it
     // gives focus back to — whichever realm's script opens and closes it (focus.rs).
     pub(crate) previously_focused: std::collections::HashMap<NodeId, NodeId>,
+    // Each focused text control's value as it was focused, and whether the user edited it since (change_on_blur.rs).
+    pub(crate) change_baselines: crate::change_on_blur::ChangeBaselines,
     // Each text control's selection, once it has one (text_selection.rs).
     pub(crate) text_selections: std::collections::HashMap<NodeId, crate::text_selection::TextSelection>,
     // The radio buttons that have been checked, by their name and form owner (element_state.rs `note_radio`) — kept so
@@ -1132,6 +1134,10 @@ impl RealmArena {
         self.id_index.get_mut().forget(id);
         self.ce_reactions.forget_node(id);
         // (…and a checked radio's entry, under its name)
+        // (…and what a focused text control armed for its blur)
+        if !self.change_baselines.is_empty() {
+            self.change_baselines.remove(&id);
+        }
         // (…and an open dialogs list: a document's freed, or a dialog of one)
         if !self.open_dialogs.is_empty() {
             self.open_dialogs.remove(&id);
@@ -2222,6 +2228,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::focus::install(scope, ns, context_id);
     crate::autofocus::install(scope, ns, context_id);
     crate::sheet_owners::install(scope, ns, context_id);
+    crate::change_on_blur::install(scope, ns, context_id);
     crate::custom_elements::install(scope, ns, context_id);
     crate::details::install(scope, ns, context_id);
     crate::adopt::install(scope, ns, context_id);

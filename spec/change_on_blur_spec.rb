@@ -1,0 +1,59 @@
+# frozen_string_literal: true
+
+require 'capybara/simulated'
+require_relative 'support/session_teardown'
+
+# A text control's `change` is the engine's (change_on_blur.rs): armed as the control is focused, it fires as the control
+# loses focus where the USER edited it since and its value is another — a script's write never counts as an edit.
+RSpec.describe 'change on blur' do
+  def session_for(html)
+    page = "<!DOCTYPE html><meta charset=\"utf-8\"><body>#{html}"
+    simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] }).tap {|s| s.visit '/' }
+  end
+
+  # Typed and blurred: `change`. A script's write, then the blur: none. Typed and typed back: none — the value is the one
+  # it was focused with. Chrome 155 (real keys): ["a"].
+  it 'fires as a control the user edited to another value loses focus' do
+    s = session_for(<<~HTML)
+      <input id=a><input id=b><input id=c value=v>
+      <script>
+        window.log = [];
+        for (const id of ['a', 'b', 'c']) document.getElementById(id).addEventListener('change', () => log.push(id));
+      </script>
+    HTML
+    s.find('#a').send_keys('x')
+    s.execute_script('document.activeElement.blur()')
+    s.find('#b').click
+    s.execute_script("document.getElementById('b').value = 'y'; document.activeElement.blur()")
+    s.find('#c').send_keys('x', :backspace)
+    s.execute_script('document.activeElement.blur()')
+    expect(s.evaluate_script('log')).to eq(['a'])
+  end
+
+  # A focused control taken out of its document loses focus with no event (HTML's focus fixup rule; Firefox and WebKit
+  # alike), and what it had armed with it: focused again and blurred, it fires none. Chrome 155 fires `change` and `blur`
+  # as it is removed — a Blink behavior its own intent ("Stop sending blur events on element removal") is retiring.
+  it 'forgets an edit as the focused control is removed' do
+    s = session_for(<<~HTML)
+      <input id=d>
+      <script>
+        window.log = [];
+        const d = document.getElementById('d');
+        for (const t of ['change', 'blur']) d.addEventListener(t, () => log.push(t));
+      </script>
+    HTML
+    s.find('#d').send_keys('x')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const d = document.getElementById('d');
+        d.remove();
+        const removed = [log.slice(), document.activeElement === document.body];
+        document.body.append(d);
+        d.focus();
+        d.blur();
+        return [removed, log];
+      })()
+    JS
+    expect(got).to eq([[[], true], ['blur']])
+  end
+end
