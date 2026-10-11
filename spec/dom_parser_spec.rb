@@ -104,4 +104,14 @@ RSpec.describe 'DOMParser bindings' do
     poll_until { session.evaluate_script('window.got') }
     expect(session.evaluate_script('window.got')).to eq(%w[http://www.example.com/sub/doc.xml http://www.example.com/sub/doc.xml#loc])
   end
+
+  # The engine's XML parser (xml_parse.rs): a character reference to no character — past U+10FFFF — makes the source
+  # not well-formed, as a mismatched tag does: a `<parsererror>` document. Chrome 155: [1, 0, 1].
+  it 'takes a reference to no character as not well-formed XML' do
+    got = session.evaluate_script(<<~JS)
+      ['<a>&#x110000;</a>', '<a>&#x41;</a>', '<a><b></a>']
+        .map((s) => new DOMParser().parseFromString(s, 'application/xml').getElementsByTagName('parsererror').length)
+    JS
+    expect(got).to eq([1, 0, 1])
+  end
 end

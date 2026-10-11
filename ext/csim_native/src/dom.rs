@@ -2383,6 +2383,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     }
     crate::change_on_blur::install(scope, ns, context_id);
     crate::character_data::install(scope, ns, context_id);
+    crate::xml_parse::install(scope, ns, context_id);
     crate::custom_elements::install(scope, ns, context_id);
     crate::details::install(scope, ns, context_id);
     crate::adopt::install(scope, ns, context_id);

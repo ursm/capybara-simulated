@@ -98,6 +98,7 @@ mod video;
 mod walk;
 mod walk_ops;
 mod walk_reuse;
+mod xml_parse;
 mod xpath;
 mod yuv;
 
