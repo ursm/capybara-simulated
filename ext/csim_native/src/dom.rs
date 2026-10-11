@@ -222,6 +222,8 @@ pub(crate) struct NodeData {
     pub(crate) scroll: [f64; 2],
     // An element's live STATE that no attribute carries (`state` bits, below): what a script or the user did to it.
     pub(crate) state: u32,
+    // A script element's flags (HTML §4.12.1.1: "already started", parser-inserted, "force async" — script.rs `SCRIPT_*`).
+    pub(crate) script_flags: u8,
     // A shadow root's host (None for every other node): the shadow-including ancestor chain `:focus` walks…
     pub(crate) host: Option<NodeId>,
     // …and a host's shadow root, the other way; and whether a shadow root delegates focus (`attachShadow`'s
@@ -358,6 +360,7 @@ impl NodeData {
             anon_boxes: None,
             scroll: [0.0; 2],
             state: 0,
+            script_flags: 0,
             host: None,
             shadow_root: None,
             delegates_focus: false,

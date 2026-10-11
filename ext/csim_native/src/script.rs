@@ -1,5 +1,6 @@
 // The script element (HTML §4.12.1): what its type is — "prepare the script element" steps 8-12, which decide whether
-// and as what it runs — the engine's to say from its attributes. Running it, fetching it, the bindings'.
+// and as what it runs — the engine's to say from its attributes, and its flags the engine's to keep. Running it, fetching
+// it, the bindings'.
 
 use crate::dom::{dom, nid_arg, NodeData};
 
@@ -10,6 +11,13 @@ pub(crate) const CLASSIC: u32 = 1;
 pub(crate) const MODULE: u32 = 2;
 pub(crate) const IMPORT_MAP: u32 = 3;
 pub(crate) const SPECULATION_RULES: u32 = 4;
+
+// A script element's flags (`NodeData::script_flags`): HTML's "already started", its parser document (parser-inserted),
+// "force async" — which it is made with, so the bit says it is not — and whether the driver's after-parse pass has run it.
+pub(crate) const SCRIPT_ALREADY_STARTED: u8 = 1;
+pub(crate) const SCRIPT_PARSER_INSERTED: u8 = 1 << 1;
+pub(crate) const SCRIPT_NOT_FORCE_ASYNC: u8 = 1 << 2;
+pub(crate) const SCRIPT_RUN: u8 = 1 << 3;
 
 // The JavaScript MIME type essences (MIME Sniffing §4.6), each matched ASCII case-insensitively.
 const JAVASCRIPT_MIME_TYPES: [&str; 16] = [
@@ -56,12 +64,31 @@ pub(crate) fn script_type(n: &NodeData) -> u32 {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "scriptType", script_type_op, context_id);
+    crate::dom::register(scope, ns, "scriptFlags", script_flags_op, context_id);
+    crate::dom::register(scope, ns, "setScriptFlags", set_script_flags_op, context_id);
 }
 
 // __dom.scriptType(nid) -> what the script element's type is (`script_type`: `DATA_BLOCK`, `CLASSIC`, …).
 fn script_type_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(DATA_BLOCK) };
     rv.set_uint32(dom(scope).arena.get(id).map_or(DATA_BLOCK, script_type));
+}
+
+// __dom.scriptFlags(nid) -> the script element's flags (`SCRIPT_*`).
+fn script_flags_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
+    rv.set_uint32(dom(scope).arena.get(id).map_or(0, |n| u32::from(n.script_flags)));
+}
+
+// __dom.setScriptFlags(nid, mask, bits) — the script element's flags under `mask` become `bits`.
+fn set_script_flags_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let mask = args.get(1).uint32_value(scope).unwrap_or(0) as u8;
+    let bits = args.get(2).uint32_value(scope).unwrap_or(0) as u8;
+    // (…no input to any memo of the arena, nor to a layout: a write that moves none)
+    if let Some(n) = dom(scope).arena.get_mut_quietly(id) {
+        n.script_flags = (n.script_flags & !mask) | (bits & mask);
+    }
 }
 
 #[cfg(test)]
