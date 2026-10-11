@@ -1252,7 +1252,7 @@ impl StyleEngine {
             (Some(el), _) if subtree => self.web_animations.relevant_animations(|t| within(el, t.node), &order),
             (Some(el), _) => self.web_animations.relevant_animations(|t| t.node == el && t.pseudo.is_none(), &order),
             (None, Some(doc)) => {
-                self.web_animations.relevant_animations(|t| arena.is_inclusive_ancestor(doc, t.node), &order)
+                self.web_animations.relevant_animations(|t| arena.shadow_including_ancestor(doc, t.node), &order)
             },
             (None, None) => Vec::new(),
         }

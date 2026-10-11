@@ -141,17 +141,6 @@ impl RealmArena {
         let node = self.get(id)?;
         node.parent.or(node.host).filter(|&p| self.get(p).is_some())
     }
-    // Is `node` `ancestor` or a shadow-including descendant of it?
-    pub(crate) fn is_inclusive_ancestor(&self, ancestor: NodeId, node: NodeId) -> bool {
-        let mut cur = Some(node);
-        while let Some(c) = cur {
-            if c == ancestor {
-                return true;
-            }
-            cur = self.shadow_including_parent(c);
-        }
-        false
-    }
     // Is `id` in a document (shadow-including)?
     pub(crate) fn is_connected(&self, id: NodeId) -> bool {
         let mut cur = Some(id);
@@ -192,11 +181,11 @@ impl RealmArena {
     }
     // `:focus-within`: the focused element or one of its shadow-including ancestors.
     pub(crate) fn has_focus_within(&self, id: NodeId) -> bool {
-        self.focus.is_some_and(|f| self.is_inclusive_ancestor(id, f))
+        self.focus.is_some_and(|f| self.shadow_including_ancestor(id, f))
     }
     // `:hover`: the hovered element or one of its shadow-including ancestors.
     pub(crate) fn is_hovered(&self, id: NodeId) -> bool {
-        self.hover.is_some_and(|h| self.is_inclusive_ancestor(id, h))
+        self.hover.is_some_and(|h| self.shadow_including_ancestor(id, h))
     }
 
     // `:checked`: an option's selectedness, or a checkbox's / radio button's checkedness — its own once dirty (a
@@ -461,7 +450,7 @@ impl RealmArena {
     pub(crate) fn is_form_named_candidate(&self, form: NodeId, el: NodeId) -> bool {
         let Some(n) = self.get(el).filter(|n| n.kind == NodeKind::Element) else { return false };
         if n.is_html_named("img") {
-            return el != form && self.is_inclusive_ancestor(form, el) && self.root_of(el) == self.root_of(form);
+            return el != form && self.shadow_including_ancestor(form, el) && self.root_of(el) == self.root_of(form);
         }
         let image = n.is_html_named("input") && n.input_type() == "image";
         is_listed(n) && !image && self.form_owner(el) == Some(form)
@@ -869,7 +858,7 @@ impl RealmArena {
     fn in_first_legend(&self, id: NodeId, fieldset: NodeId) -> bool {
         let Some(f) = self.get(fieldset) else { return false };
         let legend = f.children.iter().copied().find(|&c| self.get(c).is_some_and(|n| n.is_html_named("legend")));
-        legend.is_some_and(|l| self.is_inclusive_ancestor(l, id))
+        legend.is_some_and(|l| self.shadow_including_ancestor(l, id))
     }
     // `:enabled`: a form control (a form-associated custom element included) that is not actually disabled.
     pub(crate) fn is_enabled(&self, id: NodeId) -> bool {
@@ -1023,7 +1012,7 @@ impl RealmArena {
     // labeled form-associated custom element or `<output>` is not handed back to it).
     pub(crate) fn label_to_activate(&self, id: NodeId) -> Option<NodeId> {
         let label = self.enclosing_label(id)?;
-        let inside = self.labeled_control(label).is_some_and(|control| self.is_inclusive_ancestor(control, id));
+        let inside = self.labeled_control(label).is_some_and(|control| self.shadow_including_ancestor(control, id));
         (!inside).then_some(label)
     }
     fn enclosing_label(&self, id: NodeId) -> Option<NodeId> {

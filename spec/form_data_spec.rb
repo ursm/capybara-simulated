@@ -152,6 +152,30 @@ RSpec.describe 'FormData "formdata" event, USV conversion, _charset_' do
     expect(got).to eq([[true, true, true, true], nil, nil, nil, nil])
   end
 
+  # A move (`moveBefore`) runs HTML's moving steps: "If movedNode is a form-associated element with a non-null form owner
+  # and movedNode and its form owner are no longer in the same tree, then reset the form owner of movedNode." So a
+  # parser-given owner is kept by a move within its form's tree — the control alone, or inside a moved wrapper — and lost
+  # by one into a shadow tree, which a move back out does not restore. Chrome 155 and Firefox reset it on every move,
+  # same tree or not ([nil, nil, nil, "g"]); the spec says otherwise, and the spec wins.
+  it "resets a parser-given form owner as a move takes the control out of its form's tree" do
+    page = '<!DOCTYPE html><meta charset="utf-8"><body><table><form id=f><tr><td><input id=a><input id=b>' \
+           '<div id=w><input id=i></div><input id=j></td></tr></form></table><div id=host></div><form id=g></form>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] }).tap {|ss| ss.visit '/' }
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const [a, b, i, j] = ['a', 'b', 'i', 'j'].map((id) => document.getElementById(id));
+        const sr = document.getElementById('host').attachShadow({ mode: 'open' });
+        document.body.moveBefore(a, null);
+        sr.moveBefore(b, null);
+        document.body.moveBefore(b, null);
+        document.body.moveBefore(document.getElementById('w'), null);
+        document.getElementById('g').moveBefore(j, null);
+        return [a, b, i, j].map((c) => c.form && c.form.id);
+      })()
+    JS
+    expect(got).to eq(['f', nil, 'f', 'g'])
+  end
+
   it 'gives a hidden _charset_ control the UTF-8 encoding name' do
     charset = session.evaluate_script(<<~JS)
       (function () {

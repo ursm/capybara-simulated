@@ -1634,7 +1634,7 @@ impl RealmArena {
         // answer for a scroller removed and inserted again — where one only `display: none` keeps its offset)
         if !self.scrolled_nodes.is_empty() {
             let (gone, kept): (Vec<NodeId>, Vec<NodeId>) =
-                std::mem::take(&mut self.scrolled_nodes).into_iter().partition(|&n| self.under(n, child));
+                std::mem::take(&mut self.scrolled_nodes).into_iter().partition(|&n| self.shadow_including_ancestor(child, n));
             self.scrolled_nodes = kept;
             for n in gone {
                 if let Some(node) = self.get_mut_quietly(n) {
@@ -1685,17 +1685,6 @@ impl RealmArena {
             stack.extend(node.shadow_root);
         }
         found
-    }
-    // Is `node` `ancestor` or in its subtree, shadow trees included?
-    pub(crate) fn under(&self, node: NodeId, ancestor: NodeId) -> bool {
-        let mut at = Some(node);
-        while let Some(n) = at {
-            if n == ancestor {
-                return true;
-            }
-            at = self.get(n).and_then(|d| d.parent.or(d.host));
-        }
-        false
     }
 
     // Move `child` under `parent`, before `before` when that is one of its children, else last. Refused when it would

@@ -1,7 +1,7 @@
 // The DOM's tree mutation algorithms (DOM §4.2.3): what makes an insertion or a replacement valid — the "ensure
 // pre-insertion validity" steps and the replace algorithm's checks — over the arena's trees, and the change of a parent's
-// children each of them makes (`change_children`): the engine's edges and steps in the order the algorithms write and
-// run them, the bindings' steps in its course (a frame's discarding, a select's reset) called back where they fall, and
+// children each of them makes (`change_children`; DOM "move", `moveBefore`'s, `move_child`): the engine's edges and
+// steps in the order the algorithms write and run them, the bindings' steps in its course (a frame's discarding, a select's reset) called back where they fall, and
 // those it ends with — the mutation record, the custom element reactions, the connection walk — the bindings' to take as
 // it returns.
 
@@ -374,7 +374,9 @@ fn change_children_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 
 // DOM "move" (`moveBefore`) of `node` into `parent` before `child` (none: last) — the checks passed — as its edges and
 // the engine's moving steps go: out of its old parent and into the new one with the live ranges' and NodeIterators'
-// steps of each (it stays connected: no removing or insertion steps), a form the parser gave a control in it no longer
+// steps of each (it stays connected: none of the bindings' removing or insertion steps — the engine's radio group and
+// registry steps of an insertion run, as Chrome's do: a checked radio moved into another group unchecks the rest of it),
+// a form the parser gave a control in it no longer
 // its owner where they are no longer in the same tree (HTML's moving steps), and the focused or hovered element moved
 // with it — the old ancestors' `:focus-within` / `:hover` ending and the new ones' beginning, a flip of state no setter
 // sees (`note_state_changed`). The parent it left and the siblings it had there, which the removal's record carries.
@@ -390,7 +392,7 @@ fn move_child(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node: 
     crate::dom::insert_nodes(scope, cid, parent, &[node], child);
     let arena = realm(scope, cid);
     arena.parser_form_owners_removed(node);
-    let carried = |id: Option<NodeId>| id.is_some_and(|f| arena.under(f, node));
+    let carried = |id: Option<NodeId>| id.is_some_and(|f| arena.shadow_including_ancestor(node, f));
     if old != Some(parent) && (carried(arena.focus) || carried(arena.hover)) {
         arena.observers.note_state_changed();
     }
