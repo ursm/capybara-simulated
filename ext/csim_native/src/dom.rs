@@ -2696,10 +2696,11 @@ fn set_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let had = arena.get(id).map_or(0, |n| n.state);
     let next = (had & !mask) | (bits & mask);
     if next != had {
-        arena.set_state(id, next);
         // (…a radio's checkedness set to true unchecks the rest of its group, whatever set it — a click, `.checked`, a
-        // form's reset — §4.10.5.1.15)
-        if mask & (STATE_CHECKED | STATE_CHECKED_DIRTY) != 0 && arena.radio_steps(id) {
+        // form's reset — §4.10.5.1.15: where it was not checked, as Chrome and Firefox)
+        let was_checked = mask & (STATE_CHECKED | STATE_CHECKED_DIRTY) != 0 && arena.is_checked(id);
+        arena.set_state(id, next);
+        if mask & (STATE_CHECKED | STATE_CHECKED_DIRTY) != 0 && !was_checked && arena.is_checked(id) && arena.radio_steps(id) {
             arena.observers.note_state_changed();
         }
     }
@@ -3044,15 +3045,16 @@ fn slot_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, nodes:
     }
 }
 // The steps of an attribute write the engine runs after it: the slot steps (`slot_attribute_steps`), and a radio
-// button's, whose `checked`, `name`, `type` or `form` written may make it a checked one of a group (`radio_steps`),
-// whose state change the bindings hear of (`note_state_changed`).
-fn attribute_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, names: &[&str]) {
+// button's (`radio_steps`), whose state change the bindings hear of (`note_state_changed`) — as its `name`, `type` or
+// `form` written changed its group, or its `checked` its checkedness from false (`was_checked`) to true: one dirty has
+// a checkedness of its own, which its attribute no longer sets.
+fn attribute_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, names: &[&str], was_checked: bool) {
     slot_attribute_steps(scope, cid, id, names);
-    if names.iter().any(|n| matches!(*n, "checked" | "name" | "type" | "form")) {
-        let arena = realm(scope, cid);
-        if arena.radio_steps(id) {
-            arena.observers.note_state_changed();
-        }
+    let arena = realm(scope, cid);
+    let regrouped = names.iter().any(|n| matches!(*n, "name" | "type" | "form"));
+    let checked = names.contains(&"checked") && !was_checked && arena.is_checked(id);
+    if (regrouped || checked) && arena.radio_steps(id) {
+        arena.observers.note_state_changed();
     }
 }
 // …and the attribute change steps': a slottable's `slot` changed, so the slot it was assigned is assigned anew and then
@@ -4785,11 +4787,12 @@ fn attr_set(
     let cid = holder_realm_id(scope, args);
     let (utf8, u16) = read_v8_value(scope, value);
     let (arena, engine) = arena_and_engine(scope, cid);
+    let was_checked = arena.is_checked(id);
     before_attribute_write(arena, engine, id, &[name]);
     if let Some(node) = arena.get_mut(id) {
         node.set_attr_full(name, utf8, u16);
     }
-    attribute_steps(scope, cid, id, &[name]);
+    attribute_steps(scope, cid, id, &[name], was_checked);
     v8::Intercepted::kYes
 }
 
@@ -4845,11 +4848,12 @@ fn attr_delete(
     };
     let cid = holder_realm_id(scope, args);
     let (arena, engine) = arena_and_engine(scope, cid);
+    let was_checked = arena.is_checked(id);
     before_attribute_write(arena, engine, id, &[name]);
     if let Some(node) = arena.get_mut(id) {
         node.remove_attr(name);
     }
-    attribute_steps(scope, cid, id, &[name]);
+    attribute_steps(scope, cid, id, &[name], was_checked);
     rv.set_bool(true);
     v8::Intercepted::kYes
 }
