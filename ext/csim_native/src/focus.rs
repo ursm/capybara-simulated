@@ -425,6 +425,22 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "focusableArea", focusable_area_op, context_id);
     crate::dom::register(scope, ns, "dialogFocusingSteps", dialog_focusing_steps_op, context_id);
     crate::dom::register(scope, ns, "dialogFocusRestore", dialog_focus_restore_op, context_id);
+    crate::dom::register(scope, ns, "documentFocus", document_focus_op, context_id);
+}
+
+// __dom.documentFocus(docNid, hover) -> the element the realm of the document has focused (or, `hover`, hovered) — its
+// state (`RealmState::focus` / `hover`, which STATE_FOCUSED / STATE_HOVERED written there name), whichever realm asks —
+// as `node_value` answers it, or null: where it is still, a removal it left with not yet told (`subtreeLeft` asks).
+fn document_focus_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_null() };
+    let hover = args.get(1).is_true();
+    let arena = &crate::dom::dom(scope).arena;
+    let found = arena
+        .get(doc)
+        .filter(|d| d.kind == NodeKind::Document)
+        .and_then(|d| arena.realm_state(d.realm))
+        .and_then(|st| if hover { st.hover } else { st.focus });
+    rv.set(crate::dom::node_value(scope, found));
 }
 
 // HTML's "dialog focusing steps" for a dialog opening, up to running the focusing steps: the element focused now kept as
@@ -498,42 +514,16 @@ fn focusable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 }
 
 // __dom.nextFocus(docNid, currentNid, reverse, now) -> the element Tab (Shift-Tab, with `reverse`) moves focus to from
-// `currentNid` (-1: nothing focused, the document's sequential focus navigation starting point), as its nid and then the path to it from the document — each step a child's index
-// among the live ones, or -1 into the shadow root of the element before it — or null where nothing is focusable.
+// `currentNid` (-1: nothing focused, the document's sequential focus navigation starting point), as `node_value`
+// answers it — null where nothing is focusable.
 fn next_focus_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_null() };
     let current = crate::dom::nid_arg(scope, &args, 1);
     let reverse = args.get(2).is_true();
-    let path = crate::rendered::with_engine(scope, &args, 3, |engine, arena, now| {
+    let found = crate::rendered::with_engine(scope, &args, 3, |engine, arena, now| {
         // (…nothing focused: on from the starting point, where it is in the document yet — else from its start)
         let current = current.or(arena.focus_start.filter(|&s| arena.shadow_including_root(s) == doc));
-        let next = next(engine, arena, doc, current, reverse, now)?;
-        let mut path = Vec::new();
-        let mut cur = next;
-        while cur != doc {
-            let n = arena.get(cur)?;
-            match (n.parent, n.host) {
-                (Some(p), _) => {
-                    let live = arena.get(p)?.children.iter().filter(|&&c| arena.get(c).is_some());
-                    path.push(live.take_while(|&&c| c != cur).count() as f64);
-                    cur = p;
-                }
-                (None, Some(host)) => {
-                    path.push(-1.0);
-                    cur = host;
-                }
-                (None, None) => return None,
-            }
-        }
-        path.push(next.to_f64());
-        path.reverse();
-        Some(path)
+        next(engine, arena, doc, current, reverse, now)
     });
-    match path.flatten() {
-        Some(path) => {
-            let array = crate::dom::f64_array(scope, &path);
-            rv.set(array.into());
-        }
-        None => rv.set_null(),
-    }
+    rv.set(crate::dom::node_value(scope, found.flatten()));
 }
