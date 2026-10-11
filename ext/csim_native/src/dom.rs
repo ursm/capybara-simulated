@@ -2807,7 +2807,7 @@ fn write_data(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgum
     write_data_of(scope, args.get(0), data, appended);
 }
 // …or `units` spliced over `count` code units at `offset` of node `id`'s data, in the arena alone (its handle's string
-// made again when next read: node_handle.rs `forget_data`).
+// made again when next read: node_handle.rs `forget_data`) — its parent's style block the caller's to update.
 pub(crate) fn splice_data(scope: &mut v8::PinScope<'_, '_>, id: NodeId, offset: usize, count: usize, units: &[u16]) {
     let Some(cid) = dom(scope).arena.get(id).map(|n| n.realm) else { return };
     let (arena, engine) = arena_and_engine(scope, cid);
@@ -2818,9 +2818,6 @@ pub(crate) fn splice_data(scope: &mut v8::PinScope<'_, '_>, id: NodeId, offset: 
         node.data.splice(offset..offset + count, units.iter().copied());
     }
     text_changed(arena, engine, id, had_text);
-    if let Some(p) = arena.parent_of(id) {
-        arena.style_block_changed(p);
-    }
 }
 // …`node`'s (the object): the node's data, or `appended` to it. Whether that changed it.
 pub(crate) fn write_data_of(scope: &mut v8::PinScope<'_, '_>, node: v8::Local<'_, v8::Value>, data: v8::Local<'_, v8::String>, appended: bool) -> bool {

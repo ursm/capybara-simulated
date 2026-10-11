@@ -302,6 +302,22 @@ RSpec.describe 'CSSOM rules' do
     expect(got).to eq([true, true, 'fs'])
   end
 
+  # A `<style>`'s block is updated by every write of its text — a splice inside it of the units already there too — so an
+  # edit CSSOM made of its sheet is gone. Chrome 155: [1, "16px"].
+  it "updates a style block as a splice writes the text it had" do
+    got = page('').evaluate_script(<<~JS)
+      (() => {
+        const p = document.body.appendChild(document.createElement('p'));
+        const st = document.head.appendChild(document.createElement('style'));
+        st.textContent = 'p { color: rgb(1, 0, 0) }';
+        st.sheet.insertRule('p { font-size: 40px }', 1);
+        st.firstChild.replaceData(3, 1, st.textContent[3]);
+        return [st.sheet.cssRules.length, getComputedStyle(p).fontSize];
+      })()
+    JS
+    expect(got).to eq([1, '16px'])
+  end
+
   # A `<link>` disabled and enabled again obtains its sheet again: a new one, without the edit a script made of the old,
   # which has no owner from the moment it was disabled. (Chrome: the same, each value.)
   it 'obtains a new sheet for a link enabled again' do

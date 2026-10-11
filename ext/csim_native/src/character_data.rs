@@ -60,6 +60,11 @@ fn replace_data_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
             crate::node_handle::forget_data(scope, node);
             crate::dom::splice_data(scope, id, offset, count, &units);
         }
+        // (…a `<style>`'s block updated by any write — to the same units, too — as the other two update it)
+        let arena = realm(scope, cid);
+        if let Some(parent) = arena.parent_of(id) {
+            arena.style_block_changed(parent);
+        }
         !same
     };
     let arena = realm(scope, cid);
