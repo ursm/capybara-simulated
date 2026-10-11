@@ -781,6 +781,9 @@ pub(crate) struct RealmState {
     pub(crate) focus_start: Option<NodeId>,
     // The modal dialogs, in the order they were shown — the top layer's: the last blocks the document (`is_inert`).
     pub(crate) modals: Vec<NodeId>,
+    // Whether a shadow root of the realm's trees has had a host — its tree and attribute writes run the slot steps only
+    // then (`slot_steps`): a web component in a frame costs the page around it nothing.
+    pub(crate) shadow_hosts: bool,
     // Whether the focus shows NO ring (not `:focus-visible`): only after a pointer focus of a non-text control.
     pub(crate) focus_ring_hidden: bool,
     // The realm document and its target fragments (as it stands, then decoded), when it has any — what `:target`
@@ -1317,6 +1320,7 @@ impl RealmArena {
             node.manual_slot_assignment = init.manual_slot_assignment;
             node.closed = init.closed;
             self.has_shadow_hosts = true;
+            self.state.shadow_hosts = true;
         }
         if let Some(node) = self.get_mut(host) {
             node.shadow_root = Some(root);
@@ -2587,7 +2591,8 @@ fn insert_children(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 }
 
 // DOM "insert"'s edges: `nodes` the children of `parent` before `before` (last where it is none) — taken from where they
-// are first — and the live ranges' insert steps for them, and the style engine told of each list that changed.
+// are first — and the live ranges' insert steps for them, the style engine told of each list that changed, and the slot
+// steps of each parent they left and of `parent` (`slot_steps`).
 fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, nodes: &[NodeId], before: Option<NodeId>) {
     let (arena, mut engine) = arena_and_engine(scope, cid);
     // (…one — the commonest insertion, a node at a time — allocating nothing)
@@ -2613,7 +2618,7 @@ fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node
         slot_steps(scope, cid, parent, nodes, false);
         return;
     }
-    let old: Vec<NodeId> = nodes.iter().filter_map(|&n| arena.parent_of(n)).collect();
+    let old: Vec<(NodeId, NodeId)> = nodes.iter().filter_map(|&n| arena.parent_of(n).map(|p| (p, n))).collect();
     if let Some(engine) = engine.as_deref_mut() {
         for &n in nodes.iter().filter(|&&n| arena.parent_of(n).is_some()) {
             engine.node_left(arena, n);
@@ -2622,23 +2627,25 @@ fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node
     let inserted = arena.insert_children(parent, nodes, before);
     // (…where they went, past the first: a boundary in the parent after it moves by them)
     let index = inserted.first().map(|&n| arena.child_index(n));
-    let mut left: Vec<NodeId> = Vec::new();
-    for o in old.into_iter().filter(|&o| o != parent) {
-        if !left.contains(&o) {
-            left.push(o);
+    // (…each parent they left, with the ones that left it)
+    let mut left: Vec<(NodeId, Vec<NodeId>)> = Vec::new();
+    for (o, n) in old.into_iter().filter(|&(o, _)| o != parent) {
+        match left.iter_mut().find(|(p, _)| *p == o) {
+            Some((_, from)) => from.push(n),
+            None => left.push((o, vec![n])),
         }
     }
     if let Some(engine) = engine {
-        for &o in &left {
-            engine.children_changed(arena, o);
+        for (o, _) in &left {
+            engine.children_changed(arena, *o);
         }
         engine.children_changed(arena, parent);
     }
     if let Some(index) = index.filter(|_| before.is_some()) {
         crate::ranges::inserted(scope, parent, index as u32, inserted.len() as u32);
     }
-    for o in left {
-        slot_steps(scope, cid, o, nodes, true);
+    for (o, from) in left {
+        slot_steps(scope, cid, o, &from, true);
     }
     slot_steps(scope, cid, parent, &inserted, false);
 }
@@ -2971,10 +2978,11 @@ fn assign_slots_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: Option<Node
 // DOM "insert" and "remove"'s slot steps, as `nodes` were inserted into `parent` or (`removed`) removed from it: a
 // host's children changed, so its shadow tree is assigned anew; a slot came into or left a shadow tree, so its tree is
 // (and a slot that left, with it); and a slot showing its fallback content — its children — had them change, so it is
-// signaled, and so is each enclosing slot showing it in turn. Nothing on a page with no shadow host.
+// signaled (DOM insert step 7.5, remove step 9: the parent alone, whose `slotchange` an enclosing slot sees bubble).
+// Nothing in a realm with no shadow host.
 fn slot_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, nodes: &[NodeId], removed: bool) {
     let arena = realm(scope, cid);
-    if !arena.has_shadow_hosts {
+    if !arena.shadow_hosts {
         return;
     }
     let host_tree = arena.get(parent).and_then(|p| p.shadow_root);
@@ -2987,30 +2995,27 @@ fn slot_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, nodes:
         assign_slots_in(scope, cid, root, if removed { &slots } else { &[] });
     }
     let arena = realm(scope, cid);
-    if crate::slots::is_slot(arena, parent) && crate::slots::enclosing_shadow_root(arena, parent).is_some() {
-        let mut fallback = Vec::new();
-        let mut at = Some(parent);
-        while let Some(s) = at.filter(|&s| crate::slots::is_slot(arena, s)) {
-            if arena.get(s).is_some_and(|n| !n.assigned.is_empty()) {
-                break;
-            }
-            fallback.push(s);
-            at = arena.get(s).and_then(|n| n.parent.or(n.host));
-        }
-        for s in fallback {
-            crate::mutation_observers::signal(scope, s);
-        }
+    let showing_fallback = crate::slots::is_slot(arena, parent)
+        && arena.get(parent).is_some_and(|p| p.assigned.is_empty())
+        && crate::slots::enclosing_shadow_root(arena, parent).is_some();
+    if showing_fallback {
+        crate::mutation_observers::signal(scope, parent);
     }
 }
-// …and an attribute's: a slottable's `slot` changed which slot of its parent's shadow tree takes it, and a slot's `name`
-// which slottables of its tree's host it takes.
+// …and the attribute change steps': a slottable's `slot` changed, so the slot it was assigned is assigned anew and then
+// the one that takes it now (DOM "slottable" attribute change steps: its old slot's `slotchange` first) — the rest of
+// its parent's shadow tree is; and a slot's `name`, so its tree is.
 fn slot_attribute_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, names: &[&str]) {
     let arena = realm(scope, cid);
-    if !arena.has_shadow_hosts {
+    if !arena.shadow_hosts {
         return;
     }
     if names.contains(&"slot") {
+        let was = arena.get(id).and_then(|n| n.assigned_slot).filter(|&s| arena.get(s).is_some());
         let tree = arena.parent_of(id).and_then(|p| arena.get(p)).and_then(|p| p.shadow_root);
+        if let Some(was) = was {
+            assign_slots_in(scope, cid, None, &[was]);
+        }
         if tree.is_some() {
             assign_slots_in(scope, cid, tree, &[]);
         }
@@ -3157,24 +3162,21 @@ pub(crate) fn utf16_value<'s>(scope: &mut v8::PinScope<'s, '_>, units: &[u16]) -
     }
 }
 
-// __dom.removeChild(childNid) -> the child leaves its parent (and keeps its own subtree); the observers it took transient
-// registrations of (`mutation_observers::observer_list`).
+// __dom.removeChild(childNid): the child leaves its parent (and keeps its own subtree).
 fn remove_child(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let Some(child) = nid_arg(scope, &args, 0) else {
         return;
     };
     let cid = realm_id(scope, &args);
-    if let Some(list) = take_out(scope, cid, child) {
-        rv.set(list);
-    }
+    take_out(scope, cid, child);
 }
 // __dom.remove(parentNid, childNid) -> DOM "remove" of a child of the parent, the `removeChild` op's steps, answered as
-// what the steps after it need: `[previousSibling, nextSibling, wasConnected, observers]` — the siblings it had, whether
-// the parent was connected, the observers as `removeChild` answers them — or undefined where it is no child of the parent.
+// what the steps after it need: `[previousSibling, nextSibling, wasConnected]` — the siblings it had and whether the
+// parent was connected — or undefined where it is no child of the parent.
 fn remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(parent), Some(child)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
     let cid = realm_id(scope, &args);
@@ -3183,14 +3185,15 @@ fn remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
         return;
     }
     let (prev, next, connected) = (arena.sibling(child, -1), arena.sibling(child, 1), arena.is_connected(parent));
-    let observers = take_out(scope, cid, child).unwrap_or_else(|| v8::undefined(scope).into());
+    take_out(scope, cid, child);
     let (prev, next) = (node_value(scope, prev), node_value(scope, next));
     let connected = v8::Boolean::new(scope, connected).into();
-    rv.set(v8::Array::new_with_elements(scope, &[prev, next, connected, observers]).into());
+    rv.set(v8::Array::new_with_elements(scope, &[prev, next, connected]).into());
 }
 // …both: the NodeIterators' pre-removing steps and the live ranges' removing steps, with the node still where it was;
-// the node unlinked, which its style engine hears of; and the observers it took transient registrations of.
-fn take_out<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, child: NodeId) -> Option<v8::Local<'s, v8::Value>> {
+// the node unlinked, which its style engine hears of; the mutation observers' transient registrations it takes, which
+// make them pending; and the slot steps of the parent it left (`slot_steps`).
+fn take_out(scope: &mut v8::PinScope<'_, '_>, cid: i32, child: NodeId) {
     crate::node_iterators::removing(scope, cid, child);
     let at = {
         let arena = realm(scope, cid);
@@ -3208,22 +3211,21 @@ fn take_out<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, child: NodeId) -> Op
     if let (Some(engine), Some(o)) = (engine, old) {
         engine.children_changed(arena, o);
     }
-    let given = old.map_or_else(Vec::new, |o| arena.add_transient_observers(child, o));
     if let Some(o) = old {
+        arena.add_transient_observers(child, o);
         slot_steps(scope, cid, o, &[child], true);
     }
-    crate::mutation_observers::observer_list(scope, &given)
 }
 
-// __dom.removeChildren(parentNid) -> [children, observers]: every child of the parent removed, one after another, as
-// "replace all" removes them — the NodeIterators' and live ranges' steps for them, the mutation observers' transient
-// registrations they take (`observers`, as `observer_list` answers), and the children, as `nodes_value` answers them.
+// __dom.removeChildren(parentNid) -> the children, as `nodes_value` answers them: every child of the parent removed, one
+// after another, as "replace all" removes them — the NodeIterators' and live ranges' steps for them, the mutation
+// observers' transient registrations they take, and the parent's slot steps for them (`slot_steps`).
 fn remove_children(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(parent) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
     let kids = arena.get(parent).map_or_else(Vec::new, |p| p.children.clone());
-    let given = crate::mutation_observers::transients_of_children(arena, parent);
+    crate::mutation_observers::transients_of_children(arena, parent);
     if !kids.is_empty() {
         crate::node_iterators::removing_all(scope, cid, parent);
         crate::ranges::removing_all(scope, cid, parent);
@@ -3240,9 +3242,7 @@ fn remove_children(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         }
         slot_steps(scope, cid, parent, &kids, true);
     }
-    let nodes = nodes_value(scope, cid, &kids);
-    let observers = crate::mutation_observers::observer_list(scope, &given).unwrap_or_else(|| v8::undefined(scope).into());
-    rv.set(v8::Array::new_with_elements(scope, &[nodes, observers]).into());
+    rv.set(nodes_value(scope, cid, &kids));
 }
 
 // __dom.syncAttrs(nodeNid, attrsFlat): replace a node's attributes with the flat [name, value, …]
@@ -3262,7 +3262,7 @@ fn sync_attrs(
     let (arena, engine) = arena_and_engine(scope, cid);
     // (…and whether it had or will have a `slot` or a `name`, which a shadow tree's assignment reads)
     let slotting = |attrs: &[(String, String)]| attrs.iter().any(|(k, _)| k == "slot" || k == "name");
-    let reassigns = slotting(&attributes) || arena.get(id).is_some_and(|n| slotting(&n.attributes));
+    let reassigns = arena.shadow_hosts && (slotting(&attributes) || arena.get(id).is_some_and(|n| slotting(&n.attributes)));
     // (…which can write or drop an id, whichever the names)
     arena.id_epoch += 1;
     // Every name the element had or will have — a wholesale write can add, drop or change any of them — listed only
