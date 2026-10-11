@@ -2,7 +2,7 @@
 // and as what it runs — the engine's to say from its attributes, and its flags the engine's to keep. Running it, fetching
 // it, the bindings'.
 
-use crate::dom::{dom, nid_arg, NodeData};
+use crate::dom::{dom, nid_arg, NodeData, NodeId, NodeKind, RealmArena};
 
 // What a script element's type is: none it runs as (a data block), a classic script, a module script, an import map,
 // speculation rules.
@@ -62,10 +62,52 @@ pub(crate) fn script_type(n: &NodeData) -> u32 {
     }
 }
 
+// What preparing a script element (`prepare`) found it is to do: nothing; fire `error` (an empty `src`); run as a classic
+// script; run as a module script — inline, or from its `src`, which the bindings fetch.
+pub(crate) const PREPARE_NONE: u32 = 0;
+pub(crate) const PREPARE_ERROR: u32 = 1;
+pub(crate) const PREPARE_CLASSIC: u32 = 2;
+pub(crate) const PREPARE_MODULE: u32 = 3;
+
+impl RealmArena {
+    // HTML "prepare the script element" for one no parser is preparing — its children changed, it was connected, its
+    // `src` set — as far as the element decides it: an "already started" one, one with neither a `src` nor child text, one
+    // not connected, and one whose type runs as nothing here (a data block; an import map or speculation rules, which
+    // only a parse registers) do nothing; any other is "already started" from here (and run by the after-parse pass's
+    // reckoning), and does nothing as a classic script marked `nomodule`, fires `error` with an empty `src`, and else runs.
+    pub(crate) fn prepare_script(&mut self, id: NodeId) -> u32 {
+        let Some(n) = self.get(id) else { return PREPARE_NONE };
+        if n.script_flags & SCRIPT_ALREADY_STARTED != 0 {
+            return PREPARE_NONE;
+        }
+        let src = n.plain_attr("src").map(str::is_empty);
+        let has_text = n.children.iter().any(|&c| self.get(c).is_some_and(|t| t.kind == NodeKind::Text && !t.data.is_empty()));
+        if (src.is_none() && !has_text) || !self.is_connected(id) {
+            return PREPARE_NONE;
+        }
+        let Some(n) = self.get(id) else { return PREPARE_NONE };
+        let ty = script_type(n);
+        if ty != CLASSIC && ty != MODULE {
+            return PREPARE_NONE;
+        }
+        let nomodule = ty == CLASSIC && n.plain_attr("nomodule").is_some();
+        if let Some(n) = self.get_mut_quietly(id) {
+            n.script_flags |= SCRIPT_ALREADY_STARTED | SCRIPT_RUN;
+        }
+        match (nomodule, src, ty) {
+            (true, _, _) => PREPARE_NONE,
+            (_, Some(true), _) => PREPARE_ERROR,
+            (_, _, MODULE) => PREPARE_MODULE,
+            _ => PREPARE_CLASSIC,
+        }
+    }
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "scriptType", script_type_op, context_id);
     crate::dom::register(scope, ns, "scriptFlags", script_flags_op, context_id);
     crate::dom::register(scope, ns, "setScriptFlags", set_script_flags_op, context_id);
+    crate::dom::register(scope, ns, "prepareScript", prepare_script_op, context_id);
 }
 
 // __dom.scriptType(nid) -> what the script element's type is (`script_type`: `DATA_BLOCK`, `CLASSIC`, …).
@@ -89,6 +131,13 @@ fn set_script_flags_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     if let Some(n) = dom(scope).arena.get_mut_quietly(id) {
         n.script_flags = (n.script_flags & !mask) | (bits & mask);
     }
+}
+
+// __dom.prepareScript(nid) -> what preparing the script element found it is to do (`prepare_script`: `PREPARE_NONE`, …).
+fn prepare_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(PREPARE_NONE) };
+    let cid = crate::dom::realm_id(scope, &args);
+    rv.set_uint32(crate::dom::realm(scope, cid).prepare_script(id));
 }
 
 #[cfg(test)]
