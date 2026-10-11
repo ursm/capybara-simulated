@@ -2,8 +2,9 @@
 // of its shadow tree is assigned, kept on the slots and the slotted nodes (`assigned` / `assigned_slot`), which the style
 // engine's flat tree, the layout walk, focus navigation and the event path all read. Run over a shadow tree each time
 // something it depends on changes — the host's children, a `slot` or `name` attribute, a slot entering or leaving the
-// tree, a manual `assign()` (dom-nodes.js's mutation hooks ask) — so what is stored is always what "find slottables"
-// would compute.
+// tree, a manual `assign()` — so what is stored is always what "find slottables" would compute. The tree's edges and
+// attributes are the engine's, so it runs them where they change (dom.rs `slot_steps` / `slot_attribute_steps`), as
+// DOM's insert, remove and attribute change steps do, and signals each slot whose assigned nodes changed.
 //
 // A shadow root in MANUAL mode assigns each slot its `assign()`ed nodes that are the host's children, in assignment
 // order; the lists are the slots' (`manual_assigned`, which dom-nodes.js writes from the nodes a script handed over).
@@ -22,7 +23,7 @@ fn slottable_name(arena: &RealmArena, id: NodeId) -> &str {
 fn slot_name(arena: &RealmArena, id: NodeId) -> &str {
     arena.get(id).and_then(|n| n.get_attr("name")).unwrap_or("")
 }
-fn is_slot(arena: &RealmArena, id: NodeId) -> bool {
+pub(crate) fn is_slot(arena: &RealmArena, id: NodeId) -> bool {
     arena.get(id).is_some_and(|n| n.is_html_named("slot"))
 }
 
@@ -49,6 +50,13 @@ fn slots_of(arena: &RealmArena, root: NodeId) -> Vec<NodeId> {
         }
         stack.extend(n.children.iter().rev());
     }
+    out
+}
+
+// The `<slot>`s of `node`'s subtree, itself included, in tree order (not those of a shadow tree within it).
+pub(crate) fn slots_in(arena: &RealmArena, node: NodeId) -> Vec<NodeId> {
+    let mut out = if is_slot(arena, node) { vec![node] } else { Vec::new() };
+    out.extend(slots_of(arena, node));
     out
 }
 

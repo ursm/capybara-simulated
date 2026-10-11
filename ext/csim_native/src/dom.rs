@@ -2607,6 +2607,10 @@ fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node
             let index = arena.child_index(node) as u32;
             crate::ranges::inserted(scope, parent, index, 1);
         }
+        if let Some(o) = old.filter(|&o| o != parent) {
+            slot_steps(scope, cid, o, nodes, true);
+        }
+        slot_steps(scope, cid, parent, nodes, false);
         return;
     }
     let old: Vec<NodeId> = nodes.iter().filter_map(|&n| arena.parent_of(n)).collect();
@@ -2618,14 +2622,14 @@ fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node
     let inserted = arena.insert_children(parent, nodes, before);
     // (…where they went, past the first: a boundary in the parent after it moves by them)
     let index = inserted.first().map(|&n| arena.child_index(n));
-    if let Some(engine) = engine {
-        let mut changed: Vec<NodeId> = Vec::new();
-        for o in old.into_iter().filter(|&o| o != parent) {
-            if !changed.contains(&o) {
-                changed.push(o);
-            }
+    let mut left: Vec<NodeId> = Vec::new();
+    for o in old.into_iter().filter(|&o| o != parent) {
+        if !left.contains(&o) {
+            left.push(o);
         }
-        for o in changed {
+    }
+    if let Some(engine) = engine {
+        for &o in &left {
             engine.children_changed(arena, o);
         }
         engine.children_changed(arena, parent);
@@ -2633,6 +2637,10 @@ fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node
     if let Some(index) = index.filter(|_| before.is_some()) {
         crate::ranges::inserted(scope, parent, index as u32, inserted.len() as u32);
     }
+    for o in left {
+        slot_steps(scope, cid, o, nodes, true);
+    }
+    slot_steps(scope, cid, parent, &inserted, false);
 }
 
 // __dom.setState(nid, mask, bits) -> the bits it had: the element's state bits (`STATE_*`) under `mask` become `bits`.
@@ -2919,9 +2927,9 @@ pub(crate) fn nids_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8
         .collect()
 }
 // __dom.assignSlots(rootNid, [slotNid, …]) -> [nodes, counts]: assign the slots of the shadow tree `rootNid` (-1 for
-// none) and the slots listed (ones that left it, assigned what their own tree now gives them), and answer each slot
-// whose assigned nodes changed with the nodes that left it — for the caller's `slotchange` and layout marks: `nodes`
-// each such slot and then the nodes that left it, as `nodes_value` answers them, and `counts` how many left each.
+// none) and the slots listed (ones that left it, assigned what their own tree now gives them), each slot whose assigned
+// nodes changed signaled, and answer them with the nodes that left them — for the caller's layout marks: `nodes` each
+// such slot and then the nodes that left it, as `nodes_value` answers them, and `counts` how many left each.
 fn assign_slots(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -2930,15 +2938,7 @@ fn assign_slots(
     let root = nid_arg(scope, &args, 0);
     let extra = nids_arg(scope, args.get(1));
     let cid = realm_id(scope, &args);
-    let (arena, mut engine) = arena_and_engine(scope, cid);
-    let changed = crate::slots::assign(arena, root, &extra, |arena, slot, old, now| {
-        if let Some(engine) = engine.as_deref_mut() {
-            for &n in old.iter().filter(|n| !now.contains(n)).chain(now.iter().filter(|n| !old.contains(n))) {
-                engine.node_left(arena, n);
-            }
-            engine.slot_assignment_changed(arena, slot);
-        }
-    });
+    let changed = assign_slots_in(scope, cid, root, &extra);
     let mut nodes = Vec::new();
     let mut counts = Vec::with_capacity(changed.len());
     for c in &changed {
@@ -2949,6 +2949,79 @@ fn assign_slots(
     let nodes = nodes_value(scope, cid, &nodes);
     let counts = f64_array(scope, &counts);
     rv.set(v8::Array::new_with_elements(scope, &[nodes, counts.into()]).into());
+}
+
+// "Assign slottables for a tree" of the shadow tree `root` and the slots `extra` (`slots::assign`), the style engine told
+// of each slot whose assigned nodes changed, and each signaled.
+fn assign_slots_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: Option<NodeId>, extra: &[NodeId]) -> Vec<crate::slots::Changed> {
+    let (arena, mut engine) = arena_and_engine(scope, cid);
+    let changed = crate::slots::assign(arena, root, extra, |arena, slot, old, now| {
+        if let Some(engine) = engine.as_deref_mut() {
+            for &n in old.iter().filter(|n| !now.contains(n)).chain(now.iter().filter(|n| !old.contains(n))) {
+                engine.node_left(arena, n);
+            }
+            engine.slot_assignment_changed(arena, slot);
+        }
+    });
+    for c in &changed {
+        crate::mutation_observers::signal(scope, c.slot);
+    }
+    changed
+}
+// DOM "insert" and "remove"'s slot steps, as `nodes` were inserted into `parent` or (`removed`) removed from it: a
+// host's children changed, so its shadow tree is assigned anew; a slot came into or left a shadow tree, so its tree is
+// (and a slot that left, with it); and a slot showing its fallback content — its children — had them change, so it is
+// signaled, and so is each enclosing slot showing it in turn. Nothing on a page with no shadow host.
+fn slot_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, nodes: &[NodeId], removed: bool) {
+    let arena = realm(scope, cid);
+    if !arena.has_shadow_hosts {
+        return;
+    }
+    let host_tree = arena.get(parent).and_then(|p| p.shadow_root);
+    let slots: Vec<NodeId> = nodes.iter().flat_map(|&n| crate::slots::slots_in(arena, n)).collect();
+    let slot_tree = (!slots.is_empty()).then(|| crate::slots::enclosing_shadow_root(arena, parent));
+    if host_tree.is_some() {
+        assign_slots_in(scope, cid, host_tree, &[]);
+    }
+    if let Some(root) = slot_tree {
+        assign_slots_in(scope, cid, root, if removed { &slots } else { &[] });
+    }
+    let arena = realm(scope, cid);
+    if crate::slots::is_slot(arena, parent) && crate::slots::enclosing_shadow_root(arena, parent).is_some() {
+        let mut fallback = Vec::new();
+        let mut at = Some(parent);
+        while let Some(s) = at.filter(|&s| crate::slots::is_slot(arena, s)) {
+            if arena.get(s).is_some_and(|n| !n.assigned.is_empty()) {
+                break;
+            }
+            fallback.push(s);
+            at = arena.get(s).and_then(|n| n.parent.or(n.host));
+        }
+        for s in fallback {
+            crate::mutation_observers::signal(scope, s);
+        }
+    }
+}
+// …and an attribute's: a slottable's `slot` changed which slot of its parent's shadow tree takes it, and a slot's `name`
+// which slottables of its tree's host it takes.
+fn slot_attribute_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, names: &[&str]) {
+    let arena = realm(scope, cid);
+    if !arena.has_shadow_hosts {
+        return;
+    }
+    if names.contains(&"slot") {
+        let tree = arena.parent_of(id).and_then(|p| arena.get(p)).and_then(|p| p.shadow_root);
+        if tree.is_some() {
+            assign_slots_in(scope, cid, tree, &[]);
+        }
+    }
+    let arena = realm(scope, cid);
+    if names.contains(&"name") && crate::slots::is_slot(arena, id) {
+        let tree = crate::slots::enclosing_shadow_root(arena, id);
+        if tree.is_some() {
+            assign_slots_in(scope, cid, tree, &[]);
+        }
+    }
 }
 
 // __dom.setManualAssigned(slotNid, [nid, …]): the nodes `assign()`ed to a slot, in that order (those in this arena).
@@ -3136,6 +3209,9 @@ fn take_out<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, child: NodeId) -> Op
         engine.children_changed(arena, o);
     }
     let given = old.map_or_else(Vec::new, |o| arena.add_transient_observers(child, o));
+    if let Some(o) = old {
+        slot_steps(scope, cid, o, &[child], true);
+    }
     crate::mutation_observers::observer_list(scope, &given)
 }
 
@@ -3162,6 +3238,7 @@ fn remove_children(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         if let Some(engine) = engine {
             engine.children_changed(arena, parent);
         }
+        slot_steps(scope, cid, parent, &kids, true);
     }
     let nodes = nodes_value(scope, cid, &kids);
     let observers = crate::mutation_observers::observer_list(scope, &given).unwrap_or_else(|| v8::undefined(scope).into());
@@ -3183,6 +3260,9 @@ fn sync_attrs(
     let (attributes, attr_u16) = read_attrs_flat(scope, args.get(1));
     let cid = realm_id(scope, &args);
     let (arena, engine) = arena_and_engine(scope, cid);
+    // (…and whether it had or will have a `slot` or a `name`, which a shadow tree's assignment reads)
+    let slotting = |attrs: &[(String, String)]| attrs.iter().any(|(k, _)| k == "slot" || k == "name");
+    let reassigns = slotting(&attributes) || arena.get(id).is_some_and(|n| slotting(&n.attributes));
     // (…which can write or drop an id, whichever the names)
     arena.id_epoch += 1;
     // Every name the element had or will have — a wholesale write can add, drop or change any of them — listed only
@@ -3215,6 +3295,9 @@ fn sync_attrs(
         if autofocus {
             arena.autofocus.note_source();
         }
+    }
+    if reassigns {
+        slot_attribute_steps(scope, cid, id, &["slot", "name"]);
     }
 }
 
@@ -4653,6 +4736,7 @@ fn attr_set(
     if let Some(node) = arena.get_mut(id) {
         node.set_attr_full(name, utf8, u16);
     }
+    slot_attribute_steps(scope, cid, id, &[name]);
     v8::Intercepted::kYes
 }
 
@@ -4713,6 +4797,7 @@ fn attr_delete(
     if let Some(node) = arena.get_mut(id) {
         node.remove_attr(name);
     }
+    slot_attribute_steps(scope, cid, id, &[name]);
     rv.set_bool(true);
     v8::Intercepted::kYes
 }

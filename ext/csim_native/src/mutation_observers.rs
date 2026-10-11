@@ -48,12 +48,17 @@ pub(crate) struct Observers {
     records: HashMap<u32, Vec<(v8::Global<v8::Array>, bool)>>,
     // The agent's pending mutation observers: those with records or transient registrations since they were notified…
     notify: Vec<u32>,
+    // …and its signal slots (DOM "signal a slot change"): each slot, in the order signaled — held, as a removed one may be
+    // no tree's — with the realm whose tree it is in, which fires its `slotchange`.
+    signals: Vec<(NodeId, i32, v8::Global<v8::Value>)>,
     // …and the realms with pending observers or signaled slots, which hold them: one notification, in whichever realm
     // it runs, takes them all.
     pending: Vec<i32>,
     // What every realm's bindings read without a call (`moFlags`, a view each of the one buffer): [0] whether any node
     // has a registered observer — which a change must then ask about, whichever realm's script made it — [1] whether
-    // the agent's mutation observer microtask is queued, [2] whether observers are being notified.
+    // the agent's mutation observer microtask is queued, [2] whether observers are being notified, [3] whether anything
+    // is pending — set as a realm becomes pending, cleared as the notification takes them all — which a change the
+    // engine signaled a slot for asks the microtask to be queued by.
     flags: Option<v8::SharedRef<v8::BackingStore>>,
     // The realm whose microtask queue holds the agent's mutation observer microtask, while one does (`moQueue`).
     queued_in: Option<i32>,
@@ -61,6 +66,7 @@ pub(crate) struct Observers {
 
 const ANY_REGISTERED: usize = 0;
 const MICROTASK_QUEUED: usize = 1;
+const PENDING: usize = 3;
 
 impl Observers {
     // `observer` is pending, and so is its realm.
@@ -69,10 +75,25 @@ impl Observers {
             self.notify.push(observer);
         }
         if let Some(&cid) = self.realms.get(&observer) {
-            if !self.pending.contains(&cid) {
-                self.pending.push(cid);
-            }
+            self.pend_realm(cid);
         }
+    }
+    // Realm `cid` is pending.
+    fn pend_realm(&mut self, cid: i32) {
+        if !self.pending.contains(&cid) {
+            self.pending.push(cid);
+        }
+        if let Some(flags) = &self.flags {
+            flags[PENDING].set(1);
+        }
+    }
+    // DOM "signal a slot change" of `slot` (its object `held`), a slot of realm `cid`'s trees: in the signal slots once,
+    // its realm pending.
+    pub(crate) fn signal_slot(&mut self, slot: NodeId, cid: i32, held: v8::Global<v8::Value>) {
+        if !self.signals.iter().any(|&(s, _, _)| s == slot) {
+            self.signals.push((slot, cid, held));
+        }
+        self.pend_realm(cid);
     }
 
     // (…[0] kept as the lists are)
@@ -140,6 +161,7 @@ impl Observers {
             self.realms.remove(&observer);
         }
         self.pending.retain(|&c| c != cid);
+        self.signals.retain(|&(_, c, _)| c != cid);
         if self.queued_in == Some(cid) {
             self.queued_in = None;
             if let Some(flags) = &self.flags {
@@ -272,6 +294,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moTakeRecords", take_records, context_id);
     crate::dom::register(scope, ns, "moTakeBatch", take_batch, context_id);
     crate::dom::register(scope, ns, "moAddTransients", add_transients, context_id);
+    crate::dom::register(scope, ns, "signalSlot", signal_slot, context_id);
     crate::dom::register(scope, ns, "moPend", pend, context_id);
     crate::dom::register(scope, ns, "moQueue", queue, context_id);
     crate::dom::register(scope, ns, "moTakePending", take_pending, context_id);
@@ -280,10 +303,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     // (…and the flags, a view on the isolate's one buffer)
     let store = {
         let observers = &mut crate::dom::dom(scope).arena.observers;
-        observers.flags.get_or_insert_with(|| v8::ArrayBuffer::new_backing_store_from_vec(vec![0u8; 3]).make_shared()).clone()
+        observers.flags.get_or_insert_with(|| v8::ArrayBuffer::new_backing_store_from_vec(vec![0u8; 4]).make_shared()).clone()
     };
     let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
-    if let (Some(view), Some(key)) = (v8::Uint8Array::new(scope, buffer, 0, 3), v8::String::new(scope, "moFlags")) {
+    if let (Some(view), Some(key)) = (v8::Uint8Array::new(scope, buffer, 0, 4), v8::String::new(scope, "moFlags")) {
         ns.set(scope, key.into(), view.into());
     }
 }
@@ -291,10 +314,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // __dom.moPend(): the calling realm has observers to notify (records, transient registrations) or slots signaled.
 fn pend(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    let pending = &mut crate::dom::dom(scope).arena.observers.pending;
-    if !pending.contains(&cid) {
-        pending.push(cid);
-    }
+    crate::dom::dom(scope).arena.observers.pend_realm(cid);
 }
 
 // __dom.moQueue(): the agent's mutation observer microtask is queued, in the calling realm's queue (flag [1]).
@@ -307,9 +327,13 @@ fn queue(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'
     }
 }
 
-// __dom.moTakePending() -> [cid] — the realms `moPend` named since, emptied.
+// __dom.moTakePending() -> [cid] — the realms pending since, emptied.
 fn take_pending(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cids = std::mem::take(&mut crate::dom::dom(scope).arena.observers.pending);
+    let observers = &mut crate::dom::dom(scope).arena.observers;
+    if let Some(flags) = &observers.flags {
+        flags[PENDING].set(0);
+    }
+    let cids = std::mem::take(&mut observers.pending);
     let values: Vec<v8::Local<'_, v8::Value>> = cids.iter().map(|&c| v8::Integer::new(scope, c).into()).collect();
     rv.set(v8::Array::new_with_elements(scope, &values).into());
 }
@@ -419,8 +443,9 @@ fn take_records(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set(taken(scope, records).into());
 }
 
-// __dom.moTakeBatch() -> the calling realm's pending observers, each as `[observer, records]` (`taken`), in the order
-// they were made — no longer pending, their queues emptied: a notification's part in this realm.
+// __dom.moTakeBatch() -> `[observers, slots]`: the calling realm's pending observers, each as `[observer, records]`
+// (`taken`), in the order they were made — no longer pending, their queues emptied — and its signal slots, in the order
+// signaled, taken: a notification's part in this realm.
 fn take_batch(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let store = &mut arena(scope, &args).observers;
@@ -429,12 +454,34 @@ fn take_batch(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     mine.sort_unstable();
     let batch: Vec<(u32, Vec<(v8::Global<v8::Array>, bool)>)> =
         mine.into_iter().map(|o| (o, store.records.remove(&o).unwrap_or_default())).collect();
+    let (slots, others): (Vec<_>, Vec<_>) = std::mem::take(&mut store.signals).into_iter().partition(|&(_, c, _)| c == cid);
+    store.signals = others;
     let mut out: Vec<v8::Local<'_, v8::Value>> = Vec::with_capacity(batch.len() * 2);
     for (observer, records) in batch {
         out.push(v8::Integer::new_from_unsigned(scope, observer).into());
         out.push(taken(scope, records).into());
     }
-    rv.set(v8::Array::new_with_elements(scope, &out).into());
+    let out = v8::Array::new_with_elements(scope, &out);
+    let slots: Vec<v8::Local<'_, v8::Value>> = slots.into_iter().map(|(_, _, held)| v8::Local::new(scope, held)).collect();
+    let slots = v8::Array::new_with_elements(scope, &slots);
+    rv.set(v8::Array::new_with_elements(scope, &[out.into(), slots.into()]).into());
+}
+
+// __dom.signalSlot(nid) — DOM "signal a slot change" of the slot (`signal`), as `assign()` gives it nodes.
+fn signal_slot(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    if let Some(slot) = nid_arg(scope, &args, 0) {
+        signal(scope, slot);
+    }
+}
+// "Signal a slot change" of `slot`, a node the engine names, in the realm whose tree it is in.
+pub(crate) fn signal<'s>(scope: &mut v8::PinScope<'s, '_>, slot: NodeId) {
+    let Some(cid) = crate::dom::dom(scope).arena.get(slot).map(|n| n.realm) else { return };
+    let object = crate::dom::node_value(scope, Some(slot));
+    if object.is_null() {
+        return;
+    }
+    let held = v8::Global::new(scope, object);
+    crate::dom::dom(scope).arena.observers.signal_slot(slot, cid, held);
 }
 
 // __dom.moAddTransients(nid, parentNid) -> the observers `add_transient_observers` gave a transient registered observer
