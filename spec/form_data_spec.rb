@@ -126,6 +126,27 @@ RSpec.describe 'FormData "formdata" event, USV conversion, _charset_' do
     expect(got).to eq(['fostered=1', 'a=1&s=go'])
   end
 
+  # The form the parser's pointer gave a control is its form owner only until a script inserts the control again — in
+  # place, or into a frame's document and back (HTML "reset the form owner"). Chrome 155: [[true, true], nil, nil].
+  it "resets a parser-given form owner as a script inserts the control" do
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend',
+        '<table><form id=t><tr><td><input id=a><input id=b></td></tr></form></table><iframe id=fr srcdoc="<p>f</p>"></iframe>');
+    JS
+    session.within_frame('fr') { session.has_text?('f') }
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const a = document.getElementById('a'), b = document.getElementById('b'), t = document.getElementById('t');
+        const before = [a.form === t, b.form === t];
+        a.parentNode.appendChild(a);
+        document.getElementById('fr').contentDocument.body.append(b);
+        document.body.append(b);
+        return [before, a.form, b.form];
+      })()
+    JS
+    expect(got).to eq([[true, true], nil, nil])
+  end
+
   it 'gives a hidden _charset_ control the UTF-8 encoding name' do
     charset = session.evaluate_script(<<~JS)
       (function () {

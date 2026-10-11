@@ -880,11 +880,17 @@ impl RealmArena {
     }
     // `id` and everything it holds — its children, shadow tree, template contents and generated boxes, theirs — are the
     // held realm's now: they joined a tree of it, and its page load frees them, not the one of the realm that made them.
-    pub(crate) fn adopt(&mut self, id: NodeId) {
+    // A form the parser gave a control among them that is left in another realm's tree is its form owner no more (a
+    // pointer void once the control moved: following it would drag the form out of its own tree). Whether a shadow host
+    // was among them.
+    pub(crate) fn adopt(&mut self, id: NodeId) -> bool {
         let cur = self.cur;
-        let mut stack = vec![id];
+        let (mut stack, mut owned, mut hosts) = (vec![id], Vec::new(), false);
         while let Some(n) = stack.pop() {
             let Some(node) = self.get(n) else { continue };
+            if !self.parser_form_owners.is_empty() && self.parser_form_owners.contains_key(&n) {
+                owned.push(n);
+            }
             if node.realm != cur {
                 self.unlist(n.idx);
                 let list = self.realm_nodes.entry(cur).or_default();
@@ -899,8 +905,16 @@ impl RealmArena {
             let host = node.shadow_root.is_some();
             stack.extend(node.children.iter().copied());
             stack.extend(node.shadow_root.into_iter().chain(node.template_content).chain(node.pseudo_boxes.into_iter().flatten()));
-            self.state.shadow_hosts |= host;
+            hosts |= host;
         }
+        self.state.shadow_hosts |= hosts;
+        for control in owned {
+            let form = self.parser_form_owners.get(&control).copied();
+            if form.and_then(|f| self.get(f)).is_none_or(|f| f.realm != cur) {
+                self.set_parser_form_owner(control, None);
+            }
+        }
+        hosts
     }
     // A new context is realm `cid`: whatever an earlier context of that id made is unreachable, and its state with it.
     pub(crate) fn realm_begins(&mut self, cid: i32) {
@@ -1364,12 +1378,15 @@ impl RealmArena {
 
     // The form the parser gave `id`, or none.
     pub(crate) fn set_parser_form_owner(&mut self, id: NodeId, form: Option<NodeId>) {
-        self.mutations += 1;
-        self.state_epoch += 1;
-        match form {
+        let had = match form {
             Some(f) => self.parser_form_owners.insert(id, f),
             None => self.parser_form_owners.remove(&id),
         };
+        // (…a write that changes nothing — a script's insertion of a control the parser gave none — moves no memo)
+        if had != form {
+            self.mutations += 1;
+            self.state_epoch += 1;
+        }
     }
     pub(crate) fn parser_form_owner(&self, id: NodeId) -> Option<NodeId> {
         self.parser_form_owners.get(&id).copied()
@@ -4549,16 +4566,13 @@ fn reset_arena(
     }
 }
 
-// __dom.adoptSubtree(nid) — a subtree another realm made joined a tree of this realm, in the slots it has
-// (`RealmArena::adopt`).
-fn adopt_subtree(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
+// __dom.adoptSubtree(nid) -> whether a shadow host was among it: a subtree another realm made joined a tree of this realm,
+// in the slots it has (`RealmArena::adopt`).
+fn adopt_subtree(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
-    realm(scope, cid).adopt(id);
+    let hosts = realm(scope, cid).adopt(id);
+    rv.set_bool(hosts);
 }
 
 // __dom.handleEdgesMismatch(nid) -> where the node's handle's tree edges, or its position, disagree with its slot's tree
