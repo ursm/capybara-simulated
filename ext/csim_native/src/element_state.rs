@@ -964,8 +964,12 @@ impl RealmArena {
         }
         None
     }
-    // Whether a click on `id` activates it — it has activation behaviour (HTML): a hyperlink (an SVG one too); a button,
-    // input or select; the summary of its details; a label with a labeled control.
+    // Whether `id` has activation behaviour (HTML), the click's activation target where it is the nearest on the path:
+    // a hyperlink (an SVG one too) — an `<a>` with no `href` is none, which a summary or a label it is in still activates
+    // past (WPT the-summary-element/anchor-without-link) — a button, an input of any type but hidden (HTML's input
+    // activation behaviour, whatever its state's input activation behaviour is), the summary of its details, and a label with a
+    // labeled control. (A select has none; Chrome and Firefox, which follow a link past a button or a text input,
+    // depart from the HTML text here, which this follows.)
     pub(crate) fn is_click_activatable(&self, id: NodeId) -> bool {
         let Some(n) = self.get(id).filter(|n| n.kind == NodeKind::Element) else { return false };
         if n.is_hyperlink() {
@@ -973,46 +977,31 @@ impl RealmArena {
         }
         n.is_html()
             && match &*n.local_name {
-                "button" | "input" | "select" => true,
+                "button" => true,
+                // (…but a hidden input, which a label it is in still activates past: WPT clicking-noninteractive-…)
+                "input" => !n.plain_attr("type").is_some_and(|t| t.eq_ignore_ascii_case("hidden")),
                 "summary" => self.is_details_summary(id),
                 "label" => self.labeled_control(id).is_some(),
                 _ => false,
             }
     }
-    // The hyperlink a click on `target` follows (HTML's `<a>` / `<area>` activation behaviour), where the click's
-    // activation target is one: the target, or — the click bubbling — its nearest ancestor `<a>` / `<area>` (out of a
-    // shadow tree through its host), unless an element whose activation behaviour comes first is on the way: a checkbox
-    // or radio button, a details' summary, a label with a labeled control (one activation target a click — Chrome, and
-    // DOM dispatch). None for an `<a>` with no `href`.
-    pub(crate) fn followed_link(&self, target: NodeId, bubbles: bool) -> Option<NodeId> {
-        let mut cur = Some(target);
-        while let Some(c) = cur {
-            let n = self.get(c).filter(|n| n.kind == NodeKind::Element)?;
-            if matches!(&*n.local_name, "a" | "area") && (n.is_html() || n.ns == ns!(svg)) {
-                return n.is_hyperlink().then_some(c);
-            }
-            let first = n.is_html()
-                && match &*n.local_name {
-                    "input" => n.plain_attr("type").is_some_and(|t| t.eq_ignore_ascii_case("checkbox") || t.eq_ignore_ascii_case("radio")),
-                    "summary" => self.is_details_summary(c),
-                    "label" => self.labeled_control(c).is_some(),
-                    _ => false,
-                };
-            if first || !bubbles {
-                return None;
-            }
-            cur = n.parent.or(n.host);
-        }
-        None
-    }
-    // A click's activation target (DOM dispatch): the nearest element with activation behaviour on its path from
-    // `target` — itself or, the click bubbling, an ancestor across shadow trees and slots (the flat tree's parents, as
-    // the composed path runs).
-    pub(crate) fn activation_target(&self, target: NodeId) -> Option<NodeId> {
+    // A click's activation target (DOM dispatch): the nearest element with activation behaviour on its event path — the
+    // target, or, the click bubbling, an ancestor on the flat tree's way up (a slotted node's slot, a shadow root's
+    // host), out of the target's own shadow tree only for a composed click.
+    pub(crate) fn activation_target(&self, target: NodeId, bubbles: bool, composed: bool) -> Option<NodeId> {
+        let target_root = self.root_of(target);
         let mut cur = Some(target);
         while let Some(c) = cur {
             if self.is_click_activatable(c) {
                 return Some(c);
+            }
+            if !bubbles {
+                return None;
+            }
+            let parent = self.get(c)?.parent;
+            let out_of_root = parent.filter(|&p| self.get(p).is_some_and(|pn| pn.kind != NodeKind::Element && pn.host.is_some()));
+            if !composed && out_of_root == Some(target_root) {
+                return None;
             }
             cur = crate::geometry::flat_parent(self, c);
         }

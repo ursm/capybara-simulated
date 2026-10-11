@@ -694,7 +694,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "isClickActivatable", is_click_activatable, context_id);
     crate::dom::register(scope, ns, "isDetailsSummary", is_details_summary, context_id);
     crate::dom::register(scope, ns, "activationTarget", activation_target, context_id);
-    crate::dom::register(scope, ns, "followedLink", followed_link, context_id);
 }
 
 // __dom.isEditable / isClickActivatable / isDetailsSummary(nid) -> what `element_state` answers of the node: whether it
@@ -719,23 +718,14 @@ fn node_test(
     rv.set_bool(test(crate::dom::realm(scope, cid), id));
 }
 
-// __dom.activationTarget(nid) -> [a click's activation target] or [] (`element_state::activation_target`), from the
-// target's shadow-including root: the path runs out of shadow trees.
+// __dom.activationTarget(nid, bubbles, composed) -> the activation target of a click on the node
+// (`element_state::activation_target`; a click that bubbles and is composed where the two are not given), as
+// `node_value` answers it — null for none.
 fn activation_target(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
-    let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let arena = crate::dom::realm(scope, cid);
-    let found = arena.activation_target(target);
-    rv.set(crate::dom::nodes_value(scope, cid, found.as_slice()));
-}
-
-// __dom.followedLink(nid, bubbles) -> the hyperlink a click on the node follows (`element_state::followed_link`), as
-// `node_value` answers it — null for none.
-fn followed_link(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
     let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_null() };
-    let bubbles = args.get(1).is_true();
-    let found = crate::dom::realm(scope, cid).followed_link(target, bubbles);
+    let (bubbles, composed) = (!args.get(1).is_false(), !args.get(2).is_false());
+    let found = crate::dom::realm(scope, cid).activation_target(target, bubbles, composed);
     rv.set(crate::dom::node_value(scope, found));
 }
 

@@ -3,10 +3,13 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
-# A click has ONE activation target (DOM dispatch): the target, or — the click bubbling — its nearest ancestor with
-# activation behaviour. The hyperlink a scripted click follows is that one (element_state.rs `followed_link`): not for
-# a click that does not bubble on what is inside the link, and not past a checkbox, a radio button, a details' summary
-# or a label with a control, whose activation it is. Each expectation is headless Chrome's.
+# A click has ONE activation target (DOM dispatch: "If isActivationEvent is true, event's bubbles attribute is true,
+# activationTarget is null, and parent has activation behavior, then set activationTarget to parent") — the engine's
+# (element_state.rs `activation_target`) — and only its activation behaviour runs: the link is not followed for a click
+# that does not bubble on what is inside it, nor past an element with activation behaviour of its own — a checkbox, a
+# label with a control, a details' summary (Chrome alike) — and, as HTML gives every input and button one ("The
+# activation behavior for input elements are these steps", "A button element element's activation behavior given event
+# is"), nor past a text input or a button: there Chrome and Firefox follow the link, departing from the text.
 RSpec.describe 'the activation target of a click' do
   let(:page_html) {
     <<~HTML
@@ -21,7 +24,7 @@ RSpec.describe 'the activation target of a click' do
   }
   let(:session) { simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page_html]] }) }
 
-  it 'follows the link only where the click activates it' do
+  it 'follows the link only where it is the click\'s activation target' do
     session.visit '/'
     got = session.evaluate_script(<<~JS)
       (() => {
@@ -35,6 +38,32 @@ RSpec.describe 'the activation target of a click' do
                 document.getElementById('sm').parentNode.open];
       })()
     JS
-    expect(got).to eq(['s1', 'i2#i2', 'c4', 'lab', 'sm', 'b#b', true, true, true])
+    expect(got).to eq(['s1', 'i2', 'c4', 'lab', 'sm', 'b', true, true, true])
+  end
+
+  # The target's event path goes up through slots and, for a composed click, out of its shadow tree to the host — and
+  # the link the activation target is followed, an SVG one's by its resolved `href` (Chrome and Firefox, the first two).
+  it 'finds the activation target along the event path, and follows an SVG link' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const click = (el, composed) => {
+          location.hash = '';
+          el.dispatchEvent(new MouseEvent('click', {bubbles: true, composed, cancelable: true}));
+          return location.hash;
+        };
+        const outer = document.body.appendChild(document.createElement('a'));
+        outer.href = '#out';
+        const host = outer.appendChild(document.createElement('span'));
+        const inner = host.attachShadow({mode: 'open'}).appendChild(document.createElement('b'));
+        const shadowLink = document.body.appendChild(document.createElement('div'));
+        shadowLink.attachShadow({mode: 'open'}).innerHTML = '<a href="#slot"><slot></slot></a>';
+        const slotted = shadowLink.appendChild(document.createElement('i'));
+        const svg = document.body.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'svg'));
+        svg.innerHTML = '<a href="#svg"><text id="t">t</text></a>';
+        return [click(inner, true), click(inner, false), click(slotted, true), click(svg.querySelector('text'), true)];
+      })()
+    JS
+    expect(got).to eq(['#out', '', '#slot', '#svg'])
   end
 end

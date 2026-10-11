@@ -5183,11 +5183,6 @@ html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-correc
 - "== html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-correct-order-remove-readd-ref.html"
 html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-dynamic.html:
 - "== html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-dynamic-ref.html"
-html/semantics/interactive-elements/the-summary-element/anchor-with-inline-element.html:
-- Clicking on anchor with embedded inline element should navigate instead of opening
-  details
-- Expected <a>, inside svg, containing <circle> to navigate
-- "[harness] TIMEOUT"
 html/semantics/interactive-elements/the-summary-element/interactive-content.html:
 - Clicking a <label> doesn't open <details>
 - Clicking a <video> doesn't open <details>
