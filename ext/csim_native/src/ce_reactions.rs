@@ -650,6 +650,20 @@ fn ce_set_registry(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     unsafe { handle.as_ref() }.set_registry(scope, code, object);
 }
 
+// DOM "clone a node": the copy's registry association the node's — a registry (not one its realm took with it), the
+// null registry or the tracking null; none set stays none.
+pub(crate) fn copy_registry(scope: &mut v8::PinScope<'_, '_>, from: &crate::node_handle::NodeHandle, to: &crate::node_handle::NodeHandle) {
+    let code = from.registry();
+    if code == UNSET {
+        return;
+    }
+    let object = (code >= FIRST_REGISTRY).then(|| registry_value(scope, code)).and_then(|v| v8::Local::<v8::Object>::try_from(v).ok());
+    if code >= FIRST_REGISTRY && object.is_none() {
+        return;
+    }
+    to.set_registry(scope, code, object);
+}
+
 // The value a registry code is to the bindings: null for none (`UNSET` or `NULL` — a window's of a document without a
 // browsing context), else the registry, undefined for one its realm took with it.
 fn registry_value<'s>(scope: &mut v8::PinScope<'s, '_>, code: u32) -> v8::Local<'s, v8::Value> {

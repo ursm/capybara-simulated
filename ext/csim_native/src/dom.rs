@@ -2391,6 +2391,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::change_on_blur::install(scope, ns, context_id);
     crate::character_data::install(scope, ns, context_id);
     crate::element_references::install(scope, ns, context_id);
+    crate::cloning::install(scope, ns, context_id);
     crate::xml_parse::install(scope, ns, context_id);
     crate::custom_elements::install(scope, ns, context_id);
     crate::details::install(scope, ns, context_id);
@@ -3589,6 +3590,20 @@ fn sync_attrs(
     };
     let (attributes, attr_u16) = read_attrs_flat(scope, args.get(1));
     let cid = realm_id(scope, &args);
+    replace_attributes(scope, cid, id, attributes, attr_u16, None);
+}
+// The namespaced attributes' records (`NodeData::attr_ns`, and those that lost a lone surrogate exactly beside).
+pub(crate) type AttrNamespaces = (Vec<(String, String, String)>, Vec<(String, Vec<u16>, Vec<u16>)>);
+// An element's attributes replaced wholesale — their values, those that lost a lone surrogate exactly beside, and the
+// namespaced ones' records (`ns`; with none, the records of the names it keeps are kept) — and what moves with them.
+pub(crate) fn replace_attributes(
+    scope: &mut v8::PinScope<'_, '_>,
+    cid: i32,
+    id: NodeId,
+    attributes: Vec<(String, String)>,
+    attr_u16: Vec<(String, Vec<u16>)>,
+    ns: Option<AttrNamespaces>,
+) {
     let (arena, engine) = arena_and_engine(scope, cid);
     // (…and whether it had or will have a `slot` or a `name`, which a shadow tree's assignment reads)
     let slotting = |attrs: &[(String, String)]| attrs.iter().any(|(k, _)| k == "slot" || k == "name");
@@ -3614,9 +3629,17 @@ fn sync_attrs(
     if let Some(node) = arena.get_mut(id) {
         node.attributes = attributes;
         node.attr_u16 = attr_u16;
-        let attrs = std::mem::take(&mut node.attributes);
-        node.retain_attr_ns(|k| attrs.iter().any(|(a, _)| a == k));
-        node.attributes = attrs;
+        match ns {
+            Some((attr_ns, attr_ns_u16)) => {
+                node.attr_ns = attr_ns;
+                node.attr_ns_u16 = attr_ns_u16;
+            }
+            None => {
+                let attrs = std::mem::take(&mut node.attributes);
+                node.retain_attr_ns(|k| attrs.iter().any(|(a, _)| a == k));
+                node.attributes = attrs;
+            }
+        }
         node.attr_changed(None);
         // (…with or without an engine to hear of it: the parser's `dir` is what `is_rtl` must not miss)
         let (direction, inert, autofocus) = (notes_direction(node), notes_inert(node), node.plain_attr("autofocus").is_some());
