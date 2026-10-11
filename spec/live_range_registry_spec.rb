@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/garbage'
 
 # The DOM's mutations update every live range (DOM §5.5) — the engine keeps their boundary points (ranges.rs) — and a
 # range is held by its object alone: one a script dropped goes with it, where a strong set kept every range ever made
@@ -17,8 +18,7 @@ RSpec.describe 'live range registry' do
       window.__held = document.createRange();
       __held.setStart(p, 2);
     JS
-    s.evaluate_script('0')
-    2.times { s.driver.browser.instance_variable_get(:@runtime).ctx.low_memory_notification }
+    collect_garbage(s) { s.evaluate_script('__dom.rangesLive()') <= 1 }
     got = s.evaluate_script(<<~JS)
       (() => {
         const p = document.getElementById('p');
@@ -42,8 +42,7 @@ RSpec.describe 'live range registry' do
         d.range.setStart(t, 1);
       }
     JS
-    s.evaluate_script('0')
-    2.times { s.driver.browser.instance_variable_get(:@runtime).ctx.low_memory_notification }
+    collect_garbage(s) { s.evaluate_script('__dom.rangesLive()').zero? }
     got = s.evaluate_script(<<~JS)
       (() => {
         const live = __dom.rangesLive();

@@ -2,17 +2,13 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/garbage'
 
 # A NodeIterator's state is the engine's (node_iterators.rs), which runs every removal's pre-removing steps on it, and
 # its handle is held by the iterator alone: one a script dropped goes with it, while one it holds keeps its reference —
 # a node held by nothing else — and keeps being moved.
 RSpec.describe 'NodeIterator registry' do
   let(:session) { simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><div id=r><p id=a>1</p><p id=b>2</p><p id=c>3</p></div>']] }) }
-
-  def gc
-    session.evaluate_script('0')
-    2.times { session.driver.browser.instance_variable_get(:@runtime).ctx.low_memory_notification }
-  end
 
   it 'lets go of the iterators a script dropped and keeps moving the one it holds' do
     session.visit '/'
@@ -22,7 +18,7 @@ RSpec.describe 'NodeIterator registry' do
       window.__it = document.createNodeIterator(r, NodeFilter.SHOW_ELEMENT);
       __it.nextNode(); __it.nextNode();   // r, then a: the reference is #a, the pointer after it
     JS
-    gc
+    collect_garbage(session) { session.evaluate_script('__dom.iteratorsLive()') <= 1 }
     got = session.evaluate_script(<<~JS)
       (() => {
         const live = __dom.iteratorsLive();
@@ -44,7 +40,7 @@ RSpec.describe 'NodeIterator registry' do
       __it.nextNode();
       frag.firstChild.firstChild.marker = 'kept';
     JS
-    gc
+    collect_garbage(session)
     expect(session.evaluate_script('[__it.referenceNode.localName, __it.referenceNode.marker]')).to eq(%w[i kept])
   end
 end
