@@ -2619,6 +2619,7 @@ fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node
             slot_steps(scope, cid, o, nodes, true);
         }
         slot_steps(scope, cid, parent, nodes, false);
+        insertion_steps(scope, cid, nodes);
         return;
     }
     let old: Vec<(NodeId, NodeId)> = nodes.iter().filter_map(|&n| arena.parent_of(n).map(|p| (p, n))).collect();
@@ -2651,6 +2652,15 @@ fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, node
         slot_steps(scope, cid, o, &from, true);
     }
     slot_steps(scope, cid, parent, &inserted, false);
+    insertion_steps(scope, cid, &inserted);
+}
+// The insertion steps of the inserted nodes' elements the engine runs: the radio buttons' (`radio_insertion_steps`),
+// whose state change the bindings hear of (`note_state_changed`).
+fn insertion_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, nodes: &[NodeId]) {
+    let arena = realm(scope, cid);
+    if arena.radio_insertion_steps(nodes) {
+        arena.observers.note_state_changed();
+    }
 }
 
 // __dom.setState(nid, mask, bits) -> the bits it had: the element's state bits (`STATE_*`) under `mask` become `bits`.

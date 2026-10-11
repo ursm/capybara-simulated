@@ -58,7 +58,8 @@ pub(crate) struct Observers {
     // has a registered observer — which a change must then ask about, whichever realm's script made it — [1] whether
     // the agent's mutation observer microtask is queued, [2] whether observers are being notified, [3] whether anything
     // is pending — set as a realm becomes pending, cleared as the notification takes them all — which a change the
-    // engine signaled a slot for asks the microtask to be queued by.
+    // engine signaled a slot for asks the microtask to be queued by, [4] whether a write's own steps changed an element's
+    // state (a radio group unchecked by an insertion), which the bindings' generations have to hear of.
     flags: Option<v8::SharedRef<v8::BackingStore>>,
     // The realm whose microtask queue holds the agent's mutation observer microtask, while one does (`moQueue`).
     queued_in: Option<i32>,
@@ -67,8 +68,15 @@ pub(crate) struct Observers {
 const ANY_REGISTERED: usize = 0;
 const MICROTASK_QUEUED: usize = 1;
 const PENDING: usize = 3;
+const STATE_CHANGED: usize = 4;
 
 impl Observers {
+    // A write's own steps changed an element's state (flag [4]).
+    pub(crate) fn note_state_changed(&self) {
+        if let Some(flags) = &self.flags {
+            flags[STATE_CHANGED].set(1);
+        }
+    }
     // `observer` is pending, and so is its realm.
     fn pend_observer(&mut self, observer: u32) {
         if !self.notify.contains(&observer) {
@@ -297,10 +305,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     // (…and the flags, a view on the isolate's one buffer)
     let store = {
         let observers = &mut crate::dom::dom(scope).arena.observers;
-        observers.flags.get_or_insert_with(|| v8::ArrayBuffer::new_backing_store_from_vec(vec![0u8; 4]).make_shared()).clone()
+        observers.flags.get_or_insert_with(|| v8::ArrayBuffer::new_backing_store_from_vec(vec![0u8; 5]).make_shared()).clone()
     };
     let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
-    if let (Some(view), Some(key)) = (v8::Uint8Array::new(scope, buffer, 0, 4), v8::String::new(scope, "moFlags")) {
+    if let (Some(view), Some(key)) = (v8::Uint8Array::new(scope, buffer, 0, 5), v8::String::new(scope, "moFlags")) {
         ns.set(scope, key.into(), view.into());
     }
 }

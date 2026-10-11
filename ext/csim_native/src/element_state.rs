@@ -250,6 +250,40 @@ impl RealmArena {
         });
         group
     }
+    // The radio buttons' insertion steps (HTML §4.10.5.1.15, "when … the element is inserted"): a checked one inserted —
+    // among `nodes` or in a subtree of one — unchecks the rest of its group, the last in tree order winning: each is
+    // visited in reverse tree order, and one an earlier visit unchecked is passed by. One neither connected nor with a
+    // form owner has no group to uncheck. Whether a radio's checkedness changed.
+    pub(crate) fn radio_insertion_steps(&mut self, nodes: &[NodeId]) -> bool {
+        let checked_radio = |n: &NodeData| n.is_html_named("input") && n.input_type() == "radio" && n.plain_attr("name").is_some();
+        let mut radios = Vec::new();
+        for &root in nodes {
+            let mut stack = vec![root];
+            while let Some(c) = stack.pop() {
+                let Some(n) = self.get(c).filter(|n| n.kind == NodeKind::Element) else { continue };
+                if checked_radio(n) && self.is_checked(c) {
+                    radios.push(c);
+                }
+                stack.extend(n.children.iter().rev());
+            }
+        }
+        let mut changed = false;
+        for &r in radios.iter().rev() {
+            if !self.is_checked(r) || !(self.is_connected(r) || self.form_owner(r).is_some()) {
+                continue;
+            }
+            for other in self.radio_group(r).into_iter().filter(|&o| o != r) {
+                let was = self.is_checked(other);
+                let Some(state) = self.get(other).map(|n| n.state) else { continue };
+                let unchecked = (state | STATE_CHECKED_DIRTY) & !STATE_CHECKED;
+                if unchecked != state {
+                    self.set_state(other, unchecked);
+                }
+                changed |= was;
+            }
+        }
+        changed
+    }
     // Does `id`'s radio button group — its name, form owner and tree — hold a checked radio? A nameless radio is its own
     // group.
     fn radio_group_has_checked(&self, id: NodeId) -> bool {
