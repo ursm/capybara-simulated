@@ -107,4 +107,54 @@ RSpec.describe 'inserting in an editing host' do
       ['<ul><li>a</li></ul><div><br></div><ul><li>c</li></ul>', 'DIV@0'], ['<ul><li>a</li><li><br></li></ul>', 'LI@0']
     ])
   end
+
+  it 'keeps out of a link at its edge, out of a non-editable island, and in the list a list host is' do
+    expect([
+      typed('<a href="#">link</a>', 'e.firstChild.firstChild', 4, 'x').first,
+      typed('<p><a href="#">link</a></p>', "e.querySelector('a').firstChild", 4, :enter, 'Z').first,
+      typed('<p><a href="#">link</a></p>', "e.querySelector('a').firstChild", 2, :enter, 'Z').first,
+      typed('a<span contenteditable="false">XY</span>b', 'e.childNodes[1].firstChild', 1, :enter, 'Z').first,
+      typed('<p><span contenteditable="false">X</span></p>', 'e.firstChild', 0, :enter, 'Z').first,
+      typed('<ul><li>a<ul><li><br></li></ul>b</li></ul>', "e.querySelectorAll('li')[1]", 0, :enter, 'Z').first,
+      typed('<ol><li>a<ol><li><br></li><li>c</li></ol></li></ol>', "e.querySelectorAll('li')[1]", 0, :enter, 'Z').first,
+      typed('<ul><li><p>ab</p></li></ul>', "e.querySelector('p').firstChild", 2, :enter, 'Z').first,
+      typed('<ul><li><p><br></p></li></ul>', "e.querySelector('p')", 0, :enter, 'Z').first
+    ]).to eq([
+      '<a href="#">link</a>x', '<p><a href="#">link</a></p><p>Z</p>', '<p><a href="#">li</a></p><p>Z<a href="#">nk</a></p>',
+      'a<span contenteditable="false">XY</span>b', '<p><br></p><p>Z<span contenteditable="false">X</span></p>',
+      '<ul><li>a<div>Z</div>b</li></ul>', '<ol><li>a</li><li>Z</li><ol><li>c</li></ol></ol>',
+      '<ul><li><p>ab</p></li><li><p>Z</p></li></ul>', '<div>Z</div>'
+    ])
+  end
+
+  it 'types into the empty last line a line break made, and breaks an empty host past its first line' do
+    expect([
+      typed('<p>abcd</p>', 'e.firstChild.firstChild', 4, %i[shift enter], 'Z').first,
+      typed('<pre>ab</pre>', 'e.firstChild.firstChild', 2, :enter, 'Z').first,
+      typed('ab<br><br>', 'e', 2, 'x').first,
+      typed('<p>a b</p>', 'e.firstChild.firstChild', 2, %i[shift enter]).first,
+      typed('<br>', 'e', 0, :enter, 'Z').first
+    ]).to eq(['<p>abcd<br>Z</p>', '<pre>ab<br>Z</pre>', 'ab<br>x', '<p>a <br>b</p>', '<br><div>Z</div>'])
+  end
+
+  # …in a host of its own: a list, or one inside a non-editable island inside another.
+  it 'edits the host the selection is in' do
+    hosts = lambda {|body, setup|
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]] })
+      s.visit '/'
+      s.execute_script(setup)
+      [:enter, 'Z'].each {|key| s.find(:css, '#e').send_keys(key) }
+      s.evaluate_script('document.body.innerHTML')
+    }
+    expect([
+      hosts.call('<ul id=e contenteditable><li>a</li><li><br></li></ul>', 'e.focus(); getSelection().collapse(e.children[1], 0)'),
+      hosts.call(
+        '<div id=e contenteditable><p>x<span contenteditable=false>Y<span contenteditable=true id=i>abcd</span></span>w</p></div>',
+        "e.focus(); getSelection().collapse(document.getElementById('i').firstChild, 2)"
+      )
+    ]).to eq([
+      '<ul id="e" contenteditable=""><li>a</li><li><br></li><li>Z</li></ul>',
+      '<div id="e" contenteditable=""><p>x<span contenteditable="false">Y<span contenteditable="true" id="i">ab<br>Zcd</span></span>w</p></div>'
+    ])
+  end
 end

@@ -671,10 +671,6 @@ fn css_image_urls(arena: &RealmArena, root: NodeId) -> Vec<(&'static str, String
 pub(crate) fn with_engine<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, now_at: i32, ask: impl FnOnce(&mut StyleEngine, &RealmArena, f64) -> R) -> Option<R> {
     let cid = crate::dom::realm_id(scope, args);
     let now = crate::dom::clock_arg(scope, args, now_at);
-    with_engine_of(scope, cid, now, ask)
-}
-// …of realm `cid`, at `now`.
-pub(crate) fn with_engine_of<R>(scope: &mut v8::PinScope<'_, '_>, cid: i32, now: f64, ask: impl FnOnce(&mut StyleEngine, &RealmArena, f64) -> R) -> Option<R> {
     let mut answer = None;
     crate::dom::style_op(scope, cid, |scope| {
         let d = crate::dom::dom(scope);

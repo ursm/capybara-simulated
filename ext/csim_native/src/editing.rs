@@ -158,11 +158,28 @@ mod tests {
     }
 }
 
+// The elements HTML lays out inline by default — what an element the engine made, which nothing has styled yet, is
+// taken for.
+const INLINE_TAGS: [&str; 30] = [
+    "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "dfn", "em", "font", "i", "img", "kbd", "label", "mark", "q", "s",
+    "samp", "small", "span", "strike", "strong", "sub", "sup", "time", "tt", "u", "var",
+];
+// Whether `id` is laid out inline — by its computed style, or, where it has none yet (one an edit made), by its name.
+pub(crate) fn inline_level(arena: &RealmArena, id: NodeId) -> Option<bool> {
+    crate::rendered::is_inline_level(arena, id).or_else(|| arena.get(id).filter(|n| n.kind == NodeKind::Element).map(|n| INLINE_TAGS.contains(&&*n.local_name)))
+}
+// The editing host a selection from `start` to `end` is in — none where they are in different ones, or either in none
+// (in a non-editable island): what an edit at it edits.
+pub(crate) fn selection_host(arena: &RealmArena, start: NodeId, end: NodeId) -> Option<NodeId> {
+    let host = |n: NodeId| arena.editing_host(if arena.is_element(n) { n } else { arena.parent_of(n)? });
+    let h = host(start)?;
+    (host(end)? == h).then_some(h)
+}
 // The block a place in `node` is in: its nearest inclusive ancestor that is no inline — a block, a table's part, a list
 // item — or `host`, at most.
 pub(crate) fn block_of(arena: &RealmArena, node: NodeId, host: NodeId) -> NodeId {
     let mut at = if arena.is_element(node) { node } else { arena.parent_of(node).unwrap_or(node) };
-    while at != host && crate::rendered::is_inline_level(arena, at) != Some(false) {
+    while at != host && inline_level(arena, at) != Some(false) {
         match arena.parent_of(at) {
             Some(p) => at = p,
             None => break,
@@ -212,7 +229,7 @@ pub(crate) fn within(arena: &RealmArena, root: NodeId, node: NodeId) -> bool {
 }
 // Whether `id` is content on a line: text, or an inline element other than a `<br>`.
 pub(crate) fn inline_content(arena: &RealmArena, id: NodeId) -> bool {
-    arena.get(id).is_some_and(|n| n.kind == NodeKind::Text || (n.kind == NodeKind::Element && !n.is_html_named("br") && crate::rendered::is_inline_level(arena, id) != Some(false)))
+    arena.get(id).is_some_and(|n| n.kind == NodeKind::Text || (n.kind == NodeKind::Element && !n.is_html_named("br") && inline_level(arena, id) != Some(false)))
 }
 // Whether `id` is text of white space alone — what a line shows nothing of between blocks.
 pub(crate) fn blank(arena: &RealmArena, id: NodeId) -> bool {
@@ -235,7 +252,7 @@ pub(crate) fn edge(arena: &RealmArena, parent: NodeId, child: Option<NodeId>, fo
         let Some(at) = next else {
             // (…out of an inline element, on; out of anything else, at the line's edge)
             match arena.parent_of(parent) {
-                Some(up) if crate::rendered::is_inline_level(arena, parent) == Some(true) && arena.editing_host(parent) != Some(parent) => {
+                Some(up) if inline_level(arena, parent) == Some(true) && arena.editing_host(parent) != Some(parent) => {
                     next = arena.sibling(parent, if forward { 1 } else { -1 });
                     parent = up;
                     continue;
@@ -248,7 +265,7 @@ pub(crate) fn edge(arena: &RealmArena, parent: NodeId, child: Option<NodeId>, fo
             NodeKind::Text if n.data.is_empty() => next = arena.sibling(at, if forward { 1 } else { -1 }),
             NodeKind::Text => return Edge::Content,
             NodeKind::Element if n.is_html_named("br") => return Edge::Br,
-            NodeKind::Element if crate::rendered::is_inline_level(arena, at) == Some(false) => return Edge::Block,
+            NodeKind::Element if inline_level(arena, at) == Some(false) => return Edge::Block,
             NodeKind::Element if crate::caret::CARET_VOID_TAGS.contains(&&*n.local_name) || crate::rendered::is_atomic_inline(arena, at) => return Edge::Content,
             NodeKind::Element => {
                 parent = at;

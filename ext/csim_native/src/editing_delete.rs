@@ -6,7 +6,7 @@
 // children the engine's change; the bindings finish them as the op returns and put the caret where it says.
 
 use crate::dom::{realm, NodeId, NodeKind, RealmArena};
-use crate::editing::{blank, block_of, cell_of, inline_content, island_of, make_br, rebalance_space, table_part, within};
+use crate::editing::{inline_level, selection_host, blank, block_of, cell_of, inline_content, island_of, make_br, rebalance_space, table_part, within};
 use crate::mutation::Change;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -21,13 +21,13 @@ fn holds_host(arena: &RealmArena, island: NodeId) -> bool {
 // nothing (Chrome).
 fn block_atom(arena: &RealmArena, id: NodeId) -> bool {
     arena.get(id).is_some_and(|n| n.kind == NodeKind::Element && !n.is_html_named("br") && crate::caret::CARET_VOID_TAGS.contains(&&*n.local_name))
-        && crate::rendered::is_inline_level(arena, id) == Some(false)
+        && inline_level(arena, id) == Some(false)
 }
 // Whether `id` is a block a join can move content into or out of: an editable one that holds content — no void element,
 // no table's part.
 fn joinable(arena: &RealmArena, id: NodeId) -> bool {
     arena.get(id).is_some_and(|n| n.kind == NodeKind::Element && !crate::caret::CARET_VOID_TAGS.contains(&&*n.local_name))
-        && crate::rendered::is_inline_level(arena, id) == Some(false)
+        && inline_level(arena, id) == Some(false)
         && !table_part(arena, id)
         && arena.editing_host(id).is_some()
 }
@@ -59,23 +59,25 @@ pub(crate) enum Took {
     Atom,
 }
 
-// __dom.editDelete(startNode, startOffset, endNode, endOffset, forward, word, host, now, steps) -> [caretNode, caretOffset,
-// changes…], or undefined where nothing is deleted: the deletion in the editing host `host` — of the selection's range
+// __dom.editDelete(startNode, startOffset, endNode, endOffset, forward, word, now, steps) -> [caretNode, caretOffset,
+// changes…], or undefined where nothing is deleted: the deletion in the editing host the selection is in (editing.rs
+// `selection_host`; none where its ends are in different ones, or in a non-editable island) — of the selection's range
 // from (startNode, startOffset) to (endNode, endOffset), or, collapsed, of a step back (forward) from it, a character's
 // or a word's — the place the caret goes, and the changes of children it made (mutation.rs `changes_value`). A step
 // into a non-editable island takes the island whole — none that holds an editing host; a step past a block atom takes
 // it whole; one out of a table cell — or into one — deletes nothing (Chrome); a range across cells deletes what it
 // holds of them but joins none, and one with an end in an island deletes nothing.
 fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(sc), Some(ec), Some(host)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 2), crate::dom::nid_arg(scope, &args, 6)) else { return };
+    let (Some(sc), Some(ec)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 2)) else { return };
     let (so, eo) = (args.get(1).uint32_value(scope).unwrap_or(0), args.get(3).uint32_value(scope).unwrap_or(0));
     let (forward, word) = (args.get(4).is_true(), args.get(5).is_true());
-    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(8)) else { return };
+    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(7)) else { return };
+    let Some(host) = selection_host(&crate::dom::dom(scope).arena, sc, ec) else { return };
     let caller = crate::dom::realm_id(scope, &args);
     let collapsed = sc == ec && so == eo;
     // (…the range: the selection's, or the caret's to where a step takes it — none past the host's edge)
     let range = if collapsed {
-        crate::rendered::with_engine(scope, &args, 7, |engine, arena, now| {
+        crate::rendered::with_engine(scope, &args, 6, |engine, arena, now| {
             let mut to = if word { arena.caret_word_step(engine, now, sc, so, forward) } else { arena.caret_step(engine, now, sc, so, forward) }?;
             let mut took = Took::Step;
             // (…a step into an island, or past a block atom, to its far edge: it whole)
@@ -89,7 +91,7 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
                 to = if forward { (parent, at + 1) } else { (parent, at) };
                 took = if block_atom(arena, whole) {
                     Took::Atom
-                } else if crate::rendered::is_inline_level(arena, whole) == Some(false) {
+                } else if inline_level(arena, whole) == Some(false) {
                     // (…a block island only where an editable block or a line's content on its far side joins across it:
                     // Chrome)
                     if !nearest(arena, parent, if forward { at + 1 } else { at }, forward).is_some_and(|b| joinable(arena, b) || inline_content(arena, b)) {
@@ -179,7 +181,7 @@ pub(crate) fn delete<'s>(
     let start = match joint {
         Some(joint) if arena.is_element(sc) || !within(arena, start_block, sc) => joint,
         Some(_) => (sc, so),
-        None if beside(arena, (sc, so), true).is_some_and(|n| within(arena, n, ec) && crate::rendered::is_inline_level(arena, n) == Some(false)) => (ec, 0),
+        None if beside(arena, (sc, so), true).is_some_and(|n| within(arena, n, ec) && inline_level(arena, n) == Some(false)) => (ec, 0),
         None => (sc, so),
     };
     // (…the inline elements and the text the deletion emptied at either end removed, and a block it emptied held open)
@@ -241,7 +243,7 @@ fn join<'s>(
             Some(n) => (start.0, n.children.get(start.1 as usize).copied()),
             None => return Some(None),
         };
-        while parent != start_block && crate::rendered::is_inline_level(arena, parent) != Some(false) && !within(arena, parent, end_block) {
+        while parent != start_block && inline_level(arena, parent) != Some(false) && !within(arena, parent, end_block) {
             before = arena.sibling(parent, 1);
             parent = arena.parent_of(parent)?;
         }
@@ -367,7 +369,7 @@ fn clear_emptied<'s>(
         let Some(n) = arena.get(at) else { break };
         let empty = match n.kind {
             NodeKind::Text => n.data.is_empty(),
-            NodeKind::Element => n.children.is_empty() && !crate::caret::CARET_VOID_TAGS.contains(&&*n.local_name) && crate::rendered::is_inline_level(arena, at) != Some(false),
+            NodeKind::Element => n.children.is_empty() && !crate::caret::CARET_VOID_TAGS.contains(&&*n.local_name) && inline_level(arena, at) != Some(false),
             _ => false,
         };
         let Some(parent) = arena.parent_of(at).filter(|_| empty && at != block && within(arena, block, at)) else { break };

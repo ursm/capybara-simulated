@@ -7,7 +7,7 @@
 
 use crate::cloning::BindingsSteps;
 use crate::dom::{realm, NodeData, NodeId, NodeKind, RealmArena};
-use crate::editing::{block_of, edge, has_content, line_edge, make, make_element, rebalance_space, within, Edge};
+use crate::editing::{inline_level, selection_host, block_of, edge, has_content, line_edge, make, make_element, rebalance_space, within, Edge};
 use crate::mutation::Change;
 use crate::node_handle::NodeHandle;
 
@@ -19,15 +19,16 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 const TEXT: u32 = 0;
 const LINE_BREAK: u32 = 1;
 
-// __dom.editInsert(startNode, startOffset, endNode, endOffset, kind, text, host, now, steps) -> [caretNode, caretOffset,
-// copies, (source, copy, names)…, changes…], or undefined where nothing is inserted: the insertion in the editing host
-// `host` at the selection's range from (startNode, startOffset) to (endNode, endOffset) — its contents deleted first, and
+// __dom.editInsert(startNode, startOffset, endNode, endOffset, kind, text, steps) -> [caretNode, caretOffset, copies,
+// (source, copy, names)…, changes…], or undefined where nothing is inserted: the insertion in the editing host the
+// selection is in (editing.rs `selection_host`; none where its ends are in different ones, or in a non-editable island)
+// at the selection's range from (startNode, startOffset) to (endNode, endOffset) — its contents deleted first, and
 // nothing inserted where that deletes nothing (an end in a non-editable island) — of `text` (`TEXT`), a line break
 // (`LINE_BREAK`) or a paragraph's break (any other): the place the caret goes, how many elements a split copied and each
 // with its source and the names of the attributes whose cloning steps are the bindings' (cloning.rs `bindings_value`),
 // and the changes of children it made (mutation.rs `changes_value`).
 fn edit_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(sc), Some(ec), Some(host)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 2), crate::dom::nid_arg(scope, &args, 6)) else { return };
+    let (Some(sc), Some(ec)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 2)) else { return };
     let (so, eo) = (args.get(1).uint32_value(scope).unwrap_or(0), args.get(3).uint32_value(scope).unwrap_or(0));
     let kind = args.get(4).uint32_value(scope).unwrap_or(TEXT);
     let text = args.get(5).to_string(scope).map_or_else(Vec::new, |s| {
@@ -35,28 +36,20 @@ fn edit_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         s.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
         units
     });
-    let now = crate::dom::clock_arg(scope, &args, 7);
-    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(8)) else { return };
+    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(6)) else { return };
     let caller = crate::dom::realm_id(scope, &args);
-    let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return };
     let collapsed = (sc, so) == (ec, eo);
-    {
-        let arena = realm(scope, cid);
-        if !within(arena, host, sc) || !within(arena, host, ec) || (kind == TEXT && text.is_empty() && collapsed) {
-            return;
-        }
-    }
+    let Some(host) = selection_host(&crate::dom::dom(scope).arena, sc, ec).filter(|_| !(kind == TEXT && text.is_empty() && collapsed)) else { return };
+    let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return };
     let steps = v8::Local::new(scope, steps);
     let (mut changes, mut copies, mut held) = (Vec::new(), Vec::new(), Vec::new());
-    let mut edit = Edit { cid, caller, steps, host, now, changes: &mut changes, copies: &mut copies, held: &mut held };
-    edit.restyle(scope);
+    let mut edit = Edit { cid, caller, steps, host, changes: &mut changes, copies: &mut copies, held: &mut held };
     let mut caret = (sc, so);
     if !collapsed {
         let took = crate::editing_delete::Took::Step;
         let Some(Some((at, made))) = crate::editing_delete::delete(scope, caller, steps, host, ((sc, so), (ec, eo)), took, false, false) else { return };
         caret = at;
         edit.changes.extend(made);
-        edit.restyle(scope);
     }
     let caret = match kind {
         TEXT => edit.text(scope, caret, &text),
@@ -82,10 +75,12 @@ fn edit_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     rv.set(v8::Array::new_with_elements(scope, &out).into());
 }
 
-// Where text typed at a place goes: at the end of the text before it, or the start of the text after it, where there is
-// one; and before a `<br>` that ends its block's last line — no line follows it — rather than after it (`ab<br>`, typed
-// at its end, is `abx<br>`).
-fn insertion_point(arena: &RealmArena, (node, offset): (NodeId, u32)) -> (NodeId, u32) {
+// Where what is inserted at a place goes: outside a link the place is at the edge of (`<a>link</a>`, typed at its end,
+// is `<a>link</a>x`); at the end of the text before it, or the start of the text after it, where there is one; and
+// before a `<br>` that ends its block's last line — no line follows it — rather than after it (`ab<br>`, typed at its
+// end, is `abx<br>`).
+fn insertion_point(arena: &RealmArena, place: (NodeId, u32)) -> (NodeId, u32) {
+    let (node, offset) = out_of_link(arena, place).unwrap_or(place);
     let Some(n) = arena.get(node).filter(|n| n.kind == NodeKind::Element) else { return (node, offset) };
     let mut k = (offset as usize).min(n.children.len());
     let br = |c: NodeId| arena.get(c).is_some_and(|d| d.is_html_named("br"));
@@ -101,20 +96,34 @@ fn insertion_point(arena: &RealmArena, (node, offset): (NodeId, u32)) -> (NodeId
     }
     (node, k as u32)
 }
-// Whether `id` is a `<br>` that is all its block holds — the placeholder holding an empty line open, which the line's
-// first text takes the place of (`<p><b><br></b></p>`, typed into, is `<p><b>x</b></p>`).
-fn placeholder(arena: &RealmArena, id: NodeId) -> bool {
-    if !arena.get(id).is_some_and(|n| n.is_html_named("br")) {
-        return false;
+// The place outside the link `(node, offset)` is at the start or the end of — the inline elements between ending or
+// starting there too — before the link or after it; none where it is at no link's edge.
+fn out_of_link(arena: &RealmArena, (node, offset): (NodeId, u32)) -> Option<(NodeId, u32)> {
+    let n = arena.get(node)?;
+    let length = if n.kind == NodeKind::Text { n.data.len() } else { n.children.len() };
+    let end = offset as usize == length;
+    if !end && offset != 0 {
+        return None;
     }
-    let mut at = id;
+    let mut at = node;
     loop {
-        let Some(parent) = arena.parent_of(at).filter(|&p| arena.get(p).is_some_and(|n| n.children.len() == 1)) else { return false };
-        if crate::rendered::is_inline_level(arena, parent) != Some(true) || arena.editing_host(parent) == Some(parent) {
-            return true;
+        let parent = arena.parent_of(at).filter(|&p| arena.editing_host(at) != Some(at) && arena.is_element(p))?;
+        if arena.get(at).is_some_and(|d| d.is_html_named("a")) {
+            let k = arena.child_index(at) as u32;
+            return Some((parent, if end { k + 1 } else { k }));
+        }
+        let edge_child = arena.get(parent).and_then(|p| if end { p.children.last() } else { p.children.first() }.copied());
+        if edge_child != Some(at) || inline_level(arena, parent) != Some(true) {
+            return None;
         }
         at = parent;
     }
+}
+// Whether `id` is a `<br>` holding an empty line open — nothing on its line before it, the block's end after it — which
+// the line's first text takes the place of (`<p><b><br></b></p>`, typed into, is `<p><b>x</b></p>`; `abcd<br><br>`,
+// typed into its last line, `abcd<br>x`).
+fn placeholder(arena: &RealmArena, id: NodeId) -> bool {
+    arena.get(id).is_some_and(|n| n.is_html_named("br")) && line_edge(arena, id, true) == Edge::Block && line_edge(arena, id, false) != Edge::Content
 }
 // Whether an element is a heading, whose split leaves a `<div>` after it where nothing follows the caret.
 fn heading(arena: &RealmArena, id: NodeId) -> bool {
@@ -122,24 +131,19 @@ fn heading(arena: &RealmArena, id: NodeId) -> bool {
 }
 
 // One insertion's state: the host's realm, the realm whose code inserts, the bindings' steps of a change of children,
-// the host and the clock; the changes of children it makes, the elements it copies, and what holds the nodes it makes
+// and the host; the changes of children it makes, the elements it copies, and what holds the nodes it makes
 // until a tree does.
 struct Edit<'s, 'a> {
     cid: i32,
     caller: i32,
     steps: v8::Local<'s, v8::Array>,
     host: NodeId,
-    now: f64,
     changes: &'a mut Vec<Change>,
     copies: &'a mut BindingsSteps,
     held: &'a mut Vec<v8::cppgc::Persistent<NodeHandle>>,
 }
 
 impl<'s> Edit<'s, '_> {
-    // The styles of the host's realm brought up to date — what the boxes of the nodes an edit made are read by.
-    fn restyle(&self, scope: &mut v8::PinScope<'_, '_>) {
-        crate::rendered::with_engine_of(scope, self.cid, self.now, |engine, arena, now| engine.flush(arena, now));
-    }
     fn insert(&mut self, scope: &mut v8::PinScope<'_, '_>, parent: NodeId, nodes: &[NodeId], before: Option<NodeId>) -> Option<()> {
         self.changes.push(crate::mutation::insert(scope, self.cid, self.caller, parent, nodes, before, self.steps)?);
         Some(())
@@ -172,7 +176,7 @@ impl<'s> Edit<'s, '_> {
     }
 
     // `text` at the caret: into the text there, or a text of its own — taking the place of a placeholder `<br>` — and the
-    // white space around it rebalanced. Where the caret goes: after it.
+    // white space at either edge of it rebalanced (what it holds as it is: Chrome). Where the caret goes: after it.
     fn text(&mut self, scope: &mut v8::PinScope<'_, '_>, caret: (NodeId, u32), text: &[u16]) -> Option<(NodeId, u32)> {
         let (node, offset) = insertion_point(realm(scope, self.cid), caret);
         let arena = realm(scope, self.cid);
@@ -196,12 +200,14 @@ impl<'s> Edit<'s, '_> {
             (made, 0)
         };
         let end = at + text.len() as u32;
-        rebalance_space(scope, self.caller, target, at, end)?;
+        rebalance_space(scope, self.caller, target, at, at)?;
+        rebalance_space(scope, self.caller, target, end, end)?;
         Some((target, end))
     }
 
     // A `<br>` at the caret — a second after it where it ends its block, which the line it starts is — and the white
-    // space either side rebalanced. Where the caret goes: after it, at the start of the text that follows it.
+    // space starting the line after it rebalanced (that ending the line before it collapses as it is: Chrome). Where the
+    // caret goes: after it, at the start of the text that follows it.
     fn line_break(&mut self, scope: &mut v8::PinScope<'_, '_>, caret: (NodeId, u32)) -> Option<(NodeId, u32)> {
         let place = insertion_point(realm(scope, self.cid), caret);
         let (parent, before) = self.split_at(scope, place)?;
@@ -212,7 +218,6 @@ impl<'s> Edit<'s, '_> {
             let after = realm(scope, self.cid).sibling(br, 1);
             self.insert(scope, parent, &[second], after)?;
         }
-        self.rebalance_beside(scope, parent, Some(br))?;
         let after = realm(scope, self.cid).sibling(br, 1);
         self.rebalance_beside(scope, parent, after)?;
         let arena = realm(scope, self.cid);
@@ -222,48 +227,56 @@ impl<'s> Edit<'s, '_> {
         })
     }
 
-    // The caret's block split in two at the caret — in a table's cell or a `<pre>` a line break; in an empty list item,
-    // the item out of its list (`out_of_list`); in the host itself, the line (`host_line`): what follows the caret in it —
-    // in the inline elements around the caret, copies of them — in a copy of it after it (a `<div>` after a heading
-    // nothing follows the caret in), and either part that shows nothing held open by a `<br>`. Where the caret goes: the
-    // start of the second.
+    // The caret's block split in two at the caret — in a table's cell, a `<pre>` or an inline host a line break; in an
+    // empty list item (or one whose block the caret's is), the item out of its list (`out_of_list`); in the host itself,
+    // the line (`host_line`): what follows the caret in it — in the elements between, copies of them — in a copy of it
+    // after it (a `<div>` after a heading nothing follows the caret in), a list item split with the block it holds
+    // (`<li><p>ab</p></li>`, broken at its end, is `<li><p>ab</p></li><li><p><br></p></li>`), the inline elements the
+    // caret leaves empty at the end of the first part gone where it shows anything else, and either part that shows
+    // nothing held open by a `<br>`. Where the caret goes: the start of the second.
     fn paragraph(&mut self, scope: &mut v8::PinScope<'_, '_>, caret: (NodeId, u32)) -> Option<(NodeId, u32)> {
-        let arena = realm(scope, self.cid);
+        let (cid, host) = (self.cid, self.host);
+        let arena = realm(scope, cid);
         let place = insertion_point(arena, caret);
-        let block = block_of(arena, place.0, self.host);
+        let block = block_of(arena, place.0, host);
         let b = arena.get(block)?;
-        if ["td", "th", "caption", "pre", "listing"].iter().any(|t| b.is_html_named(t)) {
+        if ["td", "th", "caption", "pre", "listing"].iter().any(|t| b.is_html_named(t)) || (block == host && inline_level(arena, host) == Some(true)) {
             return self.line_break(scope, caret);
         }
-        if b.is_html_named("li") && block != self.host && !has_content(arena, block) {
-            return self.out_of_list(scope, block);
+        let li = |n: NodeId| n != host && arena.get(n).is_some_and(|d| d.is_html_named("li"));
+        let item = Some(block).filter(|&n| li(n)).or_else(|| arena.parent_of(block).filter(|&p| li(p) && block != host));
+        if let Some(item) = item.filter(|&i| !has_content(arena, i) && arena.parent_of(i).is_some_and(|list| list != host && within(arena, host, list))) {
+            return self.out_of_list(scope, item);
         }
+        let top = item.unwrap_or(block);
         let (parent, before) = self.split_at(scope, place)?;
-        if block == self.host {
+        if top == host {
             return self.host_line(scope, parent, before);
         }
-        let (moved, before) = self.split_inlines(scope, parent, before, block)?;
-        let arena = realm(scope, self.cid);
+        let (moved, before) = self.split_inlines(scope, parent, before, top)?;
+        let arena = realm(scope, cid);
         let nodes: Vec<NodeId> = moved.into_iter().chain(std::iter::successors(before, |&n| arena.sibling(n, 1))).collect();
-        let copy = if heading(arena, block) && !nodes.iter().any(|&n| has_content(arena, n)) { self.element(scope, block, "div") } else { self.copy(scope, block)? };
+        let copy = if heading(arena, top) && !nodes.iter().any(|&n| has_content(arena, n)) { self.element(scope, top, "div") } else { self.copy(scope, top)? };
         self.move_into(scope, copy, &nodes)?;
-        let arena = realm(scope, self.cid);
-        let (outer, after) = (arena.parent_of(block)?, arena.sibling(block, 1));
+        let arena = realm(scope, cid);
+        let (outer, after) = (arena.parent_of(top)?, arena.sibling(top, 1));
         self.insert(scope, outer, &[copy], after)?;
-        self.hold_open(scope, block, false)?;
+        self.drop_emptied_end(scope, top)?;
+        self.hold_open(scope, top, false)?;
         let caret = self.hold_open(scope, copy, true)?;
-        self.restyle(scope);
-        self.rebalance_leaf(scope, block, false)?;
+        self.rebalance_leaf(scope, top, false)?;
         self.rebalance_leaf(scope, copy, true)?;
         Some(caret)
     }
-    // The line the caret is on in the host itself split: at its start, an empty `<div>` before it, the caret where it
-    // was (`ab`, broken at its start, is `<div><br></div>ab`); anywhere else, what follows the caret up to the host's next
-    // block — its `<br>`s and the lines after them too — in a `<div>` after what precedes it (`a<div>b<br>cd</div>`).
+    // The line the caret is on in the host itself split: at its start, more of it after the caret, an empty `<div>` before
+    // it, the caret where it was (`ab`, broken at its start, is `<div><br></div>ab`); anywhere else, what follows the caret
+    // up to the host's next block — its `<br>`s and the lines after them too — in a `<div>` after what precedes it
+    // (`a<div>b<br>cd</div>`), and a `<br>` before that where nothing does on its line (an empty host, broken, is
+    // `<br><div><br></div>`).
     fn host_line(&mut self, scope: &mut v8::PinScope<'_, '_>, parent: NodeId, before: Option<NodeId>) -> Option<(NodeId, u32)> {
         let (cid, host) = (self.cid, self.host);
         let arena = realm(scope, cid);
-        if edge(arena, parent, before, false) != Edge::Content {
+        if edge(arena, parent, before, false) != Edge::Content && edge(arena, parent, before, true) == Edge::Content {
             let mut top = before;
             let mut at = parent;
             while at != host {
@@ -283,27 +296,32 @@ impl<'s> Edit<'s, '_> {
         }
         let (moved, before) = self.split_inlines(scope, parent, before, host)?;
         let arena = realm(scope, cid);
-        let block = |n: NodeId| arena.is_element(n) && crate::rendered::is_inline_level(arena, n) == Some(false);
+        let block = |n: NodeId| arena.is_element(n) && inline_level(arena, n) == Some(false);
         let line: Vec<NodeId> = std::iter::successors(before, |&n| arena.sibling(n, 1)).take_while(|&n| !block(n)).collect();
         let next = line.last().map_or(before, |&n| arena.sibling(n, 1));
         let nodes: Vec<NodeId> = moved.into_iter().chain(line).collect();
         let div = self.element(scope, host, "div");
         self.move_into(scope, div, &nodes)?;
         self.insert(scope, host, &[div], next)?;
+        if edge(realm(scope, cid), host, Some(div), false) != Edge::Content {
+            let br = self.element(scope, host, "br");
+            self.insert(scope, host, &[br], Some(div))?;
+        }
         let caret = self.hold_open(scope, div, true)?;
-        self.restyle(scope);
         self.rebalance_beside(scope, host, Some(div))?;
         self.rebalance_leaf(scope, div, true)?;
         Some(caret)
     }
-    // An empty list item out of its list: in a list in another's item, a new item of that list after it; else a `<div>`
-    // after the list, the items after this one in a copy of the list after that — the list removed where that empties
-    // it. Where the caret goes: in the new block, before its `<br>`.
+    // An empty list item out of its list: in a list that ends another's item, a new item of that list after it; else a
+    // `<div>` after the list (`<li>a<ul><li></li></ul>b</li>` is `<li>a<div><br></div>b</li>`); the items after this one in
+    // a copy of the list after that, the list removed where that empties it. Where the caret goes: in the new block,
+    // before its `<br>`.
     fn out_of_list(&mut self, scope: &mut v8::PinScope<'_, '_>, item: NodeId) -> Option<(NodeId, u32)> {
         let arena = realm(scope, self.cid);
         let list = arena.parent_of(item)?;
         let outer = arena.parent_of(list)?;
-        let nested = outer != self.host && arena.get(outer).is_some_and(|n| n.is_html_named("li"));
+        let ends = std::iter::successors(arena.sibling(list, 1), |&n| arena.sibling(n, 1)).all(|n| !has_content(arena, n));
+        let nested = outer != self.host && ends && arena.get(outer).is_some_and(|n| n.is_html_named("li"));
         let following: Vec<NodeId> = std::iter::successors(arena.sibling(item, 1), |&n| arena.sibling(n, 1)).collect();
         self.remove(scope, item)?;
         let (block, into, after) = if nested {
@@ -316,7 +334,7 @@ impl<'s> Edit<'s, '_> {
         let br = self.element(scope, block, "br");
         self.insert(scope, block, &[br], None)?;
         self.insert(scope, into, &[block], after)?;
-        if !nested && !following.is_empty() {
+        if !following.is_empty() {
             let rest = self.copy(scope, list)?;
             self.move_into(scope, rest, &following)?;
             let after = realm(scope, self.cid).sibling(block, 1);
@@ -368,14 +386,37 @@ impl<'s> Edit<'s, '_> {
         }
         Some((moved, before))
     }
+    // The inline element at the end of `block` a split left empty — the caret was at its start — gone, where the block
+    // shows anything else (`<p>ab<b>|cd</b></p>`, broken, is `<p>ab</p><p><b>cd</b></p>`).
+    fn drop_emptied_end(&mut self, scope: &mut v8::PinScope<'_, '_>, block: NodeId) -> Option<()> {
+        let arena = realm(scope, self.cid);
+        if !has_content(arena, block) {
+            return Some(());
+        }
+        let last = arena.get(block)?.children.last().copied();
+        let emptied = last.filter(|&c| {
+            arena.get(c).is_some_and(|d| d.kind == NodeKind::Element && !crate::caret::CARET_VOID_TAGS.contains(&&*d.local_name))
+                && inline_level(arena, c) == Some(true)
+                && !has_content(arena, c)
+        });
+        match emptied {
+            Some(c) => self.remove(scope, c),
+            None => Some(()),
+        }
+    }
     // `block`, where it shows nothing, held open by a `<br>` in its innermost element on one side — its first (`first`)
-    // or last children's — and where the caret goes in it on that side: before that `<br>`, or at the start of its first
-    // text.
+    // or last children's, none a non-editable island, an atom or a link — and where the caret goes in it on that side:
+    // before that `<br>`, or at the start of its first text.
     fn hold_open(&mut self, scope: &mut v8::PinScope<'_, '_>, block: NodeId, first: bool) -> Option<(NodeId, u32)> {
         let arena = realm(scope, self.cid);
         let side = |n: NodeId| arena.get(n).and_then(|d| if first { d.children.first() } else { d.children.last() }.copied());
         let mut at = block;
-        while let Some(c) = side(at).filter(|&c| arena.get(c).is_some_and(|d| d.kind == NodeKind::Element && !crate::caret::CARET_VOID_TAGS.contains(&&*d.local_name))) {
+        let into = |c: NodeId| {
+            arena.get(c).is_some_and(|d| d.kind == NodeKind::Element && !crate::caret::CARET_VOID_TAGS.contains(&&*d.local_name) && !d.is_html_named("a"))
+                && arena.editing_host(c).is_some()
+                && !crate::rendered::is_atomic_inline(arena, c)
+        };
+        while let Some(c) = side(at).filter(|&c| into(c)) {
             at = c;
         }
         if has_content(arena, block) {
