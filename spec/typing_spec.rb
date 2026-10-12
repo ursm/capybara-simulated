@@ -24,4 +24,26 @@ RSpec.describe 'typing into a text control' do
       })()
     JS
   end
+
+  # The editing keys: Backspace / Delete remove the selection or the character before / after the caret, a surrogate
+  # pair one; the arrows collapse a selection to its start / end or step a character; Home / End go to the ends of the
+  # caret's line in a textarea.
+  it 'takes the editing keys as Chrome does' do
+    html = "<!DOCTYPE html><meta charset=utf-8><input id=i value=hello><textarea id=t>ab\ncd</textarea>"
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
+    state = ->(id) { s.evaluate_script("(() => { const e = document.getElementById('#{id}'); return [e.value, e.selectionStart, e.selectionEnd]; })()") }
+    press = ->(id, from, to, key, value = nil) {
+      s.execute_script("(() => { const e = document.getElementById('#{id}'); #{value ? "e.value = #{value.to_json};" : ''} e.focus(); e.setSelectionRange(#{from}, #{to}); })()")
+      s.find(:css, "##{id}").send_keys(key)
+      state.(id)
+    }
+    expect([
+      press.('i', 1, 3, :left), press.('i', 1, 3, :right), press.('i', 1, 3, :delete), press.('i', 1, 1, :delete),
+      press.('i', 3, 3, :backspace, "a\u{1F600}b"), press.('i', 1, 1, :delete, "a\u{1F600}b"), press.('i', 1, 1, :right, "a\u{1F600}b"),
+      press.('t', 4, 4, :home), press.('t', 1, 1, :end), press.('i', 0, 0, :backspace)
+    ]).to eq([
+      ['hello', 1, 1], ['hello', 3, 3], ['hlo', 1, 1], ['ho', 1, 1], ['ab', 1, 1], ['ab', 1, 1], ["a\u{1F600}b", 3, 3],
+      ["ab\ncd", 3, 3], ["ab\ncd", 2, 2], ["a\u{1F600}b", 0, 0]
+    ])
+  end
 end

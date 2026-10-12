@@ -50,6 +50,13 @@ const MAXLENGTH_INPUT_TYPES: [&str; 6] = ["text", "search", "tel", "url", "email
 // What typing into a control changed (`type_text`): its value, its selection.
 pub(crate) const TYPED_VALUE: u32 = 1;
 pub(crate) const TYPED_SELECTION: u32 = 2;
+// The editing keys a text control takes (`edit_control`).
+const EDIT_BACKSPACE: u32 = 0;
+const EDIT_DELETE: u32 = 1;
+const EDIT_LEFT: u32 = 2;
+const EDIT_RIGHT: u32 = 3;
+const EDIT_HOME: u32 = 4;
+const EDIT_END: u32 = 5;
 
 // Why `setRangeText()` refused.
 #[derive(Debug, PartialEq)]
@@ -136,6 +143,46 @@ impl RealmArena {
         changed
     }
 
+    // An editing key pressed in the control `id`, as Chrome takes it: Backspace / Delete remove the selection, or the
+    // character before / after the caret (a surrogate pair one); ArrowLeft / ArrowRight collapse a selection to its
+    // start / end, or move the caret by a character; Home / End go to the start / end of the line the caret is on (a
+    // textarea's — its value's line, between line feeds — or an input's whole value). What it changed (`TYPED_*`).
+    pub(crate) fn edit_control(&mut self, id: NodeId, edit: u32) -> u32 {
+        let Some(n) = self.get(id) else { return 0 };
+        let value = self.relevant_value(n);
+        let multiline = n.is_html_named("textarea");
+        let len = value.len();
+        let (sel, set) = self.text_selection(id);
+        let (start, end) = if set { (sel.start as usize, sel.end as usize) } else { (len, len) };
+        let back = |i: usize| if i >= 2 && is_low(value[i - 1]) && is_high(value[i - 2]) { i - 2 } else { i.saturating_sub(1) };
+        let on = |i: usize| if i + 1 < len && is_high(value[i]) && is_low(value[i + 1]) { i + 2 } else { (i + 1).min(len) };
+        let line_start = |i: usize| if multiline { value[..i].iter().rposition(|&u| u == 0x0A).map_or(0, |p| p + 1) } else { 0 };
+        let line_end = |i: usize| if multiline { value[i..].iter().position(|&u| u == 0x0A).map_or(len, |p| i + p) } else { len };
+        let (removed, caret) = match edit {
+            EDIT_BACKSPACE | EDIT_DELETE if end > start => (Some(start..end), start),
+            EDIT_BACKSPACE if start > 0 => (Some(back(start)..start), back(start)),
+            EDIT_DELETE if start < len => (Some(start..on(start)), start),
+            EDIT_BACKSPACE | EDIT_DELETE => return 0,
+            EDIT_LEFT => (None, if end > start { start } else { back(start) }),
+            EDIT_RIGHT => (None, if end > start { end } else { on(end) }),
+            EDIT_HOME => (None, line_start(start)),
+            EDIT_END => (None, line_end(end)),
+            _ => return 0,
+        };
+        let mut changed = 0;
+        if let Some(range) = removed {
+            let mut next = value;
+            next.drain(range);
+            if self.write_live_value(id, Some(next.into_boxed_slice())) {
+                changed |= TYPED_VALUE;
+            }
+        }
+        if self.set_text_selection(id, caret as u32, caret as u32, Direction::None) {
+            changed |= TYPED_SELECTION;
+        }
+        changed
+    }
+
     // `id`'s selection as it stands — clamped to its value's length, which may have shrunk by a path that moved no
     // cursor (a `type` change re-sanitizing, a reset, a clean `<textarea>`'s children), and kept so — and whether it
     // was ever set.
@@ -209,6 +256,13 @@ impl RealmArena {
     }
 }
 
+fn is_high(u: u16) -> bool {
+    (0xD800..0xDC00).contains(&u)
+}
+fn is_low(u: u16) -> bool {
+    (0xDC00..0xE000).contains(&u)
+}
+
 // Whether `units` is a prefix of a floating-point number as one is typed — `[-+]?\d*\.?\d*([eE][-+]?\d*)?`.
 fn number_being_entered(units: &[u16]) -> bool {
     let mut i = 0;
@@ -242,6 +296,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setTextSelection", set_text_selection_op, context_id);
     crate::dom::register(scope, ns, "rangeTextEdit", range_text_op, context_id);
     crate::dom::register(scope, ns, "typeText", type_text_op, context_id);
+    crate::dom::register(scope, ns, "editControl", edit_control_op, context_id);
 }
 
 // __dom.selectionApplies(nid, forSelect) -> whether the selection APIs (`select()`, with `forSelect`) apply to the
@@ -360,6 +415,20 @@ fn type_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let cid = crate::dom::realm_id(scope, &args);
     let whole = args.get(2).is_true();
     let changed = crate::dom::realm(scope, cid).type_text(id, &text, whole);
+    if changed & TYPED_VALUE != 0 {
+        crate::node_handle::forget_live_value(scope, control);
+    }
+    rv.set_uint32(changed);
+}
+
+// __dom.editControl(control, edit) -> what the editing key `edit` (`EDIT_*`) pressed in the control changed
+// (`edit_control`'s `TYPED_*` bits).
+fn edit_control_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let control = args.get(0);
+    let Some(id) = crate::node_handle::nid_of(scope, control) else { return rv.set_uint32(0) };
+    let edit = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
+    let cid = crate::dom::realm_id(scope, &args);
+    let changed = crate::dom::realm(scope, cid).edit_control(id, edit);
     if changed & TYPED_VALUE != 0 {
         crate::node_handle::forget_live_value(scope, control);
     }
