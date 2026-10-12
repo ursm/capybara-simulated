@@ -161,7 +161,7 @@ fn scrolled_by(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
 }
 // …the shift of the boxes `p` holds: its own scroll where it is the root or a scroll container, less what it has stuck
 // if it is sticky, and its ancestors' — none past a FIXED one, whose own scroll still moves its content.
-fn shift_below(arena: &RealmArena, p: NodeId) -> [f64; 2] {
+pub(crate) fn shift_below(arena: &RealmArena, p: NodeId) -> [f64; 2] {
     if let Some(&shift) = memo(arena).below.get(&p) {
         return shift;
     }

@@ -368,10 +368,11 @@ impl RealmArena {
             None => Frame { shift: [0.0; 2], chain: None },
         }
     }
-    // …that of the box `owner`'s text moves with (`box_owner`): its scroll shift, then its transforms.
+    // …that of the box `owner`'s text moves with (`box_owner`): the shift of what that box HOLDS — its own scroll too, a
+    // textarea's or a scroller's text being its content — then its transforms.
     fn frame(&self, owner: NodeId) -> Frame {
         match self.box_owner(owner) {
-            Some(o) => Frame { shift: crate::geometry::scroll_shift(self, o), chain: crate::geometry::transform_chain(self, o) },
+            Some(o) => Frame { shift: crate::geometry::shift_below(self, o), chain: crate::geometry::transform_chain(self, o) },
             None => Frame { shift: [0.0; 2], chain: None },
         }
     }
@@ -382,9 +383,11 @@ impl RealmArena {
         n.data.iter().take(offset as usize).filter(|&&u| !taken(source.flags, u)).count() as u32
     }
 
-    // The middle of the line next above (below, without `up`) the band `top`..`bottom` among the text `root` holds, in
-    // the viewport — where a caret moving a line from a place on that band goes; none past its first (last) line.
+    // The middle of the line next above (below, without `up`) the caret on the band `top`..`bottom` among the text `root`
+    // holds, in the viewport — the nearest line wholly past the caret's middle, as a caret's box can run past its own line
+    // (a 16px font's on a 20px line) — where a caret moving a line from there goes; none past its first (last) line.
     pub(crate) fn line_over(&self, g: &TextView, root: NodeId, top: f64, bottom: f64, up: bool) -> Option<f64> {
+        let mid = (top + bottom) / 2.0;
         let mut best: Option<(f64, f64)> = None;
         for r in g.rows {
             if r[1] == r[2] {
@@ -396,16 +399,16 @@ impl RealmArena {
             }
             let [_, line_top, _, line_h] = self.row_frame(mark, r[1] as u32).rect([r[3], r[4], r[6], r[9]]);
             let line_bottom = line_top + line_h;
-            let gap = if up { top - line_bottom } else { line_top - bottom };
-            if gap >= -0.5 && best.is_none_or(|(d, _)| gap < d) {
+            let gap = if up { mid - line_bottom } else { line_top - mid };
+            if gap > 0.0 && best.is_none_or(|(d, _)| gap < d) {
                 best = Some((gap, (line_top + line_bottom) / 2.0));
             }
         }
         // (…an empty line one too)
         for b in g.blanks.iter().filter(|b| self.holds(root, b.holder)) {
             let [_, line_top, _, line_h] = self.frame(b.owner).rect([b.x, b.top, 0.0, b.h]);
-            let gap = if up { top - (line_top + line_h) } else { line_top - bottom };
-            if gap >= -0.5 && best.is_none_or(|(d, _)| gap < d) {
+            let gap = if up { mid - (line_top + line_h) } else { line_top - mid };
+            if gap > 0.0 && best.is_none_or(|(d, _)| gap < d) {
                 best = Some((gap, line_top + line_h / 2.0));
             }
         }
@@ -518,13 +521,15 @@ pub(crate) fn with_text<R>(scope: &mut v8::PinScope<'_, '_>, cid: i32, ask: impl
     arena.with_text(prior, |g| ask(arena, g))
 }
 
-// __dom.caretFromPoint(x, y, now) -> [[node], offset]: the caret position at the viewport point (`caret_from_point`),
-// in the element a hit there lands on — undefined where it lands on none.
+// __dom.caretFromPoint(x, y, now, root) -> [[node], offset]: the caret position at the viewport point (`caret_from_point`),
+// in the element a hit there lands on — undefined where it lands on none — or, given `root`, in `root`, wherever the point
+// is: a line a scroller clipped away is no hit, and a caret moving a line in an editor goes to it all the same.
 fn caret_from_point(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let x = args.get(0).number_value(scope).unwrap_or(f64::NAN);
     let y = args.get(1).number_value(scope).unwrap_or(f64::NAN);
     let cid = crate::dom::realm_id(scope, &args);
-    let Some(hit) = crate::hit_test::painting(scope, &args, 2, |p| p.hit(x, y, false).first().copied()).flatten() else { return };
+    let within = crate::dom::nid_arg(scope, &args, 3);
+    let Some(hit) = within.or_else(|| crate::hit_test::painting(scope, &args, 2, |p| p.hit(x, y, false).first().copied()).flatten()) else { return };
     let (node, offset) = with_text(scope, cid, |arena, g| arena.caret_from_point(g, x, y, hit)).unwrap_or((hit, 0));
     let mut values = vec![crate::dom::nodes_value(scope, cid, &[node])];
     values.push(v8::Integer::new_from_unsigned(scope, offset).into());

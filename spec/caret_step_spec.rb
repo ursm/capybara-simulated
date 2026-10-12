@@ -296,4 +296,29 @@ RSpec.describe 'stepping a caret by a character' do
     ed.send_keys('X')
     expect(s.evaluate_script('document.getElementById("ed").textContent')).to eq('HelloX')
   end
+
+  # …onto a line the editor's scroller clipped away — the caret goes there and the editor scrolls to show it, a textarea
+  # and an editing host that scrolls alike (Chrome: 14 at 21, then 20 at 41; `cccc@2` at 21).
+  it 'moves the caret onto a line a scroller clipped, and scrolls to it' do
+    s = session_for(<<~HTML)
+      <!DOCTYPE html><body style="margin:0;font:16px monospace"><textarea id=t style="font:16px monospace;width:300px;height:40px;line-height:20px;padding:0;border:0;display:block">line1
+      line2
+      line3
+      line4
+      line5</textarea>
+      <div id=e contenteditable style="width:300px;height:40px;overflow:auto;line-height:20px"><p style="margin:0">aaaa</p><p style="margin:0">bbbb</p><p style="margin:0">cccc</p><p style="margin:0">dddd</p></div>
+    HTML
+    t = s.find(:css, '#t')
+    t.click
+    s.execute_script('t.setSelectionRange(8, 8)')
+    t.send_keys(:down)
+    first = s.evaluate_script('[t.selectionStart, t.scrollTop]')
+    t.send_keys(:down)
+    expect([first, s.evaluate_script('[t.selectionStart, t.scrollTop]')]).to eq([[14, 21], [20, 41]])
+    e = s.find(:css, '#e')
+    e.click
+    s.execute_script('getSelection().collapse(document.querySelectorAll("#e p")[1].firstChild, 2)')
+    e.send_keys(:down)
+    expect(s.evaluate_script('(() => { const s = getSelection(); return [s.focusNode.data + "@" + s.focusOffset, document.getElementById("e").scrollTop]; })()')).to eq(['cccc@2', 21])
+  end
 end
