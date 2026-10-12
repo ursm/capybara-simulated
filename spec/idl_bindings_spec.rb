@@ -997,11 +997,12 @@ RSpec.describe 'IDL bindings' do
     JS
     expect(got).to eq([
       'open true true #hit',
-      'pa before closed>open', 'pb before closed>open', 'pa before open>closed', 'pa before closed>open',
-      'dlg before closed>open', 'dlg before open>closed',
+      # (…auto popovers: one shown hides the other, and a dialog shown hides both — Chrome's order)
+      'pa before closed>open', 'pb before closed>open', 'pa before open>closed', 'pa before closed>open', 'pb before open>closed',
+      'dlg before closed>open', 'pa before open>closed', 'dlg before open>closed',
       'dlg before closed>open', 'InvalidStateError', 'dlg before open>closed',
       '[object DataTransfer]', true,
-      'd3 toggle closed>open', 'clone toggle closed>open', 'pb toggle closed>open', 'pa toggle closed>open', 'dlg toggle closed>closed'
+      'd3 toggle closed>open', 'clone toggle closed>open', 'pb toggle closed>closed', 'pa toggle closed>closed', 'dlg toggle closed>closed'
     ])
   end
 

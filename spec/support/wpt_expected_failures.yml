@@ -4910,60 +4910,26 @@ html/semantics/interactive-elements/the-dialog-element/dialog-overlay.html:
   'none'
 - dialog computed overlay initially 'none'
 html/semantics/interactive-elements/the-dialog-element/dialog-popover-closedby-complex.html:
-- clicking dialogA with modal dialogA and modal dialogB, normal DOM nesting
 - clicking dialogA with modal dialogA and modal dialogB, same structure, but with
   shadow DOM slots
-- clicking dialogA with modal dialogA and modeless dialogB, normal DOM nesting
 - clicking dialogA with modal dialogA and modeless dialogB, same structure, but with
   shadow DOM slots
-- clicking dialogA with modeless dialogA and modal dialogB, normal DOM nesting
 - clicking dialogA with modeless dialogA and modal dialogB, same structure, but with
   shadow DOM slots
-- clicking dialogA with modeless dialogA and modeless dialogB, normal DOM nesting
 - clicking dialogA with modeless dialogA and modeless dialogB, same structure, but
   with shadow DOM slots
-- clicking dialogB with modal dialogA and modal dialogB, normal DOM nesting
 - clicking dialogB with modal dialogA and modal dialogB, same structure, but with
   shadow DOM slots
-- clicking dialogB with modal dialogA and modeless dialogB, normal DOM nesting
 - clicking dialogB with modal dialogA and modeless dialogB, same structure, but with
   shadow DOM slots
-- clicking dialogB with modeless dialogA and modal dialogB, normal DOM nesting
 - clicking dialogB with modeless dialogA and modal dialogB, same structure, but with
   shadow DOM slots
-- clicking dialogB with modeless dialogA and modeless dialogB, normal DOM nesting
 - clicking dialogB with modeless dialogA and modeless dialogB, same structure, but
   with shadow DOM slots
-- clicking outside all with modal dialogA and modal dialogB, normal DOM nesting
-- clicking outside all with modal dialogA and modal dialogB, same structure, but with
-  shadow DOM slots
-- clicking outside all with modal dialogA and modeless dialogB, normal DOM nesting
-- clicking outside all with modal dialogA and modeless dialogB, same structure, but
-  with shadow DOM slots
-- clicking outside all with modeless dialogA and modal dialogB, normal DOM nesting
-- clicking outside all with modeless dialogA and modal dialogB, same structure, but
-  with shadow DOM slots
-- clicking outside all with modeless dialogA and modeless dialogB, normal DOM nesting
-- clicking outside all with modeless dialogA and modeless dialogB, same structure,
-  but with shadow DOM slots
-- clicking popoverA with modal dialogA and modal dialogB, normal DOM nesting
-- clicking popoverA with modal dialogA and modal dialogB, same structure, but with
-  shadow DOM slots
-- clicking popoverA with modal dialogA and modeless dialogB, normal DOM nesting
 - clicking popoverA with modal dialogA and modeless dialogB, same structure, but with
   shadow DOM slots
-- clicking popoverA with modeless dialogA and modal dialogB, normal DOM nesting
-- clicking popoverA with modeless dialogA and modal dialogB, same structure, but with
-  shadow DOM slots
-- clicking popoverA with modeless dialogA and modeless dialogB, normal DOM nesting
 - clicking popoverA with modeless dialogA and modeless dialogB, same structure, but
   with shadow DOM slots
-html/semantics/interactive-elements/the-dialog-element/dialog-popover-closedby-simple.html:
-- Dialog closedby=any parent, popover child
-- Dialog closedby=closerequest parent, popover child
-- Dialog closedby=none parent, popover child
-- Popover parent, dialog closedby=any child
-- Popover parent, dialog closedby=closerequest child
 html/semantics/interactive-elements/the-dialog-element/dialog-popover-overlay.html:
 - "== html/semantics/interactive-elements/the-dialog-element/dialog-popover-overlay-ref.html"
 html/semantics/interactive-elements/the-dialog-element/dialog-requestclose-2.html:

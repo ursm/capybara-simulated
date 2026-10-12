@@ -91,6 +91,7 @@ mod svg_geometry;
 mod tables;
 mod attributes;
 mod selected_content;
+mod popovers;
 mod activation;
 mod text;
 mod text_codec;

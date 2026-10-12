@@ -862,6 +862,12 @@ pub(crate) struct RealmArena {
     // Each document's open dialogs list (HTML §4.11.4), by the document's slot, in the order they opened, with the close
     // watcher groups their dialogs' close watchers are in (dialogs.rs).
     pub(crate) open_dialogs: std::collections::HashMap<NodeId, crate::dialogs::OpenDialogs>,
+    // …and its showing auto popover list, in the order they were shown (popovers.rs).
+    pub(crate) showing_popovers: std::collections::HashMap<NodeId, Vec<NodeId>>,
+    // …and when each open dialog and showing popover was opened, in one count: whose close watcher is the newer, which a
+    // close request goes to first (popovers.rs `closeRequestTarget`).
+    pub(crate) close_watcher_order: std::collections::HashMap<NodeId, u64>,
+    pub(crate) close_watcher_count: u64,
     // The keys of the tasks the platform queues on the realms' timer lists, the isolate's (timers.rs).
     pub(crate) task_keys: crate::timers::TaskKeys,
     // The custom element reactions: each element's reaction queue, and the agent's reactions stack (ce_reactions.rs).
@@ -1076,6 +1082,7 @@ impl RealmArena {
         self.ce_reactions.forget(|id| live_node_realm(slots, id).is_none_or(|realm| realm == cid));
         // (…and its documents' open dialogs lists: a page of it begins with none)
         self.open_dialogs.retain(|&doc, _| live_node_realm(slots, doc).is_some_and(|realm| realm != cid));
+        self.showing_popovers.retain(|&doc, _| live_node_realm(slots, doc).is_some_and(|realm| realm != cid));
         self.ce_reactions.forget_definitions_of(cid);
     }
     // The elements of the backup element queue realm `cid` made, taken (ce_reactions.rs `take_backup`).
@@ -1272,7 +1279,16 @@ impl RealmArena {
         if !self.explicit_elements.is_empty() {
             self.forget_all_explicit_elements(id);
         }
-        // (…and an open dialogs list: a document's freed, or a dialog of one)
+        // (…and an open dialogs list or a showing popover list: a document's freed, or a dialog or popover of one)
+        if !self.close_watcher_order.is_empty() {
+            self.close_watcher_order.remove(&id);
+        }
+        if !self.showing_popovers.is_empty() {
+            self.showing_popovers.remove(&id);
+            for list in self.showing_popovers.values_mut() {
+                list.retain(|&p| p != id);
+            }
+        }
         if !self.open_dialogs.is_empty() {
             self.open_dialogs.remove(&id);
             for list in self.open_dialogs.values_mut() {
@@ -2492,6 +2508,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::tables::install(scope, ns, context_id);
     crate::attributes::install(scope, ns, context_id);
     crate::selected_content::install(scope, ns, context_id);
+    crate::popovers::install(scope, ns, context_id);
     crate::activation::install(scope, ns, context_id);
     crate::input_value::install(scope, ns, context_id);
     crate::image_source::install(scope, ns, context_id);

@@ -30,6 +30,7 @@ impl RealmArena {
         };
         list.activations = activations;
         list.dialogs.push((dialog, group));
+        self.note_close_watcher(dialog);
     }
     // …`dialog` taken out of whichever list has it.
     fn dialog_closed(&mut self, dialog: NodeId) {
@@ -65,7 +66,7 @@ impl RealmArena {
     }
     // The last of document `doc`'s open dialogs that is connected in it, an entry gone or moved dropped as it is met; one
     // not connected stays, for when it comes back.
-    fn topmost_dialog(&mut self, doc: NodeId) -> Option<NodeId> {
+    pub(crate) fn topmost_dialog(&mut self, doc: NodeId) -> Option<NodeId> {
         let mut list = self.open_dialogs.remove(&doc)?;
         list.dialogs.retain(|&(d, _)| self.dialog_of(doc, d).is_some());
         let found = list.dialogs.iter().rev().map(|&(d, _)| d).find(|&d| self.dialog_of(doc, d) == Some(true));
