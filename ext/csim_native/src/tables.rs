@@ -1,7 +1,7 @@
 // The tabular data interfaces' tree navigation (HTML §4.9): a table's caption, head, foot and bodies — its HTML children
 // of those names — its rows and a row's cells, and where a row or a cell sits among them; and their create* / insert* /
-// delete* steps and their caption / tHead / tFoot setters, which change that tree (`tableInsert`, `tableRemove`,
-// `tableReplace`). Their live collections are html-tables.js's.
+// delete* steps and the removal their caption / tHead / tFoot setters begin with, which change that tree (`tableInsert`,
+// `tableRemove`, `tableReplace`). Their live collections are html-tables.js's, and the setters' insertion.
 
 use crate::dom::{nodes_value, nid_arg, realm, realm_id, register, NodeData, NodeId, NodeKind, RealmArena};
 use crate::mutation::Change;
@@ -149,8 +149,8 @@ fn header_place(arena: &RealmArena, table: NodeId, part: u32) -> (Option<NodeId>
     };
     (arena.children_named(table, tag).into_iter().next(), before)
 }
-// The answer of an op that changed the tree: the element it made or none (null), and the changes of children it made
-// (mutation.rs `changes_value`).
+// The answer of an op that changed the tree: the element it made or names, or none (null), and the changes of children
+// it made (mutation.rs `changes_value`).
 fn answer<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, made: Option<NodeId>, changes: &[Change]) -> Option<v8::Local<'s, v8::Value>> {
     let mut out = vec![crate::dom::node_value(scope, made)];
     if crate::dom::factory_threw(scope) {
@@ -270,13 +270,13 @@ fn table_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     }
 }
 
-// __dom.tableReplace(nid, part, value, steps) -> [null, changes…]: a table's caption / tHead / tFoot setter — its first
-// child of that name removed, and `value` (an element, or null for none) put where that part goes.
+// __dom.tableReplace(nid, part, steps) -> [child, changes…]: the first half of a table's caption / tHead / tFoot setter —
+// its first child of that name removed — answering the child the new one is to go before (null: last), which the
+// bindings pre-insert it before, adopted and checked as any insertion is.
 fn table_replace(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return };
     let part = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
-    let value = crate::node_handle::nid_of(scope, args.get(2));
-    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(3)) else { return };
+    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(2)) else { return };
     let caller = realm_id(scope, &args);
     let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) else { return };
     if !matches!(part, CAPTION | THEAD | TFOOT) {
@@ -287,14 +287,8 @@ fn table_replace(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         let Some(change) = crate::mutation::remove(scope, cid, caller, existing, steps) else { return };
         changes.push(change);
     }
-    if let Some(value) = value {
-        // (…inserted before itself: before what follows it)
-        let arena = realm(scope, cid);
-        let before = header_place(arena, id, part).1.and_then(|b| if b == value { arena.sibling(value, 1) } else { Some(b) });
-        let Some(change) = crate::mutation::insert(scope, cid, caller, id, &[value], before, steps) else { return };
-        changes.push(change);
-    }
-    if let Some(out) = answer(scope, cid, None, &changes) {
+    let before = header_place(realm(scope, cid), id, part).1;
+    if let Some(out) = answer(scope, cid, before, &changes) {
         rv.set(out);
     }
 }

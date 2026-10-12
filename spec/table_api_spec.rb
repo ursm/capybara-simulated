@@ -57,4 +57,32 @@ RSpec.describe 'the table API' do
       ''
     ])
   end
+
+  it 'pre-inserts what a setter is given — adopted, refused where it holds the table, out of where it was' do
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>']] }).tap {|s| s.visit '/' }
+    got = session.evaluate_script(<<~'JS')
+      (() => {
+        const out = [];
+        const t = document.createElement('table');
+        t.createCaption();
+        t.createTBody();
+        const outer = document.createElement('caption');
+        outer.appendChild(t);
+        try { t.caption = outer; } catch (e) { out.push(e.name, t.innerHTML); }
+        const other = document.implementation.createHTMLDocument('');
+        const caption = other.createElement('caption');
+        document.createElement('table').caption = caption;
+        out.push(caption.ownerDocument === document);
+        const div = document.createElement('div'), moved = document.createElement('caption'), table = document.createElement('table');
+        div.append('x', moved);
+        document.body.append(div, table);
+        const mo = new MutationObserver(() => {});
+        mo.observe(document.body, {childList: true, subtree: true});
+        table.caption = moved;
+        out.push(mo.takeRecords().map((r) => r.target.nodeName + (r.addedNodes.length ? '+' : '-')).join(' '), div.childNodes.length);
+        return out;
+      })()
+    JS
+    expect(got).to eq(['HierarchyRequestError', '<tbody></tbody>', true, 'DIV- TABLE+', 1])
+  end
 end
