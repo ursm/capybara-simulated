@@ -346,4 +346,67 @@ RSpec.describe 'stepping a caret by a character' do
     }
     expect([ta.(12, :home), ta.(12, :end), ta.(2, :end), ta.(27, :home)]).to eq([10, 20, 10, 25])
   end
+
+  # A place a wrap breaks at is two: the end of one line and the start of the next. End leaves the caret at the END of
+  # its line, and the keys after it read that line (Chrome: End then Home 10, End twice 20, End then Down 19, then Home
+  # 10; Shift+End then Shift+Home back to the line's start; a textarea alike).
+  it "keeps End's caret at the end of the line it wrapped" do
+    s = session_for(<<~HTML)
+      <!DOCTYPE html><body style="margin:0;font:16px monospace"><div id=e contenteditable style="width:120px">aaaa bbbb cccc dddd eeee</div><textarea id=t style="font:16px monospace;width:120px;height:100px">aaaa bbbb cccc dddd eeee
+      second</textarea>
+    HTML
+    e = s.find(:css, '#e')
+    e.click
+    at = ->(offset, *keys) {
+      s.execute_script("getSelection().collapse(document.getElementById('e').firstChild, #{offset})")
+      e.send_keys(*keys)
+      s.evaluate_script('(() => { const s = getSelection(); return s.anchorOffset === s.focusOffset ? s.focusOffset : [s.anchorOffset, s.focusOffset]; })()')
+    }
+    expect([at.(12, :end, :home), at.(12, :end, :end), at.(2, :end, :end, :home), at.(2, :end, :down), at.(2, :end, :down, :home)]).to eq([10, 20, 0, 19, 10])
+    expect([at.(12, [:shift, :end], [:shift, :home]), at.(12, :end, [:shift, :home]), at.(2, :end, :left, :right, :home)]).to eq([[12, 10], [20, 10], 10])
+    t = s.find(:css, '#t')
+    t.click
+    s.execute_script('t.setSelectionRange(12, 12)')
+    t.send_keys([:shift, :end], [:shift, :home])
+    expect(s.evaluate_script('[t.selectionStart, t.selectionEnd, t.selectionDirection]')).to eq([10, 12, 'backward'])
+  end
+
+  # The caret's own line — not every line beside it — and the atoms on it: End in a flex item stays in it, a float's
+  # text is no part of the line beside it, an image ends or opens one, a line of an image alone has its edges; white
+  # space a wrap hangs is passed over to its first character in whatever node it is; Home before a non-editable chip
+  # opening a line, not in it. Every figure is Chrome's.
+  it "finds the edges of the caret's own line" do
+    s = session_for('<!DOCTYPE html><body style="margin:0;font:16px monospace"><div id=e contenteditable style="width:120px"></div>')
+    e = s.find(:css, '#e')
+    e.click
+    edge = ->(html, node, offset, key, style = '') {
+      s.execute_script("e.setAttribute('style', 'width:120px;#{style}'); e.innerHTML = #{html.to_json}; e.focus(); getSelection().collapse(#{node}, #{offset})")
+      e.send_keys(key)
+      s.evaluate_script("(() => { #{focus_js} return desc(); })()")
+    }
+    flex = '<div style="display:flex"><div style="width:60px">ab cd</div><div>ef gh</div></div>'
+    expect([
+      edge.(flex, 'e.firstChild.firstChild.firstChild', 1, :end),
+      edge.(flex, 'e.firstChild.lastChild.firstChild', 3, :home),
+      edge.('<span style="float:right">FLT</span>aaa bbb', 'e.lastChild', 1, :end),
+      edge.('<span style="float:left">FLT</span>aaa bbb', 'e.lastChild', 5, :home),
+      edge.('<table><tr><td>ab cd</td><td>ef gh</td></tr></table>', 'e.querySelector("td").firstChild', 1, :end)
+    ]).to eq(['ab cd@5', 'ef gh@0', 'aaa bbb@7', 'aaa bbb@0', 'ab cd@5'])
+    img = '<img style="width:20px;height:20px">'
+    expect([
+      edge.("<div>aaa</div><div>#{img}</div><div>bbb</div>", 'e.children[1]', 0, :end),
+      edge.("<div>aaa</div><div>#{img}</div><div>bbb</div>", 'e.children[1]', 1, :home),
+      edge.("aaa#{img}", 'e.firstChild', 1, :end),
+      edge.("#{img}aaa", 'e.lastChild', 2, :home),
+      edge.('<span contenteditable=false>XX</span>aaa', 'e.lastChild', 2, :home)
+    ]).to eq(['DIV@1', 'DIV@0', 'DIV@2', 'DIV@0', 'DIV@0'])
+    expect([
+      edge.('aaaa bbbb <b>cccc</b> dddd', 'e.firstChild', 1, :end),
+      edge.('aaaa bbbb<b> cccc</b> dddd', 'e.firstChild', 1, :end),
+      edge.("aaaa bbbb   \n   cccc", 'e.firstChild', 1, :end),
+      edge.('aaa <br>bbb', 'e.firstChild', 1, :end),
+      edge.('abc   ', 'e.firstChild', 1, :end, 'white-space:pre-wrap'),
+      edge.('aaaa bbbb    cccc', 'e.firstChild', 1, :end, 'white-space:pre-wrap')
+    ]).to eq(['aaaa bbbb @10', ' cccc@1', "aaaa bbbb   \n   cccc@10", 'aaa @3', 'abc   @6', 'aaaa bbbb    cccc@13'])
+  end
 end

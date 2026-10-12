@@ -1194,15 +1194,20 @@ pub(crate) type FragRow = [f64; 5];
 // apply), the advance the line reserved for it, what a justified line added to each no-break space inside it, the pen it
 // was measured from — its distance from the content edge before the line was aligned, which a tab's stop is counted
 // from — its line's height, the band a point on the line falls in, and the pen its line's content ends at (its hanging
-// white space off), which says whether a space after the piece is on the line. In the block's border-box frame until
-// `place` moves it into the document's, as a fragment is. Only glyph-bearing pieces: white space draws nothing.
-pub(crate) type TextRow = [f64; 11];
+// white space off), which says whether a space after the piece is on the line; then how many pieces of its line come
+// before it — a line's pieces are consecutive rows, so one line is the rows from a 0 to the next 0 — and 1 where a soft
+// wrap ended its line (not a `<br>`, a preserved newline, or its block's end), the white space it hangs a wrap's. In the
+// block's border-box frame until `place` moves it into the document's, as a fragment is. Only glyph-bearing pieces:
+// white space draws nothing.
+pub(crate) type TextRow = [f64; 13];
 
 // A line layout's text pieces in its box's frame — moved `dx` across and `dy` down — their runs numbered in the pass's
 // stream from `rs`.
 fn pieces_in(rows: &[TextRow], rs: usize, dx: f64, dy: f64) -> Vec<TextRow> {
     rows.iter()
-        .map(|&[run, start, end, x, y, baseline, w, justify, pen, h, line_end]| [run + rs as f64, start, end, x + dx, y + dy, baseline + dy, w, justify, pen, h, line_end])
+        .map(|&[run, start, end, x, y, baseline, w, justify, pen, h, line_end, on_line, wrapped]| {
+            [run + rs as f64, start, end, x + dx, y + dy, baseline + dy, w, justify, pen, h, line_end, on_line, wrapped]
+        })
         .collect()
 }
 
@@ -2191,9 +2196,10 @@ fn line_layout(
             for (ri, start, end, x, w, rx, ry) in line_pieces.drain(..) {
                 let inside = if extra > 0.0 { gaps.iter().filter(|&&g| g >= x && g < x + w).count() } else { 0 };
                 let justify = if inside > 0 { extra } else { 0.0 };
-                let row = [ri as f64, start, end, x + shift_at(x) + rx, total + ry, total + line_asc + ry, w + inside as f64 * extra, justify, x, line_h, line_end];
-                let spaced = |at: f64| run_texts.get(ri).and_then(|t| t.as_deref()).and_then(|t| t.get(at as usize)) == Some(&0x20);
                 let this_line = texts.len() > line_rows;
+                let (on_line, wrapped) = ((texts.len() - line_rows) as f64, if $wrap { 1.0 } else { 0.0 });
+                let row = [ri as f64, start, end, x + shift_at(x) + rx, total + ry, total + line_asc + ry, w + inside as f64 * extra, justify, x, line_h, line_end, on_line, wrapped];
+                let spaced = |at: f64| run_texts.get(ri).and_then(|t| t.as_deref()).and_then(|t| t.get(at as usize)) == Some(&0x20);
                 match texts.last_mut().filter(|l| this_line && extra == 0.0 && l[0] == row[0] && l[2] + 1.0 == start && l[5] == row[5] && spaced(l[2])) {
                     Some(last) => {
                         last[2] = end;

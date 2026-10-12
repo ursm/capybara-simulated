@@ -278,8 +278,8 @@ input:is([type=radio i], [type=checkbox i], [type=reset i], [type=button i], [ty
   box-sizing: border-box;
 }
 /* (…and it scrolls its own text: Chrome computes `overflow: auto`, where Firefox keeps `visible` and the spec says
-   nothing — the JS layout's and the Chrome figure) */
-textarea { white-space: pre-wrap; overflow: auto; }
+   nothing — the JS layout's and the Chrome figure; and it breaks a word too long for its line, as both engines do) */
+textarea { white-space: pre-wrap; overflow: auto; overflow-wrap: break-word; }
 
 /* …and each control's own box, which HTML leaves to the user agent: Chrome's, measured. The font every control
  * takes is 13.333px Arial (a date or time field and a textarea: monospace). */

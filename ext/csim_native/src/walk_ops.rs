@@ -271,7 +271,7 @@ fn words(rows: &[crate::layout::TextRow], runs: &[crate::layout::Run], run_texts
             let len = if cp > 0xFFFF { 2 } else { 1 };
             if cp == 0x20 {
                 if let Some((ws, x, w)) = word.take() {
-                    out.push([r[0], (start + ws) as f64, (start + unit) as f64, r[3] + x, r[4], r[5], w, r[7], r[8] + x, r[9], r[10]]);
+                    out.push([r[0], (start + ws) as f64, (start + unit) as f64, r[3] + x, r[4], r[5], w, r[7], r[8] + x, r[9], r[10], r[11], r[12]]);
                 }
             } else {
                 let (_, _, w) = word.get_or_insert((unit, pen, 0.0));
@@ -281,7 +281,7 @@ fn words(rows: &[crate::layout::TextRow], runs: &[crate::layout::Run], run_texts
             unit += len;
         }
         if let Some((ws, x, w)) = word {
-            out.push([r[0], (start + ws) as f64, end as f64, r[3] + x, r[4], r[5], w, r[7], r[8] + x, r[9], r[10]]);
+            out.push([r[0], (start + ws) as f64, end as f64, r[3] + x, r[4], r[5], w, r[7], r[8] + x, r[9], r[10], r[11], r[12]]);
         }
     }
     out
