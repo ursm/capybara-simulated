@@ -1950,8 +1950,6 @@ custom-elements/microtasks-and-constructors.html:
 - Microtasks evaluate immediately when the stack is empty inside the parser
 - Microtasks evaluate immediately when the stack is empty inside the parser, causing
   the checks on no attributes to fail
-custom-elements/parser/parser-sets-attributes-and-children.html:
-- HTML parser should call connectedCallback before appending child nodes.
 custom-elements/perform-microtask-checkpoint-before-construction-xml-parser.xhtml:
 - XML parser must perform a microtask checkpoint before constructing a custom element
 custom-elements/perform-microtask-checkpoint-before-construction.html:

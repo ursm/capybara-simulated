@@ -148,4 +148,14 @@ RSpec.describe 'HTML parser custom-element construction' do
     JS
     expect(got).to eq([true, 'span', 'late-el', true])
   end
+
+  # Each one the parser constructs is connected as it is inserted — its connectedCallback before the next start tag's
+  # constructor, and before what follows it is parsed (Chrome), where the connects waited for the next script.
+  it 'connects each custom element as the parser inserts it' do
+    html = <<~HTML
+      <!DOCTYPE html><body><script>window.log = []; customElements.define('x-b', class extends HTMLElement { constructor() { super(); log.push('ctor'); } connectedCallback() { log.push('conn:' + this.id + ':' + !!document.getElementById('after')); } });</script><x-b id=one></x-b><p id=after></p><x-b id=two><x-b id=in></x-b></x-b><script>log.push('script')</script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
+    expect(s.evaluate_script('window.log')).to eq(%w[ctor conn:one:false ctor conn:two:true ctor conn:in:true script])
+  end
 end
