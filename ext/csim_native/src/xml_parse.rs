@@ -747,7 +747,7 @@ fn parser_error() -> Vec<Value> {
 // The parse's steps taken: each node made — an element with its name, namespace, prefix and attributes — and put in the
 // node its step names, an XHTML `<template>`'s children in its contents; one at the top level into `into`, or else
 // among `tops`. Of the open `<details>` of a name group in one tree — a template's contents, or else the rest — the
-// first stays open and the bindings close the others (`BUILT_CLOSED`), as each one's insertion steps leave them (HTML
+// first stays open and the others are closed (`Build::close_details`), as each one's insertion steps leave them (HTML
 // "ensure details exclusivity by closing the given element if needed").
 fn replay<'s>(scope: &mut v8::PinScope<'s, '_>, build: &mut Build<'s>, values: Vec<Value>, into: Option<crate::dom::NodeId>, tops: &mut Vec<crate::dom::NodeId>) -> Option<()> {
     let text = |v: Option<Value>| match v {
@@ -805,7 +805,7 @@ fn replay<'s>(scope: &mut v8::PinScope<'s, '_>, build: &mut Build<'s>, values: V
                 if let Some(group) = group {
                     let contents = to.map(|t| realm(scope, build.cid).root_of(t)).filter(|&r| build.is_contents(r));
                     if !open_groups.insert((contents, group)) {
-                        build.flag(id, crate::html_parse::BUILT_CLOSED);
+                        build.close_details(scope, id);
                     }
                 }
                 id

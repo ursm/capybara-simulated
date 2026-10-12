@@ -192,6 +192,7 @@ const STEP_FORM_OWNER: u32 = 1 << 17; // `form`, `id`, `disabled`: form-associat
 const STEP_FILES: u32 = 1 << 18; // an input become a file input: its files emptied
 const STEP_BACKUP: u32 = 1 << 19; // a reaction enqueued: the backup element queue's microtask
 const STEP_REMOVED: u32 = 1 << 20; // the attribute removed: its Attr node detached
+const STEP_POPOVER: u32 = 1 << 21; // a `popover` changed: a showing popover of another state now hidden
 
 // __dom.attrWrite(element, how, a, b, c, d) -> `[steps, key, oldValue, localName]` of the change made (`how`, above):
 // what the bindings do for it (`STEP_*`), the key of the attribute, the value it had (null for none) and its local
@@ -285,6 +286,17 @@ fn attr_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let local_value = v8::String::new(scope, &local).map_or_else(|| v8::undefined(scope).into(), Into::into);
     let values = [v8::Integer::new_from_unsigned(scope, steps).into(), key_value, old_value, local_value];
     rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+
+// The attribute `name` in no namespace of `id` removed by an algorithm of the engine's own (a parser's insertion steps
+// closing a details element): the change handled as any removal — its record queued, its reaction enqueued — its steps
+// for the bindings answered (`STEP_*`, none where it had none).
+pub(crate) fn remove_plain(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, id: NodeId, name: &str) -> u32 {
+    let element = crate::dom::node_value(scope, Some(id));
+    if element.is_null() {
+        return 0;
+    }
+    change(scope, cid, caller, element, id, name, None, None).map_or(0, |(steps, _, _)| steps)
 }
 
 // HTML's value modes of an input's type (§4.10.5): "value", "default", "default/on" and "filename".
@@ -421,6 +433,7 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     steps |= flag(tag == "source" && changed && set, STEP_PICTURE);
     steps |= flag(local.starts_with("on"), STEP_HANDLER);
     steps |= flag(changed && matches!(local, "form" | "id" | "disabled"), STEP_FORM_OWNER);
+    steps |= flag(html && local == "popover" && changed && n.state & crate::dom::STATE_POPOVER_OPEN != 0, STEP_POPOVER);
     steps
 }
 

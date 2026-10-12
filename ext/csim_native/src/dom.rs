@@ -862,8 +862,8 @@ pub(crate) struct RealmArena {
     // Each document's open dialogs list (HTML §4.11.4), by the document's slot, in the order they opened, with the close
     // watcher groups their dialogs' close watchers are in (dialogs.rs).
     pub(crate) open_dialogs: std::collections::HashMap<NodeId, crate::dialogs::OpenDialogs>,
-    // …and its showing auto popover list, in the order they were shown (popovers.rs).
-    pub(crate) showing_popovers: std::collections::HashMap<NodeId, Vec<NodeId>>,
+    // …and its showing auto and hint popover lists, in the order they were shown, each entry with its list (popovers.rs).
+    pub(crate) showing_popovers: std::collections::HashMap<NodeId, Vec<(NodeId, u32)>>,
     // …and when each open dialog and showing popover was opened, in one count: whose close watcher is the newer, which a
     // close request goes to first (popovers.rs `closeRequestTarget`).
     pub(crate) close_watcher_order: std::collections::HashMap<NodeId, u64>,
@@ -1286,7 +1286,7 @@ impl RealmArena {
         if !self.showing_popovers.is_empty() {
             self.showing_popovers.remove(&id);
             for list in self.showing_popovers.values_mut() {
-                list.retain(|&p| p != id);
+                list.retain(|&(p, _)| p != id);
             }
         }
         if !self.open_dialogs.is_empty() {

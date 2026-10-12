@@ -807,7 +807,7 @@ const FORM_ASSOCIATED: [&str; 7] = ["button", "fieldset", "input", "object", "ou
 
 // What the bindings run for an element the build made, after it: its attributes' steps (`names`), and — `BUILT_*` —
 // a select's options set up, its insertion steps, and — a `<details>` its name group has another open one of before it
-// — its closing (its `open` added, then removed: both its toggle's states).
+// — its closing, which the build made (its `open` added, then removed: both its toggle's states, the bindings' task).
 const BUILT_SELECT: u32 = 1;
 const BUILT_INSERTED: u32 = 1 << 2;
 pub(crate) const BUILT_CLOSED: u32 = 1 << 3;
@@ -1035,12 +1035,12 @@ impl<'s> Build<'s> {
         }
         self.script_made(scope, child, contents);
         // (…an open details element with a name closed where its tree has another of its name group open: its
-        // insertion steps, HTML "ensure details exclusivity by closing the given element if needed" — the bindings
-        // remove its `open` after, as each insertion in turn would have)
+        // insertion steps, HTML "ensure details exclusivity by closing the given element if needed" — its `open`
+        // removed now, its record among the insertion's and what a constructor after it sees; its toggle the bindings')
         let arena = crate::dom::realm(scope, self.cid);
         let open_named = arena.get(child).is_some_and(|n| n.is_html_named("details") && n.plain_attr("open").is_some() && n.plain_attr("name").is_some_and(|v| !v.is_empty()));
         if open_named && !arena.open_details_in_group(child).is_empty() {
-            self.flag(child, BUILT_CLOSED);
+            self.close_details(scope, child);
         }
     }
     // What the parser making `node` gives it, a script's flags: no longer "force async", and the build's own — in
@@ -1083,6 +1083,12 @@ impl<'s> Build<'s> {
 
     // `flags` added to those the bindings run for `id` — the element last made, whose entry is the last one where it has
     // one.
+    // A details element the parser's insertion steps close: its `open` removed — as any removal, its record queued — and
+    // its toggle the bindings' to queue (`BUILT_CLOSED`: the `open` it was made with, then none).
+    pub(crate) fn close_details(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId) {
+        crate::attributes::remove_plain(scope, self.cid, self.maker, id, "open");
+        self.flag(id, BUILT_CLOSED);
+    }
     pub(crate) fn flag(&mut self, id: crate::dom::NodeId, flags: u32) {
         match self.steps.iter_mut().rev().find(|(e, ..)| *e == id) {
             Some((_, _, had)) => *had |= flags,

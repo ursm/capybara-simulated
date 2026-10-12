@@ -196,6 +196,27 @@ const INVOKE_DIALOG_COMMAND: u32 = 2;
 const INVOKE_CUSTOM_COMMAND: u32 = 3;
 const INVOKE_POPOVER_TARGET: u32 = 4;
 
+// HTML's "popover target element" of `id` — its `popovertarget`'s popover, or a `<button commandfor>`'s popover where its
+// command is a popover's — for a button or a button-like input that is not disabled and no submit button with a form
+// owner: what a press on it is a press of, for the popovers' light dismiss.
+pub(crate) fn invoked_popover(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
+    let n = arena.get(id)?;
+    let ty = n.plain_attr("type").unwrap_or("").to_ascii_lowercase();
+    let button = n.is_html_named("button");
+    if !button && !(n.is_html_named("input") && BUTTON_INPUT_TYPES.contains(&ty.as_str())) {
+        return None;
+    }
+    if arena.is_actually_disabled(id) || (n.is_submit_button() && arena.form_owner(id).is_some()) {
+        return None;
+    }
+    let popover = |p: NodeId| arena.get(p).is_some_and(|t| crate::popovers::popover_kind(t) != 0 || t.plain_attr("popover").is_some());
+    if let Some(target) = button.then(|| arena.referenced_element(id, "commandfor")).flatten() {
+        let command = button_command(n);
+        return command.filter(|c| POPOVER_COMMANDS.contains(&c.as_str())).map(|_| target).filter(|&t| popover(t));
+    }
+    arena.referenced_element(id, "popovertarget").filter(|&p| popover(p))
+}
+
 // __dom.invokerAction(invoker, eventTarget) -> undefined, or `[kind, target, command, action]`: HTML's button activation
 // for a command or popover invoker, which a click runs for its activation target where that submitted or reset no form —
 // nothing for a disabled or disconnected one, nor for a button with a form owner unless its type is `button` (a submit,
