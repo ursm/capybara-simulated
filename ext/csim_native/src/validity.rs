@@ -830,18 +830,18 @@ fn form_listed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     rv.set(crate::dom::nodes_value(scope, cid, &listed));
 }
 
-// __dom.formReset(formNid) -> `[elements, files, outputs, selects, options]`, as `nodes_value` answers each: HTML "reset"
+// __dom.formReset(formNid) -> `[elements, files, followers, options]`, as `nodes_value` answers each: HTML "reset"
 // of a form (§4.10.21.6), its built-in controls' share — each listed element's reset algorithm: a text control's dirty
 // value and user edit forgotten (its value its default again), a checkbox's or a radio's dirty checkedness, a select's
 // options' selectedness their `selected` attributes', not dirty, and its selectedness setting algorithm run — and what
 // the bindings do after: the form-associated custom elements whose `formResetCallback` is owed, the file inputs whose
-// files are emptied, the outputs to reset, the selects whose `<selectedcontent>` follows, the options whose selectedness
-// changed.
+// files are emptied, the outputs to reset and the selects whose `<selectedcontent>` follows — in tree order, together —
+// and the options whose selectedness changed.
 fn form_reset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(form) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let arena = crate::dom::realm(scope, cid);
-    let (mut elements, mut files, mut outputs, mut selects, mut options, mut values) = (vec![], vec![], vec![], vec![], vec![], vec![]);
+    let (mut elements, mut files, mut followers, mut options, mut values) = (vec![], vec![], vec![], vec![], vec![]);
     for id in arena.form_listed(form) {
         let Some(n) = arena.get(id) else { continue };
         if n.state & STATE_FORM_ASSOCIATED != 0 {
@@ -875,9 +875,9 @@ fn form_reset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
             options.extend(arena.apply_option_states(states));
             let states = arena.selectedness(id, None);
             options.extend(arena.apply_option_states(states));
-            selects.push(id);
+            followers.push(id);
         } else if n.is_html_named("output") {
-            outputs.push(id);
+            followers.push(id);
         }
     }
     for &id in &values {
@@ -886,7 +886,7 @@ fn form_reset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         }
     }
     crate::dom::realm(scope, cid).observers.note_state_changed();
-    let lists = [elements, files, outputs, selects, options].map(|ids| crate::dom::nodes_value(scope, cid, &ids));
+    let lists = [elements, files, followers, options].map(|ids| crate::dom::nodes_value(scope, cid, &ids));
     rv.set(v8::Array::new_with_elements(scope, &lists).into());
 }
 

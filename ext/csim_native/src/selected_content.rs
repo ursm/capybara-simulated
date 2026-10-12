@@ -60,7 +60,7 @@ fn update_selected_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     }
     let steps = v8::Local::new(scope, steps);
     let (mut changes, mut copies, mut held): (Vec<crate::mutation::Change>, BindingsSteps, Vec<_>) = (Vec::new(), Vec::new(), Vec::new());
-    for target in targets {
+    'targets: for target in targets {
         // (…one an outer one's replacement took out, which the content model forbids anyway, skipped)
         let arena = realm(scope, cid);
         if arena.get(target).is_none_or(|n| n.parent.is_none()) || (!force && crate::serialize::html(arena, target, false, &[]) == want) {
@@ -78,13 +78,14 @@ fn update_selected_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
                 None
             };
             for &c in kids {
-                let Some(copy) = crate::cloning::clone_into(scope, cid, caller, c, parent, true, doc, &mut held, &mut copies) else { return };
+                // (…a copy not made — its factory threw — ends the update: what it changed so far the op's answer)
+                let Some(copy) = crate::cloning::clone_into(scope, cid, caller, c, parent, true, doc, &mut held, &mut copies) else { break 'targets };
                 if parent.is_none() {
                     clones.push(copy);
                 }
             }
         }
-        let Some(change) = crate::mutation::replace_all(scope, cid, caller, target, &clones, steps) else { return };
+        let Some(change) = crate::mutation::replace_all(scope, cid, caller, target, &clones, steps) else { break };
         changes.push(change);
     }
     if changes.is_empty() {
