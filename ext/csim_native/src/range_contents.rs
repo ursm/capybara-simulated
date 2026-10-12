@@ -49,7 +49,7 @@ impl<'s> Run<'s> {
     // A new fragment, in the node document of what the run makes.
     fn fragment(&mut self, scope: &mut v8::PinScope<'s, '_>) -> NodeId {
         let id = realm(scope, self.cid).create(NodeData::of_kind(NodeKind::Fragment, Vec::new()), None);
-        self.held.push(crate::node_handle::bare(scope, id, self.doc));
+        self.held.push(crate::node_handle::bare(scope, id, self.doc, self.caller));
         id
     }
     // `nodes` appended to `parent`, each taken out of the parent it has first (DOM "insert" step 6's adoption: a
@@ -72,7 +72,7 @@ impl<'s> Run<'s> {
     }
     // A copy of `src` (its descendants with it, `deep`).
     fn copy(&mut self, scope: &mut v8::PinScope<'s, '_>, src: NodeId, deep: bool) -> Option<NodeId> {
-        clone_into(scope, self.cid, src, None, deep, self.doc, &mut self.held, &mut self.bindings)
+        clone_into(scope, self.cid, self.caller, src, None, deep, self.doc, &mut self.held, &mut self.bindings)
     }
     // A copy of the character data `node` holding its data from `from` to `to`.
     fn slice(&mut self, scope: &mut v8::PinScope<'s, '_>, node: NodeId, from: u32, to: u32) -> Option<NodeId> {

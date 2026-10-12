@@ -100,6 +100,8 @@ pub(crate) struct NodeHandle {
     // …and, for a shadow root, whether it keeps its null registry as it is adopted (a declarative
     // `shadowrootcustomelementregistry` root's: HTML "keep custom element registry null").
     keep_null: Cell<bool>,
+    // The realm whose code made a node the engine made (`bare`), whose factory makes its object (`object_of`).
+    maker: Cell<i32>,
 }
 
 impl NodeHandle {
@@ -330,19 +332,21 @@ fn fresh() -> NodeHandle {
         registry_object: UnsafeCell::new(v8::TracedReference::empty()),
         window_registry_object: UnsafeCell::new(v8::TracedReference::empty()),
         keep_null: Cell::new(false),
+        maker: Cell::new(0),
     }
 }
 
 // The handle of a node the ENGINE made (`RealmArena::create`), which has no object until the page is handed it
-// (`object_of`): bound to slot `nid`, its node document `doc`'s. The Persistent returned holds it while the engine holds
+// (`object_of`): bound to slot `nid`, its node document `doc`'s, made by realm `maker`'s code. The Persistent returned holds it while the engine holds
 // the node — a collection in between would take it, held by nothing else yet; then the tree's edges hold it, once it is
 // in one, and its object once it has one; and otherwise it is collected, and its slot freed, as any node's is.
-pub(crate) fn bare(scope: &mut v8::PinScope<'_, '_>, nid: NodeId, doc: Option<v8::Local<'_, v8::Object>>) -> v8::cppgc::Persistent<NodeHandle> {
+pub(crate) fn bare(scope: &mut v8::PinScope<'_, '_>, nid: NodeId, doc: Option<v8::Local<'_, v8::Object>>, maker: i32) -> v8::cppgc::Persistent<NodeHandle> {
     let heap = scope.get_cpp_heap().expect("the engine makes nodes only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and held by the Persistent before anything else allocates.
     let held = unsafe { v8::cppgc::Persistent::new(&v8::cppgc::make_garbage_collected(heap, fresh())) };
     let h = held.get().expect("a handle its Persistent holds");
     h.set_document(scope, doc);
+    h.maker.set(maker);
     attach(scope, &held, h, nid);
     held
 }
@@ -387,26 +391,37 @@ fn attach(scope: &mut v8::PinScope<'_, '_>, ptr: &impl v8::cppgc::GetRustObj<Nod
     crate::dom::dom(scope).arena.set_link(nid, Link(Some(WeakPersistent::new(ptr))));
 }
 
-// The object of the node in slot `id` — made by its realm's node factory (`setNodeFactory`) the first time a node the
-// engine made, which has none, is handed to the page: the factory makes an object of the node's interface, which
-// `construct` makes the wrapper of the node's own handle. None for a node with no handle, or whose realm has no
-// factory.
+// The object of the node in slot `id` — made by the node factory (`setNodeFactory`) of the realm whose code made it, the
+// first time a node the engine made, which has none, is handed to the page: the factory makes an object of the node's
+// interface, which `construct` makes the wrapper of the node's own handle. None for a node with no handle, or whose
+// maker has no factory.
 pub(crate) fn object_of<'s>(scope: &mut v8::PinScope<'s, '_>, id: NodeId) -> Option<v8::Local<'s, v8::Object>> {
     let n = crate::dom::dom(scope).arena.get(id)?;
-    let (link, realm) = (n.link.0.as_ref().map(|w| v8::cppgc::Persistent::new(w))?, n.realm);
+    // (…a handle collected since its answer was asked for is none: no object is made for it)
+    let link = n.link.0.as_ref().map(|w| v8::cppgc::Persistent::new(w)).filter(|p| p.get().is_some())?;
+    let h = link.get()?;
     if let Some(object) = held_of(&link).and_then(|h| h.get(scope)) {
         return Some(object);
     }
+    // (…by the realm whose code made the node — not whichever tree's edges it is in now: Chrome's)
+    let realm = h.maker.get();
     let factory = crate::dom::dom(scope).factories.get(&realm).cloned()?.to_local(scope)?;
     let n = crate::dom::dom(scope).arena.get(id)?;
-    let (node_type, local, ns, prefix) = (n.node_type(), n.local_name.to_string(), n.ns.to_string(), n.prefix.as_deref().map(str::to_owned));
+    // (…its name exact: the UTF-16 the DOM holds, a lone surrogate kept)
+    let exact = n.name_u16.as_deref().map(|e| (e.local.clone(), e.ns.clone(), e.prefix.clone()));
+    let (local, ns, prefix) = exact.unwrap_or_else(|| {
+        let utf16 = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+        (utf16(&n.local_name), utf16(&n.ns), n.prefix.as_deref().map(utf16))
+    });
+    let node_type = n.node_type();
+    let string = |scope: &mut v8::PinScope<'s, '_>, units: &[u16]| v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal);
     let args: [v8::Local<'_, v8::Value>; 5] = [
         v8::Number::new(scope, id.to_f64()).into(),
         v8::Integer::new_from_unsigned(scope, node_type).into(),
-        v8::String::new(scope, &local)?.into(),
-        v8::String::new(scope, &ns)?.into(),
+        string(scope, &local)?.into(),
+        string(scope, &ns)?.into(),
         match prefix {
-            Some(p) => v8::String::new(scope, &p)?.into(),
+            Some(p) => string(scope, &p)?.into(),
             None => v8::null(scope).into(),
         },
     ];
