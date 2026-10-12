@@ -220,7 +220,10 @@ impl RealmArena {
                 (Some(from..start), from)
             }
             EDIT_WORD_DELETE if start < len => (Some(start..word(start, true)), start),
-            EDIT_LINE_BACKSPACE if start > 0 => (Some(line_start(start)..start), line_start(start)),
+            EDIT_LINE_BACKSPACE if start > 0 => {
+                let from = if value[start - 1] == 0x0A { start - 1 } else { line_start(start) };
+                (Some(from..start), from)
+            }
             EDIT_WORD_BACKSPACE | EDIT_WORD_DELETE | EDIT_LINE_BACKSPACE => return 0,
             EDIT_WORD_LEFT => (None, word(focus, false)),
             EDIT_WORD_RIGHT => (None, word(focus, true)),

@@ -174,7 +174,8 @@ RSpec.describe 'typing into a text control' do
 
   # A word step with a selection goes from its focus; Ctrl+Backspace / Ctrl+Delete over a selection delete it as
   # `deleteContent…`; Ctrl+Shift+Backspace deletes to the line's start (`deleteSoftLineBackward`), Ctrl+Shift+Delete
-  # nothing; a password field's words are its whole value; Alt+ArrowLeft moves nothing (Chrome on Linux).
+  # nothing (at a line's start, the line feed alone); a password field's words are its whole value; Alt+ArrowLeft and
+  # Meta+ArrowLeft move nothing (Chrome on Linux).
   it 'steps words from the focus, a password whole' do
     html = '<!DOCTYPE html><meta charset=utf-8><input id=i><input id=p type=password><textarea id=t></textarea>'
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
@@ -193,14 +194,15 @@ RSpec.describe 'typing into a text control' do
       key.('t', "ab cd\nef gh", 10, 10, 'none', [:control, :shift, :backspace]),
       key.('p', v, 10, 10, 'none', [:control, :left]), key.('p', v, 5, 5, 'none', [:control, :right]),
       key.('p', v, 10, 10, 'none', [:control, :backspace]), key.('p', v, 10, 10, 'none', [:control, :delete]),
-      key.('i', v, 10, 10, 'none', [:alt, :left])
+      key.('i', v, 10, 10, 'none', [:alt, :left]), key.('i', v, 10, 10, 'none', [:meta, :left]),
+      key.('t', "ab cd\nef gh", 6, 6, 'none', [:control, :shift, :backspace])
     ]
     expect(got).to eq([
       [v, 9, 9], [v, 4, 4], [v, 7, 7], [v, 4, 4],
       ['abc dhi.j  kl', 5, 5, 'deleteContentBackward'], ['abc dhi.j  kl', 5, 5, 'deleteContentForward'],
       [v, 10, 10], ['hi.j  kl', 0, 0, 'deleteSoftLineBackward'], ["ab cd\nh", 6, 6, 'deleteSoftLineBackward'],
       [v, 0, 0], [v, 18, 18], ['hi.j  kl', 0, 0, 'deleteWordBackward'], ['abc def, g', 10, 10, 'deleteWordForward'],
-      [v, 10, 10]
+      [v, 10, 10], [v, 10, 10], ['ab cdef gh', 5, 5, 'deleteSoftLineBackward']
     ])
   end
 end
