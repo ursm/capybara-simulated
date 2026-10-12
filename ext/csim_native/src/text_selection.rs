@@ -71,6 +71,7 @@ const EDIT_WORD_LEFT: u32 = 8;
 const EDIT_WORD_RIGHT: u32 = 9;
 const EDIT_WORD_BACKSPACE: u32 = 10;
 const EDIT_WORD_DELETE: u32 = 11;
+const EDIT_LINE_BACKSPACE: u32 = 12;
 const EDIT_EXTEND: u32 = 16;
 
 // Why `setRangeText()` refused.
@@ -172,24 +173,32 @@ impl RealmArena {
     // flag, which go whole ("é" leaves "e"; "👍🏽" nothing); ArrowLeft / ArrowRight collapse a selection to its start /
     // end, or move the caret by a grapheme cluster; Home / End go to the start / end of the line the caret is on (a
     // textarea's — its value's line, between line feeds — or an input's whole value), Ctrl+Home / Ctrl+End to the
-    // value's; Ctrl+ArrowLeft / Ctrl+ArrowRight go a word back / on (`word_edge`), Ctrl+Backspace / Ctrl+Delete remove
-    // up to there (at a line's start, its line feed alone); and with `EDIT_EXTEND` (Shift) the moves take the
+    // value's; Ctrl+ArrowLeft / Ctrl+ArrowRight go a word back / on from the selection's focus (`word_edge`; a password
+    // field's words none, its value one), Ctrl+Backspace / Ctrl+Delete remove up to there (at a line's start, its line
+    // feed alone), Ctrl+Shift+Backspace up to the line's start; and with `EDIT_EXTEND` (Shift) the moves take the
     // selection's focus there, its anchor staying. What it changed (`TYPED_*`).
     pub(crate) fn edit_control(&mut self, id: NodeId, edit: u32) -> u32 {
         let Some(n) = self.get(id) else { return 0 };
         let value = self.relevant_value(n);
         let multiline = n.is_html_named("textarea");
+        // (…a password's words its whole value: Blink steps a password field by its line, its words told to nobody)
+        let password = n.is_html_named("input") && n.input_type() == "password";
         let len = value.len();
         let (sel, set) = self.text_selection(id);
         let (start, end) = if set { (sel.start as usize, sel.end as usize) } else { (len, len) };
         let line_start = |i: usize| if multiline { value[..i].iter().rposition(|&u| u == 0x0A).map_or(0, |p| p + 1) } else { 0 };
         let line_end = |i: usize| if multiline { value[i..].iter().position(|&u| u == 0x0A).map_or(len, |p| i + p) } else { len };
+        let word = |at: usize, forward: bool| match (password, forward) {
+            (false, _) => word_edge(&value, at, forward),
+            (true, true) => line_end(at),
+            (true, false) => line_start(at),
+        };
         let extend = edit & EDIT_EXTEND != 0;
         let key = edit & !EDIT_EXTEND;
+        // (…the focus the end the selection runs to, the anchor the other)
+        let backward = sel.direction == Direction::Backward;
+        let (anchor, focus) = if backward { (end, start) } else { (start, end) };
         if extend && key >= EDIT_LEFT {
-            // (…the focus the end the selection runs to, the anchor the other)
-            let backward = sel.direction == Direction::Backward;
-            let (anchor, focus) = if backward { (end, start) } else { (start, end) };
             let to = match key {
                 EDIT_LEFT => cluster_before(&value, focus),
                 EDIT_RIGHT => cluster_after(&value, focus),
@@ -197,23 +206,24 @@ impl RealmArena {
                 EDIT_END => line_end(focus),
                 EDIT_TEXT_START => 0,
                 EDIT_TEXT_END => len,
-                EDIT_WORD_LEFT => word_edge(&value, focus, false),
-                EDIT_WORD_RIGHT => word_edge(&value, focus, true),
+                EDIT_WORD_LEFT => word(focus, false),
+                EDIT_WORD_RIGHT => word(focus, true),
                 _ => return 0,
             };
             let (from, until, direction) = if to < anchor { (to, anchor, Direction::Backward) } else { (anchor, to, Direction::Forward) };
             return if self.set_text_selection(id, from as u32, until as u32, direction) { TYPED_SELECTION } else { 0 };
         }
         let (removed, caret) = match key {
-            EDIT_BACKSPACE | EDIT_DELETE | EDIT_WORD_BACKSPACE | EDIT_WORD_DELETE if end > start => (Some(start..end), start),
+            EDIT_BACKSPACE | EDIT_DELETE | EDIT_WORD_BACKSPACE | EDIT_WORD_DELETE | EDIT_LINE_BACKSPACE if end > start => (Some(start..end), start),
             EDIT_WORD_BACKSPACE if start > 0 => {
-                let from = if value[start - 1] == 0x0A { start - 1 } else { word_edge(&value, start, false) };
+                let from = if value[start - 1] == 0x0A { start - 1 } else { word(start, false) };
                 (Some(from..start), from)
             }
-            EDIT_WORD_DELETE if start < len => (Some(start..word_edge(&value, start, true)), start),
-            EDIT_WORD_BACKSPACE | EDIT_WORD_DELETE => return 0,
-            EDIT_WORD_LEFT => (None, word_edge(&value, start, false)),
-            EDIT_WORD_RIGHT => (None, word_edge(&value, end, true)),
+            EDIT_WORD_DELETE if start < len => (Some(start..word(start, true)), start),
+            EDIT_LINE_BACKSPACE if start > 0 => (Some(line_start(start)..start), line_start(start)),
+            EDIT_WORD_BACKSPACE | EDIT_WORD_DELETE | EDIT_LINE_BACKSPACE => return 0,
+            EDIT_WORD_LEFT => (None, word(focus, false)),
+            EDIT_WORD_RIGHT => (None, word(focus, true)),
             EDIT_BACKSPACE if start > 0 => {
                 let from = backspace_from(&value, start);
                 (Some(from..start), from)
