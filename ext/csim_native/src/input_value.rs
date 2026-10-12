@@ -326,8 +326,8 @@ fn ascii_email(addr: &str) -> String {
     }
 }
 // A range's value: its number (the middle of the range where it has none), clamped into [min, max] (a reversed range
-// is min alone), and — unless its step is `any` — rounded onto its step from min, a tie to the larger, within the
-// range.
+// is min alone), and — unless its step is `any` — rounded onto its step from its step base, a tie to the larger, within
+// the range.
 fn range_value(v: &str, a: &Attrs<'_>) -> f64 {
     let min = a.min.and_then(parse_float).unwrap_or(0.0);
     let max = a.max.and_then(parse_float).unwrap_or(100.0).max(min);
@@ -336,7 +336,10 @@ fn range_value(v: &str, a: &Attrs<'_>) -> f64 {
         return n;
     }
     let step = a.step.and_then(parse_float).filter(|&s| s > 0.0).unwrap_or(1.0);
-    let mut snapped = min + ((n - min) / step + 0.5).floor() * step;
+    // (…on the step grid from the step base: the `min` attribute, else the `value` attribute, else 0 — not the default
+    // minimum, which a range has without a `min`)
+    let base = a.min.and_then(parse_float).or_else(|| a.value.and_then(parse_float)).unwrap_or(0.0);
+    let mut snapped = base + ((n - base) / step + 0.5).floor() * step;
     if snapped < min {
         snapped += step;
     }
@@ -532,6 +535,11 @@ mod tests {
         assert_eq!(sanitize("range", "", &none, &keep), "50");
         assert_eq!(sanitize("range", "0.31", &attrs(Some("0"), Some("1"), Some("0.1")), &keep), "0.3");
         assert_eq!(sanitize("number", "1.", &none, &keep), "");
+        // (…a range's step base its `value` attribute where it has no `min`: Chrome, `value=5 step=10`)
+        let based = Attrs { step: Some("10"), value: Some("5"), ..none };
+        let snapped: Vec<String> = ["5", "12", "99", "abc"].iter().map(|v| sanitize("range", v, &based, &keep)).collect();
+        assert_eq!(snapped, ["5", "15", "95", "55"]);
+        assert_eq!(sanitize("range", "12", &Attrs { min: Some("0"), ..based }, &keep), "10");
     }
 
     #[test]

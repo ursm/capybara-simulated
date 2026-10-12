@@ -913,7 +913,7 @@ const CLICK: u32 = 2;
 // in a disabled select, a click on one in none): what a user's pick of an option did — its select (null for none), every
 // option whose selectedness changed, for which the bindings fire the select's `input` and `change` — the user's
 // interaction with the select (`:user-valid`) noted, but for an unpick that changed nothing.
-fn option_pick(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+fn option_pick(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(option) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
     let how = args.get(1).uint32_value(scope).unwrap_or(PICK);
     let Some(cid) = crate::dom::dom(scope).arena.get(option).filter(|n| n.is_html_named("option")).map(|n| n.realm) else { return };
@@ -936,17 +936,30 @@ fn option_pick(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         }
     }
     arena.observers.note_state_changed();
-    let changed = crate::dom::nodes_value(scope, cid, &changed);
-    let values = [crate::dom::node_value(scope, select), changed];
-    rv.set(v8::Array::new_with_elements(scope, &values).into());
+    picked_value(scope, cid, select, &changed, rv);
+}
+
+// `[element, changed]` of a pick — undefined where making an object of either threw, its exception pending.
+fn picked_value(scope: &mut v8::PinScope<'_, '_>, cid: i32, element: Option<NodeId>, changed: &[NodeId], mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let changed = crate::dom::nodes_value(scope, cid, changed);
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
+    let element = crate::dom::node_value(scope, element);
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
+    rv.set(v8::Array::new_with_elements(scope, &[element, changed]).into());
 }
 
 // __dom.arrowDefault(control, key) -> `[element, changed]`, or undefined for nothing: an arrow key's default action on a
 // focused control. A radio button's: the next radio of its group not disabled (`ArrowDown` / `ArrowRight`; the previous
-// for `ArrowUp` / `ArrowLeft`), wrapping, checked — the element to focus and fire `input` / `change` at, no options. A
-// single select's (`ArrowDown` / `ArrowUp` only): the next option not disabled (the previous, up), not wrapping, picked
-// as the user's — the select, its `input` / `change` owed, the options whose selectedness changed.
-fn arrow_default(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// for `ArrowUp` / `ArrowLeft`), wrapping — the element to focus and click, which checks it (Chrome: `focus`, then a
+// trusted `click`, `input`, `change`), no options. A single select's (`ArrowDown` / `ArrowUp` only): the next option not
+// disabled after the one selected (the previous, up; from the start or the end where none is), not wrapping, picked as
+// the user's, the user's interaction with it noted — the select, its `input` / `change` owed, the options whose
+// selectedness changed.
+fn arrow_default(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(control) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
     let key = args.get(1).to_rust_string_lossy(scope);
     let forward = matches!(&*key, "ArrowDown" | "ArrowRight");
@@ -957,31 +970,28 @@ fn arrow_default(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         let group: Vec<NodeId> = arena.radio_group(control).into_iter().filter(|&r| !arena.is_actually_disabled(r)).collect();
         let Some(i) = group.iter().position(|&r| r == control).filter(|_| group.len() >= 2) else { return };
         let len = group.len();
-        let target = group[if forward { (i + 1) % len } else { (i + len - 1) % len }];
-        arena.set_checkedness(target, true);
-        (target, Vec::new())
+        (group[if forward { (i + 1) % len } else { (i + len - 1) % len }], Vec::new())
     } else if n.is_html_named("select") && n.plain_attr("multiple").is_none() && matches!(&*key, "ArrowDown" | "ArrowUp") {
-        let options: Vec<NodeId> = arena.list_of_options(control).into_iter().filter(|&o| !arena.is_actually_disabled(o)).collect();
+        let options = arena.list_of_options(control);
         let current = options.iter().position(|&o| arena.get(o).is_some_and(|n| n.state & STATE_SELECTED != 0));
-        let next = match current {
-            _ if options.is_empty() => return,
-            None if forward => 0,
-            None => options.len() - 1,
-            Some(c) if forward => (c + 1).min(options.len() - 1),
-            Some(c) => c.saturating_sub(1),
+        let enabled = |&&o: &&NodeId| !arena.is_actually_disabled(o);
+        let next = match (current, forward) {
+            (Some(c), true) => options[c + 1..].iter().find(enabled),
+            (None, true) => options.iter().find(enabled),
+            (Some(c), false) => options[..c].iter().rev().find(enabled),
+            (None, false) => options.iter().rev().find(enabled),
         };
-        if current == Some(next) {
-            return;
+        let Some(&next) = next else { return };
+        let changed = arena.user_pick(Some(control), next, true);
+        if let Some(had) = arena.get(control).map(|n| n.state).filter(|s| s & STATE_USER_INTERACTED == 0) {
+            arena.set_state(control, had | STATE_USER_INTERACTED);
         }
-        let changed = arena.user_pick(Some(control), options[next], true);
         arena.observers.note_state_changed();
         (control, changed)
     } else {
         return;
     };
-    let changed = crate::dom::nodes_value(scope, cid, &changed);
-    let values = [crate::dom::node_value(scope, Some(target)), changed];
-    rv.set(v8::Array::new_with_elements(scope, &values).into());
+    picked_value(scope, cid, Some(target), &changed, rv);
 }
 
 // __dom.selectedness(selectNid, justNid) -> the options whose selectedness the selectedness setting algorithm changed

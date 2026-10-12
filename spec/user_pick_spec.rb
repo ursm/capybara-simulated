@@ -5,7 +5,9 @@ require_relative 'support/session_teardown'
 
 # A user's pick of an option, and an arrow key's default action on a focused radio button or single select, are the
 # engine's (validity.rs `optionPick` / `arrowDefault`): which option or radio button they land on, what they deselect
-# and uncheck, and whether anything changed — the select's `input` / `change` fired only then.
+# and uncheck, and whether anything changed — the select's `input` / `change` fired only then. The arrow keys' events
+# are Chrome's, measured with real key presses: a radio button focused, then clicked (`click`, `input`, `change`); a
+# select's `input` and `change`, and its `:user-valid`.
 RSpec.describe 'User picks' do
   let(:app) {
     lambda {|_env|
@@ -15,10 +17,12 @@ RSpec.describe 'User picks' do
         <select id=many multiple><option selected>x<option>y<optgroup disabled><option>z</optgroup></select>
         <input type=radio name=g id=r1 checked><input type=radio name=g id=r2 disabled><input type=radio name=g id=r3>
         <input type=range id=range min=0 max=10 step=4>
+        <input type=range id=based value=5 step=10>
+        <select id=past><option>a<option>b<option selected disabled>c<option>d</select>
         <script>
           window.fired = [];
           for (const el of document.querySelectorAll('select, input')) {
-            for (const type of ['input', 'change']) el.addEventListener(type, () => fired.push(type + ':' + el.id));
+            for (const type of ['focus', 'click', 'input', 'change']) el.addEventListener(type, () => fired.push(type + ':' + el.id));
           }
         </script>
       HTML
@@ -54,20 +58,40 @@ RSpec.describe 'User picks' do
 
   it 'moves a single select past a disabled option with the arrow keys, stopping at its end' do
     session.find('#one').send_keys(:down)
-    expect(state('one')).to eq(%w[c])
+    expect([state('one'), session.evaluate_script("one.matches(':user-valid')")]).to eq([%w[c], true])
+    session.execute_script('fired.length = 0')
     session.find('#one').send_keys(:down)
-    expect([state('one'), session.evaluate_script('fired')]).to eq([%w[c], %w[input:one change:one]])
+    expect([state('one'), session.evaluate_script('fired')]).to eq([%w[c], []])
   end
 
-  it 'checks and focuses the next radio button of the group not disabled, wrapping' do
+  it 'moves a select on from a disabled option selected' do
+    session.find('#past').send_keys(:down)
+    expect(state('past')).to eq(%w[d])
+  end
+
+  it 'focuses and clicks the next radio button of the group not disabled, wrapping' do
     session.find('#r1').send_keys(:right)
-    expect(session.evaluate_script('[r1.checked, r3.checked, document.activeElement.id]')).to eq([false, true, 'r3'])
+    session.execute_script("fired = fired.filter((e) => !e.endsWith(':r1'))")
+    expect(session.evaluate_script('[r1.checked, r3.checked, document.activeElement.id, fired]')).to eq(
+      [false, true, 'r3', %w[focus:r3 click:r3 input:r3 change:r3]]
+    )
     session.find('#r3').send_keys(:right)
     expect(session.evaluate_script('[r1.checked, r3.checked, document.activeElement.id]')).to eq([true, false, 'r1'])
+  end
+
+  it 'leaves a radio button unchecked where its click is canceled' do
+    session.execute_script("r3.addEventListener('click', (e) => e.preventDefault())")
+    session.find('#r1').send_keys(:right)
+    expect(session.evaluate_script('[r1.checked, r3.checked, document.activeElement.id]')).to eq([true, false, 'r3'])
   end
 
   it 'sets a range to the nearest value on its step' do
     session.find('#range').set('7')
     expect(session.evaluate_script('range.value')).to eq('8')
+  end
+
+  it 'steps a range with no min from its value attribute, as Chrome' do
+    session.find('#based').set('12')
+    expect(session.evaluate_script('based.value')).to eq('15')
   end
 end
