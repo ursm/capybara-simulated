@@ -399,6 +399,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "htmlWrite", html_write, context_id);
     register(scope, ns, "htmlDone", html_done, context_id);
     register(scope, ns, "htmlParseFragment", html_parse_fragment, context_id);
+    register(scope, ns, "htmlParseDocument", html_parse_document, context_id);
 }
 
 // Run a parser op, catching a panic (a bug in the parser, or one a page's input found) where it would otherwise unwind
@@ -609,6 +610,8 @@ struct Build<'s> {
     held: std::collections::HashMap<crate::dom::NodeId, v8::cppgc::Persistent<crate::node_handle::NodeHandle>>,
     in_contents: std::collections::HashSet<crate::dom::NodeId>,
     steps: Vec<(crate::dom::NodeId, Vec<String>, u32)>,
+    // A document's mode, as `htmlParse` numbers it, where the parse set one.
+    quirks: Option<i32>,
 }
 
 impl<'s> Build<'s> {
@@ -839,7 +842,15 @@ impl<'s> Build<'s> {
                         n.script_flags = (n.script_flags | crate::script::SCRIPT_ALREADY_STARTED | crate::script::SCRIPT_NOT_FORCE_ASYNC) & !crate::script::SCRIPT_PARSER_INSERTED;
                     }
                 }
-                // (…no doctype, no document mode, no declarative shadow root in a fragment parse)
+                // (…a document's doctype and mode — none in a fragment parse — and no declarative shadow root)
+                OP_DOCTYPE => {
+                    let (name, public, system) = (string(ops.next())?, string(ops.next())?, string(ops.next())?);
+                    let ids = Some(Box::new((public.encode_utf16().collect(), system.encode_utf16().collect())));
+                    let dt = self.make(scope, crate::dom::NodeData { doctype_ids: ids, ..crate::dom::NodeData::of_kind(crate::dom::NodeKind::Other, name.encode_utf16().collect()) });
+                    let doc = self.node(0)?;
+                    self.insert(scope, doc, dt, None);
+                }
+                OP_QUIRKS => self.quirks = Some(int(ops.next())?),
                 _ => return None,
             }
         }
@@ -866,45 +877,25 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         let mut standins = StandIns::default();
         let well_formed = args.get(1).boolean_value(scope);
         let html = parser_text(scope, args.get(0), well_formed, &mut standins);
-        if standins.base.is_some() || html.contains("customelementregistry") || has_details(&html) {
+        if !buildable(&html, &standins) {
             return;
         }
         let ns = args.get(2).int32_value(scope).unwrap_or(1);
         let local = args.get(3).to_rust_string_lossy(scope);
         let form = crate::dom::nid_arg(scope, &args, 4);
-        let quirks_mode = match args.get(5).int32_value(scope) {
-            Some(2) => QuirksMode::Quirks,
-            Some(1) => QuirksMode::LimitedQuirks,
-            _ => QuirksMode::NoQuirks,
-        };
-        // (…re-rooted in this scope, as the build's other handles are)
-        let doc = v8::Local::<v8::Object>::try_from(args.get(6)).ok().map(|d| v8::Local::new(scope, d));
-        let template_doc = v8::Local::<v8::Object>::try_from(args.get(7)).ok().map(|d| v8::Local::new(scope, d)).or(doc);
-        let opts = TreeBuilderOpts { scripting_enabled: true, quirks_mode, ..Default::default() };
+        let opts = TreeBuilderOpts { scripting_enabled: true, quirks_mode: quirks_mode(args.get(5).int32_value(scope)), ..Default::default() };
         let name = QualName::new(None, namespace_of(ns), LocalName::from(local.as_str()));
         let builder = TreeBuilder::new_for_fragment(Sink::new(Some(name), false), 1, form.is_some().then_some(2), opts);
         let initial_state = Some(builder.tokenizer_state_for_context_elem(true));
         let tokenizer = Tokenizer::new(builder, TokenizerOpts { initial_state, discard_bom: false, ..Default::default() });
-        let input = BufferQueue::default();
-        input.push_back(StrTendril::from(html));
-        // (…to its end: a fragment's scripts run nowhere)
-        while let TokenizerResult::Script(_) | TokenizerResult::EncodingIndicator(_) = tokenizer.feed(&input) {}
-        tokenizer.end();
-        let ops = std::mem::take(&mut *tokenizer.sink.sink.ops.borrow_mut());
         let cid = crate::dom::realm_id(scope, &args);
-        let mut build = Build {
-            cid,
-            maker: cid,
-            doc,
-            template_doc,
-            nodes: vec![None, None, form],
-            held: std::collections::HashMap::new(),
-            in_contents: std::collections::HashSet::new(),
-            steps: Vec::new(),
-        };
+        // (…re-rooted in this scope, as the build's other handles are)
+        let doc = v8::Local::<v8::Object>::try_from(args.get(6)).ok().map(|d| v8::Local::new(scope, d));
+        let template_doc = v8::Local::<v8::Object>::try_from(args.get(7)).ok().map(|d| v8::Local::new(scope, d)).or(doc);
+        let mut build = Build::new(cid, doc, template_doc, vec![None, None, form]);
         let root = build.make(scope, crate::dom::NodeData::of_kind(crate::dom::NodeKind::Fragment, Vec::new()));
         build.set(0, root);
-        if build.take(scope, ops).is_none() {
+        if build.take(scope, parsed(tokenizer, html)).is_none() {
             return;
         }
         // (…the parse's nodes: the children of the root `<html>` it made, taken out of it)
@@ -914,34 +905,107 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         for &t in &tops {
             arena.detach(t);
         }
-        // (…an element whose insertion steps are the bindings': one with an id, autofocus, or an open details' `open`)
-        for (id, names, flags) in build.steps.iter_mut() {
+        if let Some(out) = build.answer(scope, &tops) {
+            rv.set(v8::Array::new_with_elements(scope, &out).into());
+        }
+    });
+}
+
+// __dom.htmlParseDocument(html, wellFormed, document, templateDocument) -> [quirks, element, names, flags, …], or
+// undefined where the engine leaves it to the bindings: HTML's parse of a whole document no script runs in (DOMParser's,
+// scripting off), built by the engine into `document` (empty) as a fragment parse is (`htmlParseFragment`) — its doctype
+// too — answered as the mode it set (`htmlParse`'s numbers, -1 for none) and the elements the bindings have steps for.
+fn html_parse_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    parser_op(scope, None, &mut rv, &[-2], |scope, rv| {
+        let mut standins = StandIns::default();
+        let well_formed = args.get(1).boolean_value(scope);
+        let html = parser_text(scope, args.get(0), well_formed, &mut standins);
+        let Some(document) = crate::node_handle::nid_of(scope, args.get(2)) else { return };
+        if !buildable(&html, &standins) {
+            return;
+        }
+        let opts = TreeBuilderOpts { scripting_enabled: false, ..Default::default() };
+        let tokenizer = Tokenizer::new(TreeBuilder::new(Sink::new(None, false), opts), TokenizerOpts { discard_bom: false, ..Default::default() });
+        let cid = crate::dom::realm_id(scope, &args);
+        let doc = v8::Local::<v8::Object>::try_from(args.get(2)).ok().map(|d| v8::Local::new(scope, d));
+        let template_doc = v8::Local::<v8::Object>::try_from(args.get(3)).ok().map(|d| v8::Local::new(scope, d)).or(doc);
+        let mut build = Build::new(cid, doc, template_doc, vec![Some(document), None, None]);
+        if build.take(scope, parsed(tokenizer, html)).is_none() {
+            return;
+        }
+        let quirks = build.quirks.unwrap_or(-1);
+        if let Some(mut out) = build.answer(scope, &[]) {
+            out[0] = v8::Integer::new(scope, quirks).into();
+            rv.set(v8::Array::new_with_elements(scope, &out).into());
+        }
+    });
+}
+
+// Whether the engine builds a parse of `html`: one with no lone surrogate (the stand-ins' text is the bindings'), no
+// `customelementregistry` attribute (a null registry propagated down the parse), no `<details>` (`has_details`).
+fn buildable(html: &str, standins: &StandIns) -> bool {
+    standins.base.is_none() && !html.contains("customelementregistry") && !has_details(html)
+}
+// A document mode as `htmlParse` numbers it.
+fn quirks_mode(code: Option<i32>) -> QuirksMode {
+    match code {
+        Some(2) => QuirksMode::Quirks,
+        Some(1) => QuirksMode::LimitedQuirks,
+        _ => QuirksMode::NoQuirks,
+    }
+}
+// The steps of a parse of `html` run to its end — a fragment's or a scriptless document's: no script runs anywhere.
+fn parsed(tokenizer: Tokenizer<TreeBuilder<u32, Sink>>, html: String) -> Vec<Operand> {
+    let input = BufferQueue::default();
+    input.push_back(StrTendril::from(html));
+    while let TokenizerResult::Script(_) | TokenizerResult::EncodingIndicator(_) = tokenizer.feed(&input) {}
+    tokenizer.end();
+    std::mem::take(&mut *tokenizer.sink.sink.ops.borrow_mut())
+}
+
+impl<'s> Build<'s> {
+    fn new(cid: i32, doc: Option<v8::Local<'s, v8::Object>>, template_doc: Option<v8::Local<'s, v8::Object>>, nodes: Vec<Option<crate::dom::NodeId>>) -> Build<'s> {
+        Build {
+            cid,
+            maker: cid,
+            doc,
+            template_doc,
+            nodes,
+            held: std::collections::HashMap::new(),
+            in_contents: std::collections::HashSet::new(),
+            steps: Vec::new(),
+            quirks: None,
+        }
+    }
+    // What the page is handed: the count of `tops` and their objects, then each element the bindings have steps for,
+    // the names of its attributes whose steps are theirs and its flags — an element with an id, autofocus or an
+    // `open` given its insertion steps too (`BUILT_INSERTED`). None past a node factory that threw: its exception is what
+    // the op ends with.
+    fn answer(&mut self, scope: &mut v8::PinScope<'s, '_>, tops: &[crate::dom::NodeId]) -> Option<Vec<v8::Local<'s, v8::Value>>> {
+        for (_, names, flags) in self.steps.iter_mut() {
             if names.iter().any(|n| matches!(n.as_str(), "id" | "autofocus" | "open")) {
                 *flags |= BUILT_INSERTED;
             }
             names.retain(|n| n != "autofocus");
-            let _ = id;
         }
-        let mut out: Vec<v8::Local<'_, v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, tops.len() as u32).into()];
-        // (…each answer made, and none past a node factory that threw: its exception is what the op ends with)
-        let Ok(nodes) = v8::Local::<v8::Array>::try_from(crate::dom::nodes_value(scope, cid, &tops)) else { return };
+        let mut out: Vec<v8::Local<'s, v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, tops.len() as u32).into()];
+        let nodes = v8::Local::<v8::Array>::try_from(crate::dom::nodes_value(scope, self.cid, tops)).ok()?;
         if crate::dom::factory_threw(scope) {
-            return;
+            return None;
         }
         for i in 0..tops.len() as u32 {
             out.push(nodes.get_index(scope, i).unwrap_or_else(|| v8::null(scope).into()));
         }
-        let ids: Vec<crate::dom::NodeId> = build.steps.iter().map(|(id, ..)| *id).collect();
-        let Ok(elements) = v8::Local::<v8::Array>::try_from(crate::dom::nodes_value(scope, cid, &ids)) else { return };
+        let ids: Vec<crate::dom::NodeId> = self.steps.iter().map(|(id, ..)| *id).collect();
+        let elements = v8::Local::<v8::Array>::try_from(crate::dom::nodes_value(scope, self.cid, &ids)).ok()?;
         if crate::dom::factory_threw(scope) {
-            return;
+            return None;
         }
-        for (k, (_, names, flags)) in build.steps.iter().enumerate() {
+        for (k, (_, names, flags)) in self.steps.iter().enumerate() {
             out.push(elements.get_index(scope, k as u32).unwrap_or_else(|| v8::null(scope).into()));
             out.push(crate::cloning::names_value(scope, names));
             out.push(v8::Integer::new_from_unsigned(scope, *flags).into());
         }
-        drop(build);
-        rv.set(v8::Array::new_with_elements(scope, &out).into());
-    });
+        Some(out)
+    }
 }

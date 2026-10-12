@@ -407,9 +407,11 @@ pub(crate) fn object_of<'s>(scope: &mut v8::PinScope<'s, '_>, id: NodeId) -> Opt
     let realm = h.maker.get();
     let factory = crate::dom::dom(scope).factories.get(&realm).cloned()?.to_local(scope)?;
     let n = crate::dom::dom(scope).arena.get(id)?;
-    // (…its name exact: the UTF-16 the DOM holds, a lone surrogate kept)
+    // (…its name exact: the UTF-16 the DOM holds, a lone surrogate kept — a doctype's its name and its public and
+    // system identifiers in those three places)
     let exact = n.name_u16.as_deref().map(|e| (e.local.clone(), e.ns.clone(), e.prefix.clone()));
-    let (local, ns, prefix) = exact.unwrap_or_else(|| {
+    let doctype = n.doctype_ids.as_deref().map(|(public, system)| (n.data.clone(), public.clone(), Some(system.clone())));
+    let (local, ns, prefix) = doctype.or(exact).unwrap_or_else(|| {
         let utf16 = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
         (utf16(&n.local_name), utf16(&n.ns), n.prefix.as_deref().map(utf16))
     });
