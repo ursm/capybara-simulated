@@ -743,9 +743,10 @@ impl<'s> Build<'s> {
         self.insert(scope, parent, t, before);
     }
 
-    // `flags` added to those the bindings run for `id`.
+    // `flags` added to those the bindings run for `id` — the element last made, whose entry is the last one where it has
+    // one.
     pub(crate) fn flag(&mut self, id: crate::dom::NodeId, flags: u32) {
-        match self.steps.iter_mut().find(|(e, ..)| *e == id) {
+        match self.steps.iter_mut().rev().find(|(e, ..)| *e == id) {
             Some((_, _, had)) => *had |= flags,
             None => self.steps.push((id, Vec::new(), flags)),
         }

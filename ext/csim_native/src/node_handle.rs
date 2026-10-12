@@ -405,7 +405,10 @@ pub(crate) fn object_of<'s>(scope: &mut v8::PinScope<'s, '_>, id: NodeId) -> Opt
     }
     // (…by the realm whose code made the node — not whichever tree's edges it is in now: Chrome's)
     let realm = h.maker.get();
-    let factory = crate::dom::dom(scope).factories.get(&realm).cloned()?.to_local(scope)?;
+    let factory = crate::dom::dom(scope).factories.get(&realm)? as *const v8::Weak<v8::Function>;
+    // SAFETY: the realm's factory stays in the map while this reads it — no call into the page comes between — and a
+    // clone would make a weak handle per object.
+    let factory = unsafe { &*factory }.to_local(scope)?;
     let n = crate::dom::dom(scope).arena.get(id)?;
     let node_type = n.node_type();
     // (…its name exact: the UTF-16 the DOM holds, a lone surrogate kept — a doctype's its name and its public and
