@@ -431,6 +431,13 @@ RSpec.describe 'stepping a caret by a character' do
       edge.('aaa <span style="display:inline-block"><img style="width:10px;height:10px"></span>', 'e.firstChild', 1, :end),
       edge.("<div>aaa</div>\n", 'e.lastChild', 0, :home)
     ]).to eq(['SPAN@0', 'SPAN@1', 'aaa@0'])
+    # (…past a control, never into it — Chrome: after the input, the select, the textarea)
+    controls = [
+      '<input style="width:30px">',
+      '<select><option>o</select>',
+      '<textarea style="width:30px;height:16px"></textarea>'
+    ]
+    expect(controls.map {|control| edge.("aaa#{control}", 'e.firstChild', 1, :end) }).to eq(%w[DIV@2] * 3)
   end
 
   # `Selection.modify` moves as the keys do: by a line — to the text's first or last place past its first or last line —

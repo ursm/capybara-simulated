@@ -668,9 +668,14 @@ impl RealmArena {
                         if b.y >= bottom || b.y + b.h <= top {
                             break;
                         }
-                        // (…an inline-block's own edge where no text of its own has one: Chrome's, inside it)
-                        let inside = crate::rendered::is_atomic_inline(self, c).then(|| (c, if end { cn.children.len() as u32 } else { 0 }));
-                        out = self.inner_edge(g, c, end).or(inside).unwrap_or((parent, step as u32));
+                        // (…past a replaced element or a control; into an inline-block, to its own text's edge — or its box's)
+                        let edge = if crate::caret::CARET_VOID_TAGS.contains(&&*cn.local_name) || matches!(cn.local_name.as_ref(), "select" | "textarea") {
+                            Some((parent, step as u32))
+                        } else {
+                            self.inner_edge(g, c, end).or_else(|| self.box_edge(c, end))
+                        };
+                        let Some(edge) = edge else { break };
+                        out = edge;
                         atom = true;
                     }
                     index = step;
@@ -680,6 +685,21 @@ impl RealmArena {
             }
         }
         (out, false)
+    }
+    // …an inline-block's own edge where no text of its own has one: inside it, at its end (start) — an inline-block it
+    // ends (starts) with its own — and none where a `<br>` ends it, which the caret stays before (Chrome: SPAN@0 in an
+    // empty one, SPAN@1 after its only image).
+    fn box_edge(&self, block: NodeId, end: bool) -> Option<(NodeId, u32)> {
+        let n = self.get(block)?;
+        let kid = if end { n.children.last() } else { n.children.first() };
+        match kid.and_then(|&k| self.get(k).map(|d| (k, d))) {
+            None => Some((block, 0)),
+            Some((_, d)) if d.kind == NodeKind::Element && d.local_name.as_ref() == "br" => None,
+            Some((k, d)) if d.kind == NodeKind::Element && crate::rendered::is_atomic_inline(self, k) && !crate::caret::CARET_VOID_TAGS.contains(&&*d.local_name) => {
+                self.box_edge(k, end)
+            }
+            _ => Some((block, if end { n.children.len() as u32 } else { 0 })),
+        }
     }
     // …the last (first, without `end`) place of the text an inline-block's own lines hold — none where they hold none.
     fn inner_edge(&self, g: &TextView, block: NodeId, end: bool) -> Option<(NodeId, u32)> {
