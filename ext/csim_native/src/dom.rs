@@ -2430,6 +2430,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::element_references::install(scope, ns, context_id);
     crate::cloning::install(scope, ns, context_id);
     crate::range_contents::install(scope, ns, context_id);
+    crate::editing_delete::install(scope, ns, context_id);
     crate::xml_parse::install(scope, ns, context_id);
     crate::custom_elements::install(scope, ns, context_id);
     crate::details::install(scope, ns, context_id);

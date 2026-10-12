@@ -278,3 +278,22 @@ fn process_range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     out.extend(triples);
     rv.set(v8::Array::new_with_elements(scope, &out).into());
 }
+
+// A deletion of the contents from (`sc`, `so`) to (`ec`, `eo`) — an editing command's (editing_delete.rs) — by realm
+// `caller`'s code: the changes it made, for the bindings to finish; None where something stopped it (a node factory
+// that threw, a step that threw), the changes it made before then lost with the op's exception.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn delete<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    cid: i32,
+    caller: i32,
+    steps: v8::Local<'s, v8::Array>,
+    sc: NodeId,
+    so: u32,
+    ec: NodeId,
+    eo: u32,
+) -> Option<Vec<Change>> {
+    let mut run = Run { cid, caller, mode: DELETE, doc: None, steps, held: Vec::new(), changes: Vec::new(), bindings: Vec::new() };
+    run.process(scope, sc, so, ec, eo, None)?;
+    Some(run.changes)
+}

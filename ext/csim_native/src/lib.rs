@@ -37,6 +37,7 @@ mod document_encoding;
 mod dom;
 mod dom_matrix;
 mod editing;
+mod editing_delete;
 mod element_state;
 mod event_path;
 mod focus;

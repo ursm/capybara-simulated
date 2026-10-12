@@ -5392,7 +5392,6 @@ selection/fire-selectionchange-event-on-document-if-textcontrol-element-is-in-sh
 - selectionchange event fired on the document in case TextControl element is in Shadow
   Tree
 selection/fire-selectionchange-event-on-pressing-backspace.html:
-- Selectionchange event is fired after removing the character
 - Selectionchange event is fired after removing the range
 selection/move-by-word-korean.html:
 - Latin/Korean transition should be considered a word boundary when moving backward
