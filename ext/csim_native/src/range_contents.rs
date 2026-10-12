@@ -35,6 +35,8 @@ struct Run<'s> {
     held: Vec<v8::cppgc::Persistent<NodeHandle>>,
     changes: Vec<Change>,
     bindings: BindingsSteps,
+    // Whether it cut any data (a change of children is in `changes`).
+    cut_any: bool,
 }
 
 // DOM's length of a node: its data's for character data, its children's count for any other.
@@ -93,6 +95,7 @@ impl<'s> Run<'s> {
             return None;
         }
         let none = v8::String::empty(scope);
+        self.cut_any |= count > 0;
         crate::character_data::replace_data(scope, self.caller, node, object, offset as usize, count as usize, none).ok()
     }
 
@@ -243,7 +246,7 @@ fn process_range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     };
     // (…the steps re-rooted in this scope, as the run's other handles are)
     let steps = v8::Local::new(scope, steps);
-    let mut run = Run { cid, caller, mode, doc, steps, held: Vec::new(), changes: Vec::new(), bindings: Vec::new() };
+    let mut run = Run { cid, caller, mode, doc, steps, held: Vec::new(), changes: Vec::new(), bindings: Vec::new(), cut_any: false };
     let frag = (mode != DELETE).then(|| run.fragment(scope));
     // (…what changed handed back whatever stopped it — a cut a script's steps had made impossible: the changes made are
     // the bindings' to finish, and the range collapses to its start)
@@ -280,8 +283,9 @@ fn process_range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
 }
 
 // A deletion of the contents from (`sc`, `so`) to (`ec`, `eo`) — an editing command's (editing_delete.rs) — by realm
-// `caller`'s code: the changes it made, for the bindings to finish; None where something stopped it (a node factory
-// that threw, a step that threw), the changes it made before then lost with the op's exception.
+// `caller`'s code: the changes it made, for the bindings to finish, and whether it deleted anything at all (data cut or
+// a node removed); None where something stopped it (a node factory that threw, a step that threw), the changes it made
+// before then lost with the op's exception.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn delete<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -292,8 +296,9 @@ pub(crate) fn delete<'s>(
     so: u32,
     ec: NodeId,
     eo: u32,
-) -> Option<Vec<Change>> {
-    let mut run = Run { cid, caller, mode: DELETE, doc: None, steps, held: Vec::new(), changes: Vec::new(), bindings: Vec::new() };
+) -> Option<(Vec<Change>, bool)> {
+    let mut run = Run { cid, caller, mode: DELETE, doc: None, steps, held: Vec::new(), changes: Vec::new(), bindings: Vec::new(), cut_any: false };
     run.process(scope, sc, so, ec, eo, None)?;
-    Some(run.changes)
+    let any = run.cut_any || !run.changes.is_empty();
+    Some((run.changes, any))
 }

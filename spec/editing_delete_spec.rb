@@ -79,4 +79,44 @@ RSpec.describe 'deleting in an editing host' do
       delete('foo bar baz', 't0', 4, %i[control delete])
     ]).to eq([["foo&nbsp; baz", "foo  baz@4"], ["foo&nbsp; baz", "foo  baz@4"]])
   end
+
+  # …the innerHTML a deletion leaves, the caret at the node `at` (a script expression over `e`, the host) and `offset`.
+  def deleted(html, at, offset, key, to = nil)
+    session.execute_script(<<~JS)
+      const e = document.getElementById('e');
+      e.innerHTML = #{html.to_json};
+      e.focus();
+      getSelection().collapse(#{at}, #{offset});
+      #{to ? "getSelection().extend(#{to[0]}, #{to[1]});" : ''}
+    JS
+    session.find(:css, '#e').send_keys(key)
+    session.evaluate_script("document.getElementById('e').innerHTML")
+  end
+
+  it "joins no table's cells, and takes a non-editable island whole" do
+    table = '<table><tbody><tr><td>aa</td><td>bb</td></tr></tbody></table>'
+    expect([
+      deleted(table, "e.querySelectorAll('td')[1].firstChild", 0, :backspace),
+      deleted(table, "e.querySelector('td').firstChild", 2, :delete),
+      deleted('<p>aa</p><table><tr><td>bb</td></tr></table>', "e.querySelector('td').firstChild", 0, :backspace),
+      deleted('<p>aa</p><table><tr><td>bb</td></tr></table>', "e.querySelector('p').firstChild", 1, :backspace, ["e.querySelector('td').firstChild", 1]),
+      deleted('a<span contenteditable="false">XX</span>b', 'e.lastChild', 0, :backspace),
+      deleted('a<span contenteditable="false">XX</span>b', 'e.firstChild', 1, :delete),
+      deleted('<p>a</p><div contenteditable="false">XX</div><p>b</p>', 'e.lastChild.firstChild', 0, :backspace)
+    ]).to eq([
+      table, table, '<p>aa</p><table><tbody><tr><td>bb</td></tr></tbody></table>',
+      '<p>a</p><table><tbody><tr><td>b</td></tr></tbody></table>', 'ab', 'ab', '<p>ab</p>'
+    ])
+  end
+
+  it 'joins a block it holds or that holds it, and leaves no emptied element behind' do
+    expect([
+      deleted('aa<p>bb</p>', "e.querySelector('p').firstChild", 0, :backspace),
+      deleted('<p>aa</p>bb', 'e.lastChild', 0, :backspace),
+      deleted('<ul><li>aa<ul><li>bb</li></ul></li></ul>', "e.querySelectorAll('li')[1].firstChild", 0, :backspace),
+      deleted('ab<b>c</b>d', 'e.firstChild', 2, :delete),
+      deleted('ab<b>cd</b>e', 'e.firstChild', 1, :backspace, ["e.querySelector('b').firstChild", 2]),
+      deleted('a', 'e.firstChild', 1, :backspace)
+    ]).to eq(['aabb', '<p>aabb</p>', '<ul><li>aabb</li></ul>', 'abd', 'ae', '<br>'])
+  end
 end
