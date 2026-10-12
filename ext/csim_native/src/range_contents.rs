@@ -8,7 +8,7 @@
 
 use crate::cloning::{clonable, clone_into, BindingsSteps};
 use crate::dom::{realm, NodeData, NodeId, NodeKind, RealmArena};
-use crate::mutation::{change_children, Removing};
+use crate::mutation::Change;
 use crate::node_handle::NodeHandle;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -33,7 +33,7 @@ struct Run<'s> {
     doc: Option<v8::Local<'s, v8::Object>>,
     steps: v8::Local<'s, v8::Array>,
     held: Vec<v8::cppgc::Persistent<NodeHandle>>,
-    changes: Vec<(NodeId, Vec<NodeId>, Vec<NodeId>, bool)>,
+    changes: Vec<Change>,
     bindings: BindingsSteps,
 }
 
@@ -60,19 +60,14 @@ impl<'s> Run<'s> {
                 self.remove(scope, n)?;
             }
         }
-        let connected = realm(scope, self.cid).is_connected(parent);
-        let empty = v8::Array::new(scope, 0);
-        change_children(scope, self.cid, self.caller, parent, Removing::None, nodes, empty, None, false, self.steps)?.ok()?;
-        self.changes.push((parent, nodes.to_vec(), Vec::new(), connected));
+        let change = crate::mutation::insert(scope, self.cid, self.caller, parent, nodes, None, self.steps)?;
+        self.changes.push(change);
         Some(())
     }
     // `node` taken out of its parent.
     fn remove(&mut self, scope: &mut v8::PinScope<'s, '_>, node: NodeId) -> Option<()> {
-        let parent = realm(scope, self.cid).parent_of(node)?;
-        let connected = realm(scope, self.cid).is_connected(parent);
-        let empty = v8::Array::new(scope, 0);
-        let removed = change_children(scope, self.cid, self.caller, parent, Removing::Child(node), &[], empty, None, false, self.steps)?.ok()?;
-        self.changes.push((parent, Vec::new(), removed, connected));
+        let change = crate::mutation::remove(scope, self.cid, self.caller, node, self.steps)?;
+        self.changes.push(change);
         Some(())
     }
     // A copy of `src` (its descendants with it, `deep`).
@@ -178,12 +173,9 @@ impl<'s> Run<'s> {
         // (…the sub-fragment's children into the copy: DOM "insert" of a fragment, its children taken out of it first)
         let kids = realm(scope, self.cid).get(sub)?.children.clone();
         if !kids.is_empty() {
-            let empty = v8::Array::new(scope, 0);
-            change_children(scope, self.cid, self.caller, sub, Removing::All, &[], empty, None, false, self.steps)?.ok()?;
-            self.changes.push((sub, Vec::new(), kids.clone(), false));
-            let empty = v8::Array::new(scope, 0);
-            change_children(scope, self.cid, self.caller, copy, Removing::None, &kids, empty, None, false, self.steps)?.ok()?;
-            self.changes.push((copy, kids, Vec::new(), false));
+            let out = crate::mutation::remove_all(scope, self.cid, self.caller, sub, self.steps)?;
+            let into = crate::mutation::insert(scope, self.cid, self.caller, copy, &kids, None, self.steps)?;
+            self.changes.extend([out, into]);
         }
         Some(())
     }
@@ -260,13 +252,8 @@ fn process_range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
             out.extend([null, null]);
         }
     }
-    out.push(v8::Integer::new_from_unsigned(scope, run.changes.len() as u32).into());
-    for (parent, added, removed, connected) in std::mem::take(&mut run.changes) {
-        out.push(crate::dom::node_value(scope, Some(parent)));
-        out.push(crate::dom::nodes_value(scope, cid, &added));
-        out.push(crate::dom::nodes_value(scope, cid, &removed));
-        out.push(v8::Boolean::new(scope, connected).into());
-    }
+    let changes = crate::mutation::changes_value(scope, cid, &run.changes);
+    out.extend(changes);
     let triples = crate::cloning::bindings_value(scope, cid, &run.bindings);
     out.extend(triples);
     rv.set(v8::Array::new_with_elements(scope, &out).into());

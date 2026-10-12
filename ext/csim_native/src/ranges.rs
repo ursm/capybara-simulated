@@ -252,7 +252,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "rangeSet", range_set, context_id);
     register(scope, ns, "rangeContainer", range_container, context_id);
     register(scope, ns, "rangeOffset", range_offset, context_id);
-    register(scope, ns, "rangesMerge", ranges_merge, context_id);
     register(scope, ns, "rangesLive", ranges_live, context_id);
     register(scope, ns, "isRange", is_range, context_id);
     register(scope, ns, "rangeSetPoint", range_set_point, context_id);
@@ -784,15 +783,10 @@ pub(crate) fn removing_all(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: N
     follow(scope, moved, parent_obj);
 }
 
-// __dom.rangesMerge(nid, node, mergedNid, parentNid, index, length) — `normalize()` merges the text node `mergedNid` (at
-// `index` in the parent) into the text node `nid` (object `node`), whose data ran `length` units before it (DOM §4.4
-// normalize, steps 6.4-6.5): a boundary in the merged node moves into `node`, past those units, and one in the parent at
-// the merged node's index to `node`'s `length`.
-fn ranges_merge(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(node), Some(merged), Some(parent)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2), nid_arg(scope, &args, 3)) else { return };
-    let Ok(node_obj) = v8::Local::<v8::Object>::try_from(args.get(1)) else { return };
-    let index = args.get(4).uint32_value(scope).unwrap_or(0);
-    let length = args.get(5).uint32_value(scope).unwrap_or(0);
+// `normalize()` merges the text node `merged` (at `index` in `parent`) into the text node `node` (object `node_obj`),
+// whose data ran `length` units before it (DOM §4.4 normalize, steps 6.4-6.5): a boundary in the merged node moves into
+// `node`, past those units, and one in the parent at the merged node's index to `node`'s `length`.
+pub(crate) fn merge(scope: &mut v8::PinScope<'_, '_>, node: NodeId, node_obj: v8::Local<'_, v8::Object>, merged: NodeId, parent: NodeId, index: u32, length: u32) {
     let r = ranges(scope);
     r.sweep();
     let mut moved = Vec::new();

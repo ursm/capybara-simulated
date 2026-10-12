@@ -13,6 +13,7 @@ use crate::mutation_observers::{CASCADE_REFRESH, CASCADE_VERSION, OBSERVATIONS};
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "replaceData", replace_data_op, context_id);
     crate::dom::register(scope, ns, "splitText", split_text_op, context_id);
+    crate::dom::register(scope, ns, "normalize", normalize_op, context_id);
 }
 
 // Why "replace data" throws: the offset is past the data (an IndexSizeError), or the data it would make is longer than
@@ -109,14 +110,13 @@ pub(crate) fn replace_data(
     Ok(())
 }
 
-// __dom.splitText(node, offset, steps) -> [newNode], or `OFFSET_PAST_DATA`: DOM "split a Text node" (§4.11) of `node`
+// __dom.splitText(node, offset, steps) -> [newNode, changes…], or `OFFSET_PAST_DATA`: DOM "split a Text node" (§4.11) of `node`
 // (the object) at `offset`, the engine's whole — a Text node of the same kind (a CDATASection's a CDATASection) holding
 // the data past `offset`, in `node`'s node document; where `node` has a parent, inserted after it (its childList
 // record, `steps` the bindings' steps of a change of children: mutation.rs `change_children`) and the live ranges'
-// split steps; then the data past `offset` replaced with none (its characterData record). The bindings take what the
-// insertion ends with as it returns (`changeFlags`), as a change of children's.
+// split steps; then the data past `offset` replaced with none (its characterData record). With the change it made, for
+// the bindings to finish (mutation.rs `changes_value`).
 fn split_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    crate::dom::dom(scope).arena.change_flags.set(0);
     let node = args.get(0);
     let Some(id) = crate::node_handle::nid_of(scope, node) else { return };
     let offset = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
@@ -134,18 +134,83 @@ fn split_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let new_value = crate::dom::node_value(scope, Some(new));
     drop(held);
     let Ok(new_obj) = v8::Local::<v8::Object>::try_from(new_value) else { return };
+    let mut changes = Vec::new();
     if let Some(parent) = parent {
         let arena = realm(scope, cid);
         let (next, slot) = (arena.sibling(id, 1), arena.child_index(id) as u32 + 1);
-        let empty = v8::Array::new(scope, 0);
-        if crate::mutation::change_children(scope, cid, caller, parent, crate::mutation::Removing::None, &[new], empty, next, false, steps).is_none() {
-            return;
-        }
+        let Some(change) = crate::mutation::insert(scope, cid, caller, parent, &[new], next, steps) else { return };
+        changes.push(change);
         crate::ranges::split(scope, id, offset as u32, new, new_obj, Some(parent), slot);
     }
     let none = v8::String::empty(scope);
     if replace_data(scope, caller, id, node, offset, length - offset, none).is_err() {
         return;
     }
-    rv.set(v8::Array::new_with_elements(scope, &[new_value]).into());
+    let mut out = vec![new_value];
+    out.extend(crate::mutation::changes_value(scope, cid, &changes));
+    rv.set(v8::Array::new_with_elements(scope, &out).into());
+}
+
+// __dom.normalize(node, steps) -> [changes…]: DOM `normalize()` (§4.4) of `node` (the object), the engine's whole — for
+// each exclusive Text node among its descendants, in tree order: one with no data removed; any other given the data of
+// the exclusive Text nodes that follow it (its characterData record), the live ranges in them moved into it, and those
+// removed (each its childList record). With the changes it made, for the bindings to finish (mutation.rs
+// `changes_value`).
+fn normalize_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(root) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(1)) else { return };
+    let caller = realm_id(scope, &args);
+    let Some(cid) = crate::dom::dom(scope).arena.get(root).map(|n| n.realm) else { return };
+    let exclusive = |arena: &crate::dom::RealmArena, n: crate::dom::NodeId| arena.get(n).is_some_and(|d| d.kind == crate::dom::NodeKind::Text && !d.cdata);
+    // (…the descendants in tree order: a stack, last child pushed first)
+    let texts: Vec<crate::dom::NodeId> = {
+        let arena = realm(scope, cid);
+        let (mut out, mut stack) = (Vec::new(), arena.get(root).map_or_else(Vec::new, |n| n.children.iter().rev().copied().collect::<Vec<_>>()));
+        while let Some(n) = stack.pop() {
+            if exclusive(arena, n) {
+                out.push(n);
+            }
+            stack.extend(arena.get(n).map_or(&[][..], |d| &d.children[..]).iter().rev());
+        }
+        out
+    };
+    let mut changes = Vec::new();
+    for node in texts {
+        // (…one merged into the one before it is gone)
+        let arena = realm(scope, cid);
+        let Some(parent) = arena.parent_of(node) else { continue };
+        let length = arena.get(node).map_or(0, |n| n.data.len());
+        if length == 0 {
+            let Some(change) = crate::mutation::remove(scope, cid, caller, node, steps) else { return };
+            changes.push(change);
+            continue;
+        }
+        let mut following = Vec::new();
+        let mut at = arena.sibling(node, 1);
+        while let Some(n) = at.filter(|&n| exclusive(arena, n)) {
+            following.push((n, arena.child_index(n) as u32, arena.get(n).map_or(0, |d| d.data.len() as u32)));
+            at = arena.sibling(n, 1);
+        }
+        if following.is_empty() {
+            continue;
+        }
+        let data: Vec<u16> = following.iter().flat_map(|&(n, ..)| arena.get(n).map_or_else(Vec::new, |d| d.data.clone())).collect();
+        let object = crate::dom::node_value(scope, Some(node));
+        let Some(joined) = v8::String::new_from_two_byte(scope, &data, v8::NewStringType::Normal) else { return };
+        if replace_data(scope, caller, node, object, length, 0, joined).is_err() {
+            return;
+        }
+        let Ok(node_obj) = v8::Local::<v8::Object>::try_from(object) else { return };
+        let mut offset = length as u32;
+        for &(n, index, len) in &following {
+            crate::ranges::merge(scope, node, node_obj, n, parent, index, offset);
+            offset += len;
+        }
+        for &(n, ..) in &following {
+            let Some(change) = crate::mutation::remove(scope, cid, caller, n, steps) else { return };
+            changes.push(change);
+        }
+    }
+    let out = crate::mutation::changes_value(scope, cid, &changes);
+    rv.set(v8::Array::new_with_elements(scope, &out).into());
 }

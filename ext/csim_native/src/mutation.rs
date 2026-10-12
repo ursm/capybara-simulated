@@ -205,7 +205,7 @@ const CHANGE_REFUSED: u32 = 1 << 1;
 
 // What `removing` names: no child (an insertion), every child (replace all), or the one.
 #[derive(Clone, Copy)]
-pub(crate) enum Removing {
+enum Removing {
     None,
     All,
     Child(NodeId),
@@ -257,7 +257,7 @@ fn removing_steps(scope: &mut v8::PinScope<'_, '_>, steps: v8::Local<'_, v8::Arr
 // every insertion step: DOM "insert" steps 7, 9 and 11). The steps of one removal may take `child` out too (a frame's
 // unload): an insertion then goes last, a replacement is refused — its removal standing — with the NotFoundError Chrome
 // throws (`CHANGE_REFUSED`). The removed nodes, `REMOVED_NOT_A_CHILD`, or None where a step threw.
-pub(crate) fn change_children(
+fn change_children(
     scope: &mut v8::PinScope<'_, '_>,
     cid: i32,
     caller: i32,
@@ -326,6 +326,44 @@ pub(crate) fn change_children(
     let flags = (if connected { CHANGE_CONNECTED } else { 0 }) | (if refused { CHANGE_REFUSED } else { 0 });
     crate::dom::dom(scope).arena.change_flags.set(flags);
     Some(Ok(removed))
+}
+
+// A change of children one of the engine's own algorithms made (range_contents.rs, `normalize`), which the bindings
+// finish as its op returns, in order (`changeFinished`): the parent, the nodes it added and removed, and whether the
+// parent was connected as it began.
+pub(crate) type Change = (NodeId, Vec<NodeId>, Vec<NodeId>, bool);
+// …`nodes` inserted into `parent` before `child` (none: last)…
+pub(crate) fn insert(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, parent: NodeId, nodes: &[NodeId], child: Option<NodeId>, steps: v8::Local<'_, v8::Array>) -> Option<Change> {
+    let connected = realm(scope, cid).is_connected(parent);
+    let empty = v8::Array::new(scope, 0);
+    change_children(scope, cid, caller, parent, Removing::None, nodes, empty, child, false, steps)?.ok()?;
+    Some((parent, nodes.to_vec(), Vec::new(), connected))
+}
+// …`node` taken out of its parent…
+pub(crate) fn remove(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, node: NodeId, steps: v8::Local<'_, v8::Array>) -> Option<Change> {
+    let parent = realm(scope, cid).parent_of(node)?;
+    let connected = realm(scope, cid).is_connected(parent);
+    let empty = v8::Array::new(scope, 0);
+    let removed = change_children(scope, cid, caller, parent, Removing::Child(node), &[], empty, None, false, steps)?.ok()?;
+    Some((parent, Vec::new(), removed, connected))
+}
+// …every child of `parent` taken out…
+pub(crate) fn remove_all(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, parent: NodeId, steps: v8::Local<'_, v8::Array>) -> Option<Change> {
+    let connected = realm(scope, cid).is_connected(parent);
+    let empty = v8::Array::new(scope, 0);
+    let removed = change_children(scope, cid, caller, parent, Removing::All, &[], empty, None, false, steps)?.ok()?;
+    Some((parent, Vec::new(), removed, connected))
+}
+// …and the changes as the page has them: their count, then each `[parent, added, removed, connected]`.
+pub(crate) fn changes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, changes: &[Change]) -> Vec<v8::Local<'s, v8::Value>> {
+    let mut out: Vec<v8::Local<'s, v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, changes.len() as u32).into()];
+    for (parent, added, removed, connected) in changes {
+        out.push(node_value(scope, Some(*parent)));
+        out.push(nodes_value(scope, cid, added));
+        out.push(nodes_value(scope, cid, removed));
+        out.push(v8::Boolean::new(scope, *connected).into());
+    }
+    out
 }
 
 // __dom.changeChildren(parentNid, removing, nodes, childNid, adoptAll, steps, callerRealm) -> the removed nodes (as
