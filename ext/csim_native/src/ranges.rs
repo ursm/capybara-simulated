@@ -587,6 +587,16 @@ struct Contents {
     partial_non_text: bool,
 }
 
+// …as cloning, extracting and deleting a range's contents read it (range_contents.rs): the common ancestor, the first and
+// the last partially contained child's index, the contained children's run, and whether a doctype is among them.
+pub(crate) fn contents_plan(arena: &RealmArena, sc: NodeId, so: u32, ec: NodeId, eo: u32) -> (NodeId, Option<usize>, Option<usize>, std::ops::Range<usize>, bool) {
+    let c = contents(arena, Boundary { node: sc, offset: so }, Boundary { node: ec, offset: eo });
+    let mut common = sc;
+    for _ in 0..c.common_up {
+        common = arena.parent_of(common).unwrap_or(common);
+    }
+    (common, c.first_partial, c.last_partial, c.contained, c.doctype)
+}
 fn contents(arena: &RealmArena, s: Boundary, e: Boundary) -> Contents {
     let (cs, ce) = (arena.chain(s.node), arena.chain(e.node));
     let shared = cs.iter().zip(&ce).take_while(|(x, y)| x == y).count().max(1);

@@ -77,16 +77,24 @@ fn clone_tree_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let doc = unsafe { from.as_ref() }.document(scope);
     let (mut held, mut steps) = (Vec::new(), Vec::new());
     let Some(copy) = clone_into(scope, cid, src, None, deep, doc, &mut held, &mut steps) else { return };
-    let ids: Vec<NodeId> = std::iter::once(copy).chain(steps.iter().flat_map(|(s, c, _)| [*s, *c])).collect();
-    let Ok(nodes) = v8::Local::<v8::Array>::try_from(crate::dom::nodes_value(scope, cid, &ids)) else { return };
-    let mut out: Vec<v8::Local<'_, v8::Value>> = vec![nodes.get_index(scope, 0).unwrap_or_else(|| v8::null(scope).into())];
+    let mut out = vec![crate::dom::node_value(scope, Some(copy))];
+    out.extend(bindings_value(scope, cid, &steps));
+    rv.set(v8::Array::new_with_elements(scope, &out).into());
+}
+// The copies whose cloning steps are the bindings' too, each with its source and the names of the attributes whose steps
+// are theirs (`bindings_steps`) — as the page has them: `[source, copy, names, …]`.
+pub(crate) type BindingsSteps = Vec<(NodeId, NodeId, Vec<String>)>;
+pub(crate) fn bindings_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, steps: &BindingsSteps) -> Vec<v8::Local<'s, v8::Value>> {
+    let ids: Vec<NodeId> = steps.iter().flat_map(|(s, c, _)| [*s, *c]).collect();
+    let Ok(nodes) = v8::Local::<v8::Array>::try_from(crate::dom::nodes_value(scope, cid, &ids)) else { return Vec::new() };
+    let mut out = Vec::with_capacity(steps.len() * 3);
     for (k, (_, _, names)) in steps.iter().enumerate() {
-        for i in [1 + 2 * k as u32, 2 + 2 * k as u32] {
+        for i in [2 * k as u32, 2 * k as u32 + 1] {
             out.push(nodes.get_index(scope, i).unwrap_or_else(|| v8::null(scope).into()));
         }
         out.push(names_value(scope, names));
     }
-    rv.set(v8::Array::new_with_elements(scope, &out).into());
+    out
 }
 // The names of the attributes whose steps are the bindings', or undefined for none.
 fn names_value<'s>(scope: &mut v8::PinScope<'s, '_>, names: &[String]) -> v8::Local<'s, v8::Value> {
@@ -102,7 +110,7 @@ use crate::dom::{NodeData, NodeId, NodeKind, RealmArena};
 
 // Whether the engine clones `src` (and, `deep`, what it holds): an element, a text or a comment, and no `<template>` or
 // shadow host among it.
-fn clonable(arena: &RealmArena, src: NodeId, deep: bool) -> bool {
+pub(crate) fn clonable(arena: &RealmArena, src: NodeId, deep: bool) -> bool {
     let Some(n) = arena.get(src) else { return false };
     match n.kind {
         NodeKind::Text | NodeKind::Comment => true,
@@ -115,7 +123,7 @@ fn clonable(arena: &RealmArena, src: NodeId, deep: bool) -> bool {
 // (`held`) until its object is made or a tree holds it, and the elements whose steps are the bindings' too noted with
 // their sources (`steps`), in tree order.
 #[allow(clippy::too_many_arguments)]
-fn clone_into(
+pub(crate) fn clone_into(
     scope: &mut v8::PinScope<'_, '_>,
     cid: i32,
     src: NodeId,
@@ -123,7 +131,7 @@ fn clone_into(
     deep: bool,
     doc: Option<v8::Local<'_, v8::Object>>,
     held: &mut Vec<v8::cppgc::Persistent<crate::node_handle::NodeHandle>>,
-    steps: &mut Vec<(NodeId, NodeId, Vec<String>)>,
+    steps: &mut BindingsSteps,
 ) -> Option<NodeId> {
     let arena = crate::dom::realm(scope, cid);
     let n = arena.get(src)?;

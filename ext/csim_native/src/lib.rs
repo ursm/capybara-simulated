@@ -19,6 +19,7 @@ mod ce_reactions;
 mod change_on_blur;
 mod character_data;
 mod cloning;
+mod range_contents;
 mod element_references;
 mod clone;
 mod connection_steps;
