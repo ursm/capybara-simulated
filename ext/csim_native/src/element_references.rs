@@ -69,14 +69,14 @@ impl RealmArena {
         false
     }
 
+    // The one element the reference attribute `name` of `host` reflects as (`attr_associated`).
+    pub(crate) fn referenced_element(&self, host: NodeId, name: &str) -> Option<NodeId> {
+        self.attr_associated(host, attribute_index(name)?, false)?.first().copied()
+    }
     // The element(s) `host`'s reference attribute `attribute` reflects as: the explicitly set ones still valid, where
     // the content attribute is "" — the IDL setter's — else those its IDREFs (one, or a list split on ASCII white space)
     // name in `host`'s tree, any naming none left out; None where the content attribute is absent (or, one reference,
     // empty).
-    // …the one element the reference attribute `name` of `host` reflects as.
-    pub(crate) fn referenced_element(&self, host: NodeId, name: &str) -> Option<NodeId> {
-        self.attr_associated(host, attribute_index(name)?, false)?.first().copied()
-    }
     fn attr_associated(&self, host: NodeId, attribute: u8, list: bool) -> Option<Vec<NodeId>> {
         let node = self.get(host)?;
         let raw = node.plain_attr_units(ATTRIBUTES[attribute as usize])?;
