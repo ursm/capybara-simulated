@@ -27,4 +27,16 @@ RSpec.describe 'cloneNode' do
       })()
     JS
   end
+
+  # An image's copy loads its source as its attributes are appended — inserted or not.
+  it "loads an image's copy" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [<<~HTML]] }).tap {|session| session.visit '/' }
+      <!DOCTYPE html><body><img id=i src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
+    HTML
+    s.execute_script(<<~JS)
+      const c = document.getElementById('i').cloneNode(true);
+      c.onload = () => { window.R = ['load', c.naturalWidth, c.complete]; };
+    JS
+    expect(s.evaluate_script('window.R')).to eq(['load', 1, true])
+  end
 end
