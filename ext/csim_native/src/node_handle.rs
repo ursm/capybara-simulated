@@ -81,9 +81,10 @@ pub(crate) struct NodeHandle {
     // Its node document (DOM §4.4), the document object — none for a document itself, which is its own — that adoption
     // changes (`nodeDocument` / `setNodeDocument`): an Attr's too, which has no slot in the arena.
     document: UnsafeCell<v8::TracedReference<v8::Object>>,
-    // A character data node's data as the string a script reads (`nodeData`): the one it was last given, or the one made
-    // from the arena's the first time it is read since — the arena's is the data, this is its string, kept so a read is
-    // no copy. Empty until either.
+    // A character data node's data as the string a script reads (`nodeData`) — or a form control's live value
+    // (`liveValue`), an element having no data: the one it was last given, or the one made from the arena's the first
+    // time it is read since — the arena's is the data, this is its string, kept so a read is no copy (a 200K-character
+    // textarea's value read 5,000 times). Empty until either.
     data: UnsafeCell<v8::TracedReference<v8::String>>,
     // Its custom element registry (HTML: an element's, a shadow root's, a document's), as ce_reactions.rs codes it — none
     // set, the template contents' tracking null, the null registry, or a registry — kept here as the node document is,
@@ -408,6 +409,8 @@ pub(crate) fn install_listeners(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<
     crate::dom::register(scope, ns, "listenerTypeKnown", listener_type_known, context_id);
     crate::dom::register(scope, ns, "rareData", rare_data, context_id);
     crate::dom::register(scope, ns, "nodeData", node_data, context_id);
+    crate::dom::register(scope, ns, "liveValue", live_value, context_id);
+    crate::dom::register(scope, ns, "setLiveValue", set_live_value, context_id);
     crate::dom::register(scope, ns, "nodeDocument", node_document, context_id);
     crate::dom::register(scope, ns, "setNodeDocument", set_node_document, context_id);
     crate::dom::register(scope, ns, "setSubtreeDocument", set_subtree_document, context_id);
@@ -515,6 +518,50 @@ pub(crate) fn wrote_data(scope: &mut v8::PinScope<'_, '_>, node: v8::Local<'_, v
     // SAFETY: as above.
     unsafe { (*h.data.get()).reset(scope, held) };
     h.nid.get()
+}
+
+// `__dom.liveValue(control)` -> a form control's live value — undefined while it is its default (no dirty value) — as
+// the string its handle holds, made of the arena's units where it holds none.
+fn live_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(ptr) = handle_of(scope, args.get(0)) else { return };
+    // SAFETY: the handle lives while its object, an argument, does; the main thread writes the reference.
+    let h = unsafe { ptr.as_ref() };
+    let Some(units) = h.nid.get().and_then(|id| crate::dom::dom(scope).arena.get(id)).map(|n| n.value.as_ref().map(|v| v.len())) else { return };
+    if units.is_none() {
+        return;
+    }
+    if let Some(s) = unsafe { (*h.data.get()).get(scope) } {
+        return rv.set(s.into());
+    }
+    let units = h.nid.get().and_then(|id| crate::dom::dom(scope).arena.get(id)?.value.clone()).unwrap_or_default();
+    let Some(s) = v8::String::new_from_two_byte(scope, &units, v8::NewStringType::Normal) else { return };
+    // SAFETY: as above.
+    unsafe { (*h.data.get()).reset(scope, Some(s)) };
+    rv.set(s.into());
+}
+// `__dom.setLiveValue(control, value)` -> whether it changed: the live value becomes `value` (a string; undefined back
+// to the default), the string held as given.
+fn set_live_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(ptr) = handle_of(scope, args.get(0)) else { return rv.set_bool(false) };
+    // SAFETY: as `live_value`.
+    let h = unsafe { ptr.as_ref() };
+    let Some(id) = h.nid.get() else { return rv.set_bool(false) };
+    let value = v8::Local::<v8::String>::try_from(args.get(1)).ok();
+    let units = value.map(|s| {
+        let mut units = vec![0u16; s.length()];
+        s.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
+        units.into_boxed_slice()
+    });
+    if !crate::dom::dom(scope).arena.write_live_value(id, units) {
+        return rv.set_bool(false);
+    }
+    // SAFETY: as above.
+    unsafe { (*h.data.get()).reset(scope, value) };
+    rv.set_bool(true);
+}
+// …and one the engine wrote, the units the arena has now: the string made of them when next read.
+pub(crate) fn forget_live_value(scope: &mut v8::PinScope<'_, '_>, control: v8::Local<'_, v8::Value>) {
+    forget_data(scope, control);
 }
 
 // `__dom.nodeDocument(node)` -> its node document, null for none — undefined for an object with no handle (an

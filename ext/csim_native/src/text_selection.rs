@@ -45,6 +45,12 @@ impl Direction {
 const SELECTION_INPUT_TYPES: [&str; 5] = ["text", "search", "tel", "url", "password"];
 const SELECT_INPUT_TYPES: [&str; 6] = ["text", "search", "tel", "url", "password", "email"];
 
+// The input types `maxlength` cuts typing short in (HTML: the text-like ones; a textarea too).
+const MAXLENGTH_INPUT_TYPES: [&str; 6] = ["text", "search", "tel", "url", "email", "password"];
+// What typing into a control changed (`type_text`): its value, its selection.
+pub(crate) const TYPED_VALUE: u32 = 1;
+pub(crate) const TYPED_SELECTION: u32 = 2;
+
 // Why `setRangeText()` refused.
 #[derive(Debug, PartialEq)]
 pub(crate) enum RangeTextError {
@@ -89,6 +95,45 @@ impl RealmArena {
             }
         }
         len
+    }
+
+    // The user typing `text` into the control `id`: what it inserts replacing its selection (the caret at its value's
+    // end where none was ever set) — or, `whole`, its value, as a driver's fill does — the text entry cursor after it — but no keystroke that leaves a number field's text
+    // no prefix of a scientific number being entered ("1e+1" takes no second sign; "1.", "1e", "1e+" stand), and what
+    // passes `maxlength` cut off where it applies (a textarea, a text-like input). What it changed (`TYPED_*`); the value
+    // written is the engine's, the string the bindings held of it forgotten by the caller.
+    pub(crate) fn type_text(&mut self, id: NodeId, text: &[u16], whole: bool) -> u32 {
+        let Some(n) = self.get(id) else { return 0 };
+        let current = self.relevant_value(n);
+        let number = n.is_html_named("input") && n.input_type() == "number";
+        let cuts = n.is_html_named("textarea") || (n.is_html_named("input") && MAXLENGTH_INPUT_TYPES.contains(&n.input_type()));
+        let max = if cuts { n.plain_attr("maxlength").and_then(crate::validity::parse_non_negative).filter(|&m| m > 0) } else { None };
+        let (sel, set) = self.text_selection(id);
+        let (start, end) = match (whole, set) {
+            (true, _) => (0, current.len()),
+            (false, true) => (sel.start as usize, sel.end as usize),
+            (false, false) => (current.len(), current.len()),
+        };
+        let (start, end) = (start.min(current.len()), end.min(current.len()));
+        let mut next = Vec::with_capacity(current.len() + text.len());
+        next.extend_from_slice(&current[..start]);
+        next.extend_from_slice(text);
+        next.extend_from_slice(&current[end..]);
+        if number && !number_being_entered(&next) {
+            return 0;
+        }
+        if let Some(max) = max {
+            next.truncate(max as usize);
+        }
+        let caret = next.len().min(start + text.len()) as u32;
+        let mut changed = 0;
+        if self.write_live_value(id, Some(next.into_boxed_slice())) {
+            changed |= TYPED_VALUE;
+        }
+        if self.set_text_selection(id, caret, caret, Direction::None) {
+            changed |= TYPED_SELECTION;
+        }
+        changed
     }
 
     // `id`'s selection as it stands — clamped to its value's length, which may have shrunk by a path that moved no
@@ -164,11 +209,39 @@ impl RealmArena {
     }
 }
 
+// Whether `units` is a prefix of a floating-point number as one is typed — `[-+]?\d*\.?\d*([eE][-+]?\d*)?`.
+fn number_being_entered(units: &[u16]) -> bool {
+    let mut i = 0;
+    let at = |i: usize| units.get(i).copied();
+    let digits = |mut i: usize| {
+        while at(i).is_some_and(|u| (0x30..=0x39).contains(&u)) {
+            i += 1;
+        }
+        i
+    };
+    if matches!(at(i), Some(0x2B | 0x2D)) {
+        i += 1;
+    }
+    i = digits(i);
+    if at(i) == Some(0x2E) {
+        i = digits(i + 1);
+    }
+    if matches!(at(i), Some(0x45 | 0x65)) {
+        i += 1;
+        if matches!(at(i), Some(0x2B | 0x2D)) {
+            i += 1;
+        }
+        i = digits(i);
+    }
+    i == units.len()
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "selectionApplies", selection_applies_op, context_id);
     crate::dom::register(scope, ns, "textSelection", text_selection_op, context_id);
     crate::dom::register(scope, ns, "setTextSelection", set_text_selection_op, context_id);
     crate::dom::register(scope, ns, "rangeTextEdit", range_text_op, context_id);
+    crate::dom::register(scope, ns, "typeText", type_text_op, context_id);
 }
 
 // __dom.selectionApplies(nid, forSelect) -> whether the selection APIs (`select()`, with `forSelect`) apply to the
@@ -276,4 +349,19 @@ mod tests {
         assert_eq!(arena.range_text(id, &u("XYZ"), Some((0, 4)), "preserve"), Ok((u("XYZo world"), 0, 3, Direction::None)));
         assert_eq!(arena.range_text(id, &u("X"), Some((4, 2)), "end"), Err(RangeTextError::Index));
     }
+}
+
+// __dom.typeText(control, text, whole) -> what typing `text` into the control — over its whole value, `whole` — changed
+// (`type_text`'s `TYPED_*` bits).
+fn type_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let control = args.get(0);
+    let Some(id) = crate::node_handle::nid_of(scope, control) else { return rv.set_uint32(0) };
+    let text = crate::dom::utf16_arg(scope, args.get(1));
+    let cid = crate::dom::realm_id(scope, &args);
+    let whole = args.get(2).is_true();
+    let changed = crate::dom::realm(scope, cid).type_text(id, &text, whole);
+    if changed & TYPED_VALUE != 0 {
+        crate::node_handle::forget_live_value(scope, control);
+    }
+    rv.set_uint32(changed);
 }

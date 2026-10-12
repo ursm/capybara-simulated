@@ -1470,6 +1470,18 @@ impl RealmArena {
         }
     }
 
+    // A form control's live value written — `units`, or none back to its default — and whether it changed (the state
+    // its pseudo-classes read with it: `:placeholder-shown`, `:valid`, …).
+    pub(crate) fn write_live_value(&mut self, id: NodeId, units: Option<Box<[u16]>>) -> bool {
+        let Some(node) = self.get_mut(id) else { return false };
+        if node.value == units {
+            return false;
+        }
+        node.value = units;
+        self.state_epoch += 1;
+        true
+    }
+
     // The form the parser gave `id`, or none.
     pub(crate) fn set_parser_form_owner(&mut self, id: NodeId, form: Option<NodeId>) {
         let had = match form {
@@ -2303,7 +2315,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setManualAssigned", set_manual_assigned, context_id);
     register(scope, ns, "assignedSlotOf", assigned_slot_of, context_id);
     register(scope, ns, "assignedNodesOf", assigned_nodes_of, context_id);
-    register(scope, ns, "setValue", set_value, context_id);
     register(scope, ns, "setParserFormOwner", set_parser_form_owner, context_id);
     register(scope, ns, "setCustomStates", set_custom_states, context_id);
     register(scope, ns, "setTarget", set_target, context_id);
@@ -3001,25 +3012,6 @@ const STATE_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new(
         v8::fast_api::Int64Representation::Number,
     ),
 )];
-
-// __dom.setValue(nid, value): a form control's live value — a string once dirty, `undefined` back to its default.
-fn set_value(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let v = args.get(1);
-    let value = if v.is_undefined() { None } else { Some(utf16_arg(scope, v).into_boxed_slice()) };
-    let cid = realm_id(scope, &args);
-    let arena = realm(scope, cid);
-    arena.state_epoch += 1;
-    if let Some(node) = arena.get_mut(id) {
-        node.value = value;
-    }
-}
 
 // __dom.setDoctype(nid, name, publicId, systemId): a doctype's name and identifiers, as a reused document's next parse
 // gives them.
