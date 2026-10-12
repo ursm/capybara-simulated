@@ -165,10 +165,12 @@ RSpec.describe 'deleting in an editing host' do
       typed('<p>aa</p><p>bb</p>', 'e', 1, :delete, ['e.lastChild.firstChild', 1]),
       typed("<p>a</p>#{island}<p>b</p>", 'e.firstChild.firstChild', 1, :delete),
       deleted("aa<p>bb</p>\n", "e.querySelector('p').firstChild", 0, :backspace),
-      deleted('aa<p>bb</p><br>cc', "e.querySelector('p').firstChild", 0, :backspace)
+      deleted('aa<p>bb</p><br>cc', "e.querySelector('p').firstChild", 0, :backspace),
+      typed("a#{island}<p>b</p>", 'e.lastChild.firstChild', 0, :backspace),
+      typed("<p>a</p>\n#{island}\n<p>b</p>", 'e.lastChild.firstChild', 0, :backspace)
     ]).to eq([
       "#{island}<p>Zb</p>", "<p>aZ</p>#{island}", '<p>Zbb</p>', 'aaZbb', '<p>aa</p><p>Zb</p>', '<p>aZb</p>', "aabb\n",
-      'aabb<br><br>cc'
+      'aabb<br><br>cc', 'aZb', "<p>aZb</p>\n"
     ])
   end
 

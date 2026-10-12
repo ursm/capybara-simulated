@@ -86,6 +86,23 @@ fn joinable(arena: &RealmArena, id: NodeId) -> bool {
 fn inline_content(arena: &RealmArena, id: NodeId) -> bool {
     arena.get(id).is_some_and(|n| n.kind == NodeKind::Text || (n.kind == NodeKind::Element && !n.is_html_named("br") && crate::rendered::is_inline_level(arena, id) != Some(false)))
 }
+// Whether `id` is text of white space alone — what a line shows nothing of between blocks.
+fn blank(arena: &RealmArena, id: NodeId) -> bool {
+    arena.get(id).is_some_and(|n| n.kind == NodeKind::Text && n.data.iter().all(|&c| matches!(c, 0x20 | 0x09 | 0x0A | 0x0C | 0x0D)))
+}
+// The child of `parent` nearest the place before its `at`th child on one side — the one at it (forward) or before it —
+// past text of white space alone.
+fn nearest(arena: &RealmArena, parent: NodeId, at: u32, forward: bool) -> Option<NodeId> {
+    let kids = &arena.get(parent)?.children;
+    let mut k = at as usize;
+    loop {
+        let n = if forward { *kids.get(k)? } else { *kids.get(k.checked_sub(1)?)? };
+        if !blank(arena, n) {
+            return Some(n);
+        }
+        k = if forward { k + 1 } else { k - 1 };
+    }
+}
 // The child a place between children has on the side a step goes: the one after it (forward) or before it.
 fn beside(arena: &RealmArena, (node, offset): (NodeId, u32), forward: bool) -> Option<NodeId> {
     let n = arena.get(node).filter(|n| n.kind == NodeKind::Element)?;
@@ -132,8 +149,9 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
                 took = if block_atom(arena, whole) {
                     Took::Atom
                 } else if crate::rendered::is_inline_level(arena, whole) == Some(false) {
-                    // (…a block island only where an editable block on its far side joins across it: Chrome)
-                    if !arena.sibling(whole, if forward { 1 } else { -1 }).is_some_and(|b| joinable(arena, b)) {
+                    // (…a block island only where an editable block or a line's content on its far side joins across it:
+                    // Chrome)
+                    if !nearest(arena, parent, if forward { at + 1 } else { at }, forward).is_some_and(|b| joinable(arena, b) || inline_content(arena, b)) {
                         return None;
                     }
                     Took::BlockIsland(parent, at)
@@ -168,8 +186,8 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let arena = realm(scope, cid);
     let (start_block, end_block) = match took {
         Took::BlockIsland(parent, at) => {
-            let side = |k: Option<u32>| k.and_then(|k| arena.get(parent)?.children.get(k as usize).copied()).filter(|&b| joinable(arena, b));
-            if forward { (start_block, side(Some(at)).unwrap_or(end_block)) } else { (side(at.checked_sub(1)).unwrap_or(start_block), end_block) }
+            let side = nearest(arena, parent, at, forward).filter(|&b| joinable(arena, b));
+            if forward { (start_block, side.unwrap_or(end_block)) } else { (side.unwrap_or(start_block), end_block) }
         }
         _ => (start_block, end_block),
     };
@@ -287,7 +305,8 @@ fn join<'s>(
         }
         let after = arena.sibling(top, 1).filter(|&n| {
             arena.parent_of(top) == Some(parent)
-                && arena.get(n).is_some_and(|d| if d.kind == NodeKind::Text { d.data.iter().any(|&c| !matches!(c, 0x20 | 0x09 | 0x0A | 0x0C | 0x0D)) } else { d.is_html_named("br") || inline_content(arena, n) })
+                && !blank(arena, n)
+                && (inline_content(arena, n) || arena.get(n).is_some_and(|d| d.is_html_named("br")))
         });
         let joint = if !kids.is_empty() && !lone_br {
             changes.push(crate::mutation::remove_all(scope, cid, caller, end_block, steps)?);
