@@ -44,18 +44,21 @@ fn edit_command(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let steps = v8::Local::new(scope, steps);
     let (mut changes, mut copies, mut held) = (Vec::new(), Vec::new(), Vec::new());
     let mut edit = Edit { cid, caller, steps, host, changes: &mut changes, copies: &mut copies, held: &mut held };
-    // (…an end out of the host clamped to the host's edge; a selection with neither end in it edits nothing — but a rule,
-    // which goes at its start: Chrome)
+    // (…a selection starting out of the host edits nothing — one ending out of it is clamped to the host's end — and one
+    // within a comment or a processing instruction is the place beside it: Chrome)
     let arena = realm(scope, cid);
-    let (start_in, end_in) = (crate::editing::within(arena, host, sc), crate::editing::within(arena, host, ec));
-    if !start_in && !end_in && command != "inserthorizontalrule" {
+    if !crate::editing::within(arena, host, sc) {
         return;
     }
-    let host_end = if start_in || end_in { arena.get(host).map_or(0, |n| n.children.len() as u32) } else { 0 };
-    let range = (
-        if start_in { crate::editing::beside_leaf(arena, (sc, so)) } else { (host, 0) },
-        if end_in { crate::editing::beside_leaf(arena, (ec, eo)) } else { (host, host_end) }
-    );
+    let start = crate::editing::beside_leaf(arena, (sc, so));
+    let end = if sc == ec && start.0 != sc {
+        start
+    } else if crate::editing::within(arena, host, ec) {
+        crate::editing::beside_leaf(arena, (ec, eo))
+    } else {
+        (host, arena.get(host).map_or(0, |n| n.children.len() as u32))
+    };
+    let range = (start, end);
     let done = match command.as_str() {
         "insertorderedlist" => list(scope, &mut edit, range.0, "ol"),
         "insertunorderedlist" => list(scope, &mut edit, range.0, "ul"),

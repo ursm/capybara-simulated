@@ -204,7 +204,14 @@ pub(crate) fn selection_host(arena: &RealmArena, anchor: (NodeId, u32), focus: (
             None => (node, offset),
         })
     };
-    let (anchor, focus) = (beside_leaf(arena, anchor), beside_leaf(arena, clamp(focus, backward)?));
+    // (…both ends in one leaf the one place beside it, the anchor's: nothing of the leaf selected)
+    let focus = clamp(focus, backward)?;
+    let (anchor, focus) = if anchor.0 == focus.0 && beside_leaf(arena, anchor).0 != anchor.0 {
+        let place = beside_leaf(arena, if backward { focus } else { anchor });
+        (place, place)
+    } else {
+        (beside_leaf(arena, anchor), beside_leaf(arena, focus))
+    };
     Some((host, if backward { (focus, anchor) } else { (anchor, focus) }))
 }
 // A place in a comment or a processing instruction — which an edit puts nothing in — as the place before it (at its

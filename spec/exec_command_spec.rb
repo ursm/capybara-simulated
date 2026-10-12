@@ -113,7 +113,7 @@ RSpec.describe 'execCommand in an editing host' do
       [true, '<b>a</b><hr><i>ef</i>', 'out', 'c:#text+0-0 c:#text+0-0 c:DIV+1-0'],
       [true, '<p>a</p><hr><p>ef</p>', 'out', 'c:#text+0-0 c:#text+0-0 c:DIV+1-0'],
       [false, 'abc', 'out', ''],
-      [true, '<hr>abc', 'out', 'c:DIV+1-0'],
+      [false, 'abc', 'out', ''],
       [false, 'abc', 'out', ''],
       [true, 'a<b>bc</b>', 'out', 'c:DIV+1-0 c:#text+0-0 c:DIV+1-0 c:DIV+0-1 c:B+1-0'],
       [true, '<span style="color: red;">abc</span>', 'out', 'c:DIV+1-0 c:DIV+0-1 c:SPAN+1-0'],
