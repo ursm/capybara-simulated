@@ -4,9 +4,9 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
 # A page's parse is built by the engine batch by batch, between the scripts it stops for (html_parse.rs
-# `htmlRunBuilt`), and replayed by the bindings where a batch needs them (a custom element, an observer, a
-# `<details>`): what a script sees of the page so far, what it writes in, the page's own `<html>` / `<head>` / `<body>`
-# kept, its mode, its handlers and its template contents' scripts are the same either way.
+# `htmlRunBuilt`), and replayed by the bindings where a batch needs them (a custom element, a `<details>`): what a
+# script sees of the page so far, what it writes in, the page's own `<html>` / `<head>` / `<body>` kept, its mode, its
+# handlers, its template contents' scripts and the records an observer has of it are the same either way (Chrome's).
 RSpec.describe 'a page parse the engine builds' do
   page = <<~HTML
     <html lang=en class=p><head><title>t</title>
@@ -36,6 +36,29 @@ RSpec.describe 'a page parse the engine builds' do
     JS
     expect(got).to eq([
       [true, 4, 'one', 'SCRIPT'], 'BackCompat', 'en', 'p', '1', 1, 1, true, 2, true, [true, false]
+    ])
+  end
+
+  observed = <<~HTML
+    <!DOCTYPE html><html><head><script>
+      window.seen = [];
+      new MutationObserver((records) => {
+        for (const r of records) seen.push(r.target.nodeName + '+' + [...r.addedNodes].map((n) => n.nodeName).join(',') +
+          '<' + (r.previousSibling ? r.previousSibling.nodeName : '') + '>' + (r.nextSibling ? r.nextSibling.nodeName : ''));
+      }).observe(document, {childList: true, subtree: true});
+    </script></head><body><p>a<b>b</b></p><table><tr><td>x</td></tr>t</table><script>window.mid = seen.length</script>
+    <ul><li>1<li>2</ul></body></html>
+  HTML
+
+  it 'queues the records of its insertions for an observer the page made, in order' do
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [observed]] }).tap {|s| s.visit '/' }
+    expect(session.evaluate_script('[window.mid, window.seen]')).to eq([
+      13,
+      [
+        'HTML+BODY<HEAD>', 'BODY+P<>', 'P+#text<>', 'P+B<#text>', 'B+#text<>', 'BODY+TABLE<P>', 'TABLE+TBODY<>', 'TBODY+TR<>',
+        'TR+TD<>', 'TD+#text<>', 'BODY+#text<P>TABLE', 'BODY+SCRIPT<TABLE>', 'SCRIPT+#text<>', 'BODY+#text<SCRIPT>',
+        'BODY+UL<#text>', 'UL+LI<>', 'LI+#text<>', 'UL+LI<LI>', 'LI+#text<>', 'BODY+#text<UL>'
+      ]
     ])
   end
 end

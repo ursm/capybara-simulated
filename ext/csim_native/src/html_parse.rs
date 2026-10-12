@@ -355,7 +355,7 @@ struct Parse {
     standins: StandIns,
     ended: bool,
     // The nodes by handle — those the engine built (`htmlRunBuilt`) and those the bindings made replaying the steps
-    // it left them (`htmlSetHandle`).
+    // it left them (`htmlSetHandles`).
     handles: Vec<Option<crate::dom::NodeId>>,
 }
 
@@ -399,7 +399,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "htmlRun", html_run, context_id);
     register(scope, ns, "htmlRunBuilt", html_run_built, context_id);
     register(scope, ns, "htmlHandle", html_handle, context_id);
-    register(scope, ns, "htmlSetHandle", html_set_handle, context_id);
+    register(scope, ns, "htmlSetHandles", html_set_handles, context_id);
     register(scope, ns, "htmlScriptBegin", html_script_begin, context_id);
     register(scope, ns, "htmlScriptEnd", html_script_end, context_id);
     register(scope, ns, "htmlWrite", html_write, context_id);
@@ -519,10 +519,11 @@ fn html_run(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 }
 
 // What the bindings say of a live document's next batch (`htmlRunBuilt`'s `flags`): whether the engine may build it —
-// no observer to record each insertion for, no customizable select's `<selectedcontent>` to mirror into as it goes, no
-// null registry propagating — and whether custom elements are defined, whose constructors the parser runs.
+// no customizable select's `<selectedcontent>` to mirror into as it goes, no null registry propagating — whether
+// custom elements are defined, whose constructors the parser runs, and whether the page observes mutations.
 const MAY_BUILD: u32 = 1;
 const CE_DEFINED: u32 = 1 << 1;
+const OBSERVED: u32 = 1 << 2;
 
 // Whether the engine leaves a live document's batch of `ops` to the bindings: one where the parser runs page code or
 // steps of the bindings' own as it makes or inserts a node — a custom element's constructor (`ce_defined`: a name with
@@ -609,7 +610,7 @@ fn html_run_built(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         if handles.is_empty() {
             handles = vec![Some(document), None, None];
         }
-        let live = Live { skeleton, ..Live::default() };
+        let live = Live { observed: flags & OBSERVED != 0, skeleton, ..Live::default() };
         let mut build = Build::new(cid, doc, template_doc, handles);
         build.script = crate::script::SCRIPT_ALREADY_STARTED | crate::script::SCRIPT_PARSER_INSERTED;
         build.live = Some(live);
@@ -643,12 +644,20 @@ fn html_handle(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let node = parses(scope).live.get(&id).and_then(|p| p.handles.get(handle).copied().flatten());
     rv.set(crate::dom::node_value(scope, node));
 }
-// __dom.htmlSetHandle(id, handle, node): the node the bindings made for a parse's handle, replaying its steps.
-fn html_set_handle(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.htmlSetHandles(id, [handle, node, …]): the nodes the bindings made for a parse's handles, replaying its steps.
+fn html_set_handles(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let id = parse_id(scope, &args);
-    let handle = args.get(1).uint32_value(scope).unwrap_or(u32::MAX) as usize;
-    let node = crate::node_handle::nid_of(scope, args.get(2));
-    if let Some(p) = parses(scope).live.get_mut(&id).filter(|_| handle < u32::MAX as usize) {
+    let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(1)) else { return };
+    let mut pairs = Vec::with_capacity(list.length() as usize / 2);
+    for k in (0..list.length()).step_by(2) {
+        let handle = list.get_index(scope, k).and_then(|v| v.uint32_value(scope));
+        let node = list.get_index(scope, k + 1).and_then(|v| crate::node_handle::nid_of(scope, v));
+        if let Some(handle) = handle {
+            pairs.push((handle as usize, node));
+        }
+    }
+    let Some(p) = parses(scope).live.get_mut(&id) else { return };
+    for (handle, node) in pairs {
         if p.handles.len() <= handle {
             p.handles.resize(handle + 1, None);
         }
@@ -778,6 +787,9 @@ pub(crate) struct Build<'s> {
 // elements it inserted out of template contents, in order, and the skeleton elements it reused.
 #[derive(Default)]
 struct Live {
+    // (…and whether the page observes mutations, each insertion and removal then queuing its childList record, as the
+    // page's own do)
+    observed: bool,
     skeleton: [Option<crate::dom::NodeId>; 3],
     made: std::collections::HashSet<crate::dom::NodeId>,
     inserted: Vec<crate::dom::NodeId>,
@@ -878,8 +890,12 @@ impl<'s> Build<'s> {
     // contents — and what the parser making it gives it (`script_made`).
     pub(crate) fn insert(&mut self, scope: &mut v8::PinScope<'s, '_>, parent: crate::dom::NodeId, child: crate::dom::NodeId, before: Option<crate::dom::NodeId>) {
         // (…a live document's as any insertion into it: its style engine told, its ranges, slots and insertion steps)
-        if self.live.is_some() {
+        if let Some(live) = self.live.as_ref() {
+            let observed = live.observed;
             crate::dom::insert_nodes(scope, self.cid, parent, &[child], before);
+            if observed {
+                crate::mutation::record_child_list(scope, self.maker, parent, &[child], &[], None, None);
+            }
         } else {
             crate::dom::realm(scope, self.cid).insert_child(parent, child, before);
         }
@@ -960,8 +976,14 @@ impl<'s> Build<'s> {
     }
     // `node` out of its parent — a live document's as any removal from it.
     fn take_out(&mut self, scope: &mut v8::PinScope<'s, '_>, node: crate::dom::NodeId) {
-        if self.live.is_some() {
+        if let Some(live) = self.live.as_ref() {
+            let observed = live.observed;
+            let arena = crate::dom::realm(scope, self.cid);
+            let (parent, siblings) = (arena.parent_of(node), (arena.sibling(node, -1), arena.sibling(node, 1)));
             crate::dom::take_out(scope, self.cid, node);
+            if let Some(parent) = parent.filter(|_| observed) {
+                crate::mutation::record_child_list(scope, self.maker, parent, &[], &[node], Some(siblings), None);
+            }
         } else {
             crate::dom::realm(scope, self.cid).detach(node);
         }
