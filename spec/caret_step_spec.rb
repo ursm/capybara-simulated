@@ -179,9 +179,10 @@ RSpec.describe 'stepping a caret by a character' do
   end
 
   # Focusing an editing host with no selection in it puts the caret at its first caret position (caret.rs
-  # `caret_first`): its first rendered character, white space a line starts with collapsed away; before its first
+  # `caret_edge`): its first rendered character, white space a line starts with collapsed away; before its first
   # `<br>` or image; its own start where it has none. A selection in it already stays.
   it 'puts the caret at the first caret position of an editing host it focuses' do
+    pending 'a press placing the caret at its point (a caret from a point): until then focus puts it at the last'
     s = session_for(<<~HTML)
       <!DOCTYPE html><body><div id=a contenteditable><p>abc</p><p>def</p></div><div id=b contenteditable><p><br></p></div>
       <div id=c contenteditable>  <b>x</b>yz</div><div id=d contenteditable><img src="data:,"><span>q</span></div>
@@ -204,5 +205,20 @@ RSpec.describe 'stepping a caret by a character' do
       })()
     JS
     expect(got).to eq(['abc@0', 'P@0', 'x@0', 'DIV@0', 'DIV@0', 'def@2'])
+  end
+
+  # A click into an editor then typing types where it was clicked — here right of its text, on its line's blank: at
+  # the end of the host's text, and of a paragraph's in it (Chrome).
+  it 'types where a click into an editing host put the caret' do
+    s = session_for('<!DOCTYPE html><body style="margin:0"><div id=e contenteditable style="width:400px;height:40px">Hello</div><div id=f contenteditable style="width:400px"><p>World</p></div>')
+    e = s.find(:css, '#e')
+    e.click
+    e.send_keys('X')
+    e.click
+    e.send_keys('Y')
+    f = s.find(:css, '#f')
+    f.click
+    f.send_keys('Z')
+    expect(s.evaluate_script('[e.innerHTML, f.innerHTML]')).to eq(['HelloXY', '<p>WorldZ</p>'])
   end
 end

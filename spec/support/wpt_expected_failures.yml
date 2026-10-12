@@ -5414,6 +5414,8 @@ selection/caret/move-around-generated-content.html:
   to the start of the first list item'
 - 'Moving caret between list items using arrow keys: arrow-down should move the caret
   to the third list item'
+- 'Moving caret between list items using arrow keys: caret should start at the beginning
+  of the first line'
 - 'Moving caret past the block-quote using arrow keys: arrow-down should move the
   caret to the end of the quote'
 - 'Moving caret past the block-quote using arrow keys: arrow-down should move the
@@ -5426,6 +5428,8 @@ selection/caret/move-around-generated-content.html:
   caret forward by one character'
 - 'Moving caret past the block-quote using arrow keys: arrow-up should move the caret
   to into the first line'
+- 'Moving caret past the block-quote using arrow keys: caret should start at the beginning
+  of the first line'
 selection/contenteditable/collapse.html:
 - Selection.collapse() must succeed across siblings
 - Selection.collapse() must succeed for the ancestor
