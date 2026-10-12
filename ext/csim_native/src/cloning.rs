@@ -62,8 +62,8 @@ fn clone_element_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 // After the copy, the elements whose cloning steps are the bindings' too — their attributes' (`bindings_steps`), an
 // image's, a select's, a namespaced attribute's names — each with its source and the names of those attributes
 // (undefined for none, as `cloneElementSteps` answers), in tree order. Declined, for the bindings
-// to clone, where the node is no element, text or comment (a processing instruction's target is the bindings'), or the
-// clone holds one, a `<template>` (its contents) or a shadow host (its shadow root).
+// to clone, where the node is no element or character data, or the clone holds a `<template>` (its contents) or a
+// shadow host (its shadow root).
 fn clone_tree_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let node = args.get(0);
     let (Some(src), Some(from)) = (crate::node_handle::nid_of(scope, node), crate::node_handle::handle_of(scope, node)) else { return };
@@ -108,12 +108,12 @@ fn names_value<'s>(scope: &mut v8::PinScope<'s, '_>, names: &[String]) -> v8::Lo
 
 use crate::dom::{NodeData, NodeId, NodeKind, RealmArena};
 
-// Whether the engine clones `src` (and, `deep`, what it holds): an element, a text or a comment, and no `<template>` or
+// Whether the engine clones `src` (and, `deep`, what it holds): an element or character data, and no `<template>` or
 // shadow host among it.
 pub(crate) fn clonable(arena: &RealmArena, src: NodeId, deep: bool) -> bool {
     let Some(n) = arena.get(src) else { return false };
     match n.kind {
-        NodeKind::Text | NodeKind::Comment => true,
+        NodeKind::Text | NodeKind::Comment | NodeKind::ProcessingInstruction => true,
         NodeKind::Element => n.shadow_root.is_none() && !n.is_html_named("template") && (!deep || n.children.iter().all(|&c| clonable(arena, c, true))),
         _ => false,
     }

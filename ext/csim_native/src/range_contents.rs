@@ -181,14 +181,9 @@ impl<'s> Run<'s> {
     }
 }
 
-// Whether the engine takes the contents from (`sc`, `so`) to (`ec`, `eo`) — no processing instruction at an end, no
-// partially contained node it could not copy, and, for a copy, no contained child it could not (cloning.rs
-// `clonable`): the bindings take what it declines.
+// Whether the engine takes the contents from (`sc`, `so`) to (`ec`, `eo`) — no partially contained node it could not
+// copy, and, for a copy, no contained child it could not (cloning.rs `clonable`): the bindings take what it declines.
 fn takes(arena: &RealmArena, mode: u32, sc: NodeId, so: u32, ec: NodeId, eo: u32) -> bool {
-    let pi = |n: NodeId| arena.get(n).is_some_and(|d| d.kind == NodeKind::ProcessingInstruction);
-    if pi(sc) || pi(ec) {
-        return false;
-    }
     if sc == ec && (so == eo || is_character_data(arena, sc)) {
         return true;
     }
