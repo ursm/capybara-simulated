@@ -415,6 +415,48 @@ impl RealmArena {
         best.map(|(_, mid)| mid)
     }
 
+    // Home / End: the first (last, with `end`) place of the line the caret on the band `top`..`bottom` is on, among the
+    // text `root` holds — its first piece's start; its last piece's end and the white space a wrap leaves hanging after
+    // it, the place the next line starts at (Chrome: End on `cccc dddd ` of a wrapped line is past its space, 20) — or an
+    // empty line's own place.
+    pub(crate) fn line_edge(&self, g: &TextView, root: NodeId, top: f64, bottom: f64, end: bool) -> Option<(NodeId, u32)> {
+        let mid = (top + bottom) / 2.0;
+        let mut edge: Option<(f64, &TextRow)> = None;
+        for r in g.rows {
+            if r[1] == r[2] {
+                continue;
+            }
+            let Some(mark) = g.mark(r[0] as usize) else { continue };
+            if !source_at(&mark.sources, r[1] as u32).is_some_and(|s| self.holds(root, s.node)) {
+                continue;
+            }
+            let [x, line_top, w, line_h] = self.row_frame(mark, r[1] as u32).rect([r[3], r[4], r[6], r[9]]);
+            if mid < line_top || mid >= line_top + line_h {
+                continue;
+            }
+            let at = if end { x + w } else { -x };
+            if edge.is_none_or(|(best, _)| at > best) {
+                edge = Some((at, r));
+            }
+        }
+        let Some((_, r)) = edge else {
+            return g.blanks.iter().filter(|b| self.holds(root, b.holder)).find(|b| {
+                let [_, line_top, _, line_h] = self.frame(b.owner).rect([b.x, b.top, 0.0, b.h]);
+                mid >= line_top && mid < line_top + line_h
+            }).map(|b| b.place);
+        };
+        let (run, start, mut stop) = (r[0] as usize, r[1] as u32, r[2] as u32);
+        if end {
+            let text = g.texts.get(run).and_then(|t| t.as_deref()).unwrap_or(&[]);
+            let next = g.rows.iter().any(|o| o[0] == r[0] && o[1] >= r[2] as f64 && o[4] != r[4]);
+            // (…a wrap's hanging white space: spaces and tabs up to the next line's first piece, where the run goes on)
+            while next && text.get(stop as usize).is_some_and(|&u| u == 0x20 || u == 0x09) {
+                stop += 1;
+            }
+        }
+        self.run_place(g, run, if end { stop } else { start })
+    }
+
     // Is `node` in `root`'s flat tree, `root` itself included?
     fn holds(&self, root: NodeId, node: NodeId) -> bool {
         let mut at = Some(node);
@@ -511,6 +553,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "textCurrent", text_current, context_id);
     crate::dom::register(scope, ns, "textRects", text_rects, context_id);
     crate::dom::register(scope, ns, "lineOver", line_over, context_id);
+    crate::dom::register(scope, ns, "lineEdge", line_edge, context_id);
 }
 
 // What a query of the realm's text asks of its arena and its text geometry (`RealmArena::with_text`).
@@ -565,5 +608,19 @@ fn line_over(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let cid = crate::dom::realm_id(scope, &args);
     if let Some(y) = with_text(scope, cid, |arena, g| arena.line_over(g, root, top, bottom, up)).flatten() {
         rv.set_double(y);
+    }
+}
+
+// __dom.lineEdge(nid, top, bottom, end) -> [[node], offset]: the first or last place of the caret's line in `nid`
+// (`line_edge`), or undefined.
+fn line_edge(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(root) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let top = args.get(1).number_value(scope).unwrap_or(f64::NAN);
+    let bottom = args.get(2).number_value(scope).unwrap_or(f64::NAN);
+    let end = args.get(3).is_true();
+    let cid = crate::dom::realm_id(scope, &args);
+    if let Some((node, offset)) = with_text(scope, cid, |arena, g| arena.line_edge(g, root, top, bottom, end)).flatten() {
+        let values = [crate::dom::nodes_value(scope, cid, &[node]), v8::Integer::new_from_unsigned(scope, offset).into()];
+        rv.set(v8::Array::new_with_elements(scope, &values).into());
     }
 }

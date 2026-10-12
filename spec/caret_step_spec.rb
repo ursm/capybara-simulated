@@ -321,4 +321,29 @@ RSpec.describe 'stepping a caret by a character' do
     e.send_keys(:down)
     expect(s.evaluate_script('(() => { const s = getSelection(); return [s.focusNode.data + "@" + s.focusOffset, document.getElementById("e").scrollTop]; })()')).to eq(['cccc@2', 21])
   end
+
+  # Home / End go to the edges of the caret's LINE as it wraps — End on a wrapped line past the space it hangs, where the
+  # next line starts — in an editing host and in a textarea alike (Chrome: 10, 20, 10, 20; a textarea's last line 25).
+  it 'moves the caret to the edges of its wrapped line' do
+    s = session_for(<<~HTML)
+      <!DOCTYPE html><body style="margin:0;font:16px monospace"><div id=e contenteditable style="width:120px">aaaa bbbb cccc dddd eeee</div><textarea id=t style="font:16px monospace;width:120px;height:100px">aaaa bbbb cccc dddd eeee
+      second</textarea>
+    HTML
+    e = s.find(:css, '#e')
+    e.click
+    at = ->(offset, key) {
+      s.execute_script("getSelection().collapse(document.getElementById('e').firstChild, #{offset})")
+      e.send_keys(key)
+      s.evaluate_script('getSelection().focusOffset')
+    }
+    expect([at.(12, :home), at.(12, :end), at.(2, :end), at.(22, :home)]).to eq([10, 20, 10, 20])
+    t = s.find(:css, '#t')
+    t.click
+    ta = ->(offset, key) {
+      s.execute_script("t.setSelectionRange(#{offset}, #{offset})")
+      t.send_keys(key)
+      s.evaluate_script('t.selectionStart')
+    }
+    expect([ta.(12, :home), ta.(12, :end), ta.(2, :end), ta.(27, :home)]).to eq([10, 20, 10, 25])
+  end
 end
