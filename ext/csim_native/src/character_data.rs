@@ -12,6 +12,7 @@ use crate::mutation_observers::{CASCADE_REFRESH, CASCADE_VERSION, OBSERVATIONS};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "replaceData", replace_data_op, context_id);
+    crate::dom::register(scope, ns, "splitText", split_text_op, context_id);
 }
 
 // Why "replace data" throws: the offset is past the data (an IndexSizeError), or the data it would make is longer than
@@ -25,19 +26,33 @@ fn replace_data_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let node = args.get(0);
     let Some(id) = crate::node_handle::nid_of(scope, node) else { return };
     let Some(data) = args.get(3).to_string(scope) else { return };
-    let Some((cid, length)) = crate::dom::dom(scope).arena.get(id).map(|n| (n.realm, n.data.len())) else { return };
-    let offset = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
-    if offset > length {
-        return rv.set_uint32(OFFSET_PAST_DATA);
-    }
-    let count = (args.get(2).uint32_value(scope).unwrap_or(0) as usize).min(length - offset);
-    if length - count + data.length() > v8::String::MAX_LENGTH {
-        return rv.set_uint32(TOO_LONG);
-    }
+    let (offset, count) = (args.get(1).uint32_value(scope).unwrap_or(0), args.get(2).uint32_value(scope).unwrap_or(0));
     let caller = realm_id(scope, &args);
+    if let Err(refusal) = replace_data(scope, caller, id, node, offset as usize, count as usize, data) {
+        rv.set_uint32(refusal);
+    }
+}
+// …of the node in slot `id` (its object `node`), by the realm `caller`'s code — or why it throws.
+pub(crate) fn replace_data(
+    scope: &mut v8::PinScope<'_, '_>,
+    caller: i32,
+    id: crate::dom::NodeId,
+    node: v8::Local<'_, v8::Value>,
+    offset: usize,
+    count: usize,
+    data: v8::Local<'_, v8::String>,
+) -> Result<(), u32> {
+    let Some((cid, length)) = crate::dom::dom(scope).arena.get(id).map(|n| (n.realm, n.data.len())) else { return Ok(()) };
+    if offset > length {
+        return Err(OFFSET_PAST_DATA);
+    }
+    let count = count.min(length - offset);
+    if length - count + data.length() > v8::String::MAX_LENGTH {
+        return Err(TOO_LONG);
+    }
     // (…the record first, with the data the node had — its string made only where an observer is to have it)
     if realm(scope, cid).observers.observing() {
-        let Some(old) = crate::node_handle::data_string(scope, node) else { return };
+        let Some(old) = crate::node_handle::data_string(scope, node) else { return Ok(()) };
         let undefined: v8::Local<'_, v8::Value> = v8::undefined(scope).into();
         let kind = v8::Integer::new(scope, 2).into();
         let fields = [kind, node, undefined, undefined, undefined, undefined, undefined, undefined, old.into()];
@@ -91,4 +106,46 @@ fn replace_data_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         callers.bump(GEN_NODES);
         crate::dom::dom(scope).arena.observers.note(if in_shadow { CASCADE_VERSION } else { CASCADE_REFRESH });
     }
+    Ok(())
+}
+
+// __dom.splitText(node, offset, steps) -> [newNode], or `OFFSET_PAST_DATA`: DOM "split a Text node" (§4.11) of `node`
+// (the object) at `offset`, the engine's whole — a Text node of the same kind (a CDATASection's a CDATASection) holding
+// the data past `offset`, in `node`'s node document; where `node` has a parent, inserted after it (its childList
+// record, `steps` the bindings' steps of a change of children: mutation.rs `change_children`) and the live ranges'
+// split steps; then the data past `offset` replaced with none (its characterData record). The bindings take what the
+// insertion ends with as it returns (`changeFlags`), as a change of children's.
+fn split_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    crate::dom::dom(scope).arena.change_flags.set(0);
+    let node = args.get(0);
+    let Some(id) = crate::node_handle::nid_of(scope, node) else { return };
+    let offset = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
+    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(2)) else { return };
+    let caller = realm_id(scope, &args);
+    let Some((cid, length, cdata, parent)) = crate::dom::dom(scope).arena.get(id).map(|n| (n.realm, n.data.len(), n.cdata, n.parent)) else { return };
+    if offset > length {
+        return rv.set_uint32(OFFSET_PAST_DATA);
+    }
+    // (…the new node made in the engine, its object made by the realm's factory — held here until then)
+    let tail = crate::dom::dom(scope).arena.get(id).map_or_else(Vec::new, |n| n.data[offset..].to_vec());
+    let doc = crate::node_handle::handle_of(scope, node).and_then(|h| unsafe { h.as_ref() }.document(scope));
+    let new = realm(scope, cid).create(crate::dom::NodeData { cdata, ..crate::dom::NodeData::of_kind(crate::dom::NodeKind::Text, tail) }, None);
+    let held = crate::node_handle::bare(scope, new, doc);
+    let new_value = crate::dom::node_value(scope, Some(new));
+    drop(held);
+    let Ok(new_obj) = v8::Local::<v8::Object>::try_from(new_value) else { return };
+    if let Some(parent) = parent {
+        let arena = realm(scope, cid);
+        let (next, slot) = (arena.sibling(id, 1), arena.child_index(id) as u32 + 1);
+        let empty = v8::Array::new(scope, 0);
+        if crate::mutation::change_children(scope, cid, caller, parent, crate::mutation::Removing::None, &[new], empty, next, false, steps).is_none() {
+            return;
+        }
+        crate::ranges::split(scope, id, offset as u32, new, new_obj, Some(parent), slot);
+    }
+    let none = v8::String::empty(scope);
+    if replace_data(scope, caller, id, node, offset, length - offset, none).is_err() {
+        return;
+    }
+    rv.set(v8::Array::new_with_elements(scope, &[new_value]).into());
 }

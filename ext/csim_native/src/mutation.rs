@@ -205,7 +205,7 @@ const CHANGE_REFUSED: u32 = 1 << 1;
 
 // What `removing` names: no child (an insertion), every child (replace all), or the one.
 #[derive(Clone, Copy)]
-enum Removing {
+pub(crate) enum Removing {
     None,
     All,
     Child(NodeId),
@@ -257,7 +257,7 @@ fn removing_steps(scope: &mut v8::PinScope<'_, '_>, steps: v8::Local<'_, v8::Arr
 // every insertion step: DOM "insert" steps 7, 9 and 11). The steps of one removal may take `child` out too (a frame's
 // unload): an insertion then goes last, a replacement is refused — its removal standing — with the NotFoundError Chrome
 // throws (`CHANGE_REFUSED`). The removed nodes, `REMOVED_NOT_A_CHILD`, or None where a step threw.
-fn change_children(
+pub(crate) fn change_children(
     scope: &mut v8::PinScope<'_, '_>,
     cid: i32,
     caller: i32,

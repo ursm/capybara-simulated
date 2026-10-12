@@ -2068,6 +2068,10 @@ pub(crate) struct Dom {
     // realm holding one of them asks through (`setArena` / `arenaOf`; native-query-shadow.js `liveArenaOf`). Held
     // weakly: the realm holds its own, and one navigated away from is collected with it.
     pub(crate) arenas: std::collections::HashMap<i32, v8::Weak<v8::Object>>,
+    // Each realm's node factory (`setNodeFactory`), which makes the object of a node the engine made — weakly, as its
+    // arena object is held — and the handle of the one it is making (node_handle.rs `object_of`, `construct`).
+    pub(crate) factories: std::collections::HashMap<i32, v8::Weak<v8::Function>>,
+    pub(crate) wrap_pending: Option<v8::cppgc::Persistent<crate::node_handle::NodeHandle>>,
 }
 
 // The isolate's slots go after V8 has disposed it (`OwnedIsolate`'s drop), and a weak handle's drop resets its node,
@@ -2075,6 +2079,7 @@ pub(crate) struct Dom {
 impl Drop for Dom {
     fn drop(&mut self) {
         std::mem::forget(std::mem::take(&mut self.arenas));
+        std::mem::forget(std::mem::take(&mut self.factories));
         self.arena.ce_reactions.leak_weak_handles();
     }
 }
@@ -2114,16 +2119,24 @@ pub(crate) fn nodes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, ids: &
     let held: Vec<Option<crate::node_handle::HeldObject>> =
         ids.iter().map(|&id| arena.get(id).and_then(|n| crate::node_handle::held(&n.link))).collect();
     // (…the objects read before anything is allocated: a collection in between could take a handle)
-    let objects: Vec<v8::Local<'s, v8::Value>> = held
-        .iter()
-        .map(|h| h.as_ref().and_then(|h| h.get(scope)).map_or_else(|| v8::null(scope).into(), Into::into))
-        .collect();
-    v8::Array::new_with_elements(scope, &objects).into()
+    let mut objects: Vec<Option<v8::Local<'s, v8::Object>>> = held.iter().map(|h| h.as_ref().and_then(|h| h.get(scope))).collect();
+    // (…and the objects of nodes the engine made, which the realm's factory makes now: node_handle.rs `object_of`)
+    for (k, &id) in ids.iter().enumerate() {
+        if objects[k].is_none() && held[k].is_some() {
+            objects[k] = crate::node_handle::object_of(scope, id);
+        }
+    }
+    let values: Vec<v8::Local<'s, v8::Value>> = objects.into_iter().map(|o| o.map_or_else(|| v8::null(scope).into(), Into::into)).collect();
+    v8::Array::new_with_elements(scope, &values).into()
 }
 // …and one node, or none: its object, or null.
 pub(crate) fn node_value<'s>(scope: &mut v8::PinScope<'s, '_>, id: Option<NodeId>) -> v8::Local<'s, v8::Value> {
     let held = id.and_then(|id| dom(scope).arena.get(id).and_then(|n| crate::node_handle::held(&n.link)));
-    held.and_then(|h| h.get(scope)).map_or_else(|| v8::null(scope).into(), Into::into)
+    let object = match (held.as_ref().and_then(|h| h.get(scope)), id) {
+        (None, Some(id)) if held.is_some() => crate::node_handle::object_of(scope, id),
+        (object, _) => object,
+    };
+    object.map_or_else(|| v8::null(scope).into(), Into::into)
 }
 
 // The arena for realm `cid` and its style engine, for a change the engine has to hear of — the engine's change hooks
@@ -2302,6 +2315,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register_fast(scope, ns, "contains", contains, CONTAINS_FAST, context_id);
     register_fast(scope, ns, "shadowIncludingContains", shadow_including_contains, SHADOW_INCLUDING_CONTAINS_FAST, context_id);
     register(scope, ns, "setArena", set_arena, context_id);
+    register(scope, ns, "setNodeFactory", set_node_factory, context_id);
     register(scope, ns, "arenaOf", arena_of, context_id);
     register(scope, ns, "setNaturalSize", set_natural_size, context_id);
     register(scope, ns, "pseudoBox", pseudo_box, context_id);
@@ -2699,6 +2713,17 @@ fn set_arena(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let arenas = &mut dom(scope).arenas;
     arenas.retain(|_, w| !w.is_empty());
     arenas.insert(cid, weak);
+}
+// __dom.setNodeFactory(factory): the calling realm's node factory — `factory(nid, nodeType, localName, namespace,
+// prefix)` makes the object of a node the engine made, of its interface (node_handle.rs `object_of`) — held while the
+// realm holds it.
+fn set_node_factory(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(factory) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
+    let cid = realm_id(scope, &args);
+    let weak = v8::Weak::new(scope, factory);
+    let factories = &mut dom(scope).factories;
+    factories.retain(|_, w| !w.is_empty());
+    factories.insert(cid, weak);
 }
 fn arena_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(cid) = args.get(0).int32_value(scope) else { return };

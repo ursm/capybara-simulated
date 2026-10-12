@@ -286,7 +286,8 @@ pub(crate) fn reclaim(dom: &mut crate::dom::Dom) {
 }
 
 // The constructor `Node` makes its objects with (`__dom.NodeBase`): each one branded, and a wrapper of a fresh handle
-// that holds no slot yet.
+// that holds no slot yet — or, where a node the engine made waits for its object (`wrap_pending`, `object_of`), of that
+// node's handle, its slot its own.
 fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     if args.new_target().is_undefined() {
         return;
@@ -294,7 +295,25 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let obj = args.this();
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
-    let handle = NodeHandle {
+    let pending = crate::dom::dom(scope).wrap_pending.take();
+    // SAFETY: the handle is on the cppgc heap — a fresh one moved there, or a pending one its Persistent holds — and its
+    // pointer goes straight into the wrapper, which traces it.
+    unsafe {
+        let held = match pending {
+            Some(held) => held,
+            None => {
+                let heap = scope.get_cpp_heap().expect("NodeBase is installed only on an isolate with a C++ heap");
+                v8::cppgc::Persistent::new(&v8::cppgc::make_garbage_collected(heap, fresh()))
+            }
+        };
+        v8::Object::wrap::<TAG, NodeHandle>(scope, obj, &held);
+        let h = held.get().expect("a handle its Persistent holds");
+        csim_traced_reset_droppable(h.object.get(), scope.as_raw_isolate_ptr(), &*obj as *const v8::Object);
+    }
+}
+// A handle with no slot, no tree, no object.
+fn fresh() -> NodeHandle {
+    NodeHandle {
         nid: Cell::new(None),
         reclaim: RefCell::new(Weak::new()),
         parent: Edge::new(),
@@ -311,14 +330,21 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         registry_object: UnsafeCell::new(v8::TracedReference::empty()),
         window_registry_object: UnsafeCell::new(v8::TracedReference::empty()),
         keep_null: Cell::new(false),
-    };
-    let heap = scope.get_cpp_heap().expect("NodeBase is installed only on an isolate with a C++ heap");
-    // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
-    unsafe {
-        let ptr = v8::cppgc::make_garbage_collected(heap, handle);
-        v8::Object::wrap::<TAG, NodeHandle>(scope, obj, &ptr);
-        csim_traced_reset_droppable(ptr.as_ref().object.get(), scope.as_raw_isolate_ptr(), &*obj as *const v8::Object);
     }
+}
+
+// The handle of a node the ENGINE made (`RealmArena::create`), which has no object until the page is handed it
+// (`object_of`): bound to slot `nid`, its node document `doc`'s. The Persistent returned holds it while the engine holds
+// the node — a collection in between would take it, held by nothing else yet; then the tree's edges hold it, once it is
+// in one, and its object once it has one; and otherwise it is collected, and its slot freed, as any node's is.
+pub(crate) fn bare(scope: &mut v8::PinScope<'_, '_>, nid: NodeId, doc: Option<v8::Local<'_, v8::Object>>) -> v8::cppgc::Persistent<NodeHandle> {
+    let heap = scope.get_cpp_heap().expect("the engine makes nodes only on an isolate with a C++ heap");
+    // SAFETY: the handle is moved onto the cppgc heap and held by the Persistent before anything else allocates.
+    let held = unsafe { v8::cppgc::Persistent::new(&v8::cppgc::make_garbage_collected(heap, fresh())) };
+    let h = held.get().expect("a handle its Persistent holds");
+    h.set_document(scope, doc);
+    attach(scope, &held, h, nid);
+    held
 }
 
 // The handle `value` wraps — through the Proxy a `<form>` is (its target is the node's object) — or None for anything
@@ -350,12 +376,48 @@ pub(crate) fn nid_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::
 pub(crate) fn bind(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>, nid: NodeId) {
     let Some(ptr) = handle_of(scope, value) else { return };
     // SAFETY: the handle lives while its object does, which the caller holds.
-    let h = unsafe { ptr.as_ref() };
+    attach(scope, &ptr, unsafe { ptr.as_ref() }, nid);
+}
+// …the handle `ptr` points at (`h`) to slot `nid`: the slot holds it (weakly), its edges in the tree written as the
+// slot's are, and it frees the slot when it goes.
+fn attach(scope: &mut v8::PinScope<'_, '_>, ptr: &impl v8::cppgc::GetRustObj<NodeHandle>, h: &NodeHandle, nid: NodeId) {
     let queue = Arc::downgrade(&crate::dom::dom(scope).reclaim);
     h.nid.set(Some(nid));
     *h.reclaim.borrow_mut() = queue;
-    // …and the slot holds the handle (weakly), its edges in the tree written as the slot's are
-    crate::dom::dom(scope).arena.set_link(nid, Link(Some(WeakPersistent::new(&ptr))));
+    crate::dom::dom(scope).arena.set_link(nid, Link(Some(WeakPersistent::new(ptr))));
+}
+
+// The object of the node in slot `id` — made by its realm's node factory (`setNodeFactory`) the first time a node the
+// engine made, which has none, is handed to the page: the factory makes an object of the node's interface, which
+// `construct` makes the wrapper of the node's own handle. None for a node with no handle, or whose realm has no
+// factory.
+pub(crate) fn object_of<'s>(scope: &mut v8::PinScope<'s, '_>, id: NodeId) -> Option<v8::Local<'s, v8::Object>> {
+    let n = crate::dom::dom(scope).arena.get(id)?;
+    let (link, realm) = (n.link.0.as_ref().map(|w| v8::cppgc::Persistent::new(w))?, n.realm);
+    if let Some(object) = held_of(&link).and_then(|h| h.get(scope)) {
+        return Some(object);
+    }
+    let factory = crate::dom::dom(scope).factories.get(&realm).cloned()?.to_local(scope)?;
+    let n = crate::dom::dom(scope).arena.get(id)?;
+    let (node_type, local, ns, prefix) = (n.node_type(), n.local_name.to_string(), n.ns.to_string(), n.prefix.as_deref().map(str::to_owned));
+    let args: [v8::Local<'_, v8::Value>; 5] = [
+        v8::Number::new(scope, id.to_f64()).into(),
+        v8::Integer::new_from_unsigned(scope, node_type).into(),
+        v8::String::new(scope, &local)?.into(),
+        v8::String::new(scope, &ns)?.into(),
+        match prefix {
+            Some(p) => v8::String::new(scope, &p)?.into(),
+            None => v8::null(scope).into(),
+        },
+    ];
+    crate::dom::dom(scope).wrap_pending = Some(link);
+    let undefined = v8::undefined(scope).into();
+    let made = factory.call(scope, undefined, &args);
+    crate::dom::dom(scope).wrap_pending = None;
+    made.and_then(|v| v8::Local::<v8::Object>::try_from(v).ok())
+}
+fn held_of(handle: &v8::cppgc::Persistent<NodeHandle>) -> Option<HeldObject> {
+    handle.get().map(|h| HeldObject(h.object.get()))
 }
 
 // `__dom.NodeBase` for a realm: the constructor of the isolate's template, made once per isolate — none on an isolate

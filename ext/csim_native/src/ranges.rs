@@ -252,7 +252,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "rangeSet", range_set, context_id);
     register(scope, ns, "rangeContainer", range_container, context_id);
     register(scope, ns, "rangeOffset", range_offset, context_id);
-    register(scope, ns, "rangesSplit", ranges_split, context_id);
     register(scope, ns, "rangesMerge", ranges_merge, context_id);
     register(scope, ns, "rangesLive", ranges_live, context_id);
     register(scope, ns, "isRange", is_range, context_id);
@@ -811,15 +810,18 @@ pub(crate) fn replace_data(scope: &mut v8::PinScope<'_, '_>, node: NodeId, offse
     }
 }
 
-// __dom.rangesSplit(nid, offset, newNode, newNid, parentNid, slot) — the node was split at `offset`, its tail now the
-// node `newNid` (object `newNode`) at `slot` in the parent (-1 for none): a boundary past the split point moves into the
-// new node, and one in the parent at its slot shifts right.
-fn ranges_split(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(node), Some(new_nid)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 3)) else { return };
-    let Ok(new_obj) = v8::Local::<v8::Object>::try_from(args.get(2)) else { return };
-    let offset = args.get(1).uint32_value(scope).unwrap_or(0);
-    let parent = nid_arg(scope, &args, 4);
-    let slot = args.get(5).uint32_value(scope).unwrap_or(0);
+// The "split" steps of the live ranges (DOM §4.11 "split a Text node" step 7): `node` was split at `offset`, its tail
+// now the node `new_nid` (object `new_obj`) at `slot` in the parent (none for no parent) — a boundary past the split
+// point moves into the new node, and one in the parent at its slot shifts right.
+pub(crate) fn split(
+    scope: &mut v8::PinScope<'_, '_>,
+    node: NodeId,
+    offset: u32,
+    new_nid: NodeId,
+    new_obj: v8::Local<'_, v8::Object>,
+    parent: Option<NodeId>,
+    slot: u32,
+) {
     let r = ranges(scope);
     r.sweep();
     if let Some(parent) = parent {
