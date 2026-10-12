@@ -126,11 +126,12 @@ fn split_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     if offset > length {
         return rv.set_uint32(OFFSET_PAST_DATA);
     }
-    // (…the new node made in the engine, its object made by the realm's factory — held here until then)
+    // (…the new node made in the engine, its object made by the factory of the node's realm, as its own was — held here
+    // until then)
     let tail = crate::dom::dom(scope).arena.get(id).map_or_else(Vec::new, |n| n.data[offset..].to_vec());
     let doc = crate::node_handle::handle_of(scope, node).and_then(|h| unsafe { h.as_ref() }.document(scope));
     let new = realm(scope, cid).create(crate::dom::NodeData { cdata, ..crate::dom::NodeData::of_kind(crate::dom::NodeKind::Text, tail) }, None);
-    let held = crate::node_handle::bare(scope, new, doc, caller);
+    let held = crate::node_handle::bare(scope, new, doc, cid);
     let new_value = crate::dom::node_value(scope, Some(new));
     drop(held);
     let Ok(new_obj) = v8::Local::<v8::Object>::try_from(new_value) else { return };

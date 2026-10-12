@@ -64,8 +64,12 @@ impl<'s> Run<'s> {
         self.changes.push(change);
         Some(())
     }
-    // `node` taken out of its parent.
+    // `node` taken out of its parent — none where something before took it out already (a frame's unload among the
+    // removals: removing a node with no parent does nothing).
     fn remove(&mut self, scope: &mut v8::PinScope<'s, '_>, node: NodeId) -> Option<()> {
+        if realm(scope, self.cid).parent_of(node).is_none() {
+            return Some(());
+        }
         let change = crate::mutation::remove(scope, self.cid, self.caller, node, self.steps)?;
         self.changes.push(change);
         Some(())
@@ -235,7 +239,9 @@ fn process_range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let steps = v8::Local::new(scope, steps);
     let mut run = Run { cid, caller, mode, doc, steps, held: Vec::new(), changes: Vec::new(), bindings: Vec::new() };
     let frag = (mode != DELETE).then(|| run.fragment(scope));
-    let Some(collapse) = run.process(scope, sc, so, ec, eo, frag) else { return };
+    // (…what changed handed back whatever stopped it — a cut a script's steps had made impossible: the changes made are
+    // the bindings' to finish, and the range collapses to its start)
+    let collapse = run.process(scope, sc, so, ec, eo, frag).flatten();
     let mut out: Vec<v8::Local<'_, v8::Value>> = vec![crate::dom::node_value(scope, frag)];
     match collapse {
         Some((node, offset)) => {

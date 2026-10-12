@@ -57,4 +57,41 @@ RSpec.describe 'range contents' do
     JS
     expect(got).to eq(['HierarchyRequestError', 'abc'])
   end
+
+  # A deletion whose removals take out a child it was to remove too — a frame's unload — goes on past it, and every
+  # removal it made is finished: a custom element among them gets its disconnectedCallback (Chrome).
+  it 'finishes every removal of a deletion past a child a removal took out' do
+    s = simulated_session(lambda {|env|
+      body = if env['PATH_INFO'] == '/frame'
+        "<!DOCTYPE html><script>addEventListener('unload', () => parent.document.getElementById('q').remove())</script>f"
+      else
+        '<!DOCTYPE html><script>window.log = []; customElements.define("x-dc", class extends HTMLElement { disconnectedCallback() { log.push(this.id) } })</script>' \
+          '<div id=d><x-dc id=a>a</x-dc><iframe src=/frame></iframe><p id=q>q</p><p id=z>z</p></div>'
+      end
+      [200, {'content-type' => 'text/html'}, [body]]
+    }).tap {|session| session.visit '/' }
+    expect(s.evaluate_script(<<~JS)).to eq([['a'], 0, true])
+      (() => {
+        const r = document.createRange();
+        r.selectNodeContents(document.getElementById('d'));
+        r.deleteContents();
+        return [window.log, document.getElementById('d').childNodes.length, r.collapsed];
+      })()
+    JS
+  end
+
+  # A copy of a range the document itself starts in upgrades the custom elements it holds, as any of the document's
+  # (Chrome).
+  it "upgrades a copy of a range that starts in the document" do
+    session.execute_script('customElements.define("x-up", class extends HTMLElement { constructor() { super(); this.made = 1 } }); document.body.appendChild(document.createElement("x-up"))')
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const g = document.createRange();
+        g.setStart(document, 1);
+        g.setEnd(document.body, document.body.childNodes.length);
+        return g.cloneContents().querySelector('x-up').made;
+      })()
+    JS
+    expect(got).to eq(1)
+  end
 end
