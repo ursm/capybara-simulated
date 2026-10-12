@@ -171,4 +171,13 @@ RSpec.describe 'deleting in an editing host' do
       'aabb<br><br>cc'
     ])
   end
+
+  it "leaves an emptied line's `<br>` for the text typed into it to replace" do
+    expect([
+      typed('a', 'e.firstChild', 1, :backspace),
+      typed('<ul><li>a</li></ul>', "e.querySelector('li').firstChild", 1, :backspace),
+      typed('<p>aa</p><p>bb</p>', 'e.firstChild.firstChild', 0, :backspace, ['e.lastChild.firstChild', 2]),
+      typed('ab<br>', 'e.firstChild', 2, :backspace)
+    ]).to eq(['Z', '<ul><li>Z</li></ul>', '<p>Z</p>', 'aZ<br>'])
+  end
 end
