@@ -186,9 +186,9 @@ pub(crate) struct NodeData {
     // reads the original UTF-16 units from here when present. Empty for virtually every element; only the
     // value that actually lost data lands here, keyed by attribute name.
     pub(crate) attr_u16: Vec<(String, Vec<u16>)>,
-    // The namespace and local name of each attribute that HAS a namespace, by its store key (a qualified name, or the
-    // JS side's synthetic key for an unprefixed one): (key, namespace URL, local name). Empty for virtually every
-    // element — every other attribute is in no namespace, named by its key.
+    // The namespace and local name of each attribute that HAS a namespace, by its store key (its qualified name, numbered
+    // where two share one: attributes.rs): (key, namespace URL, local name). Empty for virtually every element — every
+    // other attribute is in no namespace, named by its key.
     pub(crate) attr_ns: Vec<(String, String, String)>,
     // …and, for the rare one whose namespace or local name carries a lone surrogate, both exactly: (key, namespace, local
     // name) as UTF-16.
@@ -311,6 +311,9 @@ pub(crate) const STATE_SELECTED_INIT: u32 = 1 << 17;
 // …and an element an upgrade has been tried on, or made custom by its constructor: its custom element reactions run
 // from then on, whatever its registry resolves to after (adopted into an inert document) — custom_elements.rs.
 pub(crate) const STATE_UPGRADED: u32 = 1 << 18;
+// …and, on a document, that it is an XML document — not an HTML one, whose HTML elements' names are ASCII-lowercased
+// (DOM "HTML document").
+pub(crate) const STATE_XML_DOCUMENT: u32 = 1 << 19;
 
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its
 // first and last child, its previous and next sibling, and the element ones of those — and the bindings' own upward
@@ -550,6 +553,19 @@ impl NodeData {
             Some(units) => Some(Cow::Borrowed(units)),
             None => self.get_attr(key).map(|v| Cow::Owned(v.encode_utf16().collect())),
         }
+    }
+    // The namespace record of the attribute under `key`: `ns` its namespace and local name, or (None) none — in no
+    // namespace, named by its key. (…exactly, beside, where either lost a lone surrogate)
+    fn set_attr_record(&mut self, key: &str, ns: Option<(&[u16], &[u16])>) {
+        self.retain_attr_ns(|k| k != key);
+        if let Some((url, local)) = ns {
+            let (lossy_url, lossy_local) = (String::from_utf16_lossy(url), String::from_utf16_lossy(local));
+            if !lossy_url.encode_utf16().eq(url.iter().copied()) || !lossy_local.encode_utf16().eq(local.iter().copied()) {
+                self.attr_ns_u16.push((key.to_owned(), url.to_vec(), local.to_vec()));
+            }
+            self.attr_ns.push((key.to_owned(), lossy_url, lossy_local));
+        }
+        self.attr_changed(None);
     }
     // Keep the namespace records of the attributes `keep` names.
     fn retain_attr_ns(&mut self, keep: impl Fn(&str) -> bool) {
@@ -2475,6 +2491,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::dom_matrix::install(scope, ns, context_id);
     crate::validity::install(scope, ns, context_id);
     crate::tables::install(scope, ns, context_id);
+    crate::attributes::install(scope, ns, context_id);
     crate::input_value::install(scope, ns, context_id);
     crate::image_source::install(scope, ns, context_id);
     crate::image_decode::install(scope, ns, context_id);
@@ -2493,7 +2510,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // A node's attributes written wholesale, and their namespaces.
     register(scope, ns, "syncAttrs", sync_attrs, context_id);
     register(scope, ns, "setAttrNamespace", set_attr_namespace, context_id);
-    register(scope, ns, "attrNamespacesOf", attr_namespaces_of, context_id);
     // The store-flip's native-backed `_attrs`: __dom.attrsView(nid) -> an interceptor object over
     // that node's attributes (the Element constructor installs it in place of the JS `{}`).
     register(scope, ns, "attrsView", attrs_view, context_id);
@@ -3727,32 +3743,32 @@ fn set_attr_namespace(
     let (arena, engine) = arena_and_engine(scope, cid);
     before_attribute_write(arena, engine, id, &[&key]);
     if let Some(node) = arena.get_mut(id) {
-        node.retain_attr_ns(|k| k != key);
-        if !ns.is_empty() {
-            // (…exactly, beside, where either lost a lone surrogate)
-            if ns_u16.is_some() || local_u16.is_some() {
-                let exact = |lossy: &str, units: Option<Vec<u16>>| units.unwrap_or_else(|| lossy.encode_utf16().collect());
-                node.attr_ns_u16.push((key.clone(), exact(&ns, ns_u16), exact(&local, local_u16)));
-            }
-            node.attr_ns.push((key, ns, local));
-        }
-        node.attr_changed(None);
+        let exact = |lossy: &str, units: Option<Vec<u16>>| units.unwrap_or_else(|| lossy.encode_utf16().collect());
+        let record = (!ns.is_empty()).then(|| (exact(&ns, ns_u16), exact(&local, local_u16)));
+        node.set_attr_record(&key, record.as_ref().map(|(n, l)| (&n[..], &l[..])));
     }
 }
-
-// __dom.attrNamespacesOf(nid) -> [key, namespace, localName, …]: the attributes of the element that have a namespace,
-// by their store keys — what the bindings' `_attrNS` names of an element the engine made (html_parse.rs).
-fn attr_namespaces_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
-    let Some(n) = dom(scope).arena.get(id) else { return };
-    let entries: Vec<(String, String, String)> = n.attr_ns.clone();
-    let mut out: Vec<v8::Local<'_, v8::Value>> = Vec::with_capacity(entries.len() * 3);
-    for (key, ns, local) in &entries {
-        for s in [key, ns, local] {
-            out.push(v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into));
+// The attribute stored under `key` of `id` written — `value` set, or (None) removed — and, for one new in a namespace, its
+// record (`ns`: the namespace and local name): the engine's steps before and after it (`before_attribute_write`,
+// `attribute_steps`) run.
+pub(crate) fn store_attribute(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, key: &str, value: Option<&[u16]>, ns: Option<(&[u16], &[u16])>) {
+    let (arena, engine) = arena_and_engine(scope, cid);
+    let was_checked = arena.is_checked(id);
+    before_attribute_write(arena, engine, id, &[key]);
+    if let Some(node) = arena.get_mut(id) {
+        match value {
+            Some(units) => {
+                let lossy = String::from_utf16_lossy(units);
+                let exact = (!lossy.encode_utf16().eq(units.iter().copied())).then(|| units.to_vec());
+                node.set_attr_full(key, lossy, exact);
+            }
+            None => node.remove_attr(key),
+        }
+        if ns.is_some() {
+            node.set_attr_record(key, ns);
         }
     }
-    rv.set(v8::Array::new_with_elements(scope, &out).into());
+    attribute_steps(scope, cid, id, &[key], was_checked);
 }
 
 // __dom.query(rootNid, selector, quirks, firstOnly, scopeNid, xml) -> the elements matched, in document order, as

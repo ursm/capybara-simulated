@@ -596,18 +596,23 @@ fn ce_subtree_hook(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 fn ce_attribute_changed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let name = utf16_arg(scope, args.get(2));
+    rv.set_bool(enqueue_attribute_changed(scope, id, args.get(1), &name, [args.get(3), args.get(4), args.get(5)]));
+}
+// …the engine's: the change of the attribute `name` of `id` (`element`), `[oldValue, value, namespace]`.
+pub(crate) fn enqueue_attribute_changed(scope: &mut v8::PinScope<'_, '_>, id: NodeId, element: v8::Local<'_, v8::Value>, name: &[u16], change: [v8::Local<'_, v8::Value>; 3]) -> bool {
     let callback = {
         let reactions = &dom(scope).arena.ce_reactions;
         reactions
             .definition_of(id)
-            .filter(|d| d.observed.contains(&name))
+            .filter(|d| d.observed.iter().any(|o| o[..] == *name))
             .and_then(|d| d.callbacks[ATTRIBUTE_CHANGED].as_ref())
             .map(|w| w as *const _)
     };
-    let Some(callback) = weak_global(scope, callback) else { return rv.set_bool(false) };
-    let element = v8::Global::new(scope, args.get(1));
-    let list = [args.get(2), args.get(3), args.get(4), args.get(5)].map(|v| v8::Global::new(scope, v)).to_vec();
-    rv.set_bool(dom(scope).arena.ce_reactions.enqueue(id, element, callback, list));
+    let Some(callback) = weak_global(scope, callback) else { return false };
+    let element = v8::Global::new(scope, element);
+    let name = crate::dom::utf16_value(scope, name);
+    let list = [name, change[0], change[1], change[2]].map(|v| v8::Global::new(scope, v)).to_vec();
+    dom(scope).arena.ce_reactions.enqueue(id, element, callback, list)
 }
 
 // __dom.ceMakeRegistry(registry, scoped) -> its code: a CustomElementRegistry made in the calling realm, which a node's

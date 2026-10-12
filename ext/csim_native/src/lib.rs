@@ -89,6 +89,7 @@ mod style;
 mod style_fonts;
 mod svg_geometry;
 mod tables;
+mod attributes;
 mod text;
 mod text_codec;
 mod text_geometry;

@@ -230,6 +230,6 @@ fn copy_of(n: &NodeData) -> (NodeData, u32, Option<Box<[u16]>>, bool) {
     // change), an SVG `<image>`: dom-nodes.js `isImageElement`)
     let image = n.is_html_named("img") || n.is_html_named("input") || (n.ns == ns!(svg) && &*n.local_name == "image");
     let bindings = n.kind == NodeKind::Element
-        && (n.attributes.iter().any(|(k, _)| bindings_steps(k)) || !n.attr_ns.is_empty() || image || n.is_html_named("select"));
+        && (n.attributes.iter().any(|(k, _)| bindings_steps(k)) || image || n.is_html_named("select"));
     (data, state, if control { n.value.clone() } else { None }, bindings)
 }

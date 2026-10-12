@@ -753,10 +753,9 @@ fn attribute_namespace(code: i32) -> &'static str {
 const FORM_ASSOCIATED: [&str; 7] = ["button", "fieldset", "input", "object", "output", "select", "textarea"];
 
 // What the bindings run for an element the build made, after it: its attributes' steps (`names`), and — `BUILT_*` —
-// a select's options set up, its namespaced attributes' names, its insertion steps, and — a `<details>` its name group
-// has another open one of before it — its closing (its `open` added, then removed: both its toggle's states).
+// a select's options set up, its insertion steps, and — a `<details>` its name group has another open one of before it
+// — its closing (its `open` added, then removed: both its toggle's states).
 const BUILT_SELECT: u32 = 1;
-const BUILT_NAMESPACED: u32 = 1 << 1;
 const BUILT_INSERTED: u32 = 1 << 2;
 pub(crate) const BUILT_CLOSED: u32 = 1 << 3;
 
@@ -884,10 +883,9 @@ impl<'s> Build<'s> {
             }
             list.push((name, value));
         }
-        let flags = if namespaced.is_empty() { 0 } else { BUILT_NAMESPACED };
         crate::dom::replace_attributes(scope, self.cid, id, list, Vec::new(), Some((namespaced, Vec::new())));
-        if !names.is_empty() || flags != 0 {
-            self.steps.push((id, names, flags));
+        if !names.is_empty() {
+            self.steps.push((id, names, 0));
         }
     }
     // `child` into `parent` before `before` (none: last) — its node document the inert one where `parent` is in template
