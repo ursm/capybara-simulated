@@ -1906,7 +1906,6 @@ custom-elements/custom-element-reaction-queue.html:
 custom-elements/element-internals-shadowroot.html:
 - ElementInternals *can* be called after constructor, upgrade case
 - ElementInternals cannot be called before constructor, upgrade case
-- ElementInternals.shadowRoot doesn't reveal pre-attached closed shadowRoot
 custom-elements/form-associated/ElementInternals-reportValidity-bubble.html:
 - "!= custom-elements/form-associated/ElementInternals-reportValidity-bubble-notref.html"
 custom-elements/form-associated/ElementInternals-reportValidity-delegatesFocus.html:
