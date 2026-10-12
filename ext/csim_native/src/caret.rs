@@ -4,6 +4,7 @@
 // or at a void element (an image, a `<br>`): the atoms a browser places it beside.
 
 use crate::dom::{nid_arg, NodeData, NodeId, NodeKind, RealmArena};
+use crate::style::StyleEngine;
 
 const CARET_VOID_TAGS: [&str; 11] = ["audio", "br", "canvas", "embed", "hr", "iframe", "img", "input", "object", "svg", "video"];
 
@@ -71,63 +72,66 @@ impl RealmArena {
         None
     }
 
-    // ArrowLeft / ArrowRight, and `Selection.modify` by a character: the caret at (`node`, `offset`) one character back
-    // (on, with `forward`) — within its text, else at the next caret stop in its editing host (the document, outside
-    // one), as Chrome steps: across an inline edge it takes that stop's first character too (`ab|<b>cd</b>` →
-    // `<b>c|d</b>`: the two places either side of the edge are one place on the line, an empty leaf none at all), across
-    // a line's end — a block's edge or a `<br>` — it stops at the stop's edge; an atom (an image) is a stop it passes.
-    pub(crate) fn caret_step(&self, node: NodeId, offset: u32, forward: bool) -> Option<(NodeId, u32)> {
+    // What a caret passes stepping from (`node`, `offset`) on (back, without `forward`), in its editing host — the
+    // document, outside one (`Walk`) — as the style engine has the page at `now`.
+    fn walk<'a>(&'a self, engine: &'a mut StyleEngine, now: f64, node: NodeId, offset: u32, forward: bool) -> Option<Walk<'a>> {
+        engine.flush(self, now);
         let n = self.get(node)?;
         let element = if n.kind == NodeKind::Element { Some(node) } else { n.parent };
         let host = element.and_then(|e| self.editing_host(e));
-        let (mut at, mut index) = if is_text(n) {
-            let len = n.data.len() as u32;
-            if if forward { offset < len } else { offset > 0 } {
-                return Some((node, if forward { offset + 1 } else { offset - 1 }));
-            }
-            (n.parent?, self.child_index(node) + usize::from(forward))
-        } else {
-            (node, offset as usize)
-        };
-        let mut line_end = false;
-        loop {
-            let container = self.get(at)?;
-            let next = if forward { container.children.get(index).copied() } else { index.checked_sub(1).map(|i| container.children[i]) };
-            let Some(child) = next else {
-                // (…out of the container, to the place after (before) it in its parent — never out of the host)
-                if Some(at) == host {
-                    return None;
-                }
-                line_end |= self.is_block(at);
-                let parent = container.parent?;
-                index = self.child_index(at) + usize::from(forward);
-                at = parent;
-                continue;
-            };
-            let c = self.get(child)?;
-            match c.kind {
-                NodeKind::Text if c.data.is_empty() => {}
-                NodeKind::Text => {
-                    let len = c.data.len() as u32;
-                    let edge = if forward { 0 } else { len };
-                    return Some((child, if line_end { edge } else if forward { 1 } else { len - 1 }));
-                }
-                NodeKind::Element if &*c.local_name == "br" => line_end = true,
-                NodeKind::Element if c.children.is_empty() && CARET_VOID_TAGS.contains(&&*c.local_name) => {
-                    let i = self.child_index(child);
-                    return Some((at, (i + usize::from(forward != line_end)) as u32));
-                }
-                NodeKind::Element => {
-                    line_end |= self.is_block(child);
-                    at = child;
-                    index = if forward { 0 } else { c.children.len() };
-                    continue;
-                }
-                _ => {}
-            }
-            index = if forward { index + 1 } else { index - 1 };
-        }
+        let (at, index, text) = if is_text(n) { (node, 0, Some((node, offset))) } else { (node, offset as usize, None) };
+        // (…a space just passed where the place is in white space: what comes of it collapses)
+        let behind = is_text(n).then(|| if forward { offset.checked_sub(1) } else { Some(offset) }).flatten();
+        let space_seen = behind.and_then(|i| n.data.get(i as usize)).is_some_and(|&u| crate::rendered::is_collapsible_ws(u))
+            && crate::rendered::collapses_white_space(self, n.parent);
+        Some(Walk { arena: self, engine, now, host, forward, at, index, text, space_seen, ahead: None })
     }
+
+    // ArrowLeft / ArrowRight, and `Selection.modify` by a character: the caret one character back (on, with `forward`)
+    // — within its text, else at the next caret stop, as Chrome steps: across an inline edge it takes that stop's first
+    // character too (`ab|<b>cd</b>` → `<b>c|d</b>`: the two places either side of the edge are one place on the line, an
+    // empty leaf none at all), across a line's end it stops at the stop's edge; an atom (an image) is a stop it passes.
+    pub(crate) fn caret_step(&self, engine: &mut StyleEngine, now: f64, node: NodeId, offset: u32, forward: bool) -> Option<(NodeId, u32)> {
+        let mut line_end = false;
+        for pass in self.walk(engine, now, node, offset, forward)? {
+            match pass {
+                Pass::LineEnd => line_end = true,
+                Pass::Char { leaf, from, to, .. } => return Some((leaf, if line_end { from } else { to })),
+                Pass::Atom { parent, from, to } => return Some((parent, if line_end { from } else { to })),
+            }
+        }
+        None
+    }
+
+    // `Selection.modify` by a word, as Chrome moves: past the white space, then to the end (the start, back) of the word
+    // there — a run of word characters of one script, across inline edges — or of the run of punctuation; an atom is
+    // one. Across a line's end before any, to the edge of what is past it: the next paragraph's start (the last's end,
+    // back).
+    pub(crate) fn caret_word_step(&self, engine: &mut StyleEngine, now: f64, node: NodeId, offset: u32, forward: bool) -> Option<(NodeId, u32)> {
+        let mut line_end = false;
+        // (…the run so far: whether of word characters, the script of its text where it has one, and where it ends)
+        let mut token: Option<(bool, Option<u16>, NodeId, u32)> = None;
+        for pass in self.walk(engine, now, node, offset, forward)? {
+            match (pass, token) {
+                (Pass::Char { ch, .. }, None) if is_space(ch) => {}
+                (Pass::LineEnd, None) => line_end = true,
+                (Pass::Char { leaf, from, .. }, None) if line_end => return Some((leaf, from)),
+                (Pass::Atom { parent, from, .. }, None) if line_end => return Some((parent, from)),
+                (Pass::Atom { parent, to, .. }, None) => return Some((parent, to)),
+                (Pass::Char { leaf, to, ch, .. }, None) => token = Some((is_word(ch), crate::unicode::script(ch), leaf, to)),
+                (Pass::Char { leaf, to, ch, .. }, Some((word, script, ..))) if !is_space(ch) && is_word(ch) == word => {
+                    let own = crate::unicode::script(ch);
+                    if word && script.is_some() && own.is_some() && own != script {
+                        break;
+                    }
+                    token = Some((word, script.or(own), leaf, to));
+                }
+                (_, Some(_)) => break,
+            }
+        }
+        token.map(|(.., leaf, at)| (leaf, at))
+    }
+
     // Whether `id` is a block, by its tag (`rendered::is_block_tag`).
     fn is_block(&self, id: NodeId) -> bool {
         self.get(id).is_some_and(|n| n.kind == NodeKind::Element && crate::rendered::is_block_tag(&n.local_name))
@@ -212,6 +216,159 @@ impl RealmArena {
     }
 }
 
+// What a caret passes stepping through its editing host (the document, outside one) in tree order — back, without
+// `forward` — never out of the host, nor into what renders nothing (`display: none`, a `<script>`, a closed
+// `<details>`'s content): a character of a text leaf, from one place to the next (a surrogate pair one character, a run
+// of collapsible white space one space, none at a line's either end); a line's end — a block-level box's edge, a `<br>`
+// that breaks a line; an atom, a void element (an image), from the place before it to the place after.
+enum Pass {
+    Char { leaf: NodeId, from: u32, to: u32, ch: u32 },
+    LineEnd,
+    Atom { parent: NodeId, from: u32, to: u32 },
+}
+struct Walk<'a> {
+    arena: &'a RealmArena,
+    engine: &'a mut StyleEngine,
+    now: f64,
+    host: Option<NodeId>,
+    forward: bool,
+    // The place between `at`'s children it has come to, before its `index`th — or in the text leaf `text`, at its offset.
+    at: NodeId,
+    index: usize,
+    text: Option<(NodeId, u32)>,
+    // Whether what it passed last was a space or a line's end, after which collapsible white space renders nothing; and
+    // what it found looking past a space, to be passed next.
+    space_seen: bool,
+    ahead: Option<Pass>,
+}
+
+impl Iterator for Walk<'_> {
+    type Item = Pass;
+    // (…a run of collapsible white space passed as its first space, where something other than a line's end follows)
+    fn next(&mut self) -> Option<Pass> {
+        if let Some(pass) = self.ahead.take() {
+            self.space_seen = matches!(pass, Pass::LineEnd);
+            return Some(pass);
+        }
+        loop {
+            let (pass, collapsible) = self.pass()?;
+            if !collapsible {
+                self.space_seen = matches!(pass, Pass::LineEnd);
+                return Some(pass);
+            }
+            if self.space_seen {
+                continue;
+            }
+            loop {
+                match self.pass()? {
+                    (_, true) => {}
+                    (Pass::LineEnd, _) => {
+                        self.space_seen = true;
+                        return Some(Pass::LineEnd);
+                    }
+                    (next, _) => {
+                        self.ahead = Some(next);
+                        self.space_seen = true;
+                        return Some(pass);
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Walk<'_> {
+    // The next thing passed, and whether it is collapsible white space.
+    fn pass(&mut self) -> Option<(Pass, bool)> {
+        let arena = self.arena;
+        let forward = self.forward;
+        loop {
+            if let Some((leaf, offset)) = self.text {
+                let n = arena.get(leaf)?;
+                let data = &n.data;
+                let at = offset as usize;
+                let unit = if forward { data.get(at) } else { at.checked_sub(1).and_then(|i| data.get(i)) };
+                if let Some(&unit) = unit {
+                    // (…a pair's two halves one character)
+                    let pair = if forward {
+                        data.get(at + 1).filter(|&&low| (0xD800..0xDC00).contains(&unit) && (0xDC00..0xE000).contains(&low)).map(|&low| (unit, low))
+                    } else {
+                        at.checked_sub(2).map(|i| data[i]).filter(|&high| (0xD800..0xDC00).contains(&high) && (0xDC00..0xE000).contains(&unit)).map(|high| (high, unit))
+                    };
+                    let (ch, width) = match pair {
+                        Some((high, low)) => (0x10000 + ((u32::from(high) - 0xD800) << 10) + (u32::from(low) - 0xDC00), 2),
+                        None => (u32::from(unit), 1),
+                    };
+                    let to = if forward { offset + width } else { offset - width };
+                    self.text = Some((leaf, to));
+                    let collapsible = crate::rendered::is_collapsible_ws(unit) && crate::rendered::collapses_white_space(arena, n.parent);
+                    return Some((Pass::Char { leaf, from: offset, to, ch }, collapsible));
+                }
+                self.text = None;
+                self.at = arena.parent_of(leaf)?;
+                self.index = arena.child_index(leaf) + usize::from(forward);
+                continue;
+            }
+            let container = arena.get(self.at)?;
+            let next = if forward { container.children.get(self.index).copied() } else { self.index.checked_sub(1).map(|i| container.children[i]) };
+            let Some(child) = next else {
+                // (…out of the container, to the place after (before) it in its parent)
+                if Some(self.at) == self.host {
+                    return None;
+                }
+                let left = self.at;
+                self.at = container.parent?;
+                self.index = arena.child_index(left) + usize::from(forward);
+                if crate::rendered::is_block_level(arena, left) {
+                    return Some((Pass::LineEnd, false));
+                }
+                continue;
+            };
+            let c = arena.get(child)?;
+            let past = if forward { self.index + 1 } else { self.index - 1 };
+            match c.kind {
+                NodeKind::Text => {
+                    self.text = Some((child, if forward { 0 } else { c.data.len() as u32 }));
+                    continue;
+                }
+                NodeKind::Element if !crate::rendered::generates_text_box(self.engine, arena, child, c, self.now) => {}
+                NodeKind::Element if c.is_html_named("br") => {
+                    self.index = past;
+                    if crate::rendered::is_line_break(arena, child) {
+                        return Some((Pass::LineEnd, false));
+                    }
+                    continue;
+                }
+                NodeKind::Element if c.children.is_empty() && CARET_VOID_TAGS.contains(&&*c.local_name) => {
+                    let (before, after) = (self.index.min(past) as u32, self.index.max(past) as u32);
+                    let parent = self.at;
+                    self.index = past;
+                    let (from, to) = if forward { (before, after) } else { (after, before) };
+                    return Some((Pass::Atom { parent, from, to }, false));
+                }
+                NodeKind::Element => {
+                    self.at = child;
+                    self.index = if forward { 0 } else { c.children.len() };
+                    if crate::rendered::is_block_level(arena, child) {
+                        return Some((Pass::LineEnd, false));
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            self.index = past;
+        }
+    }
+}
+
+// White space, and a word character (`word_unit`'s, of a code point), to a caret moving by words.
+fn is_space(ch: u32) -> bool {
+    char::from_u32(ch).is_some_and(char::is_whitespace)
+}
+fn is_word(ch: u32) -> bool {
+    ch == u32::from(b'_') || crate::unicode::is_letter(ch) || crate::unicode::is_number(ch)
+}
+
 // A word character, as a UTF-16 unit is one (`/[\p{L}\p{N}_]/u` tests the string's units): a letter, a number or `_`;
 // a surrogate half none.
 fn word_unit(u: u16) -> bool {
@@ -220,6 +377,7 @@ fn word_unit(u: u16) -> bool {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "caretStep", caret_step, context_id);
+    crate::dom::register(scope, ns, "caretWordStep", caret_word_step, context_id);
     crate::dom::register(scope, ns, "caretBlockEdge", caret_block_edge, context_id);
     crate::dom::register(scope, ns, "caretWord", caret_word, context_id);
 }
@@ -231,13 +389,22 @@ fn points<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, nodes: &[NodeId], offs
     v8::Array::new_with_elements(scope, &values).into()
 }
 
-// __dom.caretStep(nid, offset, forward) -> [[node], offset] (`caret_step`), or undefined where the caret stays.
-fn caret_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.caretStep(nid, offset, forward, now) -> [[node], offset] (`caret_step`), or undefined where the caret stays (or
+// the realm has no style engine).
+fn caret_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    step_op(scope, args, rv, RealmArena::caret_step);
+}
+// __dom.caretWordStep(nid, offset, forward, now) -> …by a word (`caret_word_step`).
+fn caret_word_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    step_op(scope, args, rv, RealmArena::caret_word_step);
+}
+type Step = fn(&RealmArena, &mut StyleEngine, f64, NodeId, u32, bool) -> Option<(NodeId, u32)>;
+fn step_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>, step: Step) {
     let Some(node) = nid_arg(scope, &args, 0) else { return };
     let offset = args.get(1).uint32_value(scope).unwrap_or(0);
     let forward = args.get(2).is_true();
     let cid = crate::dom::realm_id(scope, &args);
-    if let Some((to, at)) = crate::dom::realm(scope, cid).caret_step(node, offset, forward) {
+    if let Some((to, at)) = crate::rendered::with_engine(scope, &args, 3, |engine, arena, now| step(arena, engine, now, node, offset, forward)).flatten() {
         rv.set(points(scope, cid, &[to], &[at]));
     }
 }

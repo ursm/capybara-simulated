@@ -36,6 +36,10 @@ const ATOMIC_INLINE_TAGS: [&str; 13] =
 fn tag(n: &NodeData) -> &str {
     &n.local_name
 }
+// Whether no box is ever made for a `t` (`INVISIBLE_TAGS`).
+pub(crate) fn is_invisible_tag(t: &str) -> bool {
+    INVISIBLE_TAGS.contains(&t)
+}
 pub(crate) fn is_block_tag(t: &str) -> bool {
     BLOCK_TAGS.contains(&t) || t == "ul"
 }
@@ -122,7 +126,7 @@ pub(crate) fn rendered(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId,
 // Does `el` generate a box the rendered-text walk descends? Not an invisible tag, fallback content or one no UA renders;
 // shown by the engine and not skipping its contents — whose text renders nothing, not even the breaks around it
 // (Chrome: "A||" for `A|<div hidden=until-found>uf</div>|`). `visibility` is the walk's own, per node.
-fn generates_text_box(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, n: &NodeData, now: f64) -> bool {
+pub(crate) fn generates_text_box(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, n: &NodeData, now: f64) -> bool {
     if INVISIBLE_TAGS.contains(&tag(n)) || has_fallback_only_content(arena, n) || ua_not_rendered(n) {
         return false;
     }
@@ -170,6 +174,10 @@ fn inherited_ws(arena: &RealmArena, id: Option<NodeId>) -> Ws {
         at = arena.get(n).and_then(|d| d.parent);
     }
     Ws::Normal
+}
+// Whether a text child of `parent` collapses its white space (the mode in force there keeps none of it).
+pub(crate) fn collapses_white_space(arena: &RealmArena, parent: Option<NodeId>) -> bool {
+    !inherited_ws(arena, parent).preserving()
 }
 // Does `id`'s `visibility` hide it — its own computed one where the engine styles it, else what it `inherited`?
 fn hides_by_visibility(arena: &RealmArena, id: NodeId, inherited: bool) -> bool {
@@ -234,7 +242,7 @@ struct Walk<'a> {
 
 const SPACE: u16 = 0x20;
 const NEWLINE: u16 = 0x0A;
-fn is_collapsible_ws(u: u16) -> bool {
+pub(crate) fn is_collapsible_ws(u: u16) -> bool {
     matches!(u, 0x20 | 0x09 | 0x0A | 0x0D)
 }
 fn is_js_space(u: u16) -> bool {
@@ -494,13 +502,17 @@ impl Walk<'_> {
     }
 }
 
+// Is `id` block-level — its computed `display` an outer block (a block's edge ends a line)?
+pub(crate) fn is_block_level(arena: &RealmArena, id: NodeId) -> bool {
+    primary_style(arena, id).is_some_and(|s| matches!(s.get_box().clone_display().outside(), DisplayOutside::Block))
+}
 // Does `id` generate a box — anything but `display: contents`?
 fn generates_box(arena: &RealmArena, id: NodeId) -> bool {
     !primary_style(arena, id).is_some_and(|s| s.get_box().clone_display().is_contents())
 }
 // Is `id` a `<br>` that BREAKS a line — an inline-level one, or a flex or grid item — rather than a block like any other
 // (block-level, floated or absolutely positioned)?
-fn is_line_break(arena: &RealmArena, id: NodeId) -> bool {
+pub(crate) fn is_line_break(arena: &RealmArena, id: NodeId) -> bool {
     use style::computed_values::position::T as Position;
     let Some(style) = primary_style(arena, id) else { return false };
     let d = style.get_box().clone_display();

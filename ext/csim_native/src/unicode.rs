@@ -61,6 +61,15 @@ pub(crate) fn is_letter(cp: u32) -> bool {
 pub(crate) fn is_number(cp: u32) -> bool {
     in_ranges(&NUMBERS, cp)
 }
+// The Script of `cp` (UAX #24) — None for Common and Inherited, which every script's text shares: where one script's
+// text meets another's, a caret moving by words finds a word's edge (Chrome: `희진DJ` is two words).
+pub(crate) fn script(cp: u32) -> Option<u16> {
+    use icu_properties::props::Script;
+    match icu_properties::CodePointMapData::<Script>::new().get32(cp) {
+        Script::Common | Script::Inherited => None,
+        script => Some(script.to_icu4c_value()),
+    }
+}
 // Extended_Pictographic (UAX #29): what a ZERO WIDTH JOINER joins into one grapheme cluster — an emoji ZWJ sequence
 // (GB11) — and nothing else does.
 pub(crate) fn is_extended_pictographic(cp: u32) -> bool {
