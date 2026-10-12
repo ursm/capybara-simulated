@@ -598,11 +598,12 @@ const BUILT_SELECT: u32 = 1;
 const BUILT_NAMESPACED: u32 = 1 << 1;
 const BUILT_INSERTED: u32 = 1 << 2;
 
-// One build: the realm it is in and the one whose code asked, the node document of what it makes and of what template
-// contents hold (the inert one), the nodes by handle — each held until its object is made or a tree holds it — the
-// nodes in template contents, and the elements the bindings have steps for.
-struct Build<'s> {
-    cid: i32,
+// One build — the HTML parser's, and the XML parser's (xml_parse.rs `xmlBuild`): the realm it is in and the one whose
+// code asked, the node document of what it makes and of what template contents hold (the inert one), the nodes by
+// handle — each held until its object is made or a tree holds it — the nodes in template contents, the elements the
+// bindings have steps for, and the flag a script it inserts out of template contents takes.
+pub(crate) struct Build<'s> {
+    pub(crate) cid: i32,
     maker: i32,
     doc: Option<v8::Local<'s, v8::Object>>,
     template_doc: Option<v8::Local<'s, v8::Object>>,
@@ -614,6 +615,8 @@ struct Build<'s> {
     steps: Vec<(crate::dom::NodeId, Vec<String>, u32)>,
     // A document's mode, as `htmlParse` numbers it, where the parse set one.
     quirks: Option<i32>,
+    // (…"already started" — a fragment's, a document no script runs in — or, an XML document's, "parser-inserted")
+    pub(crate) script: u8,
 }
 
 impl<'s> Build<'s> {
@@ -628,7 +631,7 @@ impl<'s> Build<'s> {
         self.nodes[at] = Some(id);
     }
     // A new node of `data`, in the parse's node document.
-    fn make(&mut self, scope: &mut v8::PinScope<'s, '_>, data: crate::dom::NodeData) -> crate::dom::NodeId {
+    pub(crate) fn make(&mut self, scope: &mut v8::PinScope<'s, '_>, data: crate::dom::NodeData) -> crate::dom::NodeId {
         let id = crate::dom::realm(scope, self.cid).create(data, None);
         self.held.insert(id, crate::node_handle::bare(scope, id, self.doc, self.maker));
         id
@@ -637,14 +640,18 @@ impl<'s> Build<'s> {
     // appends them — written as any element's are (`replace_attributes`), a namespaced one's names with them; its `is`
     // value; the steps its attributes have that are the bindings'.
     fn element(&mut self, scope: &mut v8::PinScope<'s, '_>, ns: i32, local: &str, attrs: Vec<(String, i32, String, String)>) -> crate::dom::NodeId {
-        let ns = arena_namespace(ns);
         let id = self.make(scope, crate::dom::NodeData {
             local_name: web_atoms::LocalName::from(local),
-            ns: ns.clone(),
+            ns: arena_namespace(ns),
             ..crate::dom::NodeData::of_kind(crate::dom::NodeKind::Element, Vec::new())
         });
         self.attributes(scope, id, attrs, Vec::new());
-        if ns == web_atoms::ns!(html) {
+        self.is_value(scope, id);
+        id
+    }
+    // An HTML element's `is` attribute its `is` value — fixed as "create an element" makes it.
+    pub(crate) fn is_value(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId) {
+        if crate::dom::realm(scope, self.cid).get(id).is_some_and(|n| n.ns == web_atoms::ns!(html)) {
             let arena = crate::dom::realm(scope, self.cid);
             let is = arena.get(id).and_then(|n| n.plain_attr("is").map(|v| v.encode_utf16().collect::<Vec<u16>>()));
             if let Some(is) = is {
@@ -655,36 +662,48 @@ impl<'s> Build<'s> {
                 arena.set_state(id, had | crate::dom::STATE_IS_VALUE);
             }
         }
-        id
     }
     // `attrs` (prefix, namespace code, local name, value) given to `id` after `existing` — none already there taken
     // again — and the steps they have that are the bindings'.
     fn attributes(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId, attrs: Vec<(String, i32, String, String)>, existing: Vec<(String, String)>) {
-        let (mut list, mut namespaced) = (existing, crate::dom::realm(scope, self.cid).get(id).map_or_else(Vec::new, |n| n.attr_ns.clone()));
-        let mut names = Vec::new();
-        for (prefix, ns, local, value) in attrs {
+        let named = attrs.into_iter().map(|(prefix, ns, local, value)| {
             let name = if prefix.is_empty() { local.clone() } else { format!("{prefix}:{local}") };
+            (name, value.encode_utf16().collect(), (ns != 0).then(|| (attribute_namespace(ns).to_owned(), local)))
+        });
+        self.named_attributes(scope, id, named.collect(), existing);
+    }
+    // …(name, value, namespace and local name where it has a namespace).
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn named_attributes(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId, attrs: Vec<(String, Vec<u16>, Option<(String, String)>)>, existing: Vec<(String, String)>) {
+        let (mut list, mut namespaced) = (existing, crate::dom::realm(scope, self.cid).get(id).map_or_else(Vec::new, |n| n.attr_ns.clone()));
+        let (mut names, mut exact) = (Vec::new(), Vec::new());
+        for (name, value, ns) in attrs {
             if list.iter().any(|(k, _)| *k == name) {
                 continue;
             }
-            if ns != 0 {
-                namespaced.push((name.clone(), attribute_namespace(ns).to_owned(), local));
+            if let Some((ns, local)) = ns {
+                namespaced.push((name.clone(), ns, local));
             }
             if crate::cloning::bindings_steps(&name) || matches!(name.as_str(), "autofocus") {
                 names.push(name.clone());
             }
-            list.push((name, value));
+            // (…a value with a lone surrogate kept exactly beside its lossy string)
+            let string = String::from_utf16(&value).unwrap_or_else(|_| {
+                let lossy = String::from_utf16_lossy(&value);
+                exact.push((name.clone(), value));
+                lossy
+            });
+            list.push((name, string));
         }
         let flags = if namespaced.is_empty() { 0 } else { BUILT_NAMESPACED };
-        crate::dom::replace_attributes(scope, self.cid, id, list, Vec::new(), Some((namespaced, Vec::new())));
+        crate::dom::replace_attributes(scope, self.cid, id, list, exact, Some((namespaced, Vec::new())));
         if !names.is_empty() || flags != 0 {
             self.steps.push((id, names, flags));
         }
     }
     // `child` into `parent` before `before` (none: last) — its node document the inert one where `parent` is in template
-    // contents — and the insertion's steps: a script's flags (HTML: parser-made, it is no longer "force async", and out
-    // of template contents "already started").
-    fn insert(&mut self, scope: &mut v8::PinScope<'s, '_>, parent: crate::dom::NodeId, child: crate::dom::NodeId, before: Option<crate::dom::NodeId>) {
+    // contents — and what the parser making it gives it (`parsed`).
+    pub(crate) fn insert(&mut self, scope: &mut v8::PinScope<'s, '_>, parent: crate::dom::NodeId, child: crate::dom::NodeId, before: Option<crate::dom::NodeId>) {
         crate::dom::realm(scope, self.cid).insert_child(parent, child, before);
         let contents = self.in_contents.contains(&parent);
         if contents && self.in_contents.insert(child) {
@@ -692,13 +711,18 @@ impl<'s> Build<'s> {
                 h.set_document(scope, self.template_doc);
             }
         }
+        self.parsed(scope, child, contents);
+    }
+    // What the parser making `node` gives it, a script's flags: no longer "force async", and — out of template
+    // `contents` — the build's own (`script`).
+    pub(crate) fn parsed(&mut self, scope: &mut v8::PinScope<'s, '_>, node: crate::dom::NodeId, contents: bool) {
         let arena = crate::dom::realm(scope, self.cid);
-        let Some(n) = arena.get(child) else { return };
+        let Some(n) = arena.get(node) else { return };
         let script = &*n.local_name == "script" && (n.ns == web_atoms::ns!(html) || n.ns == web_atoms::ns!(svg));
         let started = n.script_flags & (crate::script::SCRIPT_ALREADY_STARTED | crate::script::SCRIPT_PARSER_INSERTED) != 0;
         if script && !started {
-            if let Some(n) = arena.get_mut_quietly(child) {
-                n.script_flags |= crate::script::SCRIPT_NOT_FORCE_ASYNC | if contents { 0 } else { crate::script::SCRIPT_ALREADY_STARTED };
+            if let Some(n) = arena.get_mut_quietly(node) {
+                n.script_flags |= crate::script::SCRIPT_NOT_FORCE_ASYNC | if contents { 0 } else { self.script };
             }
         }
     }
@@ -717,6 +741,20 @@ impl<'s> Build<'s> {
         }
         let t = self.make(scope, crate::dom::NodeData::of_kind(crate::dom::NodeKind::Text, text.encode_utf16().collect()));
         self.insert(scope, parent, t, before);
+    }
+
+    // A template's contents: a fragment of their own, in the inert document, with template contents' null registry.
+    pub(crate) fn contents_of(&mut self, scope: &mut v8::PinScope<'s, '_>, template: crate::dom::NodeId) -> crate::dom::NodeId {
+        let frag = crate::dom::realm(scope, self.cid).create(crate::dom::NodeData::of_kind(crate::dom::NodeKind::Fragment, Vec::new()), None);
+        let held = crate::node_handle::bare(scope, frag, self.template_doc, self.maker);
+        if let Some(h) = held.get() {
+            h.set_registry_state(crate::ce_reactions::TRACKING);
+        }
+        self.held.insert(frag, held);
+        self.in_contents.insert(frag);
+        self.contents.push(frag);
+        crate::dom::realm(scope, self.cid).set_template_content(template, Some(frag));
+        frag
     }
 
     // Take the parser's steps.
@@ -744,17 +782,7 @@ impl<'s> Build<'s> {
                     let el = self.element(scope, ns, &local, list);
                     self.set(handle, el);
                     if contents != 0 {
-                        // (…a template's contents: a fragment of their own, in the inert document, with template
-                        // contents' null registry)
-                        let frag = crate::dom::realm(scope, self.cid).create(crate::dom::NodeData::of_kind(crate::dom::NodeKind::Fragment, Vec::new()), None);
-                        let held = crate::node_handle::bare(scope, frag, self.template_doc, self.maker);
-                        if let Some(h) = held.get() {
-                            h.set_registry_state(crate::ce_reactions::TRACKING);
-                        }
-                        self.held.insert(frag, held);
-                        self.in_contents.insert(frag);
-                        self.contents.push(frag);
-                        crate::dom::realm(scope, self.cid).set_template_content(el, Some(frag));
+                        let frag = self.contents_of(scope, el);
                         self.set(contents, frag);
                     }
                 }
@@ -969,7 +997,7 @@ fn parsed(tokenizer: Tokenizer<TreeBuilder<u32, Sink>>, html: String) -> Vec<Ope
 }
 
 impl<'s> Build<'s> {
-    fn new(cid: i32, doc: Option<v8::Local<'s, v8::Object>>, template_doc: Option<v8::Local<'s, v8::Object>>, nodes: Vec<Option<crate::dom::NodeId>>) -> Build<'s> {
+    pub(crate) fn new(cid: i32, doc: Option<v8::Local<'s, v8::Object>>, template_doc: Option<v8::Local<'s, v8::Object>>, nodes: Vec<Option<crate::dom::NodeId>>) -> Build<'s> {
         Build {
             cid,
             maker: cid,
@@ -981,12 +1009,13 @@ impl<'s> Build<'s> {
             contents: Vec::new(),
             steps: Vec::new(),
             quirks: None,
+            script: crate::script::SCRIPT_ALREADY_STARTED,
         }
     }
     // The insertion steps of the engine's own over what no later insertion runs them for — a document's children, every
     // template's contents (a fragment's top-level nodes have theirs as they are inserted): its radio buttons' (a group's
     // last checked one the one left checked, as each insertion in turn left it: dom.rs `insertion_steps`).
-    fn finish(&mut self, scope: &mut v8::PinScope<'s, '_>, document: Option<crate::dom::NodeId>) {
+    pub(crate) fn finish(&mut self, scope: &mut v8::PinScope<'s, '_>, document: Option<crate::dom::NodeId>) {
         let arena = crate::dom::realm(scope, self.cid);
         let mut roots: Vec<crate::dom::NodeId> = document.and_then(|d| arena.get(d)).map_or_else(Vec::new, |n| n.children.clone());
         for &c in &self.contents {
@@ -1000,7 +1029,7 @@ impl<'s> Build<'s> {
     // the names of its attributes whose steps are theirs and its flags — an element with an id, autofocus or an
     // `open` given its insertion steps too (`BUILT_INSERTED`). None past a node factory that threw: its exception is what
     // the op ends with.
-    fn answer(&mut self, scope: &mut v8::PinScope<'s, '_>, tops: &[crate::dom::NodeId]) -> Option<Vec<v8::Local<'s, v8::Value>>> {
+    pub(crate) fn answer(&mut self, scope: &mut v8::PinScope<'s, '_>, tops: &[crate::dom::NodeId]) -> Option<Vec<v8::Local<'s, v8::Value>>> {
         for (_, names, flags) in self.steps.iter_mut() {
             if names.iter().any(|n| matches!(n.as_str(), "id" | "autofocus" | "open")) {
                 *flags |= BUILT_INSERTED;
