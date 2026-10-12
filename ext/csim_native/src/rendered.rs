@@ -506,6 +506,14 @@ impl Walk<'_> {
 pub(crate) fn is_block_level(arena: &RealmArena, id: NodeId) -> bool {
     primary_style(arena, id).is_some_and(|s| matches!(s.get_box().clone_display().outside(), DisplayOutside::Block))
 }
+// Is `id` an ATOMIC inline — an inline-level box laid out as a whole on its line (`inline-block`, `inline-flex`,
+// `inline-grid`, `inline-table`)?
+pub(crate) fn is_atomic_inline(arena: &RealmArena, id: NodeId) -> bool {
+    primary_style(arena, id).is_some_and(|s| {
+        let display = s.get_box().clone_display();
+        matches!(display.outside(), DisplayOutside::Inline) && matches!(display.inside(), DisplayInside::FlowRoot | DisplayInside::Flex | DisplayInside::Grid | DisplayInside::Table)
+    })
+}
 // Does `id` generate a box — anything but `display: contents`?
 fn generates_box(arena: &RealmArena, id: NodeId) -> bool {
     !primary_style(arena, id).is_some_and(|s| s.get_box().clone_display().is_contents())

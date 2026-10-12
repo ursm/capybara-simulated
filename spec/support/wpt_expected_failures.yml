@@ -5304,10 +5304,6 @@ selection/bidi/modify-extend-by-character.html:
 - 'LTR-RTL context in LTR paragraph: extend right 3 chars'
 - 'Mixed context in auto-dir paragraph: extend left 3 chars'
 - 'Mixed context in auto-dir paragraph: extend right 3 chars'
-- 'RTL text in LTR paragraph: extend left 2 chars'
-- 'RTL text in LTR paragraph: extend right 2 chars'
-- 'RTL text in RTL paragraph: extend left 2 chars'
-- 'RTL text in RTL paragraph: extend right 2 chars'
 - 'RTL-LTR context in LTR paragraph: extend left 3 chars'
 - 'RTL-LTR context in LTR paragraph: extend right 3 chars'
 selection/bidi/modify-move-by-character.html:
@@ -5315,10 +5311,6 @@ selection/bidi/modify-move-by-character.html:
 - 'LTR-RTL context in LTR paragraph: move right 3 chars'
 - 'Mixed context in auto-dir paragraph: move left 3 chars'
 - 'Mixed context in auto-dir paragraph: move right 3 chars'
-- 'RTL text in LTR paragraph: move left 2 chars'
-- 'RTL text in LTR paragraph: move right 2 chars'
-- 'RTL text in RTL paragraph: move left 2 chars'
-- 'RTL text in RTL paragraph: move right 2 chars'
 - 'RTL-LTR context in LTR paragraph: move left 3 chars'
 - 'RTL-LTR context in LTR paragraph: move right 3 chars'
 selection/caret/move-around-contenteditable-false.html:

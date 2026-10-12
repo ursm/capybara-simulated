@@ -376,6 +376,7 @@ impl RealmArena {
         let (run, end) = (r[0] as usize, r[2] as u32);
         let reach = self.reach(g, r);
         let text = g.texts.get(run).and_then(|t| t.as_deref()).unwrap_or(&[]);
+        // (…none past a `break-spaces` line's own: its spaces wrap, they do not hang)
         if reach.preserve {
             let mut to = reach.to;
             while text.get(to as usize).is_some_and(|&u| u == 0x20 || u == 0x09) {
@@ -383,7 +384,12 @@ impl RealmArena {
             }
             return (run, to, self.advance(g, r, end, to));
         }
-        if r[12] == 0.0 || reach.to > end {
+        // (…editable text's: a wrapped line of text no one edits ends before its hanging space — Chrome's
+        // `lineboundary` in a page's text, 19 where an editor's End is 20)
+        let editable = g.mark(run).and_then(|m| source_at(&m.sources, end.saturating_sub(1))).is_some_and(|s| {
+            s.flags & CONTROL_VALUE != 0 || self.parent_of(s.node).is_some_and(|p| self.editing_host(p).is_some())
+        });
+        if r[12] == 0.0 || reach.to > end || !editable {
             return (run, reach.to, reach.after);
         }
         if let Some(&u) = text.get(end as usize) {
@@ -531,15 +537,25 @@ impl RealmArena {
             return Some(((node, offset), false));
         }
         let Some(i) = self.caret_piece(g, node, offset, upstream) else {
+            // (…a caret in text no line holds — white space between blocks — on the next text a line does: Chrome takes
+            // a place nothing renders to the next one there is)
+            let n = self.get(node)?;
+            if n.kind == NodeKind::Text {
+                let j = g.pieces_of(self.following_text(g, root, node)?).next()?;
+                let (text, at) = self.run_place(g, g.rows[j][0] as usize, g.rows[j][1] as u32)?;
+                return self.line_edge(g, root, text, at, false, end);
+            }
             // (…a caret between an element's children: on the line of the text either side of it, or past the atoms
             // beside it)
-            let n = self.get(node).filter(|n| n.kind == NodeKind::Element)?;
+            if n.kind != NodeKind::Element {
+                return None;
+            }
             let after = n.children.get(offset as usize).map(|&c| (c, 0));
             let before = (offset as usize).checked_sub(1).and_then(|k| n.children.get(k)).map(|&c| (c, self.get(c).map_or(0, |d| d.data.len() as u32)));
             if let Some(text) = [after, before].into_iter().flatten().find(|&(c, at)| self.get(c).is_some_and(|d| d.kind == NodeKind::Text) && self.caret_piece(g, c, at, false).is_some()) {
                 return self.line_edge(g, root, text.0, text.1, false, end);
             }
-            return Some((self.editable_place(root, self.past_atoms(g, root, (node, offset), end, None), end), false));
+            return Some((self.editable_place(root, self.past_atoms(g, root, (node, offset), end, None, false).0, end), false));
         };
         let held = |&j: &usize| {
             let r = &g.rows[j];
@@ -559,24 +575,59 @@ impl RealmArena {
             let reach = self.reach(g, r);
             self.run_place(g, r[0] as usize, if reach.preserve { reach.from } else { r[1] as u32 })?
         };
-        let past = self.past_atoms(g, root, place, end, Some((r[4], r[4] + r[9])));
-        Some((self.editable_place(root, past, end), end && past == place && r[12] != 0.0))
+        let wrapped = end && r[12] != 0.0;
+        let (past, hung) = self.past_atoms(g, root, place, end, Some((r[4], r[4] + r[9])), wrapped);
+        Some((self.editable_place(root, past, end), wrapped && (past == place || hung)))
+    }
+    // Whether a soft wrap ends the line the caret at (`node`, `offset`) is on — the next line is of its paragraph, which
+    // only a `<br>`, a preserved newline or its block's end ends (`Selection.modify` by a paragraph).
+    pub(crate) fn line_wraps(&self, g: &TextView, node: NodeId, offset: u32) -> bool {
+        self.caret_piece(g, node, offset, false).is_some_and(|i| g.rows[i][12] != 0.0)
+    }
+    // The first text after `node` in tree order, in `root`, that a line holds.
+    fn following_text(&self, g: &TextView, root: NodeId, node: NodeId) -> Option<NodeId> {
+        let mut at = node;
+        loop {
+            let n = self.get(at)?;
+            at = match n.children.first() {
+                Some(&c) if at != node => c,
+                _ => loop {
+                    if at == root {
+                        return None;
+                    }
+                    let parent = self.parent_of(at)?;
+                    match self.get(parent)?.children.get(self.child_index(at) + 1) {
+                        Some(&next) => break next,
+                        None => at = parent,
+                    }
+                },
+            };
+            if g.by_node.contains_key(&at) {
+                return Some(at);
+            }
+        }
     }
     // …past the atoms beside the place on its line: the images, controls, `<svg>`s the DOM holds going on (back) from it —
     // across inline elements' edges and text that renders nothing — whose boxes are on the line's band `band` (the first
-    // one's, where none is given); stopping at text that renders, a `<br>`, a block, or `root`'s edge (Chrome: End on
-    // `aaa<img>` is after the image, Home on `<img>aaa` before it)…
-    fn past_atoms(&self, g: &TextView, root: NodeId, place: (NodeId, u32), end: bool, mut band: Option<(f64, f64)>) -> (NodeId, u32) {
-        let Some(n) = self.get(place.0) else { return place };
+    // one's, where none is given), and into an inline-block there to its own text's end (start); stopping at text that
+    // renders, a `<br>`, a block, or `root`'s edge (Chrome: End on `aaa<img>` is after the image, Home on `<img>aaa`
+    // before it, End on `aaa <span style="display:inline-block">X Y</span>` after its `Y`). Past an atom a `wrapped` line
+    // ends with, the white space the wrap hangs too, its first character — with whether it went there (Chrome: End on
+    // `bbbb <img> cccc` wrapped after the image is past the space before `cccc`).
+    fn past_atoms(&self, g: &TextView, root: NodeId, place: (NodeId, u32), end: bool, mut band: Option<(f64, f64)>, wrapped: bool) -> ((NodeId, u32), bool) {
+        let Some(n) = self.get(place.0) else { return (place, false) };
         let (mut parent, mut index) = match n.kind {
             NodeKind::Element => (place.0, place.1 as usize),
-            _ if (end && (place.1 as usize) < n.data.len()) || (!end && place.1 > 0) => return place,
+            // (…from text only where all of it on that side is white space: nothing but a space between it and an atom)
+            _ if !(if end { &n.data[(place.1 as usize).min(n.data.len())..] } else { &n.data[..(place.1 as usize).min(n.data.len())] }).iter().all(|&u| crate::rendered::is_collapsible_ws(u)) => {
+                return (place, false);
+            }
             _ => match n.parent {
                 Some(p) => (p, self.child_index(place.0) + usize::from(end)),
-                None => return place,
+                None => return (place, false),
             },
         };
-        let mut out = place;
+        let (mut out, mut atom) = (place, false);
         loop {
             let Some(p) = self.get(parent) else { break };
             let child = if end { p.children.get(index) } else { index.checked_sub(1).and_then(|k| p.children.get(k)) };
@@ -591,16 +642,22 @@ impl RealmArena {
             let Some(cn) = self.get(c) else { break };
             let step = if end { index + 1 } else { index - 1 };
             match cn.kind {
-                NodeKind::Text if g.by_node.contains_key(&c) => break,
+                NodeKind::Text if g.by_node.contains_key(&c) => {
+                    if wrapped && atom && cn.data.first().is_some_and(|&u| crate::rendered::is_collapsible_ws(u)) {
+                        return ((c, 1), true);
+                    }
+                    break;
+                }
                 NodeKind::Element if cn.local_name.as_ref() == "br" || crate::rendered::is_block_level(self, c) => break,
-                NodeKind::Element if crate::caret::CARET_VOID_TAGS.contains(&&*cn.local_name) => {
-                    // (…an atom not rendered is passed over; one on another line stops it)
+                NodeKind::Element if crate::caret::CARET_VOID_TAGS.contains(&&*cn.local_name) || crate::rendered::is_atomic_inline(self, c) => {
+                    // (…one not rendered is passed over; one on another line stops it)
                     if let Some(b) = crate::geometry::laid(self, cn) {
                         let (top, bottom) = *band.get_or_insert((b.y, b.y + b.h));
                         if b.y >= bottom || b.y + b.h <= top {
                             break;
                         }
-                        out = (parent, step as u32);
+                        out = self.inner_edge(g, c, end).unwrap_or((parent, step as u32));
+                        atom = true;
                     }
                     index = step;
                 }
@@ -608,7 +665,26 @@ impl RealmArena {
                 _ => index = step,
             }
         }
-        out
+        (out, false)
+    }
+    // …the last (first, without `end`) place of the text an inline-block's own lines hold — none where they hold none.
+    fn inner_edge(&self, g: &TextView, block: NodeId, end: bool) -> Option<(NodeId, u32)> {
+        let n = self.get(block)?;
+        let kids: Box<dyn Iterator<Item = &NodeId>> = if end { Box::new(n.children.iter().rev()) } else { Box::new(n.children.iter()) };
+        for &c in kids {
+            if g.by_node.contains_key(&c) {
+                let pieces: Vec<usize> = g.pieces_of(c).filter(|&j| g.rows[j][1] != g.rows[j][2]).collect();
+                let j = if end { pieces.last() } else { pieces.first() };
+                if let Some(&j) = j {
+                    let r = &g.rows[j];
+                    return self.run_place(g, r[0] as usize, if end { r[2] } else { r[1] } as u32);
+                }
+            }
+            if let Some(place) = self.get(c).filter(|d| d.kind == NodeKind::Element).and_then(|_| self.inner_edge(g, c, end)) {
+                return Some(place);
+            }
+        }
+        None
     }
     // …and out of what `root`'s editing does not reach: a place inside an element its editing host's editing stops at
     // (`contenteditable=false`) the place before it — after it, with `end` — in its parent (Chrome: Home on a line a
@@ -726,6 +802,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "caretRect", caret_rect, context_id);
     crate::dom::register(scope, ns, "lineOver", line_over, context_id);
     crate::dom::register(scope, ns, "lineEdge", line_edge, context_id);
+    crate::dom::register(scope, ns, "lineWraps", line_wraps, context_id);
 }
 
 // What a query of the realm's text asks of its arena and its text geometry (`RealmArena::with_text`).
@@ -800,4 +877,13 @@ fn line_edge(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         ];
         rv.set(v8::Array::new_with_elements(scope, &values).into());
     }
+}
+
+// __dom.lineWraps(nid, offset) -> whether a soft wrap ends the line the caret at the place is on (`line_wraps`).
+fn line_wraps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(node) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let offset = args.get(1).uint32_value(scope).unwrap_or(0);
+    let cid = crate::dom::realm_id(scope, &args);
+    let wraps = with_text(scope, cid, |arena, g| arena.line_wraps(g, node, offset)).unwrap_or(false);
+    rv.set_bool(wraps);
 }

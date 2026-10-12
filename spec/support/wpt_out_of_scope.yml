@@ -58403,15 +58403,6 @@ selection/modify-line-grid-basic.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-selection/move-paragraph-cross-editing-boundary.tentative.html:
-- name: cross editing boundary
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: not cross editing boundary
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 selection/move-paragraphboundary-cross-editing-boundary.tentative.html:
 - name: 'Selection.modify(): move by paragraphboundary cross editing boundary'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

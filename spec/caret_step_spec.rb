@@ -359,16 +359,23 @@ RSpec.describe 'stepping a caret by a character' do
     e.click
     at = ->(offset, *keys) {
       s.execute_script("getSelection().collapse(document.getElementById('e').firstChild, #{offset})")
-      e.send_keys(*keys)
+      keys.each {|key| key.is_a?(Proc) ? key.call : e.send_keys(key) }
       s.evaluate_script('(() => { const s = getSelection(); return s.anchorOffset === s.focusOffset ? s.focusOffset : [s.anchorOffset, s.focusOffset]; })()')
     }
     expect([at.(12, :end, :home), at.(12, :end, :end), at.(2, :end, :end, :home), at.(2, :end, :down), at.(2, :end, :down, :home)]).to eq([10, 20, 0, 19, 10])
     expect([at.(12, [:shift, :end], [:shift, :home]), at.(12, :end, [:shift, :home]), at.(2, :end, :left, :right, :home)]).to eq([[12, 10], [20, 10], 10])
+    # (…and only while nothing else sets the selection: a script's collapse to the same place is the next line's start)
+    expect(at.(12, :end, -> { s.execute_script("getSelection().collapse(document.getElementById('e').firstChild, 20)") }, :home)).to eq(20)
     t = s.find(:css, '#t')
     t.click
     s.execute_script('t.setSelectionRange(12, 12)')
     t.send_keys([:shift, :end], [:shift, :home])
     expect(s.evaluate_script('[t.selectionStart, t.selectionEnd, t.selectionDirection]')).to eq([10, 12, 'backward'])
+    s.execute_script('t.setSelectionRange(12, 12)')
+    t.send_keys(:end)
+    s.execute_script('t.setSelectionRange(20, 20)')
+    t.send_keys(:home)
+    expect(s.evaluate_script('t.selectionStart')).to eq(20)
   end
 
   # The caret's own line — not every line beside it — and the atoms on it: End in a flex item stays in it, a float's
@@ -408,5 +415,42 @@ RSpec.describe 'stepping a caret by a character' do
       edge.('abc   ', 'e.firstChild', 1, :end, 'white-space:pre-wrap'),
       edge.('aaaa bbbb    cccc', 'e.firstChild', 1, :end, 'white-space:pre-wrap')
     ]).to eq(['aaaa bbbb @10', ' cccc@1', "aaaa bbbb   \n   cccc@10", 'aaa @3', 'abc   @6', 'aaaa bbbb    cccc@13'])
+    # (…an inline-block at a line's edge to its own text's; white space no line holds, to the next text; past an image a
+    # wrap ends a line with, the space it hangs)
+    expect([
+      edge.('aaa <span style="display:inline-block">X Y</span>', 'e.firstChild', 1, :end),
+      edge.('<span style="display:inline-block">X Y</span> bbb', 'e.lastChild', 2, :home),
+      edge.("<div>aaa</div>\n<div>bbb</div>", 'e.childNodes[1]', 0, :home),
+      edge.("<div>aaa</div>\n<div>bbb</div>", 'e.childNodes[1]', 0, :end),
+      edge.('aaaa bbbb <img style="width:20px;height:16px"> cccc dddd', 'e.firstChild', 1, :end)
+    ]).to eq(['X Y@3', 'X Y@0', 'bbb@0', 'bbb@3', ' cccc dddd@1'])
+  end
+
+  # `Selection.modify` moves as the keys do: by a line — to the text's first or last place past its first or last line —
+  # by a paragraph, which only a block's end, a `<br>` or a preserved newline ends, and to a line's boundary, which in
+  # text no one edits is before the space a wrap hangs (Chrome: `second`@6, 0, `second`@2, 19).
+  it 'modifies the selection by lines, paragraphs and line boundaries' do
+    w = 'aaaa bbbb cccc dddd eeee'
+    s = session_for(<<~HTML)
+      <!DOCTYPE html><body style="margin:0;font:16px monospace"><div id=e contenteditable style="width:120px"><p style="margin:0">#{w}</p><p style="margin:0">second</p></div><div id=n style="width:120px">#{w}</div>
+    HTML
+    s.find(:css, '#e').click
+    modify = ->(node, offset, granularity, direction) {
+      s.evaluate_script(<<~JS)
+        (() => {
+          #{focus_js}
+          getSelection().collapse(#{node}, #{offset});
+          getSelection().modify('move', '#{direction}', '#{granularity}');
+          return desc();
+        })()
+      JS
+    }
+    first = 'document.querySelector("#e p").firstChild'
+    expect([
+      modify.('document.querySelectorAll("#e p")[1].firstChild', 2, 'line', 'forward'),
+      modify.(first, 2, 'line', 'backward'),
+      modify.(first, 2, 'paragraph', 'forward'),
+      modify.('document.getElementById("n").firstChild', 12, 'lineboundary', 'forward')
+    ]).to eq(['second@6', "#{w}@0", 'second@2', "#{w}@19"])
   end
 end
