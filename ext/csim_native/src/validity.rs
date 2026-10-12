@@ -690,7 +690,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "isLabelable", is_labelable, context_id);
     crate::dom::register(scope, ns, "labeledControl", labeled_control, context_id);
     crate::dom::register(scope, ns, "labelsOf", labels_of, context_id);
-    crate::dom::register(scope, ns, "labelToActivate", label_to_activate, context_id);
     crate::dom::register(scope, ns, "isEditable", is_editable, context_id);
     crate::dom::register(scope, ns, "isDetailsSummary", is_details_summary, context_id);
     crate::dom::register(scope, ns, "activationTarget", activation_target, context_id);
@@ -739,16 +738,13 @@ fn is_labelable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set_bool(crate::dom::realm(scope, cid).is_labelable(id));
 }
 
-// __dom.labeledControl / labelsOf / labelToActivate(nid) -> the node(s) `element_state` answers: a label's labeled
-// control, a control's labels, the label a click activates.
+// __dom.labeledControl / labelsOf(nid) -> the node(s) `element_state` answers: a label's labeled control, a control's
+// labels.
 fn labeled_control(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     nodes_answer(scope, &args, rv, |arena, id| arena.labeled_control(id).into_iter().collect());
 }
 fn labels_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     nodes_answer(scope, &args, rv, |arena, id| arena.labels_of(id));
-}
-fn label_to_activate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    nodes_answer(scope, &args, rv, |arena, id| arena.label_to_activate(id).into_iter().collect());
 }
 // (…what `answer` gives of a node, as `nodes_value` answers it)
 fn nodes_answer(

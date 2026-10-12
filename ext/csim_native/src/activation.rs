@@ -1,0 +1,163 @@
+// HTML's activation behaviours (§6.1-6.4, the element's own: §4.10.5.1.15-16, §4.10.6, §4.11.2, §4.6.4), for a click
+// whose activation target is `act` (element_state.rs `activation_target`): its legacy-pre-activation behaviour before
+// the click's listeners run — a checkbox's checkedness toggled and indeterminate cleared, a radio button checked — and
+// what undoes it where a listener canceled the click; and, otherwise, which of its activation behaviours apply, which the
+// bindings run (dispatch.js): a checkable's `input` and `change`, a picker's activation consumed, an image button's
+// coordinate, its form submitted or reset, a summary's details toggled, an invoker's command, a label's control clicked,
+// a hyperlink followed.
+
+use crate::dom::{realm, NodeData, NodeId, RealmArena, STATE_CHECKED, STATE_CHECKED_DIRTY, STATE_INDETERMINATE};
+
+pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "preActivate", pre_activate, context_id);
+    crate::dom::register(scope, ns, "cancelActivation", cancel_activation, context_id);
+    crate::dom::register(scope, ns, "activation", activation, context_id);
+}
+
+impl RealmArena {
+    // A checkbox's or a radio button's checkedness set — dirty from now on — a radio checked unchecking the rest of its
+    // group (HTML "set the checkedness"), as every writer of it does.
+    pub(crate) fn set_checkedness(&mut self, id: NodeId, on: bool) {
+        let Some(had) = self.get(id).map(|n| n.state) else { return };
+        let was_checked = self.is_checked(id);
+        let next = (had & !STATE_CHECKED) | STATE_CHECKED_DIRTY | if on { STATE_CHECKED } else { 0 };
+        if next != had {
+            self.set_state(id, next);
+        }
+        if on && !was_checked {
+            self.radio_steps(id);
+        }
+        self.observers.note_state_changed();
+    }
+}
+
+// A checkbox or a radio button — an HTML `<input>` of either type — Some(radio).
+fn checkable(n: &NodeData) -> Option<bool> {
+    n.is_html_named("input").then(|| n.input_type()).and_then(|t| match t {
+        "checkbox" => Some(false),
+        "radio" => Some(true),
+        _ => None,
+    })
+}
+
+// __dom.preActivate(act) -> undefined, or what undoes its legacy-pre-activation behaviour: `[radio, wasChecked,
+// wasIndeterminate, checkedBefore]` — a checkbox's checkedness and indeterminate as they were, a radio button's group's
+// checked one (null for none).
+fn pre_activate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(act) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let Some(cid) = crate::dom::dom(scope).arena.get(act).map(|n| n.realm) else { return };
+    let arena = realm(scope, cid);
+    let Some(radio) = arena.get(act).and_then(checkable) else { return };
+    let was_checked = arena.is_checked(act);
+    let was_indeterminate = arena.get(act).is_some_and(|n| n.state & STATE_INDETERMINATE != 0);
+    let before = if radio { arena.radio_group(act).into_iter().filter(|&r| arena.is_checked(r)).last() } else { None };
+    if radio {
+        arena.set_checkedness(act, true);
+    } else {
+        if was_indeterminate {
+            let state = arena.get(act).map_or(0, |n| n.state) & !STATE_INDETERMINATE;
+            arena.set_state(act, state);
+        }
+        arena.set_checkedness(act, !was_checked);
+    }
+    let before = crate::dom::node_value(scope, before);
+    let values = [
+        v8::Boolean::new(scope, radio).into(),
+        v8::Boolean::new(scope, was_checked).into(),
+        v8::Boolean::new(scope, was_indeterminate).into(),
+        before
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+
+// __dom.cancelActivation(act, radio, wasChecked, wasIndeterminate, checkedBefore) — its legacy-canceled-activation
+// behaviour: the radio button its group had checked checked again, or the checkbox's checkedness and indeterminate as
+// they were (a value a listener set reverted too).
+fn cancel_activation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(act) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let Some(cid) = crate::dom::dom(scope).arena.get(act).map(|n| n.realm) else { return };
+    let (radio, was_checked, was_indeterminate) = (args.get(1).is_true(), args.get(2).is_true(), args.get(3).is_true());
+    let before = crate::node_handle::nid_of(scope, args.get(4));
+    let arena = realm(scope, cid);
+    if radio {
+        arena.set_checkedness(act, false);
+        if let Some(before) = before {
+            arena.set_checkedness(before, true);
+        }
+    } else {
+        arena.set_checkedness(act, was_checked);
+        let state = arena.get(act).map_or(0, |n| n.state);
+        let next = (state & !STATE_INDETERMINATE) | if was_indeterminate { STATE_INDETERMINATE } else { 0 };
+        if next != state {
+            arena.set_state(act, next);
+        }
+    }
+}
+
+// What `activation` answers: the behaviours that apply.
+const CHECKABLE: u32 = 1; // a checkbox or radio button: a user's click an interaction with it
+const CHECKABLE_CHANGED: u32 = 1 << 1; // …its checkedness changed, connected: `input` and `change`
+const PICKER: u32 = 1 << 2; // an input whose activation shows a picker: the user's transient activation consumed
+const IMAGE: u32 = 1 << 3; // an image button: the coordinate its click selected
+const SUBMIT: u32 = 1 << 4; // a submit button: its form owner submitted
+const RESET: u32 = 1 << 5; // a reset button: its form owner reset
+const SUMMARY: u32 = 1 << 6; // the summary for its details: those toggled
+const INVOKER: u32 = 1 << 7; // anything else that activated no form: an invoker's command, where it is one
+const LABEL: u32 = 1 << 8; // a label clicked on itself or on what of it is no interactive content: its control clicked
+const HYPERLINK: u32 = 1 << 9; // a hyperlink outside an editing host: followed
+
+// The input types whose activation shows a picker.
+const PICKER_TYPES: [&str; 7] = ["color", "date", "datetime-local", "file", "month", "time", "week"];
+
+// __dom.activation(act, target, wasChecked) -> `[steps, form, control]`: the activation behaviours of `act` for a click on
+// `target` (`steps`, above), with the form a submit or reset button's acts on and the control a label's clicks;
+// `wasChecked` a checkable's checkedness before its pre-activation (undefined for none).
+fn activation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(act) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let target = crate::node_handle::nid_of(scope, args.get(1));
+    let was_checked = (!args.get(2).is_undefined()).then(|| args.get(2).is_true());
+    let Some(cid) = crate::dom::dom(scope).arena.get(act).map(|n| n.realm) else { return };
+    let arena = realm(scope, cid);
+    let Some(n) = arena.get(act) else { return };
+    let connected = arena.is_connected(act);
+    let mut steps = 0;
+    let (mut form, mut control) = (None, None);
+    if checkable(n).is_some() {
+        steps |= CHECKABLE;
+        if connected && was_checked.is_some_and(|was| was != arena.is_checked(act)) {
+            steps |= CHECKABLE_CHANGED;
+        }
+    } else {
+        if n.is_html_named("input") && PICKER_TYPES.contains(&n.input_type()) {
+            steps |= PICKER;
+        }
+        if n.is_html_named("input") && n.input_type() == "image" {
+            steps |= IMAGE;
+        }
+        let reset = (n.is_html_named("button") || n.is_html_named("input")) && n.plain_attr("type").is_some_and(|t| t.eq_ignore_ascii_case("reset"));
+        if connected && !arena.is_actually_disabled(act) && (n.is_submit_button() || reset) {
+            form = arena.form_owner(act);
+            if form.is_some() {
+                steps |= if reset { RESET } else { SUBMIT };
+            }
+        }
+        if n.is_html_named("summary") {
+            if arena.is_details_summary(act) {
+                steps |= SUMMARY;
+            }
+        } else if form.is_none() {
+            steps |= INVOKER;
+        }
+        if n.is_html_named("label") && target.and_then(|t| arena.label_to_activate(t)) == Some(act) {
+            control = arena.labeled_control(act).filter(|&c| Some(c) != target);
+            if control.is_some() {
+                steps |= LABEL;
+            }
+        }
+        if n.is_hyperlink() && !arena.is_editable(act) {
+            steps |= HYPERLINK;
+        }
+    }
+    let values = [v8::Integer::new_from_unsigned(scope, steps).into(), crate::dom::node_value(scope, form), crate::dom::node_value(scope, control)];
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
