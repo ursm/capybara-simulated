@@ -80,4 +80,20 @@ RSpec.describe 'declarative shadow roots' do
       })()
     JS
   end
+
+  # `Document.parseHTMLUnsafe` makes a document that allows them — one with no browsing context, as DOMParser's: nothing
+  # constructed or run, `<noscript>` markup, about:blank its URL. (HTML makes it "a new Document"; Chrome an
+  # HTMLDocument.)
+  it 'attaches the ones Document.parseHTMLUnsafe parses' do
+    s = session_for(<<~HTML)
+      <!DOCTYPE html><body><script>customElements.define('x-a', class extends HTMLElement { constructor() { super(); window.made = 1; } });</script>
+    HTML
+    expect(s.evaluate_script(<<~JS)).to eq(['about:blank', 'complete', 'text/html', nil, true, 0, 0, '<p>n</p>', true, 1])
+      (() => {
+        const d = Document.parseHTMLUnsafe('<div id=h><template shadowrootmode=open>S</template></div><x-a></x-a><script>window.ran=1<\/script><noscript><p>n</p></noscript>');
+        return [d.URL, d.readyState, d.contentType, d.defaultView, !!d.getElementById('h').shadowRoot, window.made || 0, window.ran || 0,
+                d.querySelector('noscript').innerHTML, d.customElementRegistry === null, Document.parseHTMLUnsafe.length];
+      })()
+    JS
+  end
 end

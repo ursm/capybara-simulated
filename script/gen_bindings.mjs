@@ -92,7 +92,6 @@ const INTERFACES = [
       fullscreenEnabled: 'no fullscreen',
       fullscreen: 'no fullscreen',
       parseHTML: 'the Sanitizer API is not implemented',
-      parseHTMLUnsafe: 'a static operation: not generated yet',
       all: 'HTMLAllCollection is not implemented',
       wasDiscarded: 'no discarding is modelled (Page Lifecycle)',
       pictureInPictureEnabled: 'no Picture-in-Picture',
