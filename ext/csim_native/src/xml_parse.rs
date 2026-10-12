@@ -225,7 +225,12 @@ fn parse_tag(inner: &[u16], err: &mut bool) -> (Units, Vec<(Units, Units)>, bool
             bad = true;
             break;
         };
-        attrs.push((attr_name, decode(&inner[i + 1..end], err)));
+        let value = decode(&inner[i + 1..end], err);
+        // (…a reference to a lone surrogate in an attribute value: not well-formed — Chrome's, which keeps one in text)
+        if char::decode_utf16(value.iter().copied()).any(|c| c.is_err()) {
+            *err = true;
+        }
+        attrs.push((attr_name, value));
         i = end + 1;
     }
     (name, attrs, bad)
@@ -741,8 +746,9 @@ fn parser_error() -> Vec<Value> {
 
 // The parse's steps taken: each node made — an element with its name, namespace, prefix and attributes — and put in the
 // node its step names, an XHTML `<template>`'s children in its contents; one at the top level into `into`, or else
-// among `tops`. Of the open `<details>` of a name group in one tree, the first stays open, as each one's insertion
-// steps leave them (HTML "ensure details exclusivity by closing the given element if needed").
+// among `tops`. Of the open `<details>` of a name group in one tree — a template's contents, or else the rest — the
+// first stays open and the bindings close the others (`BUILT_CLOSED`), as each one's insertion steps leave them (HTML
+// "ensure details exclusivity by closing the given element if needed").
 fn replay<'s>(scope: &mut v8::PinScope<'s, '_>, build: &mut Build<'s>, values: Vec<Value>, into: Option<crate::dom::NodeId>, tops: &mut Vec<crate::dom::NodeId>) -> Option<()> {
     let text = |v: Option<Value>| match v {
         Some(Value::Text(u)) => Some(u),
@@ -756,7 +762,7 @@ fn replay<'s>(scope: &mut v8::PinScope<'s, '_>, build: &mut Build<'s>, values: V
     let string = |u: &[u16]| String::from_utf16_lossy(u);
     let mut values = values.into_iter();
     let mut nodes = Vec::new();
-    // (…the name groups with an open `<details>`, by the tree it is in: its root, or none for a fragment's top level)
+    // (…the name groups with an open `<details>`, by the template contents it is in, none for any other)
     let mut open_groups: std::collections::HashSet<(Option<crate::dom::NodeId>, String)> = std::collections::HashSet::new();
     while let Some(op) = values.next() {
         let (Value::Number(op), Some(Value::Number(parent))) = (op, values.next()) else { return None };
@@ -781,19 +787,13 @@ fn replay<'s>(scope: &mut v8::PinScope<'s, '_>, build: &mut Build<'s>, values: V
                     let (name, value) = (text(values.next())?, text(values.next())?);
                     let (attr_ns, attr_local) = (optional(values.next())?, optional(values.next())?);
                     let named = attr_local.map(|local| (attr_ns.map_or_else(String::new, |n| string(&n)), string(&local)));
-                    attrs.push((string(&name), value, named));
+                    attrs.push((string(&name), string(&value), named));
                 }
                 let (local, ns) = (string(&local), ns.map_or_else(String::new, |n| string(&n)));
-                if ns == "http://www.w3.org/1999/xhtml" && local == "details" {
-                    let group = attrs.iter().find(|(n, _, meta)| n == "name" && meta.is_none()).map(|(_, v, _)| string(v)).filter(|g| !g.is_empty());
-                    let opened = attrs.iter().any(|(n, _, meta)| n == "open" && meta.is_none());
-                    if let Some(group) = group.filter(|_| opened) {
-                        let root = to.map(|t| realm(scope, build.cid).root_of(t));
-                        if !open_groups.insert((root, group)) {
-                            attrs.retain(|(n, _, meta)| !(n == "open" && meta.is_none()));
-                        }
-                    }
-                }
+                let group = (ns == "http://www.w3.org/1999/xhtml" && local == "details" && attrs.iter().any(|(n, _, meta)| n == "open" && meta.is_none()))
+                    .then(|| attrs.iter().find(|(n, _, meta)| n == "name" && meta.is_none()).map(|(_, v, _)| v.clone()))
+                    .flatten()
+                    .filter(|g| !g.is_empty());
                 let id = build.make(scope, NodeData {
                     local_name: web_atoms::LocalName::from(local),
                     ns: web_atoms::Namespace::from(ns),
@@ -802,6 +802,12 @@ fn replay<'s>(scope: &mut v8::PinScope<'s, '_>, build: &mut Build<'s>, values: V
                 });
                 build.named_attributes(scope, id, attrs, Vec::new());
                 build.is_value(scope, id);
+                if let Some(group) = group {
+                    let contents = to.map(|t| realm(scope, build.cid).root_of(t)).filter(|&r| build.is_contents(r));
+                    if !open_groups.insert((contents, group)) {
+                        build.flag(id, crate::html_parse::BUILT_CLOSED);
+                    }
+                }
                 id
             }
             OP_TEXT | OP_COMMENT | OP_CDATA => {

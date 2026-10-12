@@ -593,10 +593,12 @@ fn attribute_namespace(code: i32) -> &'static str {
 const FORM_ASSOCIATED: [&str; 7] = ["button", "fieldset", "input", "object", "output", "select", "textarea"];
 
 // What the bindings run for an element the build made, after it: its attributes' steps (`names`), and — `BUILT_*` —
-// a select's options set up, its namespaced attributes' names, its insertion steps.
+// a select's options set up, its namespaced attributes' names, its insertion steps, and — a `<details>` its name group
+// has another open one of before it — its closing (its `open` added, then removed: both its toggle's states).
 const BUILT_SELECT: u32 = 1;
 const BUILT_NAMESPACED: u32 = 1 << 1;
 const BUILT_INSERTED: u32 = 1 << 2;
+pub(crate) const BUILT_CLOSED: u32 = 1 << 3;
 
 // One build — the HTML parser's, and the XML parser's (xml_parse.rs `xmlBuild`): the realm it is in and the one whose
 // code asked, the node document of what it makes and of what template contents hold (the inert one), the nodes by
@@ -670,15 +672,15 @@ impl<'s> Build<'s> {
     fn attributes(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId, attrs: Vec<(String, i32, String, String)>, existing: Vec<(String, String)>) {
         let named = attrs.into_iter().map(|(prefix, ns, local, value)| {
             let name = if prefix.is_empty() { local.clone() } else { format!("{prefix}:{local}") };
-            (name, value.encode_utf16().collect(), (ns != 0).then(|| (attribute_namespace(ns).to_owned(), local)))
+            (name, value, (ns != 0).then(|| (attribute_namespace(ns).to_owned(), local)))
         });
         self.named_attributes(scope, id, named.collect(), existing);
     }
     // …(name, value, namespace and local name where it has a namespace).
     #[allow(clippy::type_complexity)]
-    pub(crate) fn named_attributes(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId, attrs: Vec<(String, Vec<u16>, Option<(String, String)>)>, existing: Vec<(String, String)>) {
+    pub(crate) fn named_attributes(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId, attrs: Vec<(String, String, Option<(String, String)>)>, existing: Vec<(String, String)>) {
         let (mut list, mut namespaced) = (existing, crate::dom::realm(scope, self.cid).get(id).map_or_else(Vec::new, |n| n.attr_ns.clone()));
-        let (mut names, mut exact) = (Vec::new(), Vec::new());
+        let mut names = Vec::new();
         for (name, value, ns) in attrs {
             if list.iter().any(|(k, _)| *k == name) {
                 continue;
@@ -689,16 +691,10 @@ impl<'s> Build<'s> {
             if crate::cloning::bindings_steps(&name) || matches!(name.as_str(), "autofocus") {
                 names.push(name.clone());
             }
-            // (…a value with a lone surrogate kept exactly beside its lossy string)
-            let string = String::from_utf16(&value).unwrap_or_else(|_| {
-                let lossy = String::from_utf16_lossy(&value);
-                exact.push((name.clone(), value));
-                lossy
-            });
-            list.push((name, string));
+            list.push((name, value));
         }
         let flags = if namespaced.is_empty() { 0 } else { BUILT_NAMESPACED };
-        crate::dom::replace_attributes(scope, self.cid, id, list, exact, Some((namespaced, Vec::new())));
+        crate::dom::replace_attributes(scope, self.cid, id, list, Vec::new(), Some((namespaced, Vec::new())));
         if !names.is_empty() || flags != 0 {
             self.steps.push((id, names, flags));
         }
@@ -747,6 +743,17 @@ impl<'s> Build<'s> {
         self.insert(scope, parent, t, before);
     }
 
+    // `flags` added to those the bindings run for `id`.
+    pub(crate) fn flag(&mut self, id: crate::dom::NodeId, flags: u32) {
+        match self.steps.iter_mut().find(|(e, ..)| *e == id) {
+            Some((_, _, had)) => *had |= flags,
+            None => self.steps.push((id, Vec::new(), flags)),
+        }
+    }
+    // Whether `id` is a template's contents the build made.
+    pub(crate) fn is_contents(&self, id: crate::dom::NodeId) -> bool {
+        self.contents.contains(&id)
+    }
     // A template's contents: a fragment of their own, in the inert document, with template contents' null registry.
     pub(crate) fn contents_of(&mut self, scope: &mut v8::PinScope<'s, '_>, template: crate::dom::NodeId) -> crate::dom::NodeId {
         let frag = crate::dom::realm(scope, self.cid).create(crate::dom::NodeData::of_kind(crate::dom::NodeKind::Fragment, Vec::new()), None);

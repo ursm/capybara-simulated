@@ -66,4 +66,19 @@ RSpec.describe 'XML build' do
     error = 'parsererror http://www.mozilla.org/newlayout/xml/parsererror.xml XML parsing error'
     expect(got).to eq([[error, error, error], [true, false], true])
   end
+
+  it "closes a details name group's later open ones as their insertion does, toggle and all, nested in a fragment too" do
+    got = session.evaluate_async_script(<<~'JS')
+      const done = arguments[0];
+      const xhtml = 'http://www.w3.org/1999/xhtml';
+      const doc = new DOMParser().parseFromString(
+        `<r><details xmlns="${xhtml}" id="a" name="n" open=""/><details xmlns="${xhtml}" id="b" name="n" open=""/></r>`, 'application/xml');
+      const log = [];
+      for (const d of doc.querySelectorAll('details')) d.addEventListener('toggle', (e) => log.push(`${d.id}:${e.oldState}>${e.newState}`));
+      const f = new DOMParser().parseFromString(`<r xmlns="${xhtml}"/>`, 'application/xml').documentElement;
+      f.innerHTML = '<details name="n" open=""/><p><details name="n" open=""/></p><details name="n" open=""/>';
+      setTimeout(() => done([log, [...f.querySelectorAll('details')].map((d) => d.open)]), 20);
+    JS
+    expect(got).to eq([['a:closed>open', 'b:closed>closed'], [true, false, false]])
+  end
 end
