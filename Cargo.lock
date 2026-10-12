@@ -314,6 +314,7 @@ dependencies = [
  "harfrust",
  "html5ever",
  "icu_properties",
+ "icu_segmenter",
  "image",
  "image-webp",
  "jpeg-encoder",

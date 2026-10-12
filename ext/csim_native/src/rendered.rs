@@ -180,7 +180,7 @@ pub(crate) fn collapses_white_space(arena: &RealmArena, parent: Option<NodeId>) 
     !inherited_ws(arena, parent).preserving()
 }
 // Does `id`'s `visibility` hide it — its own computed one where the engine styles it, else what it `inherited`?
-fn hides_by_visibility(arena: &RealmArena, id: NodeId, inherited: bool) -> bool {
+pub(crate) fn hides_by_visibility(arena: &RealmArena, id: NodeId, inherited: bool) -> bool {
     use style::computed_values::visibility::T as Visibility;
     match primary_style(arena, id) {
         Some(s) => s.get_inherited_box().visibility != Visibility::Visible,

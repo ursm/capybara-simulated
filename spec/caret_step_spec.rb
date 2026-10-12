@@ -116,4 +116,44 @@ RSpec.describe 'stepping a caret by a character' do
     JS
     expect(got).to eq(['"cd"@0', '"ab"@2', '"zw"@0', '"xy"@2', "\"a\u{1F600}b\"@3", '"pq "@3', '"  rs"@3'])
   end
+
+  # An empty line — a `<br>` with nothing before it on its line — is a stop, before that `<br>`.
+  it 'stops on an empty line' do
+    s = session_for('<!DOCTYPE html><body><div contenteditable><p>ab</p><p id=em><br></p><p>cd</p></div><div contenteditable id=e2>ab<br><br>cd</div>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const desc = () => { const s = getSelection(), n = s.focusNode; return (n.nodeType === 3 ? n.data : n.nodeName + '#' + n.id) + '@' + s.focusOffset; };
+        const s = getSelection(), em = document.getElementById('em'), e2 = document.getElementById('e2');
+        const step = (node, off, dir) => { s.collapse(node, off); s.modify('move', dir, 'character'); return desc(); };
+        return [
+          step(em.previousSibling.firstChild, 2, 'forward'), step(em.nextSibling.firstChild, 0, 'backward'),
+          step(e2.firstChild, 2, 'forward'), step(e2.lastChild, 0, 'backward')
+        ];
+      })()
+    JS
+    expect(got).to eq(['P#em@0', 'P#em@0', 'DIV#e2@2', 'DIV#e2@2'])
+  end
+
+  # A word holds an apostrophe between letters and a full stop between digits, not one between letters, a colon or a
+  # hyphen; and a script written without spaces breaks where its dictionary does.
+  it "breaks words where Chrome's rules do" do
+    s = session_for('<!DOCTYPE html><meta charset=utf-8><body><p id=p></p>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const s = getSelection(), p = document.getElementById('p');
+        return ["don't 3.14 x_y", 'a.b c', 'e.g. x', 'a:b', 'ab-cd', 'foo.bar', 'gh_i.jk', '日本語のテキスト東京都庁'].map((c) => {
+          p.textContent = c;
+          const t = p.firstChild, stops = [];
+          s.collapse(t, 0);
+          for (let i = 0; i < 8; i++) {
+            s.modify('move', 'forward', 'word');
+            if (s.focusNode !== t || stops.includes(s.focusOffset)) break;
+            stops.push(s.focusOffset);
+          }
+          return stops.join(',');
+        });
+      })()
+    JS
+    expect(got).to eq(['5,10,14', '1,2,3,5', '1,2,3,4,6', '1,2,3', '2,3,5', '3,4,7', '4,5,7', '3,4,8,10,12'])
+  end
 end

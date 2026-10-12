@@ -47818,10 +47818,6 @@ input-events/input-events-get-target-ranges-backspace.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Backspace at "<p>abc<br><br></p><p>[]def</p>"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Backspace at "<p>abc<br><br></p><p>[]def</p>" - comparing innerHTML
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -50982,6 +50978,10 @@ input-events/input-events-get-target-ranges-deleting-in-list-items.tentative.htm
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: Delete at "<ol><li>list-item1[]<br><br></li><li>list-item2</li></ol>"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: Delete at "<ol><li>list-item1[]<br><br></li><li>list-item2</li></ol>" - comparing
     innerHTML
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -51933,6 +51933,10 @@ input-events/input-events-get-target-ranges-deleting-in-list-items.tentative.htm
     path/suffix. CLAUDE.md rule 1.
 - name: Delete at "<ul><li>list-item1[]<br></li><li>list-item2</li></ul>" - comparing
     innerHTML
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Delete at "<ul><li>list-item1[]<br><br></li><li>list-item2</li></ul>"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

@@ -63,12 +63,21 @@ pub(crate) fn is_number(cp: u32) -> bool {
 }
 // The Script of `cp` (UAX #24) — None for Common and Inherited, which every script's text shares: where one script's
 // text meets another's, a caret moving by words finds a word's edge (Chrome: `희진DJ` is two words).
-pub(crate) fn script(cp: u32) -> Option<u16> {
+pub(crate) fn script(cp: u32) -> Option<icu_properties::props::Script> {
     use icu_properties::props::Script;
     match icu_properties::CodePointMapData::<Script>::new().get32(cp) {
         Script::Common | Script::Inherited => None,
-        script => Some(script.to_icu4c_value()),
+        script => Some(script),
     }
+}
+// Whether `cp`'s script is written without spaces between its words, which a dictionary finds (ICU4X's segmenter):
+// Han, Hiragana, Katakana, Thai, Lao, Khmer, Myanmar.
+pub(crate) fn segmented_by_dictionary(cp: u32) -> bool {
+    use icu_properties::props::Script;
+    matches!(
+        icu_properties::CodePointMapData::<Script>::new().get32(cp),
+        Script::Han | Script::Hiragana | Script::Katakana | Script::Thai | Script::Lao | Script::Khmer | Script::Myanmar
+    )
 }
 // Extended_Pictographic (UAX #29): what a ZERO WIDTH JOINER joins into one grapheme cluster — an emoji ZWJ sequence
 // (GB11) — and nothing else does.
