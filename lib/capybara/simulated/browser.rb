@@ -6999,12 +6999,9 @@ module Capybara
         nested.group_by {|e| @workers.dig(e[:handle].to_i, :parent_worker) }.each do |pw, evs|
           @workers.dig(pw, :inbox)&.push({kind: 'nested_worker_msgs', events: evs})
         end
-        # Each worker→parent message fires from its OWN task — one host call, whose end runs the microtask checkpoint
-        # (kAuto; HTML: the message event is fired from a queued task). The awaited-receive pattern — resolve a promise,
-        # re-assign onmessage in the continuation — depends on that checkpoint running between two messages;
-        # dispatching a batch in one call fires the second message before the continuation re-attached the handler and
-        # silently drops it.
-        direct.each {|e| @runtime.call('__csim_deliverWorkerMessages', [e]) }
+        # Each worker→parent message fires from its OWN task, its checkpoint before the next (HTML: the message event is
+        # fired from a queued task) — the delivery's own, workers.js `deliverWorkerEvent`, the batch handed over at once.
+        @runtime.call('__csim_deliverWorkerMessages', direct) unless direct.empty?
         events.size
       end
 
@@ -8766,13 +8763,8 @@ module Capybara
               # counter covers the gap (same shape as sw_fetch_response).
               @worker_init_lock.synchronize { @worker_busy += 1 }
               busy_held = true
-              # One task + microtask checkpoint PER message, like the window-side
-              # delivery — a batch dispatched in one call drops the second message
-              # of an awaited-receive sequence (see deliver_worker_messages).
-              msg[:events].each do |e|
-                rt.call('__csim_deliverWorkerMessages', [e])
-                rt.drain_microtasks if msg[:events].size > 1
-              end
+              # (…each a task of its own, as the window-side delivery's: workers.js `deliverWorkerEvent`)
+              rt.call('__csim_deliverWorkerMessages', msg[:events])
               drive_worker_to_quiescence(rt, stopping)
             elsif msg.is_a?(Hash) && msg[:kind] == 'claim_client'
               # clients.claim() reaches worker clients too: adopt the claiming SW as this
