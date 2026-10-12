@@ -375,6 +375,13 @@ pub(crate) fn remove_all(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32
     let removed = change_children(scope, cid, caller, parent, Removing::All, &[], empty, None, false, steps)?.ok()?;
     Some((parent, Vec::new(), removed, connected))
 }
+// …and every child of `parent` replaced by `nodes`, nodes in no tree of its node document (DOM "replace all")…
+pub(crate) fn replace_all(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, parent: NodeId, nodes: &[NodeId], steps: v8::Local<'_, v8::Array>) -> Option<Change> {
+    let connected = realm(scope, cid).is_connected(parent);
+    let empty = v8::Array::new(scope, 0);
+    let removed = change_children(scope, cid, caller, parent, Removing::All, nodes, empty, None, false, steps)?.ok()?;
+    Some((parent, nodes.to_vec(), removed, connected))
+}
 // …and the changes as the page has them: their count, then each `[parent, added, removed, connected]` — cut short where
 // a node factory threw (`factory_threw`, which the caller asks).
 pub(crate) fn changes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, changes: &[Change]) -> Vec<v8::Local<'s, v8::Value>> {

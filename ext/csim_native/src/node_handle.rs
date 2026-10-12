@@ -664,6 +664,14 @@ fn set_live_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 pub(crate) fn forget_live_value(scope: &mut v8::PinScope<'_, '_>, control: v8::Local<'_, v8::Value>) {
     forget_data(scope, control);
 }
+// …found by its slot, its object not made for it.
+pub(crate) fn forget_live_value_of(scope: &mut v8::PinScope<'_, '_>, id: NodeId) {
+    let handle = crate::dom::dom(scope).arena.get(id).and_then(|n| n.link.handle().map(|h| h as *const NodeHandle));
+    // SAFETY: the handle lives while its node is in the arena, which this reads before anything allocates.
+    if let Some(h) = handle {
+        unsafe { (*(*h).data.get()).reset(scope, None) };
+    }
+}
 
 // `__dom.nodeDocument(node)` -> its node document, null for none — undefined for an object with no handle (an
 // author's `Object.create(Node.prototype)`), which keeps its own.

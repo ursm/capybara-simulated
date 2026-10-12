@@ -13,7 +13,7 @@ use std::rc::Rc;
 use crate::input_value::{number_of, parse_float, step_scale};
 use web_atoms::local_name;
 use crate::dom::{
-    NodeData, NodeId, NodeKind, RealmArena, STATE_CUSTOM_ERROR, STATE_DIRTY_BY_USER, STATE_FORM_ASSOCIATED,
+    NodeData, NodeId, NodeKind, RealmArena, STATE_CHECKED, STATE_CHECKED_DIRTY, STATE_CUSTOM_ERROR, STATE_DIRTY_BY_USER, STATE_FORM_ASSOCIATED,
     STATE_HAS_FILES, STATE_SELECTED, STATE_SELECTED_DIRTY, STATE_SELECTED_INIT, STATE_USER_INTERACTED,
 };
 
@@ -680,6 +680,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "formOwner", form_owner, context_id);
     crate::dom::register(scope, ns, "defaultButton", default_button, context_id);
     crate::dom::register(scope, ns, "formListed", form_listed, context_id);
+    crate::dom::register(scope, ns, "formReset", form_reset, context_id);
     crate::dom::register(scope, ns, "fieldsetListed", fieldset_listed, context_id);
     crate::dom::register(scope, ns, "formNamed", form_named, context_id);
     crate::dom::register(scope, ns, "isFormNamedCandidate", is_form_named_candidate, context_id);
@@ -827,6 +828,66 @@ fn form_listed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let arena = crate::dom::realm(scope, cid);
     let listed = arena.form_listed(form);
     rv.set(crate::dom::nodes_value(scope, cid, &listed));
+}
+
+// __dom.formReset(formNid) -> `[elements, files, outputs, selects, options]`, as `nodes_value` answers each: HTML "reset"
+// of a form (§4.10.21.6), its built-in controls' share — each listed element's reset algorithm: a text control's dirty
+// value and user edit forgotten (its value its default again), a checkbox's or a radio's dirty checkedness, a select's
+// options' selectedness their `selected` attributes', not dirty, and its selectedness setting algorithm run — and what
+// the bindings do after: the form-associated custom elements whose `formResetCallback` is owed, the file inputs whose
+// files are emptied, the outputs to reset, the selects whose `<selectedcontent>` follows, the options whose selectedness
+// changed.
+fn form_reset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(form) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let arena = crate::dom::realm(scope, cid);
+    let (mut elements, mut files, mut outputs, mut selects, mut options, mut values) = (vec![], vec![], vec![], vec![], vec![], vec![]);
+    for id in arena.form_listed(form) {
+        let Some(n) = arena.get(id) else { continue };
+        if n.state & STATE_FORM_ASSOCIATED != 0 {
+            elements.push(id);
+        } else if n.is_html_named("input") || n.is_html_named("textarea") {
+            let mut state = n.state & !STATE_DIRTY_BY_USER;
+            match n.input_type() {
+                _ if n.is_html_named("textarea") => values.push(id),
+                "checkbox" | "radio" => state &= !(STATE_CHECKED_DIRTY | STATE_CHECKED),
+                "file" => files.push(id),
+                _ => values.push(id),
+            }
+            if state != n.state {
+                // (…a radio checked again by its `checked` unchecks the rest of its group, as any checking does)
+                let was_checked = arena.is_checked(id);
+                arena.set_state(id, state);
+                if !was_checked && arena.is_checked(id) {
+                    arena.radio_steps(id);
+                }
+            }
+        } else if n.is_html_named("select") {
+            let states = arena
+                .list_of_options(id)
+                .into_iter()
+                .filter_map(|o| {
+                    let n = arena.get(o)?;
+                    let selected = if n.plain_attr("selected").is_some() { STATE_SELECTED } else { 0 };
+                    Some((o, (n.state & !(STATE_SELECTED | STATE_SELECTED_DIRTY)) | selected | STATE_SELECTED_INIT))
+                })
+                .collect();
+            options.extend(arena.apply_option_states(states));
+            let states = arena.selectedness(id, None);
+            options.extend(arena.apply_option_states(states));
+            selects.push(id);
+        } else if n.is_html_named("output") {
+            outputs.push(id);
+        }
+    }
+    for &id in &values {
+        if crate::dom::realm(scope, cid).write_live_value(id, None) {
+            crate::node_handle::forget_live_value_of(scope, id);
+        }
+    }
+    crate::dom::realm(scope, cid).observers.note_state_changed();
+    let lists = [elements, files, outputs, selects, options].map(|ids| crate::dom::nodes_value(scope, cid, &ids));
+    rv.set(v8::Array::new_with_elements(scope, &lists).into());
 }
 
 // __dom.radioGroup(nid) -> a radio's group, itself included, in tree order (`element_state::radio_group`).
