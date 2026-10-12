@@ -41,7 +41,8 @@ RSpec.describe 'cloneNode' do
   end
 
   # An image in template contents loads nothing — its document is not fully active — not as parsed, nor as cloned; its
-  # copy loads once inserted into the page, the onload content attribute running in its document (Chrome).
+  # copy loads once inserted into the page, or imported into it, the onload content attribute running in its document
+  # (Chrome).
   it 'loads a template image once it is in the page' do
     log = []
     png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='.unpack1('m0')
@@ -58,5 +59,8 @@ RSpec.describe 'cloneNode' do
     s.execute_script('document.body.append(f)')
     expect(s.evaluate_script('window.R')).to eq(['attr:true'])
     expect(log).to eq(['/', '/tpl.png'])
+    # (…and as imported, `document.importNode(template.content, true)`, which the page's document owns as it is made)
+    s.execute_script("window.R = []; document.body.append(document.importNode(document.getElementById('t').content, true))")
+    expect(s.evaluate_script('window.R')).to eq(['attr:true'])
   end
 end
