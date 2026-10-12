@@ -93,15 +93,17 @@ impl RealmArena {
     // — within its text, else at the next caret stop, as Chrome steps: across an inline edge it takes that stop's first
     // character too (`ab|<b>cd</b>` → `<b>c|d</b>`: the two places either side of the edge are one place on the line, an
     // empty leaf none at all), across a line's end it stops at the stop's edge; an atom (an image) is a stop it passes,
-    // and an empty line — a `<br>` with nothing before it on its line — one it stops on, before that `<br>`.
+    // and an empty line — a `<br>` ending a line with nothing on it — one it stops on, before that `<br>`: on, the line
+    // passed ended just before it; back, the next thing back ends one too (or there is none).
     pub(crate) fn caret_step(&self, engine: &mut StyleEngine, now: f64, node: NodeId, offset: u32, forward: bool) -> Option<(NodeId, u32)> {
-        let (mut line_end, mut after_br) = (false, false);
-        for pass in self.walk(engine, now, node, offset, forward)? {
+        let mut line_end = false;
+        let mut walk = self.walk(engine, now, node, offset, forward)?.peekable();
+        while let Some(pass) = walk.next() {
             match pass {
-                Pass::LineEnd => (line_end, after_br) = (true, false),
-                // (…back, the empty line's `<br>` is the one passed last where that was a `<br>` too, else this one)
-                Pass::Br { parent, from, to } if line_end => return Some((parent, if forward || after_br { from } else { to })),
-                Pass::Br { .. } => (line_end, after_br) = (true, true),
+                Pass::LineEnd => line_end = true,
+                Pass::Br { parent, from, .. } if forward && line_end => return Some((parent, from)),
+                Pass::Br { parent, to, .. } if !forward && walk.peek().is_none_or(Pass::ends_line) => return Some((parent, to)),
+                Pass::Br { .. } => line_end = true,
                 Pass::Char { leaf, from, to, .. } => return Some((leaf, if line_end { from } else { to })),
                 Pass::Atom { parent, from, to } => return Some((parent, if line_end { from } else { to })),
             }
@@ -132,7 +134,18 @@ impl RealmArena {
                 _ => break,
             }
         }
-        let (leaf, to, _) = run[word_length(&run, forward) - 1];
+        // (…the text of a script written without spaces behind the place too, which the dictionary reads it in)
+        let behind = || {
+            let mut chars = Vec::new();
+            for pass in self.walk(engine, now, node, offset, !forward).into_iter().flatten() {
+                match pass {
+                    Pass::Char { ch, .. } if is_word(ch) && crate::unicode::segmented_by_dictionary(ch) && chars.len() < CONTEXT => chars.push(ch),
+                    _ => break,
+                }
+            }
+            chars
+        };
+        let (leaf, to, _) = run[word_length(&run, forward, behind) - 1];
         Some((leaf, to))
     }
 
@@ -398,10 +411,11 @@ impl Walk<'_> {
 }
 
 // How many of `run`'s characters (the walk's order, from where a word step starts) the step passes: a run of
-// punctuation (`~>>>>>` one stop), or a word — word characters of one script, joined by an apostrophe between letters, or a full stop, comma
-// or semicolon between digits (Chrome: `don't` and `3.14` are one word each, `a.b` and `a:b` three) — and of a script
-// written without spaces, as far as ICU's dictionary has its first word (`東京|都庁`).
-fn word_length(run: &[(NodeId, u32, u32)], forward: bool) -> usize {
+// punctuation (`~>>>>>` one stop), or a word — word characters of one script, joined by an apostrophe between letters,
+// or a full stop, comma or semicolon between digits (Chrome: `don't` and `3.14` are one word each, `a.b` and `a:b`
+// three) — or, of scripts written without spaces, as far as ICU's dictionary has its first word in the run of them
+// (`東京|都庁`, `食べる|人`: kanji and kana are one text to it).
+fn word_length(run: &[(NodeId, u32, u32)], forward: bool, behind: impl FnOnce() -> Vec<u32>) -> usize {
     let ch = |i: usize| run[i].2;
     if !is_word(ch(0)) {
         return run.iter().take_while(|&&(.., c)| !is_word(c)).count();
@@ -410,6 +424,8 @@ fn word_length(run: &[(NodeId, u32, u32)], forward: bool) -> usize {
         (matches!(mid, 0x27 | 0x2019) && crate::unicode::is_letter(before) && crate::unicode::is_letter(after))
             || (matches!(mid, 0x2C | 0x2E | 0x3B) && crate::unicode::is_number(before) && crate::unicode::is_number(after))
     };
+    // (…a change of script a word's edge — but among scripts written without spaces, the dictionary's to say)
+    let dictionary = crate::unicode::segmented_by_dictionary(ch(0));
     let mut script = crate::unicode::script(ch(0));
     let mut n = 1;
     while n < run.len() {
@@ -422,35 +438,51 @@ fn word_length(run: &[(NodeId, u32, u32)], forward: bool) -> usize {
             break;
         }
         let own = crate::unicode::script(c);
-        if script.is_some() && own.is_some() && own != script {
+        let other = own.is_some() && if dictionary { !crate::unicode::segmented_by_dictionary(c) } else { script.is_some() && own != script };
+        if other {
             break;
         }
         script = script.or(own);
         n += 1;
     }
-    if !crate::unicode::segmented_by_dictionary(ch(0)) {
+    if !dictionary {
         return n;
     }
-    // (…the dictionary's first word: its boundaries in the run as the text reads, back to front where the walk went back)
-    let mut chars: Vec<u32> = run[..n].iter().map(|&(.., c)| c).collect();
-    if !forward {
-        chars.reverse();
-    }
-    let mut units = Vec::with_capacity(n * 2);
-    let mut ends = Vec::with_capacity(n);
-    for &c in &chars {
+    // (…the dictionary's first word past the place: its boundaries in the text as it reads, the run and what is behind
+    // the place — in the walk's order both, the other way round where it went back)
+    let mut ahead: Vec<u32> = run[..n].iter().map(|&(.., c)| c).collect();
+    let mut behind = behind();
+    let (text, at) = if forward {
+        behind.reverse();
+        let at = behind.len();
+        (behind.into_iter().chain(ahead).collect::<Vec<u32>>(), at)
+    } else {
+        ahead.reverse();
+        (ahead.into_iter().chain(behind).collect::<Vec<u32>>(), n)
+    };
+    let mut units = Vec::with_capacity(text.len() * 2);
+    let mut ends = Vec::with_capacity(text.len());
+    for &c in &text {
         let mut pair = [0u16; 2];
         units.extend_from_slice(char::from_u32(c).unwrap_or('\u{FFFD}').encode_utf16(&mut pair));
         ends.push(units.len());
     }
-    let segmenter = icu_segmenter::WordSegmenter::new_auto(icu_segmenter::options::WordBreakInvariantOptions::default());
-    let boundaries: Vec<usize> = segmenter.segment_utf16(&units).collect();
     let chars_to = |unit: usize| ends.iter().take_while(|&&e| e <= unit).count();
-    if forward {
-        boundaries.iter().find(|&&b| b > 0).map_or(n, |&b| chars_to(b).max(1))
+    let boundaries: Vec<usize> = word_segmenter().segment_utf16(&units).map(chars_to).collect();
+    let passed = if forward {
+        boundaries.iter().find(|&&b| b > at).map(|&b| b - at)
     } else {
-        boundaries.iter().rev().find(|&&b| b < units.len()).map_or(n, |&b| (n - chars_to(b)).max(1))
-    }
+        boundaries.iter().rev().find(|&&b| b < at).map(|&b| at - b)
+    };
+    passed.map_or(n, |p| p.clamp(1, n))
+}
+// How much of the text behind a place a word step reads its dictionary script's words in.
+const CONTEXT: usize = 64;
+
+// ICU4X's word segmenter (its dictionaries, and its models for the scripts it has none of), made once.
+fn word_segmenter() -> icu_segmenter::WordSegmenterBorrowed<'static> {
+    static SEGMENTER: std::sync::OnceLock<icu_segmenter::WordSegmenterBorrowed<'static>> = std::sync::OnceLock::new();
+    *SEGMENTER.get_or_init(|| icu_segmenter::WordSegmenter::new_auto(icu_segmenter::options::WordBreakInvariantOptions::default()))
 }
 
 // White space, and a word character (`word_unit`'s, of a code point), to a caret moving by words.

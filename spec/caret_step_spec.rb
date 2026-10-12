@@ -117,9 +117,13 @@ RSpec.describe 'stepping a caret by a character' do
     expect(got).to eq(['"cd"@0', '"ab"@2', '"zw"@0', '"xy"@2', "\"a\u{1F600}b\"@3", '"pq "@3', '"  rs"@3'])
   end
 
-  # An empty line — a `<br>` with nothing before it on its line — is a stop, before that `<br>`.
+  # An empty line — a `<br>` ending a line with nothing on it — is a stop, before that `<br>`; one ending a line with text
+  # on it is passed.
   it 'stops on an empty line' do
-    s = session_for('<!DOCTYPE html><body><div contenteditable><p>ab</p><p id=em><br></p><p>cd</p></div><div contenteditable id=e2>ab<br><br>cd</div>')
+    s = session_for(<<~HTML)
+      <!DOCTYPE html><body><div contenteditable><p>ab</p><p id=em><br></p><p>cd</p></div><div contenteditable id=e2>ab<br><br>cd</div>
+      <div contenteditable><p id=t>ab<br></p><p>cd</p><p id=lead><br>gh</p></div>
+    HTML
     got = s.evaluate_script(<<~JS)
       (() => {
         const desc = () => { const s = getSelection(), n = s.focusNode; return (n.nodeType === 3 ? n.data : n.nodeName + '#' + n.id) + '@' + s.focusOffset; };
@@ -127,11 +131,13 @@ RSpec.describe 'stepping a caret by a character' do
         const step = (node, off, dir) => { s.collapse(node, off); s.modify('move', dir, 'character'); return desc(); };
         return [
           step(em.previousSibling.firstChild, 2, 'forward'), step(em.nextSibling.firstChild, 0, 'backward'),
-          step(e2.firstChild, 2, 'forward'), step(e2.lastChild, 0, 'backward')
+          step(e2.firstChild, 2, 'forward'), step(e2.lastChild, 0, 'backward'),
+          step(document.getElementById('t').nextSibling.firstChild, 0, 'backward'), step(document.getElementById('t').firstChild, 2, 'forward'),
+          step(document.getElementById('lead').lastChild, 0, 'backward'), step(document.getElementById('lead').previousSibling.firstChild, 2, 'forward')
         ];
       })()
     JS
-    expect(got).to eq(['P#em@0', 'P#em@0', 'DIV#e2@2', 'DIV#e2@2'])
+    expect(got).to eq(['P#em@0', 'P#em@0', 'DIV#e2@2', 'DIV#e2@2', 'ab@2', 'cd@0', 'P#lead@0', 'P#lead@0'])
   end
 
   # A word holds an apostrophe between letters and a full stop between digits, not one between letters, a colon or a
@@ -141,7 +147,7 @@ RSpec.describe 'stepping a caret by a character' do
     got = s.evaluate_script(<<~JS)
       (() => {
         const s = getSelection(), p = document.getElementById('p');
-        return ["don't 3.14 x_y", 'a.b c', 'e.g. x', 'a:b', 'ab-cd', 'foo.bar', 'gh_i.jk', '日本語のテキスト東京都庁'].map((c) => {
+        return ["don't 3.14 x_y", 'a.b c', 'e.g. x', 'a:b', 'ab-cd', 'foo.bar', 'gh_i.jk', '日本語のテキスト東京都庁', '食べる人です', '私は東京大学の学生です。'].map((c) => {
           p.textContent = c;
           const t = p.firstChild, stops = [];
           s.collapse(t, 0);
@@ -154,6 +160,6 @@ RSpec.describe 'stepping a caret by a character' do
         });
       })()
     JS
-    expect(got).to eq(['5,10,14', '1,2,3,5', '1,2,3,4,6', '1,2,3', '2,3,5', '3,4,7', '4,5,7', '3,4,8,10,12'])
+    expect(got).to eq(['5,10,14', '1,2,3,5', '1,2,3,4,6', '1,2,3', '2,3,5', '3,4,7', '4,5,7', '3,4,8,10,12', '3,4,6', '1,2,4,6,7,9,11,12'])
   end
 end
