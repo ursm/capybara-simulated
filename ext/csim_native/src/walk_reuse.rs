@@ -161,6 +161,10 @@ impl WalkReuse {
         Pass { roots, ends, ids }
     }
 
+    // The last pass kept: its runs, their texts and marks, which the text geometry reads (text_geometry.rs).
+    pub(crate) fn last(&self) -> Option<&Prior> {
+        self.last.as_ref()
+    }
     // This pass, kept for the next to be held against — and spliced from (`Prior`).
     pub(crate) fn keep(&mut self, built: KeptPass, ends: Vec<usize>, ids: Vec<u32>) {
         if ends.len() != built.inputs.len() {
@@ -169,8 +173,8 @@ impl WalkReuse {
         }
         let by_nid = built.inputs.iter().enumerate().filter(|(_, r)| r.nid >= 0.0).map(|(i, r)| (r.nid.to_bits(), i)).collect();
         let spliceable = spliceable(&built.inputs, &built.extents, &ends);
-        let KeptPass { inputs, runs, run_texts, grids, inlines, extents, anon, inline_nids, walked } = built;
-        self.last = Some(Prior { inputs, runs, run_texts, grids, inlines, extents, anon, inline_nids, by_nid, ends, ids, spliceable, walked });
+        let KeptPass { inputs, runs, run_texts, grids, inlines, extents, anon, inline_nids, walked, paint } = built;
+        self.last = Some(Prior { inputs, runs, run_texts, grids, inlines, extents, anon, inline_nids, by_nid, ends, ids, spliceable, walked, paint });
     }
 }
 
@@ -186,6 +190,7 @@ pub(crate) struct KeptPass {
     pub(crate) anon: Vec<[f64; 4]>,
     pub(crate) inline_nids: Vec<f64>,
     pub(crate) walked: u64,
+    pub(crate) paint: Vec<crate::walk::PaintMark>,
 }
 
 // Which subtrees a later walk can splice back (`Walk::splice`): none holding an out-of-flow box whose containing block

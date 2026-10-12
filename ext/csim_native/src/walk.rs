@@ -215,12 +215,14 @@ pub(crate) struct Built {
 // `FontInfo`), and the element each part of it was written in (`[(offset, nid)]`) — or whose `::placeholder` it is, for
 // a control showing its placeholder (`control_text`) — and what each part of its text IS (`Source`), which a caret from a
 // point maps a place in it back to.
+#[derive(Clone)]
 pub(crate) struct PaintMark {
     pub(crate) run: usize,
     pub(crate) shift: f64,
     pub(crate) content: [f64; 2],
-    pub(crate) owners: Vec<(u32, f64)>,
-    pub(crate) sources: Vec<Source>,
+    // (…shared, so a pass splicing the run back from the last carries them on for a count, not a copy)
+    pub(crate) owners: std::rc::Rc<[(u32, f64)]>,
+    pub(crate) sources: std::rc::Rc<[Source]>,
     pub(crate) placeholder: bool,
 }
 // Where a part of a run's text, from its `offset` in the run on, came from: a text node's data — less what the walk took
@@ -287,6 +289,9 @@ pub(crate) struct Prior {
     pub(crate) ids: Vec<u32>,
     pub(crate) spliceable: Vec<bool>,
     pub(crate) walked: u64,
+    // …and the marks of its text runs it has (`PaintMark`, in run order): a pass that paints made them all, a pass that
+    // did not carried on those of the subtrees it spliced.
+    pub(crate) paint: Vec<PaintMark>,
 }
 
 // The pass root's containing block, which a percentage in the ROOT's own record resolves against: the viewport, for the
@@ -2164,6 +2169,13 @@ impl<'a> Walk<'a> {
         }
         let [end, runs_end, grids_end, inls_end] = end;
         let [runs_at, grids_at, inls_at] = was.start;
+        // (…and the marks of its text runs, where the last pass had them: carried on whole, so a later pass that paints
+        // can splice it too — a pass that paints splices only a subtree whose every text run has one)
+        let (lo, hi) = (prior.paint.partition_point(|m| m.run < runs_at), prior.paint.partition_point(|m| m.run < runs_end));
+        let marked = hi - lo == prior.runs[runs_at..runs_end].iter().filter(|r| r.kind == crate::layout::RUN_TEXT).count();
+        if self.painting && !marked {
+            return false;
+        }
         let at = self.inputs.len();
         let d_rec = at as i32 - j as i32;
         let d_run = self.runs.len() as i32 - runs_at as i32;
@@ -2191,6 +2203,10 @@ impl<'a> Walk<'a> {
                 ..e
             });
             self.inputs.push(x);
+        }
+        if marked {
+            let d = self.runs.len() as isize - runs_at as isize;
+            self.paint.extend(prior.paint[lo..hi].iter().map(|m| PaintMark { run: (m.run as isize + d) as usize, ..m.clone() }));
         }
         for u in runs_at..runs_end {
             let mut r = prior.runs[u];
@@ -3819,7 +3835,7 @@ impl<'a> Walk<'a> {
             let run = match r {
                 Pending::Text { font, text, wrap, ws, shift, vmax, owners, sources } => {
                     if self.painting {
-                        self.paint.push(PaintMark { run: self.runs.len(), shift, content: [font.content_asc, font.content_h], owners, sources, placeholder: false });
+                        self.paint.push(PaintMark { run: self.runs.len(), shift, content: [font.content_asc, font.content_h], owners: owners.into(), sources: sources.into(), placeholder: false });
                     }
                     self.run_texts.push(Some(text.into()));
                     // The run's place on its line: its ascent, `vertical-align` included, and its line-height below

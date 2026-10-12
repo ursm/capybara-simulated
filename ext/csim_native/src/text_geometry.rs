@@ -1,24 +1,38 @@
-// Where the text of the last PAINTED layout is (a pass that records its text pieces, layout.js `recordingRuns`): each
-// piece a line placed (`layout::TextRow`), the run it draws from, and what each part of that run's text came from
-// (`walk::Source`) — what a caret from a point is read off: CSSOM View's `caretPositionFromPoint`, and where a press
-// sets the caret.
+// Where the text of the last layout that recorded it is (layout.js `recordingPass`): each piece a line placed (`layout::TextRow`), the run it draws from, and what each part of that run's text came from (`walk::Source`) —
+// what a caret from a point is read off (CSSOM View's `caretPositionFromPoint`, where a press sets the caret, where
+// ArrowUp / ArrowDown go) and a range's rects. The runs, their texts and their marks are the pass the walk keeps
+// (`walk::Prior`), read through a `TextView`; the rows are the layout's, kept here.
 
 use crate::dom::{NodeId, NodeKind, RealmArena};
 use crate::layout::{Run, RunText, TextRow};
-use crate::walk::{PaintMark, Source, CONTROL_VALUE, STRIPPED_CR_FF, STRIPPED_SHY};
+use crate::walk::{PaintMark, Prior, Source, CONTROL_VALUE, STRIPPED_CR_FF, STRIPPED_SHY};
+use std::collections::HashMap;
 
 pub(crate) struct TextGeometry {
-    // The layout it was recorded in (`RealmArena::layout_pass`): another has moved the text.
-    pub(crate) pass: u64,
-    pub(crate) rows: Vec<TextRow>,
-    pub(crate) runs: Vec<Run>,
-    pub(crate) texts: Vec<RunText>,
-    // …the painted runs' marks, in run order.
-    pub(crate) marks: Vec<PaintMark>,
-    // …and the pieces each node's text is in, by index into `rows`: what a range's rects of a node ask for.
-    pub(crate) by_node: std::collections::HashMap<NodeId, Vec<usize>>,
-    // …and the lines no piece is on (`Blank`).
+    // The layout it was recorded in (`RealmArena::layout_pass`) and the walk's epoch (`Prior::walked`): another layout
+    // has moved the text, another kept pass holds other runs.
+    pass: u64,
+    walked: u64,
+    rows: Vec<TextRow>,
+    // …and what is asked of them, made the first time: the runs each node's text is in (what a range's rects of a node
+    // ask for), the pieces of each run (a run's pieces are its block's, in line order: one range of `rows`), and the
+    // lines no piece is on (`Blank`).
+    index: std::cell::OnceCell<Index>,
+}
+struct Index {
+    by_node: HashMap<NodeId, Vec<usize>>,
+    by_run: Vec<std::ops::Range<usize>>,
     blanks: Vec<Blank>,
+}
+// The text geometry with the kept pass's runs — what the queries read.
+pub(crate) struct TextView<'a> {
+    rows: &'a [TextRow],
+    runs: &'a [Run],
+    texts: &'a [RunText],
+    marks: &'a [PaintMark],
+    by_node: &'a HashMap<NodeId, Vec<usize>>,
+    by_run: &'a [std::ops::Range<usize>],
+    blanks: &'a [Blank],
 }
 // An EMPTY line — no piece on it — and the place a caret on it is at: one a `<br>` ends, the place before the `<br>` (its
 // box an empty fragment there); one a preserved newline makes, the place after it in its text (Chrome). In the document
@@ -33,92 +47,125 @@ struct Blank {
 }
 
 impl TextGeometry {
-    pub(crate) fn new(arena: &RealmArena, rows: Vec<TextRow>, runs: Vec<Run>, texts: Vec<RunText>, marks: Vec<PaintMark>, inline_nids: &[f64]) -> TextGeometry {
-        let mut g = TextGeometry { pass: arena.layout_pass, rows, runs, texts, marks, by_node: std::collections::HashMap::new(), blanks: Vec::new() };
-        let mut by_node: std::collections::HashMap<NodeId, Vec<usize>> = std::collections::HashMap::new();
-        for (i, r) in g.rows.iter().enumerate() {
-            let (start, end) = (r[1] as u32, r[2] as u32);
-            let Some(mark) = g.mark(r[0] as usize) else { continue };
-            // (…every source the piece overlaps — a piece can run across two nodes' text: `a<b>b</b>`)
-            for (k, s) in mark.sources.iter().enumerate() {
-                let past = mark.sources.get(k + 1).map_or(u32::MAX, |n| n.offset);
-                if s.offset <= end && past >= start {
-                    let list = by_node.entry(s.node).or_default();
-                    if list.last() != Some(&i) {
-                        list.push(i);
-                    }
-                }
-            }
-        }
-        g.by_node = by_node;
-        g.blanks = g.blanks(arena, inline_nids);
-        g
-    }
-
-    // The empty lines (`Blank`): each `<br>` on a line no piece is on, and each line a preserved newline opens with
-    // nothing on it — between two pieces of a run, and, in a form control's value (whose last line is its own even
-    // empty), after the last.
-    fn blanks(&self, arena: &RealmArena, inline_nids: &[f64]) -> Vec<Blank> {
-        let lines: std::collections::HashSet<u64> = self.rows.iter().filter(|r| r[1] != r[2]).map(|r| r[4].to_bits()).collect();
-        let mut out = Vec::new();
-        for br in inline_nids.iter().filter_map(|&n| NodeId::from_i64(n as i64)) {
-            let Some(n) = arena.get(br).filter(|n| n.is_html_named("br")) else { continue };
-            let (Some(parent), Some(&[x, y, _, h])) = (n.parent, crate::geometry::laid_frags(arena, n).and_then(|f| f.first())) else { continue };
-            if !lines.contains(&y.to_bits()) {
-                out.push(Blank { x, top: y, h, place: (parent, arena.child_index(br) as u32), holder: br, owner: parent });
-            }
-        }
-        let mut by_run: std::collections::BTreeMap<usize, Vec<&TextRow>> = std::collections::BTreeMap::new();
-        for r in self.rows.iter().filter(|r| r[1] != r[2]) {
-            by_run.entry(r[0] as usize).or_default().push(r);
-        }
-        for (run, rows) in by_run {
-            let (Some(mark), Some(info)) = (self.mark(run), self.runs.get(run)) else { continue };
-            if !crate::walk::preserving(info.ws_mode) && info.ws_mode != crate::walk::WS_PRE_LINE {
-                continue;
-            }
-            let text = self.texts.get(run).and_then(|t| t.as_deref()).unwrap_or(&[]);
-            let newlines = |from: u32, to: u32| (from..to).filter(|&i| text.get(i as usize) == Some(&0x0A)).collect::<Vec<u32>>();
-            let mut blank = |r: &TextRow, at: u32, top: f64| {
-                if let (Some(s), Some(owner)) = (source_at(&mark.sources, at), mark.owners.iter().rev().find(|&&(o, _)| o <= at).and_then(|&(_, nid)| NodeId::from_i64(nid as i64))) {
-                    out.push(Blank { x: r[3] - r[8], top, h: r[9], place: (s.node, arena.source_offset(*s, at - s.offset)), holder: s.node, owner });
-                }
-            };
-            for pair in rows.windows(2) {
-                let (a, b) = (pair[0], pair[1]);
-                for (j, &nl) in newlines(a[2] as u32, b[1] as u32).iter().enumerate().skip(1) {
-                    blank(a, nl, a[4] + a[9] * j as f64);
-                }
-            }
-            let last = rows[rows.len() - 1];
-            if mark.sources.iter().any(|s| s.flags & CONTROL_VALUE != 0) {
-                for (j, &nl) in newlines(last[2] as u32, text.len() as u32).iter().enumerate() {
-                    blank(last, nl + 1, last[4] + last[9] * (j + 1) as f64);
-                }
-            }
-        }
-        out
-    }
-
-    fn mark(&self, run: usize) -> Option<&PaintMark> {
-        self.marks.binary_search_by_key(&run, |m| m.run).ok().map(|k| &self.marks[k])
+    pub(crate) fn new(pass: u64, walked: u64, rows: Vec<TextRow>) -> TextGeometry {
+        TextGeometry { pass, walked, rows, index: std::cell::OnceCell::new() }
     }
 }
 
+impl TextView<'_> {
+    fn mark(&self, run: usize) -> Option<&PaintMark> {
+        self.marks.binary_search_by_key(&run, |m| m.run).ok().map(|k| &self.marks[k])
+    }
+    // The pieces `node`'s text is on, in run and line order.
+    fn rows_of(&self, node: NodeId) -> impl Iterator<Item = &TextRow> {
+        self.by_node.get(&node).into_iter().flatten().flat_map(|&run| self.rows[self.by_run.get(run).cloned().unwrap_or(0..0)].iter())
+    }
+}
+
+// The runs each node's text is in, by its marks' sources…
+fn by_node(marks: &[PaintMark]) -> HashMap<NodeId, Vec<usize>> {
+    let mut out: HashMap<NodeId, Vec<usize>> = HashMap::with_capacity(marks.len());
+    for m in marks {
+        for s in m.sources.iter() {
+            let list = out.entry(s.node).or_default();
+            if list.last() != Some(&m.run) {
+                list.push(m.run);
+            }
+        }
+    }
+    out
+}
+// …and each run's pieces, a range of `rows`.
+fn by_run(rows: &[TextRow], runs: usize) -> Vec<std::ops::Range<usize>> {
+    let mut out = vec![0..0; runs];
+    for (i, r) in rows.iter().enumerate() {
+        let Some(range) = out.get_mut(r[0] as usize) else { continue };
+        if range.is_empty() {
+            *range = i..i + 1;
+        } else {
+            range.end = i + 1;
+        }
+    }
+    out
+}
+
+// The empty lines (`Blank`): each `<br>` on a line no piece is on, and each line a preserved newline opens with nothing on
+// it — between two pieces of a run, and, in a form control's value (whose last line is its own even empty), after the
+// last.
+fn blanks(arena: &RealmArena, g: &TextView, inline_nids: &[f64]) -> Vec<Blank> {
+    let mut out = Vec::new();
+    let mut lines: Option<std::collections::HashSet<u64>> = None;
+    for br in inline_nids.iter().filter_map(|&n| NodeId::from_i64(n as i64)) {
+        let Some(n) = arena.get(br).filter(|n| n.is_html_named("br")) else { continue };
+        let (Some(parent), Some(&[x, y, _, h])) = (n.parent, crate::geometry::laid_frags(arena, n).and_then(|f| f.first())) else { continue };
+        let lines = lines.get_or_insert_with(|| g.rows.iter().filter(|r| r[1] != r[2]).map(|r| r[4].to_bits()).collect());
+        if !lines.contains(&y.to_bits()) {
+            out.push(Blank { x, top: y, h, place: (parent, arena.child_index(br) as u32), holder: br, owner: parent });
+        }
+    }
+    for (run, info) in g.runs.iter().enumerate() {
+        if !crate::walk::preserving(info.ws_mode) && info.ws_mode != crate::walk::WS_PRE_LINE {
+            continue;
+        }
+        let rows: Vec<&TextRow> = g.rows[g.by_run.get(run).cloned().unwrap_or(0..0)].iter().filter(|r| r[1] != r[2]).collect();
+        let Some(mark) = g.mark(run).filter(|_| !rows.is_empty()) else { continue };
+        let text = g.texts.get(run).and_then(|t| t.as_deref()).unwrap_or(&[]);
+        let newlines = |from: u32, to: u32| (from..to).filter(|&i| text.get(i as usize) == Some(&0x0A)).collect::<Vec<u32>>();
+        let mut blank = |r: &TextRow, at: u32, top: f64| {
+            if let (Some(s), Some(owner)) = (source_at(&mark.sources, at), mark.owners.iter().rev().find(|&&(o, _)| o <= at).and_then(|&(_, nid)| NodeId::from_i64(nid as i64))) {
+                out.push(Blank { x: r[3] - r[8], top, h: r[9], place: (s.node, arena.source_offset(*s, at - s.offset)), holder: s.node, owner });
+            }
+        };
+        for pair in rows.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            for (j, &nl) in newlines(a[2] as u32, b[1] as u32).iter().enumerate().skip(1) {
+                blank(a, nl, a[4] + a[9] * j as f64);
+            }
+        }
+        let last = rows[rows.len() - 1];
+        if mark.sources.iter().any(|s| s.flags & CONTROL_VALUE != 0) {
+            for (j, &nl) in newlines(last[2] as u32, text.len() as u32).iter().enumerate() {
+                blank(last, nl + 1, last[4] + last[9] * (j + 1) as f64);
+            }
+        }
+    }
+    out
+}
+
 impl RealmArena {
-    // Whether the text geometry is the current layout's: what a caret from a point can be read off without a pass that
-    // records it.
-    pub(crate) fn text_geometry_current(&self) -> bool {
-        self.text_geometry.borrow().as_ref().is_some_and(|g| g.pass == self.layout_pass)
+    // Whether the last pass that recorded its text is the current layout (`prior` the pass the walk kept): what a query
+    // of the text can be read off without one that does (layout.js `ensureTextGeometry`)…
+    pub(crate) fn text_current(&self, prior: Option<&Prior>) -> bool {
+        self.text_geometry.borrow().as_ref().is_some_and(|g| g.pass == self.layout_pass && prior.is_some_and(|p| p.walked == g.walked))
+    }
+    // …and that text geometry, with the runs of the pass the walk kept for it, for `ask` — none where either is another
+    // layout's.
+    pub(crate) fn with_text<R>(&self, prior: Option<&Prior>, ask: impl FnOnce(&TextView) -> R) -> Option<R> {
+        let geometry = self.text_geometry.borrow();
+        let g = geometry.as_ref().filter(|g| g.pass == self.layout_pass)?;
+        let prior = prior.filter(|p| p.walked == g.walked)?;
+        let index = g.index.get_or_init(|| {
+            let (by_node, by_run) = (by_node(&prior.paint), by_run(&g.rows, prior.runs.len()));
+            let bare = TextView { rows: &g.rows, runs: &prior.runs, texts: &prior.run_texts, marks: &prior.paint, by_node: &by_node, by_run: &by_run, blanks: &[] };
+            let blanks = blanks(self, &bare, &prior.inline_nids);
+            Index { by_node, by_run, blanks }
+        });
+        Some(ask(&TextView {
+            rows: &g.rows,
+            runs: &prior.runs,
+            texts: &prior.run_texts,
+            marks: &prior.paint,
+            by_node: &index.by_node,
+            by_run: &index.by_run,
+            blanks: &index.blanks
+        }))
     }
 
     // The caret position at the viewport point (`x`, `y`) in `hit`, the element a hit there lands on: of the text pieces
     // in it, the one on the line the point is on — the nearest line, past its lines — and nearest it across, the place
     // between two of its characters nearest the point; `hit` itself at 0 where it holds no text (an image, an `<svg>`
     // shape). As the text node and offset it is in, or the form control and the offset in its value.
-    pub(crate) fn caret_from_point(&self, x: f64, y: f64, hit: NodeId) -> (NodeId, u32) {
-        let geometry = self.text_geometry.borrow();
-        let Some(g) = geometry.as_ref().filter(|g| g.pass == self.layout_pass) else { return (hit, 0) };
+    pub(crate) fn caret_from_point(&self, g: &TextView, x: f64, y: f64, hit: NodeId) -> (NodeId, u32) {
         // (…an atom that shows no text — an image, a video, a checkbox — the place before it in its parent, wherever over
         // it the point is (Chrome: a replaced box answers its start); a text field's place is in its value, below)
         if let Some(n) = self.get(hit).filter(|n| n.kind == NodeKind::Element && crate::caret::CARET_VOID_TAGS.contains(&&*n.local_name)) {
@@ -126,7 +173,6 @@ impl RealmArena {
                 return (parent, self.child_index(hit) as u32);
             }
         }
-        // (…each piece where it is in the viewport: its box's scroll shift taken off, as the painter takes it)
         // (…each piece, in the document, against the point taken back through what moves its box there — its scroll
         // shift and its transforms)
         let mut best: Option<((f64, f64), usize, [f64; 2])> = None;
@@ -192,7 +238,7 @@ impl RealmArena {
 
     // The place the run's offset `at` is in its source: a text node and the offset in its data, or a control and the
     // offset in its value.
-    fn run_place(&self, g: &TextGeometry, run: usize, at: u32) -> Option<(NodeId, u32)> {
+    fn run_place(&self, g: &TextView, run: usize, at: u32) -> Option<(NodeId, u32)> {
         let s = *source_at(&g.mark(run)?.sources, at)?;
         Some((s.node, self.source_offset(s, at - s.offset)))
     }
@@ -201,11 +247,9 @@ impl RealmArena {
     // viewport, one a piece of it holds: from where the first place is on the piece to where the last is, its font's
     // content box tall (Chrome); zero wide for a collapsed range of it, the caret's. None for what no piece of the last painted
     // layout holds (white space a line collapsed, text not rendered).
-    pub(crate) fn text_rects(&self, node: NodeId, from: u32, to: u32) -> Vec<[f64; 4]> {
-        let geometry = self.text_geometry.borrow();
-        let Some(g) = geometry.as_ref().filter(|g| g.pass == self.layout_pass) else { return Vec::new() };
+    pub(crate) fn text_rects(&self, g: &TextView, node: NodeId, from: u32, to: u32) -> Vec<[f64; 4]> {
         let mut out = Vec::new();
-        for r in g.by_node.get(&node).into_iter().flatten().map(|&i| &g.rows[i]) {
+        for r in g.rows_of(node) {
             let (run, start, end) = (r[0] as usize, r[1] as u32, r[2] as u32);
             if start == end {
                 continue;
@@ -254,7 +298,7 @@ impl RealmArena {
     // before something it holds after (short of the line's end, `r[10]`): a collapsible run as one space, the first of
     // its characters (a space's width, whatever it collapsed from — a tab, a newline; none for one that only continues a
     // run collapsed before it), a preserved one whole (Chrome). A caret in it, and a range's rect over it, are there.
-    fn reach(&self, g: &TextGeometry, r: &TextRow) -> Reach {
+    fn reach(&self, g: &TextView, r: &TextRow) -> Reach {
         let (run, start, end) = (r[0] as usize, r[1] as u32, r[2] as u32);
         let text = g.texts.get(run).and_then(|t| t.as_deref()).unwrap_or(&[]);
         let mode = g.runs.get(run).map_or(0, |ri| ri.ws_mode);
@@ -286,7 +330,7 @@ impl RealmArena {
     }
     // …and where in the piece a place in that reach is, from its start — in a collapsed run, on its one space's far side
     // but before its first character.
-    fn place_x(&self, g: &TextGeometry, r: &TextRow, reach: &Reach, at: u32) -> f64 {
+    fn place_x(&self, g: &TextView, r: &TextRow, reach: &Reach, at: u32) -> f64 {
         let (start, end) = (r[1] as u32, r[2] as u32);
         if at < start {
             return -if reach.preserve { self.advance(g, r, at, start) } else if at == reach.from { reach.before } else { 0.0 };
@@ -300,11 +344,11 @@ impl RealmArena {
 
     // How far the piece `r` draws from its start to its run's offset `to` — past its end, over the run's text on — at its
     // spacing and from its pen, which a tab's stop is counted from…
-    fn pen_to(&self, g: &TextGeometry, r: &TextRow, to: u32) -> f64 {
+    fn pen_to(&self, g: &TextView, r: &TextRow, to: u32) -> f64 {
         self.advance(g, r, r[1] as u32, to)
     }
     // …and how far it moves over the run's text from `from` to `to`, as from the piece's pen.
-    fn advance(&self, g: &TextGeometry, r: &TextRow, from: u32, to: u32) -> f64 {
+    fn advance(&self, g: &TextView, r: &TextRow, from: u32, to: u32) -> f64 {
         let run = r[0] as usize;
         let text = g.texts.get(run).and_then(|t| t.as_deref()).and_then(|t| t.get(from as usize..to as usize)).unwrap_or(&[]);
         g.runs.get(run).and_then(|ri| crate::font::with_font(ri.font, |fm| fm.pen_steps(text, ri.size, ri.ls, ri.ws, r[7], r[8], ri.tab_px, ri.tab_min)))
@@ -312,7 +356,7 @@ impl RealmArena {
     }
 
     // …and how far one space moves it: what a collapsible run of white space renders as.
-    fn space(&self, g: &TextGeometry, r: &TextRow) -> f64 {
+    fn space(&self, g: &TextView, r: &TextRow) -> f64 {
         g.runs.get(r[0] as usize).and_then(|ri| crate::font::with_font(ri.font, |fm| fm.pen_steps(&[0x20], ri.size, ri.ls, ri.ws, r[7], r[8], ri.tab_px, ri.tab_min)))
             .map_or(0.0, |steps| steps[1])
     }
@@ -340,11 +384,9 @@ impl RealmArena {
 
     // The middle of the line next above (below, without `up`) the band `top`..`bottom` among the text `root` holds, in
     // the viewport — where a caret moving a line from a place on that band goes; none past its first (last) line.
-    pub(crate) fn line_over(&self, root: NodeId, top: f64, bottom: f64, up: bool) -> Option<f64> {
-        let geometry = self.text_geometry.borrow();
-        let g = geometry.as_ref().filter(|g| g.pass == self.layout_pass)?;
+    pub(crate) fn line_over(&self, g: &TextView, root: NodeId, top: f64, bottom: f64, up: bool) -> Option<f64> {
         let mut best: Option<(f64, f64)> = None;
-        for r in &g.rows {
+        for r in g.rows {
             if r[1] == r[2] {
                 continue;
             }
@@ -463,9 +505,17 @@ fn source_at(sources: &[Source], at: u32) -> Option<&Source> {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "caretFromPoint", caret_from_point, context_id);
-    crate::dom::register(scope, ns, "textGeometryCurrent", text_geometry_current, context_id);
+    crate::dom::register(scope, ns, "textCurrent", text_current, context_id);
     crate::dom::register(scope, ns, "textRects", text_rects, context_id);
     crate::dom::register(scope, ns, "lineOver", line_over, context_id);
+}
+
+// What a query of the realm's text asks of its arena and its text geometry (`RealmArena::with_text`).
+pub(crate) fn with_text<R>(scope: &mut v8::PinScope<'_, '_>, cid: i32, ask: impl FnOnce(&RealmArena, &TextView) -> R) -> Option<R> {
+    let d = crate::dom::dom(scope);
+    let prior = d.walk_reuse.get(&cid).and_then(|r| r.last());
+    let arena = d.arena.enter_known(cid)?;
+    arena.with_text(prior, |g| ask(arena, g))
 }
 
 // __dom.caretFromPoint(x, y, now) -> [[node], offset]: the caret position at the viewport point (`caret_from_point`),
@@ -475,16 +525,19 @@ fn caret_from_point(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let y = args.get(1).number_value(scope).unwrap_or(f64::NAN);
     let cid = crate::dom::realm_id(scope, &args);
     let Some(hit) = crate::hit_test::painting(scope, &args, 2, |p| p.hit(x, y, false).first().copied()).flatten() else { return };
-    let (node, offset) = crate::dom::realm(scope, cid).caret_from_point(x, y, hit);
+    let (node, offset) = with_text(scope, cid, |arena, g| arena.caret_from_point(g, x, y, hit)).unwrap_or((hit, 0));
     let mut values = vec![crate::dom::nodes_value(scope, cid, &[node])];
     values.push(v8::Integer::new_from_unsigned(scope, offset).into());
     rv.set(v8::Array::new_with_elements(scope, &values).into());
 }
 
-// __dom.textGeometryCurrent() -> whether the last painted layout's text geometry is the current layout's.
-fn text_geometry_current(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.textCurrent() -> whether the text geometry is the current layout's (`RealmArena::text_current`).
+fn text_current(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
-    rv.set_bool(crate::dom::realm(scope, cid).text_geometry_current());
+    let d = crate::dom::dom(scope);
+    let prior = d.walk_reuse.get(&cid).and_then(|r| r.last());
+    let current = d.arena.enter_known(cid).is_some_and(|arena| arena.text_current(prior));
+    rv.set_bool(current);
 }
 
 // __dom.textRects(nid, from, to) -> Float64Array [x, y, width, height, …] (`text_rects`).
@@ -493,7 +546,7 @@ fn text_rects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let from = args.get(1).uint32_value(scope).unwrap_or(0);
     let to = args.get(2).uint32_value(scope).unwrap_or(0);
     let cid = crate::dom::realm_id(scope, &args);
-    let rects: Vec<f64> = crate::dom::realm(scope, cid).text_rects(node, from, to).concat();
+    let rects: Vec<f64> = with_text(scope, cid, |arena, g| arena.text_rects(g, node, from, to)).unwrap_or_default().concat();
     rv.set(crate::dom::f64_array(scope, &rects).into());
 }
 
@@ -505,7 +558,7 @@ fn line_over(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let bottom = args.get(2).number_value(scope).unwrap_or(f64::NAN);
     let up = args.get(3).is_true();
     let cid = crate::dom::realm_id(scope, &args);
-    if let Some(y) = crate::dom::realm(scope, cid).line_over(root, top, bottom, up) {
+    if let Some(y) = with_text(scope, cid, |arena, g| arena.line_over(g, root, top, bottom, up)).flatten() {
         rv.set_double(y);
     }
 }

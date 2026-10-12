@@ -12,10 +12,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "styleFaces", style_faces, context_id);
 }
 
-// __dom.layoutBuild(rootNid, fontGeneration, rootCbW, rootCbH, texts, check): a whole layout pass the Rust walk builds
+// __dom.layoutBuild(rootNid, fontGeneration, rootCbW, rootCbH, records, check): a whole layout pass the Rust walk builds
 // from the arena and the style engine — its records, runs and tables — and lays out (the root placed natively), its
-// boxes kept in the arena for the geometry (geometry.rs `store_layout`): answered `true` — or where `texts` asks, for a
-// pass a painter records, each text piece as it draws it, `[rows, texts, steps, owners]`: `[x, y, baseline, width,
+// boxes kept in the arena for the geometry (geometry.rs `store_layout`) — `records` 1 or 2 recording its text pieces
+// for the text geometry too (text_geometry.rs): answered `true` — or where `records` is 2, for a pass a painter
+// records, each text piece as it draws it, `[rows, texts, steps, owners]`: `[x, y, baseline, width,
 // justify, owner, placeholder, steps at, steps]` — the owner -2 for none, -1 for the element `owners` holds at the
 // piece's index, 0 / 1 for that element's `::before` / `::after` — the texts, the pen steps of the pieces drawn a
 // character at a time (`paint_rows`), and the elements. Or `[family, bucket, …]` — the faces the walk needs first, for
@@ -26,7 +27,8 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let generation = args.get(1).to_rust_string_lossy(scope);
     let root_cb_w = args.get(2).number_value(scope).unwrap_or(0.0);
     let basis = Basis { w: root_cb_w, h: args.get(3).number_value(scope).unwrap_or(f64::NAN) };
-    let texts = args.get(4).is_true();
+    let records = args.get(4).integer_value(scope).unwrap_or(0);
+    let (texts, paints) = (records >= 1, records == 2);
     // …and whether to CHECK every measure put back against laying it out again (`CSIM_NL_REUSE_VERIFY`).
     let check = args.get(5).is_true();
     let d = dom(scope);
@@ -37,9 +39,8 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let root_rtl = walk::principal_starts_right(arena, root);
     // (…splicing back from the last kept pass what did not change since it: `Walk::splice`; under the check, the pass is
     // walked whole as well, and the two held against each other)
+    // (…a pass that paints splicing only what the last kept whole, the marks of its text runs included)
     let (maths, prior) = d.walk_reuse.entry(cid).or_default().for_walk(&generation);
-    // (…but none for a pass that paints: a spliced subtree's runs carry no `PaintMark`)
-    let prior = prior.filter(|_| !texts);
     let (built, whole) = loop {
         let (built, whole) = arena.faces.with(|faces| {
             faces.at_generation(&generation);
@@ -80,26 +81,21 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         }
     };
     let walk::Built { mut inputs, runs, run_texts, inlines, grids, anon, inline_nids, extents, spliced, walked, paint } = built;
-    // The layout of every subtree built as the last pass built it is the measure cache's to put back (`walk_reuse`) —
-    // except for a pass that answers its text pieces, which a put-back measure does not hold.
+    // The layout of every subtree built as the last pass built it is the measure cache's to put back (`walk_reuse`) — for
+    // a pass that answers its text pieces, a measure that holds them (`layout::Measured::texts`).
     let reuse = dom(scope).walk_reuse.entry(cid).or_default();
     let streams = walk_reuse::Streams { inputs: &inputs, runs: &runs, run_texts: &run_texts, grids: &grids, inlines: &inlines, extents: &extents, spliced: &spliced };
     let walk_reuse::Pass { roots, ends, ids } = reuse.chunks(&streams);
     let built_inputs = inputs.clone();
     let mut measure = std::mem::take(&mut reuse.measure);
     let maths = std::mem::take(&mut reuse.maths);
-    let cache = (!texts).then_some((&mut measure, roots, check));
+    let cache = Some((&mut measure, roots, check));
     let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths.values, f64::NAN, f64::NAN, root_cb_w, root_rtl, cache, texts);
     // (…and a pass that paints answers each text piece as the painter draws it — beside the rows that index the runs, which
     // only this side has: its row, its text and its pen steps, the baseline's run shift taken back off and a hyphen's owner
     // the character's before it)
     let painted = match &out {
-        crate::layout::Outcome::LaidOut(laid) if texts => Some(paint_rows(&laid.texts, &paint, &runs, &run_texts)),
-        _ => None,
-    };
-    // (…and keeps where that text is — a caret from a point's, text_geometry.rs)
-    let geometry = match &out {
-        crate::layout::Outcome::LaidOut(laid) if texts => Some((laid.texts.clone(), runs.clone(), run_texts.clone(), paint)),
+        crate::layout::Outcome::LaidOut(laid) if paints => Some(paint_rows(&laid.texts, &paint, &runs, &run_texts)),
         _ => None,
     };
     let mismatch = measure.mismatch.take();
@@ -116,6 +112,7 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         anon: anon.clone(),
         inline_nids: inline_nids.clone(),
         walked,
+        paint,
     };
     reuse.keep(kept, ends, ids);
     if let Some(why) = mismatch {
@@ -138,9 +135,9 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         }
         arena.begin_layout(root, [basis.w, basis.h]);
         crate::geometry::store_layout(arena, &laid, &inline_nids, &anon);
-        if let Some((rows, runs, texts, marks)) = geometry {
-            let geometry = crate::text_geometry::TextGeometry::new(arena, rows, runs, texts, marks, &inline_nids);
-            *arena.text_geometry.borrow_mut() = Some(geometry);
+        // (…and where its text is, with the runs the walk kept: text_geometry.rs)
+        if texts {
+            *arena.text_geometry.borrow_mut() = Some(crate::text_geometry::TextGeometry::new(arena.layout_pass, walked, std::mem::take(&mut laid.texts)));
         }
     }
     // (…answered `true` — the boxes are the arena's now — or, for a pass that paints, as the painter's text pieces:
@@ -252,6 +249,44 @@ fn font_measures(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set_bool(crate::font::with_font(handle, |fm| fm.face(overrides).is_some()).unwrap_or(false));
 }
 
+// The rows a painter draws, a word each: a row the line made of several pieces across plain spaces (layout.rs, which keeps
+// one for them) split back at its spaces, each word where the pen over the run's text puts it — the flow's own advance,
+// the figure a painter condenses a word to.
+fn words(rows: &[crate::layout::TextRow], runs: &[crate::layout::Run], run_texts: &[crate::layout::RunText]) -> Vec<crate::layout::TextRow> {
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        let (run, start, end) = (r[0] as usize, r[1] as usize, r[2] as usize);
+        let piece = run_texts.get(run).and_then(|t| t.as_deref()).and_then(|t| t.get(start..end)).unwrap_or(&[]);
+        let per = (start < end && piece.contains(&0x20))
+            .then(|| runs.get(run).and_then(|ri| crate::font::with_font(ri.font, |fm| fm.pen_steps(piece, ri.size, ri.ls, ri.ws, r[7], r[8], ri.tab_px, ri.tab_min))))
+            .flatten();
+        let Some(per) = per else {
+            out.push(*r);
+            continue;
+        };
+        // (…walking its code points: a word from its first unit to the space after it, its width the steps over it)
+        let (mut pen, mut unit, mut word): (f64, usize, Option<(usize, f64, f64)>) = (0.0, 0, None);
+        for (k, cp) in crate::font::code_points(piece).enumerate() {
+            let step = per.get(k * 3 + 1).copied().unwrap_or(0.0);
+            let len = if cp > 0xFFFF { 2 } else { 1 };
+            if cp == 0x20 {
+                if let Some((ws, x, w)) = word.take() {
+                    out.push([r[0], (start + ws) as f64, (start + unit) as f64, r[3] + x, r[4], r[5], w, r[7], r[8] + x, r[9], r[10]]);
+                }
+            } else {
+                let (_, _, w) = word.get_or_insert((unit, pen, 0.0));
+                *w += step;
+            }
+            pen += step;
+            unit += len;
+        }
+        if let Some((ws, x, w)) = word {
+            out.push([r[0], (start + ws) as f64, end as f64, r[3] + x, r[4], r[5], w, r[7], r[8] + x, r[9], r[10]]);
+        }
+    }
+    out
+}
+
 // Each text row (`layout::TextRow`) as the painter draws it — whether its owner's `::placeholder` is what it is drawn
 // in, and where its characters' pen steps start in the third list and how many there are, for a piece it cannot draw
 // whole (`FontMetrics::pen_steps`): a spaced, justified or tabbed one, or one whose characters a split face spreads
@@ -260,7 +295,7 @@ fn paint_rows(rows: &[crate::layout::TextRow], paint: &[walk::PaintMark], runs: 
     let mut out = Vec::new();
     let mut strings = Vec::new();
     let mut steps = Vec::new();
-    for r in rows {
+    for r in &words(rows, runs, run_texts) {
         let (run, start, end) = (r[0] as usize, r[1] as usize, r[2] as usize);
         let hyphen = start == end;
         // (…the marks in run order, as the walk committed them)

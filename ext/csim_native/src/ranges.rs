@@ -558,14 +558,16 @@ fn selected(arena: &RealmArena, s: Boundary, e: Boundary) -> Vec<Selected> {
 fn range_rects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some([s, e]) = entry_points(scope, args.get(0)) else { return };
     let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let mut rects: Vec<f64> = Vec::new();
-    for part in selected(arena, s, e) {
-        match part {
-            Selected::Element(el) => rects.extend(crate::geometry::client_rects(arena, el).unwrap_or_default().concat()),
-            Selected::Text(t, from, to) => rects.extend(arena.text_rects(t, from, to).concat()),
+    let rects = crate::text_geometry::with_text(scope, cid, |arena, g| {
+        let mut rects: Vec<f64> = Vec::new();
+        for part in selected(arena, s, e) {
+            match part {
+                Selected::Element(el) => rects.extend(crate::geometry::client_rects(arena, el).unwrap_or_default().concat()),
+                Selected::Text(t, from, to) => rects.extend(arena.text_rects(g, t, from, to).concat()),
+            }
         }
-    }
+        rects
+    }).unwrap_or_default();
     rv.set(crate::dom::f64_array(scope, &rects).into());
 }
 

@@ -2184,11 +2184,23 @@ fn line_layout(
             // …and the text pieces, by the coordinate rule too: a piece with a gap INSIDE it —
             // a no-break space — widens by that gap's share, which the painter spreads over it; every piece sits on the
             // line's baseline.
-            let line_end = end;
+            // (…a piece that goes on from the last across one plain space of its run, on a line no justification spreads,
+            // one piece with it: the pen over the run's text puts each character where the line did, and a painter draws
+            // the space as the line laid it — a row a word otherwise, which every pass that records copies)
+            let (line_end, line_rows) = (end, texts.len());
             for (ri, start, end, x, w, rx, ry) in line_pieces.drain(..) {
                 let inside = if extra > 0.0 { gaps.iter().filter(|&&g| g >= x && g < x + w).count() } else { 0 };
                 let justify = if inside > 0 { extra } else { 0.0 };
-                texts.push([ri as f64, start, end, x + shift_at(x) + rx, total + ry, total + line_asc + ry, w + inside as f64 * extra, justify, x, line_h, line_end]);
+                let row = [ri as f64, start, end, x + shift_at(x) + rx, total + ry, total + line_asc + ry, w + inside as f64 * extra, justify, x, line_h, line_end];
+                let spaced = |at: f64| run_texts.get(ri).and_then(|t| t.as_deref()).and_then(|t| t.get(at as usize)) == Some(&0x20);
+                let this_line = texts.len() > line_rows;
+                match texts.last_mut().filter(|l| this_line && extra == 0.0 && l[0] == row[0] && l[2] + 1.0 == start && l[5] == row[5] && spaced(l[2])) {
+                    Some(last) => {
+                        last[2] = end;
+                        last[6] = row[3] + row[6] - last[3];
+                    }
+                    None => texts.push(row),
+                }
             }
             // …and the inline boxes' pieces on it, by the same COORDINATE rule the markers use (`shift_at` of a
             // piece's `min_x` and right edges, not how many gaps precede it), then stamped with the line's ascent —
@@ -3964,6 +3976,10 @@ pub(crate) struct Measured {
     inputs: Vec<Input>,
     frags: Vec<(usize, Vec<FragRow>)>,
     inl_at: usize,
+    // …and its text pieces, where the pass that kept it recorded them (`records_texts`) — run indices counted from
+    // `runs_at` — which a pass that records them puts back only from a measure that has them.
+    texts: Option<Vec<(usize, Vec<TextRow>)>>,
+    runs_at: usize,
     indef: u64,
 }
 #[derive(Default)]
@@ -4110,6 +4126,9 @@ impl MeasureState {
 fn frags_of(i: usize) -> Vec<FragRow> {
     FRAG_PASS.with(|m| m.borrow().as_ref().and_then(|p| p.rows.get(i).cloned()).unwrap_or_default())
 }
+fn texts_of(i: usize) -> Vec<TextRow> {
+    FRAG_PASS.with(|m| m.borrow().as_ref().and_then(|p| p.texts.as_ref()).and_then(|t| t.get(i).cloned()).unwrap_or_default())
+}
 
 // Measure node `i` — put back where it is a chunk's root measured under these conditions before (see above), laid out
 // afresh (`measure_uncached`) and kept otherwise.
@@ -4141,7 +4160,8 @@ fn measure(
     let hit = MEASURE_PASS.with(|m| {
         let pass = m.borrow();
         let kept = pass.as_ref()?.cache.by_chunk.get(&root.id)?;
-        let k = kept.iter().find(|k| k.w == wb && k.imposed_h == hb && k.bfc == bfc && k.root.same(&at_rest))?;
+        let texts = records_texts();
+        let k = kept.iter().find(|k| k.w == wb && k.imposed_h == hb && k.bfc == bfc && k.root.same(&at_rest) && (!texts || k.texts.is_some()))?;
         let (x, y) = (boxes[i].x, boxes[i].y);
         boxes[i..i + root.n].copy_from_slice(&k.boxes);
         boxes[i].x = x;
@@ -4161,6 +4181,12 @@ fn measure(
         let shift = root.inl_at as f64 - k.inl_at as f64;
         for (off, rows) in &k.frags {
             store_frags(i + off, rows.iter().map(|r| [r[0] + shift, r[1], r[2], r[3], r[4]]).collect());
+        }
+        if texts {
+            let shift = root.runs_at as f64 - k.runs_at as f64;
+            for (off, rows) in k.texts.iter().flatten() {
+                store_texts(i + off, rows.iter().map(|r| { let mut r = *r; r[0] += shift; r }).collect());
+            }
         }
         INDEF_PCT_H_READS.with(|n| n.set(n.get() + k.indef));
         Some(k.info)
@@ -4213,6 +4239,11 @@ fn measure(
             (!rows.is_empty()).then_some((off, rows))
         }).collect(),
         inl_at: root.inl_at,
+        texts: records_texts().then(|| (0..root.n).filter_map(|off| {
+            let rows = texts_of(i + off);
+            (!rows.is_empty()).then_some((off, rows))
+        }).collect()),
+        runs_at: root.runs_at,
         indef: INDEF_PCT_H_READS.with(|n| n.get()) - indef0,
     };
     MEASURE_PASS.with(|m| {
