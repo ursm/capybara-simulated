@@ -48,7 +48,7 @@ impl NodeData {
         self.attributes.iter().map(|(k, _)| k.as_str()).find(|k| named(k))
     }
     // …"by namespace and local name": `ns` empty for none.
-    fn key_by_ns(&self, ns: &str, local: &str) -> Option<&str> {
+    pub(crate) fn key_by_ns(&self, ns: &str, local: &str) -> Option<&str> {
         self.attributes.iter().map(|(k, _)| k.as_str()).find(|k| self.attribute_name(k) == (ns, local))
     }
     // A key no attribute has for a new one named `qn`: the name itself where it is free — never for one in a namespace
@@ -176,23 +176,22 @@ const STEP_SCRIPT: u32 = 1 << 1; // a script's `src` added: prepare it
 const STEP_SHEET: u32 = 1 << 2; // a `<link>`'s or `<style>`'s: its sheet follows
 const STEP_DISABLED: u32 = 1 << 3; // `disabled` set: the focused element unfocused where it no longer can be
 const STEP_NAMED: u32 = 1 << 4; // an `id` or a `name` set: a named property
-const STEP_NONCE: u32 = 1 << 5; // `nonce`: its internal slot
-const STEP_CANVAS: u32 = 1 << 6; // a canvas's `width` / `height`: its bitmap reset
-const STEP_DIALOG: u32 = 1 << 7; // a dialog's `open` came or went
-const STEP_DETAILS: u32 = 1 << 8; // a details element's `open` came or went: its toggle, its group closed
-const STEP_DETAILS_NAME: u32 = 1 << 9; // …its `name`
-const STEP_SELECTED: u32 = 1 << 10; // an option's `selected`
-const STEP_MULTIPLE: u32 = 1 << 11; // a select's `multiple` removed
-const STEP_FRAME_MARGINS: u32 = 1 << 12; // a frame's `marginwidth` / `marginheight`
-const STEP_FRAME_SRC: u32 = 1 << 13; // a frame's `src` / `srcdoc`
-const STEP_MEDIA_SRC: u32 = 1 << 14; // a `src` set
-const STEP_PICTURE: u32 = 1 << 15; // a `<source>`'s, its `<picture>`'s image following
-const STEP_HANDLER: u32 = 1 << 16; // an event handler content attribute
-const STEP_FORM_OWNER: u32 = 1 << 17; // `form`, `id`, `disabled`: form-associated custom elements' owners
-const STEP_FILES: u32 = 1 << 18; // an input become a file input: its files emptied
-const STEP_BACKUP: u32 = 1 << 19; // a reaction enqueued: the backup element queue's microtask
-const STEP_REMOVED: u32 = 1 << 20; // the attribute removed: its Attr node detached
-const STEP_POPOVER: u32 = 1 << 21; // a `popover` changed: a showing popover of another state now hidden
+const STEP_CANVAS: u32 = 1 << 5; // a canvas's `width` / `height`: its bitmap reset
+const STEP_DIALOG: u32 = 1 << 6; // a dialog's `open` came or went
+const STEP_DETAILS: u32 = 1 << 7; // a details element's `open` came or went: its toggle, its group closed
+const STEP_DETAILS_NAME: u32 = 1 << 8; // …its `name`
+const STEP_SELECTED: u32 = 1 << 9; // an option's `selected`
+const STEP_MULTIPLE: u32 = 1 << 10; // a select's `multiple` removed
+const STEP_FRAME_MARGINS: u32 = 1 << 11; // a frame's `marginwidth` / `marginheight`
+const STEP_FRAME_SRC: u32 = 1 << 12; // a frame's `src` / `srcdoc`
+const STEP_MEDIA_SRC: u32 = 1 << 13; // a `src` set
+const STEP_PICTURE: u32 = 1 << 14; // a `<source>`'s, its `<picture>`'s image following
+const STEP_HANDLER: u32 = 1 << 15; // an event handler content attribute
+const STEP_FORM_OWNER: u32 = 1 << 16; // `form`, `id`, `disabled`: form-associated custom elements' owners
+const STEP_FILES: u32 = 1 << 17; // an input become a file input: its files emptied
+const STEP_BACKUP: u32 = 1 << 18; // a reaction enqueued: the backup element queue's microtask
+const STEP_REMOVED: u32 = 1 << 19; // the attribute removed: its Attr node detached
+const STEP_POPOVER: u32 = 1 << 20; // a `popover` changed: a showing popover of another state now hidden
 
 // __dom.attrWrite(element, how, a, b, c, d) -> `[steps, key, oldValue, localName]` of the change made (`how`, above):
 // what the bindings do for it (`STEP_*`), the key of the attribute, the value it had (null for none) and its local
@@ -373,6 +372,10 @@ fn change(
     }
     // (…a script's `async` added makes it no longer "force async": HTML §4.12.1)
     let arena = realm(scope, cid);
+    // (…a `nonce` set or removed sets the element's nonce: HTML §2.6.4)
+    if plain && local == "nonce" {
+        arena.set_nonce(id, value.map(<[u16]>::to_vec).unwrap_or_default());
+    }
     if plain && local == "async" && value.is_some() && arena.get(id).is_some_and(is_script) {
         if let Some(n) = arena.get_mut_quietly(id) {
             n.script_flags |= crate::script::SCRIPT_NOT_FORCE_ASYNC;
@@ -385,7 +388,7 @@ fn change(
 }
 
 // A script element: an HTML or SVG `<script>`.
-fn is_script(n: &NodeData) -> bool {
+pub(crate) fn is_script(n: &NodeData) -> bool {
     &*n.local_name == "script" && (n.is_html() || n.ns == web_atoms::ns!(svg))
 }
 // The steps of the bindings' a change of the attribute `local` (`plain`: in no namespace) of `id`, a `tag`, from `old` to
@@ -418,7 +421,6 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     steps |= flag(matches!(tag, "link" | "style"), STEP_SHEET);
     steps |= flag(local == "disabled" && set, STEP_DISABLED);
     steps |= flag(matches!(local, "id" | "name") && value.is_some_and(|v| !v.is_empty()), STEP_NAMED);
-    steps |= flag(local == "nonce", STEP_NONCE);
     steps |= flag(html && tag == "canvas" && matches!(local, "width" | "height"), STEP_CANVAS);
     steps |= flag(html && tag == "dialog" && local == "open" && came_or_went, STEP_DIALOG);
     steps |= flag(html && tag == "details" && local == "open" && came_or_went, STEP_DETAILS);

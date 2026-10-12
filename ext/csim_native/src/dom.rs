@@ -830,6 +830,8 @@ pub(crate) struct RealmArena {
     parser_form_owners: std::collections::HashMap<NodeId, NodeId>,
     // A custom element's custom states (`ElementInternals.states`, `:state()`), for the few elements that have any.
     custom_states: std::collections::HashMap<NodeId, Vec<String>>,
+    // Each element's nonce, once its `nonce` attribute was written or the element cloned with one (nonce.rs).
+    pub(crate) nonces: std::collections::HashMap<NodeId, Vec<u16>>,
     // Every node's registered observer list, and each mutation observer's nodes (mutation_observers.rs).
     pub(crate) observers: crate::mutation_observers::Observers,
     // Each top-level document's autofocus candidates (autofocus.rs).
@@ -1282,6 +1284,9 @@ impl RealmArena {
         // (…and an open dialogs list or a showing popover list: a document's freed, or a dialog or popover of one)
         if !self.close_watcher_order.is_empty() {
             self.close_watcher_order.remove(&id);
+        }
+        if !self.nonces.is_empty() {
+            self.nonces.remove(&id);
         }
         if !self.showing_popovers.is_empty() {
             self.showing_popovers.remove(&id);
@@ -2508,6 +2513,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::tables::install(scope, ns, context_id);
     crate::attributes::install(scope, ns, context_id);
     crate::selected_content::install(scope, ns, context_id);
+    crate::nonce::install(scope, ns, context_id);
     crate::popovers::install(scope, ns, context_id);
     crate::activation::install(scope, ns, context_id);
     crate::input_value::install(scope, ns, context_id);

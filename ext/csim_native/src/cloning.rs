@@ -44,6 +44,7 @@ fn clone_element_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         node.is_value = is_value;
         node.script_flags |= script_flags;
     }
+    arena.clone_nonce(src, copy);
     // (…a radio's checkedness with them, where no group of the detached copy's has another to uncheck)
     if state != 0 {
         let had = arena.get(copy).map_or(0, |n| n.state);
@@ -163,6 +164,7 @@ pub(crate) fn clone_into(
         crate::dom::replace_attributes(scope, cid, copy, attributes, attr_u16, Some(namespaces));
     }
     let arena = crate::dom::realm(scope, cid);
+    arena.clone_nonce(src, copy);
     if state != 0 {
         let had = arena.get(copy).map_or(0, |c| c.state);
         arena.set_state(copy, had | state);
