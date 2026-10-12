@@ -38,7 +38,7 @@ fn units(s: &str) -> Units {
 enum Value {
     Number(i32),
     Text(Units),
-    None,
+    Absent,
 }
 
 // The steps made so far, and the number the next node takes.
@@ -59,7 +59,7 @@ impl Steps {
         self.values.push(Value::Text(units));
     }
     fn optional(&mut self, units: Option<Units>) {
-        self.values.push(units.map_or(Value::None, Value::Text));
+        self.values.push(units.map_or(Value::Absent, Value::Text));
     }
 }
 
@@ -169,7 +169,7 @@ fn code_point_units(code: u32) -> Units {
 }
 
 // A start tag's inside (`name attr="v" …`): its name and its attributes, their values decoded — and whether its
-// attributes are not well-formed (a name missing, a value missing or unquoted, a quote unclosed).
+// attributes are not well-formed (a name missing or given twice, a value missing or unquoted, a quote unclosed).
 fn parse_tag(inner: &[u16], err: &mut bool) -> (Units, Vec<(Units, Units)>, bool) {
     let n = inner.len();
     let mut i = 0;
@@ -200,6 +200,11 @@ fn parse_tag(inner: &[u16], err: &mut bool) -> (Units, Vec<(Units, Units)>, bool
             ae += 1;
         }
         let attr_name = inner[i..ae].to_vec();
+        // (…an attribute named twice: not well-formed)
+        if attrs.iter().any(|(a, _)| *a == attr_name) {
+            bad = true;
+            break;
+        }
         i = ae;
         while i < n && is_ws(inner[i]) {
             i += 1;
@@ -439,6 +444,10 @@ fn well_formed_reference(s: &[u16]) -> bool {
 // Parse `src` into `steps` — its top-level nodes into `top` — in the namespace scope `scope`: as a document, or a
 // fragment (its top level may hold text and more than one element). Whether it is well-formed.
 fn parse_into(src: &[u16], steps: &mut Steps, scope: Scope, fragment: bool, top: i32) -> bool {
+    // (…a lone surrogate is no XML character: Chrome)
+    if char::decode_utf16(src.iter().copied()).any(|c| c.is_err()) {
+        return false;
+    }
     let mut p = Parser { steps, fragment, open: Vec::new(), scopes: vec![scope], entities: HashMap::new(), err: false, roots: 0, top };
     let s = src;
     let n = s.len();
@@ -598,29 +607,28 @@ fn parse_into(src: &[u16], steps: &mut Steps, scope: Scope, fragment: bool, top:
                 // (…an attribute's namespace, prefix and local name, where it has a namespace — an `xmlns` one, an
                 // `xml:` one, or one whose prefix the scope declares)
                 let meta = if an == units("xmlns") {
-                    Some((Some(units(XMLNS_NS)), None, units("xmlns")))
+                    Some((Some(units(XMLNS_NS)), units("xmlns")))
                 } else {
                     an.iter().position(|&c| c == u16::from(b':')).map(|c| {
-                        let (ap, al) = (an[..c].to_vec(), an[c + 1..].to_vec());
+                        let (ap, al) = (&an[..c], an[c + 1..].to_vec());
                         let ans = if ap == units("xmlns") {
                             Some(units(XMLNS_NS))
                         } else if ap == units("xml") {
                             Some(units(XML_NS))
                         } else {
-                            scope.get(&ap).cloned().flatten()
+                            scope.get(ap).cloned().flatten()
                         };
-                        (ans, Some(ap), al)
+                        (ans, al)
                     })
                 };
                 p.steps.text(an);
                 p.steps.text(av);
                 match meta {
-                    Some((ans, ap, al)) => {
+                    Some((ans, al)) => {
                         p.steps.optional(ans);
-                        p.steps.optional(ap);
                         p.steps.text(al);
                     }
-                    None => p.steps.values.extend([Value::None, Value::None, Value::None]),
+                    None => p.steps.values.extend([Value::Absent, Value::Absent]),
                 }
             }
             if !self_close {
@@ -675,11 +683,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // __dom.xmlBuild(source, contextNid, document, templateDocument) -> [count, nodes…, element, names, flags, …], or null
-// where the source is not well-formed: the XML parse of `source` built by the engine — a document's, `contextNid` -1, its
-// nodes made the children of `document` (its scripts parser-inserted, which the bindings run as it loads), or a
-// fragment's in that element's namespace scope (its scripts already started), its top-level nodes answered out of any
-// parent — every node in `document`, an XHTML `<template>`'s contents in `templateDocument`; then the elements the
-// bindings have steps for (html_parse.rs `Build::answer`).
+// where the source is a fragment's and not well-formed: the XML parse of `source` built by the engine — a document's,
+// `contextNid` -1, its nodes made the children of `document` (its scripts parser-inserted, which the bindings run as
+// it loads), a `<parsererror>` where it is not well-formed; or a fragment's in that element's namespace scope (its
+// scripts already started, those in template contents too), its top-level nodes answered out of any parent — every
+// node in `document`, an XHTML `<template>`'s contents in `templateDocument`; then the elements the bindings have steps
+// for (html_parse.rs `Build::answer`).
 fn xml_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let src = crate::dom::utf16_arg(scope, args.get(0));
     let context = nid_arg(scope, &args, 1);
@@ -688,7 +697,8 @@ fn xml_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         None => Scope::from([(units("xml"), Some(units(XML_NS)))]),
     };
     let mut steps = Steps { values: Vec::new(), next: 0 };
-    if !parse_into(&src, &mut steps, initial, context.is_some(), -1) {
+    let well_formed = parse_into(&src, &mut steps, initial, context.is_some(), -1);
+    if !well_formed && context.is_some() {
         return rv.set_null();
     }
     let Ok(doc) = v8::Local::<v8::Object>::try_from(args.get(2)) else { return };
@@ -700,9 +710,12 @@ fn xml_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let mut build = Build::new(cid, Some(doc), Some(template_doc), Vec::new());
     if into.is_some() {
         build.script = crate::script::SCRIPT_PARSER_INSERTED;
+    } else {
+        build.contents_script = crate::script::SCRIPT_ALREADY_STARTED;
     }
     let mut tops = Vec::new();
-    if replay(scope, &mut build, steps.values, into, &mut tops).is_none() {
+    let values = if well_formed { steps.values } else { parser_error() };
+    if replay(scope, &mut build, values, into, &mut tops).is_none() {
         return;
     }
     build.finish(scope, into);
@@ -711,9 +724,25 @@ fn xml_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     }
 }
 
+// The steps of a document that is not well-formed: a `<parsererror>` element holding its text (Chrome's namespace).
+fn parser_error() -> Vec<Value> {
+    vec![
+        Value::Number(OP_ELEMENT),
+        Value::Number(-1),
+        Value::Text(units("parsererror")),
+        Value::Text(units("http://www.mozilla.org/newlayout/xml/parsererror.xml")),
+        Value::Absent,
+        Value::Number(0),
+        Value::Number(OP_TEXT),
+        Value::Number(0),
+        Value::Text(units("XML parsing error")),
+    ]
+}
+
 // The parse's steps taken: each node made — an element with its name, namespace, prefix and attributes — and put in the
 // node its step names, an XHTML `<template>`'s children in its contents; one at the top level into `into`, or else
-// among `tops`.
+// among `tops`. Of the open `<details>` of a name group in one tree, the first stays open, as each one's insertion
+// steps leave them (HTML "ensure details exclusivity by closing the given element if needed").
 fn replay<'s>(scope: &mut v8::PinScope<'s, '_>, build: &mut Build<'s>, values: Vec<Value>, into: Option<crate::dom::NodeId>, tops: &mut Vec<crate::dom::NodeId>) -> Option<()> {
     let text = |v: Option<Value>| match v {
         Some(Value::Text(u)) => Some(u),
@@ -721,14 +750,28 @@ fn replay<'s>(scope: &mut v8::PinScope<'s, '_>, build: &mut Build<'s>, values: V
     };
     let optional = |v: Option<Value>| match v {
         Some(Value::Text(u)) => Some(Some(u)),
-        Some(Value::None) => Some(None),
+        Some(Value::Absent) => Some(None),
         _ => None,
     };
     let string = |u: &[u16]| String::from_utf16_lossy(u);
     let mut values = values.into_iter();
     let mut nodes = Vec::new();
+    // (…the name groups with an open `<details>`, by the tree it is in: its root, or none for a fragment's top level)
+    let mut open_groups: std::collections::HashSet<(Option<crate::dom::NodeId>, String)> = std::collections::HashSet::new();
     while let Some(op) = values.next() {
         let (Value::Number(op), Some(Value::Number(parent))) = (op, values.next()) else { return None };
+        let open = usize::try_from(parent).ok().and_then(|p| nodes.get(p).copied());
+        let to = match open {
+            Some(open) => {
+                let arena = realm(scope, build.cid);
+                Some(match arena.get(open).filter(|n| n.is_html_named("template")).map(|n| n.template_content) {
+                    Some(Some(contents)) => contents,
+                    Some(None) => build.contents_of(scope, open),
+                    None => open,
+                })
+            }
+            None => into,
+        };
         let node = match op {
             OP_ELEMENT => {
                 let (local, ns, prefix) = (text(values.next())?, optional(values.next())?, optional(values.next())?);
@@ -736,13 +779,24 @@ fn replay<'s>(scope: &mut v8::PinScope<'s, '_>, build: &mut Build<'s>, values: V
                 let mut attrs = Vec::with_capacity(count.max(0) as usize);
                 for _ in 0..count {
                     let (name, value) = (text(values.next())?, text(values.next())?);
-                    let (attr_ns, _, attr_local) = (optional(values.next())?, optional(values.next())?, optional(values.next())?);
+                    let (attr_ns, attr_local) = (optional(values.next())?, optional(values.next())?);
                     let named = attr_local.map(|local| (attr_ns.map_or_else(String::new, |n| string(&n)), string(&local)));
                     attrs.push((string(&name), value, named));
                 }
+                let (local, ns) = (string(&local), ns.map_or_else(String::new, |n| string(&n)));
+                if ns == "http://www.w3.org/1999/xhtml" && local == "details" {
+                    let group = attrs.iter().find(|(n, _, meta)| n == "name" && meta.is_none()).map(|(_, v, _)| string(v)).filter(|g| !g.is_empty());
+                    let opened = attrs.iter().any(|(n, _, meta)| n == "open" && meta.is_none());
+                    if let Some(group) = group.filter(|_| opened) {
+                        let root = to.map(|t| realm(scope, build.cid).root_of(t));
+                        if !open_groups.insert((root, group)) {
+                            attrs.retain(|(n, _, meta)| !(n == "open" && meta.is_none()));
+                        }
+                    }
+                }
                 let id = build.make(scope, NodeData {
-                    local_name: web_atoms::LocalName::from(string(&local)),
-                    ns: web_atoms::Namespace::from(ns.map_or_else(String::new, |n| string(&n))),
+                    local_name: web_atoms::LocalName::from(local),
+                    ns: web_atoms::Namespace::from(ns),
                     prefix: prefix.map(|p| string(&p).into_boxed_str()),
                     ..NodeData::of_kind(NodeKind::Element, Vec::new())
                 });
@@ -765,23 +819,13 @@ fn replay<'s>(scope: &mut v8::PinScope<'s, '_>, build: &mut Build<'s>, values: V
             _ => return None,
         };
         nodes.push(node);
-        let Some(&open) = usize::try_from(parent).ok().and_then(|p| nodes.get(p)) else {
-            match into {
-                Some(doc) => build.insert(scope, doc, node, None),
-                None => {
-                    build.parsed(scope, node, false);
-                    tops.push(node);
-                }
+        match to {
+            Some(to) => build.insert(scope, to, node, None),
+            None => {
+                build.script_made(scope, node, false);
+                tops.push(node);
             }
-            continue;
-        };
-        let arena = realm(scope, build.cid);
-        let to = match arena.get(open).filter(|n| n.is_html_named("template")).map(|n| n.template_content) {
-            Some(Some(contents)) => contents,
-            Some(None) => build.contents_of(scope, open),
-            None => open,
-        };
-        build.insert(scope, to, node, None);
+        }
     }
     Some(())
 }

@@ -608,15 +608,17 @@ pub(crate) struct Build<'s> {
     doc: Option<v8::Local<'s, v8::Object>>,
     template_doc: Option<v8::Local<'s, v8::Object>>,
     nodes: Vec<Option<crate::dom::NodeId>>,
-    held: std::collections::HashMap<crate::dom::NodeId, v8::cppgc::Persistent<crate::node_handle::NodeHandle>>,
+    held: Vec<v8::cppgc::Persistent<crate::node_handle::NodeHandle>>,
     in_contents: std::collections::HashSet<crate::dom::NodeId>,
     // …the template contents it made, roots of trees no later insertion runs steps over
     contents: Vec<crate::dom::NodeId>,
     steps: Vec<(crate::dom::NodeId, Vec<String>, u32)>,
     // A document's mode, as `htmlParse` numbers it, where the parse set one.
     quirks: Option<i32>,
-    // (…"already started" — a fragment's, a document no script runs in — or, an XML document's, "parser-inserted")
+    // (…"already started" — a fragment's, a document no script runs in — or, an XML document's, "parser-inserted"; and
+    // in template contents none, a fragment's "already started": the fragment parser marks every script it makes)
     pub(crate) script: u8,
+    pub(crate) contents_script: u8,
 }
 
 impl<'s> Build<'s> {
@@ -633,7 +635,7 @@ impl<'s> Build<'s> {
     // A new node of `data`, in the parse's node document.
     pub(crate) fn make(&mut self, scope: &mut v8::PinScope<'s, '_>, data: crate::dom::NodeData) -> crate::dom::NodeId {
         let id = crate::dom::realm(scope, self.cid).create(data, None);
-        self.held.insert(id, crate::node_handle::bare(scope, id, self.doc, self.maker));
+        self.held.push(crate::node_handle::bare(scope, id, self.doc, self.maker));
         id
     }
     // An element of the parser's token: its attributes — the first of a name taken, as "create an element for the token"
@@ -702,27 +704,29 @@ impl<'s> Build<'s> {
         }
     }
     // `child` into `parent` before `before` (none: last) — its node document the inert one where `parent` is in template
-    // contents — and what the parser making it gives it (`parsed`).
+    // contents — and what the parser making it gives it (`script_made`).
     pub(crate) fn insert(&mut self, scope: &mut v8::PinScope<'s, '_>, parent: crate::dom::NodeId, child: crate::dom::NodeId, before: Option<crate::dom::NodeId>) {
         crate::dom::realm(scope, self.cid).insert_child(parent, child, before);
         let contents = self.in_contents.contains(&parent);
         if contents && self.in_contents.insert(child) {
-            if let Some(h) = self.held.get(&child).and_then(|h| h.get()) {
-                h.set_document(scope, self.template_doc);
+            let handle = crate::dom::realm(scope, self.cid).get(child).and_then(|n| n.link.handle().map(|h| h as *const crate::node_handle::NodeHandle));
+            // SAFETY: the node's handle lives while the build holds it, which it does every node it made.
+            if let Some(h) = handle {
+                unsafe { &*h }.set_document(scope, self.template_doc);
             }
         }
-        self.parsed(scope, child, contents);
+        self.script_made(scope, child, contents);
     }
-    // What the parser making `node` gives it, a script's flags: no longer "force async", and — out of template
-    // `contents` — the build's own (`script`).
-    pub(crate) fn parsed(&mut self, scope: &mut v8::PinScope<'s, '_>, node: crate::dom::NodeId, contents: bool) {
+    // What the parser making `node` gives it, a script's flags: no longer "force async", and the build's own — in
+    // template `contents` (`contents_script`) or out of them (`script`).
+    pub(crate) fn script_made(&mut self, scope: &mut v8::PinScope<'s, '_>, node: crate::dom::NodeId, contents: bool) {
         let arena = crate::dom::realm(scope, self.cid);
         let Some(n) = arena.get(node) else { return };
         let script = &*n.local_name == "script" && (n.ns == web_atoms::ns!(html) || n.ns == web_atoms::ns!(svg));
         let started = n.script_flags & (crate::script::SCRIPT_ALREADY_STARTED | crate::script::SCRIPT_PARSER_INSERTED) != 0;
         if script && !started {
             if let Some(n) = arena.get_mut_quietly(node) {
-                n.script_flags |= crate::script::SCRIPT_NOT_FORCE_ASYNC | if contents { 0 } else { self.script };
+                n.script_flags |= crate::script::SCRIPT_NOT_FORCE_ASYNC | if contents { self.contents_script } else { self.script };
             }
         }
     }
@@ -750,7 +754,7 @@ impl<'s> Build<'s> {
         if let Some(h) = held.get() {
             h.set_registry_state(crate::ce_reactions::TRACKING);
         }
-        self.held.insert(frag, held);
+        self.held.push(held);
         self.in_contents.insert(frag);
         self.contents.push(frag);
         crate::dom::realm(scope, self.cid).set_template_content(template, Some(frag));
@@ -924,6 +928,7 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         let doc = v8::Local::<v8::Object>::try_from(args.get(6)).ok().map(|d| v8::Local::new(scope, d));
         let template_doc = v8::Local::<v8::Object>::try_from(args.get(7)).ok().map(|d| v8::Local::new(scope, d)).or(doc);
         let mut build = Build::new(cid, doc, template_doc, vec![None, None, form]);
+        build.contents_script = crate::script::SCRIPT_ALREADY_STARTED;
         let root = build.make(scope, crate::dom::NodeData::of_kind(crate::dom::NodeKind::Fragment, Vec::new()));
         build.set(0, root);
         if build.take(scope, parsed(tokenizer, html)).is_none() {
@@ -1004,12 +1009,13 @@ impl<'s> Build<'s> {
             doc,
             template_doc,
             nodes,
-            held: std::collections::HashMap::new(),
+            held: Vec::new(),
             in_contents: std::collections::HashSet::new(),
             contents: Vec::new(),
             steps: Vec::new(),
             quirks: None,
             script: crate::script::SCRIPT_ALREADY_STARTED,
+            contents_script: 0,
         }
     }
     // The insertion steps of the engine's own over what no later insertion runs them for — a document's children, every

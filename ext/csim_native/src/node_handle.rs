@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use v8::cppgc::{GarbageCollected, Member, Visitor, WeakPersistent};
 
-use crate::dom::NodeId;
+use crate::dom::{NodeId, NodeKind};
 
 // The wrapper tag `Object::wrap` / `unwrap` file the handle under.
 const TAG: u16 = 1;
@@ -407,26 +407,40 @@ pub(crate) fn object_of<'s>(scope: &mut v8::PinScope<'s, '_>, id: NodeId) -> Opt
     let realm = h.maker.get();
     let factory = crate::dom::dom(scope).factories.get(&realm).cloned()?.to_local(scope)?;
     let n = crate::dom::dom(scope).arena.get(id)?;
+    let node_type = n.node_type();
     // (…its name exact: the UTF-16 the DOM holds, a lone surrogate kept — a doctype's its name and its public and
-    // system identifiers in those three places)
+    // system identifiers in those three places; an element's names, which repeat, internalized; none of anything else)
+    let two_byte = |scope: &mut v8::PinScope<'s, '_>, units: &[u16]| v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal).map(Into::into);
+    let name = |scope: &mut v8::PinScope<'s, '_>, s: &str| v8::String::new_from_utf8(scope, s.as_bytes(), v8::NewStringType::Internalized).map(Into::into);
     let exact = n.name_u16.as_deref().map(|e| (e.local.clone(), e.ns.clone(), e.prefix.clone()));
     let doctype = n.doctype_ids.as_deref().map(|(public, system)| (n.data.clone(), public.clone(), Some(system.clone())));
-    let (local, ns, prefix) = doctype.or(exact).unwrap_or_else(|| {
-        let utf16 = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
-        (utf16(&n.local_name), utf16(&n.ns), n.prefix.as_deref().map(utf16))
-    });
-    let node_type = n.node_type();
-    let string = |scope: &mut v8::PinScope<'s, '_>, units: &[u16]| v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal);
-    let args: [v8::Local<'_, v8::Value>; 5] = [
-        v8::Number::new(scope, id.to_f64()).into(),
-        v8::Integer::new_from_unsigned(scope, node_type).into(),
-        string(scope, &local)?.into(),
-        string(scope, &ns)?.into(),
-        match prefix {
-            Some(p) => string(scope, &p)?.into(),
-            None => v8::null(scope).into(),
-        },
-    ];
+    let names: [v8::Local<'_, v8::Value>; 3] = match doctype.or(exact) {
+        Some((local, ns, prefix)) => [
+            two_byte(scope, &local)?,
+            two_byte(scope, &ns)?,
+            match prefix {
+                Some(p) => two_byte(scope, &p)?,
+                None => v8::null(scope).into(),
+            },
+        ],
+        None if n.kind == NodeKind::Element || n.kind == NodeKind::ProcessingInstruction => {
+            let (local, ns, prefix) = (n.local_name.clone(), n.ns.clone(), n.prefix.clone());
+            [
+                name(scope, &local)?,
+                name(scope, &ns)?,
+                match prefix {
+                    Some(p) => name(scope, &p)?,
+                    None => v8::null(scope).into(),
+                },
+            ]
+        }
+        None => {
+            let undefined: v8::Local<'_, v8::Value> = v8::undefined(scope).into();
+            [undefined; 3]
+        }
+    };
+    let [local, ns, prefix] = names;
+    let args: [v8::Local<'_, v8::Value>; 5] = [v8::Number::new(scope, id.to_f64()).into(), v8::Integer::new_from_unsigned(scope, node_type).into(), local, ns, prefix];
     crate::dom::dom(scope).wrap_pending = Some(link);
     let undefined = v8::undefined(scope).into();
     let made = factory.call(scope, undefined, &args);
