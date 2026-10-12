@@ -50,10 +50,10 @@ fn position(arena: &RealmArena, other: &Side, this: &Side) -> u32 {
 
 // ── traversal (DOM §6) ──────────────────────────────────────────────────────────────────────────────────────────
 
-// The object of the node `id` — which its handle holds — or undefined for one whose object V8 dropped.
+// The object of the node `id` — which its handle holds, or its maker's factory makes for one the engine made
+// (node_handle.rs `object_of`) — or undefined for none.
 fn node_object<'s>(scope: &mut v8::PinScope<'s, '_>, id: NodeId) -> v8::Local<'s, v8::Value> {
-    let held = crate::dom::dom(scope).arena.get(id).and_then(|n| crate::node_handle::held(&n.link));
-    match held.and_then(|h| h.get(scope)) {
+    match crate::node_handle::object_of(scope, id) {
         Some(object) => object.into(),
         None => v8::undefined(scope).into(),
     }

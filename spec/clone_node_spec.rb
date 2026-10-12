@@ -63,4 +63,34 @@ RSpec.describe 'cloneNode' do
     s.execute_script("window.R = []; document.body.append(document.importNode(document.getElementById('t').content, true))")
     expect(s.evaluate_script('window.R')).to eq(['attr:true'])
   end
+
+  # The engine makes a deep copy's nodes, their objects only when the page asks (cloning.rs): a traversal's filter is
+  # handed each one, a detached copy's radio group unchecks as any, an image's copy of every kind — an image button, an
+  # SVG image — loads, and a name with a lone surrogate keeps it. Chrome's.
+  it "hands over the nodes of a copy the page has not touched" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [<<~HTML]] }).tap {|session| session.visit '/' }
+      <!DOCTYPE html><body><div id=d><p><!--c-->t</p></div>
+    HTML
+    expect(s.evaluate_script(<<~'JS')).to eq(['P #comment #text', 'false,true,1', true])
+      (() => {
+        const copy = document.getElementById('d').cloneNode(true), seen = [];
+        const walker = document.createTreeWalker(copy, NodeFilter.SHOW_ALL, { acceptNode: (n) => { seen.push(n.nodeName); return NodeFilter.FILTER_ACCEPT; } });
+        while (walker.nextNode());
+        const d = document.getElementById('d');
+        d.innerHTML = '<input type=radio name=g checked><input type=radio name=g>';
+        const group = d.cloneNode(true), radios = group.querySelectorAll('input');
+        radios[1].checked = true;
+        const svg = 'http://www.w3.org/2000/svg';
+        d.innerHTML = '<input type=image src="data:,">';
+        d.appendChild(document.createElementNS(svg, 'svg')).appendChild(document.createElementNS(svg, 'image')).setAttribute('href', 'data:,');
+        window.loads = [];
+        const images = d.cloneNode(true);
+        for (const n of images.querySelectorAll('input, image')) for (const t of ['load', 'error']) n.addEventListener(t, () => loads.push(n.localName));
+        document.body.appendChild(images);
+        const odd = document.createElement('div');
+        odd.appendChild(document.createElementNS('urn:x', 'a\uD800b'));
+        return [seen.join(' '), [radios[0].checked, radios[1].checked, group.querySelectorAll(':checked').length].join(), odd.cloneNode(true).firstChild.localName === 'a\uD800b'];
+      })()
+    JS
+  end
 end

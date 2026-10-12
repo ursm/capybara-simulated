@@ -689,12 +689,29 @@ fn set_subtree_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 }
 
 // `__dom.dispatchPath(targetNid)` -> [path, stores] for a dispatch at a node: the target and its ancestors up to its
-// root, their objects, and each one's listener store (undefined for none); undefined where a node of it has no object
-// (V8 dropped a bare one), which the bindings' own walk then answers; null where the path crosses a shadow root, which the flat
+// root, their objects — made for the nodes the engine made that have none — and each one's listener store (undefined
+// for none); undefined where a node of it still has no object, which the bindings' own walk then answers; null where the path crosses a shadow root, which the flat
 // tree's event path (event_path.rs) retargets across.
 fn dispatch_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    // (…the handles found first, while the arena is borrowed: reading the references allocates nothing a collection
+    // (…the objects of the nodes the engine made made first — a clone's ancestors the page never asked for — before any
+    // handle is read: making one runs script)
+    let chain: Vec<(NodeId, Option<HeldObject>)> = {
+        let arena = &crate::dom::dom(scope).arena;
+        let mut out = Vec::new();
+        let mut cur = Some(target);
+        while let Some(id) = cur {
+            let Some(n) = arena.get(id) else { break };
+            out.push((id, held(&n.link)));
+            cur = arena.parent_of(id);
+        }
+        out
+    };
+    let bare: Vec<NodeId> = chain.iter().filter(|(_, h)| h.as_ref().is_some_and(|h| h.get(scope).is_none())).map(|&(id, _)| id).collect();
+    for id in bare {
+        object_of(scope, id);
+    }
+    // (…the handles found next, while the arena is borrowed: reading the references allocates nothing a collection
     // could take one in until they are all read)
     let handles: Option<Vec<*const NodeHandle>> = {
         let arena = &crate::dom::dom(scope).arena;
