@@ -360,6 +360,9 @@ struct Parse {
     // holds theirs.
     handles: Vec<Option<crate::dom::NodeId>>,
     held: Vec<v8::cppgc::Persistent<crate::node_handle::NodeHandle>>,
+    // …and, where a build paused after a custom element it constructed went in, the steps of its batch left and the
+    // status the parse stopped with (`htmlRunBuilt`).
+    pending: Option<(std::vec::IntoIter<Operand>, i32)>,
 }
 
 impl Parse {
@@ -497,7 +500,7 @@ fn html_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let all = parses(scope);
         all.next += 1;
         let id = all.next;
-        all.live.insert(id, Parse { tokenizer, input, set_aside: Vec::new(), standins, ended: false, handles: Vec::new(), held: Vec::new() });
+        all.live.insert(id, Parse { tokenizer, input, set_aside: Vec::new(), standins, ended: false, handles: Vec::new(), held: Vec::new(), pending: None });
         if args.get(9).is_true() {
             return rv.set(v8::Array::new_with_elements(scope, &[v8::Integer::new_from_unsigned(scope, id).into()]).into());
         }
@@ -525,12 +528,15 @@ fn html_run(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 // no customizable select's `<selectedcontent>` to mirror into as it goes, no null registry propagating — whether
 // custom elements are defined, whose constructors the parser runs, and whether the page observes mutations.
 const MAY_BUILD: u32 = 1;
+// What `htmlRunBuilt` answers for a build that paused after a custom element it constructed went in: the bindings
+// connect what it inserted, then ask for the rest of the batch.
+const CUSTOM_ELEMENT_INSERTED: i32 = -2;
 const CE_DEFINED: u32 = 1 << 1;
 const OBSERVED: u32 = 1 << 2;
 
 // Whether the engine leaves a live document's batch of `ops` to the bindings: one where the parser runs page code or
-// steps of the bindings' own as it makes or inserts a node — a custom element's constructor (`ce_defined`: a name with
-// a hyphen, an `is`), a declarative shadow root, a `<details>` (its name group closed as each is inserted), a
+// steps of the bindings' own as it makes or inserts a node — a customized built-in's (`ce_defined`: an `is`), which the
+// bindings upgrade as they connect it, a declarative shadow root, a `<details>` (its name group closed as each is inserted), a
 // `<selectedcontent>`, a `customelementregistry` attribute — or one that gives a document a second doctype.
 fn declines(ops: &[Operand], ce_defined: bool, has_doctype: bool) -> bool {
     let int = |k: usize| match ops.get(k) {
@@ -548,29 +554,58 @@ fn declines(ops: &[Operand], ce_defined: bool, has_doctype: bool) -> bool {
     let mut i = 0;
     while i < ops.len() {
         let Some(op) = int(i) else { return true };
-        i = match op {
+        match op {
             OP_ELEMENT => {
                 let (ns, local, n) = (int(i + 2).unwrap_or(0), string(i + 3).unwrap_or(""), int(i + 4).unwrap_or(0).max(0) as usize);
-                if (namespace_of(ns) == html5ever::ns!(html) && matches!(local, "details" | "selectedcontent")) || (ce_defined && local.contains('-')) || refused(i + 5, n) {
+                if (namespace_of(ns) == html5ever::ns!(html) && matches!(local, "details" | "selectedcontent")) || refused(i + 5, n) {
                     return true;
                 }
-                i + 6 + 4 * n
             }
-            OP_ADD_ATTRS => {
-                let n = int(i + 2).unwrap_or(0).max(0) as usize;
-                if refused(i + 3, n) {
-                    return true;
-                }
-                i + 3 + 4 * n
-            }
+            OP_ADD_ATTRS if refused(i + 3, int(i + 2).unwrap_or(0).max(0) as usize) => return true,
             OP_SHADOW_ROOT => return true,
             OP_DOCTYPE if has_doctype => return true,
-            OP_DOCTYPE | OP_APPEND_BASED | OP_APPEND_BASED_TEXT => i + 4,
-            OP_QUIRKS | OP_REMOVE | OP_POP | OP_SELECTED_CONTENT | OP_SCRIPT_STARTED => i + 2,
-            _ => i + 3,
-        };
+            _ => {}
+        }
+        let Some(next) = op_end(ops, i) else { return true };
+        i = next;
     }
     false
+}
+// Where the step of `ops` at `i` ends: the index of the next one's code.
+fn op_end(ops: &[Operand], i: usize) -> Option<usize> {
+    let int = |k: usize| match ops.get(k) {
+        Some(Operand::Int(v)) => Some(*v),
+        _ => None,
+    };
+    let count = |k: usize| int(k).map(|n| n.max(0) as usize);
+    Some(match int(i)? {
+        OP_ELEMENT => i + 6 + 4 * count(i + 4)?,
+        OP_ADD_ATTRS => i + 3 + 4 * count(i + 2)?,
+        OP_SHADOW_ROOT => i + 5,
+        OP_DOCTYPE | OP_APPEND_BASED | OP_APPEND_BASED_TEXT => i + 4,
+        OP_QUIRKS | OP_REMOVE | OP_POP | OP_SELECTED_CONTENT | OP_SCRIPT_STARTED => i + 2,
+        _ => i + 3,
+    })
+}
+// The node the step of `ops` that inserts `handle` first puts it under — the parser's insertion parent for it, which it
+// knows only once it has made it — as a handle; for a foster-parented one, the table and the element before it on the
+// stack of open elements (`based`).
+fn insertion_parent(ops: &[Operand], handle: i32) -> Option<(i32, Option<i32>)> {
+    let int = |k: usize| match ops.get(k) {
+        Some(Operand::Int(v)) => Some(*v),
+        _ => None,
+    };
+    let mut i = 0;
+    while i < ops.len() {
+        match int(i)? {
+            OP_APPEND if int(i + 2) == Some(handle) => return Some((int(i + 1)?, None)),
+            OP_INSERT_BEFORE if int(i + 2) == Some(handle) => return Some((int(i + 1)?, Some(-1))),
+            OP_APPEND_BASED if int(i + 3) == Some(handle) => return Some((int(i + 1)?, int(i + 2))),
+            _ => {}
+        }
+        i = op_end(ops, i)?;
+    }
+    None
 }
 
 // __dom.htmlRunBuilt(id, flags, document, templateDocument, html, head, body) -> [1, status, quirks, sheets, connect,
@@ -586,7 +621,12 @@ fn html_run_built(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let id = parse_id(scope, &args);
     parser_op(scope, Some(id), &mut rv, &[0, -1], |scope, rv| {
         let flags = args.get(1).uint32_value(scope).unwrap_or(0);
-        let status = parses(scope).live.get_mut(&id).map_or(-1, Parse::run);
+        // (…or the steps a build that paused left of its batch, which stopped where it stopped — built on as they are)
+        let resumed = parses(scope).live.get_mut(&id).and_then(|p| p.pending.take());
+        let status = match &resumed {
+            Some((_, status)) => *status,
+            None => parses(scope).live.get_mut(&id).map_or(-1, Parse::run),
+        };
         let doc = v8::Local::<v8::Object>::try_from(args.get(2)).ok().map(|d| v8::Local::new(scope, d));
         let document = doc.and_then(|d| crate::node_handle::nid_of(scope, d.into()));
         let skeleton: [Option<crate::dom::NodeId>; 3] = [4, 5, 6].map(|k| crate::node_handle::nid_of(scope, args.get(k)));
@@ -596,8 +636,13 @@ fn html_run_built(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         });
         let builds = flags & MAY_BUILD != 0
             && document.is_some()
-            && parses(scope).live.get(&id).is_some_and(|p| p.standins.base.is_none() && !declines(&p.tokenizer.sink.sink.ops.borrow(), flags & CE_DEFINED != 0, has_doctype));
+            && (resumed.is_some()
+                || parses(scope).live.get(&id).is_some_and(|p| p.standins.base.is_none() && !declines(&p.tokenizer.sink.sink.ops.borrow(), flags & CE_DEFINED != 0, has_doctype)));
         let (Some(document), true) = (document, builds) else {
+            // (…a paused build's steps the bindings take after all, back where the parse's are)
+            if let (Some((rest, _)), Some(p)) = (resumed, parses(scope).live.get_mut(&id)) {
+                p.tokenizer.sink.sink.ops.borrow_mut().splice(0..0, rest.collect::<Vec<_>>());
+            }
             let steps = steps(scope, id, status, false);
             let mut items: Vec<v8::Local<'_, v8::Value>> = vec![v8::Integer::new(scope, 0).into()];
             for k in 0..steps.length() {
@@ -608,24 +653,32 @@ fn html_run_built(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         let Some(cid) = crate::dom::dom(scope).arena.get(document).map(|n| n.realm) else { return };
         let template_doc = v8::Local::<v8::Object>::try_from(args.get(3)).ok().map(|d| v8::Local::new(scope, d)).or(doc);
         let Some(p) = parses(scope).live.get_mut(&id) else { return };
-        let ops = std::mem::take(&mut *p.tokenizer.sink.sink.ops.borrow_mut());
+        let ops = match resumed {
+            Some((rest, _)) => rest,
+            None => std::mem::take(&mut *p.tokenizer.sink.sink.ops.borrow_mut()).into_iter(),
+        };
         let mut handles = std::mem::take(&mut p.handles);
         if handles.is_empty() {
             handles = vec![Some(document), None, None];
         }
-        let live = Live { observed: flags & OBSERVED != 0, skeleton, ..Live::default() };
+        let live = Live { observed: flags & OBSERVED != 0, ce_defined: flags & CE_DEFINED != 0, skeleton, ..Live::default() };
         let mut build = Build::new(cid, doc, template_doc, handles);
         build.script = crate::script::SCRIPT_ALREADY_STARTED | crate::script::SCRIPT_PARSER_INSERTED;
         build.live = Some(live);
         let built = build.take(scope, ops);
         let live = build.live.take().unwrap_or_default();
+        let (paused, failed) = (build.paused, built.is_none());
         if let Some(p) = parses(scope).live.get_mut(&id) {
             p.handles = std::mem::take(&mut build.nodes);
             p.held.append(&mut build.held);
+            if let (true, Some(rest)) = (paused, built) {
+                p.pending = Some((rest, status));
+            }
         }
-        if built.is_none() {
+        if failed {
             return;
         }
+        let status = if paused { CUSTOM_ELEMENT_INSERTED } else { status };
         let arena = crate::dom::realm(scope, cid);
         let named = |e: &crate::dom::NodeId, names: &[&str]| arena.get(*e).is_some_and(|n| names.iter().any(|t| *t == &*n.local_name));
         let connect: Vec<crate::dom::NodeId> = live.inserted.iter().copied().filter(|&e| arena.get(e).is_some_and(crate::connection_steps::has_connection_step)).collect();
@@ -782,6 +835,8 @@ pub(crate) struct Build<'s> {
     pub(crate) contents_script: u8,
     // A live document's build (`htmlRunBuilt`): what it does as the page's own insertions do, none otherwise.
     live: Option<Live>,
+    // …and whether it paused, a custom element it constructed inserted, for the bindings to connect it before it goes on.
+    paused: bool,
 }
 
 // A live document parse's batch the engine builds: the document's `<html>`, `<head>` and `<body>` not taken yet, which
@@ -793,6 +848,8 @@ struct Live {
     // (…and whether the page observes mutations, each insertion and removal then queuing its childList record, as the
     // page's own do)
     observed: bool,
+    // (…whether custom elements are defined, whose constructors it runs as it makes their elements)
+    ce_defined: bool,
     skeleton: [Option<crate::dom::NodeId>; 3],
     made: std::collections::HashSet<crate::dom::NodeId>,
     inserted: Vec<crate::dom::NodeId>,
@@ -842,6 +899,64 @@ impl<'s> Build<'s> {
         self.attributes(scope, id, attrs, Vec::new());
         self.is_value(scope, id);
         id
+    }
+    // HTML "create an element for the token" where it will execute script — a live document's, whose window registry
+    // defines a custom element of the token's name: its constructor run now, as the parser makes it (a page's hook,
+    // which holds the document's throw-on-dynamic-markup-insertion counter while it runs) — not where the element goes
+    // into template contents, or under a node of the null registry. The element, and whether it is custom (a constructor
+    // that failed leaves an HTMLUnknownElement); None where no constructor runs. `rest` the steps after the token's.
+    fn construct(&mut self, scope: &mut v8::PinScope<'s, '_>, ns: i32, local: &str, handle: i32, rest: &[Operand]) -> Option<(crate::dom::NodeId, bool)> {
+        if !self.live.as_ref().is_some_and(|l| l.ce_defined) || namespace_of(ns) != html5ever::ns!(html) || !local.contains('-') {
+            return None;
+        }
+        if !crate::dom::dom(scope).arena.ce_reactions.defines(self.cid, local) {
+            return None;
+        }
+        let (parent, based) = insertion_parent(rest, handle)?;
+        let parent = match based {
+            // (…a foster parent: the table's parent, where it has one, else the element before it)
+            Some(prev) if prev >= 0 => crate::dom::realm(scope, self.cid).parent_of(self.node(parent)?).or_else(|| self.node(prev))?,
+            Some(_) => crate::dom::realm(scope, self.cid).parent_of(self.node(parent)?)?,
+            None => self.node(parent)?,
+        };
+        if self.in_template_contents(scope, parent) {
+            return None;
+        }
+        let registry = crate::dom::dom(scope).arena.get(parent).and_then(|n| n.link.handle().map(crate::node_handle::NodeHandle::registry));
+        if registry.is_some_and(|r| r == crate::ce_reactions::NULL || r == crate::ce_reactions::TRACKING) {
+            return None;
+        }
+        let hook = v8::String::new(scope, "__csimConstructParsedElement")?;
+        let global = scope.get_current_context().global(scope);
+        let hook = v8::Local::<v8::Function>::try_from(global.get(scope, hook.into())?).ok()?;
+        let name = v8::String::new(scope, local)?;
+        let doc: v8::Local<'_, v8::Value> = self.doc.map_or_else(|| v8::null(scope).into(), Into::into);
+        let made = hook.call(scope, global.into(), &[name.into(), doc])?;
+        let made = v8::Local::<v8::Array>::try_from(made).ok()?;
+        let element = made.get_index(scope, 0)?;
+        let custom = made.get_index(scope, 1).is_some_and(|c| c.is_true());
+        let id = crate::node_handle::nid_of(scope, element)?;
+        // (…held until a tree holds it, as every node the build made)
+        let held = crate::dom::dom(scope).arena.get(id).and_then(|n| crate::node_handle::holding(&n.link))?;
+        self.held.push(held);
+        if let Some(live) = self.live.as_mut() {
+            live.made.insert(id);
+        }
+        Some((id, custom))
+    }
+    // …and the token's attributes appended to what its constructor made — attributes it set kept, the first of a name
+    // taken — each an attributeChanged reaction of a custom one, run as it is made (the page's hook).
+    fn constructed(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId, attrs: Vec<(String, i32, String, String)>, custom: bool) {
+        let existing = crate::dom::realm(scope, self.cid).get(id).map_or_else(Vec::new, |n| n.attributes.clone());
+        self.attributes(scope, id, attrs, existing);
+        if !custom {
+            return;
+        }
+        let element = crate::dom::node_value(scope, Some(id));
+        let Some(hook) = v8::String::new(scope, "__csimParsedElementReactions") else { return };
+        let global = scope.get_current_context().global(scope);
+        let Some(hook) = global.get(scope, hook.into()).and_then(|h| v8::Local::<v8::Function>::try_from(h).ok()) else { return };
+        hook.call(scope, global.into(), &[element]);
     }
     // An HTML element's `is` attribute its `is` value — fixed as "create an element" makes it.
     pub(crate) fn is_value(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId) {
@@ -906,6 +1021,9 @@ impl<'s> Build<'s> {
             let arena = crate::dom::realm(scope, self.cid);
             if arena.is_element(child) && arena.parent_of(child) == Some(parent) {
                 live.inserted.push(child);
+                // (…a custom element it constructed: HTML "insert an element at the adjusted insertion location" pops
+                // the element queue it pushed, its connectedCallback before the next start tag's constructor — a pause)
+                self.paused |= live.made.contains(&child) && arena.get(child).is_some_and(|n| n.state & crate::dom::STATE_CUSTOM != 0);
             }
         }
         if contents && self.in_contents.insert(child) {
@@ -1022,9 +1140,8 @@ impl<'s> Build<'s> {
         frag
     }
 
-    // Take the parser's steps.
-    fn take(&mut self, scope: &mut v8::PinScope<'s, '_>, ops: Vec<Operand>) -> Option<()> {
-        let mut ops = ops.into_iter();
+    // Take the parser's steps — up to where it pauses (`paused`): the steps left.
+    fn take(&mut self, scope: &mut v8::PinScope<'s, '_>, mut ops: std::vec::IntoIter<Operand>) -> Option<std::vec::IntoIter<Operand>> {
         let int = |o: Option<Operand>| match o {
             Some(Operand::Int(i)) => Some(i),
             _ => None,
@@ -1037,7 +1154,7 @@ impl<'s> Build<'s> {
             let n = int(ops.next())?;
             (0..n).map(|_| Some((string(ops.next())?, int(ops.next())?, string(ops.next())?, string(ops.next())?))).collect()
         };
-        while let Some(op) = ops.next() {
+        while let Some(op) = (!self.paused).then(|| ops.next()).flatten() {
             let Operand::Int(op) = op else { return None };
             match op {
                 OP_ELEMENT => {
@@ -1045,12 +1162,20 @@ impl<'s> Build<'s> {
                     let list = attrs(&mut ops)?;
                     let contents = int(ops.next())?;
                     let reused = self.live.as_mut().and_then(|l| l.reuse(ns, &local));
-                    let el = match reused {
-                        Some(el) => {
+                    let constructed = match reused {
+                        None => self.construct(scope, ns, &local, handle, ops.as_slice()),
+                        Some(_) => None,
+                    };
+                    let el = match (reused, constructed) {
+                        (Some(el), _) => {
                             self.reset(scope, el, list);
                             el
                         }
-                        None => self.element(scope, ns, &local, list),
+                        (None, Some((el, custom))) => {
+                            self.constructed(scope, el, list, custom);
+                            el
+                        }
+                        (None, None) => self.element(scope, ns, &local, list),
                     };
                     self.set(handle, el);
                     if contents != 0 {
@@ -1159,7 +1284,7 @@ impl<'s> Build<'s> {
                 _ => return None,
             }
         }
-        Some(())
+        Some(ops)
     }
 }
 
@@ -1201,7 +1326,7 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         build.contents_script = crate::script::SCRIPT_ALREADY_STARTED;
         let root = build.make(scope, crate::dom::NodeData::of_kind(crate::dom::NodeKind::Fragment, Vec::new()));
         build.set(0, root);
-        if build.take(scope, parsed(tokenizer, html)).is_none() {
+        if build.take(scope, parsed(tokenizer, html).into_iter()).is_none() {
             return;
         }
         build.finish(scope, None);
@@ -1237,7 +1362,7 @@ fn html_parse_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         let doc = v8::Local::<v8::Object>::try_from(args.get(2)).ok().map(|d| v8::Local::new(scope, d));
         let template_doc = v8::Local::<v8::Object>::try_from(args.get(3)).ok().map(|d| v8::Local::new(scope, d)).or(doc);
         let mut build = Build::new(cid, doc, template_doc, vec![Some(document), None, None]);
-        if build.take(scope, parsed(tokenizer, html)).is_none() {
+        if build.take(scope, parsed(tokenizer, html).into_iter()).is_none() {
             return;
         }
         build.finish(scope, Some(document));
@@ -1287,6 +1412,7 @@ impl<'s> Build<'s> {
             script: crate::script::SCRIPT_ALREADY_STARTED,
             contents_script: 0,
             live: None,
+            paused: false,
         }
     }
     // The insertion steps of the engine's own over what no later insertion runs them for — a document's children, every

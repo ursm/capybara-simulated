@@ -95,6 +95,18 @@ pub(crate) struct Reactions {
     window_registries: HashMap<i32, u32>,
 }
 
+impl Reactions {
+    // Whether realm `realm`'s window registry defines an autonomous custom element named `name` — one the parser
+    // constructs as it makes it.
+    pub(crate) fn defines(&self, realm: i32, name: &str) -> bool {
+        let Some(&code) = self.window_registries.get(&realm) else { return false };
+        code.checked_sub(FIRST_REGISTRY)
+            .and_then(|i| self.registries.get(i as usize))
+            .and_then(Option::as_ref)
+            .is_some_and(|r| r.named.contains_key(name))
+    }
+}
+
 const DEPTH: usize = 0;
 const DEEPEST: usize = 1;
 const BACKUP: usize = 2;

@@ -351,6 +351,12 @@ pub(crate) fn bare(scope: &mut v8::PinScope<'_, '_>, nid: NodeId, doc: Option<v8
     held
 }
 
+// What holds a node's handle while the engine holds the node — one whose object the page made — or None where it has
+// none any longer.
+pub(crate) fn holding(link: &Link) -> Option<v8::cppgc::Persistent<NodeHandle>> {
+    link.0.as_ref().map(|w| v8::cppgc::Persistent::new(w)).filter(|p| p.get().is_some())
+}
+
 // The handle `value` wraps — through the Proxy a `<form>` is (its target is the node's object) — or None for anything
 // that is no node's object: the brand is checked first, as `unwrap` reads garbage from an object it never wrapped.
 pub(crate) fn handle_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<v8::cppgc::UnsafePtr<NodeHandle>> {
