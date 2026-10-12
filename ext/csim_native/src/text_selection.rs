@@ -47,9 +47,17 @@ const SELECT_INPUT_TYPES: [&str; 6] = ["text", "search", "tel", "url", "password
 
 // The input types `maxlength` cuts typing short in (HTML: the text-like ones; a textarea too).
 const MAXLENGTH_INPUT_TYPES: [&str; 6] = ["text", "search", "tel", "url", "email", "password"];
-// What typing into a control changed (`type_text`): its value, its selection.
+// What typing into a control changed (`type_text`): its value, its selection — and, above `TYPED_LENGTH_SHIFT`, how many
+// code units of the text went in.
 pub(crate) const TYPED_VALUE: u32 = 1;
 pub(crate) const TYPED_SELECTION: u32 = 2;
+const TYPED_LENGTH_SHIFT: u32 = 2;
+// Where typed text goes (`type_text`): at the selection, the caret at the value's end where none was ever set (the
+// user's keystrokes); over the whole value (a driver's fill); at the selection a script reads, its start where none was
+// set (execCommand, the clipboard).
+pub(crate) const TYPE_AT_CARET: u32 = 0;
+pub(crate) const TYPE_WHOLE: u32 = 1;
+pub(crate) const TYPE_AT_SELECTION: u32 = 2;
 // The editing keys a text control takes (`edit_control`) — the moves extending the selection with `EDIT_EXTEND` (Shift).
 const EDIT_BACKSPACE: u32 = 0;
 const EDIT_DELETE: u32 = 1;
@@ -107,25 +115,26 @@ impl RealmArena {
         len
     }
 
-    // The user typing `text` into the control `id`: what it inserts replacing its selection (the caret at its value's
-    // end where none was ever set) — or, `whole`, its value, as a driver's fill does — the text entry cursor after it —
+    // The user typing `text` into the control `id`: what it inserts replacing its selection (`at`: the caret at its
+    // value's end where none was ever set; its start, as a script reads it; or its whole value, as a driver's fill
+    // does) — the text entry cursor after it —
     // but no keystroke that leaves a number field's text no prefix of a scientific number being entered ("1e+1" takes
     // no second sign; "1.", "1e", "1e+" stand), and of the text no more than `maxlength` has room for where it applies
     // (a textarea, a text-like input): what the value keeps besides the selection is left whole, and a surrogate pair
     // goes in whole or not at all (Chrome: "abcde" at maxlength 5 takes no "X"; a script's longer value takes nothing,
     // and loses nothing). What it changed (`TYPED_*`); the value written is the engine's, the string the bindings held
-    // of it forgotten by the caller.
-    pub(crate) fn type_text(&mut self, id: NodeId, text: &[u16], whole: bool) -> u32 {
+    // of it forgotten by the caller — and how much of the text went in.
+    pub(crate) fn type_text(&mut self, id: NodeId, text: &[u16], at: u32) -> u32 {
         let Some(n) = self.get(id) else { return 0 };
         let current = self.relevant_value(n);
         let number = n.is_html_named("input") && n.input_type() == "number";
         let cuts = n.is_html_named("textarea") || (n.is_html_named("input") && MAXLENGTH_INPUT_TYPES.contains(&n.input_type()));
         let max = if cuts { n.plain_attr("maxlength").and_then(crate::validity::parse_non_negative) } else { None };
         let (sel, set) = self.text_selection(id);
-        let (start, end) = match (whole, set) {
-            (true, _) => (0, current.len()),
-            (false, true) => (sel.start as usize, sel.end as usize),
-            (false, false) => (current.len(), current.len()),
+        let (start, end) = match (at, set) {
+            (TYPE_WHOLE, _) => (0, current.len()),
+            (TYPE_AT_CARET, false) => (current.len(), current.len()),
+            _ => (sel.start as usize, sel.end as usize),
         };
         let (start, end) = (start.min(current.len()), end.min(current.len()));
         let mut text = text;
@@ -151,7 +160,7 @@ impl RealmArena {
         if self.set_text_selection(id, caret, caret, Direction::None) {
             changed |= TYPED_SELECTION;
         }
-        changed
+        changed | (text.len() as u32) << TYPED_LENGTH_SHIFT
     }
 
     // An editing key pressed in the control `id`, as Chrome takes it: Backspace / Delete remove the selection, or what
@@ -476,16 +485,16 @@ mod tests {
     }
 }
 
-// __dom.typeText(control, text, whole) -> what typing `text` into the control — over its whole value, `whole` — changed
-// (`type_text`'s `TYPED_*` bits).
+// __dom.typeText(control, text, at) -> what typing `text` into the control where `at` (`TYPE_*`) says changed, and how
+// much went in (`type_text`'s `TYPED_*` bits, the length above them).
 fn type_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let control = args.get(0);
     let Some(id) = crate::node_handle::nid_of(scope, control) else { return rv.set_uint32(0) };
     let text = crate::dom::utf16_arg(scope, args.get(1));
-    let whole = args.get(2).is_true();
+    let at = args.get(2).uint32_value(scope).unwrap_or(TYPE_AT_CARET);
     // (…in the control's realm, whatever realm's code asks: its style state is what the value moves)
     let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) else { return rv.set_uint32(0) };
-    let changed = crate::dom::realm(scope, cid).type_text(id, &text, whole);
+    let changed = crate::dom::realm(scope, cid).type_text(id, &text, at);
     if changed & TYPED_VALUE != 0 {
         crate::node_handle::forget_live_value(scope, control);
     }
