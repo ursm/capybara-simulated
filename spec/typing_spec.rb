@@ -108,13 +108,13 @@ RSpec.describe 'typing into a text control' do
   end
 
   # execCommand types at the selection a script reads — its start where none was set — and its `input` event's data is
-  # what went in: as much as `maxlength` has room for; insertText into a number field too.
+  # what went in: as much as `maxlength` has room for; insertText into a number field too, not a date's.
   it 'types an execCommand at the selection a script reads' do
     html = <<~HTML
-      <!doctype html><meta charset=utf-8><body><input id=i value=abc><textarea id=t>abc</textarea><input id=e type=email value=a@b><input id=m maxlength=3 value=ab><input id=n type=number>
+      <!doctype html><meta charset=utf-8><body><input id=i value=abc><textarea id=t>abc</textarea><input id=e type=email value=a@b><input id=m maxlength=3 value=ab><input id=n type=number><input id=d type=date>
     HTML
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
-    expect(s.evaluate_script(<<~JS)).to eq(['Xabc,1', 'Xabc,1', 'Qa@b,Q', 'abX,X', '5'])
+    expect(s.evaluate_script(<<~JS)).to eq(['Xabc,1', 'Xabc,1', 'Qa@b,Q', 'abX,X', '5', 'false,'])
       (() => {
         const $ = (q) => document.querySelector(q), R = [];
         let e = $('#i'); e.focus(); document.execCommand('insertText', false, 'X'); R.push([e.value, e.selectionStart].join());
@@ -122,6 +122,7 @@ RSpec.describe 'typing into a text control' do
         let d; e = $('#e'); e.focus(); e.addEventListener('input', (ev) => d = ev.data); document.execCommand('insertHTML', false, '<b>Q</b>'); R.push([e.value, d].join());
         let d2; e = $('#m'); e.focus(); e.setSelectionRange(2, 2); e.addEventListener('input', (ev) => d2 = ev.data); document.execCommand('insertText', false, 'XYZ'); R.push([e.value, d2].join());
         e = $('#n'); e.focus(); document.execCommand('insertText', false, '5'); R.push(e.value);
+        e = $('#d'); e.focus(); R.push([document.execCommand('insertText', false, '5'), e.value].join());
         return R;
       })()
     JS
