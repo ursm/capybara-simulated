@@ -12,6 +12,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "preActivate", pre_activate, context_id);
     crate::dom::register(scope, ns, "cancelActivation", cancel_activation, context_id);
     crate::dom::register(scope, ns, "activation", activation, context_id);
+    crate::dom::register(scope, ns, "invokerAction", invoker_action, context_id);
 }
 
 impl RealmArena {
@@ -159,5 +160,68 @@ fn activation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         }
     }
     let values = [v8::Integer::new_from_unsigned(scope, steps).into(), crate::dom::node_value(scope, form), crate::dom::node_value(scope, control)];
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+
+// The built-in commands of a button's `command` (HTML §4.10.6), those of a popover and those of a dialog.
+const POPOVER_COMMANDS: [&str; 3] = ["toggle-popover", "show-popover", "hide-popover"];
+const DIALOG_COMMANDS: [&str; 3] = ["close", "request-close", "show-modal"];
+// The input types a popover invoker is among: the button-like ones.
+const BUTTON_INPUT_TYPES: [&str; 4] = ["submit", "reset", "image", "button"];
+// What `invokerAction` answers an invoker does.
+const INVOKE_COMMAND: u32 = 1;
+const INVOKE_POPOVER: u32 = 2;
+
+// __dom.invokerAction(invoker, eventTarget) -> undefined, or `[kind, target, action]`: HTML's button activation for a
+// command or popover invoker, which a click runs for its activation target where that submitted or reset no form —
+// nothing for a disabled or disconnected one, nor for a button with a form owner unless its type is `button` (a submit,
+// reset or Auto one has the form's activation), nor an input with one unless it is a `button` input. A `<button
+// commandfor>` with a command (`INVOKE_COMMAND`): its target and the command — a built-in one of a popover or a dialog it
+// applies to (ASCII lowercased), or a custom one (`--` and more) as written — whose `command` event the bindings fire;
+// else a popover invoker (`INVOKE_POPOVER`): its popover and its `popovertargetaction` (toggle, show or hide) — but none
+// for a click inside that popover where the invoker contains it.
+fn invoker_action(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(invoker) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let event_target = crate::node_handle::nid_of(scope, args.get(1));
+    let Some(cid) = crate::dom::dom(scope).arena.get(invoker).map(|n| n.realm) else { return };
+    let arena = realm(scope, cid);
+    let Some(n) = arena.get(invoker) else { return };
+    if n.plain_attr("commandfor").is_none() && n.plain_attr("popovertarget").is_none() {
+        return;
+    }
+    let ty = n.plain_attr("type").unwrap_or("").to_ascii_lowercase();
+    let button = n.is_html_named("button");
+    if !button && !(n.is_html_named("input") && BUTTON_INPUT_TYPES.contains(&ty.as_str())) {
+        return;
+    }
+    if arena.is_actually_disabled(invoker) || !arena.is_connected(invoker) || (arena.form_owner(invoker).is_some() && ty != "button") {
+        return;
+    }
+    let answer = match button.then(|| arena.referenced_element(invoker, "commandfor")).flatten() {
+        Some(target) => {
+            let Some(raw) = n.plain_attr("command") else { return };
+            let command = if raw.starts_with("--") { raw.to_owned() } else { raw.to_ascii_lowercase() };
+            let t = arena.get(target);
+            let popover = POPOVER_COMMANDS.contains(&command.as_str()) && t.is_some_and(|t| t.plain_attr("popover").is_some());
+            let dialog = DIALOG_COMMANDS.contains(&command.as_str()) && t.is_some_and(|t| t.is_html_named("dialog"));
+            if !command.starts_with("--") && !popover && !dialog {
+                return;
+            }
+            (INVOKE_COMMAND, target, command)
+        }
+        None => {
+            let Some(popover) = arena.referenced_element(invoker, "popovertarget").filter(|&p| arena.get(p).is_some_and(|p| p.plain_attr("popover").is_some())) else { return };
+            if event_target.is_some_and(|t| arena.shadow_including_ancestor(popover, t)) && arena.shadow_including_ancestor(invoker, popover) {
+                return;
+            }
+            let action = n.plain_attr("popovertargetaction").unwrap_or("").to_ascii_lowercase();
+            let action = if matches!(action.as_str(), "show" | "hide") { action } else { "toggle".to_owned() };
+            (INVOKE_POPOVER, popover, action)
+        }
+    };
+    let (kind, target, action) = answer;
+    let target = crate::dom::node_value(scope, Some(target));
+    let Some(action) = v8::String::new(scope, &action) else { return };
+    let values = [v8::Integer::new_from_unsigned(scope, kind).into(), target, action.into()];
     rv.set(v8::Array::new_with_elements(scope, &values).into());
 }
