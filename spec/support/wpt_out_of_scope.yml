@@ -58923,17 +58923,6 @@ shadow-dom/Document-caretPositionFromPoint.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: document.caretPositionFromPoint() should return a CaretPosition at the specified
-    location pointing to an input element when the shadow tree is specified as an
-    argument.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: document.caretPositionFromPoint() should return a CaretPosition at the specified
-    location pointing to an input element which is the offsetNode.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 shadow-dom/accesskey.tentative.html:
 - name: button element with accesskey in the shadow tree of closed mode
   reason: Tentative accesskey activation, driven via testdriver input injection (WebDriver);

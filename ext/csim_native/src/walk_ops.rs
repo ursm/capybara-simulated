@@ -139,7 +139,8 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         arena.begin_layout(root, [basis.w, basis.h]);
         crate::geometry::store_layout(arena, &laid, &inline_nids, &anon);
         if let Some((rows, runs, texts, marks)) = geometry {
-            *arena.text_geometry.borrow_mut() = Some(crate::text_geometry::TextGeometry { pass: arena.layout_pass, rows, runs, texts, marks });
+            let geometry = crate::text_geometry::TextGeometry::new(arena, rows, runs, texts, marks, &inline_nids);
+            *arena.text_geometry.borrow_mut() = Some(geometry);
         }
     }
     // (…answered `true` — the boxes are the arena's now — or, for a pass that paints, as the painter's text pieces:

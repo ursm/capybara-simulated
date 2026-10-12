@@ -263,4 +263,37 @@ RSpec.describe 'stepping a caret by a character' do
     s.execute_script('getSelection().collapse(document.querySelector("#e p").firstChild, 2)')
     expect(desc.([:up])).to eq('abcd@0')
   end
+
+  # …over an empty line — to the place before the `<br>` ending it, or after the newline opening it — and through
+  # indentation a line holds (Chrome); and a click beside an editing host's text in a flex row types after it, not in
+  # the column beside (Chrome: `HelloX`).
+  it 'moves the caret onto empty lines and through indentation' do
+    s = session_for(<<~HTML)
+      <!DOCTYPE html><body style="margin:0;font:16px monospace"><textarea id=t style="font:16px monospace">abc
+
+      xyz</textarea><textarea id=u style="font:16px monospace">    abc
+          def</textarea>
+      <div id=e contenteditable><p>abc</p><p><br></p><p>xyz</p></div>
+      <div id=f contenteditable>line one<br>line two<br><br>line four</div>
+      <div style="display:flex"><div id=ed contenteditable style="width:400px;min-height:200px"><p style="margin:0">Hello</p></div><aside style="width:200px">Sidebar link</aside></div>
+    HTML
+    down = ->(id, js) {
+      el = s.find(:css, "##{id}")
+      el.click
+      s.execute_script(js)
+      el.send_keys(:down)
+      s.evaluate_script(%[(() => { const el = document.getElementById("#{id}"); if (el.localName === "textarea") return el.selectionStart; const s = getSelection(); return (s.focusNode.data ?? s.focusNode.nodeName) + "@" + s.focusOffset; })()])
+    }
+    expect(down.('t', 't.setSelectionRange(2, 2)')).to eq(4)
+    expect([down.('u', 'u.setSelectionRange(2, 2)'), down.('u', 'u.setSelectionRange(0, 0)')]).to eq([10, 8])
+    expect(down.('e', 'getSelection().collapse(document.querySelector("#e p").firstChild, 2)')).to eq('P@0')
+    expect(down.('f', 'getSelection().collapse(document.getElementById("f").childNodes[2], 3)')).to eq('DIV@4')
+    f = s.find(:css, '#f')
+    f.send_keys(:down)
+    expect(s.evaluate_script('(() => { const s = getSelection(); return s.focusNode.data + "@" + s.focusOffset; })()')).to eq('line four@3')
+    ed = s.find(:css, '#ed')
+    ed.click
+    ed.send_keys('X')
+    expect(s.evaluate_script('document.getElementById("ed").textContent')).to eq('HelloX')
+  end
 end

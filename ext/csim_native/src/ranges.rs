@@ -526,7 +526,11 @@ fn selected(arena: &RealmArena, s: Boundary, e: Boundary) -> Vec<Selected> {
     let mut whole: Option<NodeId> = None;
     use std::cmp::Ordering::*;
     while let Some(n) = cur {
-        if n == e.node || compare(arena, Boundary { node: n, offset: 0 }, e) != Some(Less) {
+        // (…into the end node too: its children before the end offset are in it)
+        if compare(arena, Boundary { node: n, offset: 0 }, e) != Some(Less) {
+            break;
+        }
+        if n == e.node && text_len(n).is_some() {
             break;
         }
         let len = arena.get(n).map_or(0, |d| if d.kind == crate::dom::NodeKind::Text { d.data.len() } else { d.children.len() }) as u32;
