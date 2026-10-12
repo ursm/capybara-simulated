@@ -355,8 +355,11 @@ struct Parse {
     standins: StandIns,
     ended: bool,
     // The nodes by handle — those the engine built (`htmlRunBuilt`) and those the bindings made replaying the steps
-    // it left them (`htmlSetHandles`).
+    // it left them (`htmlSetHandles`) — and what holds those the engine built while the parse goes on: one a script
+    // took out of the tree is the parser's still (an open element, the form element pointer), as the bindings' array
+    // holds theirs.
     handles: Vec<Option<crate::dom::NodeId>>,
+    held: Vec<v8::cppgc::Persistent<crate::node_handle::NodeHandle>>,
 }
 
 impl Parse {
@@ -494,7 +497,7 @@ fn html_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let all = parses(scope);
         all.next += 1;
         let id = all.next;
-        all.live.insert(id, Parse { tokenizer, input, set_aside: Vec::new(), standins, ended: false, handles: Vec::new() });
+        all.live.insert(id, Parse { tokenizer, input, set_aside: Vec::new(), standins, ended: false, handles: Vec::new(), held: Vec::new() });
         if args.get(9).is_true() {
             return rv.set(v8::Array::new_with_elements(scope, &[v8::Integer::new_from_unsigned(scope, id).into()]).into());
         }
@@ -618,6 +621,7 @@ fn html_run_built(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         let live = build.live.take().unwrap_or_default();
         if let Some(p) = parses(scope).live.get_mut(&id) {
             p.handles = std::mem::take(&mut build.nodes);
+            p.held.append(&mut build.held);
         }
         if built.is_none() {
             return;
@@ -901,7 +905,8 @@ impl<'s> Build<'s> {
         }
         let contents = self.in_template_contents(scope, parent);
         if let Some(live) = self.live.as_mut().filter(|_| !contents) {
-            if crate::dom::realm(scope, self.cid).is_element(child) {
+            let arena = crate::dom::realm(scope, self.cid);
+            if arena.is_element(child) && arena.parent_of(child) == Some(parent) {
                 live.inserted.push(child);
             }
         }
@@ -965,14 +970,19 @@ impl<'s> Build<'s> {
         self.contents.contains(&id)
     }
     // Whether `node` is in template contents: one the build made — or, a live document's, whose batches go on from where
-    // an earlier one left a template open, a tree whose root is a fragment with no host (a shadow root has one; the
-    // parser inserts into no other).
+    // an earlier one (or the bindings' replay) left a template open, one whose node document is not the page's: the
+    // inert one template contents are in (a fragment a script moved an open element into is the page's).
     fn in_template_contents(&self, scope: &mut v8::PinScope<'s, '_>, node: crate::dom::NodeId) -> bool {
-        if self.live.is_none() {
+        if self.live.is_none() || self.in_contents.contains(&node) {
             return self.in_contents.contains(&node);
         }
-        let arena = crate::dom::realm(scope, self.cid);
-        arena.get(arena.root_of(node)).is_some_and(|r| r.kind == crate::dom::NodeKind::Fragment && r.host.is_none())
+        let handle = crate::dom::realm(scope, self.cid).get(node).and_then(|n| n.link.handle().map(|h| h as *const crate::node_handle::NodeHandle));
+        // SAFETY: the node's handle lives while its node is in the arena, which this reads before anything allocates.
+        let document = handle.and_then(|h| unsafe { &*h }.document(scope));
+        match (document, self.doc) {
+            (Some(document), Some(page)) => !document.strict_equals(page.into()),
+            _ => false,
+        }
     }
     // `node` out of its parent — a live document's as any removal from it.
     fn take_out(&mut self, scope: &mut v8::PinScope<'s, '_>, node: crate::dom::NodeId) {
