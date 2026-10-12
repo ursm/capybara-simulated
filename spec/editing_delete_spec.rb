@@ -147,4 +147,28 @@ RSpec.describe 'deleting in an editing host' do
       ['<p>a</p><p>b</p>', 'b@0'], ['<p>a</p><p>b</p>', 'a@1'], '<p>a</p><p>b</p>', ['<p>ab</p>', 'ab@1'], island, nested
     ])
   end
+
+  # …and where the caret goes — what a "Z" typed after the deletion shows.
+  def typed(html, at, offset, key, to = nil)
+    deleted(html, at, offset, key, to)
+    session.find(:css, '#e').send_keys('Z')
+    session.evaluate_script("document.getElementById('e').innerHTML")
+  end
+
+  it 'keeps a block island nothing joins across, and puts the caret where the deletion leaves the line' do
+    island = '<div contenteditable="false">XX</div>'
+    expect([
+      typed("#{island}<p>b</p>", 'e.lastChild.firstChild', 0, :backspace),
+      typed("<p>a</p>#{island}", 'e.firstChild.firstChild', 1, :delete),
+      typed('<span contenteditable="false">X</span><p>bb</p>', 'e.lastChild.firstChild', 0, :backspace),
+      typed('aa<span contenteditable="false">X</span><p>bb</p>', 'e.lastChild.firstChild', 0, :backspace),
+      typed('<p>aa</p><p>bb</p>', 'e', 1, :delete, ['e.lastChild.firstChild', 1]),
+      typed("<p>a</p>#{island}<p>b</p>", 'e.firstChild.firstChild', 1, :delete),
+      deleted("aa<p>bb</p>\n", "e.querySelector('p').firstChild", 0, :backspace),
+      deleted('aa<p>bb</p><br>cc', "e.querySelector('p').firstChild", 0, :backspace)
+    ]).to eq([
+      "#{island}<p>Zb</p>", "<p>aZ</p>#{island}", '<p>Zbb</p>', 'aaZbb', '<p>aa</p><p>Zb</p>', '<p>aZb</p>', "aabb\n",
+      'aabb<br><br>cc'
+    ])
+  end
 end

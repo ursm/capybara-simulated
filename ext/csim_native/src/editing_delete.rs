@@ -132,6 +132,10 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
                 took = if block_atom(arena, whole) {
                     Took::Atom
                 } else if crate::rendered::is_inline_level(arena, whole) == Some(false) {
+                    // (…a block island only where an editable block on its far side joins across it: Chrome)
+                    if !arena.sibling(whole, if forward { 1 } else { -1 }).is_some_and(|b| joinable(arena, b)) {
+                        return None;
+                    }
                     Took::BlockIsland(parent, at)
                 } else {
                     Took::Step
@@ -186,11 +190,15 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     if !deleted && joint.is_none() {
         return;
     }
-    // (…the caret at the joint where the start is in no block the join kept; a block atom taken back, where it was)
+    // (…the caret at the joint where the start is between children or in no block the join kept; where nothing
+    // joined and the start is the place before the block that holds the end — a block atom taken back, a line's start
+    // — at the end, at what the deletion left of it)
+    let arena = realm(scope, cid);
     let start = match joint {
-        Some(joint) if !within(realm(scope, cid), start_block, sc) => joint,
-        _ if took == Took::Atom && !forward => (ec, eo),
-        _ => (sc, so),
+        Some(joint) if arena.is_element(sc) || !within(arena, start_block, sc) => joint,
+        Some(_) => (sc, so),
+        None if beside(arena, (sc, so), true).is_some_and(|n| within(arena, n, ec) && crate::rendered::is_inline_level(arena, n) == Some(false)) => (ec, 0),
+        None => (sc, so),
     };
     // (…the inline elements and the text the deletion emptied at either end removed, and a block it emptied held open)
     let Some(caret) = tidy(scope, cid, caller, steps, (start_block, end_block), start, ec, &mut changes) else { return };
@@ -214,7 +222,7 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 //   - the start's holds the end's (`aa<p>bb</p>`, a nested list's item): the end's block's content right after the
 //     start — after the inline elements it is in, at the start's block's level — and the end's block removed with the
 //     ancestors that leaves empty, short of the start's; a `<br>` after it where more of the line follows
-//     (`aa<p>bb</p>cc` is `aabb<br>cc`); none where the start is where the end's block's line starts;
+//     (`aa<p>bb</p>cc` is `aabb<br>cc`, `aa<p>bb</p><br>cc` `aabb<br><br>cc`); none where the start is where the end's block's line starts;
 //   - the end's holds the start's (`<p>aa</p>bb`): the inline content after the start's block, up to the next block or
 //     `<br>`, to the end of the start's — and that `<br>`, its line gone, removed.
 // The joint — the place the moved content starts at — where anything joined.
@@ -277,7 +285,10 @@ fn join<'s>(
         while let Some(p) = arena.parent_of(top).filter(|&p| p != parent && arena.get(p).is_some_and(|n| n.children.len() == 1)) {
             top = p;
         }
-        let after = arena.sibling(top, 1).filter(|&n| arena.parent_of(top) == Some(parent) && inline_content(arena, n));
+        let after = arena.sibling(top, 1).filter(|&n| {
+            arena.parent_of(top) == Some(parent)
+                && arena.get(n).is_some_and(|d| if d.kind == NodeKind::Text { d.data.iter().any(|&c| !matches!(c, 0x20 | 0x09 | 0x0A | 0x0C | 0x0D)) } else { d.is_html_named("br") || inline_content(arena, n) })
+        });
         let joint = if !kids.is_empty() && !lone_br {
             changes.push(crate::mutation::remove_all(scope, cid, caller, end_block, steps)?);
             Some(move_into(scope, cid, caller, steps, parent, before, &kids, changes)?)
