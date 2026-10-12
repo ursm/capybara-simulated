@@ -2038,8 +2038,6 @@ custom-elements/upgrading/upgrading-parser-created-element.html:
   not SameValue as the upgraded element
 - Upgrading a custom element whose constructor returns a Text node must throw
 - Upgrading a custom element whose constructor returns an Element must throw
-dom/events/Event-dispatch-on-disabled-elements.html:
-- Real clicks on disabled elements must not dispatch events.
 dom/events/EventListener-incumbent-global-1.sub.html:
 - "[harness] TIMEOUT"
 dom/events/EventListener-incumbent-global-2.sub.html:
@@ -5416,8 +5414,6 @@ selection/caret/move-around-generated-content.html:
   to the start of the first list item'
 - 'Moving caret between list items using arrow keys: arrow-down should move the caret
   to the third list item'
-- 'Moving caret between list items using arrow keys: caret should start at the beginning
-  of the first line'
 - 'Moving caret past the block-quote using arrow keys: arrow-down should move the
   caret to the end of the quote'
 - 'Moving caret past the block-quote using arrow keys: arrow-down should move the
@@ -5430,8 +5426,6 @@ selection/caret/move-around-generated-content.html:
   caret forward by one character'
 - 'Moving caret past the block-quote using arrow keys: arrow-up should move the caret
   to into the first line'
-- 'Moving caret past the block-quote using arrow keys: caret should start at the beginning
-  of the first line'
 selection/contenteditable/collapse.html:
 - Selection.collapse() must succeed across siblings
 - Selection.collapse() must succeed for the ancestor

@@ -1348,7 +1348,7 @@ module Capybara
             submit_form_handle(action['formHandle'], action['submitter'], action['entryList'])
           end
         when 'download'
-          download_link(resolve_against_current(action['url'].to_s), action['filename'].to_s)
+          save_download(action['url'].to_s, action['filename'].to_s)
         end
       end
 
@@ -1983,8 +1983,11 @@ module Capybara
       def consume_pending_download
         pending = @runtime.call('__csimTakePendingDownload')
         return unless pending.is_a?(Hash) && pending['url']
-        url = pending['url'].to_s
-        filename = pending['filename'].to_s
+        save_download(pending['url'].to_s, pending['filename'].to_s)
+      end
+
+      # A download's resource saved to `downloads_directory`: a `blob:` URL's bytes from the page, anything else fetched.
+      def save_download(url, filename)
         if url.start_with?('blob:')
           content = @runtime.call('__csimReadBlobBytes', url)
           return if content.nil?

@@ -177,4 +177,32 @@ RSpec.describe 'stepping a caret by a character' do
     JS
     expect(got).to eq(['st uv@5', 'ab cd@0', 'ab cd@0', 'st uv@5'])
   end
+
+  # Focusing an editing host with no selection in it puts the caret at its first caret position (caret.rs
+  # `caret_first`): its first rendered character, white space a line starts with collapsed away; before its first
+  # `<br>` or image; its own start where it has none. A selection in it already stays.
+  it 'puts the caret at the first caret position of an editing host it focuses' do
+    s = session_for(<<~HTML)
+      <!DOCTYPE html><body><div id=a contenteditable><p>abc</p><p>def</p></div><div id=b contenteditable><p><br></p></div>
+      <div id=c contenteditable>  <b>x</b>yz</div><div id=d contenteditable><img src="data:,"><span>q</span></div>
+      <div id=e contenteditable></div><div id=g contenteditable><p>abc</p><p>def</p></div>
+    HTML
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        #{focus_js}
+        const out = [];
+        for (const id of ['a', 'b', 'c', 'd', 'e']) {
+          getSelection().removeAllRanges();
+          document.getElementById(id).focus();
+          out.push(desc());
+        }
+        document.activeElement.blur();
+        getSelection().collapse(document.querySelector('#g p + p').firstChild, 2);
+        document.getElementById('g').focus();
+        out.push(desc());
+        return out;
+      })()
+    JS
+    expect(got).to eq(['abc@0', 'P@0', 'x@0', 'DIV@0', 'DIV@0', 'def@2'])
+  end
 end

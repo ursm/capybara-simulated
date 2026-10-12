@@ -61,4 +61,64 @@ RSpec.describe 'click activation' do
     ])
     expect(s.evaluate_script('document.getElementById("c2").checked')).to be(false)
   end
+
+  def page_session(pages)
+    app = lambda {|env|
+      body = pages[env['PATH_INFO']] || "<p id=echo>#{env['PATH_INFO']}?#{env['QUERY_STRING']}</p>"
+      [200, {'content-type' => 'text/html; charset=utf-8'}, [body]]
+    }
+    simulated_session(app)
+  end
+
+  # A label passes the user's click on with its point: an image button labeled so submits where in it that point is —
+  # Chrome, clicking the label 10px in and 12px down: `im.x=-90&im.y=-88`.
+  it "submits an image button at the point of its label's click" do
+    s = page_session('/' => <<~HTML)
+      <!DOCTYPE html><body style="margin:0"><form action="/sub"><label id=l style="display:block;width:200px;height:40px">L<input
+      type=image name=im src="data:," style="position:absolute;left:100px;top:100px;width:20px;height:20px"></label></form>
+    HTML
+    s.visit '/'
+    s.find(:css, '#l').click(x: -90, y: -8)
+    expect(s.find(:css, '#echo').text).to eq('/sub?im.x=-90&im.y=-88')
+  end
+
+  # A link to "" reloads the page, a Shift click opens it in a new window — Chrome's.
+  it 'reloads for an empty href, and opens a window for a Shift click' do
+    s = page_session('/' => '<!DOCTYPE html><a id=e href="">empty</a><a id=o href="/other">other</a><script>window.mark = 1</script>')
+    s.visit '/'
+    s.execute_script('window.mark = 2')
+    s.find(:css, '#e').click
+    expect(s.evaluate_script('window.mark')).to eq(1)
+    s.find(:css, '#o').click(:shift)
+    expect([s.current_path, s.windows.size]).to eq(['/', 2])
+  end
+
+  # Capybara's check / uncheck / choose click the control as a user's pointer does (Selenium's), and only where that
+  # changes it; a required checkbox the user unchecked matches :user-invalid (Chrome, two real clicks). A disabled one a
+  # user clicks gets no click at all (Chrome).
+  it 'checks and unchecks with a pointer click, and clicks no disabled control' do
+    s = page_session('/' => <<~HTML)
+      <!DOCTYPE html><form><label>C <input type=checkbox id=c required></label><label>R <input type=radio name=r id=r></label>
+      <input type=checkbox id=d disabled></form>
+      <script>
+        window.log = [];
+        for (const t of ['click', 'input', 'change', 'keydown']) {
+          document.addEventListener(t, (e) => log.push(t + ':' + e.target.id + (t === 'click' ? ':' + [e.detail, e.pointerType] : '')), true);
+        }
+      </script>
+    HTML
+    s.visit '/'
+    taken = -> { s.evaluate_script('window.log.splice(0)') }
+    s.check('C')
+    expect(taken.call).to eq(['click:c:1,mouse', 'input:c', 'change:c'])
+    s.check('C')
+    expect(taken.call).to eq([])
+    s.uncheck('C')
+    expect([taken.call, s.evaluate_script('c.matches(":user-invalid")')]).to eq([['click:c:1,mouse', 'input:c', 'change:c'], true])
+    s.choose('R')
+    s.choose('R')
+    expect(taken.call).to eq(['click:r:1,mouse', 'input:r', 'change:r'])
+    s.find(:css, '#d').click
+    expect([taken.call, s.evaluate_script('d.checked')]).to eq([[], false])
+  end
 end

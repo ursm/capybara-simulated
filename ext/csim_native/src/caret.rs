@@ -112,6 +112,29 @@ impl RealmArena {
         None
     }
 
+    // The first caret position in `root` (the last, with `end`): where focusing an editing host with no selection in it
+    // puts the caret (Chrome), and where WebDriver's keys sent to a contenteditable element that does not have focus
+    // start, "after any child content". The first character it renders (the last's end) — white space a line starts
+    // (ends) with collapsed away — or the place before its first `<br>` (its last), beside its first atom (its last), or
+    // `root`'s start (end) where it has none: `<div contenteditable>  <b>x</b>` at `x`'s start, `<p><br></p>` at the
+    // `<p>`'s either way.
+    pub(crate) fn caret_edge(&self, engine: &mut StyleEngine, now: f64, root: NodeId, end: bool) -> (NodeId, u32) {
+        let edge = if end { self.get(root).map_or(0, |n| if is_text(n) { n.data.len() } else { n.children.len() }) as u32 } else { 0 };
+        let Some(mut walk) = self.walk(engine, now, root, edge, !end) else { return (root, edge) };
+        // (…never out of `root`)
+        walk.host = Some(root);
+        walk.space_seen = true;
+        for pass in walk {
+            match pass {
+                Pass::Char { leaf, from, .. } => return (leaf, from),
+                Pass::Br { parent, from, to } => return (parent, if end { to } else { from }),
+                Pass::Atom { parent, from, .. } => return (parent, from),
+                Pass::LineEnd | Pass::Editable => {}
+            }
+        }
+        (root, edge)
+    }
+
     // `Selection.modify` by a word, as Chrome moves: past the white space, then to the end (the start, back) of the word
     // or the punctuation there (`word_length`); an atom is one. Across a line's end before any, to the edge of what is
     // past it: the next paragraph's start (the last's end, back) — not past an editing host, from outside one.
@@ -153,14 +176,27 @@ impl RealmArena {
         Some((leaf, to))
     }
 
-    // Home / End: the caret at the start (end, with `end`) of the block holding `node` — its first (last) caret stop, or
-    // the block itself where it has none (an empty paragraph).
-    pub(crate) fn caret_block_edge(&self, node: NodeId, end: bool) -> Option<(NodeId, u32)> {
-        let block = self.block_of(node)?;
-        let leaf = self.caret_leaf(block, end).unwrap_or(block);
-        let n = self.get(leaf)?;
-        let offset = if !end { 0 } else if is_text(n) { n.data.len() } else { n.children.len() };
-        Some((leaf, offset as u32))
+    // Home / End: the caret at the start (end, with `end`) of the block holding `node` in its editing host — the host
+    // itself at most (`<span contenteditable>` its own) — its first (last) caret position (`caret_edge`).
+    pub(crate) fn caret_block_edge(&self, engine: &mut StyleEngine, now: f64, node: NodeId, end: bool) -> Option<(NodeId, u32)> {
+        engine.flush(self, now);
+        let n = self.get(node)?;
+        let element = if n.kind == NodeKind::Element { node } else { n.parent? };
+        let host = self.editing_host(element);
+        let styled = crate::style::primary_style(self, element).is_some();
+        let mut at = element;
+        let block = loop {
+            let e = self.get(at)?;
+            let block = if styled { crate::rendered::is_block_level(self, at) } else { crate::rendered::is_block_tag(&e.local_name) };
+            if block || Some(at) == host {
+                break at;
+            }
+            match e.parent.filter(|&p| self.is_element(p)) {
+                Some(p) => at = p,
+                None => break at,
+            }
+        };
+        Some(self.caret_edge(engine, now, block, end))
     }
 
     // A double click's word: from (`node`, `offset`) — or, where `node` is no text, its first non-empty text leaf's
@@ -515,6 +551,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "caretWordStep", caret_word_step, context_id);
     crate::dom::register(scope, ns, "caretBlockEdge", caret_block_edge, context_id);
     crate::dom::register(scope, ns, "caretWord", caret_word, context_id);
+    crate::dom::register(scope, ns, "caretEdge", caret_edge, context_id);
 }
 
 // [nodes, offsets…] for points of `nodes` — the nodes as `nodes_value` answers them.
@@ -544,12 +581,12 @@ fn step_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     }
 }
 
-// __dom.caretBlockEdge(nid, end) -> [[node], offset] (`caret_block_edge`), or undefined for no block.
+// __dom.caretBlockEdge(nid, end, now) -> [[node], offset] (`caret_block_edge`), or undefined.
 fn caret_block_edge(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(node) = nid_arg(scope, &args, 0) else { return };
     let end = args.get(1).is_true();
     let cid = crate::dom::realm_id(scope, &args);
-    if let Some((to, at)) = crate::dom::realm(scope, cid).caret_block_edge(node, end) {
+    if let Some((to, at)) = crate::rendered::with_engine(scope, &args, 2, |engine, arena, now| arena.caret_block_edge(engine, now, node, end)).flatten() {
         rv.set(points(scope, cid, &[to], &[at]));
     }
 }
@@ -561,5 +598,15 @@ fn caret_word(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let cid = crate::dom::realm_id(scope, &args);
     if let Some((s, so, e, eo)) = crate::dom::realm(scope, cid).caret_word(node, offset) {
         rv.set(points(scope, cid, &[s, e], &[so, eo]));
+    }
+}
+
+// __dom.caretEdge(nid, end, now) -> [[node], offset] (`caret_edge`), or undefined where the realm has no style engine.
+fn caret_edge(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(root) = nid_arg(scope, &args, 0) else { return };
+    let end = args.get(1).is_true();
+    let cid = crate::dom::realm_id(scope, &args);
+    if let Some((to, at)) = crate::rendered::with_engine(scope, &args, 2, |engine, arena, now| arena.caret_edge(engine, now, root, end)) {
+        rv.set(points(scope, cid, &[to], &[at]));
     }
 }
