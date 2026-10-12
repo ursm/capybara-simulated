@@ -80,6 +80,21 @@ impl RealmArena {
     }
 }
 
+// The block container a place in `host` is in (`edit_ancestor`), entering an element place's child at its offset with
+// `descend`; …the list item in an `<ol>` / `<ul>`; …and the `<blockquote>` at or above `from` — none the host.
+pub(crate) fn block_container_of(arena: &RealmArena, host: NodeId, node: NodeId, offset: u32, descend: bool) -> Option<NodeId> {
+    arena.edit_ancestor(host, node, offset, descend, &|id| is_block_container(arena, id))
+}
+pub(crate) fn list_item_of(arena: &RealmArena, host: NodeId, node: NodeId, offset: u32) -> Option<NodeId> {
+    arena.edit_ancestor(host, node, offset, false, &|id| is_list_item(arena, id))
+}
+pub(crate) fn blockquote_of(arena: &RealmArena, host: NodeId, from: NodeId) -> Option<NodeId> {
+    arena.edit_ancestor(host, from, 0, false, &|id| tag_is(arena, id, &|t| t == "blockquote"))
+}
+fn is_list_item(arena: &RealmArena, id: NodeId) -> bool {
+    tag_is(arena, id, &|t| t == "li") && arena.parent_of(id).is_some_and(|p| tag_is(arena, p, &|t| t == "ol" || t == "ul"))
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "editAncestor", edit_ancestor_op, context_id);
     crate::dom::register(scope, ns, "editCoveredText", edit_covered_text_op, context_id);
@@ -100,7 +115,7 @@ fn edit_ancestor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     let found = arena.edit_ancestor(host, node, offset, descend, &|id| match kind {
-        LIST_ITEM => tag_is(arena, id, &|t| t == "li") && arena.parent_of(id).is_some_and(|p| tag_is(arena, p, &|t| t == "ol" || t == "ul")),
+        LIST_ITEM => is_list_item(arena, id),
         BLOCKQUOTE => tag_is(arena, id, &|t| t == "blockquote"),
         _ => is_block_container(arena, id),
     });

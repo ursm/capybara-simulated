@@ -135,41 +135,44 @@ fn heading(arena: &RealmArena, id: NodeId) -> bool {
     arena.get(id).is_some_and(|n| ["h1", "h2", "h3", "h4", "h5", "h6"].iter().any(|t| n.is_html_named(t)))
 }
 
-// One insertion's state: the host's realm, the realm whose code inserts, the bindings' steps of a change of children,
-// and the host; the changes of children it makes, the elements it copies, and what holds the nodes it makes
-// until a tree does.
-struct Edit<'s, 'a> {
-    cid: i32,
-    caller: i32,
-    steps: v8::Local<'s, v8::Array>,
-    host: NodeId,
-    changes: &'a mut Vec<Change>,
-    copies: &'a mut BindingsSteps,
-    held: &'a mut Vec<v8::cppgc::Persistent<NodeHandle>>,
+// One edit's state — an insertion's, or an editing command's (editing_commands.rs): the host's realm, the realm whose code
+// edits, the bindings' steps of a change of children, and the host; the changes of children it makes, the elements it
+// copies, and what holds the nodes it makes until a tree does.
+pub(crate) struct Edit<'s, 'a> {
+    pub(crate) cid: i32,
+    pub(crate) caller: i32,
+    pub(crate) steps: v8::Local<'s, v8::Array>,
+    pub(crate) host: NodeId,
+    pub(crate) changes: &'a mut Vec<Change>,
+    pub(crate) copies: &'a mut BindingsSteps,
+    pub(crate) held: &'a mut Vec<v8::cppgc::Persistent<NodeHandle>>,
 }
 
 impl<'s> Edit<'s, '_> {
-    fn insert(&mut self, scope: &mut v8::PinScope<'_, '_>, parent: NodeId, nodes: &[NodeId], before: Option<NodeId>) -> Option<()> {
+    pub(crate) fn insert(&mut self, scope: &mut v8::PinScope<'_, '_>, parent: NodeId, nodes: &[NodeId], before: Option<NodeId>) -> Option<()> {
         self.changes.push(crate::mutation::insert(scope, self.cid, self.caller, parent, nodes, before, self.steps)?);
         Some(())
     }
-    fn remove(&mut self, scope: &mut v8::PinScope<'_, '_>, node: NodeId) -> Option<()> {
+    pub(crate) fn remove(&mut self, scope: &mut v8::PinScope<'_, '_>, node: NodeId) -> Option<()> {
         self.changes.push(crate::mutation::remove(scope, self.cid, self.caller, node, self.steps)?);
         Some(())
     }
-    // `nodes` out of where they are, into `parent` at its end.
-    fn move_into(&mut self, scope: &mut v8::PinScope<'_, '_>, parent: NodeId, nodes: &[NodeId]) -> Option<()> {
+    // `nodes` out of where they are, into `parent` at its end — or before `before`.
+    pub(crate) fn move_into(&mut self, scope: &mut v8::PinScope<'_, '_>, parent: NodeId, nodes: &[NodeId]) -> Option<()> {
+        self.move_before(scope, parent, nodes, None)
+    }
+    pub(crate) fn move_before(&mut self, scope: &mut v8::PinScope<'_, '_>, parent: NodeId, nodes: &[NodeId], before: Option<NodeId>) -> Option<()> {
         for &n in nodes {
             if realm(scope, self.cid).parent_of(n).is_some() {
                 self.remove(scope, n)?;
             }
         }
         if !nodes.is_empty() {
-            self.insert(scope, parent, nodes, None)?;
+            self.insert(scope, parent, nodes, before)?;
         }
         Some(())
     }
-    fn element(&mut self, scope: &mut v8::PinScope<'_, '_>, near: NodeId, name: &str) -> NodeId {
+    pub(crate) fn element(&mut self, scope: &mut v8::PinScope<'_, '_>, near: NodeId, name: &str) -> NodeId {
         let (id, held) = make_element(scope, self.cid, self.caller, near, name);
         self.held.push(held);
         id
@@ -354,7 +357,7 @@ impl<'s> Edit<'s, '_> {
 
     // A place made one between children: a text there split at it (character_data.rs `split_text`), where it is inside
     // one. The parent, and the child after the place.
-    fn split_at(&mut self, scope: &mut v8::PinScope<'_, '_>, (node, offset): (NodeId, u32)) -> Option<(NodeId, Option<NodeId>)> {
+    pub(crate) fn split_at(&mut self, scope: &mut v8::PinScope<'_, '_>, (node, offset): (NodeId, u32)) -> Option<(NodeId, Option<NodeId>)> {
         let arena = realm(scope, self.cid);
         let n = arena.get(node)?;
         if n.kind != NodeKind::Text {

@@ -37,6 +37,7 @@ mod document_encoding;
 mod dom;
 mod dom_matrix;
 mod editing;
+mod editing_commands;
 mod editing_delete;
 mod editing_insert;
 mod element_state;
