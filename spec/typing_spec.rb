@@ -154,4 +154,21 @@ RSpec.describe 'typing into a text control' do
       ["ab cd\nef gh", 6, 6], ["ab cd\nef gh", 6, 6], ["ab cdef gh", 5, 5], ['abc df', 5, 5]
     ])
   end
+
+  # `beforeinput` comes for every editing keystroke, `input` only where the value changed: not for a Backspace at the
+  # start, a Delete at the end, a keystroke `maxlength` or a number field's text refuses (Chrome).
+  it 'fires input only where the value changed' do
+    html = '<!DOCTYPE html><input id=i value=ab><input id=m maxlength=2 value=ab><input id=n type=number value=1>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
+    s.execute_script("window.log = []; for (const id of ['i', 'm', 'n']) for (const t of ['beforeinput', 'input']) document.getElementById(id).addEventListener(t, (e) => log.push(id + ':' + t + ':' + e.inputType));")
+    run = ->(id, from, *keys) {
+      s.execute_script("(() => { const e = document.getElementById('#{id}'); e.focus(); if (e.type !== 'number') e.setSelectionRange(#{from}, #{from}); window.log = []; })()")
+      s.find(:css, "##{id}").send_keys(*keys)
+      s.evaluate_script('window.log')
+    }
+    expect([run.('i', 0, :backspace), run.('i', 2, :delete), run.('m', 2, 'x'), run.('n', 0, :end, 'e', '-', '-')]).to eq([
+      ['i:beforeinput:deleteContentBackward'], ['i:beforeinput:deleteContentForward'], ['m:beforeinput:insertText'],
+      %w[n:beforeinput:insertText n:input:insertText n:beforeinput:insertText n:input:insertText n:beforeinput:insertText]
+    ])
+  end
 end
