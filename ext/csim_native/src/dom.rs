@@ -2072,6 +2072,8 @@ pub(crate) struct Dom {
     // arena object is held — and the handle of the one it is making (node_handle.rs `object_of`, `construct`).
     pub(crate) factories: std::collections::HashMap<i32, v8::Weak<v8::Function>>,
     pub(crate) wrap_pending: Option<v8::cppgc::Persistent<crate::node_handle::NodeHandle>>,
+    // Whether a factory threw (at the stack's limit, say) since `nodes_value` began asking for objects.
+    pub(crate) factory_threw: bool,
 }
 
 // The isolate's slots go after V8 has disposed it (`OwnedIsolate`'s drop), and a weak handle's drop resets its node,
@@ -2120,9 +2122,11 @@ pub(crate) fn nodes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, ids: &
         ids.iter().map(|&id| arena.get(id).and_then(|n| crate::node_handle::held(&n.link))).collect();
     // (…the objects read before anything is allocated: a collection in between could take a handle)
     let mut objects: Vec<Option<v8::Local<'s, v8::Object>>> = held.iter().map(|h| h.as_ref().and_then(|h| h.get(scope))).collect();
-    // (…and the objects of nodes the engine made, which the realm's factory makes now: node_handle.rs `object_of`)
+    // (…and the objects of nodes the engine made, which the realm's factory makes now: node_handle.rs `object_of` —
+    // none past one that threw, whose exception is what the op ends with)
+    dom(scope).factory_threw = false;
     for (k, &id) in ids.iter().enumerate() {
-        if objects[k].is_none() && held[k].is_some() {
+        if objects[k].is_none() && held[k].is_some() && !dom(scope).factory_threw {
             objects[k] = crate::node_handle::object_of(scope, id);
         }
     }

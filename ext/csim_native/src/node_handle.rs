@@ -428,7 +428,10 @@ pub(crate) fn object_of<'s>(scope: &mut v8::PinScope<'s, '_>, id: NodeId) -> Opt
     crate::dom::dom(scope).wrap_pending = Some(link);
     let undefined = v8::undefined(scope).into();
     let made = factory.call(scope, undefined, &args);
-    crate::dom::dom(scope).wrap_pending = None;
+    let d = crate::dom::dom(scope);
+    d.wrap_pending = None;
+    // (…a factory that threw — its exception the page's now — noted: no other is called before the op returns)
+    d.factory_threw |= made.is_none();
     made.and_then(|v| v8::Local::<v8::Object>::try_from(v).ok())
 }
 fn held_of(handle: &v8::cppgc::Persistent<NodeHandle>) -> Option<HeldObject> {
