@@ -536,8 +536,8 @@ const OBSERVED: u32 = 1 << 2;
 
 // Whether the engine leaves a live document's batch of `ops` to the bindings: one where the parser runs page code or
 // steps of the bindings' own as it makes or inserts a node — a customized built-in's (`ce_defined`: an `is`), which the
-// bindings upgrade as they connect it, a declarative shadow root, a `<details>` (its name group closed as each is inserted), a
-// `<selectedcontent>`, a `customelementregistry` attribute — or one that gives a document a second doctype.
+// bindings upgrade as they connect it, a declarative shadow root, a `<selectedcontent>`, a `customelementregistry`
+// attribute — or one that gives a document a second doctype.
 fn declines(ops: &[Operand], ce_defined: bool, has_doctype: bool) -> bool {
     let int = |k: usize| match ops.get(k) {
         Some(Operand::Int(v)) => Some(*v),
@@ -557,7 +557,7 @@ fn declines(ops: &[Operand], ce_defined: bool, has_doctype: bool) -> bool {
         match op {
             OP_ELEMENT => {
                 let (ns, local, n) = (int(i + 2).unwrap_or(0), string(i + 3).unwrap_or(""), int(i + 4).unwrap_or(0).max(0) as usize);
-                if (namespace_of(ns) == html5ever::ns!(html) && matches!(local, "details" | "selectedcontent")) || refused(i + 5, n) {
+                if (namespace_of(ns) == html5ever::ns!(html) && local == "selectedcontent") || refused(i + 5, n) {
                     return true;
                 }
             }
@@ -1034,6 +1034,14 @@ impl<'s> Build<'s> {
             }
         }
         self.script_made(scope, child, contents);
+        // (…an open details element with a name closed where its tree has another of its name group open: its
+        // insertion steps, HTML "ensure details exclusivity by closing the given element if needed" — the bindings
+        // remove its `open` after, as each insertion in turn would have)
+        let arena = crate::dom::realm(scope, self.cid);
+        let open_named = arena.get(child).is_some_and(|n| n.is_html_named("details") && n.plain_attr("open").is_some() && n.plain_attr("name").is_some_and(|v| !v.is_empty()));
+        if open_named && !arena.open_details_in_group(child).is_empty() {
+            self.flag(child, BUILT_CLOSED);
+        }
     }
     // What the parser making `node` gives it, a script's flags: no longer "force async", and the build's own — in
     // template `contents` (`contents_script`) or out of them (`script`).
@@ -1288,20 +1296,14 @@ impl<'s> Build<'s> {
     }
 }
 
-// Whether markup may hold a `<details>`: its insertion steps close the others of its name group open as it is inserted,
-// each in turn — which the build, running the bindings' steps after, would not keep the order of.
-fn has_details(html: &str) -> bool {
-    html.as_bytes().windows(8).any(|w| w[0] == b'<' && w[1..].eq_ignore_ascii_case(b"details"))
-}
-
 // __dom.htmlParseFragment(html, wellFormed, contextNs, contextLocalName, formNid, quirks, document, templateDocument)
 // -> [count, nodes…, element, names, flags, …], or undefined where the engine leaves it to the bindings: HTML's fragment
 // parsing algorithm in the context of an element (its namespace as `ns_code` numbers it, its local name; the nearest form
 // its form element pointer, -1 for none; its document's mode, as `htmlParse` takes it), built by the engine — the nodes
 // in `document`, those in template contents in `templateDocument` — and answered as the parse's top-level nodes, out
 // of any parent, then the elements the bindings have steps for (`BUILT_*`), each with the names of its attributes whose
-// steps are theirs (undefined for none). Left to the bindings: markup with a lone surrogate, a `customelementregistry`
-// attribute, or a `<details>` (`has_details`).
+// steps are theirs (undefined for none). Left to the bindings: markup with a lone surrogate or a `customelementregistry`
+// attribute.
 fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     parser_op(scope, None, &mut rv, &[-1], |scope, rv| {
         let mut standins = StandIns::default();
@@ -1375,9 +1377,9 @@ fn html_parse_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 }
 
 // Whether the engine builds a parse of `html`: one with no lone surrogate (the stand-ins' text is the bindings'), no
-// `customelementregistry` attribute (a null registry propagated down the parse), no `<details>` (`has_details`).
+// `customelementregistry` attribute (a null registry propagated down the parse).
 fn buildable(html: &str, standins: &StandIns) -> bool {
-    standins.base.is_none() && !html.contains("customelementregistry") && !has_details(html)
+    standins.base.is_none() && !html.contains("customelementregistry")
 }
 // A document mode as `htmlParse` numbers it.
 fn quirks_mode(code: Option<i32>) -> QuirksMode {
