@@ -67,6 +67,10 @@ const EDIT_HOME: u32 = 4;
 const EDIT_END: u32 = 5;
 const EDIT_TEXT_START: u32 = 6;
 const EDIT_TEXT_END: u32 = 7;
+const EDIT_WORD_LEFT: u32 = 8;
+const EDIT_WORD_RIGHT: u32 = 9;
+const EDIT_WORD_BACKSPACE: u32 = 10;
+const EDIT_WORD_DELETE: u32 = 11;
 const EDIT_EXTEND: u32 = 16;
 
 // Why `setRangeText()` refused.
@@ -168,8 +172,9 @@ impl RealmArena {
     // flag, which go whole ("é" leaves "e"; "👍🏽" nothing); ArrowLeft / ArrowRight collapse a selection to its start /
     // end, or move the caret by a grapheme cluster; Home / End go to the start / end of the line the caret is on (a
     // textarea's — its value's line, between line feeds — or an input's whole value), Ctrl+Home / Ctrl+End to the
-    // value's; and with `EDIT_EXTEND` (Shift) the moves take the selection's focus there, its anchor staying. What it
-    // changed (`TYPED_*`).
+    // value's; Ctrl+ArrowLeft / Ctrl+ArrowRight go a word back / on (`word_edge`), Ctrl+Backspace / Ctrl+Delete remove
+    // up to there (at a line's start, its line feed alone); and with `EDIT_EXTEND` (Shift) the moves take the
+    // selection's focus there, its anchor staying. What it changed (`TYPED_*`).
     pub(crate) fn edit_control(&mut self, id: NodeId, edit: u32) -> u32 {
         let Some(n) = self.get(id) else { return 0 };
         let value = self.relevant_value(n);
@@ -192,13 +197,23 @@ impl RealmArena {
                 EDIT_END => line_end(focus),
                 EDIT_TEXT_START => 0,
                 EDIT_TEXT_END => len,
+                EDIT_WORD_LEFT => word_edge(&value, focus, false),
+                EDIT_WORD_RIGHT => word_edge(&value, focus, true),
                 _ => return 0,
             };
             let (from, until, direction) = if to < anchor { (to, anchor, Direction::Backward) } else { (anchor, to, Direction::Forward) };
             return if self.set_text_selection(id, from as u32, until as u32, direction) { TYPED_SELECTION } else { 0 };
         }
         let (removed, caret) = match key {
-            EDIT_BACKSPACE | EDIT_DELETE if end > start => (Some(start..end), start),
+            EDIT_BACKSPACE | EDIT_DELETE | EDIT_WORD_BACKSPACE | EDIT_WORD_DELETE if end > start => (Some(start..end), start),
+            EDIT_WORD_BACKSPACE if start > 0 => {
+                let from = if value[start - 1] == 0x0A { start - 1 } else { word_edge(&value, start, false) };
+                (Some(from..start), from)
+            }
+            EDIT_WORD_DELETE if start < len => (Some(start..word_edge(&value, start, true)), start),
+            EDIT_WORD_BACKSPACE | EDIT_WORD_DELETE => return 0,
+            EDIT_WORD_LEFT => (None, word_edge(&value, start, false)),
+            EDIT_WORD_RIGHT => (None, word_edge(&value, end, true)),
             EDIT_BACKSPACE if start > 0 => {
                 let from = backspace_from(&value, start);
                 (Some(from..start), from)
@@ -297,6 +312,58 @@ impl RealmArena {
             }
         };
         Ok((next, ns, ne, Direction::None))
+    }
+}
+
+// Where a word step from `at` in a text control's value goes, as Chrome on Linux steps (`Selection.modify` by a word's
+// rules, caret.rs `word_length`): past the spaces, to the end (the start, back) of the word or the punctuation there; on,
+// a line feed crossed alone; back, none — Ctrl+ArrowLeft at a line's start stays (Chrome).
+fn word_edge(value: &[u16], at: usize, forward: bool) -> usize {
+    let points: Vec<(u32, usize)> = {
+        let mut out = Vec::with_capacity(value.len());
+        let mut i = 0;
+        for c in char::decode_utf16(value.iter().copied()) {
+            let (cp, width) = match c {
+                Ok(c) => (u32::from(c), c.len_utf16()),
+                Err(e) => (u32::from(e.unpaired_surrogate()), 1),
+            };
+            out.push((cp, i));
+            i += width;
+        }
+        out
+    };
+    let n = points.len();
+    let offset = |k: usize| points.get(k).map_or(value.len(), |&(_, o)| o);
+    let mut i = points.partition_point(|&(_, o)| o < at);
+    let cp = |k: usize| points[k].0;
+    let blank = |c: u32| c != 0x0A && crate::caret::is_space(c);
+    let dictionary = |c: u32| crate::caret::is_word(c) && crate::unicode::segmented_by_dictionary(c);
+    if forward {
+        if i < n && cp(i) == 0x0A {
+            return offset(i + 1);
+        }
+        while i < n && blank(cp(i)) {
+            i += 1;
+        }
+        if i == n || cp(i) == 0x0A {
+            return offset(i);
+        }
+        let run: Vec<u32> = (i..n).map(cp).take_while(|&c| !crate::caret::is_space(c)).collect();
+        let behind = || (0..i).rev().map(cp).take_while(|&c| dictionary(c)).take(crate::caret::CONTEXT).collect();
+        offset(i + crate::caret::word_length(&run, true, behind))
+    } else {
+        if i > 0 && cp(i - 1) == 0x0A {
+            return at;
+        }
+        while i > 0 && blank(cp(i - 1)) {
+            i -= 1;
+        }
+        if i == 0 || cp(i - 1) == 0x0A {
+            return offset(i);
+        }
+        let run: Vec<u32> = (0..i).rev().map(cp).take_while(|&c| !crate::caret::is_space(c)).collect();
+        let behind = || (i..n).map(cp).take_while(|&c| dictionary(c)).take(crate::caret::CONTEXT).collect();
+        offset(i - crate::caret::word_length(&run, false, behind))
     }
 }
 

@@ -127,4 +127,31 @@ RSpec.describe 'typing into a text control' do
       })()
     JS
   end
+
+  # Ctrl with the arrows, Backspace and Delete goes by a word, as `Selection.modify` does: past the spaces to the end (the
+  # start, back) of a word or a run of punctuation; on, a line feed crossed alone; back, a line's start staying (the
+  # line feed alone deleted).
+  it 'moves and deletes by a word with Ctrl' do
+    html = '<!DOCTYPE html><meta charset=utf-8><input id=i><textarea id=t></textarea>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
+    key = ->(id, value, from, keys, to = from) {
+      s.execute_script("(() => { const e = document.getElementById('#{id}'); e.value = #{value.to_json}; e.focus(); e.setSelectionRange(#{from}, #{to}); })()")
+      s.find(:css, "##{id}").send_keys(keys)
+      s.evaluate_script("(() => { const e = document.getElementById('#{id}'); return [e.value, e.selectionStart, e.selectionEnd]; })()")
+    }
+    v = 'abc def, ghi.j  kl'
+    got = [
+      key.('i', v, 18, [:control, :left]), key.('i', v, 16, [:control, :left]), key.('i', v, 9, [:control, :left]), key.('i', v, 7, [:control, :left]),
+      key.('i', v, 0, [:control, :right]), key.('i', v, 3, [:control, :right]), key.('i', v, 7, [:control, :right]), key.('i', v, 12, [:control, :right]),
+      key.('i', v, 18, [:control, :backspace]), key.('i', v, 9, [:control, :backspace]), key.('i', v, 4, [:control, :delete]), key.('i', v, 7, [:control, :delete]),
+      key.('i', v, 2, [:control, :shift, :right]),
+      key.('t', "ab cd\nef gh", 6, [:control, :left]), key.('t', "ab cd\nef gh", 5, [:control, :right]), key.('t', "ab cd\nef gh", 6, [:control, :backspace]),
+      key.('i', 'abc def', 5, [:control, :backspace], 6)
+    ]
+    expect(got).to eq([
+      [v, 16, 16], [v, 13, 13], [v, 7, 7], [v, 4, 4], [v, 3, 3], [v, 7, 7], [v, 8, 8], [v, 13, 13],
+      ['abc def, ghi.j  ', 16, 16], ['abc defghi.j  kl', 7, 7], ['abc , ghi.j  kl', 4, 4], ['abc def ghi.j  kl', 7, 7], [v, 2, 3],
+      ["ab cd\nef gh", 6, 6], ["ab cd\nef gh", 6, 6], ["ab cdef gh", 5, 5], ['abc df', 5, 5]
+    ])
+  end
 end

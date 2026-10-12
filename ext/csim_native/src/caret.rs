@@ -148,7 +148,8 @@ impl RealmArena {
             }
             chars
         };
-        let (leaf, to, _) = run[word_length(&run, forward, behind) - 1];
+        let chars: Vec<u32> = run.iter().map(|&(.., c)| c).collect();
+        let (leaf, to, _) = run[word_length(&chars, forward, behind) - 1];
         Some((leaf, to))
     }
 
@@ -420,15 +421,15 @@ impl Walk<'_> {
     }
 }
 
-// How many of `run`'s characters (the walk's order, from where a word step starts) the step passes: a run of
+// How many of `run`'s characters (code points, in the walk's order, from where a word step starts) the step passes: a run of
 // punctuation (`~>>>>>` one stop), or a word — word characters of one script, joined by an apostrophe between letters,
 // or a full stop, comma or semicolon between digits (Chrome: `don't` and `3.14` are one word each, `a.b` and `a:b`
 // three) — or, of scripts written without spaces, as far as ICU's dictionary has its first word in the run of them
 // (`東京|都庁`, `食べる|人`: kanji and kana are one text to it).
-fn word_length(run: &[(NodeId, u32, u32)], forward: bool, behind: impl FnOnce() -> Vec<u32>) -> usize {
-    let ch = |i: usize| run[i].2;
+pub(crate) fn word_length(run: &[u32], forward: bool, behind: impl FnOnce() -> Vec<u32>) -> usize {
+    let ch = |i: usize| run[i];
     if !is_word(ch(0)) {
-        return run.iter().take_while(|&&(.., c)| !is_word(c)).count();
+        return run.iter().take_while(|&&c| !is_word(c)).count();
     }
     let joins = |before: u32, mid: u32, after: u32| {
         (matches!(mid, 0x27 | 0x2019) && crate::unicode::is_letter(before) && crate::unicode::is_letter(after))
@@ -460,7 +461,7 @@ fn word_length(run: &[(NodeId, u32, u32)], forward: bool, behind: impl FnOnce() 
     }
     // (…the dictionary's first word past the place: its boundaries in the text as it reads, the run and what is behind
     // the place — in the walk's order both, the other way round where it went back)
-    let mut ahead: Vec<u32> = run[..n].iter().map(|&(.., c)| c).collect();
+    let mut ahead: Vec<u32> = run[..n].to_vec();
     let mut behind = behind();
     let (text, at) = if forward {
         behind.reverse();
@@ -487,7 +488,7 @@ fn word_length(run: &[(NodeId, u32, u32)], forward: bool, behind: impl FnOnce() 
     passed.map_or(n, |p| p.clamp(1, n))
 }
 // How much of the text behind a place a word step reads its dictionary script's words in.
-const CONTEXT: usize = 64;
+pub(crate) const CONTEXT: usize = 64;
 
 // ICU4X's word segmenter (its dictionaries, and its models for the scripts it has none of), made once.
 fn word_segmenter() -> icu_segmenter::WordSegmenterBorrowed<'static> {
@@ -496,10 +497,10 @@ fn word_segmenter() -> icu_segmenter::WordSegmenterBorrowed<'static> {
 }
 
 // White space, and a word character (`word_unit`'s, of a code point), to a caret moving by words.
-fn is_space(ch: u32) -> bool {
+pub(crate) fn is_space(ch: u32) -> bool {
     char::from_u32(ch).is_some_and(char::is_whitespace)
 }
-fn is_word(ch: u32) -> bool {
+pub(crate) fn is_word(ch: u32) -> bool {
     ch == u32::from(b'_') || crate::unicode::is_letter(ch) || crate::unicode::is_number(ch)
 }
 
