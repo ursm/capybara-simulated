@@ -32,4 +32,21 @@ RSpec.describe 'fragment build' do
     JS
     expect(got).to eq([1, 'http://www.w3.org/1999/xlink', 'href', '#x', 1, nil, true, true, true])
   end
+
+  # What no later insertion runs the steps for — a parsed document's tree, a template's contents — has the engine's
+  # insertion steps run over it: a radio group's last checked button is the one left checked (Chrome).
+  it "runs the radio groups' steps over a parsed document and a template's contents" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body><div id=d></div>']] }).tap {|session| session.visit '/' }
+    got = s.evaluate_script(<<~'JS')
+      (() => {
+        const radios = '<form><input type=radio name=r checked><input type=radio name=r checked></form>';
+        const doc = new DOMParser().parseFromString(radios, 'text/html');
+        const d = document.getElementById('d');
+        d.innerHTML = '<template>' + radios + '</template>';
+        const checked = (root) => [...root.querySelectorAll('input')].map((r) => r.checked);
+        return [checked(doc), checked(d.firstChild.content)];
+      })()
+    JS
+    expect(got).to eq([[false, true], [false, true]])
+  end
 end

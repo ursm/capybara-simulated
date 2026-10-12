@@ -332,8 +332,8 @@ fn change_children(
             step(scope, steps, STEP_SOURCE_INSERTED, &[node, parent_object])?;
         }
     }
-    if !removed.is_empty() || !added.is_empty() {
-        record_child_list(scope, caller, parent, added, &removed, siblings, Some(renewals));
+    if (!removed.is_empty() || !added.is_empty()) && !record_child_list(scope, caller, parent, added, &removed, siblings, Some(renewals)) {
+        return None;
     }
     let flags = (if connected { CHANGE_CONNECTED } else { 0 }) | (if refused { CHANGE_REFUSED } else { 0 });
     crate::dom::dom(scope).arena.change_flags.set(flags);
@@ -435,8 +435,8 @@ fn change_children_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 // recorded as a removal from the old parent and an insertion into the new one; a form the parser gave a control in it
 // no longer its owner where they are no longer in the same tree (HTML's moving steps); and the focused or hovered
 // element moved with it — the old ancestors' `:focus-within` / `:hover` ending and the new ones' beginning, a flip of
-// state no setter sees (`note_state_changed`). The parent it left.
-fn move_child(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, parent: NodeId, node: NodeId, child: Option<NodeId>) -> Option<NodeId> {
+// state no setter sees (`note_state_changed`). The parent it left — None where a node factory threw making its records.
+fn move_child(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, parent: NodeId, node: NodeId, child: Option<NodeId>) -> Option<Option<NodeId>> {
     let renewals = crate::dom::dom(scope).arena.sheet_renewals;
     let arena = realm(scope, cid);
     // (…"if child is node, set child to node's next sibling": a move before itself is none)
@@ -448,17 +448,19 @@ fn move_child(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, parent: N
     }
     crate::dom::insert_nodes(scope, cid, parent, &[node], child);
     // (…a removal from the old parent and an insertion into the new one, to an observer)
-    if let Some(old) = old {
-        record_child_list(scope, caller, old, &[], &[node], Some((previous, next)), None);
+    if old.is_some_and(|old| !record_child_list(scope, caller, old, &[], &[node], Some((previous, next)), None)) {
+        return None;
     }
-    record_child_list(scope, caller, parent, &[node], &[], None, Some(renewals));
+    if !record_child_list(scope, caller, parent, &[node], &[], None, Some(renewals)) {
+        return None;
+    }
     let arena = realm(scope, cid);
     arena.parser_form_owners_removed(node);
     let carried = |id: Option<NodeId>| id.is_some_and(|f| arena.shadow_including_ancestor(node, f));
     if old != Some(parent) && (carried(arena.focus) || carried(arena.hover)) {
         arena.observers.note_state_changed();
     }
-    old
+    Some(old)
 }
 
 // __dom.moveChild(nodeNid, nodeType, parentNid, parentType, childNid, callerRealm) -> the parent the node left (`move_child`;
@@ -474,7 +476,8 @@ fn move_child_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         return rv.set_uint32(refusal as u32);
     }
     let caller = args.get(5).int32_value(scope).unwrap_or(cid);
-    let old = move_child(scope, cid, caller, parent, node, child.flatten());
+    // (…nothing past a node factory that threw making its records: its exception is what the op ends with)
+    let Some(old) = move_child(scope, cid, caller, parent, node, child.flatten()) else { return };
     rv.set(node_value(scope, old));
 }
 
@@ -484,7 +487,9 @@ fn move_child_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 // the selectors read of a child list, positions, `:empty`, a `:has()` above — and each node put in with its subtree,
 // measured where it is now); the calling realm's settle, tree, nodes and structure generations and the observations a
 // change schedules; and, where the change gave a sheet owner a new sheet (the count `renewals` was at as it began), the
-// cascade — the version too on a page with shadow trees, whose sheets are handed to the style engine by it.
+// cascade — the version too on a page with shadow trees, whose sheets are handed to the style engine by it. False where
+// a node factory threw making the record's answers (none queued): the caller goes no further, its exception what the op
+// ends with.
 pub(crate) fn record_child_list(
     scope: &mut v8::PinScope<'_, '_>,
     caller: i32,
@@ -493,8 +498,8 @@ pub(crate) fn record_child_list(
     removed: &[NodeId],
     siblings: Option<(Option<NodeId>, Option<NodeId>)>,
     renewals: Option<u32>,
-) {
-    let Some(cid) = crate::dom::dom(scope).arena.get(target).map(|n| n.realm) else { return };
+) -> bool {
+    let Some(cid) = crate::dom::dom(scope).arena.get(target).map(|n| n.realm) else { return true };
     let arena = realm(scope, cid);
     let generations = &arena.generations;
     generations.bump(GEN_DIRTY);
@@ -521,7 +526,7 @@ pub(crate) fn record_child_list(
     }
     // (…the record's arrays made only where an observer is to have it)
     if !crate::mutation_observers::observed(realm(scope, cid), target, &crate::mutation_observers::Change::ChildList) {
-        return;
+        return true;
     }
     let (previous, next) = siblings.unwrap_or_else(|| {
         let arena = realm(scope, cid);
@@ -533,24 +538,25 @@ pub(crate) fn record_child_list(
     let mut answers = [target_object; 4];
     for (k, nodes) in [added, removed].into_iter().enumerate() {
         if crate::dom::factory_threw(scope) {
-            return;
+            return false;
         }
         answers[k] = nodes_value(scope, cid, nodes);
     }
     for (k, node) in [previous, next].into_iter().enumerate() {
         if crate::dom::factory_threw(scope) {
-            return;
+            return false;
         }
         answers[2 + k] = node_value(scope, node);
     }
     if crate::dom::factory_threw(scope) {
-        return;
+        return false;
     }
     let [added, removed, previous, next] = answers;
     let kind = v8::Integer::new(scope, 0).into();
     let null: v8::Local<'_, v8::Value> = v8::null(scope).into();
     let fields = [kind, target_object, added, removed, previous, next, null, null, null];
     crate::mutation_observers::queue_record(scope, cid, target, &fields);
+    true
 }
 
 // __dom.recordChildList(targetNid, added, removed, previousSibling, nextSibling) — a change of the target's children

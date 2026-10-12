@@ -609,6 +609,8 @@ struct Build<'s> {
     nodes: Vec<Option<crate::dom::NodeId>>,
     held: std::collections::HashMap<crate::dom::NodeId, v8::cppgc::Persistent<crate::node_handle::NodeHandle>>,
     in_contents: std::collections::HashSet<crate::dom::NodeId>,
+    // …the template contents it made, roots of trees no later insertion runs steps over
+    contents: Vec<crate::dom::NodeId>,
     steps: Vec<(crate::dom::NodeId, Vec<String>, u32)>,
     // A document's mode, as `htmlParse` numbers it, where the parse set one.
     quirks: Option<i32>,
@@ -751,6 +753,7 @@ impl<'s> Build<'s> {
                         }
                         self.held.insert(frag, held);
                         self.in_contents.insert(frag);
+                        self.contents.push(frag);
                         crate::dom::realm(scope, self.cid).set_template_content(el, Some(frag));
                         self.set(contents, frag);
                     }
@@ -898,6 +901,7 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         if build.take(scope, parsed(tokenizer, html)).is_none() {
             return;
         }
+        build.finish(scope, None);
         // (…the parse's nodes: the children of the root `<html>` it made, taken out of it)
         let arena = crate::dom::realm(scope, cid);
         let html_root = arena.get(root).and_then(|n| n.children.first().copied());
@@ -933,6 +937,7 @@ fn html_parse_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         if build.take(scope, parsed(tokenizer, html)).is_none() {
             return;
         }
+        build.finish(scope, Some(document));
         let quirks = build.quirks.unwrap_or(-1);
         if let Some(mut out) = build.answer(scope, &[]) {
             out[0] = v8::Integer::new(scope, quirks).into();
@@ -973,8 +978,22 @@ impl<'s> Build<'s> {
             nodes,
             held: std::collections::HashMap::new(),
             in_contents: std::collections::HashSet::new(),
+            contents: Vec::new(),
             steps: Vec::new(),
             quirks: None,
+        }
+    }
+    // The insertion steps of the engine's own over what no later insertion runs them for — a document's children, every
+    // template's contents (a fragment's top-level nodes have theirs as they are inserted): its radio buttons' (a group's
+    // last checked one the one left checked, as each insertion in turn left it: dom.rs `insertion_steps`).
+    fn finish(&mut self, scope: &mut v8::PinScope<'s, '_>, document: Option<crate::dom::NodeId>) {
+        let arena = crate::dom::realm(scope, self.cid);
+        let mut roots: Vec<crate::dom::NodeId> = document.and_then(|d| arena.get(d)).map_or_else(Vec::new, |n| n.children.clone());
+        for &c in &self.contents {
+            roots.extend(arena.get(c).map_or(&[][..], |n| &n.children[..]).iter().copied());
+        }
+        if arena.radio_insertion_steps(&roots) {
+            arena.observers.note_state_changed();
         }
     }
     // What the page is handed: the count of `tops` and their objects, then each element the bindings have steps for,
