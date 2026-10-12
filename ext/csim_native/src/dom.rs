@@ -791,6 +791,10 @@ pub(crate) fn view_word(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::
 #[derive(Default)]
 pub(crate) struct RealmArena {
     slots: Vec<Slot>,
+    // What the nodes made and freed since V8 was last told of it weigh (`NODE_WEIGHT` each), which `dom` tells it as
+    // external memory — a tree of nodes no object holds yet is otherwise a tree V8's heap does not see (an engine
+    // build's), and its collections come too late for the memory it holds.
+    pub(crate) external: i64,
     // Indices whose slot is free, LIFO. `importNode` pops one before growing `slots`, so a page's
     // live-node high-water mark bounds `slots.len()` even as nodes churn.
     free: Vec<u32>,
@@ -1088,7 +1092,9 @@ impl RealmArena {
         self.id_epoch += 1;
         for idx in self.realm_nodes.remove(&cid).unwrap_or_default() {
             let slot = &mut self.slots[idx as usize];
-            slot.data = None;
+            if slot.data.take().is_some() {
+                self.external -= NODE_WEIGHT;
+            }
             if slot.generation < GEN_MAX {
                 slot.generation += 1;
                 self.free.push(idx);
@@ -1190,6 +1196,7 @@ impl RealmArena {
     // its NodeId at the slot's CURRENT generation. A recycled slot's gen was already bumped at free.
     fn alloc(&mut self, mut data: NodeData) -> NodeId {
         self.mutations += 1;
+        self.external += NODE_WEIGHT;
         data.stamp.set(self.layout_epoch.get());
         let list = self.realm_nodes.entry(data.realm).or_default();
         data.realm_pos = list.len() as u32;
@@ -1271,6 +1278,7 @@ impl RealmArena {
         let slot = &mut self.slots[id.idx as usize];
         let (assigned_slot, pseudo_boxes) = slot.data.as_ref().map_or((None, [None; 2]), |n| (n.assigned_slot, n.pseudo_boxes));
         slot.data = None;
+        self.external -= NODE_WEIGHT;
         if slot.generation < GEN_MAX {
             slot.generation += 1;
             self.free.push(id.idx);
@@ -2096,10 +2104,20 @@ pub(crate) fn dom<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Dom {
     if scope.get_slot::<Dom>().is_none() {
         scope.set_slot(Dom::default());
     }
+    // (…what the arena's nodes weigh told V8 as it changes by a step: `RealmArena::external`)
+    let d = scope.get_slot_mut::<Dom>().expect("Dom slot was just set");
+    if d.arena.external.abs() >= EXTERNAL_STEP {
+        let delta = std::mem::take(&mut d.arena.external);
+        scope.adjust_amount_of_external_allocated_memory(delta);
+    }
     scope
         .get_slot_mut::<Dom>()
         .expect("Dom slot was just set")
 }
+// What a node weighs as V8 is told (`RealmArena::external`) — its data's share and its handle's, a text's own and an
+// element's attributes left out — and the change in that which is worth telling it of.
+const NODE_WEIGHT: i64 = std::mem::size_of::<NodeData>() as i64 + 160;
+const EXTERNAL_STEP: i64 = 1 << 20;
 
 // The context_id of the realm whose `__dom` invoked this callback — carried as each realm's `__dom`
 // function DATA (set in `install`), so an op works in its OWN realm's state. `0` (main) when
