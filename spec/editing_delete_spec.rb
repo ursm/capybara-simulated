@@ -19,7 +19,7 @@ RSpec.describe 'deleting in an editing host' do
       ({
         t0: () => e.firstChild, b0: () => e.querySelector('b').firstChild, p1t: () => e.children[1].firstChild,
         p0t: () => e.children[0].firstChild, p1: () => e.children[1], last: () => e.lastChild,
-        li1t: () => e.querySelectorAll('li')[1].firstChild
+        li1t: () => e.querySelectorAll('li')[1].firstChild, p2t: () => e.children[2].firstChild
       })
     JS
   end
@@ -118,5 +118,33 @@ RSpec.describe 'deleting in an editing host' do
       deleted('ab<b>cd</b>e', 'e.firstChild', 1, :backspace, ["e.querySelector('b').firstChild", 2]),
       deleted('a', 'e.firstChild', 1, :backspace)
     ]).to eq(['aabb', '<p>aabb</p>', '<ul><li>aabb</li></ul>', 'abd', 'ae', '<br>'])
+  end
+
+  it 'joins out of the inline elements around the start, keeps the next line, and its own' do
+    expect([
+      deleted('<div><b>aa</b><p>bb</p></div>', "e.querySelector('p').firstChild", 0, :backspace),
+      deleted('<a href="#">aa</a><p>bb</p>', "e.querySelector('p').firstChild", 0, :backspace),
+      deleted('<b>aa</b><p>bb</p>', "e.querySelector('b').firstChild", 2, :delete),
+      deleted('aa<p>bb</p>cc', "e.querySelector('p').firstChild", 0, :backspace),
+      deleted('<p>a</p>bb<br>cc', 'e.childNodes[1]', 0, :backspace),
+      deleted('<p>aa</p><p>bb</p>', 'e', 1, :delete, ['e.lastChild.firstChild', 1])
+    ]).to eq([
+      '<div><b>aa</b>bb</div>', '<a href="#">aa</a>bb', '<b>aa</b>bb', 'aabb<br>cc', '<p>abb</p>cc', '<p>aa</p><p>b</p>'
+    ])
+  end
+
+  it 'takes a block atom whole, joins across a block island at the joint, and leaves an island a selection ends in' do
+    island = 'a<span contenteditable="false">XY</span>bc'
+    nested = 'a<span contenteditable="false">X<span contenteditable="true">yz</span>X</span>b'
+    expect([
+      delete('<p>a</p><hr><p>b</p>', 'p2t', 0, :backspace),
+      delete('<p>a</p><hr><p>b</p>', 'p0t', 1, :delete),
+      delete('<p>a</p><img style="display:block" src="data:,"><p>b</p>', 'p2t', 0, :backspace).first,
+      delete('<p>a</p><div contenteditable="false">XX</div><p>b</p>', 'p2t', 0, :backspace),
+      deleted(island, 'e.firstChild', 0, :backspace, ['e.childNodes[1].firstChild', 1]),
+      deleted(nested, 'e.lastChild', 0, :backspace)
+    ]).to eq([
+      ['<p>a</p><p>b</p>', 'b@0'], ['<p>a</p><p>b</p>', 'a@1'], '<p>a</p><p>b</p>', ['<p>ab</p>', 'ab@1'], island, nested
+    ])
   end
 end

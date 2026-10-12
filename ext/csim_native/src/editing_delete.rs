@@ -64,13 +64,50 @@ fn within(arena: &RealmArena, root: NodeId, node: NodeId) -> bool {
     }
     false
 }
+// Whether an island holds an editing host of its own — what no step deletes (Chrome).
+fn holds_host(arena: &RealmArena, island: NodeId) -> bool {
+    arena.get(island).is_some_and(|n| n.children.iter().any(|&c| arena.get(c).is_some_and(|d| d.kind == NodeKind::Element && (d.contenteditable_state() == Some(true) || holds_host(arena, c)))))
+}
+// Whether `id` is a void element laid out as a block (`<hr>`, a block `<img>`): a step past it takes it whole and joins
+// nothing (Chrome).
+fn block_atom(arena: &RealmArena, id: NodeId) -> bool {
+    arena.get(id).is_some_and(|n| n.kind == NodeKind::Element && !n.is_html_named("br") && crate::caret::CARET_VOID_TAGS.contains(&&*n.local_name))
+        && crate::rendered::is_inline_level(arena, id) == Some(false)
+}
+// Whether `id` is a block a join can move content into or out of: an editable one that holds content — no void element,
+// no table's part.
+fn joinable(arena: &RealmArena, id: NodeId) -> bool {
+    arena.get(id).is_some_and(|n| n.kind == NodeKind::Element && !crate::caret::CARET_VOID_TAGS.contains(&&*n.local_name))
+        && crate::rendered::is_inline_level(arena, id) == Some(false)
+        && !table_part(arena, id)
+        && arena.editing_host(id).is_some()
+}
+// Whether `id` is content on a line: text, or an inline element other than a `<br>`.
+fn inline_content(arena: &RealmArena, id: NodeId) -> bool {
+    arena.get(id).is_some_and(|n| n.kind == NodeKind::Text || (n.kind == NodeKind::Element && !n.is_html_named("br") && crate::rendered::is_inline_level(arena, id) != Some(false)))
+}
+// The child a place between children has on the side a step goes: the one after it (forward) or before it.
+fn beside(arena: &RealmArena, (node, offset): (NodeId, u32), forward: bool) -> Option<NodeId> {
+    let n = arena.get(node).filter(|n| n.kind == NodeKind::Element)?;
+    if forward { n.children.get(offset as usize).copied() } else { (offset as usize).checked_sub(1).and_then(|k| n.children.get(k).copied()) }
+}
+
+// What a collapsed step took besides what it crossed: an island laid out as a block — the place it was, in its parent,
+// what the blocks either side join across (Chrome) — or a block atom, which joins nothing.
+#[derive(Clone, Copy, PartialEq)]
+enum Took {
+    Step,
+    BlockIsland(NodeId, u32),
+    Atom,
+}
 
 // __dom.editDelete(startNode, startOffset, endNode, endOffset, forward, word, host, now, steps) -> [caretNode, caretOffset,
 // changes…], or undefined where nothing is deleted: the deletion in the editing host `host` — of the selection's range
 // from (startNode, startOffset) to (endNode, endOffset), or, collapsed, of a step back (forward) from it, a character's
 // or a word's — the place the caret goes, and the changes of children it made (mutation.rs `changes_value`). A step
-// into a non-editable island takes the island whole; one out of a table cell — or into one — deletes nothing (Chrome);
-// a range across cells deletes what it holds of them but joins none.
+// into a non-editable island takes the island whole — none that holds an editing host; a step past a block atom takes
+// it whole; one out of a table cell — or into one — deletes nothing (Chrome); a range across cells deletes what it
+// holds of them but joins none, and one with an end in an island deletes nothing.
 fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(sc), Some(ec), Some(host)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 2), crate::dom::nid_arg(scope, &args, 6)) else { return };
     let (so, eo) = (args.get(1).uint32_value(scope).unwrap_or(0), args.get(3).uint32_value(scope).unwrap_or(0));
@@ -82,21 +119,37 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let range = if collapsed {
         crate::rendered::with_engine(scope, &args, 7, |engine, arena, now| {
             let mut to = if word { arena.caret_word_step(engine, now, sc, so, forward) } else { arena.caret_step(engine, now, sc, so, forward) }?;
-            // (…a step into an island to its far edge: the island whole)
-            if let Some(island) = island_of(arena, to.0, host) {
-                let (parent, at) = (arena.parent_of(island)?, arena.child_index(island) as u32);
+            let mut took = Took::Step;
+            // (…a step into an island, or past a block atom, to its far edge: it whole)
+            let whole = match island_of(arena, to.0, host) {
+                Some(island) if holds_host(arena, island) => return None,
+                Some(island) => Some(island),
+                None => beside(arena, to, forward).filter(|&n| block_atom(arena, n)),
+            };
+            if let Some(whole) = whole {
+                let (parent, at) = (arena.parent_of(whole)?, arena.child_index(whole) as u32);
                 to = if forward { (parent, at + 1) } else { (parent, at) };
+                took = if block_atom(arena, whole) {
+                    Took::Atom
+                } else if crate::rendered::is_inline_level(arena, whole) == Some(false) {
+                    Took::BlockIsland(parent, at)
+                } else {
+                    Took::Step
+                };
             }
-            Some(if forward { ((sc, so), to) } else { (to, (sc, so)) })
+            Some((if forward { ((sc, so), to) } else { (to, (sc, so)) }, took))
         })
         .flatten()
     } else {
-        Some(((sc, so), (ec, eo)))
+        Some((((sc, so), (ec, eo)), Took::Step))
     };
-    let Some(((sc, so), (ec, eo))) = range else { return };
+    let Some((((sc, so), (ec, eo)), took)) = range else { return };
     let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return };
     let arena = realm(scope, cid);
     if !within(arena, host, sc) || !within(arena, host, ec) || (sc == ec && so == eo) {
+        return;
+    }
+    if !collapsed && (island_of(arena, sc, host).is_some() || island_of(arena, ec, host).is_some()) {
         return;
     }
     let (start_block, end_block) = (block_of(arena, sc, host), block_of(arena, ec, host));
@@ -106,31 +159,41 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
     let steps = v8::Local::new(scope, steps);
     let Some((mut changes, deleted)) = crate::range_contents::delete(scope, cid, caller, steps, sc, so, ec, eo) else { return };
-    // (…a range across blocks joins them — not across cells, not a table's own parts)
+    // (…a range across blocks joins them — not across cells, not a table's own parts; a block island gone, the blocks
+    // either side of its place)
     let arena = realm(scope, cid);
-    // (…a start between children, after a block — an island's place gone — that block's end the join's start: Chrome)
-    let start_block = match arena.get(sc).filter(|n| n.kind == NodeKind::Element).and_then(|n| (so as usize).checked_sub(1).and_then(|k| n.children.get(k).copied())) {
-        Some(before) if crate::rendered::is_inline_level(arena, before) == Some(false) && !table_part(arena, before) => before,
-        _ => start_block,
+    let (start_block, end_block) = match took {
+        Took::BlockIsland(parent, at) => {
+            let side = |k: Option<u32>| k.and_then(|k| arena.get(parent)?.children.get(k as usize).copied()).filter(|&b| joinable(arena, b));
+            if forward { (start_block, side(Some(at)).unwrap_or(end_block)) } else { (side(at.checked_sub(1)).unwrap_or(start_block), end_block) }
+        }
+        _ => (start_block, end_block),
     };
-    let joins = start_block != end_block
+    let joins = took != Took::Atom
+        && start_block != end_block
         && same_cell
         && !table_part(arena, start_block)
         && !table_part(arena, end_block)
         && within(arena, host, start_block)
         && within(arena, host, end_block);
-    let joined = if joins {
-        let Some(joined) = join(scope, cid, caller, steps, host, (start_block, end_block), (sc, so), &mut changes) else { return };
-        joined
+    let joint = if joins {
+        let Some(joint) = join(scope, cid, caller, steps, (start_block, end_block), (sc, so), &mut changes) else { return };
+        joint
     } else {
-        false
+        None
     };
     // (…nothing deleted, nothing joined: no change, the caret where it was)
-    if !deleted && !joined {
+    if !deleted && joint.is_none() {
         return;
     }
+    // (…the caret at the joint where the start is in no block the join kept; a block atom taken back, where it was)
+    let start = match joint {
+        Some(joint) if !within(realm(scope, cid), start_block, sc) => joint,
+        _ if took == Took::Atom && !forward => (ec, eo),
+        _ => (sc, so),
+    };
     // (…the inline elements and the text the deletion emptied at either end removed, and a block it emptied held open)
-    let Some(caret) = tidy(scope, cid, caller, steps, (start_block, end_block), (sc, so), ec, &mut changes) else { return };
+    let Some(caret) = tidy(scope, cid, caller, steps, (start_block, end_block), start, ec, &mut changes) else { return };
     let mut out: Vec<v8::Local<'_, v8::Value>> = vec![crate::dom::node_value(scope, Some(caret.0))];
     if crate::dom::factory_threw(scope) {
         return;
@@ -149,21 +212,21 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 //   - neither: the end's block's content to the end of the start's, and the end's block removed, with the ancestors that
 //     leaves empty, up to the host;
 //   - the start's holds the end's (`aa<p>bb</p>`, a nested list's item): the end's block's content right after the
-//     start, and the end's block removed with the ancestors that leaves empty, short of the start's;
+//     start — after the inline elements it is in, at the start's block's level — and the end's block removed with the
+//     ancestors that leaves empty, short of the start's; a `<br>` after it where more of the line follows
+//     (`aa<p>bb</p>cc` is `aabb<br>cc`); none where the start is where the end's block's line starts;
 //   - the end's holds the start's (`<p>aa</p>bb`): the inline content after the start's block, up to the next block or
-//     `<br>`, to the end of the start's.
-// Whether anything joined.
-#[allow(clippy::too_many_arguments)]
+//     `<br>`, to the end of the start's — and that `<br>`, its line gone, removed.
+// The joint — the place the moved content starts at — where anything joined.
 fn join<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     cid: i32,
     caller: i32,
     steps: v8::Local<'s, v8::Array>,
-    host: NodeId,
     (start_block, end_block): (NodeId, NodeId),
     start: (NodeId, u32),
     changes: &mut Vec<Change>,
-) -> Option<bool> {
+) -> Option<Option<(NodeId, u32)>> {
     let arena = realm(scope, cid);
     if within(arena, end_block, start_block) {
         // (…the run after the start's block, at the end's block's level)
@@ -173,43 +236,71 @@ fn join<'s>(
         }
         let mut run = Vec::new();
         let mut next = arena.sibling(top, 1);
-        while let Some(n) = next.filter(|&n| {
-            arena.get(n).is_some_and(|d| d.kind == NodeKind::Text || (d.kind == NodeKind::Element && !d.is_html_named("br") && crate::rendered::is_inline_level(arena, n) != Some(false)))
-        }) {
+        while let Some(n) = next.filter(|&n| inline_content(arena, n)) {
             run.push(n);
             next = arena.sibling(n, 1);
         }
         if run.is_empty() {
-            return Some(false);
+            return Some(None);
         }
-        move_into(scope, cid, caller, steps, start_block, None, &run, changes)?;
-        return Some(true);
+        let br = next.filter(|&n| arena.get(n).is_some_and(|d| d.is_html_named("br")));
+        let joint = move_into(scope, cid, caller, steps, start_block, None, &run, changes)?;
+        if let Some(br) = br {
+            changes.push(crate::mutation::remove(scope, cid, caller, br, steps)?);
+        }
+        return Some(Some(joint));
     }
     let kids = arena.get(end_block)?.children.clone();
     let lone_br = matches!(kids.as_slice(), [only] if arena.get(*only).is_some_and(|n| n.is_html_named("br")));
     if within(arena, start_block, end_block) {
-        // (…right after the start: after its text, or at its place between children)
-        let (parent, before) = match arena.get(start.0) {
+        // (…right after the start: after its text, or at its place between children — out of the inline elements it is
+        // in that do not hold the end's block)
+        let (mut parent, mut before) = match arena.get(start.0) {
             Some(n) if n.kind == NodeKind::Text => (n.parent?, arena.sibling(start.0, 1)),
             Some(n) => (start.0, n.children.get(start.1 as usize).copied()),
-            None => return Some(false),
+            None => return Some(None),
         };
-        if !kids.is_empty() && !lone_br {
+        while parent != start_block && crate::rendered::is_inline_level(arena, parent) != Some(false) && !within(arena, parent, end_block) {
+            before = arena.sibling(parent, 1);
+            parent = arena.parent_of(parent)?;
+        }
+        // (…none where the start is where the end's block's line starts: before it, after a block or a `<br>` — Chrome)
+        let prev = match before {
+            Some(b) => arena.sibling(b, -1),
+            None => arena.get(parent)?.children.last().copied(),
+        };
+        if before.is_some_and(|b| within(arena, b, end_block)) && !prev.is_some_and(|p| inline_content(arena, p)) {
+            return Some(None);
+        }
+        // (…what follows the end's block on its line, where the removal leaves it after the moved content)
+        let mut top = end_block;
+        while let Some(p) = arena.parent_of(top).filter(|&p| p != parent && arena.get(p).is_some_and(|n| n.children.len() == 1)) {
+            top = p;
+        }
+        let after = arena.sibling(top, 1).filter(|&n| arena.parent_of(top) == Some(parent) && inline_content(arena, n));
+        let joint = if !kids.is_empty() && !lone_br {
             changes.push(crate::mutation::remove_all(scope, cid, caller, end_block, steps)?);
-            move_into(scope, cid, caller, steps, parent, before, &kids, changes)?;
-        }
+            Some(move_into(scope, cid, caller, steps, parent, before, &kids, changes)?)
+        } else {
+            None
+        };
         remove_emptied_up(scope, cid, caller, steps, end_block, start_block, changes)?;
-        return Some(true);
-    }
-    if !kids.is_empty() {
-        changes.push(crate::mutation::remove_all(scope, cid, caller, end_block, steps)?);
-        if !lone_br {
-            move_into(scope, cid, caller, steps, start_block, None, &kids, changes)?;
+        if let Some(after) = after {
+            let (br, held) = make_br(scope, cid, caller, parent);
+            changes.push(crate::mutation::insert(scope, cid, caller, parent, &[br], Some(after), steps)?);
+            drop(held);
         }
+        return Some(Some(joint.unwrap_or(start)));
     }
-    let _ = host;
+    let joint = if !kids.is_empty() {
+        changes.push(crate::mutation::remove_all(scope, cid, caller, end_block, steps)?);
+        if lone_br { None } else { Some(move_into(scope, cid, caller, steps, start_block, None, &kids, changes)?) }
+    } else {
+        None
+    };
+    let end = realm(scope, cid).get(start_block)?.children.len() as u32;
     remove_emptied_up(scope, cid, caller, steps, end_block, start_block, changes)?;
-    Some(true)
+    Some(Some(joint.unwrap_or((start_block, end))))
 }
 // `gone` removed, and the ancestors that leaves empty — short of any that holds `keep`, the host at most.
 fn remove_emptied_up<'s>(
@@ -233,7 +324,7 @@ fn remove_emptied_up<'s>(
     }
 }
 // `nodes` into `parent` before `before` (none: last) — each out of where it was — and the text either side of the joint
-// one text: the first moved one's data the end of the text before it, and it gone (Chrome).
+// one text: the first moved one's data the end of the text before it, and it gone (Chrome). The joint.
 #[allow(clippy::too_many_arguments)]
 fn move_into<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -244,7 +335,7 @@ fn move_into<'s>(
     before: Option<NodeId>,
     nodes: &[NodeId],
     changes: &mut Vec<Change>,
-) -> Option<()> {
+) -> Option<(NodeId, u32)> {
     let arena = realm(scope, cid);
     let last = match before {
         Some(b) => arena.sibling(b, -1),
@@ -267,8 +358,10 @@ fn move_into<'s>(
         let joined = v8::String::new_from_two_byte(scope, &data, v8::NewStringType::Normal)?;
         crate::character_data::replace_data(scope, caller, prev, object, at, 0, joined).ok()?;
         changes.push(crate::mutation::remove(scope, cid, caller, moved, steps)?);
+        return Some((prev, at as u32));
     }
-    Some(())
+    let first = *nodes.first()?;
+    Some((parent, realm(scope, cid).child_index(first) as u32))
 }
 
 // From `node` up, the empty text and the inline elements a deletion left empty removed, short of `block` (Chrome:
