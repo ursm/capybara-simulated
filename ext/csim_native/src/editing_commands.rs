@@ -27,23 +27,35 @@ enum Caret {
 }
 
 // __dom.editCommand(hostNid, startNid, startOffset, endNid, endOffset, command, value, steps) -> [fire, caret…,
-// styled, nodes…, copies, changes…], or undefined for a command it does not know: the edit of `command` (its name ASCII
-// lowercased) in the editing host `host` over the selection's range — whether the bindings fire `input` for it; where
-// the selection goes (0 left, 1 collapsed: node, offset, 2 around: node, offset, node, offset); the elements whose CSS
-// the bindings set (a colour or font span, the block to align, the block whose style is cleared); then, as
-// `editInsert` answers them, the elements it copied (none) and the changes of children it made.
+// styled, nodes…, copies, changes…], or undefined for a command it does not know or a selection out of the host: the
+// edit of `command` (its name ASCII lowercased, `value` its argument: a link's URL, a span's `style`) in the editing
+// host `host` over the selection's range — whether the bindings fire `input` for it; where the selection goes (0 left,
+// 1 collapsed: node, offset, 2 around: node, offset, node, offset); the elements whose CSS the bindings set (the block
+// to align, the block whose style is cleared); then, as `editInsert` answers them, the elements it copied (none) and
+// the changes of children it made.
 fn edit_command(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(host), Some(sc), Some(ec)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1), crate::dom::nid_arg(scope, &args, 3)) else { return };
     let (so, eo) = (args.get(2).uint32_value(scope).unwrap_or(0), args.get(4).uint32_value(scope).unwrap_or(0));
     let command = args.get(5).to_rust_string_lossy(scope);
-    let value = args.get(6).to_rust_string_lossy(scope);
+    let value = crate::dom::utf16_arg(scope, args.get(6));
     let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(7)) else { return };
     let caller = crate::dom::realm_id(scope, &args);
     let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return };
     let steps = v8::Local::new(scope, steps);
     let (mut changes, mut copies, mut held) = (Vec::new(), Vec::new(), Vec::new());
     let mut edit = Edit { cid, caller, steps, host, changes: &mut changes, copies: &mut copies, held: &mut held };
-    let range = ((sc, so), (ec, eo));
+    // (…an end out of the host clamped to the host's edge; a selection with neither end in it edits nothing — but a rule,
+    // which goes at its start: Chrome)
+    let arena = realm(scope, cid);
+    let (start_in, end_in) = (crate::editing::within(arena, host, sc), crate::editing::within(arena, host, ec));
+    if !start_in && !end_in && command != "inserthorizontalrule" {
+        return;
+    }
+    let host_end = if start_in || end_in { arena.get(host).map_or(0, |n| n.children.len() as u32) } else { 0 };
+    let range = (
+        if start_in { crate::editing::beside_leaf(arena, (sc, so)) } else { (host, 0) },
+        if end_in { crate::editing::beside_leaf(arena, (ec, eo)) } else { (host, host_end) }
+    );
     let done = match command.as_str() {
         "insertorderedlist" => list(scope, &mut edit, range.0, "ol"),
         "insertunorderedlist" => list(scope, &mut edit, range.0, "ul"),
@@ -53,8 +65,8 @@ fn edit_command(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         "strikethrough" => wrap(scope, &mut edit, range, "strike", None, None),
         "superscript" => wrap(scope, &mut edit, range, "sup", Some("sub"), None),
         "subscript" => wrap(scope, &mut edit, range, "sub", Some("sup"), None),
-        "createlink" => wrap(scope, &mut edit, range, "a", None, Some(&value)),
-        "span" => wrap(scope, &mut edit, range, "span", None, None),
+        "createlink" => wrap(scope, &mut edit, range, "a", None, Some(("href", &value[..]))),
+        "span" => wrap(scope, &mut edit, range, "span", None, Some(("style", &value[..])).filter(|_| !value.is_empty())),
         "justify" => justify(scope, &mut edit, range.0),
         "removeformat" => {
             let block = selection_block(realm(scope, cid), host, range.0, true);
@@ -136,8 +148,7 @@ fn list(scope: &mut v8::PinScope<'_, '_>, edit: &mut Edit<'_, '_>, (node, offset
         let kids = arena.get(list)?.children.clone();
         let retagged = edit.element(scope, list, tag);
         edit.move_into(scope, retagged, &kids)?;
-        edit.insert(scope, parent, &[retagged], Some(list))?;
-        edit.remove(scope, list)?;
+        edit.replace(scope, list, retagged)?;
         let first = realm(scope, edit.cid).get(retagged)?.children.first().copied().unwrap_or(retagged);
         return Some((true, Caret::At(first, 0), Vec::new()));
     }
@@ -149,19 +160,17 @@ fn list(scope: &mut v8::PinScope<'_, '_>, edit: &mut Edit<'_, '_>, (node, offset
     if block == edit.host {
         edit.insert(scope, block, &[list], None)?;
     } else {
-        let parent = realm(scope, edit.cid).parent_of(block)?;
-        edit.insert(scope, parent, &[list], Some(block))?;
-        edit.remove(scope, block)?;
+        edit.replace(scope, block, list)?;
     }
     let end = realm(scope, edit.cid).get(item)?.children.len() as u32;
     Some((true, Caret::At(item, end), Vec::new()))
 }
 
 // The selected text wrapped innermost — each text node the range covers split at the slice's edges, the slice moved
-// into a new `tag` element (with `href` a link's) where it was, so chained commands nest — `exclusive` (superscript and
+// into a new `tag` element (with `attribute` set: a link's `href`, a span's `style`) where it was, so chained commands nest — `exclusive` (superscript and
 // subscript) first unwrapping a conflicting element that wraps the selected text alone; the selection around a single
-// wrapped run. `input` only where it wrapped any, as Chrome; the wrappers answered for a span's CSS.
-fn wrap(scope: &mut v8::PinScope<'_, '_>, edit: &mut Edit<'_, '_>, (start, end): ((NodeId, u32), (NodeId, u32)), tag: &str, exclusive: Option<&str>, href: Option<&str>) -> Done {
+// wrapped run. `input` only where it wrapped any, as Chrome.
+fn wrap(scope: &mut v8::PinScope<'_, '_>, edit: &mut Edit<'_, '_>, (start, end): ((NodeId, u32), (NodeId, u32)), tag: &str, exclusive: Option<&str>, attribute: Option<(&str, &[u16])>) -> Done {
     if start == end {
         return Some((false, Caret::Keep, Vec::new()));
     }
@@ -175,15 +184,18 @@ fn wrap(scope: &mut v8::PinScope<'_, '_>, edit: &mut Edit<'_, '_>, (start, end):
         let target = if from > 0 { edit.split_at(scope, (node, from))?.1? } else { node };
         targets.push(target);
     }
+    let selected: std::collections::HashSet<NodeId> = if exclusive.is_some() { targets.iter().copied().collect() } else { Default::default() };
     let mut wrappers = Vec::with_capacity(targets.len());
     for &t in &targets {
         if let Some(other) = exclusive {
-            unwrap_exclusive(scope, edit, t, other, &targets)?;
+            unwrap_exclusive(scope, edit, t, other, &selected)?;
         }
         let parent = realm(scope, edit.cid).parent_of(t)?;
         let wrapper = edit.element(scope, parent, tag);
-        if let Some(href) = href {
-            crate::dom::replace_attributes(scope, edit.cid, wrapper, vec![("href".to_owned(), href.to_owned())], Vec::new(), None);
+        if let Some((name, units)) = attribute {
+            let lossy = String::from_utf16_lossy(units);
+            let exact = if lossy.encode_utf16().eq(units.iter().copied()) { Vec::new() } else { vec![(name.to_owned(), units.to_vec())] };
+            crate::dom::replace_attributes(scope, edit.cid, wrapper, vec![(name.to_owned(), lossy)], exact, None);
         }
         edit.insert(scope, parent, &[wrapper], Some(t))?;
         edit.move_into(scope, wrapper, &[t])?;
@@ -198,11 +210,11 @@ fn wrap(scope: &mut v8::PinScope<'_, '_>, edit: &mut Edit<'_, '_>, (start, end):
         }
         _ => Caret::Keep,
     };
-    Some((!wrappers.is_empty(), caret, wrappers))
+    Some((!wrappers.is_empty(), caret, Vec::new()))
 }
 // …the element of `other` immediately around `text` — not the host — unwrapped where every text it holds that shows any
 // is selected (`targets`); one that also formats unselected text is left (a slice-scoped unwrap is editing backlog).
-fn unwrap_exclusive(scope: &mut v8::PinScope<'_, '_>, edit: &mut Edit<'_, '_>, text: NodeId, other: &str, targets: &[NodeId]) -> Option<()> {
+fn unwrap_exclusive(scope: &mut v8::PinScope<'_, '_>, edit: &mut Edit<'_, '_>, text: NodeId, other: &str, targets: &std::collections::HashSet<NodeId>) -> Option<()> {
     let arena = realm(scope, edit.cid);
     let Some(conflict) = arena.parent_of(text).filter(|&p| p != edit.host && tag_is(arena, p, other)) else { return Some(()) };
     let mut stack = vec![conflict];
@@ -301,14 +313,33 @@ fn unlink(scope: &mut v8::PinScope<'_, '_>, edit: &mut Edit<'_, '_>, (start, end
     Some((true, Caret::Keep, Vec::new()))
 }
 
-// insertHorizontalRule: the selection's contents deleted, an `<hr>` at its start — inside a text there, the text split
-// at it — and the caret after it.
+// insertHorizontalRule: the selection's contents deleted, an `<hr>` where that left the range — inside a text there, the
+// text split at it — and the caret after it.
 fn horizontal_rule<'s>(scope: &mut v8::PinScope<'s, '_>, edit: &mut Edit<'s, '_>, (start, end): ((NodeId, u32), (NodeId, u32))) -> Done {
-    if start != end {
+    let arena = realm(scope, edit.cid);
+    let place = if start != end {
+        // (…where DOM "delete the contents" leaves the range: after the start's highest ancestor the end is not in)
+        let mut reference = None;
+        if !crate::editing::within(arena, start.0, end.0) {
+            let mut at = start.0;
+            while let Some(p) = arena.parent_of(at).filter(|&p| !crate::editing::within(arena, p, end.0)) {
+                at = p;
+            }
+            reference = Some(at);
+        }
         let (made, _) = crate::range_contents::delete(scope, edit.cid, edit.caller, edit.steps, start.0, start.1, end.0, end.1)?;
         edit.changes.extend(made);
-    }
-    let (parent, before) = edit.split_at(scope, start)?;
+        match reference {
+            Some(r) => {
+                let arena = realm(scope, edit.cid);
+                (arena.parent_of(r)?, arena.child_index(r) as u32 + 1)
+            }
+            None => start,
+        }
+    } else {
+        start
+    };
+    let (parent, before) = edit.split_at(scope, place)?;
     let rule = edit.element(scope, parent, "hr");
     edit.insert(scope, parent, &[rule], before)?;
     let at = realm(scope, edit.cid).child_index(rule) as u32 + 1;

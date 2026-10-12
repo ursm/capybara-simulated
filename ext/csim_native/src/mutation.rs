@@ -359,6 +359,15 @@ pub(crate) fn remove(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, no
     let removed = change_children(scope, cid, caller, parent, Removing::Child(node), &[], empty, None, false, steps)?.ok()?;
     Some((parent, Vec::new(), removed, connected))
 }
+// …`old` replaced by `new`, a node in no tree, in one change…
+pub(crate) fn replace(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, old: NodeId, new: NodeId, steps: v8::Local<'_, v8::Array>) -> Option<Change> {
+    let arena = realm(scope, cid);
+    let (parent, next) = (arena.parent_of(old)?, arena.sibling(old, 1));
+    let connected = arena.is_connected(parent);
+    let empty = v8::Array::new(scope, 0);
+    let removed = change_children(scope, cid, caller, parent, Removing::Child(old), &[new], empty, next, false, steps)?.ok()?;
+    Some((parent, vec![new], removed, connected))
+}
 // …every child of `parent` taken out…
 pub(crate) fn remove_all(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, parent: NodeId, steps: v8::Local<'_, v8::Array>) -> Option<Change> {
     let connected = realm(scope, cid).is_connected(parent);

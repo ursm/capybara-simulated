@@ -157,6 +157,11 @@ impl<'s> Edit<'s, '_> {
         self.changes.push(crate::mutation::remove(scope, self.cid, self.caller, node, self.steps)?);
         Some(())
     }
+    // …`old` replaced by `new`, a node in no tree…
+    pub(crate) fn replace(&mut self, scope: &mut v8::PinScope<'_, '_>, old: NodeId, new: NodeId) -> Option<()> {
+        self.changes.push(crate::mutation::replace(scope, self.cid, self.caller, old, new, self.steps)?);
+        Some(())
+    }
     // `nodes` out of where they are, into `parent` at its end — or before `before`.
     pub(crate) fn move_into(&mut self, scope: &mut v8::PinScope<'_, '_>, parent: NodeId, nodes: &[NodeId]) -> Option<()> {
         self.move_before(scope, parent, nodes, None)

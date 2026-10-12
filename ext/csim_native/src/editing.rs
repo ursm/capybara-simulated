@@ -204,8 +204,17 @@ pub(crate) fn selection_host(arena: &RealmArena, anchor: (NodeId, u32), focus: (
             None => (node, offset),
         })
     };
-    let focus = clamp(focus, backward)?;
+    let (anchor, focus) = (beside_leaf(arena, anchor), beside_leaf(arena, clamp(focus, backward)?));
     Some((host, if backward { (focus, anchor) } else { (anchor, focus) }))
+}
+// A place in a comment or a processing instruction — which an edit puts nothing in — as the place before it (at its
+// start) or after it (anywhere else); any other place as it is.
+pub(crate) fn beside_leaf(arena: &RealmArena, (node, offset): (NodeId, u32)) -> (NodeId, u32) {
+    let leaf = arena.get(node).is_some_and(|n| matches!(n.kind, NodeKind::Comment | NodeKind::ProcessingInstruction));
+    match arena.parent_of(node).filter(|_| leaf) {
+        Some(parent) => (parent, arena.child_index(node) as u32 + (offset > 0) as u32),
+        None => (node, offset),
+    }
 }
 // The block a place in `node` is in: its nearest inclusive ancestor that is no inline — a block, a table's part, a list
 // item — or `host`, at most.

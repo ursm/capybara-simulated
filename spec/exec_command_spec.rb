@@ -70,4 +70,55 @@ RSpec.describe 'execCommand in an editing host' do
       ['<p>a</p><p>b</p>', '"a"@0-"a"@0', '']
     ])
   end
+
+  # Where the selection is no place to put anything — inside a comment, across elements, out of the host, nowhere — and
+  # what an observer hears of the edit (Chrome's shape, for each the reviewer measured there).
+  edges = [
+    ['abc<!--c-->def', 'getSelection().collapse(e.childNodes[1], 1)', 'insertHorizontalRule'],
+    ['<b>abc</b><i>def</i>', 'getSelection().setBaseAndExtent(e.firstChild.firstChild, 1, e.lastChild.firstChild, 1)', 'insertHorizontalRule'],
+    ['<p>abc</p><p>def</p>', 'getSelection().setBaseAndExtent(e.firstChild.firstChild, 1, e.lastChild.firstChild, 1)', 'insertHorizontalRule'],
+    ['abc', 'getSelection().removeAllRanges()', 'insertHorizontalRule'],
+    ['abc', 'getSelection().collapse(document, 1)', 'insertHorizontalRule'],
+    ['abc', 'getSelection().setBaseAndExtent(out.firstChild, 1, out.firstChild, 2)', 'bold'],
+    ['abc', 'getSelection().setBaseAndExtent(e.firstChild, 1, out.firstChild, 2)', 'bold'],
+    ['abc', 'getSelection().setBaseAndExtent(e.firstChild, 0, e.firstChild, 3)', 'foreColor'],
+    ['abc', 'getSelection().setBaseAndExtent(e.firstChild, 0, e.firstChild, 3)', 'createLink'],
+    ['<ul><li>a</li></ul>', 'getSelection().collapse(e.querySelector("li").firstChild, 0)', 'insertOrderedList']
+  ]
+
+  it 'puts nothing where nothing goes, and tells an observer what it changed' do
+    session = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><div id=e contenteditable></div><p id=out>out</p>']]
+    }).tap {|s| s.visit '/' }
+    got = edges.map {|html, setup, command|
+      session.evaluate_script(<<~JS)
+        (() => {
+          const e = document.getElementById('e'), out = document.getElementById('out');
+          e.innerHTML = #{html.to_json};
+          e.focus();
+          #{setup};
+          const mo = new MutationObserver(() => {});
+          mo.observe(document.body, {subtree: true, childList: true, attributes: true, characterData: true});
+          const arg = {foreColor: 'red', createLink: '\\ud800z'}[#{command.to_json}];
+          const ok = document.execCommand(#{command.to_json}, false, arg);
+          const records = mo.takeRecords().map((r) =>
+            r.type[0] + ':' + r.target.nodeName + '+' + r.addedNodes.length + '-' + r.removedNodes.length + (r.attributeName ? '@' + r.attributeName : ''));
+          const a = e.querySelector('a');
+          return [ok, e.innerHTML + (a && a.getAttribute('href') === '\\ud800z' ? ' (href exact)' : ''), out.innerHTML, records.join(' ')];
+        })()
+      JS
+    }
+    expect(got).to eq([
+      [true, 'abc<!--c--><hr>def', 'out', 'c:DIV+1-0'],
+      [true, '<b>a</b><hr><i>ef</i>', 'out', 'c:#text+0-0 c:#text+0-0 c:DIV+1-0'],
+      [true, '<p>a</p><hr><p>ef</p>', 'out', 'c:#text+0-0 c:#text+0-0 c:DIV+1-0'],
+      [false, 'abc', 'out', ''],
+      [true, '<hr>abc', 'out', 'c:DIV+1-0'],
+      [false, 'abc', 'out', ''],
+      [true, 'a<b>bc</b>', 'out', 'c:DIV+1-0 c:#text+0-0 c:DIV+1-0 c:DIV+0-1 c:B+1-0'],
+      [true, '<span style="color: red;">abc</span>', 'out', 'c:DIV+1-0 c:DIV+0-1 c:SPAN+1-0'],
+      [true, "<a href=\"\u{FFFD}z\">abc</a> (href exact)", 'out', 'c:DIV+1-0 c:DIV+0-1 c:A+1-0'],
+      [true, '<ol><li>a</li></ol>', 'out', 'c:UL+0-1 c:DIV+1-1']
+    ])
+  end
 end
