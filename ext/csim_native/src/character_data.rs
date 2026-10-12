@@ -133,6 +133,9 @@ fn split_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let new = realm(scope, cid).create(crate::dom::NodeData { cdata, ..crate::dom::NodeData::of_kind(crate::dom::NodeKind::Text, tail) }, None);
     let held = crate::node_handle::bare(scope, new, doc, cid);
     let new_value = crate::dom::node_value(scope, Some(new));
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
     drop(held);
     let Ok(new_obj) = v8::Local::<v8::Object>::try_from(new_value) else { return };
     let mut changes = Vec::new();
@@ -149,6 +152,9 @@ fn split_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     }
     let mut out = vec![new_value];
     out.extend(crate::mutation::changes_value(scope, cid, &changes));
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
     rv.set(v8::Array::new_with_elements(scope, &out).into());
 }
 
@@ -197,6 +203,9 @@ fn normalize_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         }
         let data: Vec<u16> = following.iter().flat_map(|&(n, ..)| arena.get(n).map_or_else(Vec::new, |d| d.data.clone())).collect();
         let object = crate::dom::node_value(scope, Some(node));
+        if crate::dom::factory_threw(scope) {
+            return;
+        }
         let Some(joined) = v8::String::new_from_two_byte(scope, &data, v8::NewStringType::Normal) else { return };
         if replace_data(scope, caller, node, object, length, 0, joined).is_err() {
             return;
@@ -213,5 +222,8 @@ fn normalize_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         }
     }
     let out = crate::mutation::changes_value(scope, cid, &changes);
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
     rv.set(v8::Array::new_with_elements(scope, &out).into());
 }

@@ -89,6 +89,9 @@ impl<'s> Run<'s> {
     // `count` units of `node`'s data from `offset` cut.
     fn cut(&mut self, scope: &mut v8::PinScope<'s, '_>, node: NodeId, offset: u32, count: u32) -> Option<()> {
         let object = crate::dom::node_value(scope, Some(node));
+        if crate::dom::factory_threw(scope) {
+            return None;
+        }
         let none = v8::String::empty(scope);
         crate::character_data::replace_data(scope, self.caller, node, object, offset as usize, count as usize, none).ok()
     }
@@ -231,6 +234,9 @@ fn process_range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     }
     // (…what it makes, in the start node's node document — or the start node's, a document)
     let start = crate::dom::node_value(scope, Some(sc));
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
     let doc = match crate::dom::dom(scope).arena.get(sc).map(|n| n.kind) {
         Some(NodeKind::Document) => v8::Local::<v8::Object>::try_from(start).ok(),
         _ => crate::node_handle::handle_of(scope, start).and_then(|h| unsafe { h.as_ref() }.document(scope)),
@@ -242,10 +248,17 @@ fn process_range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     // (…what changed handed back whatever stopped it — a cut a script's steps had made impossible: the changes made are
     // the bindings' to finish, and the range collapses to its start)
     let collapse = run.process(scope, sc, so, ec, eo, frag).flatten();
+    // (…each answer made, and none past a node factory that threw: its exception is what the op ends with)
     let mut out: Vec<v8::Local<'_, v8::Value>> = vec![crate::dom::node_value(scope, frag)];
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
     match collapse {
         Some((node, offset)) => {
             out.push(crate::dom::node_value(scope, Some(node)));
+            if crate::dom::factory_threw(scope) {
+                return;
+            }
             out.push(v8::Integer::new_from_unsigned(scope, offset).into());
         }
         None => {
@@ -254,8 +267,14 @@ fn process_range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         }
     }
     let changes = crate::mutation::changes_value(scope, cid, &run.changes);
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
     out.extend(changes);
     let triples = crate::cloning::bindings_value(scope, cid, &run.bindings);
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
     out.extend(triples);
     rv.set(v8::Array::new_with_elements(scope, &out).into());
 }

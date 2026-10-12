@@ -923,12 +923,19 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
             let _ = id;
         }
         let mut out: Vec<v8::Local<'_, v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, tops.len() as u32).into()];
+        // (…each answer made, and none past a node factory that threw: its exception is what the op ends with)
         let Ok(nodes) = v8::Local::<v8::Array>::try_from(crate::dom::nodes_value(scope, cid, &tops)) else { return };
+        if crate::dom::factory_threw(scope) {
+            return;
+        }
         for i in 0..tops.len() as u32 {
             out.push(nodes.get_index(scope, i).unwrap_or_else(|| v8::null(scope).into()));
         }
         let ids: Vec<crate::dom::NodeId> = build.steps.iter().map(|(id, ..)| *id).collect();
         let Ok(elements) = v8::Local::<v8::Array>::try_from(crate::dom::nodes_value(scope, cid, &ids)) else { return };
+        if crate::dom::factory_threw(scope) {
+            return;
+        }
         for (k, (_, names, flags)) in build.steps.iter().enumerate() {
             out.push(elements.get_index(scope, k as u32).unwrap_or_else(|| v8::null(scope).into()));
             out.push(crate::cloning::names_value(scope, names));

@@ -2072,7 +2072,7 @@ pub(crate) struct Dom {
     // arena object is held — and the handle of the one it is making (node_handle.rs `object_of`, `construct`).
     pub(crate) factories: std::collections::HashMap<i32, v8::Weak<v8::Function>>,
     pub(crate) wrap_pending: Option<v8::cppgc::Persistent<crate::node_handle::NodeHandle>>,
-    // Whether a factory threw (at the stack's limit, say) since `nodes_value` began asking for objects.
+    // Whether a factory threw (at the stack's limit, say) since `nodes_value` / `node_value` began asking for objects.
     pub(crate) factory_threw: bool,
 }
 
@@ -2135,12 +2135,20 @@ pub(crate) fn nodes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, ids: &
 }
 // …and one node, or none: its object, or null.
 pub(crate) fn node_value<'s>(scope: &mut v8::PinScope<'s, '_>, id: Option<NodeId>) -> v8::Local<'s, v8::Value> {
+    dom(scope).factory_threw = false;
     let held = id.and_then(|id| dom(scope).arena.get(id).and_then(|n| crate::node_handle::held(&n.link)));
     let object = match (held.as_ref().and_then(|h| h.get(scope)), id) {
         (None, Some(id)) if held.is_some() => crate::node_handle::object_of(scope, id),
         (object, _) => object,
     };
     object.map_or_else(|| v8::null(scope).into(), Into::into)
+}
+
+// Whether a node factory threw making an answer of the last `nodes_value` / `node_value` (node_handle.rs `object_of`) —
+// what an op that makes more than one answer asks after each: past one, it returns at once, the factory's exception what
+// it ends with (any call into V8 between could lose it).
+pub(crate) fn factory_threw(scope: &mut v8::PinScope<'_, '_>) -> bool {
+    dom(scope).factory_threw
 }
 
 // The arena for realm `cid` and its style engine, for a change the engine has to hear of — the engine's change hooks

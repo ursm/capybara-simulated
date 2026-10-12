@@ -80,15 +80,25 @@ fn clone_tree_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let maker = crate::dom::realm_id(scope, &args);
     let Some(copy) = clone_into(scope, cid, maker, src, None, deep, doc, &mut held, &mut steps) else { return };
     let mut out = vec![crate::dom::node_value(scope, Some(copy))];
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
     out.extend(bindings_value(scope, cid, &steps));
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
     rv.set(v8::Array::new_with_elements(scope, &out).into());
 }
 // The copies whose cloning steps are the bindings' too, each with its source and the names of the attributes whose steps
-// are theirs (`bindings_steps`) — as the page has them: `[source, copy, names, …]`.
+// are theirs (`bindings_steps`) — as the page has them: `[source, copy, names, …]`; none where a node factory threw
+// (`factory_threw`, which the caller asks).
 pub(crate) type BindingsSteps = Vec<(NodeId, NodeId, Vec<String>)>;
 pub(crate) fn bindings_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, steps: &BindingsSteps) -> Vec<v8::Local<'s, v8::Value>> {
     let ids: Vec<NodeId> = steps.iter().flat_map(|(s, c, _)| [*s, *c]).collect();
     let Ok(nodes) = v8::Local::<v8::Array>::try_from(crate::dom::nodes_value(scope, cid, &ids)) else { return Vec::new() };
+    if crate::dom::factory_threw(scope) {
+        return Vec::new();
+    }
     let mut out = Vec::with_capacity(steps.len() * 3);
     for (k, (_, _, names)) in steps.iter().enumerate() {
         for i in [2 * k as u32, 2 * k as u32 + 1] {

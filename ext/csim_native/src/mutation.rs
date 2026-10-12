@@ -354,13 +354,21 @@ pub(crate) fn remove_all(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32
     let removed = change_children(scope, cid, caller, parent, Removing::All, &[], empty, None, false, steps)?.ok()?;
     Some((parent, Vec::new(), removed, connected))
 }
-// …and the changes as the page has them: their count, then each `[parent, added, removed, connected]`.
+// …and the changes as the page has them: their count, then each `[parent, added, removed, connected]` — cut short where
+// a node factory threw (`factory_threw`, which the caller asks).
 pub(crate) fn changes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, changes: &[Change]) -> Vec<v8::Local<'s, v8::Value>> {
     let mut out: Vec<v8::Local<'s, v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, changes.len() as u32).into()];
     for (parent, added, removed, connected) in changes {
         out.push(node_value(scope, Some(*parent)));
-        out.push(nodes_value(scope, cid, added));
-        out.push(nodes_value(scope, cid, removed));
+        for nodes in [added, removed] {
+            if crate::dom::factory_threw(scope) {
+                return out;
+            }
+            out.push(nodes_value(scope, cid, nodes));
+        }
+        if crate::dom::factory_threw(scope) {
+            return out;
+        }
         out.push(v8::Boolean::new(scope, *connected).into());
     }
     out
