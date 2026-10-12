@@ -153,6 +153,65 @@ fn hard_wrap(text: &[u16], cols: usize) -> Vec<u16> {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "formEntries", form_entries, context_id);
+    crate::dom::register(scope, ns, "formSubmission", form_submission, context_id);
+}
+
+// An enumerated attribute's state: its value ASCII-lowercased where it is one of `keywords`, else `invalid`.
+fn keyword(value: &str, keywords: &[&'static str], invalid: &'static str) -> &'static str {
+    keywords.iter().copied().find(|k| value.eq_ignore_ascii_case(k)).unwrap_or(invalid)
+}
+
+// __dom.formSubmission(formNid, submitterNid, documentEncoding) -> `[action, method, enctype, target, rel, encoding]`:
+// how a form submits (HTML §4.10.21.3) — the submitter's `formaction`, `formmethod`, `formenctype` and `formtarget`
+// where it has them, else the form's own; the action as written (null for none: the bindings resolve it against the
+// document's base URL); the method and the enctype their states (an invalid or missing one GET, urlencoded); the target
+// the form's `target`, else the first `<base target>` of its tree's; its submission character encoding — the first of
+// its `accept-charset` labels that names an encoding, else the document's, UTF-8 for a UTF-16 one or `replacement`.
+fn form_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(form) = nid_arg(scope, &args, 0) else { return };
+    let submitter = nid_arg(scope, &args, 1);
+    let document_encoding = args.get(2).to_rust_string_lossy(scope);
+    let arena = &crate::dom::dom(scope).arena;
+    let Some(f) = arena.get(form) else { return };
+    let s = submitter.and_then(|id| arena.get(id));
+    let own = |submitter_attr: &str, form_attr: &str| s.and_then(|s| s.plain_attr_units(submitter_attr)).or_else(|| f.plain_attr_units(form_attr));
+    let text = |units: Vec<u16>| String::from_utf16_lossy(&units);
+    let action = own("formaction", "action");
+    let method = keyword(&own("formmethod", "method").map(text).unwrap_or_default(), &["get", "post", "dialog"], "get");
+    let enctype_value = own("formenctype", "enctype").map(text).unwrap_or_default();
+    let enctype = keyword(&enctype_value, &["application/x-www-form-urlencoded", "multipart/form-data", "text/plain"], "application/x-www-form-urlencoded");
+    let target = s.and_then(|s| s.plain_attr_units("formtarget")).or_else(|| f.plain_attr_units("target")).or_else(|| {
+        let root = arena.root_of(form);
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            let n = arena.get(id)?;
+            if n.is_html_named("base") {
+                if let Some(t) = n.plain_attr_units("target") {
+                    return Some(t);
+                }
+            }
+            stack.extend(n.children.iter().rev());
+        }
+        None
+    });
+    let rel = f.plain_attr_units("rel").unwrap_or_default();
+    let ascii_ws = |c: char| matches!(c, '\t' | '\n' | '\x0C' | '\r' | ' ' | ',');
+    let labelled = f.plain_attr("accept-charset").and_then(|ac| ac.split(ascii_ws).filter(|l| !l.is_empty()).find_map(|l| encoding_rs::Encoding::for_label(l.as_bytes())));
+    let encoding = labelled.or_else(|| encoding_rs::Encoding::for_label(document_encoding.as_bytes())).map_or("UTF-8", |e| e.name());
+    let encoding = if matches!(encoding, "replacement" | "UTF-16BE" | "UTF-16LE") { "UTF-8" } else { encoding };
+    let action = match action {
+        Some(a) => crate::dom::utf16_value(scope, &a),
+        None => v8::null(scope).into(),
+    };
+    let values: [v8::Local<'_, v8::Value>; 6] = [
+        action,
+        v8::String::new(scope, method).map_or_else(|| v8::null(scope).into(), Into::into),
+        v8::String::new(scope, enctype).map_or_else(|| v8::null(scope).into(), Into::into),
+        crate::dom::utf16_value(scope, &target.unwrap_or_default()),
+        crate::dom::utf16_value(scope, &rel),
+        v8::String::new(scope, encoding).map_or_else(|| v8::null(scope).into(), Into::into),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
 }
 
 // __dom.formEntries(formNid, submitterNid, encoding, x, y) -> [entries, nodes] — `x`, `y` an image submitter's selected
