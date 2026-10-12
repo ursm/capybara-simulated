@@ -3189,17 +3189,7 @@ html/dom/idlharness.https.html:
   with too few arguments must throw TypeError'
 - 'Document interface: calling parseHTML(DOMString, optional SetHTMLOptions) on new
   Document() with too few arguments must throw TypeError'
-- 'Document interface: calling parseHTMLUnsafe((TrustedHTML or DOMString), optional
-  ParseHTMLUnsafeOptions) on documentWithHandlers with too few arguments must throw
-  TypeError'
-- 'Document interface: calling parseHTMLUnsafe((TrustedHTML or DOMString), optional
-  ParseHTMLUnsafeOptions) on iframe.contentDocument with too few arguments must throw
-  TypeError'
-- 'Document interface: calling parseHTMLUnsafe((TrustedHTML or DOMString), optional
-  ParseHTMLUnsafeOptions) on new Document() with too few arguments must throw TypeError'
 - 'Document interface: operation parseHTML(DOMString, optional SetHTMLOptions)'
-- 'Document interface: operation parseHTMLUnsafe((TrustedHTML or DOMString), optional
-  ParseHTMLUnsafeOptions)'
 - 'Element interface: calling setHTML(DOMString, optional SetHTMLOptions) on document.createElement("div")
   with too few arguments must throw TypeError'
 - 'Element interface: calling setHTML(DOMString, optional SetHTMLOptions) on document.createElement("noscript")
