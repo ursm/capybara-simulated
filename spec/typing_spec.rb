@@ -46,4 +46,64 @@ RSpec.describe 'typing into a text control' do
       ["ab\ncd", 3, 3], ["ab\ncd", 2, 2], ["a\u{1F600}b", 0, 0]
     ])
   end
+
+  # Shift extends the selection from its anchor, its direction following; Ctrl+Home / Ctrl+End go to the value's ends;
+  # `maxlength` takes as much of the typed text as it has room for, a surrogate pair whole or not at all, leaving the
+  # rest of the value whole (0 takes nothing); Delete and the arrows step a grapheme cluster, Backspace a code point but
+  # an emoji sequence or a flag whole.
+  it 'extends, cuts and steps as Chrome does' do
+    html = "<!DOCTYPE html><meta charset=utf-8><input id=i value=abcdef><textarea id=t>ab\ncd</textarea><input id=m maxlength=5><input id=z maxlength=0><input id=g>"
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
+    state = ->(id) { s.evaluate_script("(() => { const e = document.getElementById('#{id}'); return [e.value, e.selectionStart, e.selectionEnd, e.selectionDirection]; })()") }
+    select = ->(id, from, to, direction = 'none', value = nil) {
+      s.execute_script("(() => { const e = document.getElementById('#{id}'); #{value ? "e.value = #{value.to_json};" : ''} e.focus(); e.setSelectionRange(#{from}, #{to}, '#{direction}'); })()")
+    }
+    keys = ->(id, *k) { s.find(:css, "##{id}").send_keys(*k); state.(id)[0..2] }
+    got = []
+    select.('i', 2, 2)
+    got << keys.('i', [:shift, :left]) << keys.('i', [:shift, :left]) << keys.('i', [:shift, :right])
+    select.('i', 2, 4, 'forward')
+    got << keys.('i', [:shift, :left])
+    select.('t', 5, 5)
+    got << keys.('t', [:control, :home])
+    select.('t', 0, 0)
+    got << keys.('t', [:control, :end])
+    select.('t', 4, 4)
+    got << keys.('t', [:shift, :home])
+    [['abcde', 0, 0, 'X'], ['abcdefg', 7, 7, 'h'], ['ab', 1, 1, 'XYZW'], ['abcd', 4, 4, "\u{1F600}"], ['abcde', 1, 3, 'XYZ']].each do |value, from, to, text|
+      select.('m', from, to, 'none', value)
+      got << keys.('m', text)
+    end
+    select.('z', 0, 0)
+    got << keys.('z', 'q')
+    [["ae\u0301b", 1, :delete], ["ae\u0301b", 3, :left], ["a\u{1F1EF}\u{1F1F5}b", 5, :left], ["a\u{1F1EF}\u{1F1F5}b", 5, :backspace],
+     ["ae\u0301b", 3, :backspace], ["a\u{1F44D}\u{1F3FD}b", 5, :backspace]].each do |value, at, key|
+      select.('g', at, at, 'none', value)
+      got << keys.('g', key)
+    end
+    expect(got).to eq([
+      ['abcdef', 1, 2], ['abcdef', 0, 2], ['abcdef', 1, 2], ['abcdef', 2, 3], ["ab\ncd", 0, 0], ["ab\ncd", 5, 5], ["ab\ncd", 3, 4],
+      ['abcde', 0, 0], ['abcdefg', 7, 7], ['aXYZb', 4, 4], ['abcd', 4, 4], ['aXYde', 3, 3], ['', 0, 0],
+      ['ab', 1, 1], ["ae\u0301b", 1, 1], ["a\u{1F1EF}\u{1F1F5}b", 1, 1], ['ab', 1, 1], ['aeb', 2, 2], ['ab', 1, 1]
+    ])
+  end
+
+  # A value written by another realm's code moves the style state of the control's own realm, whose `:placeholder-shown`
+  # rule stops applying.
+  it "restyles a frame's control a parent's script writes" do
+    html = <<~HTML
+      <!DOCTYPE html><iframe id=f srcdoc="<style>input{width:100px} input:placeholder-shown{width:300px}</style><input id=i placeholder=p>"></iframe>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
+    expect(s.evaluate_script(<<~JS)).to eq(%w[300px 100px])
+      (() => {
+        const w = document.getElementById('f').contentWindow, i = w.document.getElementById('i');
+        const before = w.getComputedStyle(i).width;
+        document.body.offsetWidth;   // (…this realm's own read between, its layout this realm's)
+        i.value = 'x';
+        document.body.offsetWidth;
+        return [before, w.getComputedStyle(i).width];
+      })()
+    JS
+  end
 end

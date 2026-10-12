@@ -552,7 +552,9 @@ fn set_live_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         s.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
         units.into_boxed_slice()
     });
-    if !crate::dom::dom(scope).arena.write_live_value(id, units) {
+    // (…in the control's realm, whatever realm's code writes it: its style state is what the value moves)
+    let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) else { return rv.set_bool(false) };
+    if !crate::dom::realm(scope, cid).write_live_value(id, units) {
         return rv.set_bool(false);
     }
     // SAFETY: as above.

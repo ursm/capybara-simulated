@@ -50,13 +50,16 @@ const MAXLENGTH_INPUT_TYPES: [&str; 6] = ["text", "search", "tel", "url", "email
 // What typing into a control changed (`type_text`): its value, its selection.
 pub(crate) const TYPED_VALUE: u32 = 1;
 pub(crate) const TYPED_SELECTION: u32 = 2;
-// The editing keys a text control takes (`edit_control`).
+// The editing keys a text control takes (`edit_control`) — the moves extending the selection with `EDIT_EXTEND` (Shift).
 const EDIT_BACKSPACE: u32 = 0;
 const EDIT_DELETE: u32 = 1;
 const EDIT_LEFT: u32 = 2;
 const EDIT_RIGHT: u32 = 3;
 const EDIT_HOME: u32 = 4;
 const EDIT_END: u32 = 5;
+const EDIT_TEXT_START: u32 = 6;
+const EDIT_TEXT_END: u32 = 7;
+const EDIT_EXTEND: u32 = 16;
 
 // Why `setRangeText()` refused.
 #[derive(Debug, PartialEq)]
@@ -105,16 +108,19 @@ impl RealmArena {
     }
 
     // The user typing `text` into the control `id`: what it inserts replacing its selection (the caret at its value's
-    // end where none was ever set) — or, `whole`, its value, as a driver's fill does — the text entry cursor after it — but no keystroke that leaves a number field's text
-    // no prefix of a scientific number being entered ("1e+1" takes no second sign; "1.", "1e", "1e+" stand), and what
-    // passes `maxlength` cut off where it applies (a textarea, a text-like input). What it changed (`TYPED_*`); the value
-    // written is the engine's, the string the bindings held of it forgotten by the caller.
+    // end where none was ever set) — or, `whole`, its value, as a driver's fill does — the text entry cursor after it —
+    // but no keystroke that leaves a number field's text no prefix of a scientific number being entered ("1e+1" takes
+    // no second sign; "1.", "1e", "1e+" stand), and of the text no more than `maxlength` has room for where it applies
+    // (a textarea, a text-like input): what the value keeps besides the selection is left whole, and a surrogate pair
+    // goes in whole or not at all (Chrome: "abcde" at maxlength 5 takes no "X"; a script's longer value takes nothing,
+    // and loses nothing). What it changed (`TYPED_*`); the value written is the engine's, the string the bindings held
+    // of it forgotten by the caller.
     pub(crate) fn type_text(&mut self, id: NodeId, text: &[u16], whole: bool) -> u32 {
         let Some(n) = self.get(id) else { return 0 };
         let current = self.relevant_value(n);
         let number = n.is_html_named("input") && n.input_type() == "number";
         let cuts = n.is_html_named("textarea") || (n.is_html_named("input") && MAXLENGTH_INPUT_TYPES.contains(&n.input_type()));
-        let max = if cuts { n.plain_attr("maxlength").and_then(crate::validity::parse_non_negative).filter(|&m| m > 0) } else { None };
+        let max = if cuts { n.plain_attr("maxlength").and_then(crate::validity::parse_non_negative) } else { None };
         let (sel, set) = self.text_selection(id);
         let (start, end) = match (whole, set) {
             (true, _) => (0, current.len()),
@@ -122,6 +128,14 @@ impl RealmArena {
             (false, false) => (current.len(), current.len()),
         };
         let (start, end) = (start.min(current.len()), end.min(current.len()));
+        let mut text = text;
+        if let Some(max) = max {
+            let mut room = (max as usize).saturating_sub(current.len() - (end - start)).min(text.len());
+            if room > 0 && room < text.len() && is_high(text[room - 1]) {
+                room -= 1;
+            }
+            text = &text[..room];
+        }
         let mut next = Vec::with_capacity(current.len() + text.len());
         next.extend_from_slice(&current[..start]);
         next.extend_from_slice(text);
@@ -129,10 +143,7 @@ impl RealmArena {
         if number && !number_being_entered(&next) {
             return 0;
         }
-        if let Some(max) = max {
-            next.truncate(max as usize);
-        }
-        let caret = next.len().min(start + text.len()) as u32;
+        let caret = (start + text.len()) as u32;
         let mut changed = 0;
         if self.write_live_value(id, Some(next.into_boxed_slice())) {
             changed |= TYPED_VALUE;
@@ -143,10 +154,13 @@ impl RealmArena {
         changed
     }
 
-    // An editing key pressed in the control `id`, as Chrome takes it: Backspace / Delete remove the selection, or the
-    // character before / after the caret (a surrogate pair one); ArrowLeft / ArrowRight collapse a selection to its
-    // start / end, or move the caret by a character; Home / End go to the start / end of the line the caret is on (a
-    // textarea's — its value's line, between line feeds — or an input's whole value). What it changed (`TYPED_*`).
+    // An editing key pressed in the control `id`, as Chrome takes it: Backspace / Delete remove the selection, or what
+    // is before / after the caret — Delete a grapheme cluster, Backspace a code point but for an emoji sequence or a
+    // flag, which go whole ("é" leaves "e"; "👍🏽" nothing); ArrowLeft / ArrowRight collapse a selection to its start /
+    // end, or move the caret by a grapheme cluster; Home / End go to the start / end of the line the caret is on (a
+    // textarea's — its value's line, between line feeds — or an input's whole value), Ctrl+Home / Ctrl+End to the
+    // value's; and with `EDIT_EXTEND` (Shift) the moves take the selection's focus there, its anchor staying. What it
+    // changed (`TYPED_*`).
     pub(crate) fn edit_control(&mut self, id: NodeId, edit: u32) -> u32 {
         let Some(n) = self.get(id) else { return 0 };
         let value = self.relevant_value(n);
@@ -154,19 +168,40 @@ impl RealmArena {
         let len = value.len();
         let (sel, set) = self.text_selection(id);
         let (start, end) = if set { (sel.start as usize, sel.end as usize) } else { (len, len) };
-        let back = |i: usize| if i >= 2 && is_low(value[i - 1]) && is_high(value[i - 2]) { i - 2 } else { i.saturating_sub(1) };
-        let on = |i: usize| if i + 1 < len && is_high(value[i]) && is_low(value[i + 1]) { i + 2 } else { (i + 1).min(len) };
         let line_start = |i: usize| if multiline { value[..i].iter().rposition(|&u| u == 0x0A).map_or(0, |p| p + 1) } else { 0 };
         let line_end = |i: usize| if multiline { value[i..].iter().position(|&u| u == 0x0A).map_or(len, |p| i + p) } else { len };
-        let (removed, caret) = match edit {
+        let extend = edit & EDIT_EXTEND != 0;
+        let key = edit & !EDIT_EXTEND;
+        if extend && key >= EDIT_LEFT {
+            // (…the focus the end the selection runs to, the anchor the other)
+            let backward = sel.direction == Direction::Backward;
+            let (anchor, focus) = if backward { (end, start) } else { (start, end) };
+            let to = match key {
+                EDIT_LEFT => cluster_before(&value, focus),
+                EDIT_RIGHT => cluster_after(&value, focus),
+                EDIT_HOME => line_start(focus),
+                EDIT_END => line_end(focus),
+                EDIT_TEXT_START => 0,
+                EDIT_TEXT_END => len,
+                _ => return 0,
+            };
+            let (from, until, direction) = if to < anchor { (to, anchor, Direction::Backward) } else { (anchor, to, Direction::Forward) };
+            return if self.set_text_selection(id, from as u32, until as u32, direction) { TYPED_SELECTION } else { 0 };
+        }
+        let (removed, caret) = match key {
             EDIT_BACKSPACE | EDIT_DELETE if end > start => (Some(start..end), start),
-            EDIT_BACKSPACE if start > 0 => (Some(back(start)..start), back(start)),
-            EDIT_DELETE if start < len => (Some(start..on(start)), start),
+            EDIT_BACKSPACE if start > 0 => {
+                let from = backspace_from(&value, start);
+                (Some(from..start), from)
+            }
+            EDIT_DELETE if start < len => (Some(start..cluster_after(&value, start)), start),
             EDIT_BACKSPACE | EDIT_DELETE => return 0,
-            EDIT_LEFT => (None, if end > start { start } else { back(start) }),
-            EDIT_RIGHT => (None, if end > start { end } else { on(end) }),
+            EDIT_LEFT => (None, if end > start { start } else { cluster_before(&value, start) }),
+            EDIT_RIGHT => (None, if end > start { end } else { cluster_after(&value, end) }),
             EDIT_HOME => (None, line_start(start)),
             EDIT_END => (None, line_end(end)),
+            EDIT_TEXT_START => (None, 0),
+            EDIT_TEXT_END => (None, len),
             _ => return 0,
         };
         let mut changed = 0;
@@ -253,6 +288,41 @@ impl RealmArena {
             }
         };
         Ok((next, ns, ne, Direction::None))
+    }
+}
+
+// The grapheme cluster boundaries around `at` in `value` (UAX #29, ICU4X's segmenter): the one before it and the one
+// after — what the arrows and Delete step over, read in a window of the text either side (no cluster runs longer).
+const CLUSTER_WINDOW: usize = 64;
+fn cluster_boundaries(value: &[u16], at: usize) -> (usize, Vec<usize>) {
+    let from = at.saturating_sub(CLUSTER_WINDOW);
+    let to = (at + CLUSTER_WINDOW).min(value.len());
+    let segmenter = icu_segmenter::GraphemeClusterSegmenter::new();
+    (from, segmenter.segment_utf16(&value[from..to]).map(|b| from + b).collect())
+}
+fn cluster_before(value: &[u16], at: usize) -> usize {
+    let (from, bounds) = cluster_boundaries(value, at);
+    bounds.into_iter().rev().find(|&b| b < at).unwrap_or(from)
+}
+fn cluster_after(value: &[u16], at: usize) -> usize {
+    let (_, bounds) = cluster_boundaries(value, at);
+    bounds.into_iter().find(|&b| b > at).unwrap_or(value.len())
+}
+// …and where Backspace at `at` deletes from: the code point before it — but the whole cluster where that is an emoji
+// sequence or a flag (an extended pictographic, a skin tone, a regional indicator, a joiner in it), as Blink's
+// backspace state machine takes them.
+fn backspace_from(value: &[u16], at: usize) -> usize {
+    let cluster = cluster_before(value, at);
+    let emoji = char::decode_utf16(value[cluster..at].iter().copied()).filter_map(Result::ok).any(|c| {
+        let c = u32::from(c);
+        crate::unicode::is_extended_pictographic(c) || (0x1F1E6..=0x1F1FF).contains(&c) || (0x1F3FB..=0x1F3FF).contains(&c) || c == 0x200D
+    });
+    if emoji {
+        cluster
+    } else if at >= 2 && is_low(value[at - 1]) && is_high(value[at - 2]) {
+        at - 2
+    } else {
+        at - 1
     }
 }
 
@@ -412,8 +482,9 @@ fn type_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let control = args.get(0);
     let Some(id) = crate::node_handle::nid_of(scope, control) else { return rv.set_uint32(0) };
     let text = crate::dom::utf16_arg(scope, args.get(1));
-    let cid = crate::dom::realm_id(scope, &args);
     let whole = args.get(2).is_true();
+    // (…in the control's realm, whatever realm's code asks: its style state is what the value moves)
+    let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) else { return rv.set_uint32(0) };
     let changed = crate::dom::realm(scope, cid).type_text(id, &text, whole);
     if changed & TYPED_VALUE != 0 {
         crate::node_handle::forget_live_value(scope, control);
@@ -427,7 +498,7 @@ fn edit_control_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let control = args.get(0);
     let Some(id) = crate::node_handle::nid_of(scope, control) else { return rv.set_uint32(0) };
     let edit = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
-    let cid = crate::dom::realm_id(scope, &args);
+    let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) else { return rv.set_uint32(0) };
     let changed = crate::dom::realm(scope, cid).edit_control(id, edit);
     if changed & TYPED_VALUE != 0 {
         crate::node_handle::forget_live_value(scope, control);
