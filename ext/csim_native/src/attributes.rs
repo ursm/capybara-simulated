@@ -43,7 +43,9 @@ fn name_of<'a>(n: &'a NodeData, key: &'a str) -> (&'a str, Option<&'a str>, &'a 
 impl NodeData {
     // DOM "get an attribute by name": the key of the first attribute whose qualified name is `name`.
     fn key_by_qname(&self, name: &str) -> Option<&str> {
-        self.attributes.iter().map(|(k, _)| k.as_str()).find(|k| qualified(k) == name)
+        // (…its key the name, or the name numbered: compared without splitting each key)
+        let named = |k: &str| k.len() >= name.len() && k.starts_with(name) && k.as_bytes().get(name.len()).is_none_or(|&b| b == 0);
+        self.attributes.iter().map(|(k, _)| k.as_str()).find(|k| named(k))
     }
     // …"by namespace and local name": `ns` empty for none.
     fn key_by_ns(&self, ns: &str, local: &str) -> Option<&str> {
@@ -62,13 +64,15 @@ impl NodeData {
 
 // Whether names given `id` are ASCII-lowercased: an HTML element's in an HTML document (DOM "get an attribute by name",
 // "set an attribute value" via `setAttribute`) — its node document asked only where `name` has an uppercase letter.
-fn lowered(scope: &mut v8::PinScope<'_, '_>, id: NodeId, name: &str) -> String {
+fn lowered(scope: &mut v8::PinScope<'_, '_>, id: NodeId, mut name: String) -> String {
     if !name.bytes().any(|b| b.is_ascii_uppercase()) || !crate::dom::dom(scope).arena.get(id).is_some_and(NodeData::is_html) {
-        return name.to_owned();
+        return name;
     }
     let doc = crate::editing::document_of(scope, id).and_then(|d| crate::node_handle::nid_of(scope, d.into()));
-    let xml = doc.and_then(|d| crate::dom::dom(scope).arena.get(d)).is_some_and(|d| d.state & STATE_XML_DOCUMENT != 0);
-    if xml { name.to_owned() } else { name.to_ascii_lowercase() }
+    if !doc.and_then(|d| crate::dom::dom(scope).arena.get(d)).is_some_and(|d| d.state & STATE_XML_DOCUMENT != 0) {
+        name.make_ascii_lowercase();
+    }
+    name
 }
 
 // __dom.attrKey(element, how, a, b) -> the key of the attribute — `how` 0 by qualified name `a`, 1 by namespace `a` (null
@@ -83,7 +87,7 @@ fn attr_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 fn attr_get(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_null() };
     let value: Option<Result<Vec<u16>, String>> = if args.get(1).uint32_value(scope) == Some(0) {
-        let name = lowered(scope, id, &args.get(2).to_rust_string_lossy(scope));
+        let name = lowered(scope, id, args.get(2).to_rust_string_lossy(scope));
         node_of(scope, id).and_then(|n| exact_value(n, n.key_by_qname(&name)?))
     } else {
         let ns = if args.get(2).is_null_or_undefined() { String::new() } else { args.get(2).to_rust_string_lossy(scope) };
@@ -109,7 +113,7 @@ fn exact_value(n: &NodeData, key: &str) -> Option<Result<Vec<u16>, String>> {
 fn find(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> Option<(NodeId, String)> {
     let id = crate::node_handle::nid_of(scope, args.get(0))?;
     let key = if args.get(1).uint32_value(scope) == Some(0) {
-        let name = lowered(scope, id, &args.get(2).to_rust_string_lossy(scope));
+        let name = lowered(scope, id, args.get(2).to_rust_string_lossy(scope));
         node_of(scope, id)?.key_by_qname(&name).map(str::to_owned)
     } else {
         let ns = if args.get(2).is_null_or_undefined() { String::new() } else { args.get(2).to_rust_string_lossy(scope) };
@@ -209,7 +213,7 @@ fn attr_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
                 if !valid_attribute_local_name(&name) {
                     return rv.set_int32(INVALID_NAME);
                 }
-                let name = lowered(scope, id, &text(&name));
+                let name = lowered(scope, id, text(&name));
                 let key = node_of(scope, id).and_then(|n| n.key_by_qname(&name)).map_or(name, str::to_owned);
                 (key, Some(units(scope, 3)), None)
             }
@@ -231,7 +235,17 @@ fn attr_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
                 // neither lowercases)
                 let Some(n) = node_of(scope, id) else { return };
                 let url = ns.as_deref().map_or_else(String::new, text);
-                let key = n.key_by_ns(&url, &text(&local)).map_or_else(|| n.fresh_key(&qn, ns.is_some() && prefix.is_none()), str::to_owned);
+                let namespaced = ns.is_some() && prefix.is_none();
+                let (key, renamed) = match n.key_by_ns(&url, &text(&local)) {
+                    // (…an Attr taking the place of one of another prefix takes it under its own qualified name: DOM "replace
+                    // an attribute")
+                    Some(k) if how == BIND && qualified(k) != qn => (n.fresh_key(&qn, namespaced), Some(k.to_owned())),
+                    Some(k) => (k.to_owned(), None),
+                    None => (n.fresh_key(&qn, namespaced), None),
+                };
+                if let Some(old) = renamed {
+                    crate::dom::rename_attribute(scope, cid, id, &old, &key);
+                }
                 (key, Some(value), ns.map(|url| (url, local)))
             }
             SET_NULL_NS => {
@@ -248,7 +262,7 @@ fn attr_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
             REMOVE | REMOVE_NS | REMOVE_KEY => {
                 let key = match how {
                     REMOVE => {
-                        let name = lowered(scope, id, &args.get(2).to_rust_string_lossy(scope));
+                        let name = lowered(scope, id, args.get(2).to_rust_string_lossy(scope));
                         node_of(scope, id).and_then(|n| n.key_by_qname(&name)).map(str::to_owned)
                     }
                     REMOVE_NS => {

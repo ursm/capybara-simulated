@@ -3748,6 +3748,27 @@ fn set_attr_namespace(
         node.set_attr_record(&key, record.as_ref().map(|(n, l)| (&n[..], &l[..])));
     }
 }
+// …the attribute stored under `old` of `id` stored under `new` from now on, where it is in the list (one taking its
+// place under another qualified name).
+pub(crate) fn rename_attribute(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, old: &str, new: &str) {
+    let (arena, engine) = arena_and_engine(scope, cid);
+    before_attribute_write(arena, engine, id, &[old, new]);
+    if let Some(node) = arena.get_mut(id) {
+        for (k, _) in node.attributes.iter_mut().filter(|(k, _)| k == old) {
+            *k = new.to_owned();
+        }
+        for (k, _) in node.attr_u16.iter_mut().filter(|(k, _)| k == old) {
+            *k = new.to_owned();
+        }
+        for (k, _, _) in node.attr_ns.iter_mut().filter(|(k, _, _)| k == old) {
+            *k = new.to_owned();
+        }
+        for (k, _, _) in node.attr_ns_u16.iter_mut().filter(|(k, _, _)| k == old) {
+            *k = new.to_owned();
+        }
+        node.attr_changed(None);
+    }
+}
 // The attribute stored under `key` of `id` written — `value` set, or (None) removed — and, for one new in a namespace, its
 // record (`ns`: the namespace and local name): the engine's steps before and after it (`before_attribute_write`,
 // `attribute_steps`) run.

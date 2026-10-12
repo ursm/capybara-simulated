@@ -8,7 +8,8 @@ require_relative 'support/session_teardown'
 # and every change handled there — its record queued, an input's type change moving the value into the `value`
 # attribute behind the type's own record (DOM §4.9, HTML §4.10.5's "input type change" steps). Chrome agrees with every
 # figure but one: its dataset setter writes the first attribute of the qualified name, a namespaced `data-q` included,
-# where HTML's "set an attribute value" names the one in no namespace (spec over Blink).
+# where HTML's "set an attribute value" names the one in no namespace; and its `setAttributeNode` of an Attr of another
+# prefix keeps the old one's qualified name, where DOM's "replace an attribute" puts the new one in its place (Firefox).
 RSpec.describe 'an element’s attribute list' do
   it 'finds, keeps apart and records attributes as the DOM says' do
     session = simulated_session(lambda {|_env|
@@ -45,6 +46,12 @@ RSpec.describe 'an element’s attribute list' do
         out.typeChange = [seen, i.getAttribute('value'), i.value];
         i.type = 'text';
         out.back = [i.value, i.selectionStart];
+        const e = document.createElement('div');
+        e.setAttributeNS('urn:x', 'p:a', '1');
+        const bound = document.createAttributeNS('urn:x', 'q:a');
+        bound.value = '2';
+        const replaced = e.setAttributeNode(bound);
+        out.bind = [e.getAttributeNames(), e.outerHTML, e.getAttribute('p:a'), e.getAttributeNode('q:a') === bound, replaced.name, replaced.value];
         let threw = '';
         try { d.setAttribute('a b', '1'); } catch (e) { threw = e.name; }
         try { d.setAttributeNS(null, 'p:q', '1'); } catch (e) { threw += ',' + e.name; }
@@ -63,6 +70,7 @@ RSpec.describe 'an element’s attribute list' do
       'spacedType' => ['text', 'checkbox'],
       'typeChange' => [['type:null', 'value:null'], 'typed', 'typed'],
       'back'       => ['typed', 0],
+      'bind'       => [['q:a'], '<div q:a="2"></div>', nil, true, 'p:a', '1'],
       'errors'     => 'InvalidCharacterError,NamespaceError'
     )
   end
