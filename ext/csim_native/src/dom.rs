@@ -2461,6 +2461,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // A node's attributes written wholesale, and their namespaces.
     register(scope, ns, "syncAttrs", sync_attrs, context_id);
     register(scope, ns, "setAttrNamespace", set_attr_namespace, context_id);
+    register(scope, ns, "attrNamespacesOf", attr_namespaces_of, context_id);
     // The store-flip's native-backed `_attrs`: __dom.attrsView(nid) -> an interceptor object over
     // that node's attributes (the Element constructor installs it in place of the JS `{}`).
     register(scope, ns, "attrsView", attrs_view, context_id);
@@ -3705,6 +3706,21 @@ fn set_attr_namespace(
         }
         node.attr_changed(None);
     }
+}
+
+// __dom.attrNamespacesOf(nid) -> [key, namespace, localName, …]: the attributes of the element that have a namespace,
+// by their store keys — what the bindings' `_attrNS` names of an element the engine made (html_parse.rs).
+fn attr_namespaces_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let Some(n) = dom(scope).arena.get(id) else { return };
+    let entries: Vec<(String, String, String)> = n.attr_ns.clone();
+    let mut out: Vec<v8::Local<'_, v8::Value>> = Vec::with_capacity(entries.len() * 3);
+    for (key, ns, local) in &entries {
+        for s in [key, ns, local] {
+            out.push(v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into));
+        }
+    }
+    rv.set(v8::Array::new_with_elements(scope, &out).into());
 }
 
 // __dom.query(rootNid, selector, quirks, firstOnly, scopeNid, xml) -> the elements matched, in document order, as

@@ -14,7 +14,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // The attributes whose steps are the bindings' (`appendedAttributeSteps`, an event handler's content attribute).
-fn bindings_steps(name: &str) -> bool {
+pub(crate) fn bindings_steps(name: &str) -> bool {
     matches!(name, "open" | "id" | "name") || name.starts_with("on")
 }
 
@@ -99,7 +99,7 @@ pub(crate) fn bindings_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, ste
     out
 }
 // The names of the attributes whose steps are the bindings', or undefined for none.
-fn names_value<'s>(scope: &mut v8::PinScope<'s, '_>, names: &[String]) -> v8::Local<'s, v8::Value> {
+pub(crate) fn names_value<'s>(scope: &mut v8::PinScope<'s, '_>, names: &[String]) -> v8::Local<'s, v8::Value> {
     if names.is_empty() {
         return v8::undefined(scope).into();
     }
