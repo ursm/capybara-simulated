@@ -162,4 +162,19 @@ RSpec.describe 'stepping a caret by a character' do
     JS
     expect(got).to eq(['5,10,14', '1,2,3,5', '1,2,3,4,6', '1,2,3', '2,3,5', '3,4,7', '4,5,7', '3,4,8,10,12', '3,4,6', '1,2,4,6,7,9,11,12'])
   end
+
+  # From outside an editing host, a step goes over one, not into it: by a character to the stop past it, by a word
+  # nowhere.
+  it 'goes over an editing host from outside one' do
+    s = session_for('<!DOCTYPE html><body><p id=s>st uv</p><div contenteditable>xx yy</div><p id=t>ab cd</p>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const desc = () => { const s = getSelection(), n = s.focusNode; return n.data + '@' + s.focusOffset; };
+        const s = getSelection(), st = document.getElementById('s').firstChild, ab = document.getElementById('t').firstChild;
+        const step = (node, off, dir, by) => { s.collapse(node, off); s.modify('move', dir, by); return desc(); };
+        return [step(ab, 0, 'backward', 'character'), step(ab, 0, 'backward', 'word'), step(st, 5, 'forward', 'character'), step(st, 5, 'forward', 'word')];
+      })()
+    JS
+    expect(got).to eq(['st uv@5', 'ab cd@0', 'ab cd@0', 'st uv@5'])
+  end
 end

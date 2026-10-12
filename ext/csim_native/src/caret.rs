@@ -100,7 +100,8 @@ impl RealmArena {
         let mut walk = self.walk(engine, now, node, offset, forward)?.peekable();
         while let Some(pass) = walk.next() {
             match pass {
-                Pass::LineEnd => line_end = true,
+                // (…an editing host met from outside one is gone over: a block, its edges lines' ends — Chrome)
+                Pass::LineEnd | Pass::Editable => line_end = true,
                 Pass::Br { parent, from, .. } if forward && line_end => return Some((parent, from)),
                 Pass::Br { parent, to, .. } if !forward && walk.peek().is_none_or(Pass::ends_line) => return Some((parent, to)),
                 Pass::Br { .. } => line_end = true,
@@ -113,7 +114,7 @@ impl RealmArena {
 
     // `Selection.modify` by a word, as Chrome moves: past the white space, then to the end (the start, back) of the word
     // or the punctuation there (`word_length`); an atom is one. Across a line's end before any, to the edge of what is
-    // past it: the next paragraph's start (the last's end, back).
+    // past it: the next paragraph's start (the last's end, back) — not past an editing host, from outside one.
     pub(crate) fn caret_word_step(&self, engine: &mut StyleEngine, now: f64, node: NodeId, offset: u32, forward: bool) -> Option<(NodeId, u32)> {
         let mut walk = self.walk(engine, now, node, offset, forward)?;
         let mut line_end = false;
@@ -121,6 +122,8 @@ impl RealmArena {
             match walk.next()? {
                 Pass::Char { ch, .. } if is_space(ch) => {}
                 Pass::LineEnd | Pass::Br { .. } => line_end = true,
+                // (…and nothing past an editing host met from outside one: the focus stays — Chrome)
+                Pass::Editable => return None,
                 Pass::Char { leaf, from, .. } if line_end => return Some((leaf, from)),
                 Pass::Atom { parent, from, to } => return Some((parent, if line_end { from } else { to })),
                 Pass::Char { leaf, to, ch, .. } => break (leaf, to, ch),
@@ -233,12 +236,15 @@ impl RealmArena {
 // `<details>`'s content, text `visibility` hides): a character of a text leaf, from one place to the next (a surrogate
 // pair one character, a run of collapsible white space one space, none at a line's either end); a line's end — a
 // block-level box's edge — or a `<br>` that breaks a line, from the place before it to the place after; an atom, a
-// replaced element (an image, an `<svg>`), likewise. A page the engine does not style is taken by its tags.
+// replaced element (an image, an `<svg>`), likewise; an editing host, met from outside one, whole. A page the engine
+// does not style is taken by its tags.
 enum Pass {
     Char { leaf: NodeId, from: u32, to: u32, ch: u32 },
     LineEnd,
     Br { parent: NodeId, from: u32, to: u32 },
     Atom { parent: NodeId, from: u32, to: u32 },
+    // …and, outside any editing host, one met: a caret outside goes over it, not into it.
+    Editable,
 }
 struct Walk<'a> {
     arena: &'a RealmArena,
@@ -382,6 +388,10 @@ impl Walk<'_> {
                     continue;
                 }
                 NodeKind::Element if !self.renders(child, c) => {}
+                NodeKind::Element if self.host.is_none() && c.contenteditable_state() == Some(true) => {
+                    self.index = past;
+                    return Some((Pass::Editable, false));
+                }
                 NodeKind::Element if c.is_html_named("br") => {
                     let parent = self.at;
                     self.index = past;
