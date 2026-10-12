@@ -1,12 +1,17 @@
 // The tabular data interfaces' tree navigation (HTML §4.9): a table's caption, head, foot and bodies — its HTML children
-// of those names — its rows and a row's cells, and where a row or a cell sits among them. Their live collections and
-// their create* / insert* / delete* steps are html-tables.js's, which changes the tree with what these answer.
+// of those names — its rows and a row's cells, and where a row or a cell sits among them; and their create* / insert* /
+// delete* steps and their caption / tHead / tFoot setters, which change that tree (`tableInsert`, `tableRemove`,
+// `tableReplace`). Their live collections are html-tables.js's.
 
 use crate::dom::{nodes_value, nid_arg, realm, realm_id, register, NodeData, NodeId, NodeKind, RealmArena};
+use crate::mutation::Change;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "tableParts", table_parts, context_id);
     register(scope, ns, "tableIndex", table_index, context_id);
+    register(scope, ns, "tableInsert", table_insert, context_id);
+    register(scope, ns, "tableRemove", table_remove, context_id);
+    register(scope, ns, "tableReplace", table_replace, context_id);
 }
 
 // (…an HTML element of the local name `tag` — an SVG `<tr>` is no table part)
@@ -95,11 +100,9 @@ const TBODIES: u32 = 3;
 const CAPTION: u32 = 4;
 const THEAD: u32 = 5;
 const TFOOT: u32 = 6;
-const FIRST_NON_HEADER: u32 = 7;
 
 // __dom.tableParts(nid, part) -> a table's rows (0), a section's rows (1), a row's cells (2), a table's bodies (3), its
-// first caption (4), thead (5) or tfoot (6) child, its first child neither a caption nor a colgroup (7) — in tree
-// order, as `nodes_value` answers them.
+// first caption (4), thead (5) or tfoot (6) child — in tree order, as `nodes_value` answers them.
 fn table_parts(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let Some(id) = nid_arg(scope, &args, 0) else { return };
@@ -114,7 +117,6 @@ fn table_parts(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         CAPTION => first("caption"),
         THEAD => first("thead"),
         TFOOT => first("tfoot"),
-        FIRST_NON_HEADER => arena.first_non_header_child(id).into_iter().collect(),
         _ => Vec::new(),
     };
     rv.set(nodes_value(scope, cid, &parts));
@@ -132,4 +134,167 @@ fn table_index(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         Some(2) => arena.cell_index(id),
         _ => -1,
     });
+}
+
+// Why an insertion or a deletion refuses: the index is out of range (an IndexSizeError).
+const INDEX_OUT_OF_RANGE: u32 = 1;
+
+// The place `part` (a `tableParts` number) goes in `table` — a caption first, a head before the first child neither a
+// caption nor a colgroup, a foot last — and the table's first child of it.
+fn header_place(arena: &RealmArena, table: NodeId, part: u32) -> (Option<NodeId>, Option<NodeId>) {
+    let (tag, before) = match part {
+        CAPTION => ("caption", arena.get(table).and_then(|n| n.children.first().copied())),
+        THEAD => ("thead", arena.first_non_header_child(table)),
+        _ => ("tfoot", None),
+    };
+    (arena.children_named(table, tag).into_iter().next(), before)
+}
+// The answer of an op that changed the tree: the element it made or none (null), and the changes of children it made
+// (mutation.rs `changes_value`).
+fn answer<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, made: Option<NodeId>, changes: &[Change]) -> Option<v8::Local<'s, v8::Value>> {
+    let mut out = vec![crate::dom::node_value(scope, made)];
+    if crate::dom::factory_threw(scope) {
+        return None;
+    }
+    out.extend(crate::mutation::changes_value(scope, cid, changes));
+    if crate::dom::factory_threw(scope) {
+        return None;
+    }
+    Some(v8::Array::new_with_elements(scope, &out).into())
+}
+
+// __dom.tableInsert(nid, part, index, steps) -> [element, changes…], or `INDEX_OUT_OF_RANGE`: the element a table's
+// createCaption / createTHead / createTFoot answers — its first of that name, or a new one where it goes — its
+// createTBody's (a new body after its last), its insertRow's (a new row at `index` among its rows, −1 the end: after the
+// last, or — none yet — in its last body, a new one where it has none), a section's insertRow's, a row's insertCell's;
+// each new element an HTML one of its node document, made by the calling realm's code.
+fn table_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let part = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
+    let index = args.get(2).int32_value(scope).unwrap_or(-1);
+    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(3)) else { return };
+    let caller = realm_id(scope, &args);
+    let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) else { return };
+    let arena = realm(scope, cid);
+    // (…its name, and where it goes: the parent and the child it goes before — none for a table with no rows yet, whose
+    // last body it goes in; or the one already there)
+    let (tag, place) = match part {
+        CAPTION | THEAD | TFOOT => {
+            let (existing, before) = header_place(arena, id, part);
+            if existing.is_some() {
+                if let Some(out) = answer(scope, cid, existing, &[]) {
+                    rv.set(out);
+                }
+                return;
+            }
+            (["caption", "thead", "tfoot"][(part - CAPTION) as usize], Some((id, before)))
+        }
+        TBODIES => ("tbody", Some((id, arena.children_named(id, "tbody").last().and_then(|&b| arena.sibling(b, 1))))),
+        ROWS | SECTION_ROWS | CELLS => {
+            let items = match part {
+                ROWS => arena.table_rows(id),
+                SECTION_ROWS => arena.children_named(id, "tr"),
+                _ => arena.row_cells(id),
+            };
+            if index < -1 || index > items.len() as i32 {
+                return rv.set_uint32(INDEX_OUT_OF_RANGE);
+            }
+            let at = usize::try_from(index).ok().and_then(|k| items.get(k).copied());
+            let place = match (part, at, items.last()) {
+                (ROWS, Some(at), _) => arena.parent_of(at).map(|p| (p, Some(at))),
+                (ROWS, None, Some(&last)) => arena.parent_of(last).map(|p| (p, arena.sibling(last, 1))),
+                (ROWS, None, None) => None,
+                _ => Some((id, at)),
+            };
+            (if part == CELLS { "td" } else { "tr" }, place)
+        }
+        _ => return,
+    };
+    let (mut changes, mut held) = (Vec::new(), Vec::new());
+    let (parent, before) = match place {
+        Some(place) => place,
+        None => match realm(scope, cid).children_named(id, "tbody").last() {
+            Some(&body) => (body, None),
+            None => {
+                let (body, handle) = crate::editing::make_element(scope, cid, caller, id, "tbody");
+                held.push(handle);
+                let Some(change) = crate::mutation::insert(scope, cid, caller, id, &[body], None, steps) else { return };
+                changes.push(change);
+                (body, None)
+            }
+        },
+    };
+    let (made, handle) = crate::editing::make_element(scope, cid, caller, id, tag);
+    held.push(handle);
+    let Some(change) = crate::mutation::insert(scope, cid, caller, parent, &[made], before, steps) else { return };
+    changes.push(change);
+    if let Some(out) = answer(scope, cid, Some(made), &changes) {
+        rv.set(out);
+    }
+    drop(held);
+}
+
+// __dom.tableRemove(nid, part, index, steps) -> [null, changes…], or `INDEX_OUT_OF_RANGE`: a table's deleteCaption /
+// deleteTHead / deleteTFoot (its first of that name removed, where it has one), its deleteRow (the row at `index` among
+// its rows, −1 the last, where there is one), a section's deleteRow, a row's deleteCell.
+fn table_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let part = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
+    let index = args.get(2).int32_value(scope).unwrap_or(-1);
+    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(3)) else { return };
+    let caller = realm_id(scope, &args);
+    let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) else { return };
+    let arena = realm(scope, cid);
+    let gone = match part {
+        CAPTION | THEAD | TFOOT => header_place(arena, id, part).0,
+        ROWS | SECTION_ROWS | CELLS => {
+            let items = match part {
+                ROWS => arena.table_rows(id),
+                SECTION_ROWS => arena.children_named(id, "tr"),
+                _ => arena.row_cells(id),
+            };
+            if index < -1 || index >= items.len() as i32 {
+                return rv.set_uint32(INDEX_OUT_OF_RANGE);
+            }
+            if index == -1 { items.last().copied() } else { items.get(index as usize).copied() }
+        }
+        _ => return,
+    };
+    let mut changes = Vec::new();
+    if let Some(gone) = gone {
+        let Some(change) = crate::mutation::remove(scope, cid, caller, gone, steps) else { return };
+        changes.push(change);
+    }
+    if let Some(out) = answer(scope, cid, None, &changes) {
+        rv.set(out);
+    }
+}
+
+// __dom.tableReplace(nid, part, value, steps) -> [null, changes…]: a table's caption / tHead / tFoot setter — its first
+// child of that name removed, and `value` (an element, or null for none) put where that part goes.
+fn table_replace(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let part = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
+    let value = crate::node_handle::nid_of(scope, args.get(2));
+    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(3)) else { return };
+    let caller = realm_id(scope, &args);
+    let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) else { return };
+    if !matches!(part, CAPTION | THEAD | TFOOT) {
+        return;
+    }
+    let mut changes = Vec::new();
+    if let Some(existing) = header_place(realm(scope, cid), id, part).0 {
+        let Some(change) = crate::mutation::remove(scope, cid, caller, existing, steps) else { return };
+        changes.push(change);
+    }
+    if let Some(value) = value {
+        // (…inserted before itself: before what follows it)
+        let arena = realm(scope, cid);
+        let before = header_place(arena, id, part).1.and_then(|b| if b == value { arena.sibling(value, 1) } else { Some(b) });
+        let Some(change) = crate::mutation::insert(scope, cid, caller, id, &[value], before, steps) else { return };
+        changes.push(change);
+    }
+    if let Some(out) = answer(scope, cid, None, &changes) {
+        rv.set(out);
+    }
 }
