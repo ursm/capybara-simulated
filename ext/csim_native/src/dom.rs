@@ -146,7 +146,7 @@ pub(crate) struct ShadowInit {
 }
 
 // An element's name as the DOM holds it, UTF-16 throughout (`NodeData::name_u16`).
-#[derive(PartialEq)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct ExactName {
     pub(crate) local: Vec<u16>,
     pub(crate) ns: Vec<u16>,
