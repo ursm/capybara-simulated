@@ -16,6 +16,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "utf8Encode", utf8_encode, context_id);
     register(scope, ns, "utf8EncodeInto", utf8_encode_into, context_id);
     register(scope, ns, "legacyEncode", legacy_encode, context_id);
+    register(scope, ns, "formEncode", form_encode_op, context_id);
 }
 
 // An encoding by its name (every name is one of its own labels).
@@ -245,6 +246,61 @@ fn form_bytes(encoding: Option<&'static Encoding>, text: &str) -> Vec<u8> {
 // Capybara::Simulated::Native.form_encode(encoding, text) -> the bytes (BINARY): a form the host submits.
 pub(crate) fn form_encode(ruby: &magnus::Ruby, encoding: String, text: String) -> magnus::RString {
     ruby.str_from_slice(&form_bytes(Encoding::for_label(encoding.as_bytes()), &text))
+}
+
+// __dom.formEncode(enctype, encoding, list) -> `[body, contentType]`: HTML's "encode the entry list" of `list` (flat
+// `[name, value, …]`, a file entry's value its filename) for a form submitted as `enctype` — `text/plain` (each entry
+// `name=value` and a CRLF) or, for any other, application/x-www-form-urlencoded (the URL Standard's serializer, a space
+// `+`) — each name and value's newlines CRLF first, in `encoding`'s bytes (a character a legacy one cannot encode
+// `&#N;`; null for UTF-8). The body as a byte string (a character per byte).
+fn form_encode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let plain = args.get(0).to_rust_string_lossy(scope).eq_ignore_ascii_case("text/plain");
+    let encoding = encoding_arg(scope, args.get(1)).filter(|e| *e != encoding_rs::UTF_8);
+    let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(2)) else { return };
+    let crlf = |s: String| -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut chars = s.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '\r' => {
+                    chars.next_if_eq(&'\n');
+                    out.push_str("\r\n");
+                }
+                '\n' => out.push_str("\r\n"),
+                c => out.push(c),
+            }
+        }
+        out
+    };
+    let entries: Vec<(String, String)> = (0..list.length() / 2)
+        .map(|i| {
+            let [name, value] = [2 * i, 2 * i + 1].map(|k| list.get_index(scope, k).map_or_else(String::new, |v| v.to_rust_string_lossy(scope)));
+            (crlf(name), crlf(value))
+        })
+        .collect();
+    let body = if plain {
+        let text: String = entries.iter().map(|(name, value)| format!("{name}={value}\r\n")).collect();
+        form_bytes(encoding, &text)
+    } else {
+        let bytes = encoder(move |s| std::borrow::Cow::Owned(form_bytes(encoding, s)));
+        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+        serializer.encoding_override(Some(&bytes));
+        for (name, value) in &entries {
+            serializer.append_pair(name, value);
+        }
+        serializer.finish().into_bytes()
+    };
+    let content_type = if plain { "text/plain" } else { "application/x-www-form-urlencoded" };
+    let body = v8::String::new_from_one_byte(scope, &body, v8::NewStringType::Normal).map(Into::into);
+    let content_type = v8::String::new(scope, content_type).map(Into::into);
+    let (Some(body), Some(content_type)) = (body, content_type) else { return };
+    let values: [v8::Local<'_, v8::Value>; 2] = [body, content_type];
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+
+// (…an encoder as the serializer takes one: its bytes borrowing from the text they encode, as they may)
+fn encoder<F: for<'a> Fn(&'a str) -> std::borrow::Cow<'a, [u8]>>(f: F) -> F {
+    f
 }
 
 // __dom.legacyEncode(encoding, string) -> the bytes as a byte string (a character per byte): a form submitted from
