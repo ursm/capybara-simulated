@@ -675,12 +675,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "optionSelect", option_select, context_id);
     crate::dom::register(scope, ns, "htmlAncestor", html_ancestor, context_id);
     crate::dom::register(scope, ns, "initialiseOptions", initialise_options, context_id);
-    crate::dom::register(scope, ns, "optionDisabled", option_disabled, context_id);
-    crate::dom::register(scope, ns, "radioGroup", radio_group, context_id);
     crate::dom::register(scope, ns, "formOwner", form_owner, context_id);
     crate::dom::register(scope, ns, "defaultButton", default_button, context_id);
     crate::dom::register(scope, ns, "formListed", form_listed, context_id);
     crate::dom::register(scope, ns, "formReset", form_reset, context_id);
+    crate::dom::register(scope, ns, "optionPick", option_pick, context_id);
+    crate::dom::register(scope, ns, "arrowDefault", arrow_default, context_id);
     crate::dom::register(scope, ns, "fieldsetListed", fieldset_listed, context_id);
     crate::dom::register(scope, ns, "formNamed", form_named, context_id);
     crate::dom::register(scope, ns, "isFormNamedCandidate", is_form_named_candidate, context_id);
@@ -886,17 +886,102 @@ fn form_reset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     rv.set(v8::Array::new_with_elements(scope, &lists).into());
 }
 
-// __dom.radioGroup(nid) -> a radio's group, itself included, in tree order (`element_state::radio_group`).
-fn radio_group(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    nodes_answer(scope, &args, rv, RealmArena::radio_group);
+impl RealmArena {
+    // A user's pick of `option` (HTML §4.10.7 "the user agent should allow the user to pick an option"), selected or
+    // not, dirty — as the user's, not through its `selected` attribute — a single select's other options deselected
+    // where it selects one; the options whose selectedness changed.
+    fn user_pick(&mut self, select: Option<NodeId>, option: NodeId, on: bool) -> Vec<NodeId> {
+        if let Some(single) = select.filter(|&s| on && self.get(s).is_some_and(|n| n.plain_attr("multiple").is_none())) {
+            return self.select_option(single, |_, _, o| o == option);
+        }
+        let Some(had) = self.get(option).map(|n| n.state) else { return Vec::new() };
+        let next = (self.option_initialised(option) & !STATE_SELECTED) | STATE_SELECTED_DIRTY | if on { STATE_SELECTED } else { 0 };
+        if next != had {
+            self.set_state(option, next);
+        }
+        if (next ^ had) & STATE_SELECTED != 0 { vec![option] } else { Vec::new() }
+    }
 }
 
-// __dom.optionDisabled(nid) -> whether an option is disabled for its select's selectedness and entry list
-// (`option_disabled`).
-fn option_disabled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let Some(option) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    rv.set_bool(crate::dom::realm(scope, cid).option_disabled(option));
+// What a user does to an option (`optionPick`'s `how`): picks it, unpicks it, or clicks it in the select's list — which
+// toggles it in a multiple select's and picks it in a single select's.
+const PICK: u32 = 0;
+const UNPICK: u32 = 1;
+const CLICK: u32 = 2;
+
+// __dom.optionPick(option, how) -> `[select, changed]`, or undefined where the user picks nothing (a disabled option, one
+// in a disabled select, a click on one in none): what a user's pick of an option did — its select (null for none), every
+// option whose selectedness changed, for which the bindings fire the select's `input` and `change` — the user's
+// interaction with the select (`:user-valid`) noted, but for an unpick that changed nothing.
+fn option_pick(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(option) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let how = args.get(1).uint32_value(scope).unwrap_or(PICK);
+    let Some(cid) = crate::dom::dom(scope).arena.get(option).filter(|n| n.is_html_named("option")).map(|n| n.realm) else { return };
+    let arena = crate::dom::realm(scope, cid);
+    let select = arena.option_select(option);
+    if select.is_some_and(|s| arena.option_disabled(option) || arena.is_actually_disabled(s)) || (select.is_none() && how == CLICK) {
+        return;
+    }
+    let selected = arena.get(option).is_some_and(|n| n.state & STATE_SELECTED != 0);
+    let multiple = select.is_some_and(|s| arena.get(s).is_some_and(|n| n.plain_attr("multiple").is_some()));
+    let on = match how {
+        UNPICK => false,
+        CLICK if multiple => !selected,
+        _ => true,
+    };
+    let changed = arena.user_pick(select, option, on);
+    if let Some(select) = select.filter(|_| how != UNPICK || !changed.is_empty()) {
+        if let Some(had) = arena.get(select).map(|n| n.state).filter(|s| s & STATE_USER_INTERACTED == 0) {
+            arena.set_state(select, had | STATE_USER_INTERACTED);
+        }
+    }
+    arena.observers.note_state_changed();
+    let changed = crate::dom::nodes_value(scope, cid, &changed);
+    let values = [crate::dom::node_value(scope, select), changed];
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+
+// __dom.arrowDefault(control, key) -> `[element, changed]`, or undefined for nothing: an arrow key's default action on a
+// focused control. A radio button's: the next radio of its group not disabled (`ArrowDown` / `ArrowRight`; the previous
+// for `ArrowUp` / `ArrowLeft`), wrapping, checked — the element to focus and fire `input` / `change` at, no options. A
+// single select's (`ArrowDown` / `ArrowUp` only): the next option not disabled (the previous, up), not wrapping, picked
+// as the user's — the select, its `input` / `change` owed, the options whose selectedness changed.
+fn arrow_default(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(control) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let key = args.get(1).to_rust_string_lossy(scope);
+    let forward = matches!(&*key, "ArrowDown" | "ArrowRight");
+    let Some(cid) = crate::dom::dom(scope).arena.get(control).map(|n| n.realm) else { return };
+    let arena = crate::dom::realm(scope, cid);
+    let Some(n) = arena.get(control) else { return };
+    let (target, changed) = if n.is_html_named("input") && n.input_type() == "radio" {
+        let group: Vec<NodeId> = arena.radio_group(control).into_iter().filter(|&r| !arena.is_actually_disabled(r)).collect();
+        let Some(i) = group.iter().position(|&r| r == control).filter(|_| group.len() >= 2) else { return };
+        let len = group.len();
+        let target = group[if forward { (i + 1) % len } else { (i + len - 1) % len }];
+        arena.set_checkedness(target, true);
+        (target, Vec::new())
+    } else if n.is_html_named("select") && n.plain_attr("multiple").is_none() && matches!(&*key, "ArrowDown" | "ArrowUp") {
+        let options: Vec<NodeId> = arena.list_of_options(control).into_iter().filter(|&o| !arena.is_actually_disabled(o)).collect();
+        let current = options.iter().position(|&o| arena.get(o).is_some_and(|n| n.state & STATE_SELECTED != 0));
+        let next = match current {
+            _ if options.is_empty() => return,
+            None if forward => 0,
+            None => options.len() - 1,
+            Some(c) if forward => (c + 1).min(options.len() - 1),
+            Some(c) => c.saturating_sub(1),
+        };
+        if current == Some(next) {
+            return;
+        }
+        let changed = arena.user_pick(Some(control), options[next], true);
+        arena.observers.note_state_changed();
+        (control, changed)
+    } else {
+        return;
+    };
+    let changed = crate::dom::nodes_value(scope, cid, &changed);
+    let values = [crate::dom::node_value(scope, Some(target)), changed];
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
 }
 
 // __dom.selectedness(selectNid, justNid) -> the options whose selectedness the selectedness setting algorithm changed
