@@ -61,20 +61,21 @@ pub(crate) enum Took {
 
 // __dom.editDelete(startNode, startOffset, endNode, endOffset, forward, word, now, steps) -> [caretNode, caretOffset,
 // changes…], or undefined where nothing is deleted: the deletion in the editing host the selection is in (editing.rs
-// `selection_host`; none where its ends are in different ones, or in a non-editable island) — of the selection's range
+// `selection_host`: a caret in a non-editable island in none; a range's ends out of other hosts and out of islands) —
+// of the selection's range
 // from (startNode, startOffset) to (endNode, endOffset), or, collapsed, of a step back (forward) from it, a character's
 // or a word's — the place the caret goes, and the changes of children it made (mutation.rs `changes_value`). A step
 // into a non-editable island takes the island whole — none that holds an editing host; a step past a block atom takes
 // it whole; one out of a table cell — or into one — deletes nothing (Chrome); a range across cells deletes what it
-// holds of them but joins none, and one with an end in an island deletes nothing.
+// holds of them but joins none.
 fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(sc), Some(ec)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 2)) else { return };
     let (so, eo) = (args.get(1).uint32_value(scope).unwrap_or(0), args.get(3).uint32_value(scope).unwrap_or(0));
     let (forward, word) = (args.get(4).is_true(), args.get(5).is_true());
     let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(7)) else { return };
-    let Some(host) = selection_host(&crate::dom::dom(scope).arena, sc, ec) else { return };
-    let caller = crate::dom::realm_id(scope, &args);
     let collapsed = sc == ec && so == eo;
+    let Some((host, ((sc, so), (ec, eo)))) = selection_host(&crate::dom::dom(scope).arena, (sc, so), (ec, eo)) else { return };
+    let caller = crate::dom::realm_id(scope, &args);
     // (…the range: the selection's, or the caret's to where a step takes it — none past the host's edge)
     let range = if collapsed {
         crate::rendered::with_engine(scope, &args, 6, |engine, arena, now| {

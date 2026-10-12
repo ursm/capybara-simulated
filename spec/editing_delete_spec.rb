@@ -133,7 +133,7 @@ RSpec.describe 'deleting in an editing host' do
     ])
   end
 
-  it 'takes a block atom whole, joins across a block island at the joint, and leaves an island a selection ends in' do
+  it 'takes a block atom whole, joins across a block island at the joint, and deletes a selection only up to the island it ends in' do
     island = 'a<span contenteditable="false">XY</span>bc'
     nested = 'a<span contenteditable="false">X<span contenteditable="true">yz</span>X</span>b'
     expect([
@@ -144,7 +144,7 @@ RSpec.describe 'deleting in an editing host' do
       deleted(island, 'e.firstChild', 0, :backspace, ['e.childNodes[1].firstChild', 1]),
       deleted(nested, 'e.lastChild', 0, :backspace)
     ]).to eq([
-      ['<p>a</p><p>b</p>', 'b@0'], ['<p>a</p><p>b</p>', 'a@1'], '<p>a</p><p>b</p>', ['<p>ab</p>', 'ab@1'], island, nested
+      ['<p>a</p><p>b</p>', 'b@0'], ['<p>a</p><p>b</p>', 'a@1'], '<p>a</p><p>b</p>', ['<p>ab</p>', 'ab@1'], island.delete_prefix('a'), nested
     ])
   end
 

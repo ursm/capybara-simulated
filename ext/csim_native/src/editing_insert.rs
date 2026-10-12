@@ -21,9 +21,9 @@ const LINE_BREAK: u32 = 1;
 
 // __dom.editInsert(startNode, startOffset, endNode, endOffset, kind, text, steps) -> [caretNode, caretOffset, copies,
 // (source, copy, names)…, changes…], or undefined where nothing is inserted: the insertion in the editing host the
-// selection is in (editing.rs `selection_host`; none where its ends are in different ones, or in a non-editable island)
-// at the selection's range from (startNode, startOffset) to (endNode, endOffset) — its contents deleted first, and
-// nothing inserted where that deletes nothing (an end in a non-editable island) — of `text` (`TEXT`), a line break
+// selection is in (editing.rs `selection_host`: a caret in a non-editable island in none; a range's ends out of other
+// hosts and out of islands) at the selection's range from (startNode, startOffset) to (endNode, endOffset) — its
+// contents deleted first — of `text` (`TEXT`), a line break
 // (`LINE_BREAK`) or a paragraph's break (any other): the place the caret goes, how many elements a split copied and each
 // with its source and the names of the attributes whose cloning steps are the bindings' (cloning.rs `bindings_value`),
 // and the changes of children it made (mutation.rs `changes_value`).
@@ -38,8 +38,11 @@ fn edit_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     });
     let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(6)) else { return };
     let caller = crate::dom::realm_id(scope, &args);
+    if kind == TEXT && text.is_empty() && (sc, so) == (ec, eo) {
+        return;
+    }
+    let Some((host, ((sc, so), (ec, eo)))) = selection_host(&crate::dom::dom(scope).arena, (sc, so), (ec, eo)) else { return };
     let collapsed = (sc, so) == (ec, eo);
-    let Some(host) = selection_host(&crate::dom::dom(scope).arena, sc, ec).filter(|_| !(kind == TEXT && text.is_empty() && collapsed)) else { return };
     let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return };
     let steps = v8::Local::new(scope, steps);
     let (mut changes, mut copies, mut held) = (Vec::new(), Vec::new(), Vec::new());
@@ -261,7 +264,8 @@ impl<'s> Edit<'s, '_> {
         let arena = realm(scope, cid);
         let (outer, after) = (arena.parent_of(top)?, arena.sibling(top, 1));
         self.insert(scope, outer, &[copy], after)?;
-        self.drop_emptied_end(scope, top)?;
+        self.drop_emptied_edge(scope, top, false)?;
+        self.drop_emptied_edge(scope, copy, true)?;
         self.hold_open(scope, top, false)?;
         let caret = self.hold_open(scope, copy, true)?;
         self.rebalance_leaf(scope, top, false)?;
@@ -386,14 +390,15 @@ impl<'s> Edit<'s, '_> {
         }
         Some((moved, before))
     }
-    // The inline element at the end of `block` a split left empty — the caret was at its start — gone, where the block
-    // shows anything else (`<p>ab<b>|cd</b></p>`, broken, is `<p>ab</p><p><b>cd</b></p>`).
-    fn drop_emptied_end(&mut self, scope: &mut v8::PinScope<'_, '_>, block: NodeId) -> Option<()> {
+    // The inline element at the end of `block` a split left empty — the caret was at its start — or at its start (`first`)
+    // — the caret was at its end — gone, where the block shows anything else (`<p>ab<b>|cd</b></p>`, broken, is
+    // `<p>ab</p><p><b>cd</b></p>`; `<p><b>ab|</b>cd</p>` `<p><b>ab</b></p><p>cd</p>`).
+    fn drop_emptied_edge(&mut self, scope: &mut v8::PinScope<'_, '_>, block: NodeId, first: bool) -> Option<()> {
         let arena = realm(scope, self.cid);
         if !has_content(arena, block) {
             return Some(());
         }
-        let last = arena.get(block)?.children.last().copied();
+        let last = arena.get(block).and_then(|n| if first { n.children.first() } else { n.children.last() }.copied());
         let emptied = last.filter(|&c| {
             arena.get(c).is_some_and(|d| d.kind == NodeKind::Element && !crate::caret::CARET_VOID_TAGS.contains(&&*d.local_name))
                 && inline_level(arena, c) == Some(true)

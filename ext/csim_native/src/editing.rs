@@ -158,22 +158,54 @@ mod tests {
     }
 }
 
-// The elements HTML lays out inline by default — what an element the engine made, which nothing has styled yet, is
-// taken for.
-const INLINE_TAGS: [&str; 30] = [
-    "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "dfn", "em", "font", "i", "img", "kbd", "label", "mark", "q", "s",
-    "samp", "small", "span", "strike", "strong", "sub", "sup", "time", "tt", "u", "var",
+// The elements HTML's rendering lays out as blocks — `display: block`, `list-item`, a table — anything else, an unknown
+// or custom element too, inline: what an element the engine made, which nothing has styled yet, is taken for.
+const BLOCK_TAGS: [&str; 52] = [
+    "address", "article", "aside", "blockquote", "body", "caption", "center", "col", "colgroup", "dd", "details", "dialog", "dir",
+    "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup",
+    "hr", "html", "legend", "li", "listing", "main", "menu", "nav", "ol", "p", "plaintext", "pre", "search", "section", "summary",
+    "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul",
 ];
 // Whether `id` is laid out inline — by its computed style, or, where it has none yet (one an edit made), by its name.
 pub(crate) fn inline_level(arena: &RealmArena, id: NodeId) -> Option<bool> {
-    crate::rendered::is_inline_level(arena, id).or_else(|| arena.get(id).filter(|n| n.kind == NodeKind::Element).map(|n| INLINE_TAGS.contains(&&*n.local_name)))
+    crate::rendered::is_inline_level(arena, id).or_else(|| {
+        arena.get(id).filter(|n| n.kind == NodeKind::Element).map(|n| !(n.ns == web_atoms::ns!(html) && BLOCK_TAGS.contains(&&*n.local_name)))
+    })
 }
-// The editing host a selection from `start` to `end` is in — none where they are in different ones, or either in none
-// (in a non-editable island): what an edit at it edits.
-pub(crate) fn selection_host(arena: &RealmArena, start: NodeId, end: NodeId) -> Option<NodeId> {
-    let host = |n: NodeId| arena.editing_host(if arena.is_element(n) { n } else { arena.parent_of(n)? });
-    let h = host(start)?;
-    (host(end)? == h).then_some(h)
+// The editing host around `node`: the one it is in, or the one holding the non-editable island it is in.
+fn host_around(arena: &RealmArena, node: NodeId) -> Option<NodeId> {
+    let mut at = if arena.is_element(node) { Some(node) } else { arena.parent_of(node) };
+    while let Some(n) = at.filter(|&n| arena.is_element(n)) {
+        if let Some(host) = arena.editing_host(n) {
+            return Some(host);
+        }
+        at = arena.parent_of(n);
+    }
+    None
+}
+// The editing host a selection from `start` to `end` edits, and its ends in it: a caret's host, none where it is in a
+// non-editable island; a range's start's (else its end's), an end outside it at its edge, one in a non-editable island
+// in it out of the island — the start after it, the end before it; none where both are in one island (Chrome: `a[<span contenteditable=false>X]Y</span>b`,
+// typed over, is `x<span contenteditable=false>XY</span>b`).
+#[allow(clippy::type_complexity)]
+pub(crate) fn selection_host(arena: &RealmArena, start: (NodeId, u32), end: (NodeId, u32)) -> Option<(NodeId, ((NodeId, u32), (NodeId, u32)))> {
+    if start == end {
+        let host = arena.editing_host(if arena.is_element(start.0) { start.0 } else { arena.parent_of(start.0)? })?;
+        return Some((host, (start, end)));
+    }
+    let host = host_around(arena, start.0).or_else(|| host_around(arena, end.0))?;
+    let clamp = |(node, offset): (NodeId, u32), after: bool| -> Option<(NodeId, u32)> {
+        if !within(arena, host, node) {
+            return Some(if after { (host, 0) } else { (host, arena.get(host)?.children.len() as u32) });
+        }
+        Some(match island_of(arena, node, host) {
+            Some(island) => (arena.parent_of(island)?, arena.child_index(island) as u32 + after as u32),
+            None => (node, offset),
+        })
+    };
+    let (start, end) = (clamp(start, true)?, clamp(end, false)?);
+    // (…none where both ends were in one island)
+    (crate::ranges::compare_points(arena, start, end)? != std::cmp::Ordering::Greater).then_some((host, (start, end)))
 }
 // The block a place in `node` is in: its nearest inclusive ancestor that is no inline — a block, a table's part, a list
 // item — or `host`, at most.

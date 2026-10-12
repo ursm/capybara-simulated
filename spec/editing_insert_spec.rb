@@ -157,4 +157,28 @@ RSpec.describe 'inserting in an editing host' do
       '<div id="e" contenteditable=""><p>x<span contenteditable="false">Y<span contenteditable="true" id="i">ab<br>Zcd</span></span>w</p></div>'
     ])
   end
+
+  it 'splits an inline element of any name, drops one the split leaves empty, and keeps a selection to its host' do
+    expect([
+      typed('<p><ins>abcd</ins>ef</p>', "e.querySelector('ins').firstChild", 2, :enter, :enter, 'Z').first,
+      typed('<p><x-y>abcd</x-y>ef</p>', "e.querySelector('x-y').firstChild", 2, :enter, :enter, 'Z').first,
+      typed('<p><b>abcd</b>ef</p>', "e.querySelector('b').firstChild", 4, :enter, 'Z').first,
+      typed('<ul><li><b>ab</b></li></ul>', "e.querySelector('b').firstChild", 2, :enter, 'Z').first,
+      typed('a<span contenteditable="false">XY</span>b', 'e.firstChild', 0, %i[shift right], %i[shift right], 'x').first
+    ]).to eq([
+      '<p><ins>ab</ins></p><p><ins><br></ins></p><p><ins>Zcd</ins>ef</p>', '<p><x-y>ab</x-y></p><p><x-y><br></x-y></p><p><x-y>Zcd</x-y>ef</p>',
+      '<p><b>abcd</b></p><p>Zef</p>', '<ul><li><b>ab</b></li><li><b>Z</b></li></ul>', 'x<span contenteditable="false">XY</span>b'
+    ])
+    across = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><div id=e contenteditable><p>ab</p></div><div id=f contenteditable>cd</div>']]
+    }).tap {|s| s.visit '/' }
+    across.execute_script(<<~JS)
+      const e = document.getElementById('e'), g = getSelection();
+      e.focus();
+      g.collapse(e.querySelector('p').firstChild, 1);
+      g.extend(document.getElementById('f').firstChild, 1);
+    JS
+    [:backspace, 'Z'].each {|key| across.find(:css, '#e').send_keys(key) }
+    expect(across.evaluate_script('document.body.innerHTML')).to eq('<div id="e" contenteditable=""><p>aZ</p></div><div id="f" contenteditable="">cd</div>')
+  end
 end
