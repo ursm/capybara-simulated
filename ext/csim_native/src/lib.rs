@@ -38,6 +38,7 @@ mod dom;
 mod dom_matrix;
 mod editing;
 mod editing_delete;
+mod editing_insert;
 mod element_state;
 mod event_path;
 mod focus;

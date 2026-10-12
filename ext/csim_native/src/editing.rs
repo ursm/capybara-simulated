@@ -3,8 +3,12 @@
 // the host — the list item it is in, an ancestor of a kind, and the text a selection covers, as runs of text nodes with
 // the slices of them inside it. Each walk is the engine's; the DOM edits the bindings make from the answers run the
 // page's reactions.
+//
+// And what the engine's own edits — deleting and inserting (editing_delete.rs, editing_insert.rs) — share: the block,
+// the table cell and the non-editable island a place is in; what a line holds and where it ends; the nodes the engine
+// makes; and the white space an edit brings together rebalanced as the line shows it (`rebalance_space`).
 
-use crate::dom::{nid_arg, NodeId, NodeKind, RealmArena};
+use crate::dom::{nid_arg, realm, NodeData, NodeId, NodeKind, RealmArena};
 
 // The elements the list, indent and justify commands treat as the BLOCK holding the selection.
 const BLOCK_CONTAINER_TAGS: [&str; 20] = [
@@ -152,4 +156,197 @@ mod tests {
         assert_eq!(arena.edit_ancestor(host, host, 1, true, &block), Some(q));
         assert_eq!(arena.edit_ancestor(host, host, 0, false, &block), None);
     }
+}
+
+// The block a place in `node` is in: its nearest inclusive ancestor that is no inline — a block, a table's part, a list
+// item — or `host`, at most.
+pub(crate) fn block_of(arena: &RealmArena, node: NodeId, host: NodeId) -> NodeId {
+    let mut at = if arena.is_element(node) { node } else { arena.parent_of(node).unwrap_or(node) };
+    while at != host && crate::rendered::is_inline_level(arena, at) != Some(false) {
+        match arena.parent_of(at) {
+            Some(p) => at = p,
+            None => break,
+        }
+    }
+    at
+}
+// …the table cell (or caption) it is in, below `host` — or `host`: what a deletion never joins across.
+pub(crate) fn cell_of(arena: &RealmArena, node: NodeId, host: NodeId) -> NodeId {
+    let mut at = Some(node);
+    while let Some(n) = at.filter(|&n| n != host) {
+        if arena.get(n).is_some_and(|d| d.is_html_named("td") || d.is_html_named("th") || d.is_html_named("caption")) {
+            return n;
+        }
+        at = arena.parent_of(n);
+    }
+    host
+}
+// …whether an element is a table's own — the table or a part of its structure — which no join moves content into or out
+// of.
+pub(crate) fn table_part(arena: &RealmArena, id: NodeId) -> bool {
+    arena.get(id).is_some_and(|n| ["table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption", "colgroup", "col"].iter().any(|t| n.is_html_named(t)))
+}
+// …and the outermost element `node` is in, below `host`, that its editing does not reach (`contenteditable=false`): an
+// island a deletion takes whole.
+pub(crate) fn island_of(arena: &RealmArena, node: NodeId, host: NodeId) -> Option<NodeId> {
+    let mut island = None;
+    let mut at = Some(node);
+    while let Some(n) = at.filter(|&n| n != host) {
+        if arena.is_element(n) && arena.editing_host(n).is_none() {
+            island = Some(n);
+        }
+        at = arena.parent_of(n);
+    }
+    island
+}
+// Whether `node` is `root` or in it.
+pub(crate) fn within(arena: &RealmArena, root: NodeId, node: NodeId) -> bool {
+    let mut at = Some(node);
+    while let Some(n) = at {
+        if n == root {
+            return true;
+        }
+        at = arena.parent_of(n);
+    }
+    false
+}
+// Whether `id` is content on a line: text, or an inline element other than a `<br>`.
+pub(crate) fn inline_content(arena: &RealmArena, id: NodeId) -> bool {
+    arena.get(id).is_some_and(|n| n.kind == NodeKind::Text || (n.kind == NodeKind::Element && !n.is_html_named("br") && crate::rendered::is_inline_level(arena, id) != Some(false)))
+}
+// Whether `id` is text of white space alone — what a line shows nothing of between blocks.
+pub(crate) fn blank(arena: &RealmArena, id: NodeId) -> bool {
+    arena.get(id).is_some_and(|n| n.kind == NodeKind::Text && n.data.iter().all(|&c| matches!(c, 0x20 | 0x09 | 0x0A | 0x0C | 0x0D)))
+}
+
+// What a line meets at an edge: more of its content, a `<br>` that ends it, or the edge of its block.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Edge {
+    Content,
+    Br,
+    Block,
+}
+// What the line meets going on (`forward`) — or back — from the place before `child` in `parent` (none: its end), past
+// empty text and into and out of inline elements: a block's edge where it climbs out of one, or an editing host.
+pub(crate) fn edge(arena: &RealmArena, parent: NodeId, child: Option<NodeId>, forward: bool) -> Edge {
+    let first = |p: NodeId| arena.get(p).and_then(|n| if forward { n.children.first() } else { n.children.last() }.copied());
+    let (mut parent, mut next) = (parent, if forward { child } else { child.map_or_else(|| first(parent), |c| arena.sibling(c, -1)) });
+    loop {
+        let Some(at) = next else {
+            // (…out of an inline element, on; out of anything else, at the line's edge)
+            match arena.parent_of(parent) {
+                Some(up) if crate::rendered::is_inline_level(arena, parent) == Some(true) && arena.editing_host(parent) != Some(parent) => {
+                    next = arena.sibling(parent, if forward { 1 } else { -1 });
+                    parent = up;
+                    continue;
+                }
+                _ => return Edge::Block,
+            }
+        };
+        let Some(n) = arena.get(at) else { return Edge::Block };
+        match n.kind {
+            NodeKind::Text if n.data.is_empty() => next = arena.sibling(at, if forward { 1 } else { -1 }),
+            NodeKind::Text => return Edge::Content,
+            NodeKind::Element if n.is_html_named("br") => return Edge::Br,
+            NodeKind::Element if crate::rendered::is_inline_level(arena, at) == Some(false) => return Edge::Block,
+            NodeKind::Element if crate::caret::CARET_VOID_TAGS.contains(&&*n.local_name) || crate::rendered::is_atomic_inline(arena, at) => return Edge::Content,
+            NodeKind::Element => {
+                parent = at;
+                next = first(at);
+            }
+            _ => next = arena.sibling(at, if forward { 1 } else { -1 }),
+        }
+    }
+}
+// …from `node`'s edge on that side.
+pub(crate) fn line_edge(arena: &RealmArena, node: NodeId, forward: bool) -> Edge {
+    match arena.parent_of(node) {
+        Some(parent) => edge(arena, parent, if forward { arena.sibling(node, 1) } else { Some(node) }, forward),
+        None => Edge::Block,
+    }
+}
+// Whether `id` holds something a line shows: text, or a void element or an atom other than a `<br>`.
+pub(crate) fn has_content(arena: &RealmArena, id: NodeId) -> bool {
+    arena.get(id).is_some_and(|n| match n.kind {
+        NodeKind::Text => !n.data.is_empty(),
+        NodeKind::Element if n.is_html_named("br") => false,
+        NodeKind::Element if crate::caret::CARET_VOID_TAGS.contains(&&*n.local_name) => true,
+        _ => n.children.iter().any(|&c| has_content(arena, c)),
+    })
+}
+
+// The white space around the code units `from` to `to` of the text `node` — and what they hold — rebalanced as Chrome
+// does after an edit, where white space collapses: each run of spaces and no-break spaces, a single space between
+// content a space, any other alternating no-break space and space, a no-break space first, and — where it ends the line —
+// last; one that starts the line a no-break space first too (`a&nbsp; b`, `a&nbsp; &nbsp;b`, `ab&nbsp;&nbsp;`).
+pub(crate) fn rebalance_space(scope: &mut v8::PinScope<'_, '_>, caller: i32, node: NodeId, from: u32, to: u32) -> Option<()> {
+    let arena = &crate::dom::dom(scope).arena;
+    let Some(n) = arena.get(node).filter(|n| n.kind == NodeKind::Text) else { return Some(()) };
+    if !crate::rendered::collapses_white_space(arena, n.parent) {
+        return Some(());
+    }
+    let data = &n.data;
+    let space = |c: u16| c == 0x20 || c == 0xA0;
+    let (mut i, mut end) = ((from as usize).min(data.len()), (to as usize).min(data.len()));
+    while i > 0 && space(data[i - 1]) {
+        i -= 1;
+    }
+    while end < data.len() && space(data[end]) {
+        end += 1;
+    }
+    let mut runs = Vec::new();
+    while i < end {
+        if !space(data[i]) {
+            i += 1;
+            continue;
+        }
+        let a = i;
+        while i < end && space(data[i]) {
+            i += 1;
+        }
+        let count = i - a;
+        let starts = a == 0 && line_edge(arena, node, false) != Edge::Content;
+        let ends = i == data.len() && line_edge(arena, node, true) != Edge::Content;
+        let units: Vec<u16> = (0..count)
+            .map(|k| if count == 1 && !starts && !ends { 0x20 } else if (k == count - 1 && ends) || k % 2 == 0 { 0xA0 } else { 0x20 })
+            .collect();
+        if units[..] != data[a..i] {
+            runs.push((a, units));
+        }
+    }
+    if runs.is_empty() {
+        return Some(());
+    }
+    let object = crate::dom::node_value(scope, Some(node));
+    if crate::dom::factory_threw(scope) {
+        return None;
+    }
+    for (at, units) in runs {
+        let string = v8::String::new_from_two_byte(scope, &units, v8::NewStringType::Normal)?;
+        crate::character_data::replace_data(scope, caller, node, object, at, units.len(), string).ok()?;
+    }
+    Some(())
+}
+
+// The document object `near`'s node document is — what a node the engine makes beside it is in.
+pub(crate) fn document_of<'s>(scope: &mut v8::PinScope<'s, '_>, near: NodeId) -> Option<v8::Local<'s, v8::Object>> {
+    let handle = crate::dom::dom(scope).arena.get(near).and_then(|n| n.link.handle().map(|h| h as *const crate::node_handle::NodeHandle));
+    // SAFETY: the node's handle lives while its node is in the arena, which this reads before anything allocates.
+    handle.and_then(|h| unsafe { &*h }.document(scope))
+}
+// A node the engine makes of `data`, in `near`'s node document, by realm `caller`'s code — and what holds its handle
+// until a tree does.
+pub(crate) fn make(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, near: NodeId, data: NodeData) -> (NodeId, v8::cppgc::Persistent<crate::node_handle::NodeHandle>) {
+    let doc = document_of(scope, near);
+    let id = realm(scope, cid).create(data, None);
+    (id, crate::node_handle::bare(scope, id, doc, caller))
+}
+// …an HTML element named `name`, …
+pub(crate) fn make_element(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, near: NodeId, name: &str) -> (NodeId, v8::cppgc::Persistent<crate::node_handle::NodeHandle>) {
+    let data = NodeData { local_name: web_atoms::LocalName::from(name), ns: web_atoms::ns!(html), ..NodeData::of_kind(NodeKind::Element, Vec::new()) };
+    make(scope, cid, caller, near, data)
+}
+// …a `<br>`.
+pub(crate) fn make_br(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, near: NodeId) -> (NodeId, v8::cppgc::Persistent<crate::node_handle::NodeHandle>) {
+    make_element(scope, cid, caller, near, "br")
 }

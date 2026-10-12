@@ -5,65 +5,14 @@
 // emptied removed, and a block it emptied — the host too — held open by a `<br>` (Chrome). Every change of
 // children the engine's change; the bindings finish them as the op returns and put the caret where it says.
 
-use crate::dom::{realm, NodeData, NodeId, NodeKind, RealmArena};
+use crate::dom::{realm, NodeId, NodeKind, RealmArena};
+use crate::editing::{blank, block_of, cell_of, inline_content, island_of, make_br, rebalance_space, table_part, within};
 use crate::mutation::Change;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "editDelete", edit_delete, context_id);
 }
 
-// The block a place in `node` is in: its nearest inclusive ancestor that is no inline — a block, a table's part, a list
-// item — or `host`, at most.
-fn block_of(arena: &RealmArena, node: NodeId, host: NodeId) -> NodeId {
-    let mut at = if arena.is_element(node) { node } else { arena.parent_of(node).unwrap_or(node) };
-    while at != host && crate::rendered::is_inline_level(arena, at) != Some(false) {
-        match arena.parent_of(at) {
-            Some(p) => at = p,
-            None => break,
-        }
-    }
-    at
-}
-// …the table cell (or caption) it is in, below `host` — or `host`: what a deletion never joins across.
-fn cell_of(arena: &RealmArena, node: NodeId, host: NodeId) -> NodeId {
-    let mut at = Some(node);
-    while let Some(n) = at.filter(|&n| n != host) {
-        if arena.get(n).is_some_and(|d| d.is_html_named("td") || d.is_html_named("th") || d.is_html_named("caption")) {
-            return n;
-        }
-        at = arena.parent_of(n);
-    }
-    host
-}
-// …whether an element is a table's own — the table or a part of its structure — which no join moves content into or out
-// of.
-fn table_part(arena: &RealmArena, id: NodeId) -> bool {
-    arena.get(id).is_some_and(|n| ["table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption", "colgroup", "col"].iter().any(|t| n.is_html_named(t)))
-}
-// …and the outermost element `node` is in, below `host`, that its editing does not reach (`contenteditable=false`): an
-// island a deletion takes whole.
-fn island_of(arena: &RealmArena, node: NodeId, host: NodeId) -> Option<NodeId> {
-    let mut island = None;
-    let mut at = Some(node);
-    while let Some(n) = at.filter(|&n| n != host) {
-        if arena.is_element(n) && arena.editing_host(n).is_none() {
-            island = Some(n);
-        }
-        at = arena.parent_of(n);
-    }
-    island
-}
-// Whether `node` is `root` or in it.
-fn within(arena: &RealmArena, root: NodeId, node: NodeId) -> bool {
-    let mut at = Some(node);
-    while let Some(n) = at {
-        if n == root {
-            return true;
-        }
-        at = arena.parent_of(n);
-    }
-    false
-}
 // Whether an island holds an editing host of its own — what no step deletes (Chrome).
 fn holds_host(arena: &RealmArena, island: NodeId) -> bool {
     arena.get(island).is_some_and(|n| n.children.iter().any(|&c| arena.get(c).is_some_and(|d| d.kind == NodeKind::Element && (d.contenteditable_state() == Some(true) || holds_host(arena, c)))))
@@ -81,14 +30,6 @@ fn joinable(arena: &RealmArena, id: NodeId) -> bool {
         && crate::rendered::is_inline_level(arena, id) == Some(false)
         && !table_part(arena, id)
         && arena.editing_host(id).is_some()
-}
-// Whether `id` is content on a line: text, or an inline element other than a `<br>`.
-fn inline_content(arena: &RealmArena, id: NodeId) -> bool {
-    arena.get(id).is_some_and(|n| n.kind == NodeKind::Text || (n.kind == NodeKind::Element && !n.is_html_named("br") && crate::rendered::is_inline_level(arena, id) != Some(false)))
-}
-// Whether `id` is text of white space alone — what a line shows nothing of between blocks.
-fn blank(arena: &RealmArena, id: NodeId) -> bool {
-    arena.get(id).is_some_and(|n| n.kind == NodeKind::Text && n.data.iter().all(|&c| matches!(c, 0x20 | 0x09 | 0x0A | 0x0C | 0x0D)))
 }
 // The child of `parent` nearest the place before its `at`th child on one side — the one at it (forward) or before it —
 // past text of white space alone.
@@ -112,7 +53,7 @@ fn beside(arena: &RealmArena, (node, offset): (NodeId, u32), forward: bool) -> O
 // What a collapsed step took besides what it crossed: an island laid out as a block — the place it was, in its parent,
 // what the blocks either side join across (Chrome) — or a block atom, which joins nothing.
 #[derive(Clone, Copy, PartialEq)]
-enum Took {
+pub(crate) enum Took {
     Step,
     BlockIsland(NodeId, u32),
     Atom,
@@ -165,22 +106,50 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     } else {
         Some((((sc, so), (ec, eo)), Took::Step))
     };
-    let Some((((sc, so), (ec, eo)), took)) = range else { return };
+    let Some((range, took)) = range else { return };
     let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return };
-    let arena = realm(scope, cid);
-    if !within(arena, host, sc) || !within(arena, host, ec) || (sc == ec && so == eo) {
+    let steps = v8::Local::new(scope, steps);
+    let Some(Some((caret, changes))) = delete(scope, caller, steps, host, range, took, forward, collapsed) else { return };
+    let mut out: Vec<v8::Local<'_, v8::Value>> = vec![crate::dom::node_value(scope, Some(caret.0))];
+    if crate::dom::factory_threw(scope) {
         return;
     }
-    if !collapsed && (island_of(arena, sc, host).is_some() || island_of(arena, ec, host).is_some()) {
+    out.push(v8::Integer::new_from_unsigned(scope, caret.1).into());
+    out.extend(crate::mutation::changes_value(scope, cid, &changes));
+    if crate::dom::factory_threw(scope) {
         return;
+    }
+    rv.set(v8::Array::new_with_elements(scope, &out).into());
+}
+
+// The deletion of the range from `start` to `end` in the editing host `host` by realm `caller`'s code — a step's, back
+// or `forward`, which `took` what it says, where the selection was `collapsed`; the selection's, any other — and what
+// it tidied: where the caret goes and the changes of children it made, or none where nothing was deleted.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub(crate) fn delete<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    caller: i32,
+    steps: v8::Local<'s, v8::Array>,
+    host: NodeId,
+    ((sc, so), (ec, eo)): ((NodeId, u32), (NodeId, u32)),
+    took: Took,
+    forward: bool,
+    collapsed: bool,
+) -> Option<Option<((NodeId, u32), Vec<Change>)>> {
+    let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return Some(None) };
+    let arena = realm(scope, cid);
+    if !within(arena, host, sc) || !within(arena, host, ec) || (sc == ec && so == eo) {
+        return Some(None);
+    }
+    if !collapsed && (island_of(arena, sc, host).is_some() || island_of(arena, ec, host).is_some()) {
+        return Some(None);
     }
     let (start_block, end_block) = (block_of(arena, sc, host), block_of(arena, ec, host));
     let same_cell = cell_of(arena, sc, host) == cell_of(arena, ec, host);
     if collapsed && !same_cell {
-        return;
+        return Some(None);
     }
-    let steps = v8::Local::new(scope, steps);
-    let Some((mut changes, deleted)) = crate::range_contents::delete(scope, cid, caller, steps, sc, so, ec, eo) else { return };
+    let (mut changes, deleted) = crate::range_contents::delete(scope, cid, caller, steps, sc, so, ec, eo)?;
     // (…a range across blocks joins them — not across cells, not a table's own parts; a block island gone, the blocks
     // either side of its place)
     let arena = realm(scope, cid);
@@ -198,15 +167,10 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         && !table_part(arena, end_block)
         && within(arena, host, start_block)
         && within(arena, host, end_block);
-    let joint = if joins {
-        let Some(joint) = join(scope, cid, caller, steps, (start_block, end_block), (sc, so), &mut changes) else { return };
-        joint
-    } else {
-        None
-    };
+    let joint = if joins { join(scope, cid, caller, steps, (start_block, end_block), (sc, so), &mut changes)? } else { None };
     // (…nothing deleted, nothing joined: no change, the caret where it was)
     if !deleted && joint.is_none() {
-        return;
+        return Some(None);
     }
     // (…the caret at the joint where the start is between children or in no block the join kept; where nothing
     // joined and the start is the place before the block that holds the end — a block atom taken back, a line's start
@@ -219,17 +183,8 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         None => (sc, so),
     };
     // (…the inline elements and the text the deletion emptied at either end removed, and a block it emptied held open)
-    let Some(caret) = tidy(scope, cid, caller, steps, (start_block, end_block), start, ec, &mut changes) else { return };
-    let mut out: Vec<v8::Local<'_, v8::Value>> = vec![crate::dom::node_value(scope, Some(caret.0))];
-    if crate::dom::factory_threw(scope) {
-        return;
-    }
-    out.push(v8::Integer::new_from_unsigned(scope, caret.1).into());
-    out.extend(crate::mutation::changes_value(scope, cid, &changes));
-    if crate::dom::factory_threw(scope) {
-        return;
-    }
-    rv.set(v8::Array::new_with_elements(scope, &out).into());
+    let caret = tidy(scope, cid, caller, steps, (start_block, end_block), start, ec, &mut changes)?;
+    Some(Some((caret, changes)))
 }
 
 // The end's block joined to the start's, whether one holds the other or neither does — the content moving moved after
@@ -461,44 +416,6 @@ fn tidy<'s>(
             caret = (t, arena.get(t).map_or(0, |n| n.data.len() as u32));
         }
     }
-    canonicalize_space(scope, caller, caret)?;
+    rebalance_space(scope, caller, caret.0, caret.1, caret.1)?;
     Some(caret)
-}
-
-// The white space the deletion brought together at the caret kept as the line shows it (the Editing spec's
-// "canonicalize whitespace"): where white space collapses, a space before the caret that another space follows — or the
-// text ends with — a no-break space, so neither collapses into the other (Chrome: `foo bar baz`, `bar` deleted by a word,
-// is `foo&nbsp; baz`); one the text starts with, too.
-fn canonicalize_space(scope: &mut v8::PinScope<'_, '_>, caller: i32, (node, offset): (NodeId, u32)) -> Option<()> {
-    let arena = &crate::dom::dom(scope).arena;
-    // (…none where the caret is between children)
-    let Some(n) = arena.get(node).filter(|n| n.kind == NodeKind::Text) else { return Some(()) };
-    if !crate::rendered::collapses_white_space(arena, n.parent) {
-        return Some(());
-    }
-    let (data, at) = (&n.data, offset as usize);
-    let space = |i: usize| data.get(i) == Some(&0x20);
-    let target = if at > 0 && space(at - 1) && (at == data.len() || space(at)) {
-        at - 1
-    } else if at == 0 && space(0) {
-        0
-    } else {
-        return Some(());
-    };
-    let object = crate::dom::node_value(scope, Some(node));
-    if crate::dom::factory_threw(scope) {
-        return None;
-    }
-    let nbsp = v8::String::new_from_two_byte(scope, &[0xA0], v8::NewStringType::Normal)?;
-    crate::character_data::replace_data(scope, caller, node, object, target, 1, nbsp).ok()
-}
-
-// A `<br>` the engine makes, in `block`'s node document, by realm `caller`'s code — and what holds its handle until a
-// tree does.
-fn make_br(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, block: NodeId) -> (NodeId, v8::cppgc::Persistent<crate::node_handle::NodeHandle>) {
-    let doc = crate::dom::dom(scope).arena.get(block).and_then(|n| n.link.handle().map(|h| h as *const crate::node_handle::NodeHandle));
-    // SAFETY: the block's handle lives while its node is in the arena, which this reads before anything allocates.
-    let doc = doc.and_then(|h| unsafe { &*h }.document(scope));
-    let br = realm(scope, cid).create(NodeData { local_name: web_atoms::LocalName::from("br"), ns: web_atoms::ns!(html), ..NodeData::of_kind(NodeKind::Element, Vec::new()) }, None);
-    (br, crate::node_handle::bare(scope, br, doc, caller))
 }

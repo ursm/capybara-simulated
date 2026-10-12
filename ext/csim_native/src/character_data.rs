@@ -122,10 +122,29 @@ fn split_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let offset = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
     let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(2)) else { return };
     let caller = realm_id(scope, &args);
-    let Some((cid, length, cdata, parent)) = crate::dom::dom(scope).arena.get(id).map(|n| (n.realm, n.data.len(), n.cdata, n.parent)) else { return };
+    let Some((cid, length)) = crate::dom::dom(scope).arena.get(id).map(|n| (n.realm, n.data.len())) else { return };
     if offset > length {
         return rv.set_uint32(OFFSET_PAST_DATA);
     }
+    let Some((new, changes)) = split_text(scope, caller, id, node, offset, steps) else { return };
+    let mut out = vec![crate::dom::node_value(scope, Some(new))];
+    out.extend(crate::mutation::changes_value(scope, cid, &changes));
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
+    rv.set(v8::Array::new_with_elements(scope, &out).into());
+}
+// …of the node in slot `id` (its object `node`) at `offset`, no further than its data, by the realm `caller`'s code: the
+// new node and the change it made.
+pub(crate) fn split_text(
+    scope: &mut v8::PinScope<'_, '_>,
+    caller: i32,
+    id: crate::dom::NodeId,
+    node: v8::Local<'_, v8::Value>,
+    offset: usize,
+    steps: v8::Local<'_, v8::Array>,
+) -> Option<(crate::dom::NodeId, Vec<crate::mutation::Change>)> {
+    let (cid, length, cdata, parent) = crate::dom::dom(scope).arena.get(id).map(|n| (n.realm, n.data.len(), n.cdata, n.parent))?;
     // (…the new node made in the engine, its object made by the factory of the node's realm, as its own was — held here
     // until then)
     let tail = crate::dom::dom(scope).arena.get(id).map_or_else(Vec::new, |n| n.data[offset..].to_vec());
@@ -134,28 +153,20 @@ fn split_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let held = crate::node_handle::bare(scope, new, doc, cid);
     let new_value = crate::dom::node_value(scope, Some(new));
     if crate::dom::factory_threw(scope) {
-        return;
+        return None;
     }
     drop(held);
-    let Ok(new_obj) = v8::Local::<v8::Object>::try_from(new_value) else { return };
+    let new_obj = v8::Local::<v8::Object>::try_from(new_value).ok()?;
     let mut changes = Vec::new();
     if let Some(parent) = parent {
         let arena = realm(scope, cid);
         let (next, slot) = (arena.sibling(id, 1), arena.child_index(id) as u32 + 1);
-        let Some(change) = crate::mutation::insert(scope, cid, caller, parent, &[new], next, steps) else { return };
-        changes.push(change);
+        changes.push(crate::mutation::insert(scope, cid, caller, parent, &[new], next, steps)?);
         crate::ranges::split(scope, id, offset as u32, new, new_obj, Some(parent), slot);
     }
     let none = v8::String::empty(scope);
-    if replace_data(scope, caller, id, node, offset, length - offset, none).is_err() {
-        return;
-    }
-    let mut out = vec![new_value];
-    out.extend(crate::mutation::changes_value(scope, cid, &changes));
-    if crate::dom::factory_threw(scope) {
-        return;
-    }
-    rv.set(v8::Array::new_with_elements(scope, &out).into());
+    replace_data(scope, caller, id, node, offset, length - offset, none).ok()?;
+    Some((new, changes))
 }
 
 // __dom.normalize(node, steps) -> [changes…]: DOM `normalize()` (§4.4) of `node` (the object), the engine's whole — for
