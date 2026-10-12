@@ -39,4 +39,24 @@ RSpec.describe 'cloneNode' do
     JS
     expect(s.evaluate_script('window.R')).to eq(['load', 1, true])
   end
+
+  # An image in template contents loads nothing — its document is not fully active — not as parsed, nor as cloned; its
+  # copy loads once inserted into the page, the onload content attribute running in its document (Chrome).
+  it 'loads a template image once it is in the page' do
+    log = []
+    png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='.unpack1('m0')
+    html = <<~HTML
+      <!doctype html><meta charset=utf-8><body><template id=t><img src="/tpl.png" onload="R.push('attr:' + (this.ownerDocument === document))"></template>
+      <script>window.R = []; window.f = document.getElementById('t').content.cloneNode(true);</script>
+    HTML
+    app = ->(env) {
+      log << env['PATH_INFO']
+      env['PATH_INFO'].end_with?('.png') ? [200, {'content-type' => 'image/png'}, [png]] : [200, {'content-type' => 'text/html'}, [html]]
+    }
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    expect(log).to eq(['/'])
+    s.execute_script('document.body.append(f)')
+    expect(s.evaluate_script('window.R')).to eq(['attr:true'])
+    expect(log).to eq(['/', '/tpl.png'])
+  end
 end

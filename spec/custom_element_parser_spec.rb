@@ -158,4 +158,44 @@ RSpec.describe 'HTML parser custom-element construction' do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
     expect(s.evaluate_script('window.log')).to eq(%w[ctor conn:one:false ctor conn:two:true ctor conn:in:true script])
   end
+
+  # A select connected before all of its options were parsed — a custom element or a script among them made the parser
+  # connect what came before — runs its selectedness again as each later one is connected: the authored `selected`
+  # option wins, as in one connected whole (Chrome).
+  it "keeps a select's selectedness across a connect inside it" do
+    html = <<~HTML
+      <!doctype html><meta charset=utf-8><script>window.R = []; customElements.define('x-i', class extends HTMLElement {});</script>
+      <select id=s1><option>one</option><script>1</script><option selected>three</option></select>
+      <select id=s2><option>one<x-i></x-i></option><option selected>three</option></select>
+      <select id=s3><option>one<x-i></x-i></option><option>two</option></select>
+      <select id=s4 multiple><option>one<x-i></x-i></option><option selected>two</option><option selected>3</option></select>
+      <script>for (const id of ['s1', 's2', 's3', 's4']) R.push(id + ':' + [...document.getElementById(id).options].map((o) => +o.selected).join(''));</script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
+    expect(s.evaluate_script('window.R')).to eq(%w[s1:01 s2:01 s3:10 s4:011])
+  end
+
+  # A form-associated custom element's `form` attribute names its owner by id whatever element has the id and whenever
+  # it comes or goes — the owner reset as an element of that id is inserted or removed (Chrome).
+  it 'resets a form owner as elements of the id it names come and go' do
+    html = <<~HTML
+      <!doctype html><meta charset=utf-8><body><script>
+        window.R = [];
+        customElements.define('x-f', class extends HTMLElement {
+          static formAssociated = true;
+          constructor() { super(); this.i = this.attachInternals(); }
+          formAssociatedCallback(f) { R.push(this.id + '>' + (f ? f.className : null)); }
+        });
+        const x = document.createElement('x-f'); x.id = 'x'; x.setAttribute('form', 'f'); document.body.append(x);
+        const f1 = document.createElement('form'); f1.id = 'f'; f1.className = 'one'; document.body.append(f1);
+        const d = document.createElement('div'); d.id = 'f'; document.body.prepend(d);
+        d.remove();
+        f1.remove();
+        const outer = document.createElement('form'); const inner = document.createElement('form'); inner.id = 'f'; inner.className = 'inner';
+        outer.append(inner); document.body.append(outer);
+      </script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
+    expect(s.evaluate_script('window.R')).to eq(['x>one', 'x>null', 'x>one', 'x>null', 'x>inner'])
+  end
 end
