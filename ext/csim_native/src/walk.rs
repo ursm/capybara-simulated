@@ -211,14 +211,29 @@ pub(crate) struct Built {
     // back from the last pass, so a pass that paints is walked whole.
     pub(crate) paint: Vec<PaintMark>,
 }
-// A text run as a painter draws it: its run index, its baseline shift, and the element each part of it was written in
-// (`[(offset, nid)]`) — or whose `::placeholder` it is, for a control showing its placeholder (`control_text`).
+// A text run as a painter draws it: its run index, its baseline shift, its font's content box (its ascent and height,
+// `FontInfo`), and the element each part of it was written in (`[(offset, nid)]`) — or whose `::placeholder` it is, for
+// a control showing its placeholder (`control_text`) — and what each part of its text IS (`Source`), which a caret from a
+// point maps a place in it back to.
 pub(crate) struct PaintMark {
     pub(crate) run: usize,
     pub(crate) shift: f64,
+    pub(crate) content: [f64; 2],
     pub(crate) owners: Vec<(u32, f64)>,
+    pub(crate) sources: Vec<Source>,
     pub(crate) placeholder: bool,
 }
+// Where a part of a run's text, from its `offset` in the run on, came from: a text node's data — less what the walk took
+// out of it (`STRIPPED_CR_FF`, `STRIPPED_SHY`) — or a form control's shown value (`CONTROL_VALUE`), `node` the control.
+#[derive(Clone, Copy)]
+pub(crate) struct Source {
+    pub(crate) offset: u32,
+    pub(crate) node: NodeId,
+    pub(crate) flags: u8,
+}
+pub(crate) const STRIPPED_CR_FF: u8 = 1;
+pub(crate) const STRIPPED_SHY: u8 = 2;
+pub(crate) const CONTROL_VALUE: u8 = 4;
 
 // What the walk knows of a record beyond the record: where the run, grid and inline streams stood as it went in, and —
 // for one a subtree was walked from — where its records and streams ended when the walk returned from it; for a block
@@ -1399,9 +1414,10 @@ impl Rel {
 
 // A run before its block commits it: its inline box is named by the gather's entry, tabled at the commit.
 enum Pending {
-    // (…with the element each part of it was written in, as `[(offset, nid)]` — the painter's colour and font)
+    // (…with the element each part of it was written in, as `[(offset, nid)]` — the painter's colour and font — and
+    // where each part came from: `Source`)
     // (…and, in a `unicode-range` split, the ascent and descent its characters' faces need: `split_vmax`)
-    Text { font: FontInfo, text: Vec<u16>, wrap: u8, ws: u8, shift: f64, vmax: Option<(f64, f64)>, owners: Vec<(u32, f64)> },
+    Text { font: FontInfo, text: Vec<u16>, wrap: u8, ws: u8, shift: f64, vmax: Option<(f64, f64)>, owners: Vec<(u32, f64)>, sources: Vec<Source> },
     Open { plain: f64, ws: u8, entry: usize },
     Close { plain: f64, ws: u8, entry: usize, lands: bool, own_h: f64, own_asc: f64 },
     Br { ws: u8, clear: u8, entry: usize },
@@ -1502,6 +1518,10 @@ struct FontInfo {
     ws: f64,
     lh: f64,
     asc: f64,
+    // …its CONTENT box's ascent and height (the face's ascent and descent at its size, each rounded): where its text's
+    // glyphs are, which a range's rects of it report.
+    content_asc: f64,
+    content_h: f64,
     tab_px: f64,
     tab_min: f64,
     // Whether `face` splits a run's characters across faces by `unicode-range` — then a run's line box is the deepest
@@ -1514,7 +1534,7 @@ const WS_NORMAL: u8 = 0;
 const WS_NOWRAP: u8 = 1;
 const WS_PRE: u8 = 2;
 const WS_PRE_WRAP: u8 = 3;
-const WS_PRE_LINE: u8 = 4;
+pub(crate) const WS_PRE_LINE: u8 = 4;
 const WS_BREAK_SPACES: u8 = 5;
 
 // The elements HTML gives a formatting context of their own whatever their `display`: the widgets and the replaced
@@ -2525,8 +2545,12 @@ impl<'a> Walk<'a> {
         let textarea = self.node(id).rendering_tag() == "textarea";
         let ws_mode = if textarea { ws_mode_of(owner)? } else { WS_PRE };
         let vmax = self.split_vmax(owner, &font, &text, ws_mode)?;
-        let owners = if self.painting { vec![(0, id.to_f64())] } else { Vec::new() };
-        let run = Pending::Text { font, text, wrap: wrap_mode(owner), ws: ws_mode, shift: 0.0, vmax, owners };
+        let (owners, sources) = if self.painting {
+            (vec![(0, id.to_f64())], vec![Source { offset: 0, node: id, flags: CONTROL_VALUE }])
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        let run = Pending::Text { font, text, wrap: wrap_mode(owner), ws: ws_mode, shift: 0.0, vmax, owners, sources };
         let g = Gather { block: style, idx, runs: vec![run], makes_line: true, floats: Vec::new(), rel: None };
         let strut = self.font_info(style, style)?;
         let (indent, indent_bits) = indent(style)?;
@@ -3793,9 +3817,9 @@ impl<'a> Walk<'a> {
         let mut table: Vec<Option<usize>> = Vec::new();
         for r in g.runs {
             let run = match r {
-                Pending::Text { font, text, wrap, ws, shift, vmax, owners } => {
+                Pending::Text { font, text, wrap, ws, shift, vmax, owners, sources } => {
                     if self.painting {
-                        self.paint.push(PaintMark { run: self.runs.len(), shift, owners, placeholder: false });
+                        self.paint.push(PaintMark { run: self.runs.len(), shift, content: [font.content_asc, font.content_h], owners, sources, placeholder: false });
                     }
                     self.run_texts.push(Some(text.into()));
                     // The run's place on its line: its ascent, `vertical-align` included, and its line-height below
@@ -3943,7 +3967,9 @@ impl<'a> Walk<'a> {
                     // (…asked only of a pass a painter records: no other reads it)
                     let written_in = if self.painting { self.parent_of(c).map_or(-1.0, |p| p.to_f64()) } else { -1.0 };
                     let vmax = self.split_vmax(owner, font, raw, ws_mode)?;
-                    if let Some(Pending::Text { font: lf, text, wrap: lw, ws: lws, shift: ls, vmax: lv, owners }) = g.runs.last_mut() {
+                    // (…and what of the node's data the run holds: all of it, but what was taken out above)
+                    let flags = if stripped.len() < raw.len() { STRIPPED_CR_FF } else { 0 } | if td.len() < stripped.len() { STRIPPED_SHY } else { 0 };
+                    if let Some(Pending::Text { font: lf, text, wrap: lw, ws: lws, shift: ls, vmax: lv, owners, sources }) = g.runs.last_mut() {
                         let joinable = *lw == wrap
                             && *ls == shift
                             && *lv == vmax
@@ -3953,14 +3979,22 @@ impl<'a> Walk<'a> {
                             && (is_css_ws(*text.last().unwrap()) || is_css_ws(td[0]))
                             && !(ws_mode == WS_PRE_LINE && has_content(text) != has_content(&td));
                         if joinable {
-                            if self.painting && owners.last().is_none_or(|&(_, o)| o != written_in) {
-                                owners.push((text.len() as u32, written_in));
+                            if self.painting {
+                                if owners.last().is_none_or(|&(_, o)| o != written_in) {
+                                    owners.push((text.len() as u32, written_in));
+                                }
+                                sources.push(Source { offset: text.len() as u32, node: c, flags });
                             }
                             text.extend_from_slice(&td);
                             continue;
                         }
                     }
-                    g.runs.push(Pending::Text { font: *font, text: td.into_owned(), wrap, ws: ws_mode, shift, vmax, owners: if self.painting { vec![(0, written_in)] } else { Vec::new() } });
+                    let (owners, sources) = if self.painting {
+                        (vec![(0, written_in)], vec![Source { offset: 0, node: c, flags }])
+                    } else {
+                        (Vec::new(), Vec::new())
+                    };
+                    g.runs.push(Pending::Text { font: *font, text: td.into_owned(), wrap, ws: ws_mode, shift, vmax, owners, sources });
                 }
                 NodeKind::Element => {
                     let cs = self.style(c)?;
@@ -4175,7 +4209,8 @@ impl<'a> Walk<'a> {
         };
         let tab = if raw.is_finite() { if raw > 0.0 { raw } else { bls } } else { 8.0 * unit_space };
         let split = crate::font::with_font(face.handle, |m| m.is_split()).unwrap_or(false);
-        Ok(FontInfo { face: face.handle, size, ls, ws, lh, asc, tab_px: tab.max(0.0), tab_min: bare / 2.0, split })
+        let (content_asc, content_desc) = (js_round(face.asc * size), js_round(face.desc * size));
+        Ok(FontInfo { face: face.handle, size, ls, ws, lh, asc, content_asc, content_h: content_asc + content_desc, tab_px: tab.max(0.0), tab_min: bare / 2.0, split })
     }
 
     // The line box a text node needs where its font splits its characters across faces by `unicode-range`: the deepest
@@ -5281,7 +5316,7 @@ fn ws_mode_of(style: &ComputedValues) -> Result<u8, &'static str> {
         (_, wrap) => if wrap { WS_PRE_WRAP } else { WS_PRE },
     })
 }
-fn preserving(mode: u8) -> bool {
+pub(crate) fn preserving(mode: u8) -> bool {
     matches!(mode, WS_PRE | WS_PRE_WRAP | WS_BREAK_SPACES)
 }
 // Is `text` anything but CSS white space (`CSS_CONTENT_RE`)?

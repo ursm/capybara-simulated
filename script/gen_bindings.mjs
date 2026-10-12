@@ -88,7 +88,6 @@ const INTERFACES = [
       ARIANotifyMixin: 'ariaNotify: no accessibility tree to announce to'
     },
     omitMembers: {
-      caretPositionFromPoint: 'CaretPosition is not implemented',
       fullscreenEnabled: 'no fullscreen',
       fullscreen: 'no fullscreen',
       parseHTML: 'the Sanitizer API is not implemented',
@@ -548,6 +547,7 @@ const INTERFACES = [
   ['css-anchor-position', 'CSSPositionTryRule', { install: true }],
   ['dom', 'MutationObserver', { install: true }],
   ['cssom-view', 'MediaQueryList', { install: true }],
+  ['cssom-view', 'CaretPosition', { install: true }],
   ['dom', 'MutationRecord', { install: true }],
   ['dom', 'AbortController', { install: true }],
   ['dom', 'AbortSignal', { install: true }],

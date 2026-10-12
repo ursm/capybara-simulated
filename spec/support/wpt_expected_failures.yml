@@ -1688,26 +1688,6 @@ css/cssom/CSSStyleSheet-template-adoption.html:
 - adoptedStyleSheets won't be cleared when adopting into/from <template>s
 css/cssom/HTMLLinkElement-load-event-002.html:
 - "[harness] ERROR"
-css/cssom/caretPositionFromPoint-audioVideo.html:
-- document.caretPositionFromPoint() should return a CaretPosition over audio elements
-- document.caretPositionFromPoint() should return a CaretPosition over video elements
-css/cssom/caretPositionFromPoint-in-flex-container.html:
-- caretPositionFromPoint inside the short flex child resolves correctly
-- caretPositionFromPoint just inside a tall flex child resolves to that child
-- caretPositionFromPoint well inside a tall flex child resolves to that child
-css/cssom/caretPositionFromPoint-with-transformation.html:
-- iframe's with equal content should report the same caret offset
-css/cssom/caretPositionFromPoint.html:
-- CaretRange.getClientRect() should return a DOMRect that matches one obtained from
-  a manually constructed Range
-- document.caretPositionFromPoint() should return a CaretPosition at the specified
-  location
-- document.caretPositionFromPoint() should return a CaretPosition over SVG elements
-- 'document.caretPositionFromPoint() should return a CaretPosition over elements with
-  `user-select: none`'
-- document.caretPositionFromPoint() should return null for a document with no viewport
-- document.caretPositionFromPoint() should return null if given coordinates outside
-  of the viewport
 css/cssom/computed-style-002.html:
 - Check that a percent width in an iframe is resolved against iframe width for getComputedStyle.
 css/cssom/computed-style-003.html:
@@ -5414,8 +5394,6 @@ selection/caret/move-around-generated-content.html:
   to the start of the first list item'
 - 'Moving caret between list items using arrow keys: arrow-down should move the caret
   to the third list item'
-- 'Moving caret between list items using arrow keys: caret should start at the beginning
-  of the first line'
 - 'Moving caret past the block-quote using arrow keys: arrow-down should move the
   caret to the end of the quote'
 - 'Moving caret past the block-quote using arrow keys: arrow-down should move the
@@ -5428,8 +5406,6 @@ selection/caret/move-around-generated-content.html:
   caret forward by one character'
 - 'Moving caret past the block-quote using arrow keys: arrow-up should move the caret
   to into the first line'
-- 'Moving caret past the block-quote using arrow keys: caret should start at the beginning
-  of the first line'
 selection/contenteditable/collapse.html:
 - Selection.collapse() must succeed across siblings
 - Selection.collapse() must succeed for the ancestor

@@ -182,7 +182,6 @@ RSpec.describe 'stepping a caret by a character' do
   # `caret_edge`): its first rendered character, white space a line starts with collapsed away; before its first
   # `<br>` or image; its own start where it has none. A selection in it already stays.
   it 'puts the caret at the first caret position of an editing host it focuses' do
-    pending 'a press placing the caret at its point (a caret from a point): until then focus puts it at the last'
     s = session_for(<<~HTML)
       <!DOCTYPE html><body><div id=a contenteditable><p>abc</p><p>def</p></div><div id=b contenteditable><p><br></p></div>
       <div id=c contenteditable>  <b>x</b>yz</div><div id=d contenteditable><img src="data:,"><span>q</span></div>
@@ -220,5 +219,48 @@ RSpec.describe 'stepping a caret by a character' do
     f.click
     f.send_keys('Z')
     expect(s.evaluate_script('[e.innerHTML, f.innerHTML]')).to eq(['HelloXY', '<p>WorldZ</p>'])
+  end
+
+  # …and in its text, between the characters nearest the point (caret_from_point): Chrome, clicking 2, 20, 33 and 60px
+  # into `Hello World` and typing.
+  it 'types where in its text a click into an editing host was' do
+    typed = [2, 20, 33, 60].map {|x|
+      s = session_for('<!DOCTYPE html><body style="margin:0"><div id=e contenteditable style="width:400px;height:40px;font:16px sans-serif">Hello World</div>')
+      e = s.find(:css, '#e')
+      e.click(x: x - 200, y: -10)
+      e.send_keys('X')
+      s.evaluate_script('e.textContent')
+    }
+    expect(typed).to eq(['XHello World', 'HeXllo World', 'HelloX World', 'Hello WXorld'])
+  end
+
+  # ArrowUp / ArrowDown move the caret a line, in a textarea's value and in an editing host, at the x the moves set out
+  # from (a goal kept across them), to the start past the first line and the end past the last — Chrome's, every one.
+  it 'moves the caret a line up and down' do
+    s = session_for(<<~HTML)
+      <!DOCTYPE html><body style="margin:0"><textarea id=t style="font:16px monospace;width:300px;height:100px">abcd
+      ef
+      ghij</textarea><div id=e contenteditable style="font:16px monospace;width:300px"><p>abcd</p><p>ef</p><p>ghij</p></div>
+    HTML
+    t = s.find(:css, '#t')
+    t.click
+    at = ->(keys) {
+      t.send_keys(*keys)
+      s.evaluate_script('[t.selectionStart, t.selectionEnd, t.selectionDirection]')
+    }
+    s.execute_script('t.setSelectionRange(6, 6)')
+    expect([at.([:up]), at.([:up])]).to eq([[1, 1, 'none'], [0, 0, 'none']])
+    s.execute_script('t.setSelectionRange(3, 3)')
+    expect([at.([:down]), at.([:down]), at.([:down]), at.([[:shift, :up]])]).to eq([[7, 7, 'none'], [11, 11, 'none'], [12, 12, 'none'], [7, 12, 'backward']])
+    e = s.find(:css, '#e')
+    e.click
+    desc = ->(keys) {
+      e.send_keys(*keys)
+      s.evaluate_script('(() => { const s = getSelection(); return (s.focusNode.data ?? s.focusNode.nodeName) + "@" + s.focusOffset; })()')
+    }
+    s.execute_script('getSelection().collapse(document.querySelector("#e p").firstChild, 3)')
+    expect([desc.([:down]), desc.([:down]), desc.([:down])]).to eq(['ef@2', 'ghij@3', 'ghij@4'])
+    s.execute_script('getSelection().collapse(document.querySelector("#e p").firstChild, 2)')
+    expect(desc.([:up])).to eq('abcd@0')
   end
 end

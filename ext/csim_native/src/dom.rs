@@ -930,6 +930,8 @@ pub(crate) struct RealmState {
     pub(crate) geometry_epoch: std::cell::Cell<u64>,
     pub(crate) boxes_epoch: std::cell::Cell<u64>,
     pub(crate) geometry_memo: std::cell::RefCell<crate::geometry::Memo>,
+    // Where the text of the last layout that recorded its pieces is (text_geometry.rs) — a caret from a point's.
+    pub(crate) text_geometry: std::cell::RefCell<Option<crate::text_geometry::TextGeometry>>,
     // The nodes holding a scroll offset (`NodeData::scroll`), which every layout clamps to the range its box has then
     // (`geometry::reclamp_scrolls`) and a removal from the tree drops (`detach`).
     pub(crate) scrolled_nodes: Vec<NodeId>,
@@ -2261,6 +2263,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::scroll_boxes::install(scope, ns, context_id);
     crate::form_entries::install(scope, ns, context_id);
     crate::caret::install(scope, ns, context_id);
+    crate::text_geometry::install(scope, ns, context_id);
     // …and the tree mutation algorithms' checks (mutation.rs)
     crate::mutation::install(scope, ns, context_id);
     // …and where one node is against another (traversal.rs)

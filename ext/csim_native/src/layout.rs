@@ -1187,21 +1187,22 @@ impl InlineBox {
 }
 // …and what the pass answers for one: [inline index, x, y, w, h] per fragment, in document coordinates.
 pub(crate) type FragRow = [f64; 5];
-// One TEXT PIECE a line placed, for a painter: [run, start, end, x, y, baseline, width, justify, pen] — the run's index
-// in the pass's stream and the UTF-16 range of its text the piece draws (an EMPTY range is the HYPHEN a soft hyphen
-// shows where the line breaks at it, which is in no text — at the end of the piece the soft hyphen ends), where its
-// advance starts, the top and the baseline of its LINE (the run's own `vertical-align` shift is the painter's to apply),
-// the advance the line reserved for it, what a justified line added to each no-break space inside it, and the pen it
+// One TEXT PIECE a line placed, for a painter: [run, start, end, x, y, baseline, width, justify, pen, height, line end] — the
+// run's index in the pass's stream and the UTF-16 range of its text the piece draws (an EMPTY range is the HYPHEN a soft
+// hyphen shows where the line breaks at it, which is in no text — at the end of the piece the soft hyphen ends), where
+// its advance starts, the top and the baseline of its LINE (the run's own `vertical-align` shift is the painter's to
+// apply), the advance the line reserved for it, what a justified line added to each no-break space inside it, the pen it
 // was measured from — its distance from the content edge before the line was aligned, which a tab's stop is counted
-// from. In the block's border-box frame until `place` moves it into the document's, as a fragment is. Only
-// glyph-bearing pieces: white space draws nothing.
-pub(crate) type TextRow = [f64; 9];
+// from — its line's height, the band a point on the line falls in, and the pen its line's content ends at (its hanging
+// white space off), which says whether a space after the piece is on the line. In the block's border-box frame until
+// `place` moves it into the document's, as a fragment is. Only glyph-bearing pieces: white space draws nothing.
+pub(crate) type TextRow = [f64; 11];
 
 // A line layout's text pieces in its box's frame — moved `dx` across and `dy` down — their runs numbered in the pass's
 // stream from `rs`.
 fn pieces_in(rows: &[TextRow], rs: usize, dx: f64, dy: f64) -> Vec<TextRow> {
     rows.iter()
-        .map(|&[run, start, end, x, y, baseline, w, justify, pen]| [run + rs as f64, start, end, x + dx, y + dy, baseline + dy, w, justify, pen])
+        .map(|&[run, start, end, x, y, baseline, w, justify, pen, h, line_end]| [run + rs as f64, start, end, x + dx, y + dy, baseline + dy, w, justify, pen, h, line_end])
         .collect()
 }
 
@@ -2183,10 +2184,11 @@ fn line_layout(
             // …and the text pieces, by the coordinate rule too: a piece with a gap INSIDE it —
             // a no-break space — widens by that gap's share, which the painter spreads over it; every piece sits on the
             // line's baseline.
+            let line_end = end;
             for (ri, start, end, x, w, rx, ry) in line_pieces.drain(..) {
                 let inside = if extra > 0.0 { gaps.iter().filter(|&&g| g >= x && g < x + w).count() } else { 0 };
                 let justify = if inside > 0 { extra } else { 0.0 };
-                texts.push([ri as f64, start, end, x + shift_at(x) + rx, total + ry, total + line_asc + ry, w + inside as f64 * extra, justify, x]);
+                texts.push([ri as f64, start, end, x + shift_at(x) + rx, total + ry, total + line_asc + ry, w + inside as f64 * extra, justify, x, line_h, line_end]);
             }
             // …and the inline boxes' pieces on it, by the same COORDINATE rule the markers use (`shift_at` of a
             // piece's `min_x` and right edges, not how many gaps precede it), then stamped with the line's ascent —

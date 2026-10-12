@@ -690,7 +690,7 @@ fn clipped_away_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 }
 
 // One painting question asked with the realm's arena and its style engine's animations at the page's clock `now`.
-fn painting<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, now_at: i32, ask: impl FnOnce(&mut Painting<'_>) -> R) -> Option<R> {
+pub(crate) fn painting<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, now_at: i32, ask: impl FnOnce(&mut Painting<'_>) -> R) -> Option<R> {
     let cid = crate::dom::realm_id(scope, args);
     let now = args.get(now_at).number_value(scope).filter(|n| n.is_finite());
     let d = crate::dom::dom(scope);

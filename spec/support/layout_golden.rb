@@ -34,8 +34,8 @@ module LayoutGolden
   DIR = File.expand_path('../fixtures/layout_golden', __dir__)
   # `body` and everything under it in tree order: an element as its tag and border box, then — where it has any — its
   # client rects (an inline box's fragments; a block's one rect is its box, and is left out) and its used margins and
-  # padding (the resolved values `getComputedStyle` reports); a text node as `#text` and its line boxes — none yet:
-  # `Range#getClientRects` answers an empty list.
+  # padding (the resolved values `getComputedStyle` reports); a text node as `#text` and its line boxes — its range's
+  # client rects, one per line it is on, its font's content box tall (text_geometry.rs `text_rects`).
   SNAPSHOT_JS = <<~JS
     (() => {
       const r4 = (r) => [r.x, r.y, r.width, r.height];
@@ -118,7 +118,8 @@ module LayoutGolden
       end
     end
 
-    # A text node the golden holds no line boxes for is not compared, or every one would be noted.
+    # A text node the golden holds no line boxes for — one recorded before text had any, or none rendered — is not
+    # compared, or every one would be noted.
     def annotate(path, key, snapshot)
       entry = @files[path][key]
       return warn("#{entry['body']}: Chrome gave no snapshot") unless snapshot

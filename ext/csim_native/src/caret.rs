@@ -6,7 +6,7 @@
 use crate::dom::{nid_arg, NodeData, NodeId, NodeKind, RealmArena};
 use crate::style::StyleEngine;
 
-const CARET_VOID_TAGS: [&str; 11] = ["audio", "br", "canvas", "embed", "hr", "iframe", "img", "input", "object", "svg", "video"];
+pub(crate) const CARET_VOID_TAGS: [&str; 11] = ["audio", "br", "canvas", "embed", "hr", "iframe", "img", "input", "object", "svg", "video"];
 
 fn is_text(n: &NodeData) -> bool {
     n.kind == NodeKind::Text

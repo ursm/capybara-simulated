@@ -19,7 +19,6 @@ Document:
   # spec/support/wpt_out_of_scope.yml.
   - all
   - ariaNotify
-  - caretPositionFromPoint
   - convertPointFromNode
   - convertQuadFromNode
   - convertRectFromNode

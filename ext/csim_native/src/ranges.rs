@@ -265,6 +265,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "rangeIntersectsNode", range_intersects_node, context_id);
     register(scope, ns, "rangeText", range_text, context_id);
     register(scope, ns, "rangeContents", range_contents, context_id);
+    register(scope, ns, "rangeRects", range_rects, context_id);
 }
 
 // ── boundary points in tree order (DOM §5.2) ─────────────────────────────────────────────────────────────────────
@@ -496,6 +497,72 @@ fn range_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
     let value = crate::dom::utf16_value(scope, &out);
     rv.set(value);
+}
+
+// What the range from `s` to `e` selects, as CSSOM View's range rects take it — in tree order, each element it contains
+// whose parent it does not, and each Text node it contains or partially contains, with the offsets of its part.
+enum Selected {
+    Element(NodeId),
+    Text(NodeId, u32, u32),
+}
+fn selected(arena: &RealmArena, s: Boundary, e: Boundary) -> Vec<Selected> {
+    let text_len = |id: NodeId| arena.get(id).filter(|n| n.kind == crate::dom::NodeKind::Text).map(|n| n.data.len() as u32);
+    if let (true, Some(_)) = (s.node == e.node, text_len(s.node)) {
+        return vec![Selected::Text(s.node, s.offset, e.offset)];
+    }
+    let mut out = Vec::new();
+    if let Some(len) = text_len(s.node) {
+        out.push(Selected::Text(s.node, s.offset, len));
+    }
+    // (…from the first node after the start point, as `range_text` walks — an element contained taken whole, what is
+    // under it only for its text)
+    let mut cur = match text_len(s.node) {
+        Some(_) => following(arena, s.node, true),
+        None => match arena.get(s.node).and_then(|n| n.children.get(s.offset as usize)) {
+            Some(&c) => Some(c),
+            None => following(arena, s.node, true),
+        },
+    };
+    let mut whole: Option<NodeId> = None;
+    use std::cmp::Ordering::*;
+    while let Some(n) = cur {
+        if n == e.node || compare(arena, Boundary { node: n, offset: 0 }, e) != Some(Less) {
+            break;
+        }
+        let len = arena.get(n).map_or(0, |d| if d.kind == crate::dom::NodeKind::Text { d.data.len() } else { d.children.len() }) as u32;
+        if compare(arena, Boundary { node: n, offset: len }, e) != Some(Greater) {
+            match text_len(n) {
+                Some(len) => out.push(Selected::Text(n, 0, len)),
+                None if arena.is_element(n) && !whole.is_some_and(|w| contains(arena, w, n)) => {
+                    out.push(Selected::Element(n));
+                    whole = Some(n);
+                }
+                None => {}
+            }
+        }
+        cur = following(arena, n, false);
+    }
+    if text_len(e.node).is_some() {
+        out.push(Selected::Text(e.node, 0, e.offset));
+    }
+    out
+}
+
+// __dom.rangeRects(range) -> Float64Array [x, y, width, height, …]: the range's client rects (CSSOM View §6.1) — each
+// element it selects whose parent it does not, its own client rects; each Text node it selects or partially selects, the
+// rects of its part of it (text_geometry.rs `text_rects`) — of the layout and the text geometry the bindings made current.
+fn range_rects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some([s, e]) = entry_points(scope, args.get(0)) else { return };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let mut rects: Vec<f64> = Vec::new();
+    for part in selected(arena, s, e) {
+        match part {
+            Selected::Element(el) => rects.extend(crate::geometry::client_rects(arena, el).unwrap_or_default().concat()),
+            Selected::Text(t, from, to) => rects.extend(arena.text_rects(t, from, to).concat()),
+        }
+    }
+    rv.set(crate::dom::f64_array(scope, &rects).into());
 }
 
 // What the contents of the range from `s` to `e` are, as cloning, extracting and deleting them take them (DOM §5.5): its

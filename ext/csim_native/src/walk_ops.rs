@@ -97,6 +97,11 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         crate::layout::Outcome::LaidOut(laid) if texts => Some(paint_rows(&laid.texts, &paint, &runs, &run_texts)),
         _ => None,
     };
+    // (…and keeps where that text is — a caret from a point's, text_geometry.rs)
+    let geometry = match &out {
+        crate::layout::Outcome::LaidOut(laid) if texts => Some((laid.texts.clone(), runs.clone(), run_texts.clone(), paint)),
+        _ => None,
+    };
     let mismatch = measure.mismatch.take();
     let reuse = dom(scope).walk_reuse.entry(cid).or_default();
     reuse.measure = measure;
@@ -133,6 +138,9 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         }
         arena.begin_layout(root, [basis.w, basis.h]);
         crate::geometry::store_layout(arena, &laid, &inline_nids, &anon);
+        if let Some((rows, runs, texts, marks)) = geometry {
+            *arena.text_geometry.borrow_mut() = Some(crate::text_geometry::TextGeometry { pass: arena.layout_pass, rows, runs, texts, marks });
+        }
     }
     // (…answered `true` — the boxes are the arena's now — or, for a pass that paints, as the painter's text pieces:
     // `[rows, texts, steps, owners]`, each piece's owner an element and, in its row, whether it is one of its generated

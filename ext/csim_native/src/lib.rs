@@ -87,6 +87,7 @@ mod svg_geometry;
 mod tables;
 mod text;
 mod text_codec;
+mod text_geometry;
 mod text_selection;
 mod timers;
 mod token_list;
