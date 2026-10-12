@@ -206,6 +206,14 @@ fn hover_chains_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let to = nid_arg(scope, &args, 1);
     let cid = realm_id(scope, &args);
     let (leave, enter) = hover_chains(crate::dom::realm(scope, cid), from, to);
-    let lists = [crate::dom::nodes_value(scope, cid, &leave), crate::dom::nodes_value(scope, cid, &enter)];
-    rv.set(v8::Array::new_with_elements(scope, &lists).into());
+    // (…none past a node factory that threw: its exception is what the op ends with)
+    let leave = crate::dom::nodes_value(scope, cid, &leave);
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
+    let enter = crate::dom::nodes_value(scope, cid, &enter);
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
+    rv.set(v8::Array::new_with_elements(scope, &[leave, enter]).into());
 }

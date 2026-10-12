@@ -214,8 +214,13 @@ enum Removing {
 // Why a change of children throws before it begins (a NotFoundError): the child to remove is none of the parent's.
 const REMOVED_NOT_A_CHILD: u32 = 1;
 
-// One step called — undefined as its `this` — or None where it threw, whose exception goes on to the caller.
+// One step called — undefined as its `this` — or None where it threw, whose exception goes on to the caller, or where
+// a node factory threw making its arguments.
 fn step(scope: &mut v8::PinScope<'_, '_>, steps: v8::Local<'_, v8::Array>, which: u32, args: &[v8::Local<'_, v8::Value>]) -> Option<()> {
+    // (…none with the answers it is handed cut short by a node factory that threw: its exception is what the op ends with)
+    if crate::dom::factory_threw(scope) {
+        return None;
+    }
     let f = v8::Local::<v8::Function>::try_from(steps.get_index(scope, which)?).ok()?;
     let undefined = v8::undefined(scope).into();
     f.call(scope, undefined, args).map(|_| ())
@@ -290,6 +295,9 @@ fn change_children(
     }
     if !removed.is_empty() && affects_selectedness(realm(scope, cid), parent, &removed) {
         let parent_object = node_value(scope, Some(parent));
+        if crate::dom::factory_threw(scope) {
+            return None;
+        }
         let list = nodes_value(scope, cid, &removed);
         let all = v8::Boolean::new(scope, matches!(removing, Removing::All)).into();
         step(scope, steps, STEP_REMOVED_FROM, &[parent_object, list, all])?;
@@ -316,7 +324,11 @@ fn change_children(
         let arena = realm(scope, cid);
         let sources: Vec<NodeId> = added.iter().copied().filter(|&n| arena.get(n).is_some_and(|d| d.is_html_named("source"))).collect();
         for n in sources {
-            let (node, parent_object) = (node_value(scope, Some(n)), node_value(scope, Some(parent)));
+            let node = node_value(scope, Some(n));
+            if crate::dom::factory_threw(scope) {
+                return None;
+            }
+            let parent_object = node_value(scope, Some(parent));
             step(scope, steps, STEP_SOURCE_INSERTED, &[node, parent_object])?;
         }
     }
@@ -516,10 +528,26 @@ pub(crate) fn record_child_list(
         let still = |n: &NodeId| arena.parent_of(*n) == Some(target);
         (added.first().filter(|n| still(n)).and_then(|&n| arena.sibling(n, -1)), added.last().filter(|n| still(n)).and_then(|&n| arena.sibling(n, 1)))
     });
-    let kind = v8::Integer::new(scope, 0).into();
+    // (…each answer made, and no record past a node factory that threw: its exception is what the op ends with)
     let target_object = node_value(scope, Some(target));
-    let (added, removed) = (nodes_value(scope, cid, added), nodes_value(scope, cid, removed));
-    let (previous, next) = (node_value(scope, previous), node_value(scope, next));
+    let mut answers = [target_object; 4];
+    for (k, nodes) in [added, removed].into_iter().enumerate() {
+        if crate::dom::factory_threw(scope) {
+            return;
+        }
+        answers[k] = nodes_value(scope, cid, nodes);
+    }
+    for (k, node) in [previous, next].into_iter().enumerate() {
+        if crate::dom::factory_threw(scope) {
+            return;
+        }
+        answers[2 + k] = node_value(scope, node);
+    }
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
+    let [added, removed, previous, next] = answers;
+    let kind = v8::Integer::new(scope, 0).into();
     let null: v8::Local<'_, v8::Value> = v8::null(scope).into();
     let fields = [kind, target_object, added, removed, previous, next, null, null, null];
     crate::mutation_observers::queue_record(scope, cid, target, &fields);

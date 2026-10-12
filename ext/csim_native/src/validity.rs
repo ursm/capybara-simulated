@@ -881,8 +881,15 @@ fn ask_for_reset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let nodes = crate::dom::nids_arg(scope, args.get(1));
     let inserted = args.get(2).is_true();
     let Some((select, changed)) = crate::dom::realm(scope, cid).ask_for_reset(parent, &nodes, inserted) else { return };
+    // (…none past a node factory that threw: its exception is what the op ends with)
     let select = crate::dom::node_value(scope, Some(select));
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
     let changed = crate::dom::nodes_value(scope, cid, &changed);
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
     rv.set(v8::Array::new_with_elements(scope, &[select, changed]).into());
 }
 
