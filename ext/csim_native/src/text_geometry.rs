@@ -541,8 +541,17 @@ impl RealmArena {
             // a place nothing renders to the next one there is)
             let n = self.get(node)?;
             if n.kind == NodeKind::Text {
-                let j = g.pieces_of(self.following_text(g, root, node)?).next()?;
-                let (text, at) = self.run_place(g, g.rows[j][0] as usize, g.rows[j][1] as u32)?;
+                // (…the text before it where none follows: white space ending the host)
+                let (text, at) = match self.adjacent_text(g, root, node, true) {
+                    Some(next) => {
+                        let j = g.pieces_of(next).next()?;
+                        self.run_place(g, g.rows[j][0] as usize, g.rows[j][1] as u32)?
+                    }
+                    None => {
+                        let j = g.pieces_of(self.adjacent_text(g, root, node, false)?).last()?;
+                        self.run_place(g, g.rows[j][0] as usize, g.rows[j][2] as u32)?
+                    }
+                };
                 return self.line_edge(g, root, text, at, false, end);
             }
             // (…a caret between an element's children: on the line of the text either side of it, or past the atoms
@@ -584,20 +593,23 @@ impl RealmArena {
     pub(crate) fn line_wraps(&self, g: &TextView, node: NodeId, offset: u32) -> bool {
         self.caret_piece(g, node, offset, false).is_some_and(|i| g.rows[i][12] != 0.0)
     }
-    // The first text after `node` in tree order, in `root`, that a line holds.
-    fn following_text(&self, g: &TextView, root: NodeId, node: NodeId) -> Option<NodeId> {
+    // The first text after `node` in tree order — before it, without `forward` — in `root`, that a line holds.
+    fn adjacent_text(&self, g: &TextView, root: NodeId, node: NodeId, forward: bool) -> Option<NodeId> {
         let mut at = node;
         loop {
             let n = self.get(at)?;
-            at = match n.children.first() {
+            let inward = if forward { n.children.first() } else { n.children.last() };
+            at = match inward {
                 Some(&c) if at != node => c,
                 _ => loop {
                     if at == root {
                         return None;
                     }
                     let parent = self.parent_of(at)?;
-                    match self.get(parent)?.children.get(self.child_index(at) + 1) {
-                        Some(&next) => break next,
+                    let k = self.child_index(at);
+                    let sibling = if forward { self.get(parent)?.children.get(k + 1) } else { k.checked_sub(1).and_then(|k| self.get(parent)?.children.get(k)) };
+                    match sibling {
+                        Some(&s) => break s,
                         None => at = parent,
                     }
                 },
@@ -656,7 +668,9 @@ impl RealmArena {
                         if b.y >= bottom || b.y + b.h <= top {
                             break;
                         }
-                        out = self.inner_edge(g, c, end).unwrap_or((parent, step as u32));
+                        // (…an inline-block's own edge where no text of its own has one: Chrome's, inside it)
+                        let inside = crate::rendered::is_atomic_inline(self, c).then(|| (c, if end { cn.children.len() as u32 } else { 0 }));
+                        out = self.inner_edge(g, c, end).or(inside).unwrap_or((parent, step as u32));
                         atom = true;
                     }
                     index = step;

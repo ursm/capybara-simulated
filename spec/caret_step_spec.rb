@@ -366,6 +366,7 @@ RSpec.describe 'stepping a caret by a character' do
     expect([at.(12, [:shift, :end], [:shift, :home]), at.(12, :end, [:shift, :home]), at.(2, :end, :left, :right, :home)]).to eq([[12, 10], [20, 10], 10])
     # (…and only while nothing else sets the selection: a script's collapse to the same place is the next line's start)
     expect(at.(12, :end, -> { s.execute_script("getSelection().collapse(document.getElementById('e').firstChild, 20)") }, :home)).to eq(20)
+    expect(at.(12, :end, -> { s.execute_script('const r = getSelection().getRangeAt(0); r.setStart(r.startContainer, 20); r.collapse(true)') }, :home)).to eq(20)
     t = s.find(:css, '#t')
     t.click
     s.execute_script('t.setSelectionRange(12, 12)')
@@ -424,6 +425,12 @@ RSpec.describe 'stepping a caret by a character' do
       edge.("<div>aaa</div>\n<div>bbb</div>", 'e.childNodes[1]', 0, :end),
       edge.('aaaa bbbb <img style="width:20px;height:16px"> cccc dddd', 'e.firstChild', 1, :end)
     ]).to eq(['X Y@3', 'X Y@0', 'bbb@0', 'bbb@3', ' cccc dddd@1'])
+    # (…an inline-block with no text of its own its own edge, inside it; white space ending the host the text before it)
+    expect([
+      edge.('aaa <span style="display:inline-block;width:10px;height:10px"></span>', 'e.firstChild', 1, :end),
+      edge.('aaa <span style="display:inline-block"><img style="width:10px;height:10px"></span>', 'e.firstChild', 1, :end),
+      edge.("<div>aaa</div>\n", 'e.lastChild', 0, :home)
+    ]).to eq(['SPAN@0', 'SPAN@1', 'aaa@0'])
   end
 
   # `Selection.modify` moves as the keys do: by a line — to the text's first or last place past its first or last line —
@@ -452,5 +459,9 @@ RSpec.describe 'stepping a caret by a character' do
       modify.(first, 2, 'paragraph', 'forward'),
       modify.('document.getElementById("n").firstChild', 12, 'lineboundary', 'forward')
     ]).to eq(['second@6', "#{w}@0", 'second@2', "#{w}@19"])
+    # (…'right' to a line's edge by its paragraph's direction, whatever the text — Chrome and Firefox: the start of an
+    # rtl line)
+    s.execute_script("n.dir = 'rtl'")
+    expect(modify.('document.getElementById("n").firstChild', 12, 'lineboundary', 'right')).to eq("#{w}@10")
   end
 end
