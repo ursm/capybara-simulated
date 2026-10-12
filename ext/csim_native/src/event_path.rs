@@ -111,6 +111,7 @@ fn path(arena: &RealmArena, target: NodeId, related: Related, composed: bool) ->
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "eventPath", event_path, context_id);
     crate::dom::register(scope, ns, "retarget", retarget_op, context_id);
+    crate::dom::register(scope, ns, "hoverChains", hover_chains_op, context_id);
 }
 
 // __dom.retarget(aNid, bNid) -> DOM "retarget" the node `aNid` against the node `bNid` (null for something else, a
@@ -176,4 +177,35 @@ fn event_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let steps_answer = crate::dom::f64_array(scope, &out);
     let answer = v8::Array::new_with_elements(scope, &[nodes_answer, steps_answer.into()]);
     rv.set(answer.into());
+}
+
+// UI Events' boundary events, as a pointer goes from `from` to `to`: the elements it leaves — `from` and its ancestors,
+// innermost first — and those it enters — `to`'s, outermost first — up to the one they share; an element's ancestors
+// the flat tree's (a slotted node's next its slot, a shadow tree's top its host), elements alone (no shadow root, which
+// Chrome fires none at).
+fn hover_chains(arena: &RealmArena, from: Option<NodeId>, to: Option<NodeId>) -> (Vec<NodeId>, Vec<NodeId>) {
+    let chain = |start: Option<NodeId>| -> Vec<NodeId> {
+        std::iter::successors(start, |&n| crate::geometry::flat_parent(arena, n)).filter(|&n| arena.is_element(n)).collect()
+    };
+    let (mut leave, mut enter) = (chain(from), chain(to));
+    // (…the one they share, and above, in neither)
+    while let (Some(a), Some(b)) = (leave.last(), enter.last()) {
+        if a != b {
+            break;
+        }
+        leave.pop();
+        enter.pop();
+    }
+    enter.reverse();
+    (leave, enter)
+}
+
+// __dom.hoverChains(fromNid, toNid) -> [[left…], [entered…]] (`hover_chains`; -1 for no node).
+fn hover_chains_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let from = nid_arg(scope, &args, 0);
+    let to = nid_arg(scope, &args, 1);
+    let cid = realm_id(scope, &args);
+    let (leave, enter) = hover_chains(crate::dom::realm(scope, cid), from, to);
+    let lists = [crate::dom::nodes_value(scope, cid, &leave), crate::dom::nodes_value(scope, cid, &enter)];
+    rv.set(v8::Array::new_with_elements(scope, &lists).into());
 }
