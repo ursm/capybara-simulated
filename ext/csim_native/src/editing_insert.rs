@@ -19,11 +19,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 const TEXT: u32 = 0;
 const LINE_BREAK: u32 = 1;
 
-// __dom.editInsert(startNode, startOffset, endNode, endOffset, kind, text, steps) -> [caretNode, caretOffset, copies,
-// (source, copy, names)…, changes…], or undefined where nothing is inserted: the insertion in the editing host the
-// selection is in (editing.rs `selection_host`: a caret in a non-editable island in none; a range's ends out of other
-// hosts and out of islands) at the selection's range from (startNode, startOffset) to (endNode, endOffset) — its
-// contents deleted first — of `text` (`TEXT`), a line break
+// __dom.editInsert(anchorNode, anchorOffset, focusNode, focusOffset, kind, text, steps) -> [caretNode, caretOffset,
+// copies, (source, copy, names)…, changes…], or undefined where nothing is inserted: the insertion in the editing host
+// the selection from the anchor to the focus edits (editing.rs `selection_host`: its anchor's, the focus kept to it and
+// out of its non-editable islands) at the selection's range — its contents deleted first — of `text` (`TEXT`), a line break
 // (`LINE_BREAK`) or a paragraph's break (any other): the place the caret goes, how many elements a split copied and each
 // with its source and the names of the attributes whose cloning steps are the bindings' (cloning.rs `bindings_value`),
 // and the changes of children it made (mutation.rs `changes_value`).
@@ -50,9 +49,12 @@ fn edit_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let mut caret = (sc, so);
     if !collapsed {
         let took = crate::editing_delete::Took::Step;
-        let Some(Some((at, made))) = crate::editing_delete::delete(scope, caller, steps, host, ((sc, so), (ec, eo)), took, false, false) else { return };
-        caret = at;
-        edit.changes.extend(made);
+        // (…none deleted — a range a non-editable island's edge left empty — and the insertion at its start)
+        let Some(deleted) = crate::editing_delete::delete(scope, caller, steps, host, ((sc, so), (ec, eo)), took, false, false) else { return };
+        if let Some((at, made)) = deleted {
+            caret = at;
+            edit.changes.extend(made);
+        }
     }
     let caret = match kind {
         TEXT => edit.text(scope, caret, &text),

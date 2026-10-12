@@ -181,4 +181,25 @@ RSpec.describe 'inserting in an editing host' do
     [:backspace, 'Z'].each {|key| across.find(:css, '#e').send_keys(key) }
     expect(across.evaluate_script('document.body.innerHTML')).to eq('<div id="e" contenteditable=""><p>aZ</p></div><div id="f" contenteditable="">cd</div>')
   end
+
+  it "edits by the selection's anchor: none from outside its host or from an island, the focus kept out of one" do
+    island = 'a<span contenteditable="false">XY</span>b'
+    selected = lambda {|anchor, focus, key|
+      session.execute_script(<<~JS)
+        const e = document.getElementById('e'), g = getSelection();
+        e.innerHTML = #{island.to_json};
+        e.focus();
+        g.collapse(#{anchor});
+        g.extend(#{focus});
+      JS
+      session.find(:css, '#e').send_keys(key)
+      session.evaluate_script("document.getElementById('e').innerHTML")
+    }
+    expect([
+      selected.call('e.childNodes[1].firstChild, 1', 'e.lastChild, 1', 'x'),
+      selected.call('e.childNodes[1].firstChild, 2', 'e.firstChild, 0', 'x'),
+      selected.call('e.firstChild, 1', 'e.childNodes[1].firstChild, 1', 'x'),
+      selected.call('document.body, 0', 'e.firstChild, 1', 'x')
+    ]).to eq([island, island, 'ax<span contenteditable="false">XY</span>b', island])
+  end
 end

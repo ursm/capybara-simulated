@@ -59,11 +59,10 @@ pub(crate) enum Took {
     Atom,
 }
 
-// __dom.editDelete(startNode, startOffset, endNode, endOffset, forward, word, now, steps) -> [caretNode, caretOffset,
-// changes…], or undefined where nothing is deleted: the deletion in the editing host the selection is in (editing.rs
-// `selection_host`: a caret in a non-editable island in none; a range's ends out of other hosts and out of islands) —
-// of the selection's range
-// from (startNode, startOffset) to (endNode, endOffset), or, collapsed, of a step back (forward) from it, a character's
+// __dom.editDelete(anchorNode, anchorOffset, focusNode, focusOffset, forward, word, now, steps) -> [caretNode,
+// caretOffset, changes…], or undefined where nothing is deleted: the deletion in the editing host the selection from
+// the anchor to the focus edits (editing.rs `selection_host`: its anchor's, the focus kept to it and out of its
+// non-editable islands) — of the selection's range, or, collapsed, of a step back (forward) from it, a character's
 // or a word's — the place the caret goes, and the changes of children it made (mutation.rs `changes_value`). A step
 // into a non-editable island takes the island whole — none that holds an editing host; a step past a block atom takes
 // it whole; one out of a table cell — or into one — deletes nothing (Chrome); a range across cells deletes what it
@@ -142,9 +141,6 @@ pub(crate) fn delete<'s>(
     let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return Some(None) };
     let arena = realm(scope, cid);
     if !within(arena, host, sc) || !within(arena, host, ec) || (sc == ec && so == eo) {
-        return Some(None);
-    }
-    if !collapsed && (island_of(arena, sc, host).is_some() || island_of(arena, ec, host).is_some()) {
         return Some(None);
     }
     let (start_block, end_block) = (block_of(arena, sc, host), block_of(arena, ec, host));

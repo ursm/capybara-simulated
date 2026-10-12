@@ -172,28 +172,14 @@ pub(crate) fn inline_level(arena: &RealmArena, id: NodeId) -> Option<bool> {
         arena.get(id).filter(|n| n.kind == NodeKind::Element).map(|n| !(n.ns == web_atoms::ns!(html) && BLOCK_TAGS.contains(&&*n.local_name)))
     })
 }
-// The editing host around `node`: the one it is in, or the one holding the non-editable island it is in.
-fn host_around(arena: &RealmArena, node: NodeId) -> Option<NodeId> {
-    let mut at = if arena.is_element(node) { Some(node) } else { arena.parent_of(node) };
-    while let Some(n) = at.filter(|&n| arena.is_element(n)) {
-        if let Some(host) = arena.editing_host(n) {
-            return Some(host);
-        }
-        at = arena.parent_of(n);
-    }
-    None
-}
-// The editing host a selection from `start` to `end` edits, and its ends in it: a caret's host, none where it is in a
-// non-editable island; a range's start's (else its end's), an end outside it at its edge, one in a non-editable island
-// in it out of the island — the start after it, the end before it; none where both are in one island (Chrome: `a[<span contenteditable=false>X]Y</span>b`,
-// typed over, is `x<span contenteditable=false>XY</span>b`).
+// The editing host a selection from `anchor` to `focus` edits, and its range in it, start first: its anchor's — none
+// where that is in a non-editable island or no host (Chrome) — the focus, where it is outside the host, at its edge, and
+// where it is in a non-editable island in it, out of the island on the anchor's side (Chrome: `a[<span
+// contenteditable=false>X]Y</span>b`, typed over, is `x<span contenteditable=false>XY</span>b`).
 #[allow(clippy::type_complexity)]
-pub(crate) fn selection_host(arena: &RealmArena, start: (NodeId, u32), end: (NodeId, u32)) -> Option<(NodeId, ((NodeId, u32), (NodeId, u32)))> {
-    if start == end {
-        let host = arena.editing_host(if arena.is_element(start.0) { start.0 } else { arena.parent_of(start.0)? })?;
-        return Some((host, (start, end)));
-    }
-    let host = host_around(arena, start.0).or_else(|| host_around(arena, end.0))?;
+pub(crate) fn selection_host(arena: &RealmArena, anchor: (NodeId, u32), focus: (NodeId, u32)) -> Option<(NodeId, ((NodeId, u32), (NodeId, u32)))> {
+    let host = arena.editing_host(if arena.is_element(anchor.0) { anchor.0 } else { arena.parent_of(anchor.0)? })?;
+    let backward = crate::ranges::compare_points(arena, anchor, focus)? == std::cmp::Ordering::Greater;
     let clamp = |(node, offset): (NodeId, u32), after: bool| -> Option<(NodeId, u32)> {
         if !within(arena, host, node) {
             return Some(if after { (host, 0) } else { (host, arena.get(host)?.children.len() as u32) });
@@ -203,9 +189,8 @@ pub(crate) fn selection_host(arena: &RealmArena, start: (NodeId, u32), end: (Nod
             None => (node, offset),
         })
     };
-    let (start, end) = (clamp(start, true)?, clamp(end, false)?);
-    // (…none where both ends were in one island)
-    (crate::ranges::compare_points(arena, start, end)? != std::cmp::Ordering::Greater).then_some((host, (start, end)))
+    let focus = clamp(focus, backward)?;
+    Some((host, if backward { (focus, anchor) } else { (anchor, focus) }))
 }
 // The block a place in `node` is in: its nearest inclusive ancestor that is no inline — a block, a table's part, a list
 // item — or `host`, at most.
