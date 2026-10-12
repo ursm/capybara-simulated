@@ -2101,22 +2101,25 @@ impl Drop for Dom {
 // rusty_racer's istate! macro follows — and, like it, the borrow checker enforces
 // it: get_slot_mut borrows the scope, which every V8 call also needs.
 pub(crate) fn dom<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Dom {
-    if scope.get_slot::<Dom>().is_none() {
-        scope.set_slot(Dom::default());
-    }
-    // (…what the arena's nodes weigh told V8 as it changes by a step: `RealmArena::external`)
-    let d = scope.get_slot_mut::<Dom>().expect("Dom slot was just set");
-    if d.arena.external.abs() >= EXTERNAL_STEP {
-        let delta = std::mem::take(&mut d.arena.external);
-        scope.adjust_amount_of_external_allocated_memory(delta);
+    // (…and what the arena's nodes weigh told V8 as it changes by a step: `RealmArena::external`)
+    match scope.get_slot_mut::<Dom>() {
+        None => {
+            scope.set_slot(Dom::default());
+        }
+        Some(d) if d.arena.external.abs() >= EXTERNAL_STEP => {
+            let delta = std::mem::take(&mut d.arena.external);
+            scope.adjust_amount_of_external_allocated_memory(delta);
+        }
+        Some(_) => {}
     }
     scope
         .get_slot_mut::<Dom>()
         .expect("Dom slot was just set")
 }
-// What a node weighs as V8 is told (`RealmArena::external`) — its data's share and its handle's, a text's own and an
+// What a node weighs as V8 is told (`RealmArena::external`) — its slot's data, which a collection gives back to be made
+// again (the slot is reused, not shrunk); its handle is the C++ heap's, which V8 counts itself; a text's own data and an
 // element's attributes left out — and the change in that which is worth telling it of.
-const NODE_WEIGHT: i64 = std::mem::size_of::<NodeData>() as i64 + 160;
+const NODE_WEIGHT: i64 = std::mem::size_of::<NodeData>() as i64;
 const EXTERNAL_STEP: i64 = 1 << 20;
 
 // The context_id of the realm whose `__dom` invoked this callback — carried as each realm's `__dom`
