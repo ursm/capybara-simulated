@@ -45,12 +45,13 @@ impl Mode {
     }
 }
 
+// (…its type and data as the DOMStrings they were given, UTF-16: a lone surrogate is a character of one)
 struct Item {
     number: u32,
     file: bool,
-    kind_type: String,
+    kind_type: Vec<u16>,
     // (…a string item's; a file item's File is the bindings')
-    data: String,
+    data: Vec<u16>,
 }
 
 // dropEffect's values, and effectAllowed's — each the index of one.
@@ -71,13 +72,21 @@ struct Store {
     operation: u8,
 }
 
+fn ascii_lower(units: &[u16]) -> Vec<u16> {
+    units.iter().map(|&u| if (u16::from(b'A')..=u16::from(b'Z')).contains(&u) { u + 32 } else { u }).collect()
+}
+fn is(units: &[u16], ascii: &str) -> bool {
+    units.iter().copied().eq(ascii.bytes().map(u16::from))
+}
 // HTML: a format ASCII-lowercased, "text" as "text/plain" and "url" as "text/uri-list".
-fn normalize_format(format: &str) -> String {
-    let f = format.to_ascii_lowercase();
-    match f.as_str() {
-        "text" => "text/plain".to_owned(),
-        "url" => "text/uri-list".to_owned(),
-        _ => f,
+fn normalize_format(format: &[u16]) -> Vec<u16> {
+    let f = ascii_lower(format);
+    if is(&f, "text") {
+        "text/plain".encode_utf16().collect()
+    } else if is(&f, "url") {
+        "text/uri-list".encode_utf16().collect()
+    } else {
+        f
     }
 }
 
@@ -90,11 +99,11 @@ impl Store {
     }
     // An item added in read/write mode — a string under its type ASCII-lowercased, a second string of that type refused
     // (the spec's NotSupportedError; Chrome adds it under the type as written) — its number.
-    fn add(&mut self, file: bool, kind_type: &str, data: String) -> Result<u32, Refused> {
+    fn add(&mut self, file: bool, kind_type: &[u16], data: Vec<u16>) -> Result<u32, Refused> {
         if self.mode != Mode::ReadWrite {
             return Err(Refused::NotEditable);
         }
-        let kind_type = kind_type.to_ascii_lowercase();
+        let kind_type = ascii_lower(kind_type);
         if !file && self.items.iter().any(|i| !i.file && i.kind_type == kind_type) {
             return Err(Refused::Duplicate);
         }
@@ -104,7 +113,7 @@ impl Store {
         Ok(self.next)
     }
     // setData(): in read/write mode, the format's one string replaced — moved to the end of the list.
-    fn set_data(&mut self, format: &str, data: String) {
+    fn set_data(&mut self, format: &[u16], data: Vec<u16>) {
         if self.mode != Mode::ReadWrite {
             return;
         }
@@ -115,7 +124,7 @@ impl Store {
         self.changed();
     }
     // clearData(): in read/write mode, the format's string — or with no format every string, the files staying.
-    fn clear_data(&mut self, format: Option<&str>) {
+    fn clear_data(&mut self, format: Option<&[u16]>) {
         if self.mode != Mode::ReadWrite {
             return;
         }
@@ -124,25 +133,27 @@ impl Store {
         self.changed();
     }
     // getData(): none once the store is gone or while protected; a "url" the first URL of its text/uri-list.
-    fn get_data(&self, format: &str) -> &str {
+    fn get_data(&self, format: &[u16]) -> &[u16] {
         if !self.mode.readable() {
-            return "";
+            return &[];
         }
         let kind_type = normalize_format(format);
-        let Some(item) = self.items.iter().find(|i| !i.file && i.kind_type == kind_type) else { return "" };
-        if !format.eq_ignore_ascii_case("url") {
+        let Some(item) = self.items.iter().find(|i| !i.file && i.kind_type == kind_type) else { return &[] };
+        if !is(&ascii_lower(format), "url") {
             return &item.data;
         }
-        item.data.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).find(|l| !l.is_empty() && !l.starts_with('#')).unwrap_or("")
+        const LF: u16 = b'\n' as u16;
+        const CR: u16 = b'\r' as u16;
+        item.data.split(|&u| u == LF).map(|l| l.strip_suffix(&[CR]).unwrap_or(l)).find(|l| !l.is_empty() && l[0] != u16::from(b'#')).unwrap_or(&[])
     }
     // The `types` array: its strings' types, then "Files" for any file — none once the store is gone.
-    fn types(&self) -> Vec<&str> {
+    fn types(&self) -> Vec<Vec<u16>> {
         if self.mode == Mode::Gone {
             return Vec::new();
         }
-        let mut types: Vec<&str> = self.items.iter().filter(|i| !i.file).map(|i| i.kind_type.as_str()).collect();
+        let mut types: Vec<Vec<u16>> = self.items.iter().filter(|i| !i.file).map(|i| i.kind_type.clone()).collect();
         if self.items.iter().any(|i| i.file) {
-            types.push("Files");
+            types.push("Files".encode_utf16().collect());
         }
         types
     }
@@ -318,7 +329,7 @@ fn item(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_
     let number = args.get(1).uint32_value(scope).unwrap_or(0);
     let store = h.store.borrow();
     let Some(item) = store.held(number).filter(|_| store.mode != Mode::Gone) else { return rv.set_null() };
-    let items = [mode_value(scope, store.mode), v8::Boolean::new(scope, item.file).into(), string(scope, &item.kind_type)];
+    let items = [mode_value(scope, store.mode), v8::Boolean::new(scope, item.file).into(), crate::dom::utf16_value(scope, &item.kind_type)];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.dragStoreText(store, number) -> the string item `number`'s data where the store's can be read, null otherwise.
@@ -327,7 +338,7 @@ fn text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_
     let number = args.get(1).uint32_value(scope).unwrap_or(0);
     let store = h.store.borrow();
     match store.held(number).filter(|i| !i.file && store.mode.readable()) {
-        Some(item) => rv.set(string(scope, &item.data)),
+        Some(item) => rv.set(crate::dom::utf16_value(scope, &item.data)),
         None => rv.set_null(),
     }
 }
@@ -336,8 +347,8 @@ fn text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_
 fn add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return rv.set_int32(-1) };
     let file = args.get(1).is_true();
-    let kind_type = args.get(2).to_rust_string_lossy(scope);
-    let data = if file { String::new() } else { args.get(3).to_rust_string_lossy(scope) };
+    let kind_type = crate::dom::utf16_arg(scope, args.get(2));
+    let data = if file { Vec::new() } else { crate::dom::utf16_arg(scope, args.get(3)) };
     match h.store.borrow_mut().add(file, &kind_type, data) {
         Ok(number) => rv.set_double(f64::from(number)),
         Err(Refused::NotEditable) => rv.set_int32(-1),
@@ -367,22 +378,22 @@ fn remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
 // __dom.dragStoreSetData(store, format, data): `Store::set_data`.
 fn set_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return };
-    let (format, data) = (args.get(1).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
+    let (format, data) = (crate::dom::utf16_arg(scope, args.get(1)), crate::dom::utf16_arg(scope, args.get(2)));
     h.store.borrow_mut().set_data(&format, data);
 }
 // __dom.dragStoreClearData(store, format): `Store::clear_data` (undefined: no format).
 fn clear_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return };
     let format = args.get(1);
-    let format = (!format.is_undefined()).then(|| format.to_rust_string_lossy(scope));
+    let format = (!format.is_undefined()).then(|| crate::dom::utf16_arg(scope, format));
     h.store.borrow_mut().clear_data(format.as_deref());
 }
 // __dom.dragStoreGetData(store, format) -> `Store::get_data`.
 fn get_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return };
-    let format = args.get(1).to_rust_string_lossy(scope);
+    let format = crate::dom::utf16_arg(scope, args.get(1));
     let store = h.store.borrow();
-    rv.set(string(scope, store.get_data(&format)));
+    rv.set(crate::dom::utf16_value(scope, store.get_data(&format)));
 }
 // __dom.dragStoreTypes(store, version) -> the `types` array's strings, or null where `version` is the store's still
 // (its array not made anew), and the version after: [version, …types].
@@ -395,7 +406,7 @@ fn types(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'
     }
     let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, store.version).into()];
     for t in store.types() {
-        items.push(string(scope, t));
+        items.push(crate::dom::utf16_value(scope, &t));
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
@@ -470,22 +481,29 @@ mod tests {
         Store { mode: Mode::ReadWrite, items: Vec::new(), next: 0, version: 0, drop_effect: NONE, effect_allowed: NONE, operation: NONE }
     }
 
+    fn u(s: &str) -> Vec<u16> {
+        s.encode_utf16().collect()
+    }
+
     #[test]
     fn data_is_kept_by_format() {
         let mut s = store();
-        s.set_data("Text", "a".into());
-        s.set_data("URL", "# c\r\nhttp://x/\r\nhttp://y/".into());
-        assert!(s.add(true, "IMAGE/PNG", String::new()).is_ok());
-        assert!(matches!(s.add(false, "TEXT/PLAIN", "b".into()), Err(Refused::Duplicate)));
-        assert_eq!(s.types(), ["text/plain", "text/uri-list", "Files"]);
-        assert_eq!(s.get_data("url"), "http://x/");
-        assert_eq!(s.get_data("text/uri-list"), "# c\r\nhttp://x/\r\nhttp://y/");
+        s.set_data(&u("Text"), u("a"));
+        s.set_data(&u("URL"), u("# c\r\nhttp://x/\r\nhttp://y/"));
+        assert!(s.add(true, &u("IMAGE/PNG"), Vec::new()).is_ok());
+        assert!(matches!(s.add(false, &u("TEXT/PLAIN"), u("b")), Err(Refused::Duplicate)));
+        assert_eq!(s.types(), [u("text/plain"), u("text/uri-list"), u("Files")]);
+        assert_eq!(s.get_data(&u("url")), u("http://x/"));
+        assert_eq!(s.get_data(&u("text/uri-list")), u("# c\r\nhttp://x/\r\nhttp://y/"));
+        // (…a lone surrogate kept as given)
+        s.set_data(&[u16::from(b'x'), 0xdc00], vec![0xd800]);
+        assert_eq!(s.get_data(&[u16::from(b'X'), 0xdc00]), [0xd800]);
         s.clear_data(None);
-        assert_eq!(s.types(), ["Files"]);
+        assert_eq!(s.types(), [u("Files")]);
         s.mode = Mode::Protected;
-        s.set_data("text", "z".into());
-        assert_eq!(s.get_data("text"), "");
-        assert_eq!(s.types(), ["Files"]);
+        s.set_data(&u("text"), u("z"));
+        assert!(s.get_data(&u("text")).is_empty());
+        assert_eq!(s.types(), [u("Files")]);
     }
 
     #[test]

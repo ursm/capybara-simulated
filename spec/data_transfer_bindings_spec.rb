@@ -113,4 +113,16 @@ RSpec.describe 'DataTransfer bindings' do
     JS
     expect(got).to eq([2, true, 0])
   end
+
+  it 'keeps a lone surrogate in its data and its types, as a DOMString holds one' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const dt = new DataTransfer();
+        dt.setData('text/plain', 'a\\uD800b');
+        dt.setData('x/\\uDC00', 'q');
+        return [dt.getData('text/plain').charCodeAt(1), dt.types[1].charCodeAt(2), dt.getData('X/\\uDC00')];
+      })()
+    JS
+    expect(got).to eq([0xd800, 0xdc00, 'q'])
+  end
 end
