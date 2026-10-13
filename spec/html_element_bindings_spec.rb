@@ -55,6 +55,27 @@ RSpec.describe 'HTML element bindings' do
     expect(got).to start_with('http')
   end
 
+  # A document's base URL is its first `<base>` with an `href` in TREE ORDER (HTML §2.4.1) — one a script put in the body
+  # as well as the parser's in the head; a later one, none.
+  it "takes a document's base from its first base element with an href, wherever it is" do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const a = document.createElement('a');
+        a.setAttribute('href', 'p');
+        document.body.append(a);
+        const before = a.href;
+        const late = document.createElement('base');
+        late.href = '/late/';
+        const early = document.createElement('base');
+        early.href = '/early/';
+        document.body.append(early, late);
+        return [before.endsWith('/p'), new URL(a.href).pathname];
+      })()
+    JS
+    expect(got).to eq([true, '/early/p'])
+  end
+
   it 'keeps the case of an attribute name given an HTML element in an XML document' do
     session.visit '/'
     got = session.evaluate_script(<<~JS)

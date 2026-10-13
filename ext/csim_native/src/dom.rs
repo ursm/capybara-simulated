@@ -2481,6 +2481,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setParserFormOwner", set_parser_form_owner, context_id);
     register(scope, ns, "setCustomStates", set_custom_states, context_id);
     register(scope, ns, "setTarget", set_target, context_id);
+    register(scope, ns, "targetElement", target_element, context_id);
+    register(scope, ns, "baseElement", base_element, context_id);
     register(scope, ns, "setFocusRingHidden", set_focus_ring_hidden, context_id);
     register(scope, ns, "setFocusStart", set_focus_start, context_id);
     register(scope, ns, "query", query, context_id);
@@ -3407,6 +3409,24 @@ fn set_target(
     }
     let cid = realm_id(scope, &args);
     realm(scope, cid).set_target(doc, fragments);
+}
+
+// __dom.targetElement(docNid) -> the realm document's target element — the indicated part of its target fragments
+// (`target_element_of`) — or -1 for none.
+fn target_element(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let target = nid_arg(scope, &args, 0).and_then(|doc| realm(scope, cid).target_element_of(cid, doc));
+    match target {
+        Some(id) => set_nid(scope, &mut rv, id),
+        None => rv.set_int32(-1),
+    }
+}
+
+// __dom.baseElement(docNid) -> the document's first `<base>` with an `href` (`base_element`), or null.
+fn base_element(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let base = nid_arg(scope, &args, 0).and_then(|doc| realm(scope, cid).base_element(doc));
+    rv.set(node_value(scope, base));
 }
 
 // __dom.setShadowHost(rootNid, hostNid, delegatesFocus, manualSlotAssignment, closed): the shadow root `rootNid` is

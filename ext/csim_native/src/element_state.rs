@@ -373,6 +373,10 @@ impl RealmArena {
         cur
     }
     // The first element of `root`'s tree (itself included, shadow trees not) that `pred` takes, in tree order.
+    // The document's first `<base>` with an `href`, in tree order: the one its base URL is made from (HTML §2.4.1).
+    pub(crate) fn base_element(&self, doc: NodeId) -> Option<NodeId> {
+        self.find_in_tree(doc, |_, n| n.is_html_named("base") && n.plain_attr("href").is_some())
+    }
     fn find_in_tree(&self, root: NodeId, mut pred: impl FnMut(NodeId, &NodeData) -> bool) -> Option<NodeId> {
         let mut stack = vec![root];
         while let Some(c) = stack.pop() {
