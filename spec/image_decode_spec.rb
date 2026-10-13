@@ -196,7 +196,11 @@ RSpec.describe 'image decode' do
         holder.innerHTML = '<img src="/green.png?a">';
         holder.insertAdjacentHTML('beforeend', '<img src="data:,">');
         const fragment = document.createRange().createContextualFragment('<img src="/green.png?b">');
-        const parsed = await Promise.all([...holder.children, ...fragment.children].map(loaded));
+        // (…and one in a declarative shadow root's tree)
+        const host = document.createElement('div');
+        host.setHTMLUnsafe('<p><template shadowrootmode=open><img src="/green.png?e"></template></p>');
+        const shadowed = host.firstChild.shadowRoot.firstChild;
+        const parsed = await Promise.all([...holder.children, ...fragment.children, shadowed].map(loaded));
         // (…an image adopted into a frame, the frame removed, then cloned: its node document is not fully active, so it
         // waits — and a later load in this document is the barrier it would have fired by)
         const frame = document.querySelector('iframe');
@@ -214,6 +218,22 @@ RSpec.describe 'image decode' do
         done([parsed, copied, copy.complete]);
       })();
     JS
-    expect(got).to eq([%w[load error load], 'none', false])
+    expect(got).to eq([%w[load error load load], 'none', false])
+  end
+
+  it 'loads an image an XML fragment parse made under a prefix' do
+    s = simulated_session(->(env) {
+      next [200, {'content-type' => 'application/xhtml+xml'}, ['<html xmlns="http://www.w3.org/1999/xhtml"><body/></html>']] if env['PATH_INFO'] == '/'
+      [200, {'content-type' => 'image/png'}, [File.binread(File.join(__dir__, 'wpt/images/green.png'))]]
+    })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const holder = document.createElementNS('http://www.w3.org/1999/xhtml', 'div');
+      holder.innerHTML = '<h:img xmlns:h="http://www.w3.org/1999/xhtml" src="/green.png"/>';
+      const image = holder.firstChild;
+      image.onload = image.onerror = (e) => done([image.localName, e.type, image.naturalWidth]);
+    JS
+    expect(got).to eq(['img', 'load', 100])
   end
 end
