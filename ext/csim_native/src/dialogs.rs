@@ -326,7 +326,10 @@ fn dialog_cancelled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 fn clicked_dialog(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(target) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_null() };
     let [x, y] = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
-    let arena = &crate::dom::dom(scope).arena;
+    // (…in the realm whose tree the target is in, whose layout the box is of — whichever realm's code asked)
+    let caller = realm_id(scope, &args);
+    let cid = crate::dom::dom(scope).arena.get(target).map_or(caller, |n| n.realm);
+    let arena: &RealmArena = realm(scope, cid);
     let open_dialog = |id: NodeId| arena.get(id).is_some_and(|n| n.is_html_named("dialog") && n.plain_attr("open").is_some());
     if open_dialog(target) && arena.get(target).is_some_and(|n| n.state & STATE_MODAL != 0) {
         let [left, top, width, height] = crate::geometry::rendered_box(arena, target).unwrap_or([0.0; 4]);
