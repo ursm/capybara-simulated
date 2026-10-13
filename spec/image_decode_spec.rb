@@ -180,4 +180,40 @@ RSpec.describe 'image decode' do
     JS
     expect(got).to eq([true, 100, 'green.png'])
   end
+
+  it 'loads an image a fragment parse made, and none whose frame is gone' do
+    s = simulated_session(->(env) {
+      next [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><iframe src="/frame"></iframe>']] if env['PATH_INFO'] == '/'
+      next [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] if env['PATH_INFO'] == '/frame'
+      [200, {'content-type' => 'image/png'}, [File.binread(File.join(__dir__, 'wpt/images/green.png'))]]
+    })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const loaded = (img) => new Promise(resolve => { img.onload = img.onerror = (e) => resolve(e.type); });
+      (async () => {
+        const holder = document.createElement('div');
+        holder.innerHTML = '<img src="/green.png?a">';
+        holder.insertAdjacentHTML('beforeend', '<img src="data:,">');
+        const fragment = document.createRange().createContextualFragment('<img src="/green.png?b">');
+        const parsed = await Promise.all([...holder.children, ...fragment.children].map(loaded));
+        // (…an image adopted into a frame, the frame removed, then cloned: its node document is not fully active, so it
+        // waits — and a later load in this document is the barrier it would have fired by)
+        const frame = document.querySelector('iframe');
+        const image = new Image();
+        image.src = '/green.png?c';
+        await loaded(image);
+        frame.contentDocument.adoptNode(image);
+        frame.remove();
+        const copy = image.cloneNode();
+        let copied = 'none';
+        copy.onload = copy.onerror = (e) => { copied = e.type; };
+        const barrier = new Image();
+        barrier.src = '/green.png?d';
+        await loaded(barrier);
+        done([parsed, copied, copy.complete]);
+      })();
+    JS
+    expect(got).to eq([%w[load error load], 'none', false])
+  end
 end
