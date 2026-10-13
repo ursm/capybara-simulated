@@ -6,7 +6,7 @@
 // references it traces, the current state's and each saved one's. Drawing reads it here (canvas.rs `canvas_draw`, the
 // shapes and paths of canvas_path.rs): the bindings pack none of it.
 
-use std::cell::{Cell, RefCell, UnsafeCell};
+use std::cell::{RefCell, UnsafeCell};
 
 use v8::cppgc::{GarbageCollected, Visitor};
 
@@ -208,34 +208,21 @@ fn default_font() -> Font {
 pub(crate) const FILL: usize = 0;
 pub(crate) const STROKE: usize = 1;
 pub(crate) const CLIP: usize = 2;
-type Refs = Box<[UnsafeCell<v8::TracedReference<v8::Object>>; 3]>;
-fn no_refs() -> Refs {
-    Box::new([(); 3].map(|_| UnsafeCell::new(v8::TracedReference::empty())))
-}
 
 pub(crate) struct CanvasStateHandle {
     state: RefCell<State>,
-    refs: Refs,
-    // The states `save()` pushed, each with its objects — boxed, so a reference stays where it was made as the stack
-    // grows.
-    stack: RefCell<Vec<(State, Refs)>>,
-    // How deep the stack goes — what tracing reads, not borrowing `stack`.
-    depth: Cell<usize>,
+    refs: [UnsafeCell<v8::TracedReference<v8::Object>>; 3],
+    // The states `save()` pushed — and their objects, three a state in one array on V8's heap, which the handle traces
+    // through a reference of its own: the collector reads only fixed fields of the handle, whatever the stack does.
+    stack: RefCell<Vec<State>>,
+    saved: UnsafeCell<v8::TracedReference<v8::Object>>,
 }
 
 unsafe impl GarbageCollected for CanvasStateHandle {
     fn trace(&self, visitor: &mut Visitor) {
-        for r in self.refs.iter() {
+        for r in self.refs.iter().chain([&self.saved]) {
             // SAFETY: the collector reads the reference as TracedReference's barriers allow; nothing here hands one out.
             visitor.trace(unsafe { &*r.get() });
-        }
-        // SAFETY: the stack is written on the main thread only, between collector steps; its length is `depth`.
-        let stack = unsafe { &*self.stack.as_ptr() };
-        for (_, refs) in stack.iter().take(self.depth.get()) {
-            for r in refs.iter() {
-                // SAFETY: as above.
-                visitor.trace(unsafe { &*r.get() });
-            }
         }
     }
     fn get_name(&self) -> &'static std::ffi::CStr {
@@ -256,36 +243,49 @@ impl CanvasStateHandle {
         // SAFETY: as `object`.
         unsafe { (*self.refs[slot].get()).reset(scope, object) };
     }
+    // The array the saved states' objects are in, made where there is none yet.
+    fn saved<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Array> {
+        // SAFETY: the main thread reads and writes the reference.
+        let kept = unsafe { (*self.saved.get()).get(scope) }.and_then(|o| v8::Local::<v8::Array>::try_from(o).ok());
+        kept.unwrap_or_else(|| {
+            let made = v8::Array::new(scope, 0);
+            // SAFETY: as above.
+            unsafe { (*self.saved.get()).reset(scope, Some(made.into())) };
+            made
+        })
+    }
     // "Push a copy of the current drawing state onto the drawing state stack."
     fn save(&self, scope: &mut v8::PinScope<'_, '_>) {
-        let copy = no_refs();
+        let saved = self.saved(scope);
         for slot in 0..3 {
-            let object = self.object(scope, slot);
-            // SAFETY: the copy is the main thread's alone until it is pushed.
-            unsafe { (*copy[slot].get()).reset(scope, object) };
+            let object: v8::Local<'_, v8::Value> = self.object(scope, slot).map_or_else(|| v8::null(scope).into(), Into::into);
+            saved.set_index(scope, saved.length(), object);
         }
-        self.stack.borrow_mut().push((self.state.borrow().clone(), copy));
-        self.depth.set(self.depth.get() + 1);
+        self.stack.borrow_mut().push(self.state.borrow().clone());
     }
     // "Pop the top entry in the drawing state stack, and reset the drawing state it describes" — none: nothing.
     fn restore(&self, scope: &mut v8::PinScope<'_, '_>) {
-        let Some((state, refs)) = self.stack.borrow_mut().pop() else { return };
-        self.depth.set(self.depth.get() - 1);
+        let Some(state) = self.stack.borrow_mut().pop() else { return };
         *self.state.borrow_mut() = state;
+        let saved = self.saved(scope);
+        let base = saved.length().saturating_sub(3);
         for slot in 0..3 {
-            // SAFETY: the popped entry is the main thread's alone now.
-            let object = unsafe { (*refs[slot].get()).get(scope) };
+            let object = saved.get_index(scope, base + slot as u32).and_then(|v| v8::Local::<v8::Object>::try_from(v).ok());
             self.set_object(scope, slot, object);
         }
+        let length = v8::String::new(scope, "length").expect("a short string");
+        let shorter = v8::Integer::new_from_unsigned(scope, base);
+        saved.set(scope, length.into(), shorter.into());
     }
     // "Reset the rendering context to its default state": the stack emptied, every attribute its default, no clip.
     fn reset(&self, scope: &mut v8::PinScope<'_, '_>) {
-        self.depth.set(0);
         self.stack.borrow_mut().clear();
         *self.state.borrow_mut() = State::default();
         for slot in 0..3 {
             self.set_object(scope, slot, None);
         }
+        // SAFETY: the main thread writes the reference.
+        unsafe { (*self.saved.get()).reset(scope, None) };
     }
 }
 
@@ -298,7 +298,12 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let obj = args.this();
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
-    let handle = CanvasStateHandle { state: RefCell::new(State::default()), refs: no_refs(), stack: RefCell::new(Vec::new()), depth: Cell::new(0) };
+    let handle = CanvasStateHandle {
+        state: RefCell::new(State::default()),
+        refs: [(); 3].map(|_| UnsafeCell::new(v8::TracedReference::empty())),
+        stack: RefCell::new(Vec::new()),
+        saved: UnsafeCell::new(v8::TracedReference::empty()),
+    };
     let heap = scope.get_cpp_heap().expect("CanvasStateBase is installed only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
     unsafe {
@@ -433,7 +438,6 @@ fn canvas_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let which = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
     let value = args.get(2);
     let extra = args.get(3);
-    let number = value.number_value(scope).unwrap_or(f64::NAN);
     // (…a style's paint object: traced, the colour it had kept for a colour set again)
     if matches!(which, FILL_STYLE | STROKE_STYLE) && extra.is_true() {
         let object = v8::Local::<v8::Object>::try_from(value).ok();
@@ -482,6 +486,8 @@ fn canvas_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         LANG => h.state.borrow_mut().lang = text(),
         SMOOTHING => h.state.borrow_mut().smoothing = value.boolean_value(scope),
         _ => {
+            // (…converted only here: a style's paint object is no number, and its `valueOf` is the page's)
+            let number = value.number_value(scope).unwrap_or(f64::NAN);
             let finite = number.is_finite();
             let code = match which {
                 COMPOSITE => keyword(&COMPOSITE_OPS, &text()),
