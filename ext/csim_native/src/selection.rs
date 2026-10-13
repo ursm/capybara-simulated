@@ -262,16 +262,13 @@ fn direction_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackAr
     args.get(i).uint32_value(scope).map_or(NONE, |d| (d as u8).min(BACKWARD))
 }
 
-// __dom.selectionSet(selection, range|null, direction) -> whether that is a change: the range is `range` (none: the
-// selection is empty), selected in `direction` (`NONE` 0, `FORWARD` 1, `BACKWARD` 2) — the driver's selecting, as the
-// user does, wherever in the document (`__csimSelect`), and a selection emptied (removeAllRanges, empty).
-fn selection_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(sel) = handle(scope, args.get(0)) else { return };
-    let range = object_arg(&args, 1);
-    let changed = range.is_some() || sel.range(scope).is_some();
+// __dom.selectionSet(selection, range, direction): the range is `range`, as the bindings set it, selected in `direction`
+// (`NONE` 0, `FORWARD` 1, `BACKWARD` 2) — none of a script's checks: the driver's selecting, as the user does, wherever
+// in the document (`__csimSelect`), and `modify`'s move.
+fn selection_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(sel), Some(range)) = (handle(scope, args.get(0)), object_arg(&args, 1)) else { return };
     let direction = direction_arg(scope, &args, 2);
-    sel.select(scope, range, direction);
-    rv.set_bool(changed);
+    sel.select(scope, Some(range), direction);
 }
 
 // __dom.selectionDirect(selection, forward) — the direction `modify` sets as it moves the focus, whether or not it then
@@ -315,9 +312,8 @@ fn select_between(scope: &mut v8::PinScope<'_, '_>, cid: i32, sel: &SelectionHan
     }
 }
 
-// __dom.selectionCollapse(selection, fresh, node, nid, offset, direction) -> what it came to: the range collapsed at the
-// point, selected in `direction` (collapse's and setPosition's none, `modify`'s move its own) — a null node empties the
-// selection.
+// __dom.selectionCollapse(selection, fresh, node, nid, offset) -> what it came to: the range collapsed at the point (no
+// direction) — a null node empties the selection.
 fn selection_collapse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(sel) = handle(scope, args.get(0)) else { return };
     let (Some(fresh), Some(point)) = (object_arg(&args, 1), point_arg(scope, &args, 2)) else {
@@ -325,13 +321,12 @@ fn selection_collapse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         sel.select(scope, None, NONE);
         return rv.set_uint32(if changed { CHANGED } else { IGNORED });
     };
-    let direction = direction_arg(scope, &args, 5);
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
     let outcome = match check_point(arena, (point.1, point.2)) {
         Some(error) => error,
         None if !in_document(arena, sel, point.1) => IGNORED,
-        None => select_new(scope, sel, fresh, point, None, direction),
+        None => select_new(scope, sel, fresh, point, None, NONE),
     };
     rv.set_uint32(outcome);
 }
