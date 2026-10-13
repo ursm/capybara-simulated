@@ -124,6 +124,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "closeWatcherOf", close_watcher_of, context_id);
     crate::dom::register(scope, ns, "dialogRequestClose", dialog_request_close, context_id);
     crate::dom::register(scope, ns, "dialogCancelled", dialog_cancelled, context_id);
+    crate::dom::register(scope, ns, "clickedDialog", clicked_dialog, context_id);
 }
 
 // __dom.dialogOpened(docNid, dialogNid, activations) — the dialog the last of the document's open dialogs (`activations`
@@ -316,4 +317,29 @@ fn dialog_cancelled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     };
     let source = node_value(scope, source);
     rv.set(v8::Array::new_with_elements(scope, &[return_value, source]).into());
+}
+
+// __dom.clickedDialog(target, x, y) -> the open dialog a pointer press or release at client (x, y) on `target` is in
+// (HTML "light dismiss open dialogs": the nearest clicked dialog), or null: a modal dialog itself only where the point
+// is within its box — else its backdrop's, no dialog's — and otherwise the nearest open dialog the target is in, up the
+// flat tree. The layout as it stands: the bindings bring it up to date first.
+fn clicked_dialog(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(target) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_null() };
+    let [x, y] = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
+    let arena = &crate::dom::dom(scope).arena;
+    let open_dialog = |id: NodeId| arena.get(id).is_some_and(|n| n.is_html_named("dialog") && n.plain_attr("open").is_some());
+    if open_dialog(target) && arena.get(target).is_some_and(|n| n.state & STATE_MODAL != 0) {
+        let [left, top, width, height] = crate::geometry::rendered_box(arena, target).unwrap_or([0.0; 4]);
+        if x < left || x > left + width || y < top || y > top + height {
+            return rv.set_null();
+        }
+    }
+    let mut node = Some(target);
+    while let Some(id) = node {
+        if open_dialog(id) {
+            return rv.set(node_value(scope, Some(id)));
+        }
+        node = crate::geometry::flat_parent(arena, id);
+    }
+    rv.set_null();
 }
