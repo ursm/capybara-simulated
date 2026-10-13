@@ -89,6 +89,7 @@ mod reflect;
 mod rendered;
 mod script;
 mod resize_observation;
+mod resource_timing;
 mod resolved;
 mod scroll_boxes;
 mod scroll_into_view;
