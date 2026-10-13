@@ -37,6 +37,7 @@ impl RealmArena {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "validCustomElementName", valid_custom_element_name, context_id);
     crate::dom::register(scope, ns, "upgradedElementsIn", upgraded_elements_in, context_id);
     crate::dom::register(scope, ns, "upgradeCandidates", upgrade_candidates, context_id);
 }
@@ -85,4 +86,10 @@ mod tests {
         element(&mut arena, Some(child), false);
         assert_eq!(arena.upgraded_elements_in(host), vec![host, inner, child]);
     }
+}
+
+// __dom.validCustomElementName(name) -> whether `name` is a valid custom element name (element_state.rs).
+fn valid_custom_element_name(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let name = args.get(0).to_rust_string_lossy(scope);
+    rv.set_bool(crate::element_state::is_valid_custom_element_name(&name));
 }

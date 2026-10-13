@@ -21,4 +21,16 @@ RSpec.describe 'a shadow tree and its host' do
     JS
     expect(got).to eq([false, false, false, true, true])
   end
+
+  # A shadow root attaches to a valid shadow host name alone: a valid custom element name — the reserved hyphenated
+  # names are none, hyphen or not — or one of the listed elements (DOM). Chrome 155: NotSupportedError for the first two.
+  it 'attaches no shadow root to a reserved hyphenated name' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] })
+    s.visit '/'
+    expect(s.evaluate_script(<<~'JS')).to eq(%w[NotSupportedError NotSupportedError ok ok])
+      ['font-face', 'annotation-xml', 'my-el', 'x-'].map((n) => {
+        try { document.createElement(n).attachShadow({ mode: 'open' }); return 'ok'; } catch (e) { return e.name; }
+      })
+    JS
+  end
 end

@@ -54,9 +54,10 @@ pub(crate) fn is_valid_floating_point(s: &str) -> bool {
     i == b.len() && s.parse::<f64>().is_ok_and(f64::is_finite)
 }
 
-// A valid custom element name (custom-elements.js `isValidCustomElementName`): a valid element local name that starts
-// with an ASCII lower alpha, has no ASCII upper alpha and a hyphen, and is not reserved.
-fn is_valid_custom_element_name(name: &str) -> bool {
+// A valid custom element name (HTML): a valid element local name — a leading ASCII letter, then any code point but NULL,
+// ASCII whitespace, `/` and `>` — that starts with an ASCII lower alpha, has no ASCII upper alpha and a hyphen, and is
+// none of the eight reserved SVG / MathML hyphenated names (`__dom.validCustomElementName`).
+pub(crate) fn is_valid_custom_element_name(name: &str) -> bool {
     name.starts_with(|c: char| c.is_ascii_lowercase())
         && name.contains('-')
         && !name.contains(|c: char| c.is_ascii_uppercase() || matches!(c, '\0' | '\t' | '\n' | '\x0C' | '\r' | ' ' | '/' | '>'))
