@@ -73,7 +73,9 @@ pub(crate) fn cors_safelisted_request_header(name: &[u8], value: &[u8]) -> bool 
             if value.iter().any(|&b| cors_unsafe_byte(b)) {
                 return false;
             }
-            let Some(mime) = std::str::from_utf8(value).ok().and_then(crate::mime::parse) else { return false };
+            // (…the value isomorphic-decoded, each byte the code point it is)
+            let decoded: String = value.iter().map(|&b| char::from(b)).collect();
+            let Some(mime) = crate::mime::parse(&decoded) else { return false };
             matches!(mime.essence.as_str(), "application/x-www-form-urlencoded" | "multipart/form-data" | "text/plain")
         }
         b"range" => simple_range(value),
@@ -182,6 +184,7 @@ mod tests {
         assert!(!cors_safelisted_request_header(b"accept-language", b"en\x01"));
         assert!(!cors_safelisted_request_header(b"content-language", b"a\"b"));
         assert!(cors_safelisted_request_header(b"content-type", b"text/plain; charset=utf-8"));
+        assert!(cors_safelisted_request_header(b"content-type", b"text/plain;charset=\xe9"));
         assert!(!cors_safelisted_request_header(b"content-type", b"application/json"));
         assert!(cors_safelisted_request_header(b"range", b"bytes=0-"));
         assert!(cors_safelisted_request_header(b"range", b"bytes=-5"));

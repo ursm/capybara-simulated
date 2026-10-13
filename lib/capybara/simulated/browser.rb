@@ -6349,6 +6349,9 @@ module Capybara
         reset_websockets
         reset_hijacked_fetches
         @sw_clients.keys.each {|id| unregister_client(id) }
+        # …and its IndexedDB connections, which a closed window's are not left open by: no other window's upgrade waits on
+        # a page nothing runs any more.
+        @runtime.call('__csimIdbDropAgents')
       end
 
       # Drop the parked browser's queued worker→main messages (claims, client

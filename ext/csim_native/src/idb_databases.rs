@@ -522,6 +522,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "idbAgent", agent_op, context_id);
     register(scope, ns, "idbTake", take, context_id);
     register(scope, ns, "idbPending", pending_here, context_id);
+    register(scope, ns, "idbDropAgents", drop_agents, context_id);
     register(scope, ns, "idbOpen", open, context_id);
     register(scope, ns, "idbDeleteDatabase", delete_database, context_id);
     register(scope, ns, "idbTurn", turn, context_id);
@@ -597,6 +598,15 @@ fn pending_here(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArg
     let agents: Vec<u64> = scope.get_slot::<Agents>().map(|a| a.0.values().copied().collect()).unwrap_or_default();
     let reg = lock();
     rv.set_bool(agents.iter().any(|a| reg.agents.get(a).is_some_and(|a| !a.notices.is_empty())));
+}
+// __dom.idbDropAgents(): every agent of this isolate gone — its window closed while the isolate lives on (kept for its
+// service workers): its connections closed, as a closed window's are.
+fn drop_agents(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let agents: Vec<u64> = scope.get_slot_mut::<Agents>().map(|a| a.0.drain().map(|(_, agent)| agent).collect()).unwrap_or_default();
+    let mut reg = lock();
+    for agent in agents {
+        reg.drop_agent(agent);
+    }
 }
 // __dom.idbOpen(storageKey, name, version, request): an open request queued (`version` undefined: none asked).
 fn open(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
