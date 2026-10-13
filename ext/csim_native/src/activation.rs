@@ -167,7 +167,6 @@ fn activation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 // The built-in commands of a button's `command` (HTML §4.10.6), those of a popover and those of a dialog.
 const POPOVER_COMMANDS: [&str; 3] = ["toggle-popover", "show-popover", "hide-popover"];
 const DIALOG_COMMANDS: [&str; 3] = ["close", "request-close", "show-modal"];
-// The input types a popover invoker is among: the button-like ones.
 
 // A button's command: its `command` attribute's keyword — a built-in one, ASCII case-insensitive, lowercased; a custom
 // one (`--` and more) as it is written — None for a missing or unknown one.

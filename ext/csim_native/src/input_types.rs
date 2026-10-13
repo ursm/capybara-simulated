@@ -26,7 +26,8 @@ pub(crate) const DATE: u32 = 1 << 3;
 pub(crate) const LIST: u32 = 1 << 4;
 // Text a user types (execCommand's insertText goes into it).
 pub(crate) const TYPED: u32 = 1 << 5;
-// It holds text: the focus ring always shows (Chrome), its value scrolls.
+// It holds text: the focus ring always shows (Chrome), and its box — the inner editor — scrolls whatever its own
+// `overflow` computes to (Chrome computes `clip` for one and still takes `input.scrollLeft = 30`).
 pub(crate) const TEXTUAL: u32 = 1 << 6;
 // A button state.
 pub(crate) const BUTTON: u32 = 1 << 7;
@@ -34,12 +35,15 @@ pub(crate) const BUTTON: u32 = 1 << 7;
 pub(crate) const SELECTION: u32 = 1 << 8;
 // `select()` — an email field's too (Chrome: its offsets read null, its selection shows in `getSelection()`).
 pub(crate) const SELECT: u32 = 1 << 9;
-// `dirname` (a directionality entry submitted).
+// `dirname` submitting a directionality entry: the types it applies to that submit one (HTML lists reset and button
+// too, whose fields submit nothing).
 pub(crate) const DIRNAME: u32 = 1 << 10;
 // A value that is no directional text: `dir=auto` on it is ltr.
 pub(crate) const NO_DIRECTIONAL_VALUE: u32 = 1 << 11;
 // Autocorrection never applies.
 pub(crate) const NO_AUTOCORRECT: u32 = 1 << 12;
+// `required`.
+pub(crate) const REQUIRED: u32 = 1 << 13;
 // Its value mode, in the bits above `VALUE_MODE_SHIFT`.
 pub(crate) const VALUE_MODE_SHIFT: u32 = 16;
 pub(crate) const MODE_VALUE: u32 = 0;
@@ -49,8 +53,8 @@ pub(crate) const MODE_FILENAME: u32 = 3;
 
 // What applies to an input of type state `ty`.
 pub(crate) fn facts(ty: &str) -> u32 {
-    let text_like = READONLY | FREE_TEXT | LIST | TYPED | TEXTUAL | SELECT | DIRNAME;
-    let temporal = READONLY | NUMERIC | LIST | TEXTUAL | NO_DIRECTIONAL_VALUE;
+    let text_like = READONLY | REQUIRED | FREE_TEXT | LIST | TYPED | TEXTUAL | SELECT | DIRNAME;
+    let temporal = READONLY | REQUIRED | NUMERIC | LIST | TEXTUAL | NO_DIRECTIONAL_VALUE;
     let mode = |m: u32| m << VALUE_MODE_SHIFT;
     match ty {
         "text" | "search" | "tel" => text_like | SELECTION,
@@ -59,15 +63,15 @@ pub(crate) fn facts(ty: &str) -> u32 {
         "password" => (text_like & !LIST) | SELECTION | NO_AUTOCORRECT,
         "date" | "month" | "week" | "time" => temporal | DATE,
         "datetime-local" => temporal,
-        "number" => READONLY | NUMERIC | LIST | TYPED | TEXTUAL | NO_DIRECTIONAL_VALUE,
+        "number" => READONLY | REQUIRED | NUMERIC | LIST | TYPED | TEXTUAL | NO_DIRECTIONAL_VALUE,
         "range" => NUMERIC | LIST | NO_DIRECTIONAL_VALUE,
         "color" => LIST | NO_DIRECTIONAL_VALUE,
         "hidden" => DIRNAME | mode(MODE_DEFAULT),
         "submit" => BUTTON | DIRNAME | mode(MODE_DEFAULT),
         "image" => BUTTON | NO_DIRECTIONAL_VALUE | mode(MODE_DEFAULT),
         "reset" | "button" => BUTTON | mode(MODE_DEFAULT),
-        "checkbox" | "radio" => NO_DIRECTIONAL_VALUE | mode(MODE_DEFAULT_ON),
-        "file" => NO_DIRECTIONAL_VALUE | mode(MODE_FILENAME),
+        "checkbox" | "radio" => REQUIRED | NO_DIRECTIONAL_VALUE | mode(MODE_DEFAULT_ON),
+        "file" => REQUIRED | NO_DIRECTIONAL_VALUE | mode(MODE_FILENAME),
         _ => 0,
     }
 }
@@ -119,6 +123,7 @@ mod tests {
         assert_eq!(with(DIRNAME), vec!["hidden", "text", "search", "tel", "url", "email", "password", "submit"]);
         let non_text: Vec<&str> = TYPES.iter().copied().filter(|t| facts(t) & TEXTUAL == 0).collect();
         assert_eq!(non_text, vec!["hidden", "range", "color", "checkbox", "radio", "file", "submit", "image", "reset", "button"]);
+        assert_eq!(with(REQUIRED).len(), 15);
         assert_eq!(value_mode("checkbox"), MODE_DEFAULT_ON);
         assert_eq!(value_mode("file"), MODE_FILENAME);
         assert_eq!(value_mode("email"), MODE_VALUE);

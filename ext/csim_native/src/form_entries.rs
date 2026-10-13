@@ -16,8 +16,6 @@ pub(crate) enum Entry {
     Custom(NodeId),
 }
 
-// The input types whose field submits its directionality under its `dirname` (HTML: the types `dirname` applies to).
-
 fn units(s: &str) -> Vec<u16> {
     s.encode_utf16().collect()
 }

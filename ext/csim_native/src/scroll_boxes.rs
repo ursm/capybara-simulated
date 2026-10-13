@@ -12,9 +12,6 @@ use crate::rendered::{rendered, with_engine};
 use crate::style::{primary_style, StyleEngine};
 use crate::walk::{replaced_or_control, scrolls, WalkDisplay};
 
-// The input types that edit text, whose box — the inner editor — scrolls whatever the input's own `overflow` computes to
-// (Chrome computes `clip` for one and still takes `input.scrollLeft = 30`).
-
 // The document element of `doc`, and HTML's "the body element": its `<body>` or `<frameset>` child.
 fn document_element(arena: &RealmArena, doc: NodeId) -> Option<NodeId> {
     arena.get(doc)?.children.iter().copied().find(|&c| arena.get(c).is_some_and(|n| n.kind == NodeKind::Element))

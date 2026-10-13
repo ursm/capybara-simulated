@@ -7,7 +7,7 @@
 // DOM's insert, remove and attribute change steps do, and signals each slot whose assigned nodes changed.
 //
 // A shadow root in MANUAL mode assigns each slot its `assign()`ed nodes that are the host's children, in assignment
-// order; the lists are the slots' (`manual_assigned`, which dom-nodes.js writes from the nodes a script handed over).
+// order; the lists are the slots' (`manual_assigned`, which `assign_manual` writes from the nodes a script handed over).
 
 use crate::dom::{NodeId, NodeKind, RealmArena};
 

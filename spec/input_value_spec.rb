@@ -39,4 +39,26 @@ RSpec.describe 'input value algorithms' do
     JS
     expect(got).to eq('100000000000001')
   end
+
+  # What applies to an input is its type STATE's — an invalid `type` is the Text state — HTML's table of them, the
+  # engine's: `list` names no datalist on a type it does not apply to, and insertHTML types into `type=foo` as into a
+  # text field. Chrome 155: each figure below.
+  it 'asks the input type table for list and insertHTML' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><datalist id=dl><option value=a></datalist>']] })
+    s.visit '/'
+    expect(s.evaluate_script(<<~'JS')).to eq(['dl', nil, nil, 'dl', 'true:hi'])
+      (() => {
+        const lists = ['text', 'password', 'checkbox', 'foo'].map((type) => {
+          const i = document.body.appendChild(document.createElement('input'));
+          i.type = type;
+          i.setAttribute('list', 'dl');
+          return i.list ? i.list.id : null;
+        });
+        const foo = document.body.appendChild(document.createElement('input'));
+        foo.setAttribute('type', 'foo');
+        foo.focus();
+        return [...lists, document.execCommand('insertHTML', false, '<b>hi</b>') + ':' + foo.value];
+      })()
+    JS
+  end
 end

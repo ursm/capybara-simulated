@@ -29,7 +29,6 @@ pub(crate) const STEP_MISMATCH: u16 = 1 << 7;
 pub(crate) const BAD_INPUT: u16 = 1 << 8;
 pub(crate) const CUSTOM_ERROR: u16 = 1 << 9;
 
-
 fn is_ascii_ws(c: char) -> bool {
     matches!(c, '\t' | '\n' | '\x0C' | '\r' | ' ')
 }
@@ -198,8 +197,7 @@ impl RealmArena {
                 v |= VALUE_MISSING;
             }
         } else {
-            let required_applies = tag == "textarea"
-                || !matches!(ty, "submit" | "image" | "reset" | "button" | "hidden" | "range" | "color");
+            let required_applies = tag != "input" || crate::input_types::facts(ty) & crate::input_types::REQUIRED != 0;
             let readonly_applies = tag == "textarea" || crate::input_types::facts(ty) & crate::input_types::READONLY != 0;
             let mutable = !(readonly_applies && (self.is_actually_disabled(id) || n.plain_attr("readonly").is_some()));
             if required_applies && n.plain_attr("required").is_some() && empty && mutable {

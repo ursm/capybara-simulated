@@ -14,7 +14,6 @@ use crate::dom::{
 
 const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
 
-
 // The names no custom element may take: the hyphenated SVG and MathML ones.
 const RESERVED_CUSTOM_ELEMENT_NAMES: [&str; 8] = [
     "annotation-xml", "color-profile", "font-face", "font-face-src", "font-face-uri", "font-face-format",
