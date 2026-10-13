@@ -80,7 +80,6 @@ fn renew_sheet_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
 }
 
-
 // __dom.sheetOwned(nid, sheetId): the bindings made the owner's sheet (cascade.js `engineSheetOf`) — its sheet while the
 // owner's count of sheets is the one it has now.
 fn sheet_owned_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
