@@ -13,6 +13,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "popoverClicked", popover_clicked, context_id);
     crate::dom::register(scope, ns, "popoverKind", popover_kind_op, context_id);
     crate::dom::register(scope, ns, "closeRequestTarget", close_request_target, context_id);
+    crate::dom::register(scope, ns, "popoverCheck", popover_check, context_id);
 }
 
 // A `popover` attribute's state, of those the lists hold: auto (an empty value, `auto`) or hint; manual (`manual`, an
@@ -184,5 +185,30 @@ fn close_request_target(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
         (Some(_), None) => 1,
         (None, Some(_)) => 2,
         (p, d) => if order(p) > order(d) { 1 } else { 2 },
+    });
+}
+
+// HTML "check popover validity" for an element about to be shown (`expected` false: it should be hidden) or hidden: valid
+// (`VALID`); not, its showing already as asked (`AS_ASKED`); or not, a NotSupportedError — it has no `popover` attribute
+// (`NOT_A_POPOVER`) — or an InvalidStateError — it is not connected, or is a modal `<dialog>` (`INVALID_STATE`).
+const VALID: u32 = 0;
+const AS_ASKED: u32 = 1;
+const NOT_A_POPOVER: u32 = 2;
+const INVALID_STATE: u32 = 3;
+
+// __dom.popoverCheck(element, expectedShowing) -> what "check popover validity" says of it (`VALID` …).
+fn popover_check(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some((id, _)) = element(scope, args.get(0)) else { return rv.set_uint32(NOT_A_POPOVER) };
+    let expected = args.get(1).is_true();
+    let arena = &crate::dom::dom(scope).arena;
+    let Some(n) = arena.get(id) else { return rv.set_uint32(NOT_A_POPOVER) };
+    rv.set_uint32(if n.plain_attr("popover").is_none() {
+        NOT_A_POPOVER
+    } else if (n.state & STATE_POPOVER_OPEN != 0) != expected {
+        AS_ASKED
+    } else if !arena.is_connected(id) || (n.is_html_named("dialog") && n.state & crate::dom::STATE_MODAL != 0) {
+        INVALID_STATE
+    } else {
+        VALID
     });
 }

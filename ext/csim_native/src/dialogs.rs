@@ -116,6 +116,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "topmostDialog", topmost_dialog, context_id);
     crate::dom::register(scope, ns, "closeWatcherGroup", close_watcher_group, context_id);
     crate::dom::register(scope, ns, "removingSteps", removing_steps, context_id);
+    crate::dom::register(scope, ns, "dialogClosedBy", dialog_closed_by, context_id);
+    crate::dom::register(scope, ns, "dialogShowCheck", dialog_show_check, context_id);
+    crate::dom::register(scope, ns, "dialogReturnValue", dialog_return_value, context_id);
 }
 
 // __dom.dialogOpened(docNid, dialogNid, activations) — the dialog the last of the document's open dialogs (`activations`
@@ -155,4 +158,69 @@ fn removing_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let caller = realm_id(scope, &args);
     let cid = crate::dom::dom(scope).arena.get(root).map_or(caller, |n| n.realm);
     rv.set_bool(realm(scope, cid).removing_steps(root));
+}
+
+// A dialog's `closedby` attribute's state (HTML §4.11.4): `any`, `closerequest` or `none`, ASCII case-insensitively; a
+// missing or invalid one the Auto state, whose keyword is the one it computes — a modal dialog closes on a close
+// request, any other on none.
+fn closed_by(arena: &RealmArena, dialog: NodeId) -> &'static str {
+    let Some(n) = arena.get(dialog) else { return "none" };
+    match n.plain_attr("closedby") {
+        Some(v) if v.eq_ignore_ascii_case("any") => "any",
+        Some(v) if v.eq_ignore_ascii_case("closerequest") => "closerequest",
+        Some(v) if v.eq_ignore_ascii_case("none") => "none",
+        _ if n.state & STATE_MODAL != 0 => "closerequest",
+        _ => "none",
+    }
+}
+
+// __dom.dialogClosedBy(dialog) -> its `closedby` state's keyword (`closed_by`).
+fn dialog_closed_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let keyword = crate::node_handle::nid_of(scope, args.get(0)).map_or("none", |id| closed_by(&crate::dom::dom(scope).arena, id));
+    rv.set(v8::String::new(scope, keyword).map_or_else(|| v8::undefined(scope).into(), Into::into));
+}
+
+// What `show()` / `showModal()` may do with a dialog (`dialogShowCheck`): show it; nothing, open already as it would be
+// shown; or refuse it — an InvalidStateError — open as the other kind, not connected (a modal one), showing as a popover
+// (a modal one).
+const SHOW: u32 = 0;
+const SHOWN: u32 = 1;
+const OPEN_AS_OTHER: u32 = 2;
+const NOT_CONNECTED: u32 = 3;
+const SHOWING_AS_POPOVER: u32 = 4;
+
+// __dom.dialogShowCheck(dialog, modal) -> what HTML's show() (`modal` false) or "show a modal dialog" may do with the
+// dialog as it stands — asked again after its `beforetoggle`, whose listeners may have changed it (`SHOW` …).
+fn dialog_show_check(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_uint32(SHOWN) };
+    let modal = args.get(1).is_true();
+    let arena = &crate::dom::dom(scope).arena;
+    let Some(n) = arena.get(id) else { return rv.set_uint32(SHOWN) };
+    let (open, is_modal) = (n.plain_attr("open").is_some(), n.state & STATE_MODAL != 0);
+    rv.set_uint32(match (open, modal) {
+        (true, _) if is_modal == modal => SHOWN,
+        (true, _) => OPEN_AS_OTHER,
+        (false, true) if !arena.is_connected(id) => NOT_CONNECTED,
+        (false, true) if n.state & STATE_POPOVER_OPEN != 0 => SHOWING_AS_POPOVER,
+        _ => SHOW,
+    });
+}
+
+impl RealmArena {
+    // A dialog's return value (HTML: a string of its own, empty until a close or a script gives it one).
+    fn return_value(&self, dialog: NodeId) -> Vec<u16> {
+        self.dialog_return_values.get(&dialog).cloned().unwrap_or_default()
+    }
+}
+
+// __dom.dialogReturnValue(dialog[, value]) -> its return value; with `value` (a second argument), that set.
+fn dialog_return_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    if args.length() > 1 {
+        let value = crate::dom::utf16_arg(scope, args.get(1));
+        crate::dom::dom(scope).arena.dialog_return_values.insert(id, value);
+        return;
+    }
+    let value = crate::dom::dom(scope).arena.return_value(id);
+    rv.set(crate::dom::utf16_value(scope, &value));
 }

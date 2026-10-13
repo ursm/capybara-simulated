@@ -832,6 +832,8 @@ pub(crate) struct RealmArena {
     custom_states: std::collections::HashMap<NodeId, Vec<String>>,
     // Each element's nonce, once its `nonce` attribute was written or the element cloned with one (nonce.rs).
     pub(crate) nonces: std::collections::HashMap<NodeId, Vec<u16>>,
+    // Each dialog's return value, once a close or a script gave it one (dialogs.rs).
+    pub(crate) dialog_return_values: std::collections::HashMap<NodeId, Vec<u16>>,
     // Every node's registered observer list, and each mutation observer's nodes (mutation_observers.rs).
     pub(crate) observers: crate::mutation_observers::Observers,
     // Each top-level document's autofocus candidates (autofocus.rs).
@@ -1135,6 +1137,7 @@ impl RealmArena {
         self.explicit_elements.retain(|(id, _), _| live(slots, id));
         self.previously_focused.retain(|dialog, focused| live(slots, dialog) && live(slots, focused));
         self.nonces.retain(|id, _| live(slots, id));
+        self.dialog_return_values.retain(|id, _| live(slots, id));
         self.close_watcher_order.retain(|id, _| live(slots, id));
         self.showing_popovers.retain(|doc, list| {
             list.retain(|(p, _)| live(slots, p));
@@ -1297,6 +1300,9 @@ impl RealmArena {
         }
         if !self.nonces.is_empty() {
             self.nonces.remove(&id);
+        }
+        if !self.dialog_return_values.is_empty() {
+            self.dialog_return_values.remove(&id);
         }
         if !self.showing_popovers.is_empty() {
             self.showing_popovers.remove(&id);
