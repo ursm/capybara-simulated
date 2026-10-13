@@ -3,7 +3,7 @@
 // down to its topmost popover ancestor, hiding one hides those above it, showing a dialog hides, and a light dismiss
 // and a close request go to. The bindings show and hide each, firing its events; this answers which.
 
-use crate::dom::{realm, NodeData, NodeId, NodeKind, RealmArena, STATE_POPOVER_OPEN};
+use crate::dom::{realm, NodeData, NodeId, RealmArena, STATE_POPOVER_OPEN};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "popoverShown", popover_shown, context_id);
@@ -21,7 +21,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 pub(crate) const AUTO: u32 = 1;
 pub(crate) const HINT: u32 = 2;
 pub(crate) fn popover_kind(n: &NodeData) -> u32 {
-    if n.kind != NodeKind::Element {
+    if !n.is_html() {
         return 0;
     }
     match n.plain_attr("popover") {
@@ -202,7 +202,8 @@ fn popover_check(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let expected = args.get(1).is_true();
     let arena = &crate::dom::dom(scope).arena;
     let Some(n) = arena.get(id) else { return rv.set_uint32(NOT_A_POPOVER) };
-    rv.set_uint32(if n.plain_attr("popover").is_none() {
+    // (…the attribute an HTML element's: none of an SVG or MathML one makes it a popover)
+    rv.set_uint32(if !n.is_html() || n.plain_attr("popover").is_none() {
         NOT_A_POPOVER
     } else if (n.state & STATE_POPOVER_OPEN != 0) != expected {
         AS_ASKED
