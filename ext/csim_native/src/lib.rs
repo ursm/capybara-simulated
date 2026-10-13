@@ -74,6 +74,7 @@ mod paint;
 mod keys;
 mod cache_matching;
 mod sandbox;
+mod import_map;
 mod image_source;
 // Layout: the records the walk builds (mod walk) laid out, driven by the `layoutBuild` op (mod walk_ops).
 mod keyframes;
@@ -167,6 +168,9 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // A font pattern matched, and the families it is substituted through, by this machine's fontconfig.
     native.define_module_function("font_match", magnus::function!(fontconfig::font_match_for_ruby, 1))?;
     native.define_module_function("font_family_list", magnus::function!(font_faces::family_list_for_ruby, 1))?;
+    // The document's import map, as the page's module loader keeps it (import_map.rs).
+    native.define_module_function("import_map_resolve", magnus::function!(import_map::resolve_for_ruby, 3))?;
+    native.define_module_function("import_map_integrity", magnus::function!(import_map::integrity_for_ruby, 2))?;
     native.define_module_function("font_strong_families", magnus::function!(fontconfig::strong_families_for_ruby, 1))?;
     // A URL's parts as the URL Standard's parser makes them, the page's own (url_ops.rs).
     native.define_module_function("url_parts", magnus::function!(url_ops::parts_for_ruby, 2))?;

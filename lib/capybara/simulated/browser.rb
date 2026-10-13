@@ -8950,42 +8950,35 @@ module Capybara
         out
       end
 
-      # JS-side `ingestImportmaps` calls this through the host fn so
-      # Ruby-side `resolve_module_specifier` agrees with the bare-
-      # specifier map shipped by `<script type="importmap">`.
+      # The document's import map (import_map.rs, as JSON), which the page's `ingestImportmaps` keeps and pushes here
+      # through the host fn, so the host resolves a module specifier as the page does.
       def set_importmap(json)
-        @importmap = JSON.parse(json.to_s)
-        @importmap['integrity'] ||= {}
-      rescue JSON::ParserError
-        @importmap = {'imports' => {}, 'scopes' => {}}
+        @importmap = json.to_s
       end
 
-      # Import-map "integrity" metadata for a RESOLVED module URL ('' when
-      # unmapped) — keys were absolutized at JS ingest (esm-loader.js).
+      # Import-map "integrity" metadata for a RESOLVED module URL ('' when unmapped).
       def importmap_integrity(url)
-        (@importmap && @importmap['integrity'] && @importmap['integrity'][url.to_s]).to_s
+        @importmap ? Native.import_map_integrity(@importmap, url.to_s) : ''
       end
 
+      # HTML "resolve a module specifier" against `base_url` (the referrer's) through the document's import map: the
+      # URL, or the specifier itself where it resolves to none (a bare one nothing maps), which then fails to fetch.
       def resolve_module_specifier(specifier, base_url)
-        @importmap ||= {'imports' => {}, 'scopes' => {}}
-        if (mapped = @importmap['imports'][specifier])
-          return resolve_against(mapped, base_url)
-        end
-        if specifier.start_with?('/', './', '../') || specifier.match?(%r{\A[a-z]+://}i)
-          return resolve_against(specifier, base_url)
-        end
-        specifier
+        base = effective_module_base(base_url)
+        Native.import_map_resolve(@importmap || '', specifier.to_s, base) || specifier
+      end
+
+      # The base a module specifier resolves against: the importer's URL — for a nested relative import, and for a
+      # dynamic `import()` the referring script's. An inline script / module has no real URL — its pseudo-name is
+      # `<eval>` (no scheme, from V8) or `inline://<hash>` (from `__csim_runScript`) — so it resolves against the PAGE URL.
+      private def effective_module_base(base)
+        base = nil unless base.is_a?(String) && base =~ %r{\A[a-z]+://}i && !base.start_with?('inline:')
+        base || @current_url || @default_host
       end
 
       def resolve_against(url, base)
         return url if url =~ %r{\A[a-z]+://}i
-        # The module loader passes the importer for nested relative imports (and for a
-        # dynamic `import()`, the importer is the referring script). An inline script / module has no
-        # real URL — its pseudo-name is `<eval>` (no scheme, from V8) or `inline://<hash>` (from
-        # `__csim_runScript`) — so a specifier must resolve against the PAGE URL, not the pseudo-name.
-        # Fall through for a base that is not a real URL or is one of those `inline:` pseudo-names.
-        base = nil unless base.is_a?(String) && base =~ %r{\A[a-z]+://}i && !base.start_with?('inline:')
-        eff = base || @current_url || @default_host
+        eff = effective_module_base(base)
         # Memo of `url` parsed against `eff` — a pure function of (effective base, url).
         # A heavy ESM app re-resolves the same ~80 module specifiers against the
         # same base on every visit (a fresh VM re-instantiates the whole module

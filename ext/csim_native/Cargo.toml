@@ -19,6 +19,8 @@ cc = "1"
 serde_json = "1"
 
 [dependencies]
+# Import maps (import_map.rs): their JSON parsed, and the document's map kept as JSON between the page and the host.
+serde_json = "1"
 # rusty_racer as a LIBRARY (not its gem .so): we call install_classes from our own
 # magnus init and register the DOM via set_realm_init_hook. Path dep during
 # development; a git/tagged dep at release time.

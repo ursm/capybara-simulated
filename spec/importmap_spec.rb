@@ -169,3 +169,37 @@ RSpec.describe 'ESM via importmap' do
     end
   end
 end
+
+# HTML's import maps themselves (import_map.rs), apart from any library.
+RSpec.describe 'import maps' do
+  # HTML's import maps: a prefix key (`lib/`) maps what follows it, a scope's map covers the modules under its URL
+  # before the top-level one, and a second map's entry for a key the first has is ignored (the first wins).
+  it 'resolves through prefix keys and scopes, the first map winning a key' do
+    page = <<~HTML
+      <!doctype html><html><head>
+        <script type="importmap">{"imports": {"a": "/js/a1.js", "lib/": "/js/lib/"}, "scopes": {"/js/scoped/": {"a": "/js/a2.js"}}}</script>
+        <script type="importmap">{"imports": {"a": "/js/a3.js", "b": "/js/b.js"}}</script>
+      </head><body><div id="out"></div>
+        <script type="module">
+          import a from "a";
+          import b from "b";
+          import x from "lib/x.js";
+          import s from "/js/scoped/s.js";
+          document.getElementById('out').textContent = [a, b, x, s].join(' ');
+        </script>
+      </body></html>
+    HTML
+    modules = {
+      '/js/a1.js' => 'export default "a1";', '/js/a2.js' => 'export default "a2";', '/js/a3.js' => 'export default "a3";',
+      '/js/b.js' => 'export default "b";', '/js/lib/x.js' => 'export default "x";',
+      '/js/scoped/s.js' => 'import a from "a"; export default "s:" + a;'
+    }
+    app = lambda {|env|
+      body = modules[env['PATH_INFO']]
+      body ? [200, {'content-type' => 'text/javascript'}, [body]] : [200, {'content-type' => 'text/html'}, [page]]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    expect(s.find('#out').text).to eq('a1 b x s:a2')
+  end
+end
