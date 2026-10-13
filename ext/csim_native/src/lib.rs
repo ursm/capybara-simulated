@@ -62,6 +62,7 @@ mod input_types;
 mod intersection;
 mod html_parse;
 mod idb;
+mod idb_databases;
 mod image_decode;
 mod image_encode;
 mod image_source;
@@ -157,5 +158,10 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("font_strong_families", magnus::function!(fontconfig::strong_families_for_ruby, 1))?;
     // A URL's parts as the URL Standard's parser makes them, the page's own (url_ops.rs).
     native.define_module_function("url_parts", magnus::function!(url_ops::parts_for_ruby, 2))?;
+    // A driver session's IndexedDB storage: a new partition of the one registry, cleared as the session resets, and
+    // whether an agent of it has notices to take — its event loop has work (idb_databases.rs).
+    native.define_module_function("idb_partition_new", magnus::function!(idb_databases::partition_new, 0))?;
+    native.define_module_function("idb_clear", magnus::function!(idb_databases::clear, 1))?;
+    native.define_module_function("idb_pending", magnus::function!(idb_databases::pending, 1))?;
     Ok(())
 }

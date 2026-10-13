@@ -104,6 +104,8 @@ module Capybara
         # Driver level and injected, so a service worker and every same-origin window see
         # the same caches (partitioned by origin key within the store).
         @cache_storage   = {}
+        # …and IndexedDB, the session's partition of the engine's registry.
+        @idb_partition   = Native.idb_partition_new
         # Capture the universal-server flag ONCE, at session construction — the WPT
         # runner sets CSIM_LOCAL_ALL_HOSTS only while building the session, then
         # restores it. Every window (incl. aux windows opened later) inherits this so
@@ -146,6 +148,7 @@ module Capybara
                     local_storage:   @local_storage,
                     clipboard:       @clipboard,
                     cache_storage:   @cache_storage,
+                    idb_partition:   @idb_partition,
                     all_hosts_local: @all_hosts_local).tap do |b|
           b.touch_input        = @touch
           b.default_viewport   = @viewport   if @viewport

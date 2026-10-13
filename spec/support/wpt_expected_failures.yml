@@ -33,17 +33,10 @@ IndexedDB/back-forward-cache-open-connection.window.js:
 - back-forward-cache-open-connection
 IndexedDB/back-forward-cache-open-transaction.window.js:
 - back-forward-cache-open-transaction
-IndexedDB/database-names-by-origin.html:
-- closed database names don't leak to cross-origin iframe
-- closed database names don't leak to cross-origin window
-- open database names don't leak to cross-origin iframe
-- open database names don't leak to cross-origin window
 IndexedDB/file_support.sub.html:
 - Composed slices of a file can be stored and retrieved from IndexedDB
 - Saves and loads back File objects from IndexedDB
 - Sliced file can be stored and retrieved from IndexedDB
-IndexedDB/idb-partitioned-persistence.sub.html:
-- Persistence test for partitioned IndexedDB
 IndexedDB/serialize-sharedarraybuffer-throws.https.html:
 - 'IndexedDB: Attempting to serialize a SharedArrayBuffer should throw'
 WebCryptoAPI/import_export/ec_importKey.https.any.js:
@@ -5531,11 +5524,6 @@ service-workers/service-worker/immutable-prototype-serviceworker.https.html:
 - worker prototype chain should be immutable
 service-workers/service-worker/import-scripts-updated-flag.https.html:
 - import script not previously imported
-service-workers/service-worker/indexeddb.https.html:
-- Verify Indexed DB operation in a Service Worker
-- "[harness] ERROR"
-- 'clean up: database'
-- 'clean up: registration'
 service-workers/service-worker/intercepted-referrer.https.html:
 - document.referrer for a navigation intercepted by a Service Worker is unchanged
   and matches the parent URL
@@ -6057,7 +6045,6 @@ webmessaging/event.origin.sub.htm:
 webmessaging/message-channels/worker-post-after-close.any.js:
 - "[dedicatedworker] MessageChannel/MessagePort should not work after a worker self.close()"
 - "[dedicatedworker] [harness] TIMEOUT"
-- "[harness] ERROR"
 webmessaging/message-channels/worker.any.js:
 - "[dedicatedworker] MessageChannel/MessagePort created and used after a worker self.close()"
 - "[dedicatedworker] [harness] TIMEOUT"

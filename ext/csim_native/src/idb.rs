@@ -1,19 +1,17 @@
 // Indexed Database's storage (§2.1-2.7): keys and their order, an object store's records sorted by key with its key
 // generator, an index's records sorted by key and then primary key, ranges of them, what a request retrieves and where a
-// cursor moves next — and what a transaction wrote, which an abort puts back. The bindings (idb.js) keep the schema's
-// names and key paths, the transactions, requests and events; they convert a page's values to keys and evaluate key
-// paths (both read the page's objects), and a value reaches here serialized (clone.rs): its bytes.
-//
-// Each store and index is named by a number, in its realm, which its bindings object holds: the bindings let one go
-// (`idbStoreFree` / `idbIndexFree`) once the schema change deleting it commits or the database is deleted, and a realm's
-// all go with it (`drop_realm`).
+// cursor moves next — and what a transaction wrote, which an abort puts back; and each store's and index's schema, its
+// name and key path. The stores are their databases' (idb_databases.rs), in the one registry, each named by a number.
+// The bindings (idb.js) keep the transactions, requests and events; they convert a page's values to keys and evaluate
+// key paths (both read the page's objects), and a value reaches here serialized (clone.rs): its bytes.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ops::Bound;
 use std::sync::Arc;
 
-use crate::dom::{realm_id, register};
+use crate::dom::register;
+use crate::idb_databases::{lock, DbKey, Name, Registry};
 
 // A key (§2.7): a number, a date (its time value), a string (UTF-16), binary, or an array of keys — and the two bounds a
 // range of pairs is read between, which no key is.
@@ -99,92 +97,105 @@ struct Record {
     indexed: Vec<(u32, Vec<Key>)>,
 }
 
+// An index: its name, key path, `unique` and `multiEntry`, whether it holds the store's records yet (an index an
+// upgrade makes is filled in its transaction's order, `idbPopulate`), and its records.
 #[derive(Clone)]
 struct Index {
+    name: Name,
+    key_path: KeyPath,
     unique: bool,
+    multi_entry: bool,
+    populated: bool,
     entries: BTreeSet<(Key, Key)>,
 }
 
-// An object store: its records, its key generator's current number (none without one; infinite past 2^53), its indexes —
-// and the journal of the transaction writing it.
-struct Store {
+// A key path (§2.5): none, a string, or a list of strings.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum KeyPath {
+    None,
+    Path(Name),
+    List(Vec<Name>),
+}
+
+// An object store: its database, name and key path, its records, its key generator's current number (none without one;
+// infinite past 2^53), its indexes — those it has by name, and those deleted whose deletion has yet to run in their
+// transaction's order (a write before it still kept to them) — and the journal of the transaction writing it.
+pub(crate) struct Store {
+    pub(crate) db: DbKey,
+    pub(crate) name: Name,
+    key_path: KeyPath,
     records: BTreeMap<Key, Record>,
     current: Option<f64>,
     indexes: HashMap<u32, Index>,
+    index_names: BTreeMap<Name, u32>,
     journal: Option<Journal>,
+}
+
+impl Store {
+    pub(crate) fn new(db: DbKey, name: Name, key_path: KeyPath, auto_increment: bool) -> Store {
+        Store {
+            db,
+            name,
+            key_path,
+            records: BTreeMap::new(),
+            current: auto_increment.then_some(1.0),
+            indexes: HashMap::new(),
+            index_names: BTreeMap::new(),
+            journal: None,
+        }
+    }
 }
 
 // What a transaction found of a store before it wrote it, which an abort puts back: its key generator's number, and each
 // record it wrote as it was (none: no record at that key) — the record's index entries with it. Only what the transaction
 // touched is kept, so a write costs what it changes, not what the store holds.
 struct Journal {
-    id: u32,
+    tx: u32,
     current: Option<f64>,
     prior: BTreeMap<Key, Option<Record>>,
 }
 
 impl Journal {
-    // (…begun on `st`: nothing written yet)
-    fn of(st: &Store, id: u32) -> Journal {
-        Journal { id, current: st.current, prior: BTreeMap::new() }
+    // (…begun on `st` by transaction `tx`: nothing written yet)
+    fn of(st: &Store, tx: u32) -> Journal {
+        Journal { tx, current: st.current, prior: BTreeMap::new() }
     }
 }
 
-// (…a copy — an upgrade's schema snapshot — begins with no journal: what it puts back is the whole store)
+// (…a copy — an upgrade's start — begins with no journal: what it puts back is the whole store)
 impl Clone for Store {
     fn clone(&self) -> Store {
-        Store { records: self.records.clone(), current: self.current, indexes: self.indexes.clone(), journal: None }
+        Store {
+            db: self.db.clone(),
+            name: self.name.clone(),
+            key_path: self.key_path.clone(),
+            records: self.records.clone(),
+            current: self.current,
+            indexes: self.indexes.clone(),
+            index_names: self.index_names.clone(),
+            journal: None,
+        }
     }
 }
 
-// A realm's stores and snapshots.
-#[derive(Default)]
-struct Stores {
-    stores: HashMap<u32, Store>,
-    snapshots: HashMap<u32, Store>,
-    next: u32,
-}
-
-// Every realm's, by realm, in the isolate.
-#[derive(Default)]
-struct Realms(HashMap<i32, Stores>);
-
-// (…the stores of the realm whose `__dom` an op was called through — none for one that made none, or was dropped: only
-// making a store gives a realm its stores, `with_new`)
-fn with<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, f: impl FnOnce(&mut Stores) -> R) -> R {
-    let realm = realm_id(scope, args);
-    match scope.get_slot_mut::<Realms>().and_then(|realms| realms.0.get_mut(&realm)) {
-        Some(stores) => f(stores),
-        None => f(&mut Stores::default()),
-    }
-}
-fn with_new<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, f: impl FnOnce(&mut Stores) -> R) -> R {
-    let realm = realm_id(scope, args);
-    if scope.get_slot::<Realms>().is_none() {
-        scope.set_slot(Realms::default());
-    }
-    let realms = scope.get_slot_mut::<Realms>().expect("Realms slot was just set");
-    f(realms.0.entry(realm).or_default())
-}
-// Every store realm `realm` made (it is being disposed).
-pub(crate) fn drop_realm(scope: &mut v8::PinScope<'_, '_>, realm: i32) {
-    if let Some(realms) = scope.get_slot_mut::<Realms>() {
-        realms.0.remove(&realm);
-    }
-}
-fn next_id(s: &mut Stores) -> u32 {
-    s.next = s.next.wrapping_add(1);
-    s.next
+fn with<R>(f: impl FnOnce(&mut Registry) -> R) -> R {
+    f(&mut lock())
 }
 
 const MAX_GENERATED: f64 = 9_007_199_254_740_992.0; // 2^53
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "idbCompare", compare_op, context_id);
-    register(scope, ns, "idbStoreNew", store_new, context_id);
-    register(scope, ns, "idbStoreFree", store_free, context_id);
-    register(scope, ns, "idbIndexNew", index_new, context_id);
-    register(scope, ns, "idbIndexFree", index_free, context_id);
+    register(scope, ns, "idbStore", store_info, context_id);
+    register(scope, ns, "idbStoreLive", store_live, context_id);
+    register(scope, ns, "idbIndexCreate", index_create, context_id);
+    register(scope, ns, "idbIndexDelete", index_delete, context_id);
+    register(scope, ns, "idbIndexRetire", index_retire, context_id);
+    register(scope, ns, "idbIndexRename", index_rename, context_id);
+    register(scope, ns, "idbIndexId", index_id, context_id);
+    register(scope, ns, "idbIndex", index_info, context_id);
+    register(scope, ns, "idbIndexLive", index_live, context_id);
+    register(scope, ns, "idbWriteIndexes", write_indexes, context_id);
     register(scope, ns, "idbGenerator", generator, context_id);
     register(scope, ns, "idbPut", put, context_id);
     register(scope, ns, "idbDelete", delete, context_id);
@@ -195,9 +206,40 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "idbJournal", journal, context_id);
     register(scope, ns, "idbJournalUndo", journal_undo, context_id);
     register(scope, ns, "idbJournalEnd", journal_end, context_id);
-    register(scope, ns, "idbSnapshot", snapshot, context_id);
-    register(scope, ns, "idbRestore", restore, context_id);
-    register(scope, ns, "idbSnapshotFree", snapshot_free, context_id);
+}
+
+// ── Names and key paths as the bindings hold them ───────────────────────────────────────────────────────────────────
+// A name: a string's code units.
+pub(crate) fn name_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<Name> {
+    let s = v8::Local::<v8::String>::try_from(value).ok()?;
+    let mut units = vec![0u16; s.length()];
+    s.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
+    Some(units)
+}
+pub(crate) fn name_value<'s>(scope: &mut v8::PinScope<'s, '_>, name: &[u16]) -> v8::Local<'s, v8::Value> {
+    v8::String::new_from_two_byte(scope, name, v8::NewStringType::Normal).map_or_else(|| v8::undefined(scope).into(), Into::into)
+}
+// …a key path: null, a string, or an array of strings.
+pub(crate) fn key_path_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> KeyPath {
+    if let Ok(list) = v8::Local::<v8::Array>::try_from(value) {
+        let names = (0..list.length()).filter_map(|i| list.get_index(scope, i).and_then(|v| name_arg(scope, v))).collect();
+        return KeyPath::List(names);
+    }
+    name_arg(scope, value).map_or(KeyPath::None, KeyPath::Path)
+}
+fn key_path_value<'s>(scope: &mut v8::PinScope<'s, '_>, key_path: &KeyPath) -> v8::Local<'s, v8::Value> {
+    match key_path {
+        KeyPath::None => v8::null(scope).into(),
+        KeyPath::Path(name) => name_value(scope, name),
+        KeyPath::List(names) => {
+            let items: Vec<v8::Local<v8::Value>> = names.iter().map(|n| name_value(scope, n)).collect();
+            v8::Array::new_with_elements(scope, &items).into()
+        }
+    }
+}
+fn names_value<'s>(scope: &mut v8::PinScope<'s, '_>, names: Vec<Name>) -> v8::Local<'s, v8::Value> {
+    let items: Vec<v8::Local<v8::Value>> = names.iter().map(|n| name_value(scope, n)).collect();
+    v8::Array::new_with_elements(scope, &items).into()
 }
 
 // ── Keys as the bindings hold them ──────────────────────────────────────────────────────────────────────────────────
@@ -293,47 +335,124 @@ fn compare_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 }
 
 // ── Stores and indexes ──────────────────────────────────────────────────────────────────────────────────────────────
-// __dom.idbStoreNew(generator) -> a new store's number: no records, a key generator at 1 where it has one.
-fn store_new(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let generator = args.get(0).is_true();
-    let id = with_new(scope, &args, |s| {
-        let id = next_id(s);
-        s.stores.insert(id, Store { records: BTreeMap::new(), current: generator.then_some(1.0), indexes: HashMap::new(), journal: None });
-        id
-    });
-    rv.set_uint32(id);
-}
-// __dom.idbStoreFree(store): it is deleted for good.
-fn store_free(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let id = id_arg(scope, &args, 0);
-    with(scope, &args, |s| s.stores.remove(&id));
-}
-// __dom.idbIndexNew(store, unique) -> a new index's number: no records yet (`idbPopulate` fills it).
-fn index_new(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.idbStore(store) -> [name, keyPath, autoIncrement, index names]: a store's schema (undefined for none; a deleted
+// store has no index names).
+fn store_info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let store = id_arg(scope, &args, 0);
-    let unique = args.get(1).is_true();
-    let id = with(scope, &args, |s| {
-        let id = next_id(s);
-        if let Some(st) = s.stores.get_mut(&store) {
-            st.indexes.insert(id, Index { unique, entries: BTreeSet::new() });
+    // (…a deleted one's index names none)
+    let found = with(|s| {
+        let live = s.store_live(store);
+        s.stores.get(&store).map(|st| (st.name.clone(), st.key_path.clone(), st.current.is_some(), if live { st.index_names.keys().cloned().collect() } else { Vec::new() }))
+    });
+    let Some((name, key_path, auto_increment, index_names)) = found else { return };
+    let items = [name_value(scope, &name), key_path_value(scope, &key_path), v8::Boolean::new(scope, auto_increment).into(), names_value(scope, index_names)];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.idbStoreLive(store) -> whether it is its database's still (not deleted).
+fn store_live(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let store = id_arg(scope, &args, 0);
+    rv.set_bool(with(|s| s.store_live(store)));
+}
+// __dom.idbIndexCreate(store, name, keyPath, unique, multiEntry) -> a new index's number, empty until `idbPopulate` (0
+// where the store has one of the name).
+fn index_create(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let store = id_arg(scope, &args, 0);
+    let Some(name) = name_arg(scope, args.get(1)) else { return rv.set_uint32(0) };
+    let key_path = key_path_arg(scope, args.get(2));
+    let (unique, multi_entry) = (args.get(3).is_true(), args.get(4).is_true());
+    let id = with(|s| {
+        if s.stores.get(&store).is_none_or(|st| st.index_names.contains_key(&name)) {
+            return 0;
         }
+        let id = s.next_id();
+        let st = s.stores.get_mut(&store).expect("looked up");
+        st.index_names.insert(name.clone(), id);
+        st.indexes.insert(id, Index { name, key_path, unique, multi_entry, populated: false, entries: BTreeSet::new() });
         id
     });
     rv.set_uint32(id);
 }
-// __dom.idbIndexFree(store, index): it is deleted for good.
-fn index_free(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.idbIndexDelete(store, name) -> the number of the index of the name deleted (0 for none): the store has it no
+// more, but a write before its deletion runs in the transaction's order still keeps to it (`idbIndexRetire`).
+fn index_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let store = id_arg(scope, &args, 0);
+    let Some(name) = name_arg(scope, args.get(1)) else { return rv.set_uint32(0) };
+    let id = with(|s| s.stores.get_mut(&store).and_then(|st| st.index_names.remove(&name)));
+    rv.set_uint32(id.unwrap_or(0));
+}
+// __dom.idbIndexRetire(store, index): a deleted index's deletion run — its records gone.
+fn index_retire(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let (store, index) = (id_arg(scope, &args, 0), id_arg(scope, &args, 1));
-    with(scope, &args, |s| {
+    with(|s| {
         if let Some(st) = s.stores.get_mut(&store) {
-            st.indexes.remove(&index);
+            if !st.index_names.values().any(|&i| i == index) {
+                st.indexes.remove(&index);
+            }
         }
     });
+}
+// __dom.idbIndexRename(store, index, name) -> whether it took the name (none of the store's other indexes has it).
+fn index_rename(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (store, index) = (id_arg(scope, &args, 0), id_arg(scope, &args, 1));
+    let Some(name) = name_arg(scope, args.get(2)) else { return rv.set_bool(false) };
+    let took = with(|s| {
+        let Some(st) = s.stores.get_mut(&store) else { return false };
+        let Some(old) = st.indexes.get(&index).map(|i| i.name.clone()) else { return false };
+        if old == name {
+            return true;
+        }
+        if st.index_names.contains_key(&name) {
+            return false;
+        }
+        st.index_names.remove(&old);
+        st.index_names.insert(name.clone(), index);
+        if let Some(i) = st.indexes.get_mut(&index) {
+            i.name = name;
+        }
+        true
+    });
+    rv.set_bool(took);
+}
+// __dom.idbIndexId(store, name) -> the number of the store's index of that name, or 0 for none.
+fn index_id(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let store = id_arg(scope, &args, 0);
+    let Some(name) = name_arg(scope, args.get(1)) else { return rv.set_uint32(0) };
+    let id = with(|s| s.stores.get(&store).and_then(|st| st.index_names.get(&name).copied()));
+    rv.set_uint32(id.unwrap_or(0));
+}
+// __dom.idbIndex(store, index) -> [name, keyPath, unique, multiEntry]: an index's schema (undefined for none).
+fn index_info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (store, index) = (id_arg(scope, &args, 0), id_arg(scope, &args, 1));
+    let found = with(|s| s.stores.get(&store).and_then(|st| st.indexes.get(&index)).map(|i| (i.name.clone(), i.key_path.clone(), i.unique, i.multi_entry)));
+    let Some((name, key_path, unique, multi_entry)) = found else { return };
+    let items = [name_value(scope, &name), key_path_value(scope, &key_path), v8::Boolean::new(scope, unique).into(), v8::Boolean::new(scope, multi_entry).into()];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.idbIndexLive(store, index) -> whether the store has it (neither it nor its store deleted).
+fn index_live(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (store, index) = (id_arg(scope, &args, 0), id_arg(scope, &args, 1));
+    rv.set_bool(with(|s| s.store_live(store) && s.stores[&store].index_names.values().any(|&i| i == index)));
+}
+// __dom.idbWriteIndexes(store) -> [index, keyPath, multiEntry, …]: the indexes a record written into the store goes into —
+// those holding its records, a deleted one whose deletion has yet to run among them.
+fn write_indexes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let store = id_arg(scope, &args, 0);
+    let mut found: Vec<(u32, KeyPath, bool)> = with(|s| {
+        s.stores.get(&store).map(|st| st.indexes.iter().filter(|(_, i)| i.populated).map(|(id, i)| (*id, i.key_path.clone(), i.multi_entry)).collect()).unwrap_or_default()
+    });
+    found.sort_by_key(|f| f.0);
+    let mut items = Vec::with_capacity(found.len() * 3);
+    for (id, key_path, multi_entry) in found {
+        items.push(v8::Integer::new_from_unsigned(scope, id).into());
+        items.push(key_path_value(scope, &key_path));
+        items.push(v8::Boolean::new(scope, multi_entry).into());
+    }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.idbGenerator(store) -> its key generator's current number (Infinity past 2^53), or null without one.
 fn generator(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let store = id_arg(scope, &args, 0);
-    match with(scope, &args, |s| s.stores.get(&store).and_then(|st| st.current)) {
+    match with(|s| s.stores.get(&store).and_then(|st| st.current)) {
         Some(n) => rv.set_double(n),
         None => rv.set_null(),
     }
@@ -421,7 +540,7 @@ fn put(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>
             at += 2 + n;
         }
     }
-    let refused = with(scope, &args, |s| {
+    let refused = with(|s| {
         let st = s.stores.get(&store)?;
         if no_overwrite && st.records.contains_key(&key) {
             return Some((KEY_EXISTS, 0));
@@ -443,7 +562,7 @@ fn put(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>
         None => {}
     }
     let Some(bytes) = crate::clone::take_bytes(scope, number) else { return };
-    with(scope, &args, |s| {
+    with(|s| {
         let Some(st) = s.stores.get_mut(&store) else { return };
         if let Some(current) = st.current {
             let moved = if generated {
@@ -469,7 +588,7 @@ fn key_number(key: &Key) -> Option<f64> {
 fn delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let store = id_arg(scope, &args, 0);
     let range = range_arg(scope, args.get(1));
-    with(scope, &args, |s| {
+    with(|s| {
         let Some(st) = s.stores.get_mut(&store) else { return };
         let keys: Vec<Key> = Source::Store(st).in_range(&range).map(|(k, _)| k).collect();
         for k in keys {
@@ -575,7 +694,7 @@ fn retrieve(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let direction = args.get(3).uint32_value(scope).unwrap_or(NEXT);
     let count = args.get(4).uint32_value(scope).unwrap_or(0) as usize;
     let read = args.get(5).uint32_value(scope).unwrap_or(READ_VALUE);
-    let found = with(scope, &args, |s| {
+    let found = with(|s| {
         let st = s.stores.get(&store)?;
         let source = Source::of(st, index)?;
         let unique = matches!(direction, NEXT_UNIQUE | PREV_UNIQUE);
@@ -627,7 +746,7 @@ fn count(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'
     let store = id_arg(scope, &args, 0);
     let index = index_arg(scope, &args, 1);
     let range = range_arg(scope, args.get(2));
-    let n = with(scope, &args, |s| s.stores.get(&store).and_then(|st| Source::of(st, index)).map_or(0, |source| source.in_range(&range).count()));
+    let n = with(|s| s.stores.get(&store).and_then(|st| Source::of(st, index)).map_or(0, |source| source.in_range(&range).count()));
     rv.set_uint32(n as u32);
 }
 
@@ -650,7 +769,7 @@ fn cursor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     let key_only = args.get(9).is_true();
     let forward = matches!(direction, NEXT | NEXT_UNIQUE);
     let unique = matches!(direction, NEXT_UNIQUE | PREV_UNIQUE);
-    let found = with(scope, &args, |s| {
+    let found = with(|s| {
         let st = s.stores.get(&store)?;
         let source = Source::of(st, index)?;
         let mut found = None;
@@ -726,7 +845,7 @@ fn populate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
             at += 2 + n;
         }
     }
-    let took = with(scope, &args, |s| {
+    let took = with(|s| {
         let Some(st) = s.stores.get_mut(&store) else { return false };
         for (primary, keys) in entries {
             let unique = st.indexes.get(&index).is_some_and(|i| i.unique);
@@ -742,65 +861,45 @@ fn populate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
                 record.indexed.push((index, keys));
             }
         }
+        if let Some(i) = st.indexes.get_mut(&index) {
+            i.populated = true;
+        }
         true
     });
     rv.set_bool(took);
 }
 
-// __dom.idbJournal(store) -> a journal's number: what a transaction writing the store — the one transaction that may —
-// finds before each write it makes, which `idbJournalUndo` puts back (it aborted) and `idbJournalEnd` lets go (it
+// __dom.idbJournal(store, transaction): what transaction `tx` — the one transaction that may write the store — finds
+// before each write it makes kept, which `idbJournalUndo` puts back (it aborted) and `idbJournalEnd` lets go (it
 // committed).
-fn journal(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let store = id_arg(scope, &args, 0);
-    let id = with(scope, &args, |s| {
-        let id = next_id(s);
-        let st = s.stores.get_mut(&store)?;
-        st.journal = Some(Journal::of(st, id));
-        Some(id)
+fn journal(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let (store, tx) = (id_arg(scope, &args, 0), id_arg(scope, &args, 1));
+    with(|s| {
+        if let Some(st) = s.stores.get_mut(&store) {
+            st.journal = Some(Journal::of(st, tx));
+        }
     });
-    rv.set_uint32(id.unwrap_or(0));
-}
-// (…the store's journal, where it is still the one numbered `journal`)
-fn take_journal(st: &mut Store, journal: u32) -> Option<Journal> {
-    st.journal.take_if(|j| j.id == journal)
 }
 fn journal_undo(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let (store, journal) = (id_arg(scope, &args, 0), id_arg(scope, &args, 1));
-    with(scope, &args, |s| {
+    let (store, tx) = (id_arg(scope, &args, 0), id_arg(scope, &args, 1));
+    with(|s| {
         let Some(st) = s.stores.get_mut(&store) else { return };
-        if let Some(journal) = take_journal(st, journal) {
+        if let Some(journal) = st.journal.take_if(|j| j.tx == tx) {
             st.undo(journal);
         }
     });
 }
 fn journal_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let (store, journal) = (id_arg(scope, &args, 0), id_arg(scope, &args, 1));
-    with(scope, &args, |s| s.stores.get_mut(&store).map(|st| take_journal(st, journal)));
+    let (store, tx) = (id_arg(scope, &args, 0), id_arg(scope, &args, 1));
+    with(|s| s.stores.get_mut(&store).map(|st| st.journal.take_if(|j| j.tx == tx)));
 }
-
-// __dom.idbSnapshot(store) -> a snapshot's number: the store as it is — its records, key generator and indexes — which
-// `idbRestore` puts back (an aborted upgrade's) and `idbSnapshotFree` lets go.
-fn snapshot(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let store = id_arg(scope, &args, 0);
-    let id = with(scope, &args, |s| {
-        let copy = s.stores.get(&store)?.clone();
-        let id = next_id(s);
-        s.snapshots.insert(id, copy);
-        Some(id)
-    });
-    rv.set_uint32(id.unwrap_or(0));
-}
-fn restore(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let (store, snapshot) = (id_arg(scope, &args, 0), id_arg(scope, &args, 1));
-    with(scope, &args, |s| {
-        if let Some(copy) = s.snapshots.remove(&snapshot) {
-            s.stores.insert(store, copy);
+// What transaction `tx` wrote, put back in every store it wrote (its agent gone mid-transaction).
+pub(crate) fn undo_transaction(reg: &mut Registry, tx: u32) {
+    for st in reg.stores.values_mut() {
+        if let Some(journal) = st.journal.take_if(|j| j.tx == tx) {
+            st.undo(journal);
         }
-    });
-}
-fn snapshot_free(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let snapshot = id_arg(scope, &args, 0);
-    with(scope, &args, |s| s.snapshots.remove(&snapshot));
+    }
 }
 
 #[cfg(test)]
@@ -824,8 +923,9 @@ mod tests {
     fn a_journal_puts_back_what_was_written() {
         let n = Key::Number;
         let record = |i: f64| Record { value: Arc::from(vec![i as u8]), indexed: vec![(7, vec![n(i * 10.0)])] };
-        let mut st = Store { records: BTreeMap::new(), current: Some(3.0), indexes: HashMap::new(), journal: None };
-        st.indexes.insert(7, Index { unique: true, entries: BTreeSet::new() });
+        let mut st = Store::new(DbKey::default(), Vec::new(), KeyPath::None, true);
+        st.current = Some(3.0);
+        st.indexes.insert(7, Index { name: Vec::new(), key_path: KeyPath::None, unique: true, multi_entry: false, populated: true, entries: BTreeSet::new() });
         st.insert(n(1.0), record(1.0));
         st.insert(n(2.0), record(2.0));
         let before = (st.records.keys().cloned().collect::<Vec<_>>(), st.indexes[&7].entries.clone());

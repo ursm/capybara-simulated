@@ -135,6 +135,8 @@ module Capybara
         '__csimBcUnregister'         => ->(b, *a) { b.bc_unregister(a[0], a[1]); nil },
         '__csimBcPost'               => ->(b, *a) { b.bc_post(a[0], a[1], a[2], a[3], a[4], a[5]); nil },
         '__csimBcSiblingsExist'      => ->(b, *_a) { b.bc_siblings_exist? },
+        # The session's IndexedDB partition, which every realm and worker of it is an agent of (idb_databases.rs).
+        '__csimIdbPartition'         => ->(b, *_a) { b.idb_partition },
         '__csimWindowGet'            => ->(b, *a) { b.window_get(a[0], a[1]) },
         '__csimWindowDocGet'         => ->(b, *a) { b.window_doc_get(a[0], a[1]) },
         # Cross-window remote-ref RPC: route an opener's node/object proxy op to

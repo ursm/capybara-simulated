@@ -208,7 +208,7 @@ module Capybara
         Rack::Mime.mime_type(File.extname(path.to_s), '')
       end
 
-      def initialize(app, driver: nil, cookies: nil, cookie_flags: nil, auth_cache: nil, local_storage: nil, clipboard: nil, cache_storage: nil, all_hosts_local: nil)
+      def initialize(app, driver: nil, cookies: nil, cookie_flags: nil, auth_cache: nil, local_storage: nil, clipboard: nil, cache_storage: nil, idb_partition: nil, all_hosts_local: nil)
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
@@ -263,6 +263,9 @@ module Capybara
         # Cache Storage is origin-shared like localStorage (the Driver owns the store
         # and injects it into every window Browser), origin-partitioned within.
         @cache_storage                = cache_storage || {}
+        # IndexedDB is origin-shared too: the session's partition of the engine's one registry (idb_databases.rs), every
+        # window's and worker's.
+        @idb_partition                = idb_partition || Native.idb_partition_new
         @session_storage              = {}
         @sticky_headers               = {}
         @timers_active                = false
@@ -1076,16 +1079,28 @@ module Capybara
 
       # Cheap O(1) gate: is there any non-timer async channel with traffic
       # that `tick_real_time` would drain? `tick_real_time` itself runs
-      # exactly when `worker_pending? || event_source_pending? ||
-      # hijack_fetch_pending?` (plus `@timers_active`), and each of those
+      # exactly when this (plus `@timers_active`) holds, and each of these
       # predicates is a single `.empty?` / counter check. Reusing them
       # here lets an attribute poll whose value is delivered only by a
       # Worker / SSE / hijacked-fetch message (with no active timer) still
       # drain that channel, without paying an unconditional drain on
       # timer-driven runloop pages.
       def async_io_pending?
-        worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending?
+        worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending? || idb_pending?
       end
+
+      # IndexedDB's notices for this window's realms, taken — each realm its own, as its next event loop step would.
+      def deliver_idb_notices
+        return 0 unless idb_pending?
+
+        @runtime.call('__csimIdbDeliver')
+        @runtime.frame_realm_ids.each {|rid| @runtime.realm_call(rid, '__csimIdbDeliver') }
+        1
+      end
+
+      # Whether IndexedDB owes a realm of this window a notice another realm's or a worker's call caused — which the
+      # realm's next event loop step takes (idb.js `deliver`). The session's check first, which costs no V8 call.
+      def idb_pending? = Native.idb_pending(@idb_partition) && @runtime.call('__csimIdbPending')
 
       # Single-slot cache for the most recent find_xpath / find_css /
       # find_first_css result. Capybara's `synchronize` retry loop
@@ -1887,8 +1902,9 @@ module Capybara
           deliver_window_messages
           deliver_websocket_events
           deliver_image_loads
+          deliver_idb_notices
           break if @runtime.settle_gen > start_gen
-          break unless @timers_active || event_source_pending? || worker_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending?
+          break unless @timers_active || async_io_pending?
           # ONE event-loop step replaces the old drain_microtasks(4)+drain_timers(32)
           # pair: it fires due timers, runs a per-task microtask checkpoint (so
           # chained .then / MutationObserver delivery interleave spec-correctly),
@@ -1903,6 +1919,7 @@ module Capybara
           deliver_window_messages
           deliver_websocket_events
           deliver_image_loads
+          deliver_idb_notices
           break if @runtime.settle_gen > start_gen
           # A background worker thread owes us a CONTRACTUAL reply (a swack / bcack /
           # fetch_response is posted under `ensure`, so it always comes) but hasn't posted it
@@ -1931,7 +1948,7 @@ module Capybara
           # Capybara's wall-clock-driven poll loop drive the next tick
           # via `tick_real_time`. SSE / Worker channels keep us in
           # the loop as long as background threads have data queued.
-          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer? && !event_source_pending? && !worker_pending? && !hijack_fetch_pending? && !window_message_pending? && !websocket_pending? && !image_loads_pending?
+          break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer? && !async_io_pending?
           # Only in-flight image loads keeping us here? Yield the GVL briefly so their fetch
           # threads (~20 ms each) can finish inside this settle instead of a later poll —
           # spinning empty zero-budget loop steps would starve exactly the thread we wait on.
@@ -2093,7 +2110,7 @@ module Capybara
       # default. The user-agent also flows into `navigator.userAgent`
       # on every VM rebuild so JS-side UA branches (Discourse's
       # `viewport_based_mobile_mode = false` path) resolve correctly.
-      attr_reader :default_viewport, :default_user_agent
+      attr_reader :default_viewport, :default_user_agent, :idb_partition
       # Whether the session's pointer is a touchscreen (the driver's `touch:`), told every document as it boots.
       attr_accessor :touch_input
 
@@ -2625,7 +2642,7 @@ module Capybara
       # `Kernel#sleep`) and by `Playwright::Page#wait_for_timeout` to step a
       # precise virtual duration.
       def tick_real_time(step_ms: nil)
-        return unless @timers_active || worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending?
+        return unless @timers_active || async_io_pending?
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
         # advanced the clock, the inner calls would only re-drain
@@ -2990,7 +3007,7 @@ module Capybara
       # Returns true if any channel delivered.
       private def drain_async_channels
         n = deliver_worker_messages + deliver_event_source_events + deliver_hijacked_fetches +
-            deliver_window_messages + deliver_websocket_events + deliver_image_loads
+            deliver_window_messages + deliver_websocket_events + deliver_image_loads + deliver_idb_notices
         @find_cache_dirty = true if n.positive?
         n.positive?
       end
@@ -3020,7 +3037,7 @@ module Capybara
         end
         # (1) Background async (cheap Ruby-side checks, no V8 crossing) we must let
         #     land before jumping the clock: advance one fixed step, reset the guard.
-        if worker_pending? || event_source_pending? || hijack_fetch_pending? || websocket_pending? || image_loads_pending?
+        if worker_pending? || event_source_pending? || hijack_fetch_pending? || websocket_pending? || image_loads_pending? || idb_pending?
           @ff_transient_polls = 0
           return POLL_TICK_STEP_MS
         end
@@ -3394,6 +3411,7 @@ module Capybara
         # (…emptied as a write would — its change count moved on, so no realm's cache keyed on it is the next session's)
         clipboard_write([])
         @cache_storage.clear
+        Native.idb_clear(@idb_partition)
         @session_storage.clear
         @sticky_headers.clear
         # The driver-side resize buffer has to clear too — without
@@ -8270,7 +8288,7 @@ module Capybara
         # the two, the window is a few instructions wide.
         run_worker_timers = lambda do |floor|
           step = worker_clock_step.call(floor)
-          next if stopping.call || rt.call('__nextTimerDelay').to_f < 0
+          next if stopping.call || (rt.call('__nextTimerDelay').to_f < 0 && !(Native.idb_pending(@idb_partition) && rt.call('__csimIdbPending')))
 
           rt.drain_microtasks
           rt.drain_timers(step)

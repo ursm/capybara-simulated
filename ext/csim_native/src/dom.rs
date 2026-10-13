@@ -2586,6 +2586,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::validity::install(scope, ns, context_id);
     crate::input_types::install(scope, ns, context_id);
     crate::idb::install(scope, ns, context_id);
+    crate::idb_databases::install(scope, ns, context_id);
     crate::tables::install(scope, ns, context_id);
     crate::attributes::install(scope, ns, context_id);
     crate::selected_content::install(scope, ns, context_id);
@@ -4944,7 +4945,7 @@ fn reset_arena(
     }
     dom(scope).arena.forget_reactions_of(cid);
     crate::text_codec::drop_realm(scope, cid);   // (…a page's stream decoders die with it)
-    crate::idb::drop_realm(scope, cid);   // (…and its IndexedDB stores, which its bindings made)
+    crate::idb_databases::drop_realm(scope, cid);   // (…and its IndexedDB agent: its connections closed)
     dom(scope).walk_reuse.remove(&cid);
     dom(scope).caret_moves.remove(&cid);
     // …and the style engine forgets the nodes it held (its sheets stay until the new page sets its own).
@@ -4984,6 +4985,7 @@ fn handle_edges_mismatch(
 fn discard_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     if let Some(cid) = args.get(0).int32_value(scope) {
         dom(scope).arena.discard_realm(cid);
+        crate::idb_databases::drop_realm(scope, cid);   // (…and its IndexedDB agent: nothing of it can run any more)
     }
 }
 fn drop_realm(
@@ -5001,7 +5003,7 @@ fn drop_realm(
         d.arenas.remove(&id);          // (…and its arena object, which holds its global's `__dom`)
         d.clone_shadow_hooks.remove(&id);   // (…and its shadow root cloning hook)
         crate::text_codec::drop_realm(scope, id);   // (…and the stream decoders it left open)
-        crate::idb::drop_realm(scope, id);   // (…and the IndexedDB stores it made)
+        crate::idb_databases::drop_realm(scope, id);   // (…and its IndexedDB agent)
     }
 }
 
