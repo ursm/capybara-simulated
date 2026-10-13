@@ -12,6 +12,30 @@ use crate::editing_insert::Edit;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "editCommand", edit_command, context_id);
+    crate::dom::register(scope, ns, "commandSupport", command_support_op, context_id);
+}
+
+// The commands `execCommand` carries out, by name (matched ASCII case-insensitively), each with whether it is one a
+// focused text control takes as well as an editing host (Chrome's `queryCommandEnabled` with a selection in one). (…
+// `paste` among them, the driver's clipboard read: Chrome refuses a page that)
+const COMMANDS: [(&str, bool); 31] = [
+    ("bold", false), ("italic", false), ("underline", false), ("strikethrough", false), ("superscript", false),
+    ("subscript", false), ("forecolor", false), ("backcolor", false), ("hilitecolor", false), ("fontname", false),
+    ("justifycenter", false), ("justifyfull", false), ("justifyright", false), ("justifyleft", false),
+    ("removeformat", false), ("indent", false), ("outdent", false), ("createlink", false), ("unlink", false),
+    ("inserthorizontalrule", false), ("insertorderedlist", false), ("insertunorderedlist", false),
+    ("inserttext", true), ("inserthtml", true), ("insertlinebreak", true), ("insertparagraph", true), ("delete", true),
+    ("forwarddelete", true), ("cut", true), ("copy", true), ("paste", true),
+];
+// What `queryCommandSupported` / `queryCommandEnabled` answer of `command`: None for one not carried out — 1 where a
+// text control's selection takes it as well as an editing host's, 0 where only an editing host's.
+pub(crate) fn command_support(command: &str) -> Option<u32> {
+    COMMANDS.iter().find(|(name, _)| name.eq_ignore_ascii_case(command)).map(|&(_, text)| u32::from(text))
+}
+// __dom.commandSupport(command) -> `command_support`, -1 for none.
+fn command_support_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let command = args.get(0).to_rust_string_lossy(scope);
+    rv.set_int32(command_support(&command).map_or(-1, |s| s as i32));
 }
 
 // (…an element of the local name `tag`, ASCII case-insensitively, in any namespace: the tags the commands compare)

@@ -121,4 +121,29 @@ RSpec.describe 'execCommand in an editing host' do
       [true, '<ol><li>a</li></ol>', 'out', 'c:UL+0-1 c:DIV+1-1']
     ])
   end
+
+  # The commands it carries out are the ones `queryCommandSupported` answers for — `paste` among them, the driver's
+  # clipboard read, which Chrome refuses a page — and `queryCommandEnabled` with a selection in an editing host, or in a
+  # text control the text ones only, none with none (Chrome's, but for `paste`).
+  it 'answers which commands it supports and which the selection enables' do
+    session = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><div id=e contenteditable>hello</div><input id=t value=abc>']]
+    }).tap {|s| s.visit '/' }
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const names = ['bold', 'BOLD', 'insertText', 'delete', 'copy', 'paste', 'fontSize', 'selectAll', 'undo', 'bogus'];
+        const which = (f) => names.filter((n) => f(n)).join(',');
+        const out = [which((n) => document.queryCommandSupported(n)), which((n) => document.queryCommandEnabled(n))];
+        e.focus();
+        getSelection().selectAllChildren(e);
+        out.push(which((n) => document.queryCommandEnabled(n)));
+        getSelection().removeAllRanges();
+        t.focus();
+        t.select();
+        out.push(which((n) => document.queryCommandEnabled(n)));
+        return out;
+      })()
+    JS
+    expect(got).to eq(['bold,BOLD,insertText,delete,copy,paste', '', 'bold,BOLD,insertText,delete,copy,paste', 'insertText,delete,copy,paste'])
+  end
 end
