@@ -328,15 +328,18 @@ fn set_range(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgume
     let Some(ptr) = handle_of(scope, args.get(0)) else { return };
     let (Ok(node), Some(nid)) = (v8::Local::<v8::Object>::try_from(args.get(2)), nid_arg(scope, args, 3)) else { return };
     let offset = args.get(4).uint32_value(scope).unwrap_or(0);
+    place(scope, &ptr, which, node, Boundary { node: nid, offset });
+}
+// The point `which` of the range `ptr` is the handle of (2: both) is `point`, `node` the object of its node.
+fn place(scope: &mut v8::PinScope<'_, '_>, ptr: &v8::cppgc::UnsafePtr<RangeHandle>, which: usize, node: v8::Local<'_, v8::Object>, point: Boundary) {
     // SAFETY: the handle lives while its object does, which the caller holds.
     let h = unsafe { ptr.as_ref() };
-    let point = Boundary { node: nid, offset };
     let r = ranges(scope);
     r.sweep();
     let id = match h.id.get() {
         Some(id) => id,
         None => {
-            let id = r.add(WeakPersistent::new(&ptr), point);
+            let id = r.add(WeakPersistent::new(ptr), point);
             h.id.set(Some(id));
             id
         }
@@ -351,6 +354,33 @@ fn set_range(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgume
             set_point(scope, h, w, node);
         }
     }
+}
+
+// The engine's own setting of a range — the Selection's (selection.rs), of a range it was handed new: its start and end
+// (`node`'s object, its slot, the offset), the two in one tree and in order, the end none to collapse it at the start.
+// False for no range's object.
+pub(crate) fn set_points(
+    scope: &mut v8::PinScope<'_, '_>,
+    range: v8::Local<'_, v8::Value>,
+    start: (v8::Local<'_, v8::Object>, NodeId, u32),
+    end: Option<(v8::Local<'_, v8::Object>, NodeId, u32)>
+) -> bool {
+    let Some(ptr) = handle_of(scope, range) else { return false };
+    place(scope, &ptr, 2, start.0, Boundary { node: start.1, offset: start.2 });
+    if let Some((node, nid, offset)) = end {
+        place(scope, &ptr, END, node, Boundary { node: nid, offset });
+    }
+    true
+}
+// …and the engine's reading of one: its start and end as (node, offset), None for no range's object…
+pub(crate) fn points(scope: &mut v8::PinScope<'_, '_>, range: v8::Local<'_, v8::Value>) -> Option<[(NodeId, u32); 2]> {
+    entry_points(scope, range).map(|p| p.map(|b| (b.node, b.offset)))
+}
+// …and the object of the node its start's (0) or end's (1) is in.
+pub(crate) fn container<'s>(scope: &mut v8::PinScope<'s, '_>, range: v8::Local<'_, v8::Value>, which: usize) -> Option<v8::Local<'s, v8::Object>> {
+    let ptr = handle_of(scope, range)?;
+    // SAFETY: as `range_container`.
+    unsafe { (*ptr.as_ref().containers[which.min(END)].get()).get(scope) }
 }
 
 // __dom.rangeComparePoint(range, nid, offset) -> where the point is against the range: -1 before its start, 1 after its

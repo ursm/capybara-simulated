@@ -40,7 +40,7 @@ struct Run<'s> {
 }
 
 // DOM's length of a node: its data's for character data, its children's count for any other.
-fn node_length(arena: &RealmArena, n: NodeId) -> u32 {
+pub(crate) fn node_length(arena: &RealmArena, n: NodeId) -> u32 {
     arena.get(n).map_or(0, |d| if is_character_data(arena, n) { d.data.len() } else { d.children.len() }) as u32
 }
 fn is_character_data(arena: &RealmArena, n: NodeId) -> bool {

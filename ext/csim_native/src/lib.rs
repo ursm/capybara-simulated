@@ -83,6 +83,7 @@ mod resize_observation;
 mod resolved;
 mod scroll_boxes;
 mod scroll_into_view;
+mod selection;
 mod selector;
 mod serialize;
 mod sheet_owners;
