@@ -112,6 +112,73 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "eventPath", event_path, context_id);
     crate::dom::register(scope, ns, "retarget", retarget_op, context_id);
     crate::dom::register(scope, ns, "hoverChains", hover_chains_op, context_id);
+    crate::dom::register(scope, ns, "composedPath", composed_path_op, context_id);
+}
+
+// DOM `composedPath()` (§2.2): of an event path's steps — each whether it is a closed shadow root and whether it is a slot
+// in a closed shadow tree — those the listener at step `current` may see, in order: none inside a closed shadow tree
+// the current target is outside of.
+pub(crate) fn composed_steps(flags: &[(bool, bool)], current: usize) -> Vec<usize> {
+    // (…how deep in closed trees the current target is, counted from the path's end)
+    let mut level = 0i32;
+    for i in (current..flags.len()).rev() {
+        let (root_closed, slot_closed) = flags[i];
+        if root_closed {
+            level += 1;
+        }
+        if i == current {
+            break;
+        }
+        if slot_closed {
+            level -= 1;
+        }
+    }
+    let mut kept = Vec::new();
+    let (mut depth, mut max) = (level, level);
+    for i in (0..current).rev() {
+        let (root_closed, slot_closed) = flags[i];
+        if root_closed {
+            depth += 1;
+        }
+        if depth <= max {
+            kept.push(i);
+        }
+        if slot_closed {
+            depth -= 1;
+            max = max.min(depth);
+        }
+    }
+    kept.reverse();
+    kept.push(current);
+    let (mut depth, mut max) = (level, level);
+    for (i, &(root_closed, slot_closed)) in flags.iter().enumerate().skip(current + 1) {
+        if slot_closed {
+            depth += 1;
+        }
+        if depth <= max {
+            kept.push(i);
+        }
+        if root_closed {
+            depth -= 1;
+            max = max.min(depth);
+        }
+    }
+    kept
+}
+// __dom.composedPath(flags, current) -> the indices of the steps `composed_steps` keeps: `flags` a number a step (1 a
+// closed shadow root, 2 a slot in a closed tree), `current` the current target's step.
+fn composed_path_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
+    let flags: Vec<(bool, bool)> = (0..list.length())
+        .map(|i| list.get_index(scope, i).and_then(|v| v.uint32_value(scope)).unwrap_or(0))
+        .map(|f| (f & 1 != 0, f & 2 != 0))
+        .collect();
+    let current = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
+    if current >= flags.len() {
+        return;
+    }
+    let kept: Vec<f64> = composed_steps(&flags, current).into_iter().map(|i| i as f64).collect();
+    rv.set(crate::dom::f64_array(scope, &kept).into());
 }
 
 // __dom.retarget(aNid, bNid) -> DOM "retarget" the node `aNid` against the node `bNid` (null for something else, a
@@ -216,4 +283,23 @@ fn hover_chains_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         return;
     }
     rv.set(v8::Array::new_with_elements(scope, &[leave, enter]).into());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::composed_steps;
+
+    // A listener outside a closed shadow tree sees none of it; one inside sees the whole path out.
+    #[test]
+    fn a_closed_tree_is_hidden_from_outside() {
+        // target, closed shadow root, host, document
+        let flags = [(false, false), (true, false), (false, false), (false, false)];
+        assert_eq!(composed_steps(&flags, 2), vec![2, 3]);
+        assert_eq!(composed_steps(&flags, 0), vec![0, 1, 2, 3]);
+        assert_eq!(composed_steps(&flags, 3), vec![2, 3]);
+        // a slotted target: target, slot in a closed tree, closed root, host, document
+        let slotted = [(false, false), (false, true), (true, false), (false, false), (false, false)];
+        assert_eq!(composed_steps(&slotted, 0), vec![0, 3, 4]);
+        assert_eq!(composed_steps(&slotted, 1), vec![0, 1, 2, 3, 4]);
+    }
 }
