@@ -86,11 +86,16 @@ impl RealmArena {
 
     // `n`'s relevant value.
     pub(crate) fn relevant_value(&self, n: &NodeData) -> Vec<u16> {
+        self.relevant_value_with(n, &|v| v.to_string())
+    }
+    // …a colour field's sanitized by `colour` (input_value.rs `colour_value`: the style engine's), where the answer is
+    // its value and not a text selection's offsets, which no colour field has.
+    pub(crate) fn relevant_value_with(&self, n: &NodeData, colour: &dyn Fn(&str) -> String) -> Vec<u16> {
         if n.value.is_some() || !n.is_html_named("input") {
             return self.raw_value_units(n);
         }
         let attr = n.plain_attr_units("value").unwrap_or_default();
-        crate::input_value::sanitize_units(n.input_type(), &attr, &crate::input_value::Attrs::of(n), &|v| v.to_string())
+        crate::input_value::sanitize_units(n.input_type(), &attr, &crate::input_value::Attrs::of(n), colour)
     }
     // …its length, counted where that needs no copy: a dirty value's, a textarea's child text with each CR LF one.
     fn relevant_value_len(&self, n: &NodeData) -> u32 {
@@ -449,6 +454,36 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "rangeTextEdit", range_text_op, context_id);
     crate::dom::register(scope, ns, "typeText", type_text_op, context_id);
     crate::dom::register(scope, ns, "editControl", edit_control_op, context_id);
+    crate::dom::register(scope, ns, "relevantValue", relevant_value_op, context_id);
+    crate::dom::register(scope, ns, "childText", child_text_op, context_id);
+}
+
+// __dom.relevantValue(control) -> the value the user edits (`relevant_value`): a dirty value as typed, a clean input's
+// attribute sanitized for its type, a clean textarea's child text with its newlines normalized.
+fn relevant_value_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = crate::node_handle::nid_of(scope, args.get(0));
+    let cid = id.and_then(|id| crate::dom::dom(scope).arena.get(id)).map(|n| n.realm);
+    let units = match (id, cid) {
+        (Some(id), Some(cid)) => {
+            let d = crate::dom::dom(scope);
+            let arena: &crate::dom::RealmArena = d.arena.enter(cid);
+            let engine = d.styles.get(&cid);
+            let colour = |v: &str| crate::input_value::colour_value(engine, arena, v);
+            arena.get(id).map(|n| arena.relevant_value_with(n, &colour)).unwrap_or_default()
+        }
+        _ => Vec::new(),
+    };
+    rv.set(crate::dom::utf16_value(scope, &units));
+}
+// __dom.childText(element) -> the data of its direct child Text nodes (CDATA sections among them), in tree order: a
+// textarea's raw value — what its `defaultValue` is, its newlines as written.
+fn child_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = crate::node_handle::nid_of(scope, args.get(0));
+    let arena = &crate::dom::dom(scope).arena;
+    let units: Vec<u16> = id.and_then(|id| arena.get(id)).map_or_else(Vec::new, |n| {
+        n.children.iter().filter_map(|&c| arena.get(c)).filter(|t| t.kind == crate::dom::NodeKind::Text).flat_map(|t| t.data.iter().copied()).collect()
+    });
+    rv.set(crate::dom::utf16_value(scope, &units));
 }
 
 // __dom.selectionApplies(nid, forSelect) -> whether the selection APIs (`select()`, with `forSelect`) apply to the
