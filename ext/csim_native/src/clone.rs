@@ -314,6 +314,20 @@ fn structured_discard(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     }
 }
 
+// A serialization's bytes taken out of the isolate's keeping — one of plain data that shares and transfers nothing, as an
+// IndexedDB record's value is (idb.rs) — and bytes kept again as one, to be read back by its number.
+pub(crate) fn take_bytes(scope: &mut v8::PinScope<'_, '_>, number: u32) -> Option<Vec<u8>> {
+    let serialized = dom(scope).serialized.remove(&number)?;
+    Some(serialized.bytes)
+}
+pub(crate) fn keep_bytes(scope: &mut v8::PinScope<'_, '_>, bytes: Vec<u8>) -> u32 {
+    let d = dom(scope);
+    let number = d.next_serialized;
+    d.next_serialized = number.wrapping_add(1);
+    d.serialized.insert(number, Serialized { bytes, shared: Vec::new(), buffers: Vec::new(), transferred: Vec::new() });
+    number
+}
+
 // __dom.structuredExport(number) -> [bytes, buffers]: a serialization taken out of the isolate — to another one, a
 // worker's — its bytes an ArrayBuffer and its transferred ArrayBuffers new ones over their memory, for the bindings to
 // carry across (a message's own channel; RustyRacer.transferOut). It shares no SharedArrayBuffer, which no isolate here

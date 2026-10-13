@@ -61,6 +61,7 @@ mod input_value;
 mod input_types;
 mod intersection;
 mod html_parse;
+mod idb;
 mod image_decode;
 mod image_encode;
 mod image_source;
