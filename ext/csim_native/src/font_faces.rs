@@ -137,11 +137,34 @@ pub(crate) fn pick(faces: &[FaceRecord], stack: &str, bucket: &str, all: bool) -
 }
 // The families of a `font-family` value, unquoted and ASCII-lowercased.
 fn families(stack: &str) -> Vec<String> {
-    stack
-        .split(',')
-        .map(|f| f.trim().trim_matches(['"', '\'']).trim().to_ascii_lowercase())
-        .filter(|f| !f.is_empty())
-        .collect()
+    family_list(stack).into_iter().map(|f| f.to_ascii_lowercase()).collect()
+}
+// …as written: CSS Fonts 4 §2.1's `<family-name>#` — each a string, or identifiers joined by single spaces (a comma inside
+// a string no separator: `"Foo, Bar"` is one family) — a family that is neither skipped.
+pub(crate) fn family_list(stack: &str) -> Vec<String> {
+    let mut input = cssparser::ParserInput::new(stack);
+    let mut parser = cssparser::Parser::new(&mut input);
+    let mut out = Vec::new();
+    loop {
+        let item: Result<String, cssparser::ParseError<'_, ()>> = parser.parse_until_before(cssparser::Delimiter::Comma, |p| {
+            if let Ok(s) = p.try_parse(|p| p.expect_string().map(|s| s.as_ref().to_owned())) {
+                p.expect_exhausted()?;
+                return Ok(s);
+            }
+            let mut words = vec![p.expect_ident()?.as_ref().to_owned()];
+            while let Ok(w) = p.try_parse(|p| p.expect_ident().map(|w| w.as_ref().to_owned())) {
+                words.push(w);
+            }
+            p.expect_exhausted()?;
+            Ok(words.join(" "))
+        });
+        if let Some(family) = item.ok().map(|f| f.trim().to_owned()).filter(|f| !f.is_empty()) {
+            out.push(family);
+        }
+        if parser.next().is_err() {
+            return out;
+        }
+    }
 }
 // How far a face's weight range is from the weight wanted, in the order CSS Fonts 4 §5.2 prefers them: 0 inside it;
 // for a wanted 400 or 500, heavier faces up to 500 ascending, then lighter ones descending, then heavier past 500; for
@@ -172,6 +195,13 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "fontFaceInfo", font_face_info, context_id);
     crate::dom::register(scope, ns, "fontFaceSources", font_face_sources, context_id);
     crate::dom::register(scope, ns, "fontFaceDescriptor", font_face_descriptor, context_id);
+    crate::dom::register(scope, ns, "fontFamilyList", font_family_list_op, context_id);
+}
+// __dom.fontFamilyList(stack) -> the families of a `font-family` value, as written and unquoted (`family_list`).
+fn font_family_list_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let stack = args.get(0).to_rust_string_lossy(scope);
+    let items: Vec<v8::Local<v8::Value>> = family_list(&stack).iter().filter_map(|f| v8::String::new(scope, f)).map(Into::into).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // A `@font-face` descriptor's value as the engine parses and serializes it (CSS Fonts 4 §4, CSS Font Loading's FontFace
@@ -293,6 +323,12 @@ fn font_face_sources(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_family_list_parses_as_css_fonts_says() {
+        assert_eq!(family_list(r#""Foo, Bar", Times  New Roman,serif"#), ["Foo, Bar", "Times New Roman", "serif"]);
+        assert_eq!(family_list("'A', , 1x, B"), ["A", "B"]);
+    }
+
     use super::*;
 
     #[test]

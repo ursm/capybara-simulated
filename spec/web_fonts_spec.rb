@@ -290,6 +290,22 @@ RSpec.describe 'web fonts' do
     expect(got).to eq([80, 80])                                                 # still Ahem, both
   end
 
+  # A family whose quoted name holds a comma is one family (CSS Fonts 4 §2.1), its @font-face the one it names.
+  it 'takes a quoted family name with a comma in it as one family' do
+    s = session('/weights.html')
+    s.execute_script(<<~JS)
+      var st = document.createElement('style');
+      st.textContent = '@font-face { font-family: "Ah, em"; src: url("/ahem.ttf"); }';
+      document.head.appendChild(st);
+      var el = document.createElement('span');
+      el.id = 'comma';
+      el.style.fontFamily = '"Ah, em", monospace';
+      el.textContent = 'abcd';
+      document.body.appendChild(el);
+    JS
+    expect(width(s, 'comma')).to eq(80)
+  end
+
   it 'does not loop on an @import cycle' do
     s = session
     s.execute_script("var st = document.createElement('style'); st.textContent = '@import url(/cyc-a.css);'; document.head.appendChild(st); var el = document.createElement('span'); el.id = 'cyc'; el.style.fontFamily = 'CycA'; el.textContent = 'ab'; document.body.appendChild(el);")
