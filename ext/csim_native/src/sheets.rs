@@ -208,13 +208,15 @@ impl SheetStore {
         *stored.sheet.0.media.write_with(&mut lock.write()) = list;
     }
 
-    // Whether the sheet `id` is disabled — with `value`, that set.
-    pub(crate) fn disabled(&mut self, id: u32, value: Option<bool>) -> bool {
-        let Some(stored) = self.sheets.get_mut(&id) else { return false };
-        if let Some(v) = value {
-            stored.disabled = v;
+    // Whether the sheet `id` is disabled…
+    pub(crate) fn disabled(&self, id: u32) -> bool {
+        self.sheets.get(&id).is_some_and(|s| s.disabled)
+    }
+    // …and that it is, or is not.
+    pub(crate) fn set_disabled(&mut self, id: u32, disabled: bool) {
+        if let Some(stored) = self.sheets.get_mut(&id) {
+            stored.disabled = disabled;
         }
-        stored.disabled
     }
 
     // The page has let go of the sheet `id`.

@@ -229,4 +229,19 @@ RSpec.describe 'stylesheet sets + data: CSS' do
     JS
     expect(JSON.parse(r)).to eq('pre' => 'block', 'post' => 'none', 'after' => 'none')
   end
+
+  # A sheet's set is its owner's `title` as written — no whitespace trimmed (CSSOM; Chrome 155: a `<style title="A\u0085">`
+  # beside the selected set "A" is in it, one titled " A" is not).
+  it 'takes a title as written' do
+    s = session_for('<style title=A>#a{color:rgb(0, 128, 0)}</style><style id=x>#a{color:rgb(255, 0, 0)}</style>')
+    expect(s.evaluate_script(<<~'JS')).to eq(['rgb(0, 128, 0)', 'rgb(0, 128, 0)'])
+      (() => {
+        const x = document.getElementById('x'), color = () => getComputedStyle(document.getElementById('a')).color;
+        x.title = 'A\u0085';
+        const nel = color();
+        x.title = ' A';
+        return [nel, color()];
+      })()
+    JS
+  end
 end

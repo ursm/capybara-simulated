@@ -25,10 +25,12 @@ pub(crate) fn is_sheet_owner(n: &NodeData) -> bool {
 }
 
 impl RealmArena {
-    // The owner obtains a new sheet. (Quietly: which sheet it has is no input to the arena's memos, nor to a layout.)
+    // The owner obtains a new sheet. (Quietly: which sheet it has is no input to a layout, nor to the memos `mutations`
+    // keys — the style sheet sets', which it is, move on `sheet_epoch`.)
     pub(crate) fn renew_sheet(&mut self, id: NodeId) -> bool {
         let Some(n) = self.get_mut_quietly(id).filter(|n| is_sheet_owner(n)) else { return false };
         n.sheet_gen = n.sheet_gen.wrapping_add(1);
+        self.sheet_epoch += 1;
         true
     }
 
@@ -57,7 +59,6 @@ impl RealmArena {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "sheetGen", sheet_gen_op, context_id);
     crate::dom::register(scope, ns, "renewSheet", renew_sheet_op, context_id);
-    crate::dom::register(scope, ns, "explicitlyEnabled", explicitly_enabled_op, context_id);
     crate::dom::register(scope, ns, "sheetOwned", sheet_owned_op, context_id);
     crate::dom::register(scope, ns, "sheetSet", sheet_set_op, context_id);
 }
@@ -74,15 +75,11 @@ fn renew_sheet_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let Some(id) = nid_arg(scope, &args, 0) else { return };
     let enabled = args.get(1).is_true();
     let arena = &mut crate::dom::dom(scope).arena;
-    if arena.renew_sheet(id) && enabled && arena.explicitly_enabled.insert(id) {
-        arena.sheet_epoch += 1;
+    if arena.renew_sheet(id) && enabled {
+        arena.explicitly_enabled.insert(id);
     }
 }
-// __dom.explicitlyEnabled(nid) -> whether the `<link>` is explicitly enabled (`RealmArena::explicitly_enabled`).
-fn explicitly_enabled_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let enabled = nid_arg(scope, &args, 0).is_some_and(|id| crate::dom::dom(scope).arena.explicitly_enabled.contains(&id));
-    rv.set_bool(enabled);
-}
+
 
 // __dom.sheetOwned(nid, sheetId): the bindings made the owner's sheet (cascade.js `engineSheetOf`) — its sheet while the
 // owner's count of sheets is the one it has now.
@@ -114,9 +111,9 @@ pub(crate) struct SheetSet {
 
 impl RealmArena {
     // Whether the sheet `owner` has is disabled: the one the bindings last made of it, where that is its sheet still.
-    fn owner_sheet_disabled(&mut self, owner: NodeId) -> bool {
+    fn owner_sheet_disabled(&self, owner: NodeId) -> bool {
         let Some(&(sheet, count)) = self.owner_sheets.get(&owner) else { return false };
-        self.get(owner).is_some_and(|n| n.sheet_gen == count) && self.sheets.disabled(sheet, None)
+        self.get(owner).is_some_and(|n| n.sheet_gen == count) && self.sheets.disabled(sheet)
     }
 
     // …kept until the tree or what else they turn on changes.
@@ -131,9 +128,10 @@ impl RealmArena {
         set
     }
 
-    fn make_sheet_set(&mut self, doc: NodeId) -> SheetSet {
+    fn make_sheet_set(&self, doc: NodeId) -> SheetSet {
         use std::hash::{Hash, Hasher};
-        let trimmed = |v: Option<&str>| v.unwrap_or("").trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}').to_string();
+        // (…a sheet's title its owner's `title` as written: CSSOM, Chrome — no whitespace trimmed)
+        let title = |v: Option<&str>| v.unwrap_or("").to_string();
         // (…the owners and the `<meta>`s of the document's tree, in tree order — not in a shadow tree, nor a template's
         // contents)
         let (mut owners, mut default_style) = (Vec::new(), None);
@@ -166,7 +164,7 @@ impl RealmArena {
                     continue;
                 }
                 let alternate = rel.contains(&"alternate");
-                let (title, href, media) = (trimmed(n.plain_attr("title")), n.plain_attr("href").unwrap_or("").to_string(), n.plain_attr("media").map(str::to_string));
+                let (title, href, media) = (title(n.plain_attr("title")), n.plain_attr("href").unwrap_or("").to_string(), n.plain_attr("media").map(str::to_string));
                 let count = n.sheet_gen;
                 if self.owner_sheet_disabled(owner) {
                     continue;
@@ -183,7 +181,7 @@ impl RealmArena {
                 if !css {
                     continue;
                 }
-                let (title, media, count) = (trimmed(n.plain_attr("title")), n.plain_attr("media").map(str::to_string), n.sheet_gen);
+                let (title, media, count) = (title(n.plain_attr("title")), n.plain_attr("media").map(str::to_string), n.sheet_gen);
                 if self.owner_sheet_disabled(owner) {
                     continue;
                 }
@@ -208,9 +206,9 @@ impl RealmArena {
     }
 }
 
-// __dom.sheetSet(docNid) -> [key, selectedSet, owner, …]: the document's style sheet sets (`RealmArena::sheet_set`) —
-// a number keying what the sheets' taking part turns on, the selected set ('' where none matters), and the `<style>` /
-// `<link>` elements whose sheets take part, in tree order.
+// __dom.sheetSet(docNid) -> [key, selectedSet, [owner, …]]: the document's style sheet sets (`RealmArena::sheet_set`)
+// — a number keying what the sheets' taking part turns on, the selected set ('' where none matters), and the `<style>`
+// / `<link>` elements whose sheets take part, in tree order.
 fn sheet_set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);
@@ -219,14 +217,6 @@ fn sheet_set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let key: v8::Local<v8::Value> = v8::Number::new(scope, (set.key >> 11) as f64).into();
     let selected: v8::Local<v8::Value> = v8::String::new(scope, set.selected.as_deref().unwrap_or("")).map_or_else(|| v8::undefined(scope).into(), Into::into);
     let owners = crate::dom::nodes_value(scope, cid, &set.taking_part);
-    let owners = v8::Local::<v8::Array>::try_from(owners).ok();
-    let mut items = vec![key, selected];
-    if let Some(owners) = owners {
-        for i in 0..owners.length() {
-            if let Some(o) = owners.get_index(scope, i) {
-                items.push(o);
-            }
-        }
-    }
+    let items = [key, selected, owners];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }

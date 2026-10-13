@@ -4146,11 +4146,12 @@ fn sheet_media(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 fn sheet_disabled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(sheet) = handle_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let value = (args.length() > 1).then(|| args.get(1).boolean_value(scope));
-    let disabled = with_sheets(scope, &args, |store, _| store.disabled(sheet, value));
-    if value.is_some() {
+    if let Some(value) = value {
+        with_sheets(scope, &args, |store, _| store.set_disabled(sheet, value));
         let cid = realm_id(scope, &args);
         realm(scope, cid).sheet_epoch += 1;
     }
+    let disabled = with_sheets(scope, &args, |store, _| store.disabled(sheet));
     rv.set_bool(disabled);
 }
 // __dom.mediaText(text) -> `text` as a media list, as the engine serializes one.
