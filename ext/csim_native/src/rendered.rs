@@ -595,6 +595,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 const BOX_NONE: i32 = 0;
 const BOX_INLINE: i32 = 1;
 const BOX_OTHER: i32 = 2;
+// …and whether that is any box: not `display: none` either, whatever a pass left.
+pub(crate) fn has_own_box(arena: &RealmArena, id: NodeId) -> bool {
+    box_kind(arena, id) != BOX_NONE
+}
 fn box_kind(arena: &RealmArena, id: NodeId) -> i32 {
     let (Some(style), Some(n)) = (crate::geometry::box_style(arena, id), arena.get(id)) else { return BOX_NONE };
     let d = style.get_box().walk_display(n.rendering_tag());

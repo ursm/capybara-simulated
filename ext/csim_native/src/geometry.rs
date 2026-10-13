@@ -1368,7 +1368,6 @@ fn flat_inclusive_ancestor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     use crate::dom::register;
-    register(scope, ns, "scrollShift", scroll_shift_op, context_id);
     register(scope, ns, "flatInclusiveAncestor", flat_inclusive_ancestor_op, context_id);
     register(scope, ns, "laidOutBox", laid_out_box_op, context_id);
     register(scope, ns, "renderedBox", rendered_box_op, context_id);
@@ -1379,24 +1378,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "usedInsets", used_insets_op, context_id);
     register(scope, ns, "clientRects", client_rects_op, context_id);
     register(scope, ns, "offsets", offsets_op, context_id);
-    register(scope, ns, "paintTransform", paint_transform_op, context_id);
-    register(scope, ns, "paintQuad", paint_quad_op, context_id);
-    register(scope, ns, "clipBoxes", clip_boxes_op, context_id);
     register(scope, ns, "scrollOffset", scroll_offset, context_id);
     register(scope, ns, "setScrollOffset", set_scroll_offset, context_id);
     register(scope, ns, "layoutRootAlone", layout_root_alone, context_id);
 }
 
-// __dom.scrollShift(nid, out): the scroll shift of `nid`'s box (`scroll_shift`), written to the Float64Array `out` as
-// `[x, y]`.
-fn scroll_shift_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let shift = match crate::dom::nid_arg(scope, &args, 0) {
-        Some(id) => scroll_shift(crate::dom::realm(scope, cid), id),
-        None => [0.0; 2],
-    };
-    crate::dom::write_f64s(args.get(1), &shift);
-}
 
 // __dom.laidOutBox(nid, out) / renderedBox(nid, out) / scrollSize(nid, out) -> whether `nid` has one: its box where the
 // page's scrolling carried it (`laid_out_box`), that box as the page measures it (`rendered_box`), and its scrollable
@@ -1494,36 +1480,6 @@ fn client_rects_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         .unwrap_or_default();
     rv.set(crate::dom::f64_array(scope, &flat).into());
 }
-// __dom.paintTransform(nid, out) -> 0 where no transform moves `nid`'s box, 1 with the affine the painter draws it under
-// written to `out` (`paint_transform`), 2 where it has one the painter cannot express.
-fn paint_transform_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let answer = crate::dom::nid_arg(scope, &args, 0).and_then(|id| paint_transform(crate::dom::realm(scope, cid), id));
-    let kind = match answer {
-        None => 0,
-        Some(Some(affine)) => {
-            crate::dom::write_f64s(args.get(1), &affine);
-            1
-        }
-        Some(None) => 2,
-    };
-    rv.set(v8::Integer::new(scope, kind).into());
-}
-// __dom.clipBoxes(nid, own) -> Float64Array: the clips the painter lays `nid` down under, `[x, y, w, h, a, b, c, d, e,
-// f]` each, innermost first (`clip_boxes`).
-fn clip_boxes_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let own = args.get(1).is_true();
-    let flat: Vec<f64> = crate::dom::nid_arg(scope, &args, 0)
-        .map(|id| clip_boxes(crate::dom::realm(scope, cid), id, own).into_iter().flatten().collect())
-        .unwrap_or_default();
-    rv.set(crate::dom::f64_array(scope, &flat).into());
-}
-// __dom.paintQuad(nid, out) -> whether `nid`'s box projects to a quad the painter clips to, its corners written to `out`
-// (`paint_quad`).
-fn paint_quad_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    answer_into(scope, &args, rv, paint_quad);
-}
 
 
 // __dom.scrollOffset(nid, axis, shown) -> the scroll offset `nid` keeps in `axis` (0 x, 1 y) — or, with `shown`, the
@@ -1578,6 +1534,8 @@ fn layout_root_alone(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let w = declared(position.map(|p| &p.width), vw).unwrap_or(vw);
     let h = declared(position.map(|p| &p.height), vh).unwrap_or(0.0);
     arena.begin_layout(root, [vw, vh]);
+    // (…and no text placed for a painter)
+    arena.painted.replace(None);
     let pass = arena.layout_pass;
     if let Some(node) = arena.get_mut_quietly(root) {
         node.layout_box = Some(Box::at(root.to_f64(), [0.0, 0.0, w, h]));

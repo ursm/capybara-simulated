@@ -1360,7 +1360,7 @@ x</div>))
   end
 
   # `position: sticky` is IN FLOW, and its box is where a STATIC one's would be — not a relative one's. The
-  # scroll-driven shift is never in the laid-out box: `stickyDelta` is read by `scrollShift` and the `offsetTop`
+  # scroll-driven shift is never in the laid-out box: `stickyDelta` is read by `scroll_shift` and the `offsetTop`
   # reader, so the shift lives entirely in the READ path and the layout knows nothing of it. NINE separate gates
   # once refused sticky as "a scroll-driven shift native doesn't model", which mistook where that shift is
   # applied; native needed no new rule at all, only to stop refusing — a sticky float included.

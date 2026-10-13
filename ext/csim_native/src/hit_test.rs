@@ -671,7 +671,6 @@ pub(crate) fn box_parent(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "isInert", is_inert_op, context_id);
     crate::dom::register(scope, ns, "hitTest", hit_test_op, context_id);
-    crate::dom::register(scope, ns, "paintOrder", paint_order_op, context_id);
     crate::dom::register(scope, ns, "observedVisible", observed_visible_op, context_id);
     crate::dom::register(scope, ns, "clippedAway", clipped_away_op, context_id);
 }
@@ -716,20 +715,6 @@ fn hit_test_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     rv.set(crate::dom::nodes_value(scope, cid, &hits));
 }
 
-// __dom.paintOrder(nids, contents, now) -> Float64Array: the indices of the layers `nids` names — each a box, or where
-// `contents[i]` is 1 the content that box owns — in the order they paint, bottom first (`Painting::sort`).
-fn paint_order_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let nids = crate::dom::f64_arg(args.get(0)).to_vec();
-    let contents = crate::dom::f64_arg(args.get(1)).to_vec();
-    let layers: Vec<(NodeId, bool)> = nids
-        .iter()
-        .zip(&contents)
-        .map(|(&n, &c)| (NodeId::from_i64(n as i64).unwrap_or(NodeId { idx: u32::MAX, generation: 0 }), c != 0.0))
-        .collect();
-    let Some(order) = painting(scope, &args, 2, |p| p.sort(&layers)) else { return };
-    let order: Vec<f64> = order.into_iter().map(|i| i as f64).collect();
-    rv.set(crate::dom::f64_array(scope, &order).into());
-}
 
 // __dom.observedVisible(nids, now) -> Float64Array: for each element `nids` names, 1 where an intersection observer
 // tracking visibility sees it visible, else 0 (`Painting::visible`) — one painting for all of them.

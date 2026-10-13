@@ -80,7 +80,7 @@ RSpec.describe 'save_screenshot' do
   end
 
   it 'paints text in its own colour, on the line the flow put it on' do
-    # The run positions come from the flow itself (`recordingRuns`), so the ink has to land inside
+    # The run positions come from the flow itself (`recordingPass`), so the ink has to land inside
     # the paragraph's own box — which is what a painter that re-derived line breaking would miss.
     s = page_with('<p>Hello painter</p>', css: 'p{color:rgb(0,128,0);margin:0;height:20px}')
     shot(s) do |_img, px, _path|

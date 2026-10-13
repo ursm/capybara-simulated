@@ -982,6 +982,8 @@ pub(crate) struct RealmState {
     pub(crate) geometry_memo: std::cell::RefCell<crate::geometry::Memo>,
     // Where the text of the last layout that recorded its pieces is (text_geometry.rs) — a caret from a point's.
     pub(crate) text_geometry: std::cell::RefCell<Option<crate::text_geometry::TextGeometry>>,
+    // …and the text pieces of the last pass that painted, as the painter draws them (paint.rs).
+    pub(crate) painted: std::cell::RefCell<Option<crate::paint::Painted>>,
     // The nodes holding a scroll offset (`NodeData::scroll`), which every layout clamps to the range its box has then
     // (`geometry::reclamp_scrolls`) and a removal from the tree drops (`detach`).
     pub(crate) scrolled_nodes: Vec<NodeId>,
@@ -2590,6 +2592,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::media::install(scope, ns, context_id);
     crate::image_requests::install(scope, ns, context_id);
     crate::drag_data_store::install(scope, ns, context_id);
+    crate::paint::install(scope, ns, context_id);
     crate::canvas_path::install(scope, ns, context_id);
     crate::text::install(scope, ns, context_id);
     crate::dom_matrix::install(scope, ns, context_id);
