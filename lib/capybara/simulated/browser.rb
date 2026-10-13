@@ -9050,18 +9050,6 @@ module Capybara
       # throwaway arrays per hop (perf).
       CACHE_MODES_SKIP_READ  = %w[no-store reload].freeze
       CACHE_MODES_SERVE_STALE = %w[force-cache only-if-cached].freeze
-      # Fetch "bad port" blocklist (https://fetch.spec.whatwg.org/#port-blocking) —
-      # ports tied to non-HTTP protocols a request must never reach. Frozen Set for
-      # O(1) membership on the rack_fetch path.
-      BAD_PORTS = Set[
-        0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77,
-        79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135,
-        137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531,
-        532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720,
-        1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668,
-        6669, 6679, 6697, 10080
-      ].freeze
-
       REFERRER_POLICIES = %w[
         no-referrer no-referrer-when-downgrade origin origin-when-cross-origin
         same-origin strict-origin strict-origin-when-cross-origin unsafe-url
@@ -9127,7 +9115,7 @@ module Capybara
       def bad_port?(url_str)
         return false unless url_str =~ %r{\A[a-z]+://[^/]*:\d}i
         port = parse_url(url_str)&.fetch(:port).to_s
-        !port.empty? && BAD_PORTS.include?(port.to_i)
+        !port.empty? && Native.bad_port(port.to_i)
       end
 
       # URLs we won't even try to route through Rack: anything that
@@ -11626,7 +11614,7 @@ module Capybara
           'statusText' => RuntimeShared.utf8_text(Rack::Utils::HTTP_STATUS_CODES[status.to_i] || ''),
           # A network response's headers as every other's cross (`stringify`), less the forbidden response
           # headers no script sees (set-cookie / set-cookie2 — which Rack 2 joins with a newline).
-          'headers'    => stringify(headers).reject {|k, _| %w[set-cookie set-cookie2].include?(k.downcase) },
+          'headers'    => stringify(headers).reject {|k, _| Native.forbidden_response_header(k) },
           'url'        => url,
           'type'       => 'basic',
           # The UA transparently decodes a Content-Encoding'd body (gzip/deflate) before the SW's
@@ -11909,44 +11897,13 @@ module Capybara
         dom_call('__csimBaseHref').to_s
       end
 
-      # Fetch "CORS-safelisted method" / "…request-header" / "…Content-Type". A request
-      # is "simple" (no preflight) iff its method is safelisted AND every author header is
-      # safelisted (Content-Type only for a urlencoded / multipart / text/plain value).
-      CORS_SAFELISTED_METHODS = %w[GET HEAD POST].freeze
-      CORS_SAFELISTED_HEADERS = %w[accept accept-language content-language content-type].freeze
+      # Fetch "CORS-safelisted method" / "…request-header", the engine's (fetch_rules.rs) as the page's are: a request is
+      # "simple" (no preflight) iff its method is safelisted AND every author header is — a safelisted name with a value
+      # that keeps it so (Content-Type only a urlencoded / multipart / text/plain one, no CORS-unsafe byte, 128 bytes at
+      # most).
       # RFC 7230 `token` (tchar+) — a valid HTTP method / field-name. Used to reject a
       # preflight whose Access-Control-Allow-Methods / -Headers carries a malformed value.
       HTTP_TOKEN = /\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/.freeze
-      CORS_SAFELISTED_CTYPES  = %w[application/x-www-form-urlencoded multipart/form-data text/plain].freeze
-      # Fetch "CORS-unsafe request-header byte" — a byte in a header value that forces a
-      # safelisted-name header out of the safelisted set (so a preflight becomes necessary):
-      # a control byte other than HT (0x09), DEL, or one of the delimiters "(),:<>?@[\]{}.
-      CORS_UNSAFE_VALUE_BYTE  = /[\x00-\x08\x0a-\x1f\x7f"():<>?@\[\\\]{}]/n.freeze
-      # accept-language / content-language values are further restricted: only digits,
-      # ASCII letters, space, and `*,-.;=` keep them safelisted.
-      CORS_LANGUAGE_VALUE     = /\A[0-9A-Za-z *,\-.;=]*\z/n.freeze
-
-      # Fetch "CORS-safelisted request-header": a (name, value) whose value keeps the
-      # request "simple" (no preflight). All four names cap the value at 128 bytes; each
-      # then constrains which bytes the value may contain (a `"` in Accept, a control byte
-      # in Content-Language, an over-long text/plain Content-Type all force a preflight —
-      # cors-preflight-not-cors-safelisted).
-      def cors_safelisted_request_header?(name, value)
-        v = value.to_s.b
-        return false if v.bytesize > 128
-        case name
-        when 'accept'
-          !v.match?(CORS_UNSAFE_VALUE_BYTE)
-        when 'accept-language', 'content-language'
-          v.match?(CORS_LANGUAGE_VALUE)
-        when 'content-type'
-          return false if v.match?(CORS_UNSAFE_VALUE_BYTE)
-          essence = v.split(';', 2).first.to_s.strip.downcase
-          CORS_SAFELISTED_CTYPES.include?(essence)
-        else
-          false
-        end
-      end
 
       # The sorted, lowercased author header names that are NOT CORS-safelisted. A
       # safelisted NAME still counts as unsafe when its VALUE fails the safelisting (an
@@ -11957,16 +11914,12 @@ module Capybara
         (headers || {}).filter_map {|k, v|
           name = k.to_s.downcase
           next if name.start_with?('x-csim') || name == 'content-length'
-          if CORS_SAFELISTED_HEADERS.include?(name)
-            cors_safelisted_request_header?(name, v) ? nil : name
-          else
-            name
-          end
+          Native.cors_safelisted_request_header(name, v.to_s) ? nil : name
         }.uniq.sort
       end
 
       def cors_unsafe_request?(method, headers)
-        !CORS_SAFELISTED_METHODS.include?(method.to_s.upcase) || !cors_unsafe_headers(headers).empty?
+        !Native.cors_safelisted_method(method.to_s.upcase) || !cors_unsafe_headers(headers).empty?
       end
 
       # Fetch "CORS check" on a cross-origin response: it must allow the request's
@@ -12046,7 +11999,7 @@ module Capybara
         # does not cover a `DELETE` request. Safelisted GET/HEAD/POST pass regardless
         # (they're always normalized to upper-case) (cors-preflight-star method-case).
         m = method.to_s
-        method_ok = allow_methods.include?(m) || CORS_SAFELISTED_METHODS.include?(m) || (!credentialed && allow_methods.include?('*'))
+        method_ok = allow_methods.include?(m) || Native.cors_safelisted_method(m) || (!credentialed && allow_methods.include?('*'))
         return false unless method_ok
         wildcard_headers = !credentialed && allow_headers.include?('*')
         unsafe_headers.all? {|h|
@@ -12100,12 +12053,6 @@ module Capybara
         {methods: allow_methods, headers: allow_headers, max_age: cors_header(ph, 'access-control-max-age').to_i}
       end
 
-      # Fetch "CORS-safelisted response-header name" — always exposed to script for a
-      # cross-origin response, without being listed in Access-Control-Expose-Headers.
-      CORS_SAFELISTED_RESPONSE_HEADERS = %w[
-        cache-control content-language content-length content-type expires last-modified pragma
-      ].freeze
-
       # The response headers a cross-origin "cors" response exposes to getResponseHeader /
       # getAllResponseHeaders: the CORS-safelisted set plus any named in Access-Control
       # -Expose-Headers. `*` exposes every header, but ONLY for a non-credentialed response;
@@ -12124,13 +12071,15 @@ module Capybara
         # `*` (cors-filtering "header is forbidden"). x-csim-status-text is our internal
         # reason-phrase sentinel (response_hash lifts it into statusText, which IS exposed
         # cross-origin, then strips it from the script-visible map), so it must survive.
-        forbidden = %w[set-cookie set-cookie2]
-        expose    = cors_list(cors_header(headers, 'access-control-expose-headers')).map(&:downcase)
-        if !credentialed && expose.include?('*')
-          return headers.reject {|k, _| forbidden.include?(k.to_s.downcase) }
-        end
-        allowed = CORS_SAFELISTED_RESPONSE_HEADERS + expose + ['x-csim-status-text']
-        headers.select {|k, _| allowed.include?(k.to_s.downcase) && !forbidden.include?(k.to_s.downcase) }
+        expose = cors_list(cors_header(headers, 'access-control-expose-headers')).map(&:downcase)
+        return headers.reject {|k, _| Native.forbidden_response_header(k.to_s) } if !credentialed && expose.include?('*')
+
+        # (…a CORS-safelisted response-header name always exposed — the engine's table — and those named)
+        allowed = expose + ['x-csim-status-text']
+        headers.select {|k, _|
+          name = k.to_s
+          (Native.cors_safelisted_response_header(name) || allowed.include?(name.downcase)) && !Native.forbidden_response_header(name)
+        }
       end
 
       # Case-insensitive response-header lookup + comma-list split for the CORS checks.

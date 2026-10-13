@@ -61,6 +61,7 @@ mod input_value;
 mod input_types;
 mod intersection;
 mod html_parse;
+mod fetch_rules;
 mod idb;
 mod idb_databases;
 mod image_decode;
@@ -160,6 +161,12 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("url_parts", magnus::function!(url_ops::parts_for_ruby, 2))?;
     // A driver session's IndexedDB storage: a new partition of the one registry, cleared as the session resets, and
     // whether an agent of it has notices to take — its event loop has work (idb_databases.rs).
+    // Fetch's fixed header, method and port rules, the page's too (fetch_rules.rs).
+    native.define_module_function("bad_port", magnus::function!(fetch_rules::bad_port_for_ruby, 1))?;
+    native.define_module_function("cors_safelisted_method", magnus::function!(fetch_rules::cors_safelisted_method_for_ruby, 1))?;
+    native.define_module_function("cors_safelisted_request_header", magnus::function!(fetch_rules::cors_safelisted_request_header_for_ruby, 2))?;
+    native.define_module_function("cors_safelisted_response_header", magnus::function!(fetch_rules::cors_safelisted_response_header_for_ruby, 1))?;
+    native.define_module_function("forbidden_response_header", magnus::function!(fetch_rules::forbidden_response_header_for_ruby, 1))?;
     native.define_module_function("idb_partition_new", magnus::function!(idb_databases::partition_new, 0))?;
     native.define_module_function("idb_clear", magnus::function!(idb_databases::clear, 1))?;
     native.define_module_function("idb_pending", magnus::function!(idb_databases::pending, 1))?;
