@@ -734,7 +734,8 @@ fn anim_activity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 // completed transition nothing holds — ahead of the ranked ones of its class), and an animation's playback event before
 // its CSS one; otherwise as queued. Answers the events' indices.
 pub(crate) fn event_order(events: &[(f64, AnimationId, u8, bool)], rank: &std::collections::HashMap<AnimationId, usize>) -> Vec<usize> {
-    let at = |t: f64| if t.is_finite() { (t * 1000.0).round() } else { t };
+    // (…a -0 rounded to the microsecond the 0 it ties with)
+    let at = |t: f64| if t.is_finite() { (t * 1000.0).round() + 0.0 } else { t };
     let mut order: Vec<usize> = (0..events.len()).collect();
     order.sort_by(|&x, &y| {
         let (a, b) = (&events[x], &events[y]);
@@ -794,5 +795,7 @@ mod tests {
             (10.0, 7, 1, true),
         ];
         assert_eq!(event_order(&events, &rank), vec![4, 3, 5, 1, 0, 2]);
+        // (…a time just under 0 ties with 0: then its class decides)
+        assert_eq!(event_order(&[(-0.0001, 1, 1, false), (0.0001, 2, 0, false)], &rank), vec![1, 0]);
     }
 }
