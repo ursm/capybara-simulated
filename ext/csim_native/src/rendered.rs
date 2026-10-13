@@ -586,6 +586,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "visibleText", visible_text_op, context_id);
     crate::dom::register(scope, ns, "boxKind", box_kind_op, context_id);
     crate::dom::register(scope, ns, "cssImageUrls", css_image_urls_op, context_id);
+    crate::dom::register(scope, ns, "transparent", transparent_op, context_id);
 }
 
 // What box `id` generates by its own computed style, which says so before anything is laid out: `BOX_NONE` none — a
@@ -668,6 +669,21 @@ fn css_image_urls(arena: &RealmArena, root: NodeId) -> Vec<(&'static str, String
 
 // One question asked of the realm's arena and its style engine at the page's clock `now`: what it answers, or nothing
 // where the realm has no engine or the engine failed a verification (thrown here).
+// Whether `id` or an element of its flat-tree ancestry has an `opacity` of 0 — what `checkVisibility({opacityProperty})`
+// refuses.
+pub(crate) fn transparent(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, now: f64) -> bool {
+    std::iter::successors(Some(id), |&n| crate::geometry::flat_parent(arena, n))
+        .take_while(|&n| arena.is_element(n))
+        .any(|n| engine.computed_style(arena, n, None, now).is_some_and(|s| s.get_effects().opacity == 0.0))
+}
+// __dom.transparent(nid, now) -> `transparent`; undefined where the realm has no style engine.
+fn transparent_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    if let Some(answer) = with_engine(scope, &args, 1, |engine, arena, now| transparent(engine, arena, id, now)) {
+        rv.set_bool(answer);
+    }
+}
+
 pub(crate) fn with_engine<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, now_at: i32, ask: impl FnOnce(&mut StyleEngine, &RealmArena, f64) -> R) -> Option<R> {
     let cid = crate::dom::realm_id(scope, args);
     let now = crate::dom::clock_arg(scope, args, now_at);

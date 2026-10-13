@@ -31,6 +31,10 @@ pub(crate) fn flat_parent(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
         _ => Some(p),
     }
 }
+// Whether `a` is `b` or one of its flat-tree ancestors.
+pub(crate) fn flat_inclusive_ancestor(arena: &RealmArena, a: NodeId, b: NodeId) -> bool {
+    std::iter::successors(Some(b), |&n| flat_parent(arena, n)).any(|n| n == a)
+}
 
 // …and its children there (the style engine's `traversal_children`): a host's are its shadow root's, a slot its assigned
 // nodes where it has any, anything else its own.
@@ -1354,9 +1358,18 @@ fn inline_percentage_axis(
     side.is_some_and(|lp| lp.has_percentage())
 }
 
+// __dom.flatInclusiveAncestor(a, b) -> whether node `a` is node `b` or a flat-tree ancestor of it.
+fn flat_inclusive_ancestor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(a), Some(b)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return rv.set_bool(false) };
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    rv.set_bool(flat_inclusive_ancestor(arena, a, b));
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     use crate::dom::register;
     register(scope, ns, "scrollShift", scroll_shift_op, context_id);
+    register(scope, ns, "flatInclusiveAncestor", flat_inclusive_ancestor_op, context_id);
     register(scope, ns, "laidOutBox", laid_out_box_op, context_id);
     register(scope, ns, "renderedBox", rendered_box_op, context_id);
     register(scope, ns, "scrollSize", scroll_size_op, context_id);
