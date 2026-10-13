@@ -4944,6 +4944,7 @@ fn reset_arena(
     dom(scope).arena.forget_reactions_of(cid);
     crate::text_codec::drop_realm(scope, cid);   // (…a page's stream decoders die with it)
     dom(scope).walk_reuse.remove(&cid);
+    dom(scope).caret_moves.remove(&cid);
     // …and the style engine forgets the nodes it held (its sheets stay until the new page sets its own).
     if let Some(engine) = dom(scope).styles.get_mut(&cid) {
         engine.reset();
@@ -4994,6 +4995,7 @@ fn drop_realm(
         d.arena.drop_realm(id);
         d.styles.remove(&id);          // (…and its style engine)
         d.walk_reuse.remove(&id);      // (…and its Rust walk's last pass)
+        d.caret_moves.remove(&id);     // (…and its caret's last line-wise move)
         d.arenas.remove(&id);          // (…and its arena object, which holds its global's `__dom`)
         d.clone_shadow_hooks.remove(&id);   // (…and its shadow root cloning hook)
         crate::text_codec::drop_realm(scope, id);   // (…and the stream decoders it left open)

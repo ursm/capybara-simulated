@@ -996,8 +996,8 @@ fn caret_move_forget(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 }
 
 // __dom.charDirection(nid, offset) -> 1, 0 or -1: the strong direction of the text at a place in a text node, as
-// `Selection.modify()` reads 'left' and 'right' by a character or a word — the code unit after it, else the one before
-// it: a right-to-left script's character (Hebrew, Arabic, Syriac, Thaana, N'Ko, Samaritan, Mandaic, Adlam) rtl (1), any
+// `Selection.modify()` reads 'left' and 'right' by a character or a word — the character after it, else the one before
+// it (a surrogate pair one character: Adlam's are all past the BMP): a right-to-left script's character (Hebrew, Arabic, Syriac, Thaana, N'Ko, Samaritan, Mandaic, Adlam) rtl (1), any
 // other letter ltr (0); neither, none (-1: its element's `direction` decides).
 fn char_direction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     use icu_properties::props::Script;
@@ -1007,9 +1007,11 @@ fn char_direction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let arena = crate::dom::realm(scope, cid);
     let Some(data) = arena.get(node).filter(|n| n.kind == crate::dom::NodeKind::Text).map(|n| &n.data) else { return rv.set_int32(-1) };
     const RTL: [Script; 8] = [Script::Hebrew, Script::Arabic, Script::Syriac, Script::Thaana, Script::Nko, Script::Samaritan, Script::Mandaic, Script::Adlam];
-    let at = [Some(offset), offset.checked_sub(1)];
-    for unit in at.into_iter().flatten().filter_map(|i| data.get(i).copied()) {
-        let cp = u32::from(unit);
+    let after = char::decode_utf16(data.get(offset..).unwrap_or(&[]).iter().copied()).next();
+    let before = char::decode_utf16(data.get(..offset).unwrap_or(&[]).iter().rev().copied()).next();
+    // (…the one before read backwards: a pair decodes from its low surrogate first, so it is rebuilt from the two units)
+    let before = before.map(|c| c.map_or_else(|_| pair_before(data, offset), Some)).flatten();
+    for cp in [after.and_then(Result::ok), before].into_iter().flatten().map(u32::from) {
         if crate::unicode::script(cp).is_some_and(|s| RTL.contains(&s)) {
             return rv.set_int32(1);
         }
@@ -1018,4 +1020,14 @@ fn char_direction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         }
     }
     rv.set_int32(-1);
+}
+
+// The character a surrogate pair ending at `offset` makes, or the lone unit there as one.
+fn pair_before(data: &[u16], offset: usize) -> Option<char> {
+    let low = *data.get(offset.checked_sub(1)?)?;
+    let high = offset.checked_sub(2).and_then(|i| data.get(i).copied());
+    match high {
+        Some(h) => char::decode_utf16([h, low]).next().and_then(Result::ok).or_else(|| char::from_u32(u32::from(low))),
+        None => char::from_u32(u32::from(low)),
+    }
 }
