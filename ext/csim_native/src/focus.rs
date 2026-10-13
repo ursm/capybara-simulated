@@ -365,6 +365,23 @@ fn tree_order(arena: &RealmArena, a: NodeId, b: NodeId) -> Ordering {
     place(x).cmp(&place(y))
 }
 
+// What HTML's focusing steps focus for `id` (`focus()`, the driver's focusing): a shadow host that delegates focus its
+// focusable area (`focusable_area`), a label that is no focusable area itself its labeled control — each focused in
+// turn as `id` would be — else `id`, where it is a focusable area; None for nothing.
+pub(crate) fn focus_target(engine: &mut StyleEngine, arena: &RealmArena, mut id: NodeId, now: f64) -> Option<NodeId> {
+    // (…a chain of them bounded: each step goes down a shadow tree or across to a control)
+    for _ in 0..64 {
+        if delegating_root(arena, id).is_some() {
+            id = focusable_area(engine, arena, id, now)?;
+        } else if arena.get(id).is_some_and(|n| n.is_html_named("label")) && !focusable(engine, arena, id, now) {
+            id = arena.labeled_control(id)?;
+        } else {
+            return focusable(engine, arena, id, now).then_some(id);
+        }
+    }
+    None
+}
+
 // HTML "get the focusable area" for a shadow host whose shadow root delegates focus — what its focusing steps focus,
 // being no focusable area itself: the focused element, where it is under the host (a slotted node's, or one in a nested
 // tree, keeps focus), else the host's focus delegate. (The other focusable areas an element stands for — an image map's
@@ -423,6 +440,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "focusable", focusable_op, context_id);
     crate::dom::register(scope, ns, "nextFocus", next_focus_op, context_id);
     crate::dom::register(scope, ns, "focusableArea", focusable_area_op, context_id);
+    crate::dom::register(scope, ns, "focusTarget", focus_target_op, context_id);
     crate::dom::register(scope, ns, "dialogFocusingSteps", dialog_focusing_steps_op, context_id);
     crate::dom::register(scope, ns, "dialogFocusRestore", dialog_focus_restore_op, context_id);
     crate::dom::register(scope, ns, "documentFocus", document_focus_op, context_id);
@@ -501,6 +519,14 @@ fn dialog_focus_restore_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
 fn focusable_area_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(host) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let found = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| focusable_area(engine, arena, host, now)).flatten();
+    let cid = crate::dom::realm_id(scope, &args);
+    rv.set(crate::dom::nodes_value(scope, cid, found.as_slice()));
+}
+
+// __dom.focusTarget(nid, now) -> [what focusing the element focuses] or [] (`focus_target`), as `nodes_value` answers.
+fn focus_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let found = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| focus_target(engine, arena, id, now)).flatten();
     let cid = crate::dom::realm_id(scope, &args);
     rv.set(crate::dom::nodes_value(scope, cid, found.as_slice()));
 }
