@@ -382,6 +382,16 @@ pub(crate) fn focus_target(engine: &mut StyleEngine, arena: &RealmArena, mut id:
     None
 }
 
+// What a press on `id` focuses (HTML: a click focuses the nearest element up from its target that can take it): the
+// first of its flat-tree inclusive ancestors that is a focusable area or a shadow host delegating focus (pressing it moves
+// focus into its shadow tree, shadow-dom/focus/click-focus-delegatesFocus-click.html) — the focusable element around a
+// pressed icon; None where none can, the viewport's.
+pub(crate) fn press_target(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, now: f64) -> Option<NodeId> {
+    std::iter::successors(Some(id), |&n| crate::geometry::flat_parent(arena, n))
+        .take_while(|&n| arena.is_element(n))
+        .find(|&n| focusable(engine, arena, n, now) || delegating_root(arena, n).is_some())
+}
+
 // HTML "get the focusable area" for a shadow host whose shadow root delegates focus — what its focusing steps focus,
 // being no focusable area itself: the focused element, where it is under the host (a slotted node's, or one in a nested
 // tree, keeps focus), else the host's focus delegate. (The other focusable areas an element stands for — an image map's
@@ -441,6 +451,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "nextFocus", next_focus_op, context_id);
     crate::dom::register(scope, ns, "focusableArea", focusable_area_op, context_id);
     crate::dom::register(scope, ns, "focusTarget", focus_target_op, context_id);
+    crate::dom::register(scope, ns, "pressFocusTarget", press_target_op, context_id);
     crate::dom::register(scope, ns, "dialogFocusingSteps", dialog_focusing_steps_op, context_id);
     crate::dom::register(scope, ns, "dialogFocusRestore", dialog_focus_restore_op, context_id);
     crate::dom::register(scope, ns, "documentFocus", document_focus_op, context_id);
@@ -519,6 +530,15 @@ fn dialog_focus_restore_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
 fn focusable_area_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(host) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let found = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| focusable_area(engine, arena, host, now)).flatten();
+    let cid = crate::dom::realm_id(scope, &args);
+    rv.set(crate::dom::nodes_value(scope, cid, found.as_slice()));
+}
+
+// __dom.pressFocusTarget(nid, now) -> [what a press on the element focuses] or [] (`press_target`), as `nodes_value`
+// answers.
+fn press_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let found = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| press_target(engine, arena, id, now)).flatten();
     let cid = crate::dom::realm_id(scope, &args);
     rv.set(crate::dom::nodes_value(scope, cid, found.as_slice()));
 }
