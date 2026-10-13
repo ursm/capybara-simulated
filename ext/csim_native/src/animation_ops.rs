@@ -33,6 +33,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "animProperties", anim_properties, context_id);
     register(scope, ns, "animActivity", anim_activity, context_id);
     register(scope, ns, "animCompositeOrder", anim_composite_order, context_id);
+    register(scope, ns, "animEventOrder", anim_event_order, context_id);
 }
 
 // The document timeline at the page's clock `now` (an op's last argument), before an op reads or moves an animation.
@@ -725,6 +726,47 @@ fn anim_activity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     });
 }
 
+// The order the rendering update dispatches its animation events in (web-animations §4.2 "update animations and send
+// events", step 5): each `(scheduled, animation, class, playback)` — its scheduled event time, its animation, that
+// animation's class (0 a CSS transition, 1 a CSS animation, 2 any other) and whether it is a playback event — stably
+// sorted by the time, to the microsecond (float noise in a time computed two ways must not split events due together),
+// then those due together by class and the animations' composite order (`rank`: one the engine no longer has — a
+// completed transition nothing holds — ahead of the ranked ones of its class), and an animation's playback event before
+// its CSS one; otherwise as queued. Answers the events' indices.
+pub(crate) fn event_order(events: &[(f64, AnimationId, u8, bool)], rank: &std::collections::HashMap<AnimationId, usize>) -> Vec<usize> {
+    let at = |t: f64| if t.is_finite() { (t * 1000.0).round() } else { t };
+    let mut order: Vec<usize> = (0..events.len()).collect();
+    order.sort_by(|&x, &y| {
+        let (a, b) = (&events[x], &events[y]);
+        at(a.0)
+            .total_cmp(&at(b.0))
+            .then(a.2.cmp(&b.2))
+            .then(rank.get(&a.1).map_or(-1, |&r| r as i64).cmp(&rank.get(&b.1).map_or(-1, |&r| r as i64)))
+            .then(b.3.cmp(&a.3))
+    });
+    order
+}
+// __dom.animEventOrder([scheduled, animation, class, playback, …]) -> the events' indices in dispatch order
+// (`event_order`).
+fn anim_event_order(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    with_engine(scope, &args, |scope, engine, arena| {
+        let items = array_arg(scope, args.get(0));
+        let events: Vec<(f64, AnimationId, u8, bool)> = items
+            .chunks_exact(4)
+            .map(|e| {
+                let number = |i: &Item| i.number().unwrap_or(0.0);
+                (e[0].number().unwrap_or(f64::NEG_INFINITY), number(&e[1]) as AnimationId, number(&e[2]) as u8, number(&e[3]) != 0.0)
+            })
+            .collect();
+        let mut ids: Vec<AnimationId> = events.iter().map(|e| e.1).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        let rank: std::collections::HashMap<AnimationId, usize> = engine.in_composite_order(arena, ids).into_iter().enumerate().map(|(i, id)| (id, i)).collect();
+        let order: Vec<v8::Local<v8::Value>> = event_order(&events, &rank).into_iter().map(|i| v8::Number::new(scope, i as f64).into()).collect();
+        rv.set(v8::Array::new_with_elements(scope, &order).into());
+    });
+}
+
 // __dom.animCompositeOrder([animation, …]) -> the ones the engine still has, in composite order.
 fn anim_composite_order(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, arena| {
@@ -733,4 +775,24 @@ fn anim_composite_order(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
         let items: Vec<v8::Local<v8::Value>> = ids.iter().map(|&id| v8::Number::new(scope, id as f64).into()).collect();
         rv.set(v8::Array::new_with_elements(scope, &items).into());
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::event_order;
+
+    // By time to the microsecond, then class, composite order (unranked first) and playback before CSS; stable.
+    #[test]
+    fn events_dispatch_in_the_order_the_update_owes() {
+        let rank = [(7, 0), (8, 1)].into_iter().collect();
+        let events = [
+            (10.0002, 8, 1, false),
+            (10.0001, 7, 1, false),
+            (10.0, 9, 2, true),
+            (10.0, 5, 0, false),
+            (f64::NEG_INFINITY, 9, 2, true),
+            (10.0, 7, 1, true),
+        ];
+        assert_eq!(event_order(&events, &rank), vec![4, 3, 5, 1, 0, 2]);
+    }
 }
