@@ -2171,6 +2171,8 @@ pub(crate) struct Dom {
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
     // Each realm's Rust walk's last pass and the measures kept of it (`walk_reuse`).
     pub(crate) walk_reuse: std::collections::HashMap<i32, crate::walk_reuse::WalkReuse>,
+    // Each realm's last line-wise caret move (text_geometry.rs `CaretMove`), until anything else sets its selection.
+    pub(crate) caret_moves: std::collections::HashMap<i32, crate::text_geometry::CaretMove>,
     // Whether the session's pointer is a touchscreen (`setTouchInput`): what every realm's device answers `pointer` /
     // `hover` by (style.rs `Screen`).
     pub(crate) touch_input: bool,
