@@ -834,6 +834,8 @@ pub(crate) struct RealmArena {
     pub(crate) nonces: std::collections::HashMap<NodeId, Vec<u16>>,
     // Each dialog's return value, once a close or a script gave it one (dialogs.rs).
     pub(crate) dialog_return_values: std::collections::HashMap<NodeId, Vec<u16>>,
+    // …and what a request to close it holds until it closes it (dialogs.rs `RequestClose`).
+    pub(crate) dialog_requests: std::collections::HashMap<NodeId, crate::dialogs::RequestClose>,
     // Each media element's state, from its first use (media.rs).
     pub(crate) media: std::collections::HashMap<NodeId, crate::media::Media>,
     // Every node's registered observer list, and each mutation observer's nodes (mutation_observers.rs).
@@ -874,6 +876,8 @@ pub(crate) struct RealmArena {
     // close request goes to first (popovers.rs `closeRequestTarget`).
     pub(crate) close_watcher_order: std::collections::HashMap<NodeId, u64>,
     pub(crate) close_watcher_count: u64,
+    // The close watchers running their cancel action (dialogs.rs `dialogRequestClose`).
+    pub(crate) running_cancel: std::collections::HashSet<u64>,
     // The keys of the tasks the platform queues on the realms' timer lists, the isolate's (timers.rs).
     pub(crate) task_keys: crate::timers::TaskKeys,
     // The custom element reactions: each element's reaction queue, and the agent's reactions stack (ce_reactions.rs).
@@ -1140,6 +1144,7 @@ impl RealmArena {
         self.previously_focused.retain(|dialog, focused| live(slots, dialog) && live(slots, focused));
         self.nonces.retain(|id, _| live(slots, id));
         self.dialog_return_values.retain(|id, _| live(slots, id));
+        self.dialog_requests.retain(|id, _| live(slots, id));
         self.media.retain(|id, _| live(slots, id));
         self.close_watcher_order.retain(|id, _| live(slots, id));
         self.showing_popovers.retain(|doc, list| {
@@ -1306,6 +1311,9 @@ impl RealmArena {
         }
         if !self.dialog_return_values.is_empty() {
             self.dialog_return_values.remove(&id);
+        }
+        if !self.dialog_requests.is_empty() {
+            self.dialog_requests.remove(&id);
         }
         if !self.media.is_empty() {
             self.media.remove(&id);

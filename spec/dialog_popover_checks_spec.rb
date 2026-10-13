@@ -57,4 +57,58 @@ RSpec.describe 'Dialog and popover checks' do
       })()
     JS
   end
+
+  # …the request it made giving the return value all the same, which the close then takes (HTML "request to close the
+  # dialog" steps 5-7: the request close return value, set before the watcher's request to close returns). Chrome:
+  # [1, false, "inner"].
+  it 'closes with the return value the request made from its cancel listener gave' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] }).tap {|session| session.visit '/' }
+    expect(s.evaluate_script(<<~'JS')).to eq([1, false, 'inner'])
+      (() => {
+        const d = document.body.appendChild(document.createElement('dialog'));
+        let cancels = 0;
+        d.addEventListener('cancel', () => { if (++cancels < 5) d.requestClose('inner'); });
+        d.showModal();
+        d.requestClose('outer');
+        return [cancels, d.open, d.returnValue];
+      })()
+    JS
+  end
+
+  # …but where the listener closed and reopened it, its new close watcher runs no cancel action yet: the request it then
+  # makes fires a `cancel` of its own — the flag is the watcher's, not the dialog's. Chrome: [3, false, "r2"].
+  it 'runs the cancel of a request a cancel listener made after reopening the dialog' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] }).tap {|session| session.visit '/' }
+    expect(s.evaluate_script(<<~'JS')).to eq([3, false, 'r2'])
+      (() => {
+        const d = document.body.appendChild(document.createElement('dialog'));
+        let cancels = 0;
+        d.addEventListener('cancel', () => {
+          if (++cancels < 3) { d.close('c'); d.showModal(); d.requestClose('r' + cancels); }
+        });
+        d.showModal();
+        d.requestClose('o');
+        return [cancels, d.open, d.returnValue];
+      })()
+    JS
+  end
+
+  # …and a request that returns at once still ends what it enabled (step 8): a non-modal dialog — whose `closedby`
+  # computes to none — that another dialog's `cancel` asked to close again is left open, its watcher no longer enabled.
+  # Chrome: [true, "", false, "fromd"].
+  it 'leaves open a dialog whose close watcher a nested request disabled' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] }).tap {|session| session.visit '/' }
+    expect(s.evaluate_script(<<~'JS')).to eq([true, '', false, 'fromd'])
+      (() => {
+        const d = document.body.appendChild(document.createElement('dialog'));
+        const e = document.body.appendChild(document.createElement('dialog'));
+        d.show();
+        e.show();
+        d.addEventListener('cancel', () => e.requestClose('fromd'));
+        e.addEventListener('cancel', () => d.requestClose('frome'));
+        d.requestClose('dd');
+        return [d.open, d.returnValue, e.open, e.returnValue];
+      })()
+    JS
+  end
 end

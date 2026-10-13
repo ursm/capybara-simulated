@@ -32,8 +32,10 @@ impl RealmArena {
         list.dialogs.push((dialog, group));
         self.note_close_watcher(dialog);
     }
-    // …`dialog` taken out of whichever list has it.
+    // …`dialog` taken out of whichever list has it — closed, or removed — and what a request to close it held forgotten
+    // (HTML "close the dialog": its request close return value and source element null).
     fn dialog_closed(&mut self, dialog: NodeId) {
+        self.dialog_requests.remove(&dialog);
         for list in self.open_dialogs.values_mut() {
             list.dialogs.retain(|&(d, _)| d != dialog);
         }
@@ -120,6 +122,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "dialogShowCheck", dialog_show_check, context_id);
     crate::dom::register(scope, ns, "dialogReturnValue", dialog_return_value, context_id);
     crate::dom::register(scope, ns, "closeWatcherOf", close_watcher_of, context_id);
+    crate::dom::register(scope, ns, "dialogRequestClose", dialog_request_close, context_id);
+    crate::dom::register(scope, ns, "dialogCancelled", dialog_cancelled, context_id);
 }
 
 // __dom.dialogOpened(docNid, dialogNid, activations) — the dialog the last of the document's open dialogs (`activations`
@@ -232,4 +236,84 @@ fn dialog_return_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 fn close_watcher_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let watcher = crate::node_handle::nid_of(scope, args.get(0)).and_then(|id| crate::dom::dom(scope).arena.close_watcher_order.get(&id).copied());
     rv.set_double(watcher.unwrap_or(0) as f64);
+}
+
+// What a request to close a dialog holds until its close watcher closes it (HTML "request to close the dialog"): whether
+// it enables the watcher, whatever the dialog's `closedby` ("enable close watcher for request close"), and the return
+// value and source element its close action closes the dialog with — which a request made meanwhile, a `cancel`
+// listener's, overwrites.
+#[derive(Default)]
+pub(crate) struct RequestClose {
+    enabled: bool,
+    return_value: Option<Vec<u16>>,
+    source: Option<NodeId>,
+}
+
+// Which request it is: a script's or an invoker's (`requestClose()`, a `request-close` command: HTML "request to close
+// the dialog", which enables the watcher and gives the return value), or the user's (a close request or light dismiss:
+// the watcher's own, which does neither).
+const REQUESTED: u32 = 0;
+
+impl RealmArena {
+    // Whether `watcher`, the one a request to close `dialog` began with, is still active and enabled: the dialog
+    // connected and keeping it (a listener that took it out of its document destroyed it, its removing steps, and a
+    // re-insertion or a reopening made a new one), and its `closedby` takes a close request or a request enables it.
+    fn watcher_enabled(&self, dialog: NodeId, watcher: u64) -> bool {
+        self.is_connected(dialog)
+            && self.close_watcher_order.get(&dialog) == Some(&watcher)
+            && (self.dialog_requests.get(&dialog).is_some_and(|r| r.enabled) || closed_by(self, dialog) != "none")
+    }
+}
+
+// __dom.dialogRequestClose(dialog, returnValue|null, sourceNid|null, kind) -> the close watcher whose cancel action runs
+// now — the bindings fire `cancel`, then `dialogCancelled` — or 0 where the request ends here: the dialog not open, not
+// connected, with no watcher, or its watcher running its cancel action already (HTML "request to close" step 2: a
+// `cancel` listener's request returns at once, Chrome firing one `cancel`). A script's request (`REQUESTED`) enables the
+// watcher and gives the return value and source first (steps 4-6), and one that ends here disables it again (step 8).
+fn dialog_request_close(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(dialog) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_double(0.0) };
+    let return_value = (!args.get(1).is_null_or_undefined()).then(|| crate::dom::utf16_arg(scope, args.get(1)));
+    let source = nid_arg(scope, &args, 2);
+    let requested = args.get(3).uint32_value(scope) == Some(REQUESTED);
+    let arena = &mut crate::dom::dom(scope).arena;
+    let open = arena.get(dialog).is_some_and(|n| n.plain_attr("open").is_some());
+    let Some(&watcher) = arena.close_watcher_order.get(&dialog).filter(|_| open && arena.is_connected(dialog)) else { return rv.set_double(0.0) };
+    if requested {
+        *arena.dialog_requests.entry(dialog).or_default() = RequestClose { enabled: true, return_value, source };
+    }
+    if !arena.watcher_enabled(dialog, watcher) || !arena.running_cancel.insert(watcher) {
+        if let Some(r) = arena.dialog_requests.get_mut(&dialog).filter(|_| requested) {
+            r.enabled = false;
+        }
+        return rv.set_double(0.0);
+    }
+    rv.set_double(watcher as f64);
+}
+
+// __dom.dialogCancelled(dialog, watcher, prevented) -> [returnValue|null, source|null] to close the dialog with, or null
+// to leave it: the watcher's cancel action over (`prevented` a listener cancelled it), and the close action its due —
+// where the watcher is still active and enabled — with the return value and source the last request gave; the request's
+// enabling ended (step 8). One that leaves the dialog open forgets them too, as the spec does not say: a light dismiss
+// after a cancelled `request-close` command has no source (WPT dialog-toggle-source).
+fn dialog_cancelled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(dialog) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_null() };
+    let watcher = args.get(1).integer_value(scope).unwrap_or(0) as u64;
+    let prevented = args.get(2).boolean_value(scope);
+    let arena = &mut crate::dom::dom(scope).arena;
+    arena.running_cancel.remove(&watcher);
+    let closes = !prevented && arena.watcher_enabled(dialog, watcher);
+    if !closes {
+        arena.dialog_requests.remove(&dialog);
+        return rv.set_null();
+    }
+    let (return_value, source) = arena.dialog_requests.get_mut(&dialog).map_or((None, None), |r| {
+        r.enabled = false;
+        (r.return_value.clone(), r.source)
+    });
+    let return_value = match return_value {
+        Some(v) => crate::dom::utf16_value(scope, &v),
+        None => v8::null(scope).into(),
+    };
+    let source = node_value(scope, source);
+    rv.set(v8::Array::new_with_elements(scope, &[return_value, source]).into());
 }
