@@ -21,6 +21,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "animCall", anim_call, context_id);
     register(scope, ns, "animState", anim_state, context_id);
     register(scope, ns, "animTiming", anim_timing, context_id);
+    register(scope, ns, "animTimingCheck", anim_timing_check, context_id);
     register(scope, ns, "animSignals", anim_signals, context_id);
     register(scope, ns, "animDrop", anim_drop, context_id);
     register(scope, ns, "animCommitValues", anim_commit_values, context_id);
@@ -202,6 +203,12 @@ fn anim_effect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     with_engine(scope, &args, |scope, engine, _arena| {
         let composite = composite_arg(string_arg(scope, args.get(3)).as_deref()).unwrap_or(CompositeOperation::Replace);
         let accumulate = string_arg(scope, args.get(4)).as_deref() == Some("accumulate");
+        // (…the timing checked first, then the keyframes: Web Animations' constructor updates the timing properties
+        // before it sets the keyframes)
+        let timing = match timing_arg(engine, &array_arg(scope, args.get(2))) {
+            Ok(timing) => timing,
+            Err(message) => return rv.set(string_value(scope, &message)),
+        };
         let source = args.get(5);
         let keyframes = match source.is_number().then(|| source.number_value(scope)).flatten() {
             Some(source) => engine.web_animations.effects.get(&(source as EffectId)).map_or_else(Vec::new, |e| e.keyframes.clone()),
@@ -209,11 +216,6 @@ fn anim_effect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
                 Ok(keyframes) => keyframes,
                 Err(refusal) => return rv.set(refusal_value(scope, &refusal)),
             },
-        };
-        // (…the keyframes first, then the timing, as the bindings had them checked)
-        let timing = match timing_arg(engine, &array_arg(scope, args.get(2))) {
-            Ok(timing) => timing,
-            Err(message) => return rv.set(string_value(scope, &message)),
         };
         let target = target_arg(scope, &args, 0, 1);
         let id = engine.web_animations_op(|model| {
@@ -226,6 +228,15 @@ fn anim_effect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             id
         });
         rv.set(v8::Integer::new_from_unsigned(scope, id).into());
+    });
+}
+
+// __dom.animTimingCheck(timing) -> the message of the TypeError a timing as the bindings read it is refused with, or
+// null (`timing_arg`): what a KeyframeEffect's constructor asks before it reads its keyframes.
+fn anim_timing_check(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    with_engine(scope, &args, |scope, engine, _arena| match timing_arg(engine, &array_arg(scope, args.get(0))) {
+        Ok(_) => rv.set_null(),
+        Err(message) => rv.set(string_value(scope, &message)),
     });
 }
 
