@@ -17,7 +17,6 @@ pub(crate) enum Entry {
 }
 
 // The input types whose field submits its directionality under its `dirname` (HTML: the types `dirname` applies to).
-const DIRNAME_INPUT_TYPES: [&str; 8] = ["hidden", "text", "search", "tel", "url", "email", "password", "submit"];
 
 fn units(s: &str) -> Vec<u16> {
     s.encode_utf16().collect()
@@ -70,7 +69,7 @@ impl RealmArena {
                     "hidden" if String::from_utf16_lossy(&name).eq_ignore_ascii_case("_charset_") => {
                         (encoding.to_vec(), true)
                     }
-                    ty => (self.input_value_units(n, ty, colour), DIRNAME_INPUT_TYPES.contains(&ty)),
+                    ty => (self.input_value_units(n, ty, colour), crate::input_types::facts(ty) & crate::input_types::DIRNAME != 0),
                 },
                 "textarea" => {
                     let value = self.raw_value_units(n);

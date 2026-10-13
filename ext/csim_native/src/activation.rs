@@ -168,7 +168,6 @@ fn activation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 const POPOVER_COMMANDS: [&str; 3] = ["toggle-popover", "show-popover", "hide-popover"];
 const DIALOG_COMMANDS: [&str; 3] = ["close", "request-close", "show-modal"];
 // The input types a popover invoker is among: the button-like ones.
-const BUTTON_INPUT_TYPES: [&str; 4] = ["submit", "reset", "image", "button"];
 
 // A button's command: its `command` attribute's keyword — a built-in one, ASCII case-insensitive, lowercased; a custom
 // one (`--` and more) as it is written — None for a missing or unknown one.
@@ -201,9 +200,8 @@ const INVOKE_POPOVER_TARGET: u32 = 4;
 // owner: what a press on it is a press of, for the popovers' light dismiss.
 pub(crate) fn invoked_popover(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
     let n = arena.get(id)?;
-    let ty = n.plain_attr("type").unwrap_or("").to_ascii_lowercase();
     let button = n.is_html_named("button");
-    if !button && !(n.is_html_named("input") && BUTTON_INPUT_TYPES.contains(&ty.as_str())) {
+    if !button && !(n.is_html_named("input") && n.input_has(crate::input_types::BUTTON)) {
         return None;
     }
     if arena.is_actually_disabled(id) || (n.is_submit_button() && arena.form_owner(id).is_some()) {
@@ -233,11 +231,12 @@ fn invoker_action(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     if n.plain_attr("commandfor").is_none() && n.plain_attr("popovertarget").is_none() {
         return;
     }
-    let ty = n.plain_attr("type").unwrap_or("").to_ascii_lowercase();
     let button = n.is_html_named("button");
-    if !button && !(n.is_html_named("input") && BUTTON_INPUT_TYPES.contains(&ty.as_str())) {
+    if !button && !(n.is_html_named("input") && n.input_has(crate::input_types::BUTTON)) {
         return;
     }
+    // (…a button or button-like input whose `type` is no Button state submits its form owner, rather than invoke)
+    let ty = n.plain_attr("type").unwrap_or("").to_ascii_lowercase();
     if arena.is_actually_disabled(invoker) || !arena.is_connected(invoker) || (arena.form_owner(invoker).is_some() && ty != "button") {
         return;
     }

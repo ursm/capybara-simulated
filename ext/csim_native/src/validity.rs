@@ -29,14 +29,6 @@ pub(crate) const STEP_MISMATCH: u16 = 1 << 7;
 pub(crate) const BAD_INPUT: u16 = 1 << 8;
 pub(crate) const CUSTOM_ERROR: u16 = 1 << 9;
 
-// The `<input>` types `pattern` applies to.
-const PATTERN_TYPES: [&str; 6] = ["text", "search", "url", "tel", "email", "password"];
-// The `<input>` types `readonly` applies to (the mutability `required` needs).
-const READONLY_TYPES: [&str; 12] = [
-    "text", "search", "tel", "url", "email", "password", "number", "date", "month", "week", "time", "datetime-local",
-];
-// The `<input>` types `minlength` / `maxlength` apply to.
-const LENGTH_TYPES: [&str; 6] = ["text", "search", "url", "tel", "email", "password"];
 
 fn is_ascii_ws(c: char) -> bool {
     matches!(c, '\t' | '\n' | '\x0C' | '\r' | ' ')
@@ -208,7 +200,7 @@ impl RealmArena {
         } else {
             let required_applies = tag == "textarea"
                 || !matches!(ty, "submit" | "image" | "reset" | "button" | "hidden" | "range" | "color");
-            let readonly_applies = tag == "textarea" || READONLY_TYPES.contains(&ty);
+            let readonly_applies = tag == "textarea" || crate::input_types::facts(ty) & crate::input_types::READONLY != 0;
             let mutable = !(readonly_applies && (self.is_actually_disabled(id) || n.plain_attr("readonly").is_some()));
             if required_applies && n.plain_attr("required").is_some() && empty && mutable {
                 v |= VALUE_MISSING;
@@ -217,7 +209,7 @@ impl RealmArena {
         if checkable || tag != "input" && tag != "textarea" || empty {
             return v;
         }
-        if tag == "input" && PATTERN_TYPES.contains(&ty) && self.pattern_mismatch(n, ty) {
+        if tag == "input" && crate::input_types::facts(ty) & crate::input_types::FREE_TEXT != 0 && self.pattern_mismatch(n, ty) {
             v |= PATTERN_MISMATCH;
         }
         if tag == "input" {
@@ -234,7 +226,7 @@ impl RealmArena {
                 v |= TYPE_MISMATCH;
             }
         }
-        if dirty_by_user && (tag == "textarea" || LENGTH_TYPES.contains(&ty)) {
+        if dirty_by_user && (tag == "textarea" || crate::input_types::facts(ty) & crate::input_types::FREE_TEXT != 0) {
             let len = val.encode_utf16().count() as u64;
             if n.plain_attr("minlength").and_then(parse_non_negative).is_some_and(|min| len < min) {
                 v |= TOO_SHORT;

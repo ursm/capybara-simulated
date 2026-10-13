@@ -40,13 +40,6 @@ impl Direction {
     }
 }
 
-// The input types the selection APIs apply to (`selectionStart`, `setSelectionRange()`, `setRangeText()`); `select()`
-// to an email field too (Chrome: its offsets read null, its selection shows in `getSelection()`).
-const SELECTION_INPUT_TYPES: [&str; 5] = ["text", "search", "tel", "url", "password"];
-const SELECT_INPUT_TYPES: [&str; 6] = ["text", "search", "tel", "url", "password", "email"];
-
-// The input types `maxlength` cuts typing short in (HTML: the text-like ones; a textarea too).
-const MAXLENGTH_INPUT_TYPES: [&str; 6] = ["text", "search", "tel", "url", "email", "password"];
 // What typing into a control changed (`type_text`): its value, its selection — and, above `TYPED_LENGTH_SHIFT`, how many
 // code units of the text went in.
 pub(crate) const TYPED_VALUE: u32 = 1;
@@ -87,8 +80,8 @@ impl RealmArena {
     // Do the selection APIs apply to `n`: a `<textarea>`, or an `<input>` of a type they apply to? (`select()`, with
     // `for_select`, to an email field too.)
     pub(crate) fn selection_applies(&self, n: &NodeData, for_select: bool) -> bool {
-        let types: &[&str] = if for_select { &SELECT_INPUT_TYPES } else { &SELECTION_INPUT_TYPES };
-        n.is_html_named("textarea") || (n.is_html_named("input") && types.contains(&n.input_type()))
+        let fact = if for_select { crate::input_types::SELECT } else { crate::input_types::SELECTION };
+        n.is_html_named("textarea") || (n.is_html_named("input") && n.input_has(fact))
     }
 
     // `n`'s relevant value.
@@ -133,7 +126,7 @@ impl RealmArena {
         let Some(n) = self.get(id) else { return 0 };
         let current = self.relevant_value(n);
         let number = n.is_html_named("input") && n.input_type() == "number";
-        let cuts = n.is_html_named("textarea") || (n.is_html_named("input") && MAXLENGTH_INPUT_TYPES.contains(&n.input_type()));
+        let cuts = n.is_html_named("textarea") || (n.is_html_named("input") && n.input_has(crate::input_types::FREE_TEXT));
         let max = if cuts { n.plain_attr("maxlength").and_then(crate::validity::parse_non_negative) } else { None };
         let (sel, set) = self.text_selection(id);
         let (start, end) = match (at, set) {

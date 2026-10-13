@@ -14,15 +14,6 @@ use crate::dom::{
 
 const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
 
-// The `<input>` types the `readonly` attribute applies to (form-helpers.js `READONLY_INPUT_TYPES`).
-const READONLY_INPUT_TYPES: [&str; 12] = [
-    "text", "search", "tel", "url", "email", "password", "number", "date", "month", "week", "time", "datetime-local",
-];
-// Every `<input>` type state keyword: an attribute naming none of them is the Text state.
-const INPUT_TYPES: [&str; 22] = [
-    "hidden", "text", "search", "tel", "url", "email", "password", "date", "month", "week", "time", "datetime-local",
-    "number", "range", "color", "checkbox", "radio", "file", "submit", "image", "reset", "button",
-];
 
 // The names no custom element may take: the hyphenated SVG and MathML ones.
 const RESERVED_CUSTOM_ELEMENT_NAMES: [&str; 8] = [
@@ -104,10 +95,6 @@ enum Dir {
 fn dir_keyword(raw: &str) -> Option<Dir> {
     [("ltr", Dir::Ltr), ("rtl", Dir::Rtl), ("auto", Dir::Auto)].into_iter().find(|(k, _)| raw.eq_ignore_ascii_case(k)).map(|(_, d)| d)
 }
-// The `<input>` types whose value is no directional text: `dir=auto` on one is ltr (dom-nodes.js `DIR_NO_VALUE_INPUT_TYPES`).
-const DIR_NO_VALUE_INPUT_TYPES: [&str; 12] =
-    ["date", "month", "week", "time", "datetime-local", "number", "range", "color", "checkbox", "radio", "image", "file"];
-
 impl NodeData {
     // A submit button (form-helpers.js `isSubmitButton`): an `<input type=submit|image>`, or a `<button>` in the Submit
     // state — its `type` `submit`, or the Auto state (a missing or invalid one) of a button no `command` / `commandfor`
@@ -130,8 +117,11 @@ impl NodeData {
     }
     // An `<input>`'s type state: its `type` attribute, ASCII-lowercased, when that names one; else Text.
     pub(crate) fn input_type(&self) -> &'static str {
-        let raw = self.plain_attr("type").unwrap_or("");
-        INPUT_TYPES.iter().copied().find(|t| t.eq_ignore_ascii_case(raw)).unwrap_or("text")
+        crate::input_types::state(self.plain_attr("type"))
+    }
+    // Whether `fact` (input_types.rs `READONLY` …) applies to it as an `<input>` of its type state.
+    pub(crate) fn input_has(&self, fact: u32) -> bool {
+        crate::input_types::facts(self.input_type()) & fact != 0
     }
 }
 
@@ -746,7 +736,7 @@ impl RealmArena {
             .unwrap_or(false);
         }
         if n.is_html_named("input") {
-            if DIR_NO_VALUE_INPUT_TYPES.contains(&n.input_type()) {
+            if n.input_has(crate::input_types::NO_DIRECTIONAL_VALUE) {
                 return false;
             }
             return match &n.value {
@@ -875,7 +865,7 @@ impl RealmArena {
     pub(crate) fn is_read_write(&self, id: NodeId) -> bool {
         let Some(n) = self.get(id) else { return false };
         if n.is_html_named("input") {
-            return READONLY_INPUT_TYPES.contains(&n.input_type())
+            return n.input_has(crate::input_types::READONLY)
                 && n.plain_attr("readonly").is_none()
                 && !self.is_actually_disabled(id);
         }

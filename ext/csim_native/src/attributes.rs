@@ -298,7 +298,7 @@ pub(crate) fn remove_plain(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i
     change(scope, cid, caller, element, id, name, None, None).map_or(0, |(steps, _, _)| steps)
 }
 
-// HTML's value modes of an input's type (§4.10.5): "value", "default", "default/on" and "filename".
+// HTML's value modes of an input's type (§4.10.5): "value", "default", "default/on" and "filename" (input_types.rs).
 #[derive(Clone, Copy, PartialEq)]
 enum ValueMode {
     Value,
@@ -307,10 +307,10 @@ enum ValueMode {
     Filename,
 }
 fn value_mode(ty: &str) -> ValueMode {
-    match ty {
-        "hidden" | "submit" | "image" | "reset" | "button" => ValueMode::Default,
-        "checkbox" | "radio" => ValueMode::DefaultOn,
-        "file" => ValueMode::Filename,
+    match crate::input_types::value_mode(ty) {
+        crate::input_types::MODE_DEFAULT => ValueMode::Default,
+        crate::input_types::MODE_DEFAULT_ON => ValueMode::DefaultOn,
+        crate::input_types::MODE_FILENAME => ValueMode::Filename,
         _ => ValueMode::Value,
     }
 }

@@ -14,7 +14,6 @@ use crate::walk::{replaced_or_control, scrolls, WalkDisplay};
 
 // The input types that edit text, whose box — the inner editor — scrolls whatever the input's own `overflow` computes to
 // (Chrome computes `clip` for one and still takes `input.scrollLeft = 30`).
-const NON_TEXT_INPUT_TYPES: [&str; 10] = ["button", "checkbox", "radio", "submit", "reset", "file", "image", "range", "color", "hidden"];
 
 // The document element of `doc`, and HTML's "the body element": its `<body>` or `<frameset>` child.
 fn document_element(arena: &RealmArena, doc: NodeId) -> Option<NodeId> {
@@ -62,8 +61,7 @@ pub(crate) fn holds_scroll_offset(engine: &mut StyleEngine, arena: &RealmArena, 
         return true;
     }
     let Some(node) = arena.get(id).filter(|n| n.kind == NodeKind::Element) else { return false };
-    let text_input = node.is_html_named("input")
-        && !node.plain_attr("type").is_some_and(|t| NON_TEXT_INPUT_TYPES.iter().any(|n| t.eq_ignore_ascii_case(n)));
+    let text_input = node.is_html_named("input") && node.input_has(crate::input_types::TEXTUAL);
     if !text_input {
         engine.flush(arena, now);
         let Some(style) = primary_style(arena, id) else { return false };
