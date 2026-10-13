@@ -203,6 +203,7 @@ fn process_range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(5)) else { return };
     let caller = crate::dom::realm_id(scope, &args);
     let Some(cid) = crate::dom::dom(scope).arena.get(sc).map(|n| n.realm) else { return };
+    crate::cloning::begin_clone(scope);
     let arena = realm(scope, cid);
     if mode != DELETE && !(sc == ec && (so == eo || is_character_data(arena, sc))) && crate::ranges::contents_plan(arena, sc, so, ec, eo).4 {
         return rv.set_uint32(DOCTYPE_CONTAINED);
@@ -223,10 +224,6 @@ fn process_range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     // (…what changed handed back whatever stopped it — a cut a script's steps had made impossible: the changes made are
     // the bindings' to finish, and the range collapses to its start)
     let collapse = run.process(scope, sc, so, ec, eo, frag).flatten();
-    // (…none where a copy failed — a shadow root's hook threw: its exception is what the op ends with)
-    if crate::cloning::clone_failed(scope) {
-        return;
-    }
     // (…each answer made, and none past a node factory that threw: its exception is what the op ends with)
     let mut out: Vec<v8::Local<'_, v8::Value>> = vec![crate::dom::node_value(scope, frag)];
     if crate::dom::factory_threw(scope) {

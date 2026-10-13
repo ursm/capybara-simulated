@@ -41,6 +41,7 @@ fn edit_command(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(7)) else { return };
     let caller = crate::dom::realm_id(scope, &args);
     let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return };
+    crate::cloning::begin_clone(scope);
     let steps = v8::Local::new(scope, steps);
     let (mut changes, mut copies, mut held) = (Vec::new(), Vec::new(), Vec::new());
     let mut edit = Edit { cid, caller, steps, host, changes: &mut changes, copies: &mut copies, held: &mut held };
@@ -70,7 +71,13 @@ fn edit_command(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         "inserthorizontalrule" => horizontal_rule(scope, &mut edit, range),
         _ => return,
     };
-    let Some((fire, caret, styled)) = done else { return };
+    // (…where a copy's shadow root threw, what it changed answered all the same, the selection kept, for the bindings to
+    // finish before they throw it: `takeCloneException`)
+    let (fire, caret, styled) = match done {
+        Some(done) => done,
+        None if crate::dom::dom(scope).clone_exception.is_some() => (false, Caret::Keep, Vec::new()),
+        None => return,
+    };
     let mut out: Vec<v8::Local<'_, v8::Value>> = vec![v8::Boolean::new(scope, fire).into()];
     let places: Vec<(NodeId, u32)> = match caret {
         Caret::Keep => {
@@ -86,10 +93,6 @@ fn edit_command(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
             vec![(a, ao), (b, bo)]
         }
     };
-    // (…none where a copy failed — a shadow root's hook threw: its exception is what the op ends with)
-    if crate::cloning::clone_failed(scope) {
-        return;
-    }
     for (node, offset) in places {
         out.push(crate::dom::node_value(scope, Some(node)));
         if crate::dom::factory_threw(scope) {

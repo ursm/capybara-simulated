@@ -2112,10 +2112,10 @@ pub(crate) struct Dom {
     // Every live range's boundary points (ranges.rs).
     pub(crate) ranges: crate::ranges::Ranges,
     // Each realm's hook a clone of a shadow host attaches the copy's shadow root through (cloning.rs
-    // `clone_shadow_root`) — weakly, as its realm holds it — and whether one failed — threw — since a clone's caller last
-    // asked (`clone_failed`).
+    // `clone_shadow_root`) — weakly, as its realm holds it — and what one threw in the op cloning now, which the bindings
+    // rethrow once they have finished what it changed (`takeCloneException`).
     pub(crate) clone_shadow_hooks: std::collections::HashMap<i32, v8::Weak<v8::Function>>,
-    pub(crate) clone_failed: bool,
+    pub(crate) clone_exception: Option<v8::Global<v8::Value>>,
     pub(crate) iterators: crate::node_iterators::Iterators,
     // Each realm's style engine (made by `styleSheets`).
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,

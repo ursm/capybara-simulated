@@ -12,6 +12,7 @@ use crate::dom::{NodeData, NodeId, NodeKind, RealmArena, STATE_CHECKED, STATE_CH
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "cloneTree", clone_tree_op, context_id);
     crate::dom::register(scope, ns, "setCloneShadowRootHook", set_clone_shadow_root_hook, context_id);
+    crate::dom::register(scope, ns, "takeCloneException", take_clone_exception, context_id);
 }
 
 // The attributes whose steps are the bindings' (`appendedAttributeSteps`, an event handler's content attribute).
@@ -30,6 +31,7 @@ pub(crate) fn bindings_steps(name: &str) -> bool {
 fn clone_tree_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let node = args.get(0);
     let Some(src) = crate::node_handle::nid_of(scope, node) else { return };
+    begin_clone(scope);
     let deep = args.get(1).is_true();
     let arena = &crate::dom::dom(scope).arena;
     let Some(cid) = arena.get(src).map(|n| n.realm) else { return };
@@ -39,8 +41,7 @@ fn clone_tree_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let doc = crate::editing::document_of(scope, src);
     let (mut held, mut steps) = (Vec::new(), Vec::new());
     let maker = crate::dom::realm_id(scope, &args);
-    let copy = clone_into(scope, cid, maker, src, None, deep, doc, &mut held, &mut steps);
-    let Some(copy) = copy.filter(|_| !clone_failed(scope)) else { return };
+    let Some(copy) = clone_into(scope, cid, maker, src, None, deep, doc, &mut held, &mut steps) else { return };
     let mut out = vec![crate::dom::node_value(scope, Some(copy))];
     if crate::dom::factory_threw(scope) {
         return;
@@ -183,30 +184,39 @@ pub(crate) fn clone_into(
 }
 
 // The shadow root the bindings attach to `copy` for its source `src`'s, as DOM "clone a node" does a clonable one's — the
-// hook of realm `cid`, whose nodes they are (dom-nodes.js `cloneShadowRootOnto`): Some(None) where it is not clonable;
-// None where the hook threw, its exception pending, or making an object did — the clone's caller to stop and answer
-// nothing (`clone_failed`).
+// hook of realm `cid`, whose nodes they are (dom-nodes.js `REALM.cloneShadowRoot`): Some(None) where it is not clonable
+// (or the realm has no hook); None where the hook threw — what it threw kept for the bindings to rethrow once they have
+// finished what the op changed (`takeCloneException`), the clone stopping there — or making an object did, its
+// exception pending.
 fn clone_shadow_root(scope: &mut v8::PinScope<'_, '_>, cid: i32, src: NodeId, copy: NodeId) -> Option<Option<NodeId>> {
     let source = crate::dom::node_value(scope, Some(src));
     let made = crate::dom::node_value(scope, Some(copy));
-    let hook = crate::dom::dom(scope).clone_shadow_hooks.get(&cid).cloned();
-    let hook = hook.and_then(|h| h.to_local(scope));
-    let root = match hook {
-        Some(hook) if !crate::dom::factory_threw(scope) => {
-            let global = scope.get_current_context().global(scope);
-            hook.call(scope, global.into(), &[source, made])
-        }
-        _ => None,
-    };
-    let Some(root) = root else {
-        crate::dom::dom(scope).clone_failed = true;
+    if crate::dom::factory_threw(scope) {
         return None;
-    };
-    Some(crate::node_handle::nid_of(scope, root))
+    }
+    let hook = crate::dom::dom(scope).clone_shadow_hooks.get(&cid).cloned();
+    let Some(hook) = hook.and_then(|h| h.to_local(scope)) else { return Some(None) };
+    let global: v8::Local<'_, v8::Value> = scope.get_current_context().global(scope).into();
+    v8::tc_scope!(let tc, scope);
+    let root = hook.call(tc, global, &[source, made]);
+    if let Some(exception) = tc.exception().filter(|_| root.is_none()) {
+        let exception = v8::Global::new(tc, exception);
+        crate::dom::dom(tc).clone_exception = Some(exception);
+        return None;
+    }
+    Some(crate::node_handle::nid_of(tc, root?))
 }
-// Whether a clone failed since this was last asked — every caller of `clone_into` asks, before it answers.
-pub(crate) fn clone_failed(scope: &mut v8::PinScope<'_, '_>) -> bool {
-    std::mem::take(&mut crate::dom::dom(scope).clone_failed)
+// An op that clones, beginning: nothing thrown yet.
+pub(crate) fn begin_clone(scope: &mut v8::PinScope<'_, '_>) {
+    crate::dom::dom(scope).clone_exception = None;
+}
+
+// __dom.takeCloneException() -> `[exception]` where a shadow root's hook threw in the op that cloned last, the bindings to
+// throw it once they have finished what that op changed; null for none.
+fn take_clone_exception(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(exception) = crate::dom::dom(scope).clone_exception.take() else { return rv.set_null() };
+    let exception = v8::Local::new(scope, exception);
+    rv.set(v8::Array::new_with_elements(scope, &[exception]).into());
 }
 
 // __dom.setCloneShadowRootHook(hook) — the realm's hook a clone attaches a shadow root through (`clone_shadow_root`).

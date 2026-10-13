@@ -23,12 +23,14 @@ const LINE_BREAK: u32 = 1;
 // copies, (source, copy, names)…, changes…], or undefined where nothing is inserted: the insertion in the editing host
 // the selection from the anchor to the focus edits (editing.rs `selection_host`: its anchor's, the focus kept to it and
 // out of its non-editable islands) at the selection's range — its contents deleted first — of `text` (`TEXT`), a line break
-// (`LINE_BREAK`) or a paragraph's break (any other): the place the caret goes, how many elements a split copied and each
+// (`LINE_BREAK`) or a paragraph's break (any other): the place the caret goes (null where a copy's shadow root threw:
+// `takeCloneException`), how many elements a split copied and each
 // with its source and the names of the attributes whose cloning steps are the bindings' (cloning.rs `bindings_value`),
 // and the changes of children it made (mutation.rs `changes_value`).
 fn edit_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(sc), Some(ec)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 2)) else { return };
     let (so, eo) = (args.get(1).uint32_value(scope).unwrap_or(0), args.get(3).uint32_value(scope).unwrap_or(0));
+    crate::cloning::begin_clone(scope);
     let kind = args.get(4).uint32_value(scope).unwrap_or(TEXT);
     let text = args.get(5).to_string(scope).map_or_else(Vec::new, |s| {
         let mut units = vec![0u16; s.length()];
@@ -61,12 +63,16 @@ fn edit_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         LINE_BREAK => edit.line_break(scope, caret),
         _ => edit.paragraph(scope, caret),
     };
-    let Some(caret) = caret.filter(|_| !crate::cloning::clone_failed(scope)) else { return };
-    let mut out: Vec<v8::Local<'_, v8::Value>> = vec![crate::dom::node_value(scope, Some(caret.0))];
+    // (…where a copy's shadow root threw, what it changed answered all the same — no caret — for the bindings to finish
+    // before they throw it: `takeCloneException`)
+    if caret.is_none() && crate::dom::dom(scope).clone_exception.is_none() {
+        return;
+    }
+    let mut out: Vec<v8::Local<'_, v8::Value>> = vec![crate::dom::node_value(scope, caret.map(|(node, _)| node))];
     if crate::dom::factory_threw(scope) {
         return;
     }
-    out.push(v8::Integer::new_from_unsigned(scope, caret.1).into());
+    out.push(v8::Integer::new_from_unsigned(scope, caret.map_or(0, |(_, offset)| offset)).into());
     out.push(v8::Integer::new_from_unsigned(scope, copies.len() as u32).into());
     out.extend(crate::cloning::bindings_value(scope, cid, &copies));
     if crate::dom::factory_threw(scope) {

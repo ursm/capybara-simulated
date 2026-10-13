@@ -26,13 +26,14 @@ fn selected_contents(arena: &RealmArena, select: NodeId) -> Vec<NodeId> {
 }
 
 // __dom.updateSelectedContent(selectNid, force, steps) -> `[copies, copies…, changes…]` as `editInsert` answers them;
-// undefined where it changed nothing, or where a copy failed (a shadow root's hook threw, its exception pending).
+// undefined where it changed nothing.
 fn update_selected_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let force = args.get(1).is_true();
     let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(2)) else { return };
     let caller = realm_id(scope, &args);
     let Some(cid) = crate::dom::dom(scope).arena.get(select).map(|n| n.realm) else { return };
+    crate::cloning::begin_clone(scope);
     let arena = realm(scope, cid);
     let targets = selected_contents(arena, select);
     if targets.is_empty() {
@@ -84,7 +85,7 @@ fn update_selected_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
         let Some(change) = crate::mutation::replace_all(scope, cid, caller, target, &clones, steps) else { break };
         changes.push(change);
     }
-    if crate::cloning::clone_failed(scope) || changes.is_empty() {
+    if changes.is_empty() {
         return;
     }
     let mut out: Vec<v8::Local<'_, v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, copies.len() as u32).into()];
