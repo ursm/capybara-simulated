@@ -309,6 +309,7 @@ dependencies = [
  "bitflags",
  "cc",
  "cssparser",
+ "data-url",
  "encoding_rs",
  "euclid",
  "harfrust",

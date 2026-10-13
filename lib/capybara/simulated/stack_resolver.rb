@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require 'base64'
 require 'json'
 
 require_relative 'sourcemap'
@@ -93,10 +92,8 @@ module Capybara
         end
       end
 
-      def decode_data_url(uri)
-        return nil unless uri =~ %r{\Adata:application/json(?:;charset=[^;,]+)?;base64,(.+)\z}m
-        Base64.decode64(::Regexp.last_match(1))
-      end
+      # A source map given inline, by Fetch's data: URL processor (the engine's): its body, or nil.
+      def decode_data_url(uri) = Native.data_url(uri)&.last
     end
   end
 end

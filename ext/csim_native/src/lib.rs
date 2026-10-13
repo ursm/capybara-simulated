@@ -61,6 +61,7 @@ mod input_value;
 mod input_types;
 mod intersection;
 mod html_parse;
+mod data_url;
 mod fetch_rules;
 mod idb;
 mod idb_databases;
@@ -159,6 +160,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("font_strong_families", magnus::function!(fontconfig::strong_families_for_ruby, 1))?;
     // A URL's parts as the URL Standard's parser makes them, the page's own (url_ops.rs).
     native.define_module_function("url_parts", magnus::function!(url_ops::parts_for_ruby, 2))?;
+    // A `data:` URL's MIME type and body, by Fetch's data: URL processor, the page's too (data_url.rs).
+    native.define_module_function("data_url", magnus::function!(data_url::process_for_ruby, 1))?;
     // Fetch's fixed header, method and port rules, the page's too (fetch_rules.rs).
     native.define_module_function("bad_port", magnus::function!(fetch_rules::bad_port_for_ruby, 1))?;
     native.define_module_function("cors_safelisted_method", magnus::function!(fetch_rules::cors_safelisted_method_for_ruby, 1))?;

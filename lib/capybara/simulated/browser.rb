@@ -8954,19 +8954,9 @@ module Capybara
         rack_fetch_body(u, cors_mode: 'same-origin', client_url: client_url)
       end
 
-      # The decoded body of a `data:[<mediatype>][;base64],<data>` URL (RFC 2397):
-      # base64-decoded when the `;base64` flag is present, else percent-decoded.
-      private def decode_data_url_body(url)
-        comma = url.index(',')
-        return '' unless comma
-        meta    = url[5...comma]
-        payload = url[(comma + 1)..]
-        if meta =~ /;base64\s*\z/i
-          Base64.decode64(payload)
-        else
-          CGI.unescape(payload)
-        end
-      end
+      # The decoded body of a `data:` URL, by Fetch's data: URL processor (the engine's, the page's too) — empty for one
+      # it fails.
+      private def decode_data_url_body(url) = Native.data_url(url)&.last || ''
 
       # Run a worker isolate's own event loop until it goes idle NOW: drain microtasks,
       # then — if a timer is already due — fire it and loop, so the microtasks that
