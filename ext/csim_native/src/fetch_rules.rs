@@ -23,6 +23,15 @@ pub(crate) fn bad_port(port: u32) -> bool {
 pub(crate) fn forbidden_method(method: &[u8]) -> bool {
     ["CONNECT", "TRACE", "TRACK"].iter().any(|m| m.as_bytes().eq_ignore_ascii_case(method))
 }
+// An HTTP `token` (RFC 9110 §5.6.2): a method, a header name — one or more `tchar`.
+pub(crate) fn is_token(t: &[u8]) -> bool {
+    !t.is_empty() && t.iter().all(|&b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+}
+// "Normalize a method": one of DELETE, GET, HEAD, OPTIONS, POST, PUT matched ASCII case-insensitively, byte-uppercased;
+// None for any other, which keeps its case (`patch` stays `patch`).
+pub(crate) fn normalized_method(method: &[u8]) -> Option<&'static str> {
+    ["DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT"].into_iter().find(|m| m.as_bytes().eq_ignore_ascii_case(method))
+}
 // "CORS-safelisted method".
 pub(crate) fn cors_safelisted_method(method: &[u8]) -> bool {
     ["GET", "HEAD", "POST"].iter().any(|m| m.as_bytes() == method)
@@ -114,6 +123,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "badPort", bad_port_op, context_id);
     crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
     crate::dom::register(scope, ns, "headerRule", header_rule_op, context_id);
+    crate::dom::register(scope, ns, "httpToken", http_token_op, context_id);
+    crate::dom::register(scope, ns, "normalizedMethod", normalized_method_op, context_id);
 }
 fn units(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<u8> {
     let Some(s) = value.to_string(scope) else { return Vec::new() };
@@ -130,6 +141,19 @@ fn bad_port_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 fn forbidden_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let method = units(scope, args.get(0));
     rv.set_bool(forbidden_method(&method));
+}
+// __dom.httpToken(s) -> whether `s` is an HTTP token (`is_token`).
+fn http_token_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let s = units(scope, args.get(0));
+    rv.set_bool(is_token(&s));
+}
+// __dom.normalizedMethod(method) -> `normalized_method`: the uppercase method, or null for one that keeps its case.
+fn normalized_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let method = units(scope, args.get(0));
+    match normalized_method(&method).and_then(|m| v8::String::new(scope, m)) {
+        Some(m) => rv.set(m.into()),
+        None => rv.set_null(),
+    }
 }
 // The header rules `headerRule` answers.
 const FORBIDDEN_REQUEST: u32 = 0;

@@ -99,13 +99,7 @@ pub(crate) fn minimize_mime(content_type: &str) -> String {
     let Some(mime) = crate::mime::extract(content_type) else { return String::new() };
     let essence = mime.essence.as_str();
     let subtype = essence.split_once('/').map_or("", |(_, s)| s);
-    const JAVASCRIPT: [&str; 16] = [
-        "application/ecmascript", "application/javascript", "application/x-ecmascript", "application/x-javascript",
-        "text/ecmascript", "text/javascript", "text/javascript1.0", "text/javascript1.1", "text/javascript1.2",
-        "text/javascript1.3", "text/javascript1.4", "text/javascript1.5", "text/jscript", "text/livescript",
-        "text/x-ecmascript", "text/x-javascript",
-    ];
-    if JAVASCRIPT.contains(&essence) {
+    if crate::script::is_javascript_mime(essence) {
         "text/javascript".to_owned()
     } else if essence == "application/json" || essence == "text/json" || subtype.ends_with("+json") {
         "application/json".to_owned()

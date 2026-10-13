@@ -10,6 +10,7 @@ use crate::dom::{realm_id, register};
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "encodingName", encoding_name, context_id);
     register(scope, ns, "textDecode", text_decode, context_id);
+    register(scope, ns, "decodeBytes", decode_bytes, context_id);
     register(scope, ns, "textDecoderOpen", text_decoder_open, context_id);
     register(scope, ns, "textDecoderPush", text_decoder_push, context_id);
     register(scope, ns, "textDecoderClose", text_decoder_close, context_id);
@@ -131,6 +132,18 @@ fn text_decode(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         }
         None => rv.set_null(),
     }
+}
+
+// __dom.decodeBytes(bytes, label) -> the Encoding Standard's "decode" of `bytes` with the fallback encoding `label`'s
+// (null, or one no encoding has: UTF-8): a BOM's encoding over it, the BOM removed — a response's text (XHR).
+fn decode_bytes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(bytes) = bytes_arg(scope, args.get(0)) else { return };
+    let label = args.get(1);
+    let fallback = if label.is_null_or_undefined() { None } else { encoding_arg(scope, label) };
+    let (text, _, _) = fallback.unwrap_or(encoding_rs::UTF_8).decode(&bytes);
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let text = utf16_string(scope, &units);
+    rv.set(text);
 }
 
 // The decoders a streaming `TextDecoder` keeps between its calls, by realm and id (the page side closes one when its
