@@ -456,6 +456,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "editControl", edit_control_op, context_id);
     crate::dom::register(scope, ns, "relevantValue", relevant_value_op, context_id);
     crate::dom::register(scope, ns, "childText", child_text_op, context_id);
+    crate::dom::register(scope, ns, "wholeText", whole_text_op, context_id);
+    crate::dom::register(scope, ns, "documentTitle", document_title_op, context_id);
+    crate::dom::register(scope, ns, "titleElement", title_element_op, context_id);
 }
 
 // __dom.relevantValue(control) -> the value the user edits (`relevant_value`): a dirty value as typed, a clean input's
@@ -475,15 +478,29 @@ fn relevant_value_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     };
     rv.set(crate::dom::utf16_value(scope, &units));
 }
-// __dom.childText(element) -> the data of its direct child Text nodes (CDATA sections among them), in tree order: a
-// textarea's raw value — what its `defaultValue` is, its newlines as written.
+// __dom.childText(element) -> the data of its direct child Text nodes (`child_text`): a textarea's raw value — what its
+// `defaultValue` is, its newlines as written.
 fn child_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = crate::node_handle::nid_of(scope, args.get(0));
-    let arena = &crate::dom::dom(scope).arena;
-    let units: Vec<u16> = id.and_then(|id| arena.get(id)).map_or_else(Vec::new, |n| {
-        n.children.iter().filter_map(|&c| arena.get(c)).filter(|t| t.kind == crate::dom::NodeKind::Text).flat_map(|t| t.data.iter().copied()).collect()
-    });
+    let units = id.map_or_else(Vec::new, |id| crate::dom::dom(scope).arena.child_text(id));
     rv.set(crate::dom::utf16_value(scope, &units));
+}
+// __dom.wholeText(text) -> `whole_text`; __dom.documentTitle(doc) -> `document_title`; __dom.titleElement(doc) -> its
+// title element, or null.
+fn whole_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = crate::node_handle::nid_of(scope, args.get(0));
+    let units = id.map_or_else(Vec::new, |id| crate::dom::dom(scope).arena.whole_text(id));
+    rv.set(crate::dom::utf16_value(scope, &units));
+}
+fn document_title_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = crate::node_handle::nid_of(scope, args.get(0));
+    let units = id.map_or_else(Vec::new, |id| crate::dom::dom(scope).arena.document_title(id));
+    rv.set(crate::dom::utf16_value(scope, &units));
+}
+fn title_element_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = crate::node_handle::nid_of(scope, args.get(0));
+    let title = id.and_then(|id| crate::dom::dom(scope).arena.title_element(id));
+    rv.set(crate::dom::node_value(scope, title));
 }
 
 // __dom.selectionApplies(nid, forSelect) -> whether the selection APIs (`select()`, with `forSelect`) apply to the

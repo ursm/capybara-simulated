@@ -372,7 +372,46 @@ impl RealmArena {
         }
         cur
     }
-    // The first element of `root`'s tree (itself included, shadow trees not) that `pred` takes, in tree order.
+    // The document's title element (HTML §3.1.3): where its root is an SVG `svg`, that root's first SVG `title` child;
+    // else its first HTML `title` in tree order.
+    pub(crate) fn title_element(&self, doc: NodeId) -> Option<NodeId> {
+        let root = self.first_element_child(doc)?;
+        let r = self.get(root)?;
+        if r.ns == web_atoms::ns!(svg) && &*r.local_name == "svg" {
+            return r.children.iter().copied().find(|&c| self.get(c).is_some_and(|n| n.ns == web_atoms::ns!(svg) && &*n.local_name == "title"));
+        }
+        self.find_in_tree(root, |id, n| id != root && n.is_html_named("title"))
+    }
+    // …and `document.title`: its child text, ASCII whitespace stripped and collapsed — '' with none.
+    pub(crate) fn document_title(&self, doc: NodeId) -> Vec<u16> {
+        let Some(title) = self.title_element(doc) else { return Vec::new() };
+        let text = self.child_text(title);
+        let ws = |u: &u16| matches!(*u, 0x09 | 0x0A | 0x0C | 0x0D | 0x20);
+        let mut out = Vec::with_capacity(text.len());
+        for run in text.split(ws).filter(|r| !r.is_empty()) {
+            if !out.is_empty() {
+                out.push(0x20);
+            }
+            out.extend_from_slice(run);
+        }
+        out
+    }
+    // The data of `id`'s child Text nodes (CDATA sections among them), in tree order: a `<title>`'s, a `<script>`'s, a
+    // textarea's raw value.
+    pub(crate) fn child_text(&self, id: NodeId) -> Vec<u16> {
+        self.get(id).map_or_else(Vec::new, |n| {
+            n.children.iter().filter_map(|&c| self.get(c)).filter(|t| t.kind == NodeKind::Text).flat_map(|t| t.data.iter().copied()).collect()
+        })
+    }
+    // DOM `Text.wholeText`: the data of the run of contiguous Text nodes `id` is in, in tree order.
+    pub(crate) fn whole_text(&self, id: NodeId) -> Vec<u16> {
+        let Some(n) = self.get(id) else { return Vec::new() };
+        let Some(siblings) = n.parent.and_then(|p| self.get(p)).map(|p| &p.children) else { return n.data.to_vec() };
+        let is_text = |c: &NodeId| self.get(*c).is_some_and(|t| t.kind == NodeKind::Text);
+        let Some(at) = siblings.iter().position(|&c| c == id) else { return n.data.to_vec() };
+        let start = siblings[..at].iter().rposition(|c| !is_text(c)).map_or(0, |p| p + 1);
+        siblings[start..].iter().take_while(|c| is_text(c)).filter_map(|&c| self.get(c)).flat_map(|t| t.data.iter().copied()).collect()
+    }
     // The document's first `<base>` with an `href`, in tree order: the one its base URL is made from (HTML §2.4.1).
     pub(crate) fn base_element(&self, doc: NodeId) -> Option<NodeId> {
         if self.base_elements == 0 {
@@ -380,6 +419,7 @@ impl RealmArena {
         }
         self.find_in_tree(doc, |_, n| n.is_html_named("base") && n.plain_attr("href").is_some())
     }
+    // The first element of `root`'s tree (itself included, shadow trees not) that `pred` takes, in tree order.
     fn find_in_tree(&self, root: NodeId, mut pred: impl FnMut(NodeId, &NodeData) -> bool) -> Option<NodeId> {
         let mut stack = vec![root];
         while let Some(c) = stack.pop() {
