@@ -149,8 +149,16 @@ struct Stores {
 #[derive(Default)]
 struct Realms(HashMap<i32, Stores>);
 
-// (…the stores of the realm whose `__dom` an op was called through)
+// (…the stores of the realm whose `__dom` an op was called through — none for one that made none, or was dropped: only
+// making a store gives a realm its stores, `with_new`)
 fn with<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, f: impl FnOnce(&mut Stores) -> R) -> R {
+    let realm = realm_id(scope, args);
+    match scope.get_slot_mut::<Realms>().and_then(|realms| realms.0.get_mut(&realm)) {
+        Some(stores) => f(stores),
+        None => f(&mut Stores::default()),
+    }
+}
+fn with_new<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, f: impl FnOnce(&mut Stores) -> R) -> R {
     let realm = realm_id(scope, args);
     if scope.get_slot::<Realms>().is_none() {
         scope.set_slot(Realms::default());
@@ -288,7 +296,7 @@ fn compare_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 // __dom.idbStoreNew(generator) -> a new store's number: no records, a key generator at 1 where it has one.
 fn store_new(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let generator = args.get(0).is_true();
-    let id = with(scope, &args, |s| {
+    let id = with_new(scope, &args, |s| {
         let id = next_id(s);
         s.stores.insert(id, Store { records: BTreeMap::new(), current: generator.then_some(1.0), indexes: HashMap::new(), journal: None });
         id
