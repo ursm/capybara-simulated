@@ -47,6 +47,42 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "tokenListItem", token_list_item, context_id);
     register(scope, ns, "tokenListContains", token_list_contains, context_id);
     register(scope, ns, "tokenListEdit", token_list_edit, context_id);
+    register(scope, ns, "tokenListSupports", token_list_supports, context_id);
+}
+
+// HTML's "supported tokens" of an element's attribute's DOMTokenList, by the element's local name: the keywords the
+// engine registers (Chromium's, measured — a strict subset of those merely valid on the attribute, as a feature-detect
+// must see: Vite's boot-time `link.relList.supports('modulepreload')`) — none where the attribute defines none
+// (`class`), which `supports()` throws for.
+fn supported_tokens(local_name: &str, attr: &str) -> Option<&'static [&'static str]> {
+    match (attr, local_name) {
+        ("rel", "link") => Some(&[
+            "alternate", "canonical", "dns-prefetch", "icon", "manifest", "modulepreload", "next", "preconnect", "prefetch",
+            "preload", "stylesheet", "apple-touch-icon",
+        ]),
+        // (…a / area / form relLists reflect the same three hyperlink keywords)
+        ("rel", "a" | "area" | "form") => Some(&["noopener", "noreferrer", "opener"]),
+        ("sandbox", "iframe") => Some(&[
+            "allow-downloads", "allow-forms", "allow-modals", "allow-orientation-lock", "allow-pointer-lock", "allow-popups",
+            "allow-popups-to-escape-sandbox", "allow-presentation", "allow-same-origin", "allow-scripts",
+            "allow-storage-access-by-user-activation", "allow-top-navigation", "allow-top-navigation-by-user-activation",
+        ]),
+        // (…the `blocking` attribute's only one: render-blocking)
+        ("blocking", "link" | "script" | "style") => Some(&["render"]),
+        _ => None,
+    }
+}
+// __dom.tokenListSupports(nid, name, token) -> whether the token, ASCII-lowercased, is one of the attribute's supported
+// tokens — undefined where it has none (`supports()` throws).
+fn token_list_supports(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let attr = args.get(1).to_rust_string_lossy(scope);
+    let token = args.get(2).to_rust_string_lossy(scope).to_ascii_lowercase();
+    let cid = realm_id(scope, &args);
+    let Some(local) = crate::dom::realm(scope, cid).get(id).map(|n| n.local_name.to_string()) else { return };
+    if let Some(supported) = supported_tokens(&local, &attr) {
+        rv.set_bool(supported.contains(&token.as_str()));
+    }
 }
 
 // The element `nid`'s attribute `name` (arg 1), as written, or None where it has none.
