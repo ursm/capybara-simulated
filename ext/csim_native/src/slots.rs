@@ -152,3 +152,45 @@ pub(crate) fn flattened(arena: &RealmArena, slot: NodeId, out: &mut Vec<NodeId>)
         }
     }
 }
+
+impl RealmArena {
+    // HTML's `slot.assign(...nodes)`: the nodes the slot had are no longer manually assigned to it; each node given —
+    // once, in the order first given — is taken from the slot it was manually assigned to and assigned to this one,
+    // whose manually assigned nodes they are now. The shadow roots whose assignments that moved — this slot's, and each
+    // slot's a node was taken from — to have their slots assigned.
+    pub(crate) fn assign_manual(&mut self, slot: NodeId, nodes: &[NodeId]) -> Vec<NodeId> {
+        let mut roots = Vec::new();
+        let mut touch = |arena: &RealmArena, roots: &mut Vec<NodeId>, s: NodeId| {
+            if let Some(root) = enclosing_shadow_root(arena, s).filter(|r| !roots.contains(r)) {
+                roots.push(root);
+            }
+        };
+        touch(self, &mut roots, slot);
+        let had = self.get(slot).map_or_else(Vec::new, |n| n.manual_assigned.clone());
+        for n in had {
+            if self.manual_slots.get(&n) == Some(&slot) {
+                self.manual_slots.remove(&n);
+            }
+        }
+        let mut given: Vec<NodeId> = Vec::new();
+        for &n in nodes {
+            if !given.contains(&n) {
+                given.push(n);
+            }
+        }
+        for &n in &given {
+            let Some(old) = self.manual_slots.get(&n).copied().filter(|&o| o != slot) else { continue };
+            if let Some(o) = self.get_mut_quietly(old) {
+                o.manual_assigned.retain(|&x| x != n);
+            }
+            touch(self, &mut roots, old);
+        }
+        for &n in &given {
+            self.manual_slots.insert(n, slot);
+        }
+        if let Some(s) = self.get_mut_quietly(slot) {
+            s.manual_assigned = given;
+        }
+        roots
+    }
+}

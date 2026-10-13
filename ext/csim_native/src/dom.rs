@@ -833,6 +833,8 @@ pub(crate) struct RealmArena {
     // The `<link>`s whose `disabled` attribute was removed — "explicitly enabled" (HTML): an alternate style sheet one
     // applies then, whatever the selected set (sheet_owners.rs).
     pub(crate) explicitly_enabled: std::collections::HashSet<NodeId>,
+    // Each slottable's manual slot assignment (DOM): the slot a script's `assign()` gave it, for the few that have one.
+    pub(crate) manual_slots: std::collections::HashMap<NodeId, NodeId>,
     // Each sheet owner's sheet as the bindings last made it — its id in `sheets`, and the owner's count of sheets then
     // (`NodeData::sheet_gen`): the owner's sheet while that count holds (sheet_owners.rs `sheetOwned`).
     pub(crate) owner_sheets: std::collections::HashMap<NodeId, (u32, u32)>,
@@ -1154,6 +1156,7 @@ impl RealmArena {
         self.previously_focused.retain(|dialog, focused| live(slots, dialog) && live(slots, focused));
         self.nonces.retain(|id, _| live(slots, id));
         self.explicitly_enabled.retain(|id| live(slots, id));
+        self.manual_slots.retain(|id, _| live(slots, id));
         self.owner_sheets.retain(|id, _| live(slots, id));
         self.dialog_return_values.retain(|id, _| live(slots, id));
         self.dialog_requests.retain(|id, _| live(slots, id));
@@ -1323,6 +1326,9 @@ impl RealmArena {
         }
         if !self.explicitly_enabled.is_empty() {
             self.explicitly_enabled.remove(&id);
+        }
+        if !self.manual_slots.is_empty() {
+            self.manual_slots.remove(&id);
         }
         if !self.owner_sheets.is_empty() {
             self.owner_sheets.remove(&id);
@@ -2457,7 +2463,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // Slot assignment (slots.rs): what each slot is assigned, run over a shadow tree as what it depends on changes, and
     // read back by its slots and its slottables.
     register(scope, ns, "assignSlots", assign_slots, context_id);
-    register(scope, ns, "setManualAssigned", set_manual_assigned, context_id);
+    register(scope, ns, "slotAssign", slot_assign, context_id);
     register(scope, ns, "assignedSlotOf", assigned_slot_of, context_id);
     register(scope, ns, "assignedNodesOf", assigned_nodes_of, context_id);
     register(scope, ns, "setParserFormOwner", set_parser_form_owner, context_id);
@@ -3516,18 +3522,14 @@ fn slot_attribute_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, 
     }
 }
 
-// __dom.setManualAssigned(slotNid, [nid, …]): the nodes `assign()`ed to a slot, in that order (those in this arena).
-fn set_manual_assigned(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
+// __dom.slotAssign(slotNid, [nid, …]) -> [shadowRoot, …]: HTML's `slot.assign(...nodes)` (slots.rs `assign_manual`) —
+// the shadow roots whose slots the bindings then assign (DOM "assign slottables for a tree").
+fn slot_assign(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(slot) = nid_arg(scope, &args, 0) else { return };
     let nodes = nids_arg(scope, args.get(1));
     let cid = realm_id(scope, &args);
-    if let Some(s) = realm(scope, cid).get_mut_quietly(slot) {
-        s.manual_assigned = nodes;
-    }
+    let roots = realm(scope, cid).assign_manual(slot, &nodes);
+    rv.set(nodes_value(scope, cid, &roots));
 }
 
 // __dom.assignedSlotOf(nid) -> the slot a slottable is assigned to (HTML "find a slot"), none or it, as `nodes_value`
