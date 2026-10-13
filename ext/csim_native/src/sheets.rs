@@ -42,6 +42,9 @@ pub(crate) struct StoredSheet {
     pub(crate) constructed: bool,
     // An `@import`ed sheet CSSOM reached (`adopt`): one the engine cascades through the sheet importing it.
     pub(crate) imported: bool,
+    // Its CSSOM disabled flag (`StyleSheet.disabled`, a constructed sheet's `disabled` option): a disabled sheet takes
+    // no part in the cascade, whatever owns or adopts it. Kept across a `replace` — the same sheet, of other text.
+    pub(crate) disabled: bool,
     // The parse is the store's kept one (`parsed`), which other sheets of the same text share: CSSOM takes a copy of
     // its own before it reaches a rule (`own`).
     shared: bool,
@@ -141,7 +144,7 @@ impl SheetStore {
     pub(crate) fn adopt(&mut self, sheet: DocumentStyleSheet) -> u32 {
         let id = self.next_id;
         self.next_id += 1;
-        let stored = StoredSheet { sheet, css_image: false, host_has: false, version: id, constructed: false, imported: true, shared: false };
+        let stored = StoredSheet { sheet, css_image: false, host_has: false, version: id, constructed: false, imported: true, disabled: false, shared: false };
         self.sheets.insert(id, stored);
         id
     }
@@ -192,7 +195,7 @@ impl SheetStore {
         self.next_id += 1;
         let stored = self.parse(lock, source, quirks, version);
         if let Some(sheet) = self.sheets.get_mut(&id) {
-            *sheet = stored;
+            *sheet = StoredSheet { disabled: sheet.disabled, ..stored };
         }
         self.waiting_since(before)
     }
@@ -203,6 +206,15 @@ impl SheetStore {
         let url = stored.sheet.0.contents.read_with(&lock.read()).url_data.clone();
         let list = media_list(media, &url, mode(quirks));
         *stored.sheet.0.media.write_with(&mut lock.write()) = list;
+    }
+
+    // Whether the sheet `id` is disabled — with `value`, that set.
+    pub(crate) fn disabled(&mut self, id: u32, value: Option<bool>) -> bool {
+        let Some(stored) = self.sheets.get_mut(&id) else { return false };
+        if let Some(v) = value {
+            stored.disabled = v;
+        }
+        stored.disabled
     }
 
     // The page has let go of the sheet `id`.
@@ -295,6 +307,7 @@ impl SheetStore {
             version,
             constructed: source.constructed,
             imported: false,
+            disabled: false,
             shared,
         }
     }

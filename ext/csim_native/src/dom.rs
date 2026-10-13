@@ -830,6 +830,12 @@ pub(crate) struct RealmArena {
     parser_form_owners: std::collections::HashMap<NodeId, NodeId>,
     // A custom element's custom states (`ElementInternals.states`, `:state()`), for the few elements that have any.
     custom_states: std::collections::HashMap<NodeId, Vec<String>>,
+    // The `<link>`s whose `disabled` attribute was removed — "explicitly enabled" (HTML): an alternate style sheet one
+    // applies then, whatever the selected set (sheet_owners.rs).
+    pub(crate) explicitly_enabled: std::collections::HashSet<NodeId>,
+    // Each sheet owner's sheet as the bindings last made it — its id in `sheets`, and the owner's count of sheets then
+    // (`NodeData::sheet_gen`): the owner's sheet while that count holds (sheet_owners.rs `sheetOwned`).
+    pub(crate) owner_sheets: std::collections::HashMap<NodeId, (u32, u32)>,
     // Each element's nonce, once its `nonce` attribute was written or the element cloned with one (nonce.rs).
     pub(crate) nonces: std::collections::HashMap<NodeId, Vec<u16>>,
     // Each dialog's return value, once a close or a script gave it one (dialogs.rs).
@@ -1143,6 +1149,8 @@ impl RealmArena {
         self.explicit_elements.retain(|(id, _), _| live(slots, id));
         self.previously_focused.retain(|dialog, focused| live(slots, dialog) && live(slots, focused));
         self.nonces.retain(|id, _| live(slots, id));
+        self.explicitly_enabled.retain(|id| live(slots, id));
+        self.owner_sheets.retain(|id, _| live(slots, id));
         self.dialog_return_values.retain(|id, _| live(slots, id));
         self.dialog_requests.retain(|id, _| live(slots, id));
         self.media.retain(|id, _| live(slots, id));
@@ -1308,6 +1316,12 @@ impl RealmArena {
         }
         if !self.nonces.is_empty() {
             self.nonces.remove(&id);
+        }
+        if !self.explicitly_enabled.is_empty() {
+            self.explicitly_enabled.remove(&id);
+        }
+        if !self.owner_sheets.is_empty() {
+            self.owner_sheets.remove(&id);
         }
         if !self.dialog_return_values.is_empty() {
             self.dialog_return_values.remove(&id);
@@ -2479,6 +2493,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "importSheet", import_sheet, context_id);
     register(scope, ns, "ruleDrop", rule_drop, context_id);
     register(scope, ns, "sheetMedia", sheet_media, context_id);
+    register(scope, ns, "sheetDisabled", sheet_disabled, context_id);
     register(scope, ns, "mediaText", media_text, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
     register(scope, ns, "styleProperties", style_properties, context_id);
@@ -4120,6 +4135,14 @@ fn sheet_media(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let quirks = args.get(2).is_true();
     with_sheets(scope, &args, |store, lock| store.set_media(lock, sheet, &media, quirks));
     rules_moved(scope, &args, Some(sheet));
+}
+// __dom.sheetDisabled(handle[, disabled]) -> whether the sheet is disabled (sheets.rs `disabled`); with `disabled`, that
+// set (which sheets take part is the document's to say again: the bindings feed the engine anew).
+fn sheet_disabled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(sheet) = handle_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let value = (args.length() > 1).then(|| args.get(1).boolean_value(scope));
+    let disabled = with_sheets(scope, &args, |store, _| store.disabled(sheet, value));
+    rv.set_bool(disabled);
 }
 // __dom.mediaText(text) -> `text` as a media list, as the engine serializes one.
 fn media_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
