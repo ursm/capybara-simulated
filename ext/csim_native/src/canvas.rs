@@ -917,24 +917,50 @@ fn canvas_draw(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let Some(h) = crate::canvas_state::handle_of(scope, args.get(0)) else { return };
     // SAFETY: the handle lives while its object, the argument, does — through this op.
     let h = unsafe { &*(h.as_ref() as *const crate::canvas_state::CanvasStateHandle) };
-    let plain = args.get(5).is_true();
-    let s = h.state().clone();
+    let size = [2, 3].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
+    let (p3, plain) = (args.get(4).is_true(), args.get(5).is_true());
+    let shape = crate::dom::f64_arg(args.get(6)).to_vec();
+    let mask = bytes_read(args.get(7), bytes_span(args.get(1))).unwrap_or_default();
+    let paint = paint_arg(scope, h, args.get(8));
+    draw(scope, h, args.get(1), size, p3, plain, &shape, &mask, &paint, args.get(9));
+}
+
+// A draw's paint as `canvasDraw` takes it: the state's fill or stroke style's solid colour (`FILL_COLOR`,
+// `STROKE_COLOR`), else the array given.
+pub(crate) fn paint_arg(scope: &mut v8::PinScope<'_, '_>, h: &crate::canvas_state::CanvasStateHandle, value: v8::Local<'_, v8::Value>) -> Vec<f64> {
+    let s = h.state();
     let solid = |c: &crate::canvas_state::Color| vec![0.0, f64::from(c.rgb[0]), f64::from(c.rgb[1]), f64::from(c.rgb[2]), c.a];
-    let paint = match args.get(8).uint32_value(scope).filter(|_| args.get(8).is_number()) {
+    match value.uint32_value(scope).filter(|_| value.is_number()) {
         Some(FILL_COLOR) => solid(&s.fill),
         Some(STROKE_COLOR) => solid(&s.stroke),
-        _ => crate::dom::f64_arg(args.get(8)).to_vec(),
-    };
-    let [w, hgt] = [2, 3].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
+        _ => crate::dom::f64_arg(value).to_vec(),
+    }
+}
+
+// One drawing operation on the `size` bitmap `bitmap` (`Draw::run`), as `canvasDraw` describes it — `mask` the glyph
+// mask a `[2, …]` shape draws, `pixels` a pattern's or an image's.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw(
+    scope: &mut v8::PinScope<'_, '_>,
+    h: &crate::canvas_state::CanvasStateHandle,
+    bitmap: v8::Local<'_, v8::Value>,
+    size: [f64; 2],
+    p3: bool,
+    plain: bool,
+    shape: &[f64],
+    mask: &[u8],
+    paint: &[f64],
+    pixels: v8::Local<'_, v8::Value>,
+) {
+    let s = h.state().clone();
     let shadow_a = if plain { 0.0 } else { s.shadow.a };
     let [sr, sg, sb] = s.shadow.rgb.map(f64::from);
     let m = s.m;
     let state = [
-        w, hgt, if plain { 1.0 } else { s.alpha }, m[0], m[1], m[2], m[3], m[4], m[5], f64::from(u8::from(args.get(4).is_true())), sr, sg, sb, shadow_a, s.shadow_blur,
-        s.shadow_x, s.shadow_y,
+        size[0], size[1], if plain { 1.0 } else { s.alpha }, m[0], m[1], m[2], m[3], m[4], m[5], f64::from(u8::from(p3)), sr, sg, sb, shadow_a,
+        s.shadow_blur, s.shadow_x, s.shadow_y,
     ];
     let op = Op::parse(if plain { "source-over" } else { crate::canvas_state::COMPOSITE_OPS[s.composite as usize] });
-    let shape = crate::dom::f64_arg(args.get(6)).to_vec();
     let clip_object = h.object(scope, crate::canvas_state::CLIP);
     if shape.is_empty() || paint.is_empty() {
         return;
@@ -945,10 +971,8 @@ fn canvas_draw(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     if !ctm.iter().all(|v| v.is_finite()) {
         return;
     }
-    let p3 = state[9] != 0.0;
     let to = matrix(false, p3);
-    let written = bytes_span(args.get(1));
-    let mask = bytes_read(args.get(7), written).unwrap_or_default();
+    let written = bytes_span(bitmap);
     let clip = clip_object.and_then(|c| bytes_read(c.into(), written));
     let shape = match shape[0] as i32 {
         0 if shape.len() >= 5 => Shape::Box([shape[1], shape[2], shape[3], shape[4]]),
@@ -957,7 +981,7 @@ fn canvas_draw(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             if w == 0 || h == 0 || mask.len() < w * h || !shape[3..5].iter().all(|v| v.is_finite()) {
                 return;
             }
-            Shape::Mask { mask: &mask, w, h, x: shape[3] as i64, y: shape[4] as i64 }
+            Shape::Mask { mask, w, h, x: shape[3] as i64, y: shape[4] as i64 }
         }
         _ => match rings_of(&shape) {
             Some((rings, even_odd)) => Shape::Rings { rings, even_odd },
@@ -966,7 +990,7 @@ fn canvas_draw(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     };
     // (…a pattern's or an image's pixels, copied where they share the bitmap's bytes or need converting)
     let pixels = |convert: Option<&[f64; 9]>| {
-        let mut px = bytes_read(args.get(9), written).unwrap_or_default();
+        let mut px = bytes_read(pixels, written).unwrap_or_default();
         if let Some(m) = convert {
             convert_buffer(m, px.to_mut());
         }
@@ -1053,7 +1077,7 @@ fn canvas_draw(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         offset: (js_round(state[15]), js_round(state[16])),
         radius: blur_radius(state[14]),
     });
-    let Some(buf) = bytes_mut(args.get(1)) else { return };
+    let Some(buf) = bytes_mut(bitmap) else { return };
     if buf.len() < cw * ch * 4 {
         return;
     }

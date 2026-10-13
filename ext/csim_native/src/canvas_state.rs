@@ -353,7 +353,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "canvasTransform", canvas_transform, context_id);
     crate::dom::register(scope, ns, "canvasLineDash", canvas_line_dash, context_id);
     crate::dom::register(scope, ns, "canvasObject", canvas_object, context_id);
-    crate::dom::register(scope, ns, "canvasTextState", canvas_text_state, context_id);
+    crate::dom::register(scope, ns, "canvasFontFace", canvas_font_face, context_id);
 }
 
 // The handle of a state argument.
@@ -628,30 +628,15 @@ fn canvas_object(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     }
 }
 
-// __dom.canvasTextState(state) -> `[css, px, weight, slant, smallCaps, family, kerning, variantCaps, align, baseline,
-// direction, letterSpacing, wordSpacing, shadowAlpha, shadowOffsetX, shadowOffsetY, shadowBlur]`: what text is measured
-// and drawn with — the computed font, the text attributes as keywords, and how far its shadow reaches.
-fn canvas_text_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.canvasFontFace(state) -> `[weight, slant, family]` of the state's computed font: what the bindings resolve the
+// face it is drawn with by (canvas.js `_face`).
+fn canvas_font_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return };
-    let s = h.state().clone();
-    let items: Vec<v8::Local<'_, v8::Value>> = vec![
-        string(scope, &s.font.css),
-        v8::Number::new(scope, s.font.px).into(),
-        v8::Number::new(scope, s.font.weight).into(),
-        v8::Number::new(scope, f64::from(s.font.slant)).into(),
-        v8::Boolean::new(scope, s.font.small_caps).into(),
-        string(scope, &s.font.family),
-        string(scope, KERNINGS[s.kerning as usize]),
-        string(scope, VARIANT_CAPS[s.variant_caps as usize]),
-        string(scope, ALIGNS[s.align as usize]),
-        string(scope, BASELINES[s.baseline as usize]),
-        string(scope, DIRECTIONS[s.direction as usize]),
-        string(scope, &s.letter_spacing),
-        string(scope, &s.word_spacing),
-        v8::Number::new(scope, s.shadow.a).into(),
-        v8::Number::new(scope, s.shadow_x).into(),
-        v8::Number::new(scope, s.shadow_y).into(),
-        v8::Number::new(scope, s.shadow_blur).into(),
+    let font = h.state().font.clone();
+    let items: [v8::Local<'_, v8::Value>; 3] = [
+        v8::Number::new(scope, font.weight).into(),
+        v8::Number::new(scope, f64::from(font.slant)).into(),
+        string(scope, &font.family),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }

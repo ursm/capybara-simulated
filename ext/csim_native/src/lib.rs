@@ -15,6 +15,7 @@ mod av1;
 mod canvas;
 mod canvas_path;
 mod canvas_state;
+mod canvas_text;
 mod caret;
 mod ce_reactions;
 mod change_on_blur;

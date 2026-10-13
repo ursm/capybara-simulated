@@ -364,7 +364,7 @@ pub(crate) enum Baseline {
 }
 
 impl Baseline {
-    fn from_index(i: i32) -> Baseline {
+    pub(crate) fn from_index(i: i32) -> Baseline {
         [Baseline::Top, Baseline::Hanging, Baseline::Middle, Baseline::Alphabetic, Baseline::Ideographic, Baseline::Bottom]
             .get(i as usize)
             .copied()
