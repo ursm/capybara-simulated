@@ -18,4 +18,16 @@ RSpec.describe 'Easing functions' do
       })()
     JS
   end
+
+  # A comment before a number is whitespace, as everywhere in CSS; a `calc()` percentage is the one written, and a
+  # `calc()` step count is clamped to one, the `jump-none` minimum of two a rule past it. Chrome 155: each figure below.
+  it 'reads comments, calc() percentages and clamped step counts as Chrome does' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] }).tap {|session| session.visit '/' }
+    expect(s.evaluate_script(<<~'JS')).to eq(['cubic-bezier(0.5, 0, 1, 1)', 'linear(0 0%, 0.5 25%, 1 100%)', 'linear(0 0%, 1 60%)', 'steps(1)', 'TypeError'])
+      (() => {
+        const read = (easing) => { try { return new KeyframeEffect(null, null, { easing }).getTiming().easing; } catch (e) { return e.name; } };
+        return ['cubic-bezier(/**/0.5, 0, 1, 1)', 'linear(0, 0.5/**/25%, 1)', 'linear(0, 1 calc(50% + 10%))', 'steps(calc(-1))', 'steps(calc(1), jump-none)'].map(read);
+      })()
+    JS
+  end
 end

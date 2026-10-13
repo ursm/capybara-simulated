@@ -28874,12 +28874,6 @@ css/css-animations/KeyframeEffect-getKeyframes.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: KeyframeEffect.getKeyframes() returns expected frames for an animation with
-    different properties on different keyframes, with a different easing function
-    on each
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: KeyframeEffect.getKeyframes() returns expected frames for an animation with
     multiple keyframes for the same time and with different but equivalent easing
     functions
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

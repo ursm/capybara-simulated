@@ -1338,11 +1338,14 @@ impl StyleEngine {
                     }
                     .to_owned()
                 });
+                // (…a keyframe rule's `animation-timing-function` and `animation-composition` are its easing and composite,
+                // no declarations of its: Chrome reports them as those alone)
                 let declarations = k
                     .block
                     .read_with(&guard)
                     .declarations()
                     .iter()
+                    .filter(|d| !matches!(&*d.id().name(), "animation-timing-function" | "animation-composition"))
                     .map(|d| {
                         let mut value = String::new();
                         let _ = d.to_css(&mut value);

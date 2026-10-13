@@ -50,8 +50,10 @@ fn match_ignore_ascii_case<'a>(name: &str, names: &[&'a str]) -> Result<&'a str,
     names.iter().copied().find(|n| n.eq_ignore_ascii_case(name)).ok_or(())
 }
 
-// A `<number>`: a plain one at the precision the page wrote it in, a `calc()` resolved.
+// A `<number>`: a plain one at the precision the page wrote it in (its text read from where the token starts, past the
+// whitespace and comments before it), a `calc()` resolved.
 fn number(context: &ParserContext<'_>, p: &mut Parser<'_, '_>) -> Result<f64, ()> {
+    p.skip_whitespace();
     let start = p.position();
     if p.try_parse(|p| match p.next() {
         Ok(Token::Number { .. }) => Ok(()),
@@ -67,6 +69,7 @@ fn number(context: &ParserContext<'_>, p: &mut Parser<'_, '_>) -> Result<f64, ()
 }
 // …a `<percentage>`'s number of percent, likewise.
 fn percentage(context: &ParserContext<'_>, p: &mut Parser<'_, '_>) -> Result<f64, ()> {
+    p.skip_whitespace();
     let start = p.position();
     if p.try_parse(|p| match p.next() {
         Ok(Token::Percentage { .. }) => Ok(()),
@@ -77,18 +80,19 @@ fn percentage(context: &ParserContext<'_>, p: &mut Parser<'_, '_>) -> Result<f64
         return p.slice_from(start).trim().trim_end_matches('%').parse().map_err(|_| ());
     }
     let n = style::values::specified::Percentage::parse(context, p).map_err(|_| ())?;
-    shortest(n.resolve().ok_or(())? * 100.0)
+    Ok(shortest(n.resolve().ok_or(())?)? * 100.0)
 }
-// …an `<integer>`.
-fn integer(context: &ParserContext<'_>, p: &mut Parser<'_, '_>) -> Result<i64, ()> {
+// …an `<integer>` of at least `min` — a plain one below it none, a `calc()` clamped to it (CSS Values: a calc()'s result
+// is clamped to the range the context allows; Chrome: `steps(calc(-1))` reads `steps(1)`).
+fn integer(context: &ParserContext<'_>, p: &mut Parser<'_, '_>, min: i64) -> Result<i64, ()> {
     if let Ok(v) = p.try_parse(|p| match p.next() {
         Ok(&Token::Number { int_value: Some(v), .. }) => Ok(v),
         _ => Err(()),
     }) {
-        return Ok(i64::from(v));
+        return if i64::from(v) < min { Err(()) } else { Ok(i64::from(v)) };
     }
     let n = style::values::specified::Integer::parse(context, p).map_err(|_| ())?;
-    Ok(i64::from(n.resolve().ok_or(())?))
+    Ok(i64::from(n.resolve().ok_or(())?).max(min))
 }
 // (…an f32 a calc() resolved to, as the shortest decimal that reads back as it — `0.1`, not its double's digits)
 fn shortest(n: f32) -> Result<f64, ()> {
@@ -120,14 +124,16 @@ fn cubic_bezier(context: &ParserContext<'_>, p: &mut Parser<'_, '_>) -> Result<S
 // `steps(count[, position])`: at least one step — two where they jump at neither end (`jump-none`) — and the default
 // position, `end` or `jump-end`, not reported back (Chrome: `steps(2, jump-end)` reads `steps(2)`).
 fn steps(context: &ParserContext<'_>, p: &mut Parser<'_, '_>) -> Result<String, ()> {
-    let count = integer(context, p)?;
+    let count = integer(context, p, 1)?;
     let position = if p.try_parse(comma).is_ok() {
         let name = p.expect_ident().map_err(|_| ())?.clone();
         match_ignore_ascii_case(&name, &["jump-start", "jump-end", "jump-none", "jump-both", "start", "end"])?
     } else {
         "end"
     };
-    if count < 1 || (position == "jump-none" && count < 2) {
+    // (…two steps where they jump at neither end — a rule of its own, past a calc()'s clamping: Chrome refuses
+    // `steps(calc(1), jump-none)`)
+    if position == "jump-none" && count < 2 {
         return Err(());
     }
     Ok(match position {
