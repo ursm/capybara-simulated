@@ -117,20 +117,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // plays by the answer (Howler, Modernizr). Chrome's answers, measured — but for Ogg and Matroska (`video/ogg`,
 // `audio/matroska`, …), containers we demux not at all, which Chrome answers maybe.
 pub(crate) fn can_play_type(ty: &str) -> &'static str {
-    let ty = ty.trim();
-    let (container, params) = ty.split_once(';').map_or((ty, ""), |(c, p)| (c.trim_end(), p));
-    let valid = |s: &str, extra: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || extra.contains(c));
-    let Some((kind, sub)) = container.split_once('/') else { return "" };
-    if !valid(kind, "-") || !valid(sub, ".+-") {
-        return "";
-    }
-    let container = container.to_ascii_lowercase();
-    let Some((bare, plays)) = known_type(&container) else { return "" };
-    // (…the `codecs` parameter, quoted or not; an empty one saying no more than none)
-    let named = params.split(';').find_map(|p| {
-        let (key, value) = p.split_once('=')?;
-        key.trim().eq_ignore_ascii_case("codecs").then(|| value.trim_start().strip_prefix('"').map_or(value, |v| v.split('"').next().unwrap_or("")))
-    });
+    // (…the type parsed as a MIME type, the engine's parser: a quoted `codecs` list whole, the first of a name kept)
+    let Some(mime) = crate::mime::parse(ty) else { return "" };
+    let Some((bare, plays)) = known_type(&mime.essence) else { return "" };
+    // (…an empty `codecs` saying no more than none)
+    let named = mime.parameters.iter().find(|(name, _)| name == "codecs").map(|(_, value)| value.as_str());
     let Some(named) = named.filter(|n| !n.trim().is_empty()) else { return bare };
     // (…an empty item in a list naming no codec we play — Chrome)
     if named.split(',').all(|c| plays(&c.trim().to_ascii_lowercase())) { "probably" } else { "" }
@@ -404,5 +395,8 @@ mod tests {
         assert_eq!(can_play_type("audio/aac; codecs=mp4a"), "");
         assert_eq!(can_play_type("video/ogg"), "");
         assert_eq!(can_play_type("video"), "");
+        // (…a quoted list whole, its `;` no parameter's end)
+        assert_eq!(can_play_type(r#"video/mp4; codecs="avc1; mp4a""#), "");
+        assert_eq!(can_play_type(r#"video/mp4; foo="a;codecs=xx"; codecs=avc1"#), "probably");
     }
 }
