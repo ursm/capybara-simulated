@@ -553,7 +553,7 @@ impl RealmArena {
     pub(crate) fn requiredness(&self, id: NodeId) -> Option<bool> {
         let n = self.get(id)?;
         let requirable = if n.is_html_named("input") {
-            !matches!(n.input_type(), "submit" | "image" | "reset" | "button" | "hidden" | "range" | "color")
+            n.input_has(crate::input_types::REQUIRED)
         } else {
             n.is_html_named("select") || n.is_html_named("textarea")
         };
