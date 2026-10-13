@@ -366,7 +366,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "canvasStack", canvas_stack, context_id);
     crate::dom::register(scope, ns, "canvasTransform", canvas_transform, context_id);
     crate::dom::register(scope, ns, "canvasLineDash", canvas_line_dash, context_id);
-    crate::dom::register(scope, ns, "canvasObject", canvas_object, context_id);
     crate::dom::register(scope, ns, "canvasFontFace", canvas_font_face, context_id);
 }
 
@@ -385,12 +384,14 @@ fn string<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Va
 fn canvas_get(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return };
     let which = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
-    if let Some(obj) = match which {
+    // (…a style that is a gradient or a pattern: its interface object, which its paint traces)
+    let paint = match which {
         FILL_STYLE => h.object(scope, FILL),
         STROKE_STYLE => h.object(scope, STROKE),
         _ => None,
-    } {
-        return rv.set(obj.into());
+    };
+    if let Some(wrapper) = paint.and_then(|p| crate::canvas_paint::handle(scope, p.into())).and_then(|p| p.wrapper(scope)) {
+        return rv.set(wrapper.into());
     }
     let s = h.state();
     let keyword = |list: &[&'static str], i: u8| list.get(i as usize).copied().unwrap_or("");
@@ -430,7 +431,7 @@ fn canvas_get(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 
 // A colour of `text` as a canvas style takes it (style.rs `parse_color`), `currentColor` resolving to `current`; None
 // for no colour.
-fn parse_color(scope: &mut v8::PinScope<'_, '_>, cid: i32, text: &str, current: &str) -> Option<Color> {
+pub(crate) fn parse_color(scope: &mut v8::PinScope<'_, '_>, cid: i32, text: &str, current: &str) -> Option<Color> {
     use style_traits::ToCss;
     let d = crate::dom::dom(scope);
     let arena = d.arena.enter(cid);
@@ -444,7 +445,7 @@ fn parse_color(scope: &mut v8::PinScope<'_, '_>, cid: i32, text: &str, current: 
 
 // __dom.canvasSet(state, attribute, value, extra) — the attribute set, where its setter takes the value (converted as
 // its IDL type converts it): a number in its range, one of its keywords, a colour that parses (`extra` what
-// `currentColor` is), a fill or stroke style's gradient or pattern (`extra` true: the bindings tell one), a `font` that
+// `currentColor` is), a fill or stroke style's gradient or pattern — its paint (canvas_paint.rs), `extra` true — a `font` that
 // parses (`extra` the bases of its relative units: `[em, rem, lh, rlh]`, or undefined for none), a letter or word
 // spacing that is a length; else nothing.
 fn canvas_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
@@ -625,21 +626,6 @@ fn canvas_line_dash(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     }
     let dash = if segments.len() % 2 == 1 { [segments.clone(), segments].concat() } else { segments };
     h.state.borrow_mut().dash = dash;
-}
-
-// __dom.canvasObject(state, slot) -> the object the state traces in `slot` (0 its fill style's, 1 its stroke style's, 2
-// its clip mask) — null for none — or, with `object` given (a third argument), that object set there.
-fn canvas_object(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(h) = handle(scope, args.get(0)) else { return };
-    let slot = args.get(1).uint32_value(scope).unwrap_or(0).min(2) as usize;
-    if args.length() > 2 {
-        let object = v8::Local::<v8::Object>::try_from(args.get(2)).ok();
-        return h.set_object(scope, slot, object);
-    }
-    match h.object(scope, slot) {
-        Some(obj) => rv.set(obj.into()),
-        None => rv.set_null(),
-    }
 }
 
 // __dom.canvasFontFace(state) -> `[weight, slant, family, inherits, rem]`: what the bindings answer a text op with — the

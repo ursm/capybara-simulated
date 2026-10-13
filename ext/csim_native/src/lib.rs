@@ -13,6 +13,7 @@ mod animations;
 mod autofocus;
 mod av1;
 mod canvas;
+mod canvas_paint;
 mod canvas_path;
 mod canvas_state;
 mod canvas_text;

@@ -921,20 +921,32 @@ fn canvas_draw(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let (p3, plain) = (args.get(4).is_true(), args.get(5).is_true());
     let shape = crate::dom::f64_arg(args.get(6)).to_vec();
     let mask = bytes_read(args.get(7), bytes_span(args.get(1))).unwrap_or_default();
-    let paint = paint_arg(scope, h, args.get(8));
-    draw(scope, h, args.get(1), size, p3, plain, &shape, &mask, &paint, args.get(9));
+    let given = v8::Local::new(scope, args.get(9));
+    let (paint, pixels) = paint_arg(scope, h, args.get(8), given);
+    draw(scope, h, args.get(1), size, p3, plain, &shape, &mask, &paint, pixels);
 }
 
-// A draw's paint as `canvasDraw` takes it: the state's fill or stroke style's solid colour (`FILL_COLOR`,
-// `STROKE_COLOR`), else the array given.
-pub(crate) fn paint_arg(scope: &mut v8::PinScope<'_, '_>, h: &crate::canvas_state::CanvasStateHandle, value: v8::Local<'_, v8::Value>) -> Vec<f64> {
-    let s = h.state();
-    let solid = |c: &crate::canvas_state::Color| vec![0.0, f64::from(c.rgb[0]), f64::from(c.rgb[1]), f64::from(c.rgb[2]), c.a];
-    match value.uint32_value(scope).filter(|_| value.is_number()) {
-        Some(FILL_COLOR) => solid(&s.fill),
-        Some(STROKE_COLOR) => solid(&s.stroke),
-        _ => crate::dom::f64_arg(value).to_vec(),
+// A draw's paint as `canvasDraw` takes it: the state's fill or stroke style (`FILL_COLOR`, `STROKE_COLOR`) — its
+// gradient's or its pattern's (canvas_paint.rs `paint_data`), a pattern's pixels with it, else its solid colour — or
+// the array given, with the pixels `pixels` given.
+pub(crate) fn paint_arg<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    h: &crate::canvas_state::CanvasStateHandle,
+    value: v8::Local<'_, v8::Value>,
+    pixels: v8::Local<'s, v8::Value>,
+) -> (Vec<f64>, v8::Local<'s, v8::Value>) {
+    let slot = match value.uint32_value(scope).filter(|_| value.is_number()) {
+        Some(FILL_COLOR) => crate::canvas_state::FILL,
+        Some(STROKE_COLOR) => crate::canvas_state::STROKE,
+        _ => return (crate::dom::f64_arg(value).to_vec(), pixels),
+    };
+    if let Some((data, own)) = h.object(scope, slot).and_then(|p| crate::canvas_paint::paint_data(scope, p)) {
+        let own: v8::Local<'s, v8::Value> = own.map_or_else(|| v8::null(scope).into(), Into::into);
+        return (data, own);
     }
+    let s = h.state();
+    let c = if slot == crate::canvas_state::FILL { &s.fill } else { &s.stroke };
+    (vec![0.0, f64::from(c.rgb[0]), f64::from(c.rgb[1]), f64::from(c.rgb[2]), c.a], pixels)
 }
 
 // One drawing operation on the `size` bitmap `bitmap` (`Draw::run`), as `canvasDraw` describes it — `mask` the glyph

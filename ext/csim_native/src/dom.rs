@@ -2118,6 +2118,8 @@ pub(crate) struct Dom {
     pub(crate) clone_exception: Option<v8::Global<v8::Value>>,
     // The template a canvas context's state object is made from (canvas_state.rs), once per isolate.
     pub(crate) canvas_state_template: Option<v8::Global<v8::FunctionTemplate>>,
+    // …and a gradient's or a pattern's (canvas_paint.rs).
+    pub(crate) canvas_paint_template: Option<v8::Global<v8::FunctionTemplate>>,
     pub(crate) iterators: crate::node_iterators::Iterators,
     // Each realm's style engine (made by `styleSheets`).
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
@@ -2525,6 +2527,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::canvas::install(scope, ns, context_id);
     crate::canvas_state::install(scope, ns, context_id);
     crate::canvas_text::install(scope, ns, context_id);
+    crate::canvas_paint::install(scope, ns, context_id);
     crate::canvas_path::install(scope, ns, context_id);
     crate::text::install(scope, ns, context_id);
     crate::dom_matrix::install(scope, ns, context_id);

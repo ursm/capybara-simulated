@@ -177,9 +177,10 @@ fn canvas_draw_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     if text.is_empty() || !x.is_finite() || !y.is_finite() || max_width.is_some_and(|m| !(m > 0.0)) {
         return;
     }
-    let paint = crate::canvas::paint_arg(scope, h, args.get(9));
+    let given = v8::Local::new(scope, args.get(10));
+    let (paint, pixels) = crate::canvas::paint_arg(scope, h, args.get(9), given);
     let s = setting_args(scope, &args, h, 11);
-    let draw = TextDraw { bitmap: args.get(1), size, p3, paint, pixels: args.get(10) };
+    let draw = TextDraw { bitmap: args.get(1), size, p3, paint, pixels };
     if (s.letter != 0.0 || s.word != 0.0) && spaced(scope, h, &draw, &s, &text, x, y, max_width) {
         return;
     }
