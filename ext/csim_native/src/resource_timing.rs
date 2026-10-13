@@ -12,87 +12,91 @@ pub(crate) struct Metric {
 
 // Server Timing §3 "parse a server-timing header": its comma-separated metrics, each `name *( OWS ";" OWS param )`, a
 // param `key [ OWS "=" OWS value ]` — a value a token or an HTTP quoted-string (a `\` taking the character after it, a
-// comma inside it no metric's end) — the first `dur` and the first `desc` of a metric taken, any other param ignored;
-// a metric with no name, or with what no param is after its name, is none.
+// comma inside it no metric's end; one never closed `""`) — the first `dur` and the first `desc` of a metric taken, any
+// other param ignored, and what the grammar cannot take after a name or a param skipped to the next `;` or `,` ("user
+// agents MUST ignore extraneous characters"). A metric with no name is none.
 pub(crate) fn server_timing(value: &str) -> Vec<Metric> {
-    let mut metrics = Vec::new();
-    let mut chars = value.chars().peekable();
-    let ows = |chars: &mut std::iter::Peekable<std::str::Chars>| while chars.next_if(|c| matches!(c, ' ' | '\t')).is_some() {};
-    let token = |chars: &mut std::iter::Peekable<std::str::Chars>| {
+    type Chars<'a> = std::iter::Peekable<std::str::Chars<'a>>;
+    fn ows(chars: &mut Chars) {
+        while chars.next_if(|c| matches!(c, ' ' | '\t')).is_some() {}
+    }
+    fn token(chars: &mut Chars) -> String {
         let mut t = String::new();
         while let Some(c) = chars.next_if(|c| c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~".contains(*c)) {
             t.push(c);
         }
         t
-    };
+    }
+    // (…up to the next `;` or `,`, a quoted string skipped whole)
+    fn extraneous(chars: &mut Chars) {
+        let mut quoted = false;
+        while let Some(c) = chars.next_if(|&c| quoted || (c != ';' && c != ',')) {
+            match c {
+                '"' => quoted = !quoted,
+                '\\' if quoted => {
+                    chars.next();
+                }
+                _ => {}
+            }
+        }
+    }
+    fn quoted_string(chars: &mut Chars) -> String {
+        let mut s = String::new();
+        loop {
+            match chars.next() {
+                None => return String::new(),
+                Some('"') => return s,
+                Some('\\') => match chars.next() {
+                    Some(c) => s.push(c),
+                    None => return String::new(),
+                },
+                Some(c) => s.push(c),
+            }
+        }
+    }
+    let mut metrics = Vec::new();
+    let mut chars = value.chars().peekable();
     loop {
         ows(&mut chars);
         if chars.peek().is_none() {
             return metrics;
         }
         let name = token(&mut chars);
+        extraneous(&mut chars);
         let (mut duration, mut description) = (None, None);
-        let mut valid = !name.is_empty();
-        loop {
-            ows(&mut chars);
-            match chars.peek() {
-                None | Some(',') => break,
-                Some(';') => {
-                    chars.next();
-                }
-                Some(_) => {
-                    valid = false;
-                    break;
-                }
-            }
+        while chars.next_if_eq(&';').is_some() {
             ows(&mut chars);
             let key = token(&mut chars).to_ascii_lowercase();
             ows(&mut chars);
             let mut param = String::new();
             if chars.next_if_eq(&'=').is_some() {
                 ows(&mut chars);
-                if chars.next_if_eq(&'"').is_some() {
-                    while let Some(c) = chars.next() {
-                        match c {
-                            '"' => break,
-                            '\\' => param.extend(chars.next()),
-                            c => param.push(c),
-                        }
-                    }
-                } else {
-                    param = token(&mut chars);
-                }
+                param = if chars.next_if_eq(&'"').is_some() { quoted_string(&mut chars) } else { token(&mut chars) };
             }
+            extraneous(&mut chars);
             match key.as_str() {
-                "dur" if duration.is_none() => duration = Some(param.parse::<f64>().ok().filter(|d| d.is_finite()).unwrap_or(0.0)),
+                // (…a number past leading whitespace, as Chrome reads one; anything else, or none finite, 0)
+                "dur" if duration.is_none() => {
+                    let number = param.trim_start_matches([' ', '\t', '\n', '\r', '\x0c']).parse::<f64>().ok();
+                    duration = Some(number.filter(|d| d.is_finite()).unwrap_or(0.0));
+                }
                 "desc" if description.is_none() => description = Some(param),
                 _ => {}
             }
         }
-        // (…what the metric could not take, skipped to the next comma outside a quoted string)
-        if !valid {
-            let mut quoted = false;
-            while let Some(c) = chars.next_if(|&c| quoted || c != ',') {
-                match c {
-                    '"' => quoted = !quoted,
-                    '\\' if quoted => {
-                        chars.next();
-                    }
-                    _ => {}
-                }
-            }
-        }
         chars.next_if_eq(&',');
-        if valid {
+        if !name.is_empty() {
             metrics.push(Metric { name, duration: duration.unwrap_or(0.0), description: description.unwrap_or_default() });
         }
     }
 }
 
-// Resource Timing "minimize a supported MIME type": a JavaScript type `text/javascript`, a JSON one `application/json`,
-// SVG `image/svg+xml`, any other XML type `application/xml`, any other its essence — '' where it is no MIME type.
+// Resource Timing "minimize a supported MIME type" of the response's MIME type (Fetch "extract a MIME type" from its
+// `Content-Type`, the last of a combined list that parses): a JavaScript type `text/javascript`, a JSON one
+// `application/json`, SVG `image/svg+xml`, any other XML type `application/xml`, any other its essence — '' where none
+// parses. (OPEN: mimesniff's "supported by the user agent" gate, '' for a type it does not support, is not modelled.)
 pub(crate) fn minimize_mime(content_type: &str) -> String {
-    let Some(mime) = crate::mime::parse(content_type) else { return String::new() };
+    let Some(mime) = crate::mime::extract(content_type) else { return String::new() };
     let essence = mime.essence.as_str();
     let subtype = essence.split_once('/').map_or("", |(_, s)| s);
     const JAVASCRIPT: [&str; 16] = [
@@ -131,7 +135,7 @@ pub(crate) fn content_encoding(header: &str) -> String {
 // Fetch's "TAO check" for a cross-origin response: its `Timing-Allow-Origin` values, comma-separated, one `*` or the
 // requesting document's origin serialized.
 pub(crate) fn timing_allowed(tao: &str, origin: &str) -> bool {
-    tao.split(',').map(|v| v.trim_matches([' ', '\t'])).any(|v| v == "*" || v == origin)
+    tao.split(',').map(|v| v.trim_matches([' ', '\t'])).any(|v| v == "*" || (!v.is_empty() && v == origin))
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -185,7 +189,14 @@ mod tests {
         assert_eq!(st(r#"db;dur=53, app;dur=47.2;desc="a, b""#), vec![("db".into(), 53.0, "".into()), ("app".into(), 47.2, "a, b".into())]);
         assert_eq!(st("cache;desc=hit;desc=miss;dur=1;dur=2"), vec![("cache".into(), 1.0, "hit".into())]);
         assert_eq!(st(r#"x;desc="q\"q""#), vec![("x".into(), 0.0, "q\"q".into())]);
-        assert_eq!(st("bad junk, ok"), vec![("ok".into(), 0.0, "".into())]);
+        // (…what the grammar cannot take ignored, not the metric — WPT server_timing_header-parsing 63, 65, 67, 69, 70)
+        assert_eq!(st("bad junk, ok"), vec![("bad".into(), 0.0, "".into()), ("ok".into(), 0.0, "".into())]);
+        assert_eq!(st("metric;desc=d1 d2;dur=123.4"), vec![("metric".into(), 123.4, "d1".into())]);
+        assert_eq!(st(r#"metric==   ""foo;dur=123.4"#), vec![("metric".into(), 123.4, "".into())]);
+        assert_eq!(st("metric;dur foo=12"), vec![("metric".into(), 0.0, "".into())]);
+        assert_eq!(st(r#"metric;desc="\\"#), vec![("metric".into(), 0.0, "".into())]);
+        assert_eq!(st("m;dur= 7"), vec![("m".into(), 7.0, "".into())]);
+        assert_eq!(st(r#"m;dur=" 7""#), vec![("m".into(), 7.0, "".into())]);
         assert_eq!(st(";dur=1, ,y"), vec![("y".into(), 0.0, "".into())]);
     }
 
@@ -197,6 +208,7 @@ mod tests {
         assert_eq!(minimize_mime("application/atom+xml"), "application/xml");
         assert_eq!(minimize_mime("TEXT/HTML"), "text/html");
         assert_eq!(minimize_mime("nonsense"), "");
+        assert_eq!(minimize_mime("text/plain, application/json"), "application/json");
         assert_eq!(content_encoding(" GZIP "), "gzip");
         assert_eq!(content_encoding("gzip, br"), "multiple");
         assert_eq!(content_encoding("identity"), "@unknown");

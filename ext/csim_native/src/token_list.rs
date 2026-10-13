@@ -51,7 +51,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // HTML's "supported tokens" of an element's attribute's DOMTokenList, by the element's local name: the keywords the
-// engine registers (Chromium's, measured — a strict subset of those merely valid on the attribute, as a feature-detect
+// engine registers (Chromium 148's, measured — a strict subset of those merely valid on the attribute, as a feature-detect
 // must see: Vite's boot-time `link.relList.supports('modulepreload')`) — none where the attribute defines none
 // (`class`), which `supports()` throws for.
 fn supported_tokens(local_name: &str, attr: &str) -> Option<&'static [&'static str]> {
