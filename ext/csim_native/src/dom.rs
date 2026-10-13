@@ -2513,6 +2513,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "declSupports", decl_supports, context_id);
     register(scope, ns, "declSupportsCondition", decl_supports_condition, context_id);
     register(scope, ns, "cssNumber", css_number, context_id);
+    register(scope, ns, "easingText", easing_text, context_id);
     register(scope, ns, "mediaMatches", media_matches, context_id);
     register(scope, ns, "cssColor", css_color, context_id);
     register(scope, ns, "canvasFont", canvas_font, context_id);
@@ -4682,6 +4683,16 @@ fn decl_supports(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 fn css_number(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let text = args.get(0).to_rust_string_lossy(scope);
     rv.set_double(crate::cssom_decl::number(&text).unwrap_or(f64::NAN));
+}
+
+// __dom.easingText(text) -> the easing function `text` is, in the form Web Animations reads it back (easing.rs), or null
+// for none.
+fn easing_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    match crate::easing::canonical(&text) {
+        Some(e) => set_str(scope, &mut rv, &e),
+        None => rv.set_null(),
+    }
 }
 
 // __dom.mediaMatches(text, width, height) -> whether the media query list matches on a viewport of that size

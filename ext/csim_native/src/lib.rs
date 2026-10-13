@@ -39,6 +39,7 @@ mod cssom_rule;
 mod document_encoding;
 mod dom;
 mod dom_matrix;
+mod easing;
 mod editing;
 mod editing_commands;
 mod editing_delete;
