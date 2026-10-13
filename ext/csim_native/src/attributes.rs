@@ -376,6 +376,21 @@ fn change(
     if plain && local == "nonce" {
         arena.set_nonce(id, value.map(<[u16]>::to_vec).unwrap_or_default());
     }
+    // (…a sheet owner's attribute that obtains it a new sheet: a `<style>`'s `type` ("update a style block"); a `<link>`'s
+    // `type` or `disabled`, its `rel` or `href` set to another value (the same one is the same resource: Chrome keeps
+    // the sheet) — `disabled` removed making it explicitly enabled)
+    if plain && steps & STEP_SHEET != 0 {
+        let link = arena.get(id).is_some_and(|n| &*n.local_name == "link");
+        let renews = match local.as_str() {
+            "type" => true,
+            "disabled" => link,
+            "rel" | "href" => link && old.as_deref() != value,
+            _ => false,
+        };
+        if renews && arena.renew_sheet(id) && link && local == "disabled" && value.is_none() {
+            arena.explicitly_enabled.insert(id);
+        }
+    }
     if plain && local == "async" && value.is_some() && arena.get(id).is_some_and(is_script) {
         if let Some(n) = arena.get_mut_quietly(id) {
             n.script_flags |= crate::script::SCRIPT_NOT_FORCE_ASYNC;
