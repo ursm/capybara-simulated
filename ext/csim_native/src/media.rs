@@ -315,12 +315,12 @@ fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
             m.video_size = [w as u32, h as u32];
             m.duration = duration;
             m.ready = HAVE_ENOUGH_DATA;
+            m.network = NETWORK_IDLE;
             let start = std::mem::take(&mut m.default_start);
             if start > 0.0 {
                 m.current_time = if duration.is_finite() { start.min(duration) } else { start };
-                return rv.set_bool(true);
+                rv.set_bool(true);
             }
-            m.network = NETWORK_IDLE;
         }
         AUDIO_USABLE => m.network = NETWORK_IDLE,
         _ => {

@@ -69,7 +69,7 @@ RSpec.describe 'Media element state' do
     JS
     expect(s.evaluate_script('[before, negative.readyState, negative.currentTime]')).to eq([-1, 4, 0])
     s.execute_script('negative.currentTime = 2')
-    expect(s.evaluate_script('[negative.currentTime, positive.currentTime, events.join()]')).to eq([2, 3, 'loadedmetadata,seeked,loadeddata'])
+    expect(s.evaluate_script('[negative.currentTime, positive.currentTime, positive.networkState, events.join()]')).to eq([2, 3, 1, 'loadedmetadata,seeked,loadeddata'])
   end
 
   # The resource selection's first step is NO_SOURCE at once; its mode is decided once the script has run: none — no
