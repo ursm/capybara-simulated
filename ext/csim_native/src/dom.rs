@@ -1158,8 +1158,15 @@ impl RealmArena {
         self.base_epoch += 1;
         for idx in self.realm_nodes.remove(&cid).unwrap_or_default() {
             let slot = &mut self.slots[idx as usize];
-            if slot.data.take().is_some() {
+            if let Some(n) = slot.data.take() {
                 self.external -= NODE_WEIGHT;
+                // (…the `<base>` and `<title>` elements the arena counts going with it)
+                if n.is_html_named("base") {
+                    self.base_elements = self.base_elements.saturating_sub(1);
+                }
+                if n.is_html_named("title") {
+                    self.title_elements = self.title_elements.saturating_sub(1);
+                }
             }
             if slot.generation < GEN_MAX {
                 slot.generation += 1;
