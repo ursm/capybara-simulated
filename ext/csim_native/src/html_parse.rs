@@ -525,8 +525,8 @@ fn html_run(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 }
 
 // What the bindings say of a live document's next batch (`htmlRunBuilt`'s `flags`): whether the engine may build it —
-// no customizable select's `<selectedcontent>` to mirror into as it goes, no null registry propagating — whether
-// custom elements are defined, whose constructors the parser runs, and whether the page observes mutations.
+// no customizable select's `<selectedcontent>` to mirror into as it goes — whether custom elements are defined, whose
+// constructors the parser runs, and whether the page observes mutations.
 const MAY_BUILD: u32 = 1;
 // What `htmlRunBuilt` answers for a build that paused after a custom element it constructed went in: the bindings
 // connect what it inserted, then ask for the rest of the batch.
@@ -536,8 +536,8 @@ const OBSERVED: u32 = 1 << 2;
 
 // Whether the engine leaves a live document's batch of `ops` to the bindings: one where the parser runs page code or
 // steps of the bindings' own as it makes or inserts a node — a customized built-in's (`ce_defined`: an `is`), which the
-// bindings upgrade as they connect it, a declarative shadow root, a `<selectedcontent>`, a `customelementregistry`
-// attribute — or one that gives a document a second doctype.
+// bindings upgrade as they connect it, a `<selectedcontent>`, a `customelementregistry` attribute — or one that gives a
+// document a second doctype.
 fn declines(ops: &[Operand], ce_defined: bool, has_doctype: bool) -> bool {
     let int = |k: usize| match ops.get(k) {
         Some(Operand::Int(v)) => Some(*v),
@@ -549,7 +549,10 @@ fn declines(ops: &[Operand], ce_defined: bool, has_doctype: bool) -> bool {
     };
     // (…an attribute list of `n` from `at` holding one the bindings act on)
     let refused = |at: usize, n: usize| {
-        (0..n).any(|k| string(at + 4 * k).is_some_and(str::is_empty) && string(at + 4 * k + 2).is_some_and(|l| l == "customelementregistry" || (ce_defined && l == "is")))
+        (0..n).any(|k| {
+            string(at + 4 * k).is_some_and(str::is_empty)
+                && string(at + 4 * k + 2).is_some_and(|l| l == "customelementregistry" || (ce_defined && l == "is"))
+        })
     };
     let mut i = 0;
     while i < ops.len() {
@@ -562,7 +565,6 @@ fn declines(ops: &[Operand], ce_defined: bool, has_doctype: bool) -> bool {
                 }
             }
             OP_ADD_ATTRS if refused(i + 3, int(i + 2).unwrap_or(0).max(0) as usize) => return true,
-            OP_SHADOW_ROOT => return true,
             OP_DOCTYPE if has_doctype => return true,
             _ => {}
         }
@@ -944,6 +946,21 @@ impl<'s> Build<'s> {
         }
         Some((id, custom))
     }
+    // HTML's declarative shadow root steps for a `<template shadowrootmode>` (the bindings', a hook: dom-nodes.js
+    // `attachDeclarativeShadow`): the shadow root they attached to `host`, as its attributes ask — none where the host
+    // takes none.
+    fn attach_shadow(&mut self, scope: &mut v8::PinScope<'s, '_>, host: crate::dom::NodeId, template: crate::dom::NodeId) -> Option<crate::dom::NodeId> {
+        let hook = v8::String::new(scope, "__csimAttachParsedShadow")?;
+        let global = scope.get_current_context().global(scope);
+        let hook = v8::Local::<v8::Function>::try_from(global.get(scope, hook.into())?).ok()?;
+        let host = crate::dom::node_value(scope, Some(host));
+        let template = crate::dom::node_value(scope, Some(template));
+        if crate::dom::factory_threw(scope) {
+            return None;
+        }
+        let root = hook.call(scope, global.into(), &[host, template])?;
+        crate::node_handle::nid_of(scope, root)
+    }
     // …and the token's attributes appended to what its constructor made — attributes it set kept, the first of a name
     // taken — each an attributeChanged reaction of a custom one, run as it is made (the page's hook).
     fn constructed(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId, attrs: Vec<(String, i32, String, String)>, custom: bool) {
@@ -1016,6 +1033,7 @@ impl<'s> Build<'s> {
         } else {
             crate::dom::realm(scope, self.cid).insert_child(parent, child, before);
         }
+        self.inherit_registry(scope, parent, child);
         let contents = self.in_template_contents(scope, parent);
         if let Some(live) = self.live.as_mut().filter(|_| !contents) {
             let arena = crate::dom::realm(scope, self.cid);
@@ -1041,6 +1059,20 @@ impl<'s> Build<'s> {
         let open_named = arena.get(child).is_some_and(|n| n.is_html_named("details") && n.plain_attr("open").is_some() && n.plain_attr("name").is_some_and(|v| !v.is_empty()));
         if open_named && !arena.open_details_in_group(child).is_empty() {
             self.close_details(scope, child);
+        }
+    }
+    // The parser's registry for an element it inserts under a node of a null one — its intended parent's, which "create
+    // an element for the token" looks a definition up in: the tracking null passed on, the null registry given to one
+    // that has none set.
+    fn inherit_registry(&self, scope: &mut v8::PinScope<'s, '_>, parent: crate::dom::NodeId, child: crate::dom::NodeId) {
+        let arena = crate::dom::realm(scope, self.cid);
+        let from = arena.get(parent).and_then(|n| n.link.handle());
+        let to = arena.get(child).filter(|n| n.kind == crate::dom::NodeKind::Element).and_then(|n| n.link.handle());
+        let (Some(from), Some(to)) = (from, to) else { return };
+        match from.registry() {
+            crate::ce_reactions::TRACKING => to.set_registry_state(crate::ce_reactions::TRACKING),
+            crate::ce_reactions::NULL if to.registry() == 0 => to.set_registry_state(crate::ce_reactions::NULL),
+            _ => {}
         }
     }
     // What the parser making `node` gives it, a script's flags: no longer "force async", and the build's own — in
@@ -1295,6 +1327,20 @@ impl<'s> Build<'s> {
                     self.insert(scope, doc, dt, None);
                 }
                 OP_QUIRKS => self.quirks = Some(int(ops.next())?),
+                // (…a declarative shadow root attached to its host — the template not inserted, the root what its
+                // contents go into — or, where the host takes none, the template inserted, its contents theirs)
+                OP_SHADOW_ROOT => {
+                    let (host, template, root, parent) = (self.node(int(ops.next())?)?, self.node(int(ops.next())?)?, int(ops.next())?, int(ops.next())?);
+                    let into = match self.attach_shadow(scope, host, template) {
+                        Some(shadow) => shadow,
+                        None => {
+                            let parent = self.node(parent)?;
+                            self.insert(scope, parent, template, None);
+                            crate::dom::realm(scope, self.cid).get(template).and_then(|n| n.template_content)?
+                        }
+                    };
+                    self.set(root, into);
+                }
                 _ => return None,
             }
         }
