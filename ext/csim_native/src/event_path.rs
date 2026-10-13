@@ -61,7 +61,7 @@ struct Step {
 }
 
 fn closed_root(arena: &RealmArena, id: NodeId) -> bool {
-    arena.get(id).is_some_and(|n| n.host.is_some() && n.closed)
+    arena.get(id).is_some_and(|n| n.host.is_some() && n.shadow_is(crate::dom::SHADOW_CLOSED))
 }
 
 fn path(arena: &RealmArena, target: NodeId, related: Related, composed: bool) -> Vec<Step> {

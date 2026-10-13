@@ -139,11 +139,16 @@ fn nodes_under(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 }
 
 // What a shadow root was attached with (`attachShadow`'s init, as far as the engine reads it).
-pub(crate) struct ShadowInit {
-    pub(crate) delegates_focus: bool,
-    pub(crate) manual_slot_assignment: bool,
-    pub(crate) closed: bool,
-}
+// A shadow root's init (DOM "attach a shadow root", HTML's declarative one): `NodeData::shadow_init`'s bits.
+pub(crate) const SHADOW_DELEGATES_FOCUS: u8 = 1;
+pub(crate) const SHADOW_MANUAL_SLOTS: u8 = 1 << 1;
+pub(crate) const SHADOW_CLOSED: u8 = 1 << 2;
+pub(crate) const SHADOW_CLONABLE: u8 = 1 << 3;
+pub(crate) const SHADOW_SERIALIZABLE: u8 = 1 << 4;
+// (…made by the parser from a `<template shadowrootmode>`, which an `attachShadow` of its mode then reuses)
+pub(crate) const SHADOW_DECLARATIVE: u8 = 1 << 5;
+// (…"available to element internals")
+pub(crate) const SHADOW_INTERNALS: u8 = 1 << 6;
 
 // An element's name as the DOM holds it, UTF-16 throughout (`NodeData::name_u16`).
 #[derive(Clone, PartialEq)]
@@ -228,14 +233,13 @@ pub(crate) struct NodeData {
     pub(crate) sheet_gen: u32,
     // A shadow root's host (None for every other node): the shadow-including ancestor chain `:focus` walks…
     pub(crate) host: Option<NodeId>,
-    // …and a host's shadow root, the other way; and whether a shadow root delegates focus (`attachShadow`'s
-    // `delegatesFocus`), and is closed (its `mode`).
+    // …and a host's shadow root, the other way; and a shadow root's init (`SHADOW_*`): whether it delegates focus, assigns
+    // its slots by hand (slots.rs), is closed, clonable, serializable, declarative, available to element internals —
+    // and its `shadowrootadoptedstylesheets` as written, a declarative one's (getHTML gives it back).
     pub(crate) shadow_root: Option<NodeId>,
-    pub(crate) delegates_focus: bool,
-    pub(crate) closed: bool,
-    // …and whether a shadow root assigns its slots by hand (`slotAssignment: "manual"`, slots.rs), and a slot's nodes
-    // `assign()`ed to it, in that order — those in this arena.
-    pub(crate) manual_slot_assignment: bool,
+    pub(crate) shadow_init: u8,
+    pub(crate) adopted_sheets_attr: Option<Box<[u16]>>,
+    // …and a slot's nodes `assign()`ed to it, in that order — those in this arena.
     pub(crate) manual_assigned: Vec<NodeId>,
     // The node's handle on the C++ heap (node_handle.rs), whose tree edges the slot's are written into.
     pub(crate) link: crate::node_handle::Link,
@@ -369,9 +373,8 @@ impl NodeData {
             sheet_gen: 0,
             host: None,
             shadow_root: None,
-            delegates_focus: false,
-            closed: false,
-            manual_slot_assignment: false,
+            shadow_init: 0,
+            adopted_sheets_attr: None,
             manual_assigned: Vec::new(),
             link: crate::node_handle::Link::default(),
             assigned: Vec::new(),
@@ -391,6 +394,10 @@ impl NodeData {
             written_style: None,
             stamp: std::cell::Cell::new(0),
         }
+    }
+    // A shadow root's init bit `bit` (`SHADOW_*`).
+    pub(crate) fn shadow_is(&self, bit: u8) -> bool {
+        self.shadow_init & bit != 0
     }
     // An element in the HTML namespace.
     pub(crate) fn is_html(&self) -> bool {
@@ -1641,15 +1648,13 @@ impl RealmArena {
     }
 
     // `root` is the shadow root of `host`, delegating focus or not.
-    pub(crate) fn set_shadow_host(&mut self, root: NodeId, host: NodeId, init: ShadowInit) {
+    pub(crate) fn set_shadow_host(&mut self, root: NodeId, host: NodeId, init: u8) {
         if self.get(host).is_none() {
             return;
         }
         if let Some(node) = self.get_mut(root) {
             node.host = Some(host);
-            node.delegates_focus = init.delegates_focus;
-            node.manual_slot_assignment = init.manual_slot_assignment;
-            node.closed = init.closed;
+            node.shadow_init = init;
             self.has_shadow_hosts = true;
             self.state.shadow_hosts = true;
         }
@@ -2472,6 +2477,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "isValue", is_value, context_id);
     register(scope, ns, "setContainerMargins", set_container_margins, context_id);
     register(scope, ns, "setShadowHost", set_shadow_host, context_id);
+    register(scope, ns, "shadowInit", shadow_init, context_id);
+    register(scope, ns, "setShadowInit", set_shadow_init, context_id);
+    register(scope, ns, "shadowAdoptedSheets", shadow_adopted_sheets, context_id);
     // Slot assignment (slots.rs): what each slot is assigned, run over a shadow tree as what it depends on changes, and
     // read back by its slots and its slottables.
     register(scope, ns, "assignSlots", assign_slots, context_id);
@@ -3429,8 +3437,42 @@ fn base_element(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set(node_value(scope, base));
 }
 
-// __dom.setShadowHost(rootNid, hostNid, delegatesFocus, manualSlotAssignment, closed): the shadow root `rootNid` is
-// attached to `hostNid`, as `attachShadow` was told.
+// __dom.shadowInit(root) -> a shadow root's init bits (`SHADOW_*`), 0 for anything else.
+fn shadow_init(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = crate::node_handle::nid_of(scope, args.get(0));
+    rv.set_uint32(id.and_then(|id| dom(scope).arena.get(id)).map_or(0, |n| u32::from(n.shadow_init)));
+}
+// __dom.setShadowInit(root, bit, on): one of its bits set or cleared — a declarative root reused, a root made available
+// to element internals.
+fn set_shadow_init(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let bit = args.get(1).uint32_value(scope).unwrap_or(0) as u8;
+    let on = args.get(2).is_true();
+    if let Some(n) = dom(scope).arena.get_mut_quietly(id) {
+        n.shadow_init = if on { n.shadow_init | bit } else { n.shadow_init & !bit };
+    }
+}
+// __dom.shadowAdoptedSheets(root[, value]) -> its `shadowrootadoptedstylesheets` as written, null for none — or, given a
+// `value` (a string, or null), that written.
+fn shadow_adopted_sheets(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_null() };
+    if args.length() > 1 {
+        let value = args.get(1);
+        let value = (!value.is_null_or_undefined()).then(|| utf16_arg(scope, value).into_boxed_slice());
+        if let Some(n) = dom(scope).arena.get_mut_quietly(id) {
+            n.adopted_sheets_attr = value;
+        }
+        return;
+    }
+    let value = dom(scope).arena.get(id).and_then(|n| n.adopted_sheets_attr.clone());
+    match value {
+        Some(v) => rv.set(utf16_value(scope, &v)),
+        None => rv.set_null(),
+    }
+}
+
+// __dom.setShadowHost(rootNid, hostNid, init): the shadow root `rootNid` is attached to `hostNid`, with the init
+// (`SHADOW_*`) `attachShadow` was told.
 fn set_shadow_host(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -3440,8 +3482,8 @@ fn set_shadow_host(
         return;
     };
     let cid = realm_id(scope, &args);
+    let init = args.get(2).uint32_value(scope).unwrap_or(0) as u8;
     let (arena, engine) = arena_and_engine(scope, cid);
-    let init = ShadowInit { delegates_focus: args.get(2).is_true(), manual_slot_assignment: args.get(3).is_true(), closed: args.get(4).is_true() };
     arena.set_shadow_host(root, host, init);
     if let Some(engine) = engine {
         engine.shadow_attached(arena, host);

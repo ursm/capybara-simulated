@@ -66,7 +66,7 @@ fn assignments(arena: &RealmArena, root: NodeId) -> Vec<(NodeId, Vec<NodeId>)> {
     let Some(host) = r.host else { return Vec::new() };
     let slots = slots_of(arena, root);
     let kids: &[NodeId] = arena.get(host).map_or(&[], |h| &h.children);
-    if r.manual_slot_assignment {
+    if r.shadow_is(crate::dom::SHADOW_MANUAL_SLOTS) {
         return slots
             .into_iter()
             .map(|s| {

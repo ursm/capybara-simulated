@@ -132,7 +132,7 @@ impl Navigator<'_> {
             return owner(Kind::Owner, sub);
         }
         if let Some(root) = n.shadow_root {
-            let delegates = self.arena.get(root).is_some_and(|r| r.delegates_focus);
+            let delegates = self.arena.get(root).is_some_and(|r| r.shadow_is(crate::dom::SHADOW_DELEGATES_FOCUS));
             let children = self.arena.get(root).map(|r| r.children.clone()).unwrap_or_default();
             let sub = self.scope(Some(el), &children);
             let stop = !delegates && !negative && self.focusable(el);
@@ -431,7 +431,7 @@ pub(crate) fn focus_delegate(engine: &mut StyleEngine, arena: &RealmArena, targe
     })
 }
 fn delegating_root(arena: &RealmArena, host: NodeId) -> Option<NodeId> {
-    arena.get(host)?.shadow_root.filter(|&r| arena.get(r).is_some_and(|r| r.delegates_focus))
+    arena.get(host)?.shadow_root.filter(|&r| arena.get(r).is_some_and(|r| r.shadow_is(crate::dom::SHADOW_DELEGATES_FOCUS)))
 }
 // The elements under `root` in tree order — not into a shadow tree.
 fn descendants(arena: &RealmArena, root: NodeId) -> Vec<NodeId> {

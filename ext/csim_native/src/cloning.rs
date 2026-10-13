@@ -204,7 +204,19 @@ fn clone_shadow_root(scope: &mut v8::PinScope<'_, '_>, cid: i32, src: NodeId, co
         crate::dom::dom(tc).clone_exception = Some(exception);
         return None;
     }
-    Some(crate::node_handle::nid_of(tc, root?))
+    let root = crate::node_handle::nid_of(tc, root?);
+    // (…the copy as declarative as its source, with its `shadowrootadoptedstylesheets` as written — a serializable one's
+    // getHTML round-trips it — and available to element internals where either is)
+    let arena = &mut crate::dom::dom(tc).arena;
+    let from = arena.get(src).and_then(|s| s.shadow_root).and_then(|r| arena.get(r)).map(|r| (r.shadow_init, r.adopted_sheets_attr.clone()));
+    if let (Some(copy_root), Some((init, adopted))) = (root, from) {
+        if let Some(n) = arena.get_mut_quietly(copy_root) {
+            let carried = crate::dom::SHADOW_DECLARATIVE | crate::dom::SHADOW_INTERNALS;
+            n.shadow_init = (n.shadow_init & !crate::dom::SHADOW_DECLARATIVE) | (init & carried);
+            n.adopted_sheets_attr = adopted;
+        }
+    }
+    Some(root)
 }
 // An op that clones, beginning: nothing thrown yet.
 pub(crate) fn begin_clone(scope: &mut v8::PinScope<'_, '_>) {
