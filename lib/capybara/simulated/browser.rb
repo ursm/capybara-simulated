@@ -3928,8 +3928,12 @@ module Capybara
         socket.flush
       end
 
+      # The stream's events as its chunks come, by HTML's "interpret an event stream" (the engine's, the page's too): what
+      # follows the last complete record waits for the next chunk, and the last event ID carries on from record to record.
       private def read_event_source_body(socket, id, queue, chunked:)
-        buffer = String.new
+        buffer  = String.new(encoding: Encoding::BINARY)
+        last_id = ''
+        started = false
         loop do
           if chunked
             size_line = socket.gets
@@ -3941,46 +3945,16 @@ module Capybara
           else
             buffer << socket.readpartial(4096)
           end
-          while (idx = buffer.index("\n\n") || buffer.index("\r\n\r\n"))
-            sep_len   = buffer[idx, 4] == "\r\n\r\n" ? 4 : 2
-            raw_event = buffer[0...idx]
-            buffer    = buffer[(idx + sep_len)..]
-            event     = parse_sse_event(raw_event)
-            queue << {id: id, **event} if event
+          # (…a UTF-8 BOM opening the stream no part of it: its decoding takes it)
+          unless started
+            next if buffer.bytesize < 3 && "\xEF\xBB\xBF".b.start_with?(buffer)
+            buffer = buffer.byteslice(3..) if buffer.start_with?("\xEF\xBB\xBF".b)
+            started = true
           end
+          events, taken, last_id = Native.event_stream(buffer, last_id)
+          buffer = buffer.byteslice(taken..)
+          events.each {|type, data, event_id| queue << {id: id, type: type, data: data, lastEventId: event_id} }
         end
-      end
-
-      private def parse_sse_event(block)
-        type = nil
-        data = []
-        last_id = nil
-        block.each_line do |line|
-          line = line.chomp
-          next if line.empty? || line.start_with?(':')
-          if (idx = line.index(':'))
-            field = line[0...idx]
-            value = line[(idx + 1)..]
-            value = value[1..] if value.start_with?(' ')
-          else
-            field = line
-            value = ''
-          end
-          case field
-          when 'event' then type = value
-          when 'data'  then data << value
-          when 'id'    then last_id = value
-          end
-        end
-        return nil if data.empty? && type.nil?
-        # SSE is a UTF-8 TEXT protocol (the spec decodes the stream as UTF-8),
-        # but these strings are slices of the BINARY socket buffer (see
-        # `RuntimeShared.utf8_text`).
-        {
-          type:        RuntimeShared.utf8_text(type || 'message'),
-          data:        RuntimeShared.utf8_text(data.join("\n")),
-          lastEventId: last_id && RuntimeShared.utf8_text(last_id)
-        }
       end
 
       def reset_event_sources
