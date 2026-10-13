@@ -257,9 +257,11 @@ impl CanvasStateHandle {
     // "Push a copy of the current drawing state onto the drawing state stack."
     fn save(&self, scope: &mut v8::PinScope<'_, '_>) {
         let saved = self.saved(scope);
+        // (…own data properties, whatever setters a page put on `Array.prototype`)
         for slot in 0..3 {
             let object: v8::Local<'_, v8::Value> = self.object(scope, slot).map_or_else(|| v8::null(scope).into(), Into::into);
-            saved.set_index(scope, saved.length(), object);
+            let index = v8::Integer::new_from_unsigned(scope, saved.length()).to_string(scope).expect("an index");
+            saved.create_data_property(scope, index.into(), object);
         }
         self.stack.borrow_mut().push(self.state.borrow().clone());
     }
@@ -628,15 +630,23 @@ fn canvas_object(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     }
 }
 
-// __dom.canvasFontFace(state) -> `[weight, slant, family]` of the state's computed font: what the bindings resolve the
-// face it is drawn with by (canvas.js `_face`).
+// __dom.canvasFontFace(state) -> `[weight, slant, family, inherits, rem]`: what the bindings answer a text op with — the
+// face it is drawn with, which they resolve by the computed font's weight, slant and family (canvas.js `_textInputs`);
+// the canvas element's direction, where the state's `direction` inherits it; the root's font size, where a letter or
+// word spacing is in `rem`.
 fn canvas_font_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return };
-    let font = h.state().font.clone();
-    let items: [v8::Local<'_, v8::Value>; 3] = [
+    let (font, inherits, rem) = {
+        let s = h.state();
+        let rem = |v: &str| v.to_ascii_lowercase().contains("rem");
+        (s.font.clone(), DIRECTIONS[s.direction as usize] == "inherit", rem(&s.letter_spacing) || rem(&s.word_spacing))
+    };
+    let items: [v8::Local<'_, v8::Value>; 5] = [
         v8::Number::new(scope, font.weight).into(),
         v8::Number::new(scope, f64::from(font.slant)).into(),
         string(scope, &font.family),
+        v8::Boolean::new(scope, inherits).into(),
+        v8::Boolean::new(scope, rem).into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
