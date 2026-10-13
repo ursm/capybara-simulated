@@ -93,4 +93,27 @@ RSpec.describe 'cloneNode' do
       })()
     JS
   end
+
+  # The engine clones a shadow host's clonable shadow root with it (cloning.rs `clone_shadow_root`), whatever `deep`
+  # says: its tree copied, a custom element in it upgraded, the copy declarative as the source was — so attachShadow
+  # reuses it — and a range's clone carries it too. Chrome: ["<p>in</p><x-el></x-el>", true, "reused", same].
+  it 'clones a clonable shadow root with its host' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [<<~HTML]] }).tap {|session| session.visit '/' }
+      <!DOCTYPE html><meta charset=utf-8><div id=h><template shadowrootmode=open shadowrootclonable><p>in</p><x-el></x-el></template></div>
+    HTML
+    expect(s.evaluate_script(<<~'JS')).to eq(['<p>in</p><x-el></x-el>', true, 'reused', '<p>in</p><x-el></x-el>'])
+      (() => {
+        customElements.define('x-el', class extends HTMLElement { constructor() { super(); this.made = true; } });
+        const h = document.getElementById('h');
+        const c = h.cloneNode(false);
+        let reuse;
+        try { reuse = c.attachShadow({mode: 'open'}) === c.shadowRoot ? 'reused' : 'other'; } catch (e) { reuse = e.name; }
+        const d = h.cloneNode(false);
+        const range = document.createRange();
+        range.selectNode(h);
+        const f = range.cloneContents();
+        return [d.shadowRoot.innerHTML, d.shadowRoot.querySelector('x-el').made === true, reuse, f.firstChild.shadowRoot.innerHTML];
+      })()
+    JS
+  end
 end

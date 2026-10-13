@@ -192,7 +192,8 @@ impl<'s> Run<'s> {
 }
 
 // Whether the engine takes the contents from (`sc`, `so`) to (`ec`, `eo`) — no partially contained node it could not
-// copy, and, for a copy, no contained child it could not (cloning.rs `clonable`): the bindings take what it declines.
+// copy, and, for a copy, no contained child it could not (cloning.rs `clonable`) but a doctype, which is an error of its
+// own (`DOCTYPE_CONTAINED`): the bindings take what it declines.
 fn takes(arena: &RealmArena, mode: u32, sc: NodeId, so: u32, ec: NodeId, eo: u32) -> bool {
     if sc == ec && (so == eo || is_character_data(arena, sc)) {
         return true;
@@ -213,7 +214,8 @@ fn takes(arena: &RealmArena, mode: u32, sc: NodeId, so: u32, ec: NodeId, eo: u32
         return true;
     }
     let kids = arena.get(common).map_or(&[][..], |n| &n.children[..]);
-    partial_ok(sc) && partial_ok(ec) && (mode != CLONE || kids.get(contained).unwrap_or(&[]).iter().all(|&c| clonable(arena, c, true)))
+    let copies = |c: NodeId| clonable(arena, c, true) || arena.get(c).is_some_and(|n| n.kind == NodeKind::Other);
+    partial_ok(sc) && partial_ok(ec) && (mode != CLONE || kids.get(contained).unwrap_or(&[]).iter().all(|&c| copies(c)))
 }
 
 // __dom.processRangeContents(startNode, startOffset, endNode, endOffset, mode, steps) -> [fragment, collapseNode,

@@ -3376,7 +3376,7 @@ fn assign_slots(
 
 // "Assign slottables for a tree" of the shadow tree `root` and the slots `extra` (`slots::assign`), the style engine told
 // of each slot whose assigned nodes changed, and each signaled.
-fn assign_slots_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: Option<NodeId>, extra: &[NodeId]) -> Vec<crate::slots::Changed> {
+pub(crate) fn assign_slots_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: Option<NodeId>, extra: &[NodeId]) -> Vec<crate::slots::Changed> {
     let (arena, mut engine) = arena_and_engine(scope, cid);
     let changed = crate::slots::assign(arena, root, extra, |arena, slot, old, now| {
         if let Some(engine) = engine.as_deref_mut() {
