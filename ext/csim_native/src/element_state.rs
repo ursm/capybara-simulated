@@ -878,6 +878,11 @@ impl RealmArena {
     pub(crate) fn is_editable(&self, id: NodeId) -> bool {
         self.editing_host(id).is_some()
     }
+    // The outermost of `id`'s inclusive ancestor elements that is editable — what a selection moves to the start or end of
+    // by `documentboundary` (Selection `modify`).
+    pub(crate) fn outermost_editable(&self, id: NodeId) -> Option<NodeId> {
+        std::iter::successors(Some(id), |&n| self.parent_of(n)).filter(|&n| self.is_element(n) && self.is_editable(n)).last()
+    }
     // The submittable elements whose values a form's entry list takes (HTML "construct the entry list" step 5.1), in tree
     // order: its tree's button / input / select / textarea and form-associated custom elements whose form owner it is —
     // but one with a `<datalist>` ancestor, and one actually disabled unless it is the submitter, whose name and value
