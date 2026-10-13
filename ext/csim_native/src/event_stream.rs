@@ -90,7 +90,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // __dom.eventStream(text) -> [type, data, lastEventId, …]: the events a whole stream's text dispatches.
 fn event_stream_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let text = args.get(0).to_rust_string_lossy(scope);
-    let events = Parser::default().feed(text.as_bytes());
+    // (…the text already decoded, which took its BOM: a second is a character of its first line)
+    let events = Parser { later_lines: true, ..Parser::default() }.feed(text.as_bytes());
     let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(events.len() * 3);
     for e in events {
         for s in [e.kind, e.data, e.last_event_id] {

@@ -58,11 +58,12 @@ pub(crate) fn parse(body: &[u8], boundary: &str) -> Option<Vec<Part>> {
         let headers = &body[at..header_end];
         at = header_end + if header_end == at { 2 } else { 4 };
         let disposition = disposition(&header(headers, "content-disposition")?)?;
-        let name = disposition.iter().find(|(k, _)| k == "name")?.1.clone();
+        // (…a parameter given twice, its last value — as Chrome and Firefox both take)
+        let name = disposition.iter().rfind(|(k, _)| k == "name")?.1.clone();
         let body_end = find(body, &[b"\r\n", dash.as_slice()].concat(), at)?;
         let value = body[at..body_end].to_vec();
         at = body_end + 2 + dash.len();
-        let filename = disposition.iter().find(|(k, _)| k == "filename").map(|(_, v)| v.clone());
+        let filename = disposition.iter().rfind(|(k, _)| k == "filename").map(|(_, v)| v.clone());
         let content_type = match filename {
             Some(_) => header(headers, "content-type").map(|t| t.trim().to_owned()).unwrap_or_else(|| "text/plain".to_owned()),
             None => String::new(),
@@ -78,31 +79,44 @@ fn header(headers: &[u8], name: &str) -> Option<String> {
         line[..colon].eq_ignore_ascii_case(name.as_bytes()).then(|| String::from_utf8_lossy(&line[colon + 1..]).trim_start().to_owned())
     })
 }
-// …and a `Content-Disposition` of type `form-data`: its parameters, each name lowercased, each value a quoted string's
-// contents (as written: no escape undone) or a token — none where it is of another type.
+// …and a `Content-Disposition` of type `form-data`: its parameters, each name lowercased, each value a token or a quoted
+// string's — a `\` taking the character after it as it is (Chrome, and RFC 2183's quoted-string) — and none where it is
+// of another type, or a parameter is no `name=value` (anything but `;` after a quoted string, as Chrome refuses).
 fn disposition(value: &str) -> Option<Vec<(String, String)>> {
-    let (kind, mut rest) = value.split_once(';').unwrap_or((value, ""));
+    let mut chars = value.chars().peekable();
+    let kind: String = chars.by_ref().take_while(|&c| c != ';').collect();
     if !kind.trim().eq_ignore_ascii_case("form-data") {
         return None;
     }
     let mut params = Vec::new();
     loop {
-        rest = rest.trim_start_matches([' ', '\t', ';']);
-        if rest.is_empty() {
+        while chars.next_if(|c| matches!(c, ' ' | '\t' | ';')).is_some() {}
+        if chars.peek().is_none() {
             return Some(params);
         }
-        let (key, after) = rest.split_once('=')?;
-        let key = key.trim().to_ascii_lowercase();
-        let after = after.trim_start();
-        let (value, tail) = match after.strip_prefix('"') {
-            Some(quoted) => {
-                let end = quoted.find('"')?;
-                (&quoted[..end], &quoted[end + 1..])
+        let key: String = chars.by_ref().take_while(|&c| c != '=').collect();
+        let key = key.trim();
+        if key.is_empty() || key.contains(';') {
+            return None;
+        }
+        while chars.next_if(|c| matches!(c, ' ' | '\t')).is_some() {}
+        let mut value = String::new();
+        if chars.next_if_eq(&'"').is_some() {
+            loop {
+                match chars.next()? {
+                    '"' => break,
+                    '\\' => value.push(chars.next()?),
+                    c => value.push(c),
+                }
             }
-            None => after.split_once(';').map_or((after.trim_end(), ""), |(v, t)| (v.trim_end(), t)),
-        };
-        params.push((key, value.to_owned()));
-        rest = tail;
+            while chars.next_if(|c| matches!(c, ' ' | '\t')).is_some() {}
+            if chars.peek().is_some_and(|&c| c != ';') {
+                return None;
+            }
+        } else {
+            value = chars.by_ref().take_while(|&c| c != ';').collect::<String>().trim_end().to_owned();
+        }
+        params.push((key.to_ascii_lowercase(), value));
     }
 }
 
@@ -160,6 +174,11 @@ mod tests {
         assert_eq!((parts[0].name.as_str(), parts[0].content_type.as_str()), ("a", "text/plain"));
         assert!(parse(b"--B\r\n\r\nv\r\n--B\r\nContent-Disposition: form-data; name=\"b\"\r\n\r\n2\r\n--B--", "B").is_none());
         assert!(parse(b"--B\r\nContent-Disposition: attachment; name=\"a\"\r\n\r\n1\r\n--B--", "B").is_none());
+        // (…a quoted value's escapes taken, the last of a parameter given twice, nothing but `;` after a quoted value)
+        assert_eq!(disposition(r#"form-data; name="a\"b"; filename="c;d""#), Some(vec![("name".into(), "a\"b".into()), ("filename".into(), "c;d".into())]));
+        assert_eq!(disposition(r#"form-data; name="a"; NAME=b"#).map(|d| d.into_iter().rfind(|(k, _)| k == "name").map(|(_, v)| v)), Some(Some("b".into())));
+        assert_eq!(disposition(r#"form-data; name="a"x; filename="f""#), None);
+        assert_eq!(disposition(r#"form-data; foo; name="a""#), None);
         assert_eq!(boundary("text/plain; boundary=x"), None);
     }
 }
