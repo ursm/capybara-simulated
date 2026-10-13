@@ -558,7 +558,7 @@ impl RealmArena {
         }
     }
     // …and its `text`: its descendant text but an HTML or SVG script's, ASCII whitespace stripped and collapsed.
-    fn option_text_units(&self, id: NodeId) -> Vec<u16> {
+    pub(crate) fn option_text_units(&self, id: NodeId) -> Vec<u16> {
         let mut text: Vec<u16> = Vec::new();
         self.collect_text(id, &mut text);
         let words: Vec<&[u16]> = text.split(|&u| is_ascii_ws_unit(u)).filter(|w| !w.is_empty()).collect();
@@ -677,6 +677,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "formSubmittables", form_submittables, context_id);
     crate::dom::register(scope, ns, "implicitSubmissionForm", implicit_submission_form, context_id);
     crate::dom::register(scope, ns, "editingHost", editing_host, context_id);
+    crate::dom::register(scope, ns, "optionText", option_text_op, context_id);
     crate::dom::register(scope, ns, "outermostEditable", outermost_editable, context_id);
     crate::dom::register(scope, ns, "isLabelable", is_labelable, context_id);
     crate::dom::register(scope, ns, "labeledControl", labeled_control, context_id);
@@ -749,6 +750,15 @@ fn nodes_answer(
     let arena = crate::dom::realm(scope, cid);
     let nodes = answer(arena, id);
     rv.set(crate::dom::nodes_value(scope, cid, &nodes));
+}
+
+// __dom.optionText(nid) -> an option's `text` (`option_text_units`): its descendant text but an HTML or SVG script's,
+// ASCII whitespace stripped and collapsed.
+fn option_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let cid = crate::dom::realm_id(scope, &args);
+    let text = crate::dom::realm(scope, cid).option_text_units(id);
+    rv.set(crate::dom::utf16_value(scope, &text));
 }
 
 // __dom.editingHost(nid) -> [the node's editing host] or [] (`element_state::editing_host`).
