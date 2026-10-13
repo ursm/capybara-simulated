@@ -24,7 +24,10 @@ pub(crate) struct Media {
     network: u8,
     ready: u8,
     current_src: String,
+    // The official playback position, and the default playback start position: a seek made with no media data, which
+    // the position takes once there is some (HTML §4.8.11.8) — what `currentTime` reads meanwhile, where it is not 0.
     current_time: f64,
+    default_start: f64,
     // NaN with no media data.
     duration: f64,
     playing: bool,
@@ -42,31 +45,42 @@ pub(crate) struct Media {
     load: u32,
 }
 
+// An element's state before its first use.
+static INITIAL: Media = Media {
+    network: NETWORK_EMPTY,
+    ready: HAVE_NOTHING,
+    current_src: String::new(),
+    current_time: 0.0,
+    default_start: 0.0,
+    duration: f64::NAN,
+    playing: false,
+    default_rate: 1.0,
+    rate: 1.0,
+    preserves_pitch: true,
+    volume: 1.0,
+    muted: false,
+    error: 0,
+    failures: 0,
+    video_size: [0, 0],
+    load: 0,
+};
+
 impl Default for Media {
     fn default() -> Media {
-        Media {
-            network: NETWORK_EMPTY,
-            ready: HAVE_NOTHING,
-            current_src: String::new(),
-            current_time: 0.0,
-            duration: f64::NAN,
-            playing: false,
-            default_rate: 1.0,
-            rate: 1.0,
-            preserves_pitch: true,
-            volume: 1.0,
-            muted: false,
-            error: 0,
-            failures: 0,
-            video_size: [0, 0],
-            load: 0,
-        }
+        INITIAL.clone()
+    }
+}
+
+impl Media {
+    // What `currentTime` reads.
+    fn current_time(&self) -> f64 {
+        if self.default_start != 0.0 { self.default_start } else { self.current_time }
     }
 }
 
 impl RealmArena {
-    fn media(&self, id: NodeId) -> Media {
-        self.media.get(&id).cloned().unwrap_or_default()
+    fn media(&self, id: NodeId) -> &Media {
+        self.media.get(&id).unwrap_or(&INITIAL)
     }
     fn media_mut(&mut self, id: NodeId) -> &mut Media {
         self.media.entry(id).or_default()
@@ -125,11 +139,16 @@ fn element(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) ->
 // URL; for `ERROR`, the failure's number (0 for no error), which the bindings make its MediaError by.
 fn media_get(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
+    let code = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
+    if code == CURRENT_SRC {
+        let src = crate::dom::dom(scope).arena.media(id).current_src.clone();
+        return rv.set(v8::String::new(scope, &src).map_or_else(|| v8::undefined(scope).into(), Into::into));
+    }
     let m = crate::dom::dom(scope).arena.media(id);
-    match args.get(1).uint32_value(scope).unwrap_or(u32::MAX) {
+    match code {
         NETWORK_STATE => rv.set_uint32(u32::from(m.network)),
         READY_STATE => rv.set_uint32(u32::from(m.ready)),
-        CURRENT_TIME => rv.set_double(m.current_time),
+        CURRENT_TIME => rv.set_double(m.current_time()),
         DURATION => rv.set_double(m.duration),
         PAUSED => rv.set_bool(!m.playing),
         DEFAULT_PLAYBACK_RATE => rv.set_double(m.default_rate),
@@ -139,22 +158,22 @@ fn media_get(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         MUTED => rv.set_bool(m.muted),
         VIDEO_WIDTH => rv.set_uint32(m.video_size[0]),
         VIDEO_HEIGHT => rv.set_uint32(m.video_size[1]),
-        CURRENT_SRC => rv.set(v8::String::new(scope, &m.current_src).map_or_else(|| v8::undefined(scope).into(), Into::into)),
         ERROR => rv.set_uint32(if m.error == 0 { 0 } else { m.failures }),
         _ => {}
     }
 }
 
-// What `mediaSet` answers: nothing to fire; the event the change owes (`ratechange`, `volumechange`, `seeked`, `play`,
-// `pause`); or, for a volume outside [0, 1], an IndexSizeError.
+// What `mediaSet` answers: nothing to fire; the event the change owes (`ratechange`, `volumechange`, `seeked`); or, for
+// a volume outside [0, 1], an IndexSizeError.
 const NO_EVENT: u32 = 0;
 const CHANGED: u32 = 1;
 const OUT_OF_RANGE: u32 = 2;
 
 // __dom.mediaSet(media, member, value) -> `NO_EVENT`, `CHANGED` or `OUT_OF_RANGE`: the member set — a rate, the volume
 // (0 to 1), mutedness or pitch preservation, its event owed only where what it reads changed; the current time (a seek,
-// `seeked` owed where there is media data, else only the default playback start position, which reads back); `PAUSED`
-// false for play(), true for pause(), each its event owed.
+// `seeked` owed where there is media data, else the default playback start position, which reads back — -0 as 0);
+// `PAUSED` false for play(), true for pause() (whose events the bindings fire whatever it was). A value that reads the
+// same is not written: -0 for 0 reads back 0.
 fn media_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return rv.set_uint32(NO_EVENT) };
     let which = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
@@ -163,20 +182,31 @@ fn media_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let (number, flag) = (number(), value.boolean_value(scope));
     let text = (which == CURRENT_SRC).then(|| value.to_rust_string_lossy(scope));
     let m = crate::dom::dom(scope).arena.media_mut(id);
-    let changed = |was: bool| if was { CHANGED } else { NO_EVENT };
+    // (…`value` written where it differs, its event owed then)
+    fn write<T: PartialEq>(slot: &mut T, value: T) -> u32 {
+        if *slot == value {
+            return NO_EVENT;
+        }
+        *slot = value;
+        CHANGED
+    }
     rv.set_uint32(match which {
-        DEFAULT_PLAYBACK_RATE => changed(std::mem::replace(&mut m.default_rate, number) != number),
-        PLAYBACK_RATE => changed(std::mem::replace(&mut m.rate, number) != number),
+        DEFAULT_PLAYBACK_RATE => write(&mut m.default_rate, number),
+        PLAYBACK_RATE => write(&mut m.rate, number),
         PRESERVES_PITCH => {
             m.preserves_pitch = flag;
             NO_EVENT
         }
         VOLUME if !(0.0..=1.0).contains(&number) => OUT_OF_RANGE,
-        VOLUME => changed(std::mem::replace(&mut m.volume, number) != number),
-        MUTED => changed(std::mem::replace(&mut m.muted, flag) != flag),
+        VOLUME => write(&mut m.volume, number),
+        MUTED => write(&mut m.muted, flag),
+        CURRENT_TIME if m.ready == HAVE_NOTHING => {
+            m.default_start = number + 0.0;
+            NO_EVENT
+        }
         CURRENT_TIME => {
-            m.current_time = number;
-            changed(m.ready != HAVE_NOTHING)
+            m.current_time = number + 0.0;
+            CHANGED
         }
         PAUSED => {
             m.playing = !flag;
@@ -195,22 +225,15 @@ fn media_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 const ABORT: u32 = 1;
 const EMPTIED: u32 = 1 << 1;
 const TIMEUPDATE: u32 = 1 << 2;
-// …and whether the resource selection then runs: there is a `src` to select.
-const SELECTS: u32 = 1 << 3;
 
 // __dom.mediaLoad(media) -> `[load, owed]`: the media element load algorithm (§4.8.11.5), whichever asked — its `src`
 // set, load() — as far as it changes the element's state: this load the current one (what an earlier one queued
-// superseded), and, for an element that had any state, no media data, paused, at the start, no duration; no error. With
-// no `src` there is nothing to select — the network state empty, or NO_SOURCE where a `<source>` child is (whose
-// resource is not modelled); with one, NO_SOURCE until the resource selection runs, once the script that asked has
-// (`mediaSelect`). `owed` the events it owes (`ABORT` …) and whether it selects (`SELECTS`).
+// superseded), and, for an element that had any state, no media data, paused, at the start, no duration; no error; then
+// the resource selection algorithm's first step, NO_SOURCE, its rest once the script that asked has run (`mediaSelect`).
+// `owed` the events it owes (`ABORT` …).
 fn media_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
-    let arena = &mut crate::dom::dom(scope).arena;
-    let Some(n) = arena.get(id) else { return };
-    let src = n.plain_attr("src").is_some();
-    let source_child = n.children.iter().any(|&c| arena.get(c).is_some_and(|c| c.is_html_named("source")));
-    let m = arena.media_mut(id);
+    let m = crate::dom::dom(scope).arena.media_mut(id);
     m.load += 1;
     let mut owed = 0;
     if matches!(m.network, NETWORK_LOADING | NETWORK_IDLE) {
@@ -218,7 +241,9 @@ fn media_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
     if m.network != NETWORK_EMPTY {
         owed |= EMPTIED;
-        if m.current_time != 0.0 {
+        // (…where `currentTime` read other than 0 — the default playback start position too, which the load keeps, as
+        // Chrome)
+        if m.current_time() != 0.0 {
             owed |= TIMEUPDATE;
         }
         m.ready = HAVE_NOTHING;
@@ -227,14 +252,7 @@ fn media_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         m.duration = f64::NAN;
     }
     m.error = 0;
-    m.network = match (src, source_child) {
-        (true, _) => {
-            owed |= SELECTS;
-            NETWORK_NO_SOURCE
-        }
-        (false, true) => NETWORK_NO_SOURCE,
-        (false, false) => NETWORK_EMPTY,
-    };
+    m.network = NETWORK_NO_SOURCE;
     let load = m.load;
     rv.set(v8::Array::new_with_elements(scope, &[v8::Integer::new_from_unsigned(scope, load).into(), v8::Integer::new_from_unsigned(scope, owed).into()]).into());
 }
@@ -246,49 +264,63 @@ fn media_current(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set_bool(crate::dom::dom(scope).arena.media(id).load == load);
 }
 
-// __dom.mediaSelect(media, load) -> the `src` the resource selection algorithm fetches, as it begins — the network state
-// LOADING, its `loadstart` owed — or null where a later load superseded `load`, or where the element has no `src` as it
-// runs (the network state then EMPTY: nothing to select).
+// __dom.mediaSelect(media, load) -> what the resource selection algorithm does as the stable state comes, its mode
+// decided then: with a `src`, that — the attribute mode: the network state LOADING, its `loadstart` owed and the
+// resource fetched; else with a `<source>` child, true — the children mode, its `loadstart` owed, the network state
+// NO_SOURCE still (a `<source>`'s resource is not modelled: it waits for one); else null — nothing to select, the network
+// state EMPTY. Null too where a later load superseded `load`.
 fn media_select(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return rv.set_null() };
     let load = args.get(1).uint32_value(scope).unwrap_or(0);
     let arena = &mut crate::dom::dom(scope).arena;
-    let src = arena.get(id).and_then(|n| n.plain_attr_units("src"));
+    let Some(n) = arena.get(id) else { return rv.set_null() };
+    let src = n.plain_attr_units("src");
+    let source_child = n.children.iter().any(|&c| arena.get(c).is_some_and(|c| c.is_html_named("source")));
     let m = arena.media_mut(id);
     if m.load != load {
         return rv.set_null();
     }
-    let Some(src) = src else {
-        m.network = NETWORK_EMPTY;
-        return rv.set_null();
-    };
-    m.network = NETWORK_LOADING;
-    rv.set(crate::dom::utf16_value(scope, &src));
+    match src {
+        Some(src) => {
+            m.network = NETWORK_LOADING;
+            rv.set(crate::dom::utf16_value(scope, &src));
+        }
+        None if source_child => rv.set_bool(true),
+        None => {
+            m.network = NETWORK_EMPTY;
+            rv.set_null();
+        }
+    }
 }
 
 // What the bindings' fetch of the selected resource came to (`mediaResource`): it failed — an empty `src`, a resource
 // that could not be fetched or that cannot be played; a video decoded; an audio usable (not decoded: its readiness
 // alone).
-const FAILED: u32 = 0;
-const VIDEO: u32 = 1;
-const AUDIO: u32 = 2;
+const RESOURCE_FAILED: u32 = 0;
+const VIDEO_DECODED: u32 = 1;
+const AUDIO_USABLE: u32 = 2;
 
 // __dom.mediaResource(media, outcome, width, height, duration): the resource's outcome — a failure the dedicated media
 // source failure steps (MEDIA_ERR_SRC_NOT_SUPPORTED, no media data, NO_SOURCE: an earlier resource no longer there);
-// a decoded video all its data (HAVE_ENOUGH_DATA), its size and duration, IDLE; a usable audio IDLE.
+// a decoded video all its data (HAVE_ENOUGH_DATA), its size and duration, IDLE — the playback position the default
+// playback start position where there is one (a seek to it, within the duration), that 0; a usable audio IDLE.
 fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
-    let outcome = args.get(1).uint32_value(scope).unwrap_or(FAILED);
+    let outcome = args.get(1).uint32_value(scope).unwrap_or(RESOURCE_FAILED);
     let [w, h, duration] = [2, 3, 4].map(|k| args.get(k).number_value(scope).unwrap_or(f64::NAN));
     let m = crate::dom::dom(scope).arena.media_mut(id);
     match outcome {
-        VIDEO => {
+        VIDEO_DECODED => {
             m.video_size = [w as u32, h as u32];
             m.duration = duration;
             m.ready = HAVE_ENOUGH_DATA;
+            if m.default_start > 0.0 {
+                m.current_time = if duration.is_finite() { m.default_start.min(duration) } else { m.default_start };
+                m.default_start = 0.0;
+            }
             m.network = NETWORK_IDLE;
         }
-        AUDIO => m.network = NETWORK_IDLE,
+        AUDIO_USABLE => m.network = NETWORK_IDLE,
         _ => {
             m.duration = f64::NAN;
             m.ready = HAVE_NOTHING;
