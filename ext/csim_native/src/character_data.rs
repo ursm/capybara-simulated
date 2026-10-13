@@ -14,6 +14,116 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "replaceData", replace_data_op, context_id);
     crate::dom::register(scope, ns, "splitText", split_text_op, context_id);
     crate::dom::register(scope, ns, "normalize", normalize_op, context_id);
+    crate::dom::register(scope, ns, "xmlName", xml_name_op, context_id);
+    crate::dom::register(scope, ns, "pseudoAttributes", pseudo_attributes_op, context_id);
+}
+
+// The rules for parsing pseudo-attributes from a string (xml-stylesheet §3) — a processing instruction's attribute map
+// (DOM §4.13 "update attributes from data"): `PseudoAtt? (S PseudoAtt)* S?`, each `Name S? = S? PseudoAttValue`, a value
+// quoted by `"` or `'`, holding no `<`, its `&` a character reference to a legal character or one of the five predefined
+// entities — the names and the values decoded, in their order, or none (an error) where the string is no such list, or
+// names one twice.
+pub(crate) fn pseudo_attributes(s: &[u16]) -> Option<Vec<(Vec<u16>, Vec<u16>)>> {
+    let space = |c: u16| matches!(c, 0x20 | 0x09 | 0x0D | 0x0A);
+    let mut map: Vec<(Vec<u16>, Vec<u16>)> = Vec::new();
+    let mut i = 0;
+    loop {
+        let start = i;
+        while s.get(i).is_some_and(|&c| space(c)) {
+            i += 1;
+        }
+        if i == s.len() {
+            return Some(map);
+        }
+        if !map.is_empty() && i == start {
+            return None;
+        }
+        let name_start = i;
+        while s.get(i).is_some_and(|&c| !space(c) && c != u16::from(b'=')) {
+            i += 1;
+        }
+        let name = &s[name_start..i];
+        if !crate::xml_parse::is_xml_name(name) || map.iter().any(|(n, _)| n == name) {
+            return None;
+        }
+        while s.get(i).is_some_and(|&c| space(c)) {
+            i += 1;
+        }
+        if s.get(i) != Some(&u16::from(b'=')) {
+            return None;
+        }
+        i += 1;
+        while s.get(i).is_some_and(|&c| space(c)) {
+            i += 1;
+        }
+        let quote = *s.get(i).filter(|&&c| c == u16::from(b'"') || c == u16::from(b'\''))?;
+        let end = s[i + 1..].iter().position(|&c| c == quote)? + i + 1;
+        map.push((name.to_vec(), pseudo_attribute_value(&s[i + 1..end])?));
+        i = end + 1;
+    }
+}
+// …a value decoded: none where it holds a `<` or a reference that is no legal one.
+fn pseudo_attribute_value(raw: &[u16]) -> Option<Vec<u16>> {
+    if raw.contains(&u16::from(b'<')) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] != u16::from(b'&') {
+            out.push(raw[i]);
+            i += 1;
+            continue;
+        }
+        let semi = raw[i..].iter().position(|&c| c == u16::from(b';'))? + i;
+        let name = String::from_utf16(&raw[i + 1..semi]).ok()?;
+        let ch = match name.as_str() {
+            "amp" => '&',
+            "lt" => '<',
+            "gt" => '>',
+            "quot" => '"',
+            "apos" => '\'',
+            r => {
+                let code = match r.strip_prefix("#x") {
+                    Some(hex) if !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit()) => u32::from_str_radix(hex, 16).ok()?,
+                    _ => match r.strip_prefix('#') {
+                        Some(dec) if !dec.is_empty() && dec.chars().all(|c| c.is_ascii_digit()) => dec.parse().ok()?,
+                        _ => return None,
+                    },
+                };
+                // (…a reference to a character XML's Char production allows)
+                let legal = matches!(code, 0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF);
+                char::from_u32(code).filter(|_| legal)?
+            }
+        };
+        let mut buf = [0u16; 2];
+        out.extend_from_slice(ch.encode_utf16(&mut buf));
+        i = semi + 1;
+    }
+    Some(out)
+}
+fn units_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<u16> {
+    let Some(s) = value.to_string(scope) else { return Vec::new() };
+    let mut units = vec![0u16; s.length()];
+    s.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
+    units
+}
+// __dom.xmlName(s) -> whether `s` is an XML Name (`xml_parse::is_xml_name`).
+fn xml_name_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let s = units_arg(scope, args.get(0));
+    rv.set_bool(crate::xml_parse::is_xml_name(&s));
+}
+// __dom.pseudoAttributes(data) -> [name, value, …], or null where `data` is no list of pseudo-attributes.
+fn pseudo_attributes_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let data = units_arg(scope, args.get(0));
+    let Some(map) = pseudo_attributes(&data) else { return rv.set_null() };
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(map.len() * 2);
+    for (name, value) in &map {
+        for text in [name, value] {
+            items.push(v8::String::new_from_two_byte(scope, text, v8::NewStringType::Normal).map_or_else(|| v8::undefined(scope).into(), Into::into));
+        }
+    }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // Why "replace data" throws: the offset is past the data (an IndexSizeError), or the data it would make is longer than
@@ -237,4 +347,26 @@ fn normalize_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         return;
     }
     rv.set(v8::Array::new_with_elements(scope, &out).into());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pseudo_attributes;
+
+    fn parse(s: &str) -> Option<Vec<(String, String)>> {
+        let units: Vec<u16> = s.encode_utf16().collect();
+        pseudo_attributes(&units).map(|m| m.into_iter().map(|(n, v)| (String::from_utf16_lossy(&n), String::from_utf16_lossy(&v))).collect())
+    }
+
+    #[test]
+    fn pseudo_attributes_parse_as_xml_stylesheet_says() {
+        assert_eq!(parse(r#" href="a.css" type='text/css' "#), Some(vec![("href".into(), "a.css".into()), ("type".into(), "text/css".into())]));
+        assert_eq!(parse(r#"t="&lt;&#x41;&#66;&quot;""#), Some(vec![("t".into(), "<AB\"".into())]));
+        assert_eq!(parse(r#"a="1"b="2""#), None);
+        assert_eq!(parse(r#"a="1" a="2""#), None);
+        assert_eq!(parse(r#"a="&#0;""#), None);
+        assert_eq!(parse(r#"a="<""#), None);
+        assert_eq!(parse(r#"a="&nbsp;""#), None);
+        assert_eq!(parse(""), Some(vec![]));
+    }
 }

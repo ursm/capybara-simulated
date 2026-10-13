@@ -84,6 +84,12 @@ fn is_name_start(c: char) -> bool {
 fn is_name_char(c: char) -> bool {
     is_name_start(c) || matches!(c, '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')
 }
+// XML's Name production (XML 1.0 §2.3): NCName's characters and `:` too — a processing instruction's target, a
+// pseudo-attribute's name.
+pub(crate) fn is_xml_name(s: &[u16]) -> bool {
+    let mut chars = char::decode_utf16(s.iter().copied());
+    matches!(chars.next(), Some(Ok(c)) if c == ':' || is_name_start(c)) && chars.all(|c| c.is_ok_and(|c| c == ':' || is_name_char(c)))
+}
 fn is_nc_name(s: &[u16]) -> bool {
     let mut chars = char::decode_utf16(s.iter().copied());
     matches!(chars.next(), Some(Ok(c)) if is_name_start(c)) && chars.all(|c| c.is_ok_and(is_name_char))
