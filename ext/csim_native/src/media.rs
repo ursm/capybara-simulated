@@ -106,6 +106,61 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "mediaResource", media_resource, context_id);
     crate::dom::register(scope, ns, "mediaCurrent", media_current, context_id);
     crate::dom::register(scope, ns, "mediaSourceInserted", media_source_inserted, context_id);
+    crate::dom::register(scope, ns, "canPlayType", can_play_type_op, context_id);
+}
+
+// `canPlayType` (§4.8.11.3): '' for a container we cannot demux or a codec we do not decode in it; for MP4 or WebM with no
+// `codecs` to say what is in it 'maybe'; 'probably' where every codec it names is one we decode there — H.264, VP9 or AV1
+// in MP4, VP8, VP9 or AV1 in WebM (video.rs, av1.rs) — or an audio one the container carries (an audio track is no
+// obstacle to loading the video, which is all the element does). For an audio type, what Chrome answers: audio is not
+// decoded at all, but the playback state an element keeps for it does not need it to be, and a page picks the format it
+// plays by the answer (Howler, Modernizr). Chrome's answers, measured — but for Ogg and Matroska (`video/ogg`,
+// `audio/matroska`, …), containers we demux not at all, which Chrome answers maybe.
+pub(crate) fn can_play_type(ty: &str) -> &'static str {
+    let ty = ty.trim();
+    let (container, params) = ty.split_once(';').map_or((ty, ""), |(c, p)| (c.trim_end(), p));
+    let valid = |s: &str, extra: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || extra.contains(c));
+    let Some((kind, sub)) = container.split_once('/') else { return "" };
+    if !valid(kind, "-") || !valid(sub, ".+-") {
+        return "";
+    }
+    let container = container.to_ascii_lowercase();
+    let Some((bare, plays)) = known_type(&container) else { return "" };
+    // (…the `codecs` parameter, quoted or not; an empty one saying no more than none)
+    let named = params.split(';').find_map(|p| {
+        let (key, value) = p.split_once('=')?;
+        key.trim().eq_ignore_ascii_case("codecs").then(|| value.trim_start().strip_prefix('"').map_or(value, |v| v.split('"').next().unwrap_or("")))
+    });
+    let Some(named) = named.filter(|n| !n.trim().is_empty()) else { return bare };
+    // (…an empty item in a list naming no codec we play — Chrome)
+    if named.split(',').all(|c| plays(&c.trim().to_ascii_lowercase())) { "probably" } else { "" }
+}
+// A type's answer with no `codecs`, and the codecs it plays.
+fn known_type(container: &str) -> Option<(&'static str, fn(&str) -> bool)> {
+    // (…a codec named alone, or with a profile after a dot)
+    fn family(c: &str, names: &[&str]) -> bool {
+        names.iter().any(|n| c == *n || c.strip_prefix(n).is_some_and(|rest| rest.starts_with('.')))
+    }
+    fn mp4_audio(c: &str) -> bool {
+        family(c, &["mp4a"]) || matches!(c, "flac" | "opus" | "mp3")
+    }
+    Some(match container {
+        "video/mp4" => ("maybe", |c| family(c, &["avc1", "avc3", "av01", "vp09", "mp4a"]) || matches!(c, "opus" | "flac" | "mp3")),
+        "video/webm" => ("maybe", |c| family(c, &["av01", "vp09"]) || matches!(c, "vp8" | "vp9" | "vp8.0" | "vp9.0" | "opus" | "vorbis")),
+        "audio/mpeg" | "audio/mp3" => ("probably", |c| c == "mp3"),
+        "audio/aac" | "audio/flac" => ("probably", |_| false),
+        "audio/mp4" | "audio/x-m4a" => ("maybe", mp4_audio),
+        "audio/ogg" => ("maybe", |c| matches!(c, "vorbis" | "opus" | "flac")),
+        "audio/webm" => ("maybe", |c| matches!(c, "vorbis" | "opus")),
+        "audio/wav" | "audio/x-wav" => ("maybe", |c| c == "1"),
+        _ => return None,
+    })
+}
+// __dom.canPlayType(type) -> '', 'maybe' or 'probably' (`can_play_type`).
+fn can_play_type_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let ty = args.get(0).to_rust_string_lossy(scope);
+    let answer = can_play_type(&ty);
+    rv.set(v8::String::new(scope, answer).map_or_else(|| v8::undefined(scope).into(), Into::into));
 }
 
 // __dom.mediaSourceInserted(parent) — a `<source>` inserted into `parent` (`source_inserted`).
@@ -330,5 +385,24 @@ fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
             m.failures += 1;
             m.network = NETWORK_NO_SOURCE;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::can_play_type;
+
+    #[test]
+    fn types_answer_as_the_table_says() {
+        assert_eq!(can_play_type("video/mp4"), "maybe");
+        assert_eq!(can_play_type(r#"video/mp4; codecs="avc1.42E01E, mp4a.40.2""#), "probably");
+        assert_eq!(can_play_type("video/webm; codecs=vp8.0"), "probably");
+        assert_eq!(can_play_type(r#"video/webm; codecs="vp8, theora""#), "");
+        assert_eq!(can_play_type(r#"video/mp4; codecs="""#), "maybe");
+        assert_eq!(can_play_type(r#"video/mp4; codecs="avc1,""#), "");
+        assert_eq!(can_play_type("AUDIO/MPEG"), "probably");
+        assert_eq!(can_play_type("audio/aac; codecs=mp4a"), "");
+        assert_eq!(can_play_type("video/ogg"), "");
+        assert_eq!(can_play_type("video"), "");
     }
 }
