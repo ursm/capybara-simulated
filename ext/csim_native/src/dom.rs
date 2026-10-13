@@ -917,8 +917,11 @@ pub(crate) struct RealmArena {
     // a layout's and a `data-` attribute's alike, where `getElementById(x).setAttribute(…)` is how a page asks).
     pub(crate) id_epoch: u64,
     // How many HTML `<base>` elements the arena holds, anywhere: none, and a document has no base element without a
-    // walk of its tree (`base_element`) — the common page, whose base URL every URL read after a mutation asks again.
+    // walk of its tree (`base_element`)…
     pub(crate) base_elements: u32,
+    // …and what moves where a document's base element can have changed — a `<base>` linked, unlinked or freed, its
+    // `href` written — and with nothing else: the base URL a page reads after every write is kept against it.
+    pub(crate) base_epoch: u64,
     // Per tree root, the facts element_state.rs asks of every control in turn, as of `mutations` (`form_facts`).
     pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
     // Each element's resolved directionality asked so far, true for rtl, as of `mutations` (`is_rtl`)…
@@ -1149,6 +1152,7 @@ impl RealmArena {
     fn free_realm_nodes(&mut self, cid: i32) {
         self.mutations += 1;
         self.id_epoch += 1;
+        self.base_epoch += 1;
         for idx in self.realm_nodes.remove(&cid).unwrap_or_default() {
             let slot = &mut self.slots[idx as usize];
             if slot.data.take().is_some() {
@@ -1327,6 +1331,7 @@ impl RealmArena {
         }
         if self.get(id).is_some_and(|n| n.is_html_named("base")) {
             self.base_elements = self.base_elements.saturating_sub(1);
+            self.base_epoch += 1;
         }
         self.id_index.get_mut().forget(id);
         self.ce_reactions.forget_node(id);
@@ -1450,6 +1455,21 @@ impl RealmArena {
     // id-less nodes one by one between named-access reads (`d.appendChild(…)` in a loop, `d` the window's named property)
     // keeps one map, where each append threw it away and each read walked the whole tree.
     // (…and no walk where no map is made: the walks' answers keep nothing)
+    // …and `id`'s subtree moving, a `<base>` among it: the base epoch moved (no walk where the arena holds none).
+    fn bases_moved(&mut self, id: NodeId) {
+        if self.base_elements == 0 {
+            return;
+        }
+        let mut stack = vec![id];
+        while let Some(n) = stack.pop() {
+            let Some(node) = self.get(n) else { continue };
+            if node.is_html_named("base") {
+                self.base_epoch += 1;
+                return;
+            }
+            stack.extend(node.children.iter().copied());
+        }
+    }
     fn ids_moved(&mut self, id: NodeId) {
         if self.id_index.borrow().is_empty() {
             return;
@@ -1541,6 +1561,7 @@ impl RealmArena {
         if let Some(p) = parent {
             // (…a node made in place — the one move whose detach has not walked it: `insert_child`'s did)
             self.ids_moved(id);
+            self.bases_moved(id);
             self.link_child(p, id);
         }
         id
@@ -1788,6 +1809,7 @@ impl RealmArena {
     pub(crate) fn detach(&mut self, child: NodeId) {
         self.state_epoch += 1;
         self.ids_moved(child);
+        self.bases_moved(child);
         let Some(old) = self.get(child).and_then(|n| n.parent) else { return };
         self.edge_gen.bump();
         let at = self.child_index(child);
@@ -2336,6 +2358,9 @@ fn before_attribute_write(arena: &mut RealmArena, engine: Option<&mut crate::sty
     if names.iter().any(|n| store_key_names(n, "id")) {
         arena.id_epoch += 1;
     }
+    if names.contains(&"href") && arena.get(id).is_some_and(|n| n.is_html_named("base")) {
+        arena.base_epoch += 1;
+    }
     if let Some(engine) = engine {
         engine.attributes_will_change(arena, id, names);
     }
@@ -2500,6 +2525,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setTarget", set_target, context_id);
     register(scope, ns, "targetElement", target_element, context_id);
     register(scope, ns, "baseElement", base_element, context_id);
+    register(scope, ns, "baseEpoch", base_epoch, context_id);
     register(scope, ns, "setFocusRingHidden", set_focus_ring_hidden, context_id);
     register(scope, ns, "setFocusStart", set_focus_start, context_id);
     register(scope, ns, "query", query, context_id);
@@ -2613,6 +2639,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::drag_data_store::install(scope, ns, context_id);
     crate::paint::install(scope, ns, context_id);
     crate::keys::install(scope, ns, context_id);
+    crate::cache_matching::install(scope, ns, context_id);
     crate::canvas_path::install(scope, ns, context_id);
     crate::text::install(scope, ns, context_id);
     crate::dom_matrix::install(scope, ns, context_id);
@@ -3480,6 +3507,11 @@ fn shadow_adopted_sheets(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     }
 }
 
+// __dom.baseEpoch() -> `RealmArena::base_epoch`: what a document's base URL is kept against.
+fn base_epoch(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_double(dom(scope).arena.base_epoch as f64);
+}
+
 // __dom.setShadowHost(rootNid, hostNid, init): the shadow root `rootNid` is attached to `hostNid`, with the init
 // (`SHADOW_*`) `attachShadow` was told.
 fn set_shadow_host(
@@ -3856,8 +3888,11 @@ pub(crate) fn replace_attributes(
     // (…and whether it had or will have a `slot` or a `name`, which a shadow tree's assignment reads)
     let slotting = |attrs: &[(String, String)]| attrs.iter().any(|(k, _)| k == "slot" || k == "name");
     let reassigns = arena.shadow_hosts && (slotting(&attributes) || arena.get(id).is_some_and(|n| slotting(&n.attributes)));
-    // (…which can write or drop an id, whichever the names)
+    // (…which can write or drop an id, whichever the names — and a base element's `href`)
     arena.id_epoch += 1;
+    if arena.get(id).is_some_and(|n| n.is_html_named("base")) {
+        arena.base_epoch += 1;
+    }
     // Every name the element had or will have — a wholesale write can add, drop or change any of them — listed only
     // for an engine to hear of: this is the parser's per-element write, which allocates nothing more without one.
     match engine {
