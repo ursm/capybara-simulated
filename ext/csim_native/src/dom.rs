@@ -2116,6 +2116,8 @@ pub(crate) struct Dom {
     // rethrow once they have finished what it changed (`takeCloneException`).
     pub(crate) clone_shadow_hooks: std::collections::HashMap<i32, v8::Weak<v8::Function>>,
     pub(crate) clone_exception: Option<v8::Global<v8::Value>>,
+    // The template a canvas context's state object is made from (canvas_state.rs), once per isolate.
+    pub(crate) canvas_state_template: Option<v8::Global<v8::FunctionTemplate>>,
     pub(crate) iterators: crate::node_iterators::Iterators,
     // Each realm's style engine (made by `styleSheets`).
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
@@ -2521,6 +2523,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::mime::install(scope, ns, context_id);
     crate::font_faces::install(scope, ns, context_id);
     crate::canvas::install(scope, ns, context_id);
+    crate::canvas_state::install(scope, ns, context_id);
     crate::canvas_path::install(scope, ns, context_id);
     crate::text::install(scope, ns, context_id);
     crate::dom_matrix::install(scope, ns, context_id);

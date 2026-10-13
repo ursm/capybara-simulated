@@ -1055,25 +1055,25 @@ fn finish(scope: &mut v8::PinScope<'_, '_>, b: Builder<'_>, rv: &mut v8::ReturnV
     }
 }
 
-// __dom.canvasPath(path, op, baked, a, b, c, d, e, f, …args) -> a building op on the path array (`Builder::op`; the ops
-// are its `OP_` constants, in the order of the CanvasPath mixin's methods, then a reset), each point baked through the
-// CTM `a` to `f` where `baked`: nothing where it wrote in place, the array that replaces it where it outgrew it (or was
-// none), or a refusal `[exception, message]` — "RangeError", or the DOMException's name. Every number is one already
-// (the page side converts them as WebIDL does), read as such: an op is made a point at a time, and a ToNumber for each
-// costs more than the op.
+// __dom.canvasPath(path, op, state, …args) -> a building op on the path array (`Builder::op`; the ops are its `OP_`
+// constants, in the order of the CanvasPath mixin's methods, then a reset), each point baked through the CTM of the
+// context's `state` (canvas_state.rs) where it is a context's current default path — null for a Path2D's: nothing where
+// it wrote in place, the array that replaces it where it outgrew it (or was none), or a refusal `[exception, message]` —
+// "RangeError", or the DOMException's name. Every number is one already (the page side converts them as WebIDL does),
+// read as such: an op is made a point at a time, and a ToNumber for each costs more than the op.
 fn canvas_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let num = |k: i32| v8::Local::<v8::Number>::try_from(args.get(k)).map_or(f64::NAN, |n| n.value());
     let op = num(1) as i32;
-    let ctm = args.get(2).is_true().then(|| std::array::from_fn(|k| num(3 + k as i32)));
+    let ctm = crate::canvas_state::handle_of(scope, args.get(2)).map(|h| unsafe { h.as_ref() }.state().m);
     // (…the op's own arguments, missing ones NaN; roundRect's radii are the rest)
     let n = arity(op);
     let mut fixed = [f64::NAN; 8];
     let radii: Vec<f64>;
     let a: &[f64] = if op == OP_ROUND_RECT {
-        radii = (9..args.length().max(9 + n as i32)).map(num).collect();
+        radii = (3..args.length().max(3 + n as i32)).map(num).collect();
         &radii
     } else {
-        fixed[..n].iter_mut().enumerate().for_each(|(k, v)| *v = num(9 + k as i32));
+        fixed[..n].iter_mut().enumerate().for_each(|(k, v)| *v = num(3 + k as i32));
         &fixed[..n]
     };
     let mut b = Builder::new(path_mut(args.get(0)), ctm);
@@ -1113,16 +1113,27 @@ fn canvas_path_svg(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     finish(scope, b, &mut rv);
 }
 
-// __dom.canvasPathShape(head, path, ctm, baked) -> the shape a path array makes under `ctm` (`shape`): `head` `[1,
-// evenOdd]` its fill, `[3, …pen]` its stroke.
+// What `canvasPathShape` makes of a path: its fill, by the nonzero or the even-odd rule; its stroke, with the context's
+// pen — its line width, caps, joins, miter limit and dash pattern; or a focus ring's, a 2px plain line.
+const FILL_NONZERO: u32 = 0;
+const FILL_EVEN_ODD: u32 = 1;
+const STROKE: u32 = 2;
+const FOCUS_RING: u32 = 3;
+
+// __dom.canvasPathShape(state, how, path, baked) -> the shape a path array makes under the CTM of the context's `state`
+// (`shape`), as `how` says — `baked` where its points are device space already (the context's current default path).
 fn canvas_path_shape(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let head: Vec<f64> = match v8::Local::<v8::Array>::try_from(args.get(0)) {
-        Ok(arr) => (0..arr.length()).map(|k| arr.get_index(scope, k).and_then(|v| v.number_value(scope)).unwrap_or(f64::NAN)).collect(),
-        Err(_) => Vec::new(),
+    let Some(h) = crate::canvas_state::handle_of(scope, args.get(0)) else { return };
+    // SAFETY: the handle lives while its object, the argument, does — through this op.
+    let s = unsafe { h.as_ref() }.state().clone();
+    let head: Vec<f64> = match args.get(1).uint32_value(scope).unwrap_or(FILL_NONZERO) {
+        FILL_EVEN_ODD => vec![1.0, 1.0],
+        STROKE => [vec![3.0, s.line_width, f64::from(s.cap), f64::from(s.join), s.miter, s.dash_offset, s.dash.len() as f64], s.dash.clone()].concat(),
+        FOCUS_RING => vec![3.0, 2.0, 0.0, 0.0, 10.0, 0.0, 0.0],
+        _ => vec![1.0, 0.0],
     };
-    let ctm = matrix_arg(scope, args.get(2)).unwrap_or([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
     let baked = args.get(3).boolean_value(scope);
-    let flat = shape(&head, &crate::dom::f64_arg(args.get(1)), ctm, baked);
+    let flat = shape(&head, &crate::dom::f64_arg(args.get(2)), s.m, baked);
     rv.set(crate::dom::f64_array(scope, &flat).into());
 }
 
