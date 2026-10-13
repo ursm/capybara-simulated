@@ -205,4 +205,22 @@ RSpec.describe 'typing into a text control' do
       [v, 10, 10], [v, 10, 10], ['ab cdef gh', 5, 5, 'deleteSoftLineBackward']
     ])
   end
+
+  # A key's default action takes the element as its keydown left it: a listener that removes a link's `href` or makes
+  # a number field read-only stops the activation, the step.
+  it 'takes a default action on the element its keydown left' do
+    html = <<~HTML
+      <!DOCTYPE html><a id=a href="#z">link</a><input id=n type=number value=1><script>
+        window.log = [];
+        a.addEventListener('keydown', () => a.removeAttribute('href'));
+        a.addEventListener('click', () => log.push('click'));
+        n.addEventListener('keydown', () => { n.readOnly = true; });
+        n.addEventListener('input', () => log.push('input'));
+      </script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
+    s.find(:css, '#a').send_keys(:enter)
+    s.find(:css, '#n').send_keys(:up)
+    expect(s.evaluate_script('[log, n.value]')).to eq([[], '1'])
+  end
 end

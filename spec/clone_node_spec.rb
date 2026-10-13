@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # DOM "clone a node": what a copy of an element carries — its attributes, exactly, and the state the cloning steps copy
 # (cloning.rs). Every expectation is Chrome's.
@@ -57,11 +58,12 @@ RSpec.describe 'cloneNode' do
     s = simulated_session(app).tap {|session| session.visit '/' }
     expect(log).to eq(['/'])
     s.execute_script('document.body.append(f)')
-    expect(s.evaluate_script('window.R')).to eq(['attr:true'])
+    # (…the image fetched on a host thread, its load delivered when that is done: a parallel run's wall)
+    expect(poll_until { (r = s.evaluate_script('window.R')).empty? ? nil : r }).to eq(['attr:true'])
     expect(log).to eq(['/', '/tpl.png'])
     # (…and as imported, `document.importNode(template.content, true)`, which the page's document owns as it is made)
     s.execute_script("window.R = []; document.body.append(document.importNode(document.getElementById('t').content, true))")
-    expect(s.evaluate_script('window.R')).to eq(['attr:true'])
+    expect(poll_until { (r = s.evaluate_script('window.R')).empty? ? nil : r }).to eq(['attr:true'])
   end
 
   # The engine makes a deep copy's nodes, their objects only when the page asks (cloning.rs): a traversal's filter is

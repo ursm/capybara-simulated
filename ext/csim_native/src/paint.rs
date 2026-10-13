@@ -193,15 +193,20 @@ impl Painter<'_> {
         let style = if style == "normal" { String::new() } else { format!("{style} ") };
         format!("{style}{} {}px {family}", js_number(weight), js_number(size))
     }
-    // A border side: its width and colour, None where it paints none.
-    fn border(&mut self, el: NodeId, side: &str) -> Option<(f64, String)> {
+    // A border side's width: 0 for none — whatever its colour, which decides only whether it shows.
+    fn border_width(&mut self, el: NodeId, side: &str) -> f64 {
         let style = self.value(el, &format!("border-{side}-style"), None).unwrap_or_else(|| "none".to_owned());
         let style = style.trim().to_ascii_lowercase();
         if style == "none" || style == "hidden" {
-            return None;
+            return 0.0;
         }
         let width = self.value(el, &format!("border-{side}-width"), None).map_or(f64::NAN, |v| parse_float(&v));
-        if !(width > 0.0) {
+        if width > 0.0 { width } else { 0.0 }
+    }
+    // …and the side as it paints: its width and colour, None where it paints none.
+    fn border(&mut self, el: NodeId, side: &str) -> Option<(f64, String)> {
+        let width = self.border_width(el, side);
+        if width == 0.0 {
             return None;
         }
         // (…a transparent one paints nothing; one with no colour of its own the text's)
@@ -216,7 +221,7 @@ impl Painter<'_> {
     fn content_inset(&mut self, el: NodeId) -> [f64; 4] {
         let mut out = [0.0; 4];
         for (k, side) in SIDES.iter().enumerate() {
-            let border = self.border(el, side).map_or(0.0, |(w, _)| w);
+            let border = self.border_width(el, side);
             let pad = self.value(el, &format!("padding-{side}"), None).map_or(f64::NAN, |v| parse_float(&v));
             out[k] = border + if pad.is_nan() { 0.0 } else { pad };
         }
@@ -555,9 +560,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // __dom.paintList(root, body, width, height, dx, dy, now) -> [commands, strings, nodes]: the display list of the page
-// whose root element is `root` (-1 for none), as the last pass that paints placed its text, which it takes
-// (`display_list`) — its
-// commands a Float64Array, the strings and the nodes they name by index.
+// whose root element is `root` (-1 for none), with the text the last pass that paints placed, which it takes
+// (`display_list`) — its commands a Float64Array, the strings and the nodes they name by index.
 fn paint_list(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     crate::dom::style_op(scope, cid, |scope| paint_list_unguarded(scope, &args, rv));

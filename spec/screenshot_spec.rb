@@ -532,6 +532,16 @@ RSpec.describe 'save_screenshot' do
     end
   end
 
+  # …but a transparent border is still a border: a bitmap fills the content box inside it.
+  it 'draws a bitmap inside a transparent border' do
+    s = page_with('<canvas id=c width=20 height=20 style="border:10px solid transparent"></canvas>')
+    s.execute_script("const g = c.getContext('2d'); g.fillStyle = 'rgb(0,0,0)'; g.fillRect(0, 0, 20, 20)")
+    shot(s) do |_img, px, _path|
+      expect(px.call(4, 4)).to eq([255, 255, 255])   # the border: the page through it
+      expect(px.call(20, 20)).to eq([0, 0, 0])       # the canvas, at its content box
+    end
+  end
+
   # A screenshot of a page whose root is gone draws nothing the last one placed: a paint takes the text its own pass
   # placed, and a document with no root places none.
   it 'paints none of the text an earlier paint placed' do
