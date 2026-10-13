@@ -1134,6 +1134,16 @@ impl RealmArena {
         self.change_baselines.retain(|id, _| live(slots, id));
         self.explicit_elements.retain(|(id, _), _| live(slots, id));
         self.previously_focused.retain(|dialog, focused| live(slots, dialog) && live(slots, focused));
+        self.nonces.retain(|id, _| live(slots, id));
+        self.close_watcher_order.retain(|id, _| live(slots, id));
+        self.showing_popovers.retain(|doc, list| {
+            list.retain(|(p, _)| live(slots, p));
+            live(slots, doc) && !list.is_empty()
+        });
+        self.open_dialogs.retain(|doc, list| {
+            list.dialogs.retain(|(d, _)| live(slots, d));
+            live(slots, doc) && !list.dialogs.is_empty()
+        });
         self.checked_radios.retain(|_, ids| {
             ids.retain(|id| live(slots, id));
             !ids.is_empty()

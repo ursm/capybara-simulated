@@ -12,9 +12,8 @@ use crate::dom::{nid_arg, realm_id, NodeData, NodeId, NodeKind, RealmArena, STAT
 // document fetched, a script prepared, a `<link>`'s resource obtained and a `<style>`'s sheet loaded, an inline style's
 // background image fetched (by a controlled document), a `<source>`'s media element told of it, a frame's browsing
 // context made, a `<meta http-equiv=default-style>`'s stylesheet set chosen, a `nonce` hidden (nonce.rs), a custom
-// element upgraded or called back. An element's local name is compared ASCII case-insensitively in any namespace — the
-// steps tell an SVG `<style>` or `<use>` by it — but a script, which is an HTML or SVG `script` by its exact local name
-// (attributes.rs `is_script`), and a frame, an HTML `iframe` or `frame` likewise.
+// element upgraded or called back. Each is an element of its exact local name in its own namespace — HTML's, a `<use>`
+// SVG's, a `<script>` or `<style>` either — as Chrome fires no `load` for a MathML `<style>` or an HTML `STYLE`.
 pub(crate) const CONNECT_OPTION: u32 = 1;
 pub(crate) const CONNECT_SELECT: u32 = 1 << 1;
 pub(crate) const CONNECT_DIALOG: u32 = 1 << 2;
@@ -37,35 +36,23 @@ pub(crate) fn connection_steps(n: &NodeData) -> u32 {
         return 0;
     }
     let name: &str = &n.local_name;
-    let is = |tag: &str| name.eq_ignore_ascii_case(tag);
     let html = n.ns == ns!(html);
     let flag = |on: bool, step: u32| if on { step } else { 0 };
-    let tag = if is("option") {
-        CONNECT_OPTION
-    } else if is("select") {
-        CONNECT_SELECT
-    } else if html && is("dialog") && n.plain_attr("open").is_some() {
-        CONNECT_DIALOG
-    } else if is("selectedcontent") {
-        CONNECT_SELECTEDCONTENT
-    } else if ["video", "audio", "embed", "object"].iter().any(|t| is(t)) {
-        CONNECT_MEDIA
-    } else if is("use") {
-        CONNECT_USE
-    } else if crate::attributes::is_script(n) {
-        CONNECT_SCRIPT
-    } else if is("link") {
-        CONNECT_LINK
-    } else if is("style") {
-        CONNECT_STYLE
-    } else if is("source") {
-        CONNECT_SOURCE
-    } else if html && matches!(name, "iframe" | "frame") {
-        CONNECT_FRAME
-    } else if is("meta") && n.plain_attr("http-equiv").is_some_and(|v| v.eq_ignore_ascii_case("default-style")) {
-        CONNECT_DEFAULT_STYLE
-    } else {
-        0
+    let tag = match name {
+        _ if crate::attributes::is_script(n) => CONNECT_SCRIPT,
+        "style" if html || n.ns == ns!(svg) => CONNECT_STYLE,
+        "use" if n.ns == ns!(svg) => CONNECT_USE,
+        _ if !html => 0,
+        "option" => CONNECT_OPTION,
+        "select" => CONNECT_SELECT,
+        "dialog" if n.plain_attr("open").is_some() => CONNECT_DIALOG,
+        "selectedcontent" => CONNECT_SELECTEDCONTENT,
+        "video" | "audio" | "embed" | "object" => CONNECT_MEDIA,
+        "link" => CONNECT_LINK,
+        "source" => CONNECT_SOURCE,
+        "iframe" | "frame" => CONNECT_FRAME,
+        "meta" if n.plain_attr("http-equiv").is_some_and(|v| v.eq_ignore_ascii_case("default-style")) => CONNECT_DEFAULT_STYLE,
+        _ => 0,
     };
     let background = n.plain_attr("style").is_some_and(|v| v.contains("url(") && v.to_ascii_lowercase().contains("background"));
     // (…a valid custom element name has a hyphen; a customized built-in an `is` value)
