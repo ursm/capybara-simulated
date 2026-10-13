@@ -538,7 +538,7 @@ module Capybara
 
       # Run pending foreground platform tasks (FinalizationRegistry cleanup callbacks) so the native
       # state of collected CSSOM rules and sheets and TextDecoders is freed. The browser calls this once
-      # per settle; a no-op when the queue is empty (the common case).
+      # per settle and once per visit; a no-op when the queue is empty (the common case).
       def pump_message_loop
         @ctx&.pump_message_loop
       end

@@ -662,6 +662,11 @@ module Capybara
         # 'none') — page-initiated internal callers reach `navigate` directly and
         # inherit its @current_url default.
         navigate(resolve_visit_url(url), referer: referer, initiator: initiator)
+        # The native state of what earlier pages left unreachable freed, as a settle frees it (see the pump there): a
+        # suite that only visits and reads never settles. A page's own FinalizationRegistry callbacks run here too, as a
+        # browser runs them as tasks — and they may change the page.
+        @runtime.pump_message_loop
+        @find_cache_dirty = true
       end
 
       def resolve_visit_url(url)
@@ -1938,13 +1943,12 @@ module Capybara
         # run (cssom.js, cascade.js, encoding.js). A no-op when nothing was collected. (A DOM node's slot
         # is freed by its handle, at the next node made — node_handle.rs.)
         #
-        # INVARIANT this relies on: the pump drains ALL pending foreground platform tasks (and runs a
-        # microtask checkpoint) — safe to do here, AFTER settle has quiesced, only because this driver
-        # models timers/promises on its own virtual-clock queues, NOT V8's platform queue, so the only
-        # foreground tasks are FR cleanup callbacks; and our FR callbacks are pure native frees (ruleDrop,
-        # sheetDrop, textDecoderClose — no DOM mutation, no queued microtask, no app code). If either
-        # stops holding (a cleanup callback with DOM/microtask side effects, or app work posted as a
-        # foreground task), its effect would land post-settle and go un-settled — revisit this placement then.
+        # The pump drains ALL pending foreground platform tasks (and runs a microtask checkpoint). This
+        # driver models timers/promises on its own virtual-clock queues, NOT V8's platform queue, so the
+        # only foreground tasks are FR cleanup callbacks: the driver's own are pure native frees (ruleDrop,
+        # sheetDrop, textDecoderClose — no DOM mutation, no microtask), but a PAGE's FinalizationRegistry
+        # callback is app code, which may mutate the DOM and queue microtasks — those land here, after the
+        # settle quiesced, for the next poll to observe (a browser runs them as tasks, at no set time either).
         @runtime.pump_message_loop
         @find_cache_dirty = true
       end
