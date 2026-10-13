@@ -175,14 +175,17 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // A `@font-face` descriptor's value as the engine parses and serializes it (CSS Fonts 4 §4, CSS Font Loading's FontFace
-// attributes) — OPEN: a `@font-face` rule's own `font-weight: auto` the style system still drops (no `auto` in its
-// range grammars; ursm/stylo fork): `name` its CSS name (`font-weight`, `unicode-range`, `size-adjust`, …) — none where the value is no value
-// of its grammar, or the name no descriptor's.
+// attributes): `name` its CSS name (`font-weight`, `unicode-range`, `size-adjust`, …) — none where the value is no value
+// of its grammar, or the name no descriptor's. (OPEN: a `@font-face` rule's own `font-weight: auto` the style system still
+// drops — its range grammars have no `auto`; a change for the ursm/stylo fork.)
 pub(crate) fn descriptor(name: &str, value: &str) -> Option<String> {
     // (…`auto` for `font-weight`, `font-style` and `font-stretch` — CSS Fonts 4's grammar, Chrome's too — which the
     // style system's descriptor grammar does not have)
-    if matches!(name, "font-weight" | "font-style" | "font-stretch") && value.trim().eq_ignore_ascii_case("auto") {
-        return Some("auto".to_owned());
+    if matches!(name, "font-weight" | "font-style" | "font-stretch") {
+        let mut input = cssparser::ParserInput::new(value);
+        if cssparser::Parser::new(&mut input).parse_entirely(|i| i.expect_ident_matching("auto").map_err(cssparser::ParseError::<()>::from)).is_ok() {
+            return Some("auto".to_owned());
+        }
     }
     use style::properties::font_face::{DescriptorId, Descriptors};
     use style::stylesheets::CssRuleType;
@@ -302,7 +305,8 @@ mod tests {
         assert_eq!(descriptor("unicode-range", "U+0-7F, U+4??"), Some("U+0-7F, U+400-4FF".into()));
         assert_eq!(descriptor("font-weight", "heavy"), None);
         assert_eq!(descriptor("no-such", "x"), None);
-        assert_eq!(descriptor("font-weight", " AUTO "), Some("auto".into()));
+        assert_eq!(descriptor("font-weight", " AUTO/**/"), Some("auto".into()));
+        assert_eq!(descriptor("font-weight", "\u{a0}auto"), None);
         assert_eq!(descriptor("font-display", "auto"), Some("auto".into()));
     }
 
