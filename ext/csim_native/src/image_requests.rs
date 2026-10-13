@@ -52,16 +52,18 @@ fn element(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) ->
     crate::node_handle::nid_of(scope, value)
 }
 
-// __dom.imageLoadBegin(img, key, url) -> the new load's number, or 0 where `key` — its URL and CORS mode — is the one the
-// current load was made for (a relevant mutation that changes neither restarts nothing). The request's URL is `url`
-// from then on: what `currentSrc` reads once it completes.
+// __dom.imageLoadBegin(img, url, crossorigin) -> the new load's number, or 0 where `url` and the CORS mode
+// (`crossorigin`, null for none) are the ones the current load was made for (a relevant mutation that changes neither
+// restarts nothing). The request's URL is `url` from then on: what `currentSrc` reads.
 fn load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     use std::hash::{Hash, Hasher};
     let Some(id) = element(scope, args.get(0)) else { return rv.set_uint32(0) };
+    let url = args.get(1).to_rust_string_lossy(scope);
+    let mode = args.get(2);
+    let mode = (!mode.is_null_or_undefined()).then(|| mode.to_rust_string_lossy(scope));
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    args.get(1).to_rust_string_lossy(scope).hash(&mut hasher);
+    (&url, &mode).hash(&mut hasher);
     let key = hasher.finish();
-    let url = args.get(2).to_rust_string_lossy(scope);
     let r = crate::dom::dom(scope).arena.image_mut(id);
     if r.key == Some(key) {
         return rv.set_uint32(0);

@@ -157,4 +157,27 @@ RSpec.describe 'image decode' do
     # Chrome's
     expect(got).to eq(['green?a', [true, 1, true], [true, 'green?b'], [100, 50], [0, '7'], true])
   end
+
+  it "loads a clone of an image adopted into a frame, its node document's realm's to load" do
+    s = simulated_session(->(env) {
+      next [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><iframe src="/frame"></iframe>']] if env['PATH_INFO'] == '/'
+      next [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] if env['PATH_INFO'] == '/frame'
+      [200, {'content-type' => 'image/png'}, [File.binread(File.join(__dir__, 'wpt/images/green.png'))]]
+    })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const loaded = (img) => new Promise(resolve => { img.onload = img.onerror = resolve; });
+      (async () => {
+        const image = new Image();
+        image.src = '/green.png';
+        await loaded(image);
+        document.querySelector('iframe').contentDocument.adoptNode(image);
+        const copy = image.cloneNode();
+        await loaded(copy);
+        done([copy.complete, copy.naturalWidth, copy.currentSrc.split('/').pop()]);
+      })();
+    JS
+    expect(got).to eq([true, 100, 'green.png'])
+  end
 end
