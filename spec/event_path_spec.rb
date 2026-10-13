@@ -77,4 +77,24 @@ RSpec.describe 'the event path through shadow trees' do
     JS
     expect(got).to eq('#document-fragment:btn host:host BODY:host')
   end
+
+  # stopPropagation() in a window listener stops the targets after the window, not the window's other listeners —
+  # stopImmediatePropagation() does (DOM "inner invoke"). Chrome 155: "w1,w2 | a".
+  it "runs a window's other listeners after one stops propagation" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><button id=b>x</button>']] })
+    s.visit '/'
+    expect(s.evaluate_script(<<~JS)).to eq('w1,w2 | a')
+      (() => {
+        const log = [], log2 = [];
+        window.addEventListener('click', (e) => { log.push('w1'); e.stopPropagation(); }, true);
+        window.addEventListener('click', () => log.push('w2'), true);
+        document.addEventListener('click', () => log.push('d'), true);
+        document.getElementById('b').click();
+        window.addEventListener('foo', (e) => { log2.push('a'); e.stopImmediatePropagation(); }, true);
+        window.addEventListener('foo', () => log2.push('b'), true);
+        document.getElementById('b').dispatchEvent(new Event('foo', {bubbles: true}));
+        return log.join(',') + ' | ' + log2.join(',');
+      })()
+    JS
+  end
 end
