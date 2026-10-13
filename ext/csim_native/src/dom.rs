@@ -919,6 +919,9 @@ pub(crate) struct RealmArena {
     // How many HTML `<base>` elements the arena holds, anywhere: none, and a document has no base element without a
     // walk of its tree (`base_element`)…
     pub(crate) base_elements: u32,
+    // …and HTML `<title>` elements: none, and a document has no HTML title element without a walk of its tree
+    // (`title_element`) — Capybara's `has_title?` polls `document.title`.
+    pub(crate) title_elements: u32,
     // …and what moves where a document's base element can have changed — a `<base>` linked, unlinked or freed, its
     // `href` written — and with nothing else: the base URL a page reads after every write is kept against it.
     pub(crate) base_epoch: u64,
@@ -1279,6 +1282,9 @@ impl RealmArena {
         if data.is_html_named("base") {
             self.base_elements += 1;
         }
+        if data.is_html_named("title") {
+            self.title_elements += 1;
+        }
         self.external += NODE_WEIGHT;
         data.stamp.set(self.layout_epoch.get());
         let list = self.realm_nodes.entry(data.realm).or_default();
@@ -1332,6 +1338,9 @@ impl RealmArena {
         if self.get(id).is_some_and(|n| n.is_html_named("base")) {
             self.base_elements = self.base_elements.saturating_sub(1);
             self.base_epoch += 1;
+        }
+        if self.get(id).is_some_and(|n| n.is_html_named("title")) {
+            self.title_elements = self.title_elements.saturating_sub(1);
         }
         self.id_index.get_mut().forget(id);
         self.ce_reactions.forget_node(id);

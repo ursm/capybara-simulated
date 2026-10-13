@@ -380,6 +380,9 @@ impl RealmArena {
         if r.ns == web_atoms::ns!(svg) && &*r.local_name == "svg" {
             return r.children.iter().copied().find(|&c| self.get(c).is_some_and(|n| n.ns == web_atoms::ns!(svg) && &*n.local_name == "title"));
         }
+        if self.title_elements == 0 {
+            return None;
+        }
         self.find_in_tree(root, |_, n| n.is_html_named("title"))
     }
     // …and `document.title`: its child text, ASCII whitespace stripped and collapsed — '' with none.
