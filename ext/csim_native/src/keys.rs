@@ -144,9 +144,86 @@ pub(crate) fn modifier(name: &[u16]) -> Option<(&'static str, &'static str, u32)
     MODIFIERS.iter().find(|m| m.0 == name).map(|&(_, key, code, key_code)| (key, code, key_code))
 }
 
+// What pressing a key on an element does besides its events, each where its events are not canceled (`plan`): the
+// element's facts the rest is decided by, and the default actions that apply.
+// (…the element a text can be typed into: an editing host's, or an `<input>` / `<textarea>` with no `readonly` or
+// `disabled` — a checkbox or a radio none)
+pub(crate) const TYPEABLE: u32 = 1;
+pub(crate) const EDITING_HOST: u32 = 1 << 1;
+pub(crate) const CHECK_OR_RADIO: u32 = 1 << 2;
+// (…an anchor, a button, a summary, a select: send_keys focuses it though nothing is typed into it)
+pub(crate) const INTERACTIVE: u32 = 1 << 3;
+// The legacy `keypress` after the keydown: a key that produces a character — a printable one, Enter (a carriage
+// return) — none with Control / Alt / Meta held.
+pub(crate) const KEYPRESS: u32 = 1 << 4;
+// Escape's: a close request (HTML §6.4.4).
+pub(crate) const CLOSE_REQUEST: u32 = 1 << 5;
+// An arrow on a `<select>` or a radio: the adjacent option, the next or previous radio of its group.
+pub(crate) const ARROW_CHOICE: u32 = 1 << 6;
+// ArrowUp / ArrowDown on a stepped `<input>` (number, range, date …) with no `readonly` or `disabled`: a step.
+pub(crate) const STEP: u32 = 1 << 7;
+// Enter in a typeable element, no chord held: the form's implicit submission.
+pub(crate) const IMPLICIT_SUBMIT: u32 = 1 << 8;
+// Enter on a link, or with no chord held on a button or a summary — none `disabled`: its activation, a keyboard's click.
+pub(crate) const ENTER_ACTIVATES: u32 = 1 << 9;
+// Space on a button, a checkbox, a radio or a summary: its activation on the key's release.
+pub(crate) const SPACE_ACTIVATES: u32 = 1 << 10;
+// The modifiers held, as `plan` takes them.
+pub(crate) const CTRL: u32 = 1;
+pub(crate) const META: u32 = 1 << 1;
+pub(crate) const ALT: u32 = 1 << 2;
+
+// `plan` of the key `key` (a KeyboardEvent `key`) typing `char` (None for none), pressed on `id` with `modifiers` held.
+pub(crate) fn plan(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, key: &[u16], char: Option<&[u16]>, modifiers: u32) -> u32 {
+    let Some(n) = arena.get(id) else { return 0 };
+    let is = |name: &str| is_units(key, name);
+    let chord = modifiers & (CTRL | META | ALT) != 0;
+    // (…by its local name, whatever its namespace, as the bindings' `_tag` is)
+    let tag = &*n.local_name;
+    let input_type = if tag == "input" { n.input_type() } else { "" };
+    let check_or_radio = matches!(input_type, "checkbox" | "radio");
+    let control = matches!(tag, "input" | "textarea") && n.plain_attr("readonly").is_none() && n.plain_attr("disabled").is_none();
+    let host = arena.is_editable(id);
+    let button = tag == "button" || (tag == "input" && n.input_has(crate::input_types::BUTTON));
+    let mut plan = 0;
+    let mut set = |bit: u32, on: bool| {
+        if on {
+            plan |= bit;
+        }
+    };
+    let typeable = host || (control && !check_or_radio);
+    set(TYPEABLE, typeable);
+    set(EDITING_HOST, host);
+    set(CHECK_OR_RADIO, check_or_radio);
+    set(INTERACTIVE, matches!(tag, "a" | "button" | "summary" | "select"));
+    set(KEYPRESS, !chord && (is("Enter") || (key.len() == 1 && char == Some(key))));
+    set(CLOSE_REQUEST, is("Escape"));
+    let arrow = is("ArrowDown") || is("ArrowUp") || is("ArrowLeft") || is("ArrowRight");
+    set(ARROW_CHOICE, arrow && (tag == "select" || input_type == "radio"));
+    set(STEP, (is("ArrowUp") || is("ArrowDown")) && tag == "input" && control && n.input_has(crate::input_types::NUMERIC));
+    set(IMPLICIT_SUBMIT, is("Enter") && typeable && !chord);
+    let link = tag == "a" && n.is_hyperlink();
+    set(ENTER_ACTIVATES, is("Enter") && n.plain_attr("disabled").is_none() && (link || ((button || tag == "summary") && !chord)));
+    set(SPACE_ACTIVATES, is(" ") && (check_or_radio || button || tag == "summary"));
+    plan
+}
+fn is_units(units: &[u16], ascii: &str) -> bool {
+    units.iter().copied().eq(ascii.bytes().map(u16::from))
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "resolveKey", resolve_op, context_id);
     crate::dom::register(scope, ns, "modifierKey", modifier_op, context_id);
+    crate::dom::register(scope, ns, "keyPlan", plan_op, context_id);
+}
+// __dom.keyPlan(element, key, char, modifiers) -> `plan` (its bits, `modifiers` CTRL | META | ALT).
+fn plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_uint32(0) };
+    let key = crate::dom::utf16_arg(scope, args.get(1));
+    let ch = (!args.get(2).is_null_or_undefined()).then(|| crate::dom::utf16_arg(scope, args.get(2)));
+    let modifiers = args.get(3).uint32_value(scope).unwrap_or(0);
+    rv.set_uint32(plan(crate::dom::realm(scope, cid), id, &key, ch.as_deref(), modifiers));
 }
 // __dom.resolveKey(spec) -> [key, code, keyCode, char (null for none), inputType (null for none), named] (`resolve`).
 fn resolve_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
