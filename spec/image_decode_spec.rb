@@ -14,7 +14,8 @@ RSpec.describe 'image decode' do
     '/ico'   => 'html/canvas/element/manual/wide-gamut-canvas/resources/pattern-srgb.ico',
     '/cmyk'  => 'html/canvas/element/manual/wide-gamut-canvas/resources/Generic-CMYK-FF000000.jpg',
     '/bg'    => 'images/left-half-rectangle-50.svg',
-    '/bad'   => 'images/undecodable.png'
+    '/bad'   => 'images/undecodable.png',
+    '/green' => 'images/green.png'
   }
   let(:app) {
     lambda {|env|
@@ -124,5 +125,36 @@ RSpec.describe 'image decode' do
       img.src = '/crash.avif';
     JS
     expect(got).to eq(%w[error TypeError])
+  end
+
+  it "reads an image element's members off its current request" do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const data = 'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==';
+      const loaded = (img) => new Promise(resolve => { img.onload = img.onerror = resolve; });
+      (async () => {
+        const img = new Image();
+        img.src = '/green?a';
+        await loaded(img);
+        const first = img.currentSrc.split('/').pop();
+        img.src = data;
+        await loaded(img);
+        const second = [img.currentSrc === data, img.naturalWidth, img.complete];
+        const set = new Image();
+        set.srcset = '/green?b';
+        await set.decode();
+        const button = document.createElement('input');
+        button.type = 'image';
+        button.src = '/green';
+        await loaded(button);
+        const text = document.createElement('input');
+        text.width = 7;
+        done([first, second, [set.complete, set.currentSrc.split('/').pop()], [button.width, button.height], [text.width, text.getAttribute('width')], new Image().complete]);
+      })();
+    JS
+    # Chrome's
+    expect(got).to eq(['green?a', [true, 1, true], [true, 'green?b'], [100, 50], [0, '7'], true])
   end
 end

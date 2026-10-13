@@ -19,7 +19,8 @@ pub(crate) struct ImageRequest {
     tainted: bool,
     orientation: u8,
     load: u32,
-    key: Option<String>,
+    // (…the key a hash: a `data:` URL is the whole image)
+    key: Option<u64>,
 }
 
 // What a load's result is.
@@ -43,22 +44,30 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "imagePending", pending, context_id);
     crate::dom::register(scope, ns, "imageApply", apply, context_id);
     crate::dom::register(scope, ns, "imageInfo", info, context_id);
+    crate::dom::register(scope, ns, "imageUrl", url, context_id);
+    crate::dom::register(scope, ns, "imageLoad", current_load, context_id);
 }
 
 fn element(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<NodeId> {
     crate::node_handle::nid_of(scope, value)
 }
 
-// __dom.imageLoadBegin(img, key) -> the new load's number, or 0 where `key` — its URL and CORS mode — is the one the
-// current load was made for (a relevant mutation that changes neither restarts nothing).
+// __dom.imageLoadBegin(img, key, url) -> the new load's number, or 0 where `key` — its URL and CORS mode — is the one the
+// current load was made for (a relevant mutation that changes neither restarts nothing). The request's URL is `url`
+// from then on: what `currentSrc` reads once it completes.
 fn load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    use std::hash::{Hash, Hasher};
     let Some(id) = element(scope, args.get(0)) else { return rv.set_uint32(0) };
-    let key = args.get(1).to_rust_string_lossy(scope);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    args.get(1).to_rust_string_lossy(scope).hash(&mut hasher);
+    let key = hasher.finish();
+    let url = args.get(2).to_rust_string_lossy(scope);
     let r = crate::dom::dom(scope).arena.image_mut(id);
-    if r.key.as_deref() == Some(key.as_str()) {
+    if r.key == Some(key) {
         return rv.set_uint32(0);
     }
     r.key = Some(key);
+    r.url = Some(url);
     r.load += 1;
     rv.set_uint32(r.load);
 }
@@ -69,16 +78,11 @@ fn load_clear(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let r = crate::dom::dom(scope).arena.image_mut(id);
     *r = ImageRequest { complete: true, load: r.load + 1, ..ImageRequest::default() };
 }
-// __dom.imagePending(img, url): the current request pending on `url` (`null`: the URL stays as it was) — not complete,
-// its image data discarded until the response comes.
+// __dom.imagePending(img): the current request pending — not complete, its image data discarded until the response
+// comes.
 fn pending(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
-    let url = args.get(1);
-    let url = (!url.is_null_or_undefined()).then(|| url.to_rust_string_lossy(scope));
     let r = crate::dom::dom(scope).arena.image_mut(id);
-    if let Some(url) = url {
-        r.url = Some(url);
-    }
     r.complete = false;
     r.broken = false;
     r.size = [0, 0];
@@ -102,24 +106,35 @@ fn apply(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'
     r.tainted = image && tainted;
     rv.set_bool(true);
 }
-// __dom.imageInfo(img) -> [complete, broken, width, height, tainted, orientation, url (null for none), load]: the
-// current request, as the element's members and a canvas read it.
+// __dom.imageInfo(img) -> [complete, broken, width, height, tainted, orientation]: the current request, as the
+// element's members and a canvas read it.
 fn info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
-    let r = crate::dom::dom(scope).arena.image(id).cloned().unwrap_or_default();
-    let url: v8::Local<v8::Value> = match &r.url {
-        Some(u) => v8::String::new(scope, u).map_or_else(|| v8::null(scope).into(), Into::into),
-        None => v8::null(scope).into(),
+    let (complete, broken, size, tainted, orientation) = match crate::dom::dom(scope).arena.image(id) {
+        Some(r) => (r.complete, r.broken, r.size, r.tainted, r.orientation),
+        None => (false, false, [0, 0], false, 0),
     };
     let items = [
-        v8::Boolean::new(scope, r.complete).into(),
-        v8::Boolean::new(scope, r.broken).into(),
-        v8::Integer::new_from_unsigned(scope, r.size[0]).into(),
-        v8::Integer::new_from_unsigned(scope, r.size[1]).into(),
-        v8::Boolean::new(scope, r.tainted).into(),
-        v8::Integer::new_from_unsigned(scope, u32::from(r.orientation)).into(),
-        url,
-        v8::Integer::new_from_unsigned(scope, r.load).into(),
+        v8::Boolean::new(scope, complete).into(),
+        v8::Boolean::new(scope, broken).into(),
+        v8::Integer::new_from_unsigned(scope, size[0]).into(),
+        v8::Integer::new_from_unsigned(scope, size[1]).into(),
+        v8::Boolean::new(scope, tainted).into(),
+        v8::Integer::new_from_unsigned(scope, u32::from(orientation)).into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.imageUrl(img) -> the current request's URL, null for none: its own op, for a `data:` URL is the whole image.
+fn url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = element(scope, args.get(0)) else { return rv.set_null() };
+    let Some(url) = crate::dom::dom(scope).arena.image(id).and_then(|r| r.url.clone()) else { return rv.set_null() };
+    match v8::String::new(scope, &url) {
+        Some(s) => rv.set(s.into()),
+        None => rv.set_null(),
+    }
+}
+// __dom.imageLoad(img) -> the current load's number (0 before any).
+fn current_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = element(scope, args.get(0)) else { return rv.set_uint32(0) };
+    rv.set_uint32(crate::dom::dom(scope).arena.image(id).map_or(0, |r| r.load));
 }
