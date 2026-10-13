@@ -262,8 +262,8 @@ impl Animations {
         };
         let e = self.effects.get_mut(&effect).unwrap();
         e.keyframes = vec![
-            Keyframe { offset: 0.0, easing: Some(change.easing.clone()), composite: None, block: block(&from) },
-            Keyframe { offset: 1.0, easing: None, composite: None, block: block(&to) },
+            Keyframe { offset: 0.0, easing: Some(change.easing.clone()), composite: None, block: block(&from), written: None },
+            Keyframe { offset: 1.0, easing: None, composite: None, block: block(&to), written: None },
         ];
         // (Its keyframes are values already: nothing computes them again.)
         e.computed = Some(ComputedKeyframes {

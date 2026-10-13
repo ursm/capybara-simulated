@@ -70,7 +70,7 @@ fn number_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>)
 
 // An array argument's items, read out as values: a number, a string, or nothing (null, undefined, anything else).
 #[derive(Clone, Debug)]
-enum Item {
+pub(crate) enum Item {
     Number(f64),
     Text(String),
     Nothing,
@@ -88,10 +88,10 @@ fn array_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) 
 }
 
 impl Item {
-    fn number(&self) -> Option<f64> {
+    pub(crate) fn number(&self) -> Option<f64> {
         if let Item::Number(n) = self { Some(*n) } else { None }
     }
-    fn text(&self) -> Option<&str> {
+    pub(crate) fn text(&self) -> Option<&str> {
         if let Item::Text(t) = self { Some(t) } else { None }
     }
 }
@@ -135,29 +135,24 @@ fn composite_arg(text: Option<&str>) -> Option<CompositeOperation> {
     }
 }
 
-// Keyframes as the JS side normalized them, flat: [count, then per keyframe: computed offset, easing | null,
-// composite | null, declaration count, then (property, value) pairs — longhands and shorthands as written].
-fn keyframes_arg(engine: &StyleEngine, items: &[Item]) -> Vec<Keyframe> {
-    let mut at = 1;
-    let mut frames = Vec::new();
-    let count = items.first().and_then(Item::number).unwrap_or(0.0) as usize;
-    for _ in 0..count {
-        let Some(offset) = items.get(at).and_then(Item::number) else { break };
-        let easing = items.get(at + 1).and_then(Item::text).map(|e| engine.easing(e));
-        let composite = composite_arg(items.get(at + 2).and_then(Item::text));
-        let declared = items.get(at + 3).and_then(Item::number).unwrap_or(0.0) as usize;
-        at += 4;
-        let declarations: Vec<(String, String)> = (0..declared)
-            .filter_map(|i| {
-                let name = items.get(at + 2 * i)?.text()?;
-                let value = items.get(at + 2 * i + 1)?.text()?;
-                Some((name.to_owned(), value.to_owned()))
-            })
-            .collect();
-        at += 2 * declared;
-        frames.push(Keyframe { offset, easing, composite, block: engine.keyframe_block(&declarations) });
-    }
-    frames
+// Keyframes as the bindings read them (keyframes.rs `process`), processed and made the engine's: each its computed
+// offset, its easing and composite, its declarations parsed — and what the page wrote — or why they are none.
+fn keyframes_arg(engine: &StyleEngine, items: &[Item]) -> Result<Vec<Keyframe>, crate::keyframes::Refusal> {
+    let frames = crate::keyframes::process(items)?;
+    Ok(frames
+        .into_iter()
+        .map(|f| Keyframe {
+            offset: f.computed,
+            easing: f.written.easing.as_deref().map(|e| engine.easing(e)),
+            composite: composite_arg(f.written.composite.as_deref()),
+            block: engine.keyframe_block(&f.written.declared),
+            written: Some(Box::new(f.written)),
+        })
+        .collect())
+}
+// …a refusal, as the op answers it: the TypeError's message.
+fn refusal_value<'s>(scope: &mut v8::PinScope<'s, '_>, refusal: &crate::keyframes::Refusal) -> v8::Local<'s, v8::Value> {
+    string_value(scope, &refusal.message())
 }
 
 // A target: an element (its node id, or -1 for none) and its pseudo-element (`::before`, `::after`, `::marker`).
@@ -177,15 +172,23 @@ fn target_arg(
     Some(Target { node, pseudo })
 }
 
-// __dom.animEffect(targetNid | -1, pseudo | null, timing, composite, iterationComposite, keyframes) -> effect id.
+// __dom.animEffect(targetNid | -1, pseudo | null, timing, composite, iterationComposite, keyframes) -> effect id — the
+// keyframes as the bindings read them, or the id of the effect whose keyframes it copies (KeyframeEffect's copy
+// constructor); or the message of the TypeError they are no keyframes with, no effect made.
 fn anim_effect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, _arena| {
         let timing = array_arg(scope, args.get(2));
         let timing = timing_arg(engine, &timing);
         let composite = composite_arg(string_arg(scope, args.get(3)).as_deref()).unwrap_or(CompositeOperation::Replace);
         let accumulate = string_arg(scope, args.get(4)).as_deref() == Some("accumulate");
-        let keyframes = array_arg(scope, args.get(5));
-        let keyframes = keyframes_arg(engine, &keyframes);
+        let source = args.get(5);
+        let keyframes = match source.is_number().then(|| source.number_value(scope)).flatten() {
+            Some(source) => engine.web_animations.effects.get(&(source as EffectId)).map_or_else(Vec::new, |e| e.keyframes.clone()),
+            None => match keyframes_arg(engine, &array_arg(scope, args.get(5))) {
+                Ok(keyframes) => keyframes,
+                Err(refusal) => return rv.set(refusal_value(scope, &refusal)),
+            },
+        };
         let target = target_arg(scope, &args, 0, 1);
         let id = engine.web_animations_op(|model| {
             let id = model.new_effect(timing);
@@ -201,9 +204,9 @@ fn anim_effect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 }
 
 // __dom.animEffectSet(effect, what, a, b): what an effect's setters change — `timing` (a: timing, b: the members the
-// page set), `target` (a: node | -1, b: pseudo), `keyframes` (a: keyframes), `composite` / `iterationComposite` (a:
-// the operation). What a page sets of a CSS animation's effect, its style no longer does.
-fn anim_effect_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// page set), `target` (a: node | -1, b: pseudo), `keyframes` (a: keyframes as the bindings read them — answered with
+// the TypeError's message where they are none), `composite` / `iterationComposite` (a: the operation). What a page sets of a CSS animation's effect, its style no longer does.
+fn anim_effect_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, _arena| {
         let Some(id) = number_arg(scope, args.get(0)).map(|n| n as EffectId) else { return };
         match string_arg(scope, args.get(1)).as_deref() {
@@ -237,8 +240,10 @@ fn anim_effect_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
                 engine.web_animations_op(|model| model.set_target(id, target));
             },
             Some("keyframes") => {
-                let keyframes = array_arg(scope, args.get(2));
-                let keyframes = keyframes_arg(engine, &keyframes);
+                let keyframes = match keyframes_arg(engine, &array_arg(scope, args.get(2))) {
+                    Ok(keyframes) => keyframes,
+                    Err(refusal) => return rv.set(refusal_value(scope, &refusal)),
+                };
                 engine.web_animations_op(|model| {
                     model.override_css(id, Overrides::KEYFRAMES);
                     if let Some(effect) = model.effects.get_mut(&id) {
@@ -626,18 +631,20 @@ fn anim_effect_timing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     });
 }
 
-// __dom.animKeyframes(effect) -> [count, then per keyframe: offset, easing, composite | null, declaration count,
-// (property, value)…]: an effect's keyframes as the engine holds them — a CSS animation's, from its `@keyframes` rule.
+// __dom.animKeyframes(effect) -> [count, then per keyframe: offset | null, computed offset, easing, composite | null,
+// declaration count, (property, value)…]: an effect's keyframes as `getKeyframes()` reports them — a script's as it
+// wrote them, a CSS animation's from its `@keyframes` rule.
 fn anim_keyframes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, _arena| {
         let Some(id) = number_arg(scope, args.get(0)).map(|n| n as EffectId) else { return };
         let frames = engine.keyframes_text(id);
         let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Number::new(scope, frames.len() as f64).into()];
-        for (offset, easing, composite, declarations) in frames {
-            items.push(v8::Number::new(scope, offset).into());
+        for (offset, computed, easing, composite, declarations) in frames {
+            items.push(offset.map_or_else(|| v8::null(scope).into(), |o| v8::Number::new(scope, o).into()));
+            items.push(v8::Number::new(scope, computed).into());
             items.push(string_value(scope, &easing));
             items.push(match composite {
-                Some(c) => string_value(scope, c),
+                Some(c) => string_value(scope, &c),
                 None => v8::null(scope).into(),
             });
             items.push(v8::Number::new(scope, declarations.len() as f64).into());

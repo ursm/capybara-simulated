@@ -1317,18 +1317,26 @@ impl StyleEngine {
     // An effect's keyframes as `getKeyframes()` reports them: each one's offset, easing and composite (None: the
     // effect's), and its declarations serialized.
     #[allow(clippy::type_complexity)]
-    pub(crate) fn keyframes_text(&self, effect: waapi::EffectId) -> Vec<(f64, String, Option<&'static str>, Vec<(String, String)>)> {
+    pub(crate) fn keyframes_text(&self, effect: waapi::EffectId) -> Vec<(Option<f64>, f64, String, Option<String>, Vec<(String, String)>)> {
         let Some(effect) = self.web_animations.effects.get(&effect) else { return Vec::new() };
         let guard = self.lock.read();
         effect
             .keyframes
             .iter()
             .map(|k| {
+                // (…a script's keyframe as it wrote it)
+                if let Some(w) = &k.written {
+                    let easing = w.easing.clone().unwrap_or_else(|| "linear".to_owned());
+                    return (w.offset, k.offset, easing, w.composite.clone(), w.declared.clone());
+                }
                 let easing = k.easing.as_ref().map_or_else(|| "linear".to_owned(), style_traits::ToCss::to_css_string);
-                let composite = k.composite.map(|c| match c {
-                    waapi::CompositeOperation::Replace => "replace",
-                    waapi::CompositeOperation::Add => "add",
-                    waapi::CompositeOperation::Accumulate => "accumulate",
+                let composite = k.composite.map(|c| {
+                    match c {
+                        waapi::CompositeOperation::Replace => "replace",
+                        waapi::CompositeOperation::Add => "add",
+                        waapi::CompositeOperation::Accumulate => "accumulate",
+                    }
+                    .to_owned()
                 });
                 let declarations = k
                     .block
@@ -1341,7 +1349,7 @@ impl StyleEngine {
                         (d.id().name().to_string(), value)
                     })
                     .collect();
-                (k.offset, easing, composite, declarations)
+                (Some(k.offset), k.offset, easing, composite, declarations)
             })
             .collect()
     }
@@ -1731,6 +1739,7 @@ impl StyleEngine {
                                 easing: Some(declared_easing.map_or(easing.clone(), |e| e.to_computed_value_without_context())),
                                 composite: declared_composite.map(composite_of),
                                 block: block.clone(),
+                                written: None,
                             })
                         })
                         .collect();

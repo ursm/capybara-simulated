@@ -232,6 +232,9 @@ pub(crate) struct Keyframe {
     pub(crate) easing: Option<ComputedTimingFunction>,
     pub(crate) composite: Option<CompositeOperation>,
     pub(crate) block: Arc<Locked<PropertyDeclarationBlock>>,
+    // What a script's keyframe was written as (keyframes.rs), which `getKeyframes()` reports — none for a keyframe a
+    // style rule or a transition made.
+    pub(crate) written: Option<Box<crate::keyframes::Written>>,
 }
 
 // A keyframe's value of one property, computed against the target's style (§5.3.3 "computing property values").
