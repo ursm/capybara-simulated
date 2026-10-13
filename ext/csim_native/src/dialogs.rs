@@ -119,6 +119,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "dialogClosedBy", dialog_closed_by, context_id);
     crate::dom::register(scope, ns, "dialogShowCheck", dialog_show_check, context_id);
     crate::dom::register(scope, ns, "dialogReturnValue", dialog_return_value, context_id);
+    crate::dom::register(scope, ns, "closeWatcherOf", close_watcher_of, context_id);
 }
 
 // __dom.dialogOpened(docNid, dialogNid, activations) — the dialog the last of the document's open dialogs (`activations`
@@ -223,4 +224,12 @@ fn dialog_return_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     }
     let value = crate::dom::dom(scope).arena.return_value(id);
     rv.set(crate::dom::utf16_value(scope, &value));
+}
+
+// __dom.closeWatcherOf(element) -> which close watcher an open dialog or a showing popover has — a number each one made
+// as it opened gets, a re-insertion's a new one — or 0 for none: a request to close goes on only while its dialog keeps
+// the watcher it began with (HTML "request to close": a watcher destroyed is no longer active).
+fn close_watcher_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let watcher = crate::node_handle::nid_of(scope, args.get(0)).and_then(|id| crate::dom::dom(scope).arena.close_watcher_order.get(&id).copied());
+    rv.set_double(watcher.unwrap_or(0) as f64);
 }

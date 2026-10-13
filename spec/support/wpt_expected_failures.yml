@@ -4932,8 +4932,6 @@ html/semantics/interactive-elements/the-dialog-element/dialog-popover-closedby-c
   with shadow DOM slots
 html/semantics/interactive-elements/the-dialog-element/dialog-popover-overlay.html:
 - "== html/semantics/interactive-elements/the-dialog-element/dialog-popover-overlay-ref.html"
-html/semantics/interactive-elements/the-dialog-element/dialog-requestclose-2.html:
-- requestClose() should not close the dialog when disconnected
 html/semantics/interactive-elements/the-dialog-element/dialog-requestclose-3.html:
 - requestClose() should not close the dialog when is in inactive document
 html/semantics/interactive-elements/the-dialog-element/dialog-requestclose-recurse.html:

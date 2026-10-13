@@ -26,4 +26,19 @@ RSpec.describe 'Dialog and popover checks' do
       })()
     JS
   end
+
+  # …and one it re-inserts has a new close watcher, not the one the request began with: open, though no longer modal
+  # (its removing steps), its returnValue unset. Chrome: [true, false, ""].
+  it 'leaves a modal dialog its cancel listener re-inserted open' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] }).tap {|session| session.visit '/' }
+    expect(s.evaluate_script(<<~'JS')).to eq([true, false, ''])
+      (() => {
+        const d = document.body.appendChild(document.createElement('dialog'));
+        d.addEventListener('cancel', () => { d.remove(); document.body.append(d); });
+        d.showModal();
+        d.requestClose('rv');
+        return [d.open, d.matches(':modal'), d.returnValue];
+      })()
+    JS
+  end
 end
