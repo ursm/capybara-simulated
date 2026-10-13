@@ -506,6 +506,7 @@ module Capybara
         @browser.note_realm_discarded(id) rescue nil
         @realm_module_handles&.delete(id)
         @module_sw_ctxs&.delete(id)
+        @browser.forget_importmap(id)
         @frame_realm_depths&.delete(id)
         @frame_realm_parents&.delete(id)
         @window_realm_meta&.delete(id)
@@ -1212,7 +1213,7 @@ module Capybara
           # attribute; every other module resolves integrity from the import map
           # (HTML "resolve a module integrity metadata").
           integ = url_s == sw[:root] ? sw[:integrity].to_s : ''
-          integ = @browser.importmap_integrity(url_s) if integ.empty?
+          integ = @browser.importmap_integrity(url_s, realm_key(target)) if integ.empty?
           r = @browser.sw_script_subresource_fetch(
             sw[:handle],
             url_s,
@@ -1269,8 +1270,9 @@ module Capybara
       def instantiate_native_module(m, importer_url, target, handles)
         return unless m.status == :uninstantiated
         browser = @browser
+        realm = realm_key(target)
         m.instantiate do |specifier, referrer|
-          resolved = browser.resolve_module_specifier(specifier, referrer || importer_url)
+          resolved = browser.resolve_module_specifier(specifier, referrer || importer_url, realm)
           child = native_module_for(resolved, nil, target, handles)
           raise "module not found: #{resolved}" unless child
           child
@@ -1298,7 +1300,7 @@ module Capybara
             else
               [ctx, native_module_handles]
             end
-          resolved = @browser.resolve_module_specifier(specifier, referrer)
+          resolved = @browser.resolve_module_specifier(specifier, referrer, realm_key(target))
           m = native_module_for(resolved, nil, target, handles)
           raise "module not found: #{resolved}" unless m
           instantiate_native_module(m, resolved, target, handles)

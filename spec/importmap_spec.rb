@@ -202,4 +202,34 @@ RSpec.describe 'import maps' do
     s.visit '/'
     expect(s.find('#out').text).to eq('a1 b x s:a2')
   end
+
+  # Each document's import map is its own: a frame's neither replaces its parent's nor clears it, for a static import or
+  # a dynamic `import()` alike.
+  it "keeps a frame's import map apart from its parent's" do
+    frame = <<~HTML
+      <!doctype html><script type="importmap">{"imports": {"a": "/js/a2.js"}}</script>
+      <div id="f"></div><script type="module">import a from "a"; document.getElementById('f').textContent = a;</script>
+    HTML
+    page = <<~HTML
+      <!doctype html><html><head><script type="importmap">{"imports": {"a": "/js/a1.js"}}</script></head>
+      <body><div id="out"></div><iframe src="/frame"></iframe>
+        <script type="module">
+          const frame = document.querySelector('iframe');
+          frame.onload = () => setTimeout(async () => {
+            const a = (await import("a")).default;
+            document.getElementById('out').textContent = a + ' ' + frame.contentDocument.getElementById('f').textContent;
+          }, 50);
+        </script>
+      </body></html>
+    HTML
+    modules = {'/js/a1.js' => 'export default "a1";', '/js/a2.js' => 'export default "a2";'}
+    app = lambda {|env|
+      next [200, {'content-type' => 'text/html'}, [frame]] if env['PATH_INFO'] == '/frame'
+      body = modules[env['PATH_INFO']]
+      body ? [200, {'content-type' => 'text/javascript'}, [body]] : [200, {'content-type' => 'text/html'}, [page]]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    expect(s.find('#out', text: /a/).text).to eq('a1 a2')
+  end
 end

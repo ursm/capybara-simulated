@@ -8950,22 +8950,29 @@ module Capybara
         out
       end
 
-      # The document's import map (import_map.rs, as JSON), which the page's `ingestImportmaps` keeps and pushes here
-      # through the host fn, so the host resolves a module specifier as the page does.
-      def set_importmap(json)
-        @importmap = json.to_s
+      # Each realm's document's import map (import_map.rs, as JSON), which the realm's `ingestImportmaps` keeps and pushes
+      # here, by realm id, so the host resolves a realm's module specifiers as that realm does — a frame's map neither
+      # replaces its parent's nor clears it.
+      def set_importmap(json, realm)
+        (@importmaps ||= {})[realm.to_i] = json.to_s
       end
 
-      # Import-map "integrity" metadata for a RESOLVED module URL ('' when unmapped).
-      def importmap_integrity(url)
-        @importmap ? Native.import_map_integrity(@importmap, url.to_s) : ''
+      # …gone with its realm.
+      def forget_importmap(realm)
+        @importmaps&.delete(realm.to_i)
       end
 
-      # HTML "resolve a module specifier" against `base_url` (the referrer's) through the document's import map: the
-      # URL, or the specifier itself where it resolves to none (a bare one nothing maps), which then fails to fetch.
-      def resolve_module_specifier(specifier, base_url)
+      # Import-map "integrity" metadata for a RESOLVED module URL in `realm` ('' when unmapped).
+      def importmap_integrity(url, realm)
+        map = @importmaps&.[](realm.to_i)
+        map ? Native.import_map_integrity(map, url.to_s) : ''
+      end
+
+      # HTML "resolve a module specifier" against `base_url` (the referrer's) through `realm`'s import map: the URL, or
+      # the specifier itself where it resolves to none (a bare one nothing maps), which then fails to fetch.
+      def resolve_module_specifier(specifier, base_url, realm)
         base = effective_module_base(base_url)
-        Native.import_map_resolve(@importmap || '', specifier.to_s, base) || specifier
+        Native.import_map_resolve(@importmaps&.[](realm.to_i) || '', specifier.to_s, base) || specifier
       end
 
       # The base a module specifier resolves against: the importer's URL — for a nested relative import, and for a

@@ -103,7 +103,7 @@ module Capybara
         '__csim_cacheDeleteEntries'  => ->(b, *a) { b.cache_delete_entries(a[0], a[1], a[2]) },
         '__csimGeolocationState'     => ->(b, *_) { b.geolocation_state_json },
         '__modalDialog'              => ->(b, *a) { b.handle_modal(a[0], a[1], a[2]) },
-        '__csim_pushImportmap'       => ->(b, *a) { b.set_importmap(a[0]); nil },
+        '__csim_pushImportmap'       => ->(b, *a) { b.set_importmap(a[0], a[1]); nil },
         '__csim_logConsole'          => ->(b, *a) { b.log_console(a[0], a[1]); nil },
         '__csim_eventSourceOpen'     => ->(b, *a) { b.event_source_open(a[0]) },
         '__csim_eventSourceClose'    => ->(b, *a) { b.event_source_close(a[0]); nil },
