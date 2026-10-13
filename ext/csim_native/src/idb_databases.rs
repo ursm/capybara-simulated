@@ -258,6 +258,10 @@ impl Registry {
     }
     // The waiting over: an open's upgrade begun, a delete's database gone — a task later where a close ended the wait.
     fn proceed(&mut self, key: &DbKey, later: bool) {
+        // (…none for a request whose agent is gone)
+        if self.queues[key].front().is_some_and(|p| !self.agents.contains_key(&p.agent)) {
+            return self.finish(key);
+        }
         let p = self.queues.get_mut(key).and_then(VecDeque::front_mut).expect("its turn");
         p.waiting.clear();
         p.blocked = false;
@@ -418,6 +422,22 @@ impl Registry {
     // requests out of their queues.
     fn drop_agent(&mut self, agent: u64) {
         self.agents.remove(&agent);
+        // (…its requests out first, the first of a queue too: a connection of its closing must not go on with a request
+        // of its own that waited on it)
+        let keys: Vec<DbKey> = self.queues.keys().cloned().collect();
+        for key in keys {
+            let head_gone = self.queues[&key].front().is_some_and(|p| p.agent == agent);
+            if let Some(queue) = self.queues.get_mut(&key) {
+                let head = queue.pop_front();
+                queue.retain(|p| p.agent != agent);
+                if let Some(head) = head {
+                    queue.push_front(head);
+                }
+            }
+            if head_gone {
+                self.finish(&key);
+            }
+        }
         let conns: Vec<u32> = self.connections.iter().filter(|(_, c)| c.agent == agent).map(|(id, _)| *id).collect();
         for conn in &conns {
             let txs: Vec<u32> = self.transactions.iter().filter(|(_, t)| t.conn == *conn).map(|(id, _)| *id).collect();
@@ -433,20 +453,6 @@ impl Registry {
             self.ack(*conn);
         }
         self.connections.retain(|_, c| c.agent != agent || !c.closed);
-        let keys: Vec<DbKey> = self.queues.keys().cloned().collect();
-        for key in keys {
-            let head_gone = self.queues[&key].front().is_some_and(|p| p.agent == agent);
-            if let Some(queue) = self.queues.get_mut(&key) {
-                let head = queue.pop_front();
-                queue.retain(|p| p.agent != agent);
-                if let Some(head) = head {
-                    queue.push_front(head);
-                }
-            }
-            if head_gone {
-                self.finish(&key);
-            }
-        }
     }
     // A session's storage cleared: every database of its partition gone, its stores with it.
     fn clear(&mut self, partition: u64) {
@@ -464,6 +470,8 @@ impl Registry {
             }
         }
         self.queues.retain(|k, _| k.partition != partition);
+        self.transactions.retain(|_, t| t.db.partition != partition);
+        self.connections.retain(|_, c| c.db.partition != partition);
     }
 }
 

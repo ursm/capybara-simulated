@@ -266,6 +266,7 @@ module Capybara
         # IndexedDB is origin-shared too: the session's partition of the engine's one registry (idb_databases.rs), every
         # window's and worker's.
         @idb_partition                = idb_partition || Native.idb_partition_new
+        @idb_partition_owned          = idb_partition.nil?
         @session_storage              = {}
         @sticky_headers               = {}
         @timers_active                = false
@@ -1089,18 +1090,31 @@ module Capybara
         worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending? || idb_pending?
       end
 
-      # IndexedDB's notices for this window's realms, taken — each realm its own, as its next event loop step would.
+      # IndexedDB's notices for this window's realms, taken — each realm its own, as its next event loop step would — and
+      # for the session's other windows: an auxiliary window's event loop runs only as the active window's does, and a
+      # `versionchange` it never fires would hold every other window's upgrade.
       def deliver_idb_notices
-        return 0 unless idb_pending?
+        return 0 unless Native.idb_pending(@idb_partition)
+
+        idb_windows.sum(&:deliver_own_idb_notices)
+      end
+
+      def deliver_own_idb_notices
+        return 0 unless @runtime.call('__csimIdbPending')
 
         @runtime.call('__csimIdbDeliver')
         @runtime.frame_realm_ids.each {|rid| @runtime.realm_call(rid, '__csimIdbDeliver') }
         1
       end
 
-      # Whether IndexedDB owes a realm of this window a notice another realm's or a worker's call caused — which the
-      # realm's next event loop step takes (idb.js `deliver`). The session's check first, which costs no V8 call.
-      def idb_pending? = Native.idb_pending(@idb_partition) && @runtime.call('__csimIdbPending')
+      # Whether IndexedDB owes a realm of one of the session's windows a notice another realm's or a worker's call caused
+      # (idb.js `deliver`). The session's check first, which costs no V8 call.
+      def idb_pending? = Native.idb_pending(@idb_partition) && idb_windows.any? {|b| b.runtime_idb_pending? }
+
+      def runtime_idb_pending? = @runtime.call('__csimIdbPending') == true
+
+      # (…this window first, then the session's others)
+      private def idb_windows = [self, *(@driver&.window_browsers || []).reject {|b| b.equal?(self) }]
 
       # Single-slot cache for the most recent find_xpath / find_css /
       # find_first_css result. Capybara's `synchronize` retry loop
@@ -3520,6 +3534,8 @@ module Capybara
         # suite). Only reached on teardown, never on the per-test `reset!` path
         # (which keeps the runtime).
         @runtime.dispose
+        # …and the IndexedDB databases of a partition this window alone had (one a driver gave it is the driver's).
+        Native.idb_clear(@idb_partition) if @idb_partition_owned
       rescue StandardError
         nil
       end

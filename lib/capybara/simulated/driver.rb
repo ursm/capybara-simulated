@@ -406,7 +406,12 @@ module Capybara
         }
         reset_windows!
         @browser.dispose rescue nil
+        # …and the session's IndexedDB databases, which outlive every window but not the session.
+        Native.idb_clear(@idb_partition)
       end
+
+      # The session's windows' browsers: the primary's, then each auxiliary window's.
+      def window_browsers = [@browser, *@aux_windows.map {|w| w[:browser] }]
 
       # Has this driver been permanently dropped? (A `reset!` between examples does NOT set this —
       # that rebuilds the page on a live runtime.)
