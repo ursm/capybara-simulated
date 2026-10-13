@@ -75,6 +75,7 @@ mod layout;
 mod legacy;
 mod media;
 mod mime;
+mod multipart;
 mod mutation;
 mod mutation_observers;
 mod namespaces;
