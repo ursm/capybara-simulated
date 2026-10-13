@@ -850,6 +850,8 @@ pub(crate) struct RealmArena {
     pub(crate) dialog_requests: std::collections::HashMap<NodeId, crate::dialogs::RequestClose>,
     // Each media element's state, from its first use (media.rs).
     pub(crate) media: std::collections::HashMap<NodeId, crate::media::Media>,
+    // Each image element's current request, from its first load (image_requests.rs).
+    pub(crate) images: std::collections::HashMap<NodeId, crate::image_requests::ImageRequest>,
     // Every node's registered observer list, and each mutation observer's nodes (mutation_observers.rs).
     pub(crate) observers: crate::mutation_observers::Observers,
     // Each top-level document's autofocus candidates (autofocus.rs).
@@ -1161,6 +1163,7 @@ impl RealmArena {
         self.dialog_return_values.retain(|id, _| live(slots, id));
         self.dialog_requests.retain(|id, _| live(slots, id));
         self.media.retain(|id, _| live(slots, id));
+        self.images.retain(|id, _| live(slots, id));
         self.close_watcher_order.retain(|id, _| live(slots, id));
         self.showing_popovers.retain(|doc, list| {
             list.retain(|(p, _)| live(slots, p));
@@ -1341,6 +1344,9 @@ impl RealmArena {
         }
         if !self.media.is_empty() {
             self.media.remove(&id);
+        }
+        if !self.images.is_empty() {
+            self.images.remove(&id);
         }
         if !self.showing_popovers.is_empty() {
             self.showing_popovers.remove(&id);
@@ -2580,6 +2586,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::canvas_text::install(scope, ns, context_id);
     crate::canvas_paint::install(scope, ns, context_id);
     crate::media::install(scope, ns, context_id);
+    crate::image_requests::install(scope, ns, context_id);
     crate::canvas_path::install(scope, ns, context_id);
     crate::text::install(scope, ns, context_id);
     crate::dom_matrix::install(scope, ns, context_id);

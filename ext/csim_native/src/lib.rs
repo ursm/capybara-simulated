@@ -68,6 +68,7 @@ mod idb;
 mod idb_databases;
 mod image_decode;
 mod image_encode;
+mod image_requests;
 mod image_source;
 // Layout: the records the walk builds (mod walk) laid out, driven by the `layoutBuild` op (mod walk_ops).
 mod keyframes;
