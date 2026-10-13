@@ -41,4 +41,20 @@ RSpec.describe 'Dialog and popover checks' do
       })()
     JS
   end
+
+  # …and a request to close it from its own `cancel` listener returns at once, its watcher running its cancel action
+  # already: one `cancel`, then the close. Chrome: [1, false].
+  it 'fires one cancel where its listener requests the close again' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] }).tap {|session| session.visit '/' }
+    expect(s.evaluate_script(<<~'JS')).to eq([1, false])
+      (() => {
+        const d = document.body.appendChild(document.createElement('dialog'));
+        let cancels = 0;
+        d.addEventListener('cancel', () => { if (++cancels < 5) d.requestClose(); });
+        d.showModal();
+        d.requestClose();
+        return [cancels, d.open];
+      })()
+    JS
+  end
 end
