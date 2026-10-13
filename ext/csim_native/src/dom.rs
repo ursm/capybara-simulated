@@ -4944,6 +4944,7 @@ fn reset_arena(
     }
     dom(scope).arena.forget_reactions_of(cid);
     crate::text_codec::drop_realm(scope, cid);   // (…a page's stream decoders die with it)
+    crate::idb::drop_realm(scope, cid);   // (…and its IndexedDB stores, which its bindings made)
     dom(scope).walk_reuse.remove(&cid);
     dom(scope).caret_moves.remove(&cid);
     // …and the style engine forgets the nodes it held (its sheets stay until the new page sets its own).
@@ -5000,6 +5001,7 @@ fn drop_realm(
         d.arenas.remove(&id);          // (…and its arena object, which holds its global's `__dom`)
         d.clone_shadow_hooks.remove(&id);   // (…and its shadow root cloning hook)
         crate::text_codec::drop_realm(scope, id);   // (…and the stream decoders it left open)
+        crate::idb::drop_realm(scope, id);   // (…and the IndexedDB stores it made)
     }
 }
 

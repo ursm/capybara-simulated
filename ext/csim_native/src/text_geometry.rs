@@ -1008,9 +1008,7 @@ fn char_direction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let Some(data) = arena.get(node).filter(|n| n.kind == crate::dom::NodeKind::Text).map(|n| &n.data) else { return rv.set_int32(-1) };
     const RTL: [Script; 8] = [Script::Hebrew, Script::Arabic, Script::Syriac, Script::Thaana, Script::Nko, Script::Samaritan, Script::Mandaic, Script::Adlam];
     let after = char::decode_utf16(data.get(offset..).unwrap_or(&[]).iter().copied()).next();
-    let before = char::decode_utf16(data.get(..offset).unwrap_or(&[]).iter().rev().copied()).next();
-    // (…the one before read backwards: a pair decodes from its low surrogate first, so it is rebuilt from the two units)
-    let before = before.map(|c| c.map_or_else(|_| pair_before(data, offset), Some)).flatten();
+    let before = char_before(data, offset);
     for cp in [after.and_then(Result::ok), before].into_iter().flatten().map(u32::from) {
         if crate::unicode::script(cp).is_some_and(|s| RTL.contains(&s)) {
             return rv.set_int32(1);
@@ -1022,12 +1020,30 @@ fn char_direction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set_int32(-1);
 }
 
-// The character a surrogate pair ending at `offset` makes, or the lone unit there as one.
-fn pair_before(data: &[u16], offset: usize) -> Option<char> {
+// The character ending at `offset`: a surrogate pair's where a low surrogate there follows a high one, the unit there
+// otherwise — none where that is a lone surrogate.
+fn char_before(data: &[u16], offset: usize) -> Option<char> {
     let low = *data.get(offset.checked_sub(1)?)?;
     let high = offset.checked_sub(2).and_then(|i| data.get(i).copied());
     match high {
-        Some(h) => char::decode_utf16([h, low]).next().and_then(Result::ok).or_else(|| char::from_u32(u32::from(low))),
-        None => char::from_u32(u32::from(low)),
+        Some(h) if (0xD800..0xDC00).contains(&h) && (0xDC00..0xE000).contains(&low) => char::decode_utf16([h, low]).next().and_then(Result::ok),
+        _ => char::from_u32(u32::from(low)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The character before an offset: a pair whole, a lone surrogate none — a high one not read as the unit before it.
+    #[test]
+    fn the_character_before_an_offset() {
+        let pair: Vec<u16> = "a\u{10900}".encode_utf16().collect();
+        assert_eq!(char_before(&pair, 3), Some('\u{10900}'));
+        assert_eq!(char_before(&pair, 1), Some('a'));
+        assert_eq!(char_before(&[0x61, 0xD802], 2), None);
+        assert_eq!(char_before(&[0xDD00], 1), None);
+        assert_eq!(char_before(&[0x61, 0xDD00], 2), None);
+        assert_eq!(char_before(&[], 0), None);
     }
 }
