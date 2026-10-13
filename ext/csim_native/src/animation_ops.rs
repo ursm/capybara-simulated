@@ -2,6 +2,7 @@
 // (`animations.rs`, kept by its style engine). A handle holds an id; the model holds everything else, and what the
 // handle must do in turn — settle a promise, dispatch an event — comes back as signals (`animSignals`).
 
+use crate::numbers::to_js_string;
 use style::selector_parser::PseudoElement;
 use style::properties::animated_properties::AnimationValue;
 
@@ -96,9 +97,12 @@ impl Item {
     }
 }
 
-// A timing as the JS side normalized it: [delay, endDelay, fill, iterationStart, iterations, duration, direction,
-// easing] (`duration` a number — `auto` is 0 for a keyframe effect).
-fn timing_arg(engine: &StyleEngine, items: &[Item]) -> EffectTiming {
+// A timing as the bindings read it — EffectTiming's members, the page's over the defaults: [delay, endDelay, fill,
+// iterationStart, iterations, duration (a number, or `auto`), direction, easing] — checked as Web Animations checks what
+// IDL leaves it (§6.5.4 "update the timing properties"): a negative iterationStart, a NaN or negative iteration count,
+// a duration neither a non-negative number nor `auto` (a numeric string is no duration), and an easing no
+// `<easing-function>` parses are TypeErrors, of the message answered; the easing kept canonical as it was written.
+fn timing_arg(engine: &StyleEngine, items: &[Item]) -> Result<EffectTiming, String> {
     let number = |i: usize, default: f64| items.get(i).and_then(Item::number).unwrap_or(default);
     let text = |i: usize| items.get(i).and_then(Item::text);
     let fill = match text(2) {
@@ -114,16 +118,34 @@ fn timing_arg(engine: &StyleEngine, items: &[Item]) -> EffectTiming {
         Some("alternate-reverse") => PlaybackDirection::AlternateReverse,
         _ => PlaybackDirection::Normal,
     };
-    EffectTiming {
+    let iteration_start = number(3, 0.0);
+    if iteration_start < 0.0 {
+        return Err(format!("iterationStart must be non-negative: {}", to_js_string(iteration_start)));
+    }
+    let iterations = number(4, 1.0);
+    if iterations.is_nan() || iterations < 0.0 {
+        return Err(format!("iterations must be non-negative: {}", to_js_string(iterations)));
+    }
+    let (duration, auto_duration) = match items.get(5) {
+        Some(Item::Text(t)) if t == "auto" => (0.0, true),
+        Some(Item::Number(n)) if *n >= 0.0 => (*n, false),
+        Some(Item::Text(t)) => return Err(format!("duration must be non-negative or auto: {t}")),
+        Some(Item::Number(n)) => return Err(format!("duration must be non-negative or auto: {}", to_js_string(*n))),
+        _ => (0.0, true),
+    };
+    let written = text(7).unwrap_or("linear");
+    let easing = crate::easing::canonical(written).ok_or_else(|| format!("Invalid easing: {written}"))?;
+    Ok(EffectTiming {
         delay: number(0, 0.0),
         end_delay: number(1, 0.0),
         fill,
-        iteration_start: number(3, 0.0),
-        iterations: number(4, 1.0),
-        duration: number(5, 0.0),
+        iteration_start,
+        iterations,
+        duration,
         direction,
-        easing: engine.easing(text(7).unwrap_or("linear")),
-    }
+        easing: engine.easing(&easing),
+        written: Some(Box::new(crate::animations::WrittenTiming { auto_duration, easing })),
+    })
 }
 
 fn composite_arg(text: Option<&str>) -> Option<CompositeOperation> {
@@ -174,11 +196,10 @@ fn target_arg(
 
 // __dom.animEffect(targetNid | -1, pseudo | null, timing, composite, iterationComposite, keyframes) -> effect id — the
 // keyframes as the bindings read them, or the id of the effect whose keyframes it copies (KeyframeEffect's copy
-// constructor); or the message of the TypeError they are no keyframes with, no effect made.
+// constructor) — and the timing as the bindings read it; or the message of the TypeError either is refused with, no
+// effect made.
 fn anim_effect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, _arena| {
-        let timing = array_arg(scope, args.get(2));
-        let timing = timing_arg(engine, &timing);
         let composite = composite_arg(string_arg(scope, args.get(3)).as_deref()).unwrap_or(CompositeOperation::Replace);
         let accumulate = string_arg(scope, args.get(4)).as_deref() == Some("accumulate");
         let source = args.get(5);
@@ -188,6 +209,11 @@ fn anim_effect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
                 Ok(keyframes) => keyframes,
                 Err(refusal) => return rv.set(refusal_value(scope, &refusal)),
             },
+        };
+        // (…the keyframes first, then the timing, as the bindings had them checked)
+        let timing = match timing_arg(engine, &array_arg(scope, args.get(2))) {
+            Ok(timing) => timing,
+            Err(message) => return rv.set(string_value(scope, &message)),
         };
         let target = target_arg(scope, &args, 0, 1);
         let id = engine.web_animations_op(|model| {
@@ -203,16 +229,18 @@ fn anim_effect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     });
 }
 
-// __dom.animEffectSet(effect, what, a, b): what an effect's setters change — `timing` (a: timing, b: the members the
-// page set), `target` (a: node | -1, b: pseudo), `keyframes` (a: keyframes as the bindings read them — answered with
+// __dom.animEffectSet(effect, what, a, b): what an effect's setters change — `timing` (a: timing as the bindings read
+// it — answered with the TypeError's message where it is refused, b: the members the page set), `target` (a: node | -1, b: pseudo), `keyframes` (a: keyframes as the bindings read them — answered with
 // the TypeError's message where they are none), `composite` / `iterationComposite` (a: the operation). What a page sets of a CSS animation's effect, its style no longer does.
 fn anim_effect_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, _arena| {
         let Some(id) = number_arg(scope, args.get(0)).map(|n| n as EffectId) else { return };
         match string_arg(scope, args.get(1)).as_deref() {
             Some("timing") => {
-                let timing = array_arg(scope, args.get(2));
-                let timing = timing_arg(engine, &timing);
+                let timing = match timing_arg(engine, &array_arg(scope, args.get(2))) {
+                    Ok(timing) => timing,
+                    Err(message) => return rv.set(string_value(scope, &message)),
+                };
                 let set = array_arg(scope, args.get(3));
                 let overridden = set.iter().filter_map(Item::text).fold(Overrides::empty(), |all, member| {
                     all | match member {
@@ -616,14 +644,19 @@ fn anim_effect_timing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
             PlaybackDirection::Alternate => "alternate",
             PlaybackDirection::AlternateReverse => "alternate-reverse",
         };
-        let easing = style_traits::ToCss::to_css_string(&t.easing);
+        // (…a script's as it wrote it)
+        let easing = t.written.as_ref().map_or_else(|| style_traits::ToCss::to_css_string(&t.easing), |w| w.easing.clone());
+        let duration = match &t.written {
+            Some(w) if w.auto_duration => string_value(scope, "auto"),
+            _ => v8::Number::new(scope, t.duration).into(),
+        };
         let items = [
             v8::Number::new(scope, t.delay).into(),
             v8::Number::new(scope, t.end_delay).into(),
             string_value(scope, fill),
             v8::Number::new(scope, t.iteration_start).into(),
             v8::Number::new(scope, t.iterations).into(),
-            v8::Number::new(scope, t.duration).into(),
+            duration,
             string_value(scope, direction),
             string_value(scope, &easing),
         ];

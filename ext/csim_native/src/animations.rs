@@ -53,6 +53,16 @@ pub(crate) struct EffectTiming {
     pub(crate) duration: f64,
     pub(crate) direction: PlaybackDirection,
     pub(crate) easing: ComputedTimingFunction,
+    // What a script wrote that the engine's form loses — none for a timing style gave.
+    pub(crate) written: Option<Box<WrittenTiming>>,
+}
+
+// …a duration of `auto`, and the easing as written, canonical at double precision (easing.rs): what `getTiming()`
+// reports.
+#[derive(Clone, Debug)]
+pub(crate) struct WrittenTiming {
+    pub(crate) auto_duration: bool,
+    pub(crate) easing: String,
 }
 
 impl Default for EffectTiming {
@@ -66,6 +76,7 @@ impl Default for EffectTiming {
             duration: 0.0,
             direction: PlaybackDirection::Normal,
             easing: ComputedTimingFunction::Keyword(TimingKeyword::Linear),
+            written: None,
         }
     }
 }
