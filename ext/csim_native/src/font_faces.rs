@@ -171,6 +171,33 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "fontFacePick", font_face_pick, context_id);
     crate::dom::register(scope, ns, "fontFaceInfo", font_face_info, context_id);
     crate::dom::register(scope, ns, "fontFaceSources", font_face_sources, context_id);
+    crate::dom::register(scope, ns, "fontFaceDescriptor", font_face_descriptor, context_id);
+}
+
+// A `@font-face` descriptor's value as the engine parses and serializes it (CSS Fonts 4 §4, CSS Font Loading's FontFace
+// attributes): `name` its CSS name (`font-weight`, `unicode-range`, `size-adjust`, …) — none where the value is no value
+// of its grammar, or the name no descriptor's.
+pub(crate) fn descriptor(name: &str, value: &str) -> Option<String> {
+    use style::properties::font_face::{DescriptorId, Descriptors};
+    use style::stylesheets::CssRuleType;
+    let url = crate::cssom_decl::url_data("about:blank");
+    let context = crate::cssom_decl::rule_context(&url, CssRuleType::FontFace, false);
+    let mut name_input = cssparser::ParserInput::new(name);
+    let id = cssparser::Parser::new(&mut name_input).parse_entirely(DescriptorId::parse).ok()?;
+    let mut value_input = cssparser::ParserInput::new(value);
+    let mut descriptors = Descriptors::default();
+    descriptors.set(id, &context, &mut cssparser::Parser::new(&mut value_input)).ok()?;
+    let mut out = String::new();
+    descriptors.get(id, &mut out).ok()?;
+    Some(out)
+}
+// __dom.fontFaceDescriptor(name, value) -> the value serialized, or null where it is invalid (`descriptor`).
+fn font_face_descriptor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (name, value) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
+    match descriptor(&name, &value).and_then(|v| v8::String::new(scope, &v)) {
+        Some(v) => rv.set(v.into()),
+        None => rv.set_null(),
+    }
 }
 
 fn faces_of<'a>(scope: &'a mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> &'a mut Vec<FaceRecord> {
@@ -258,6 +285,18 @@ fn font_face_sources(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn descriptors_parse_and_serialize_as_the_engine_does() {
+        assert_eq!(descriptor("font-weight", "bold"), Some("bold".into()));
+        assert_eq!(descriptor("font-display", "SWAP"), Some("swap".into()));
+        assert_eq!(descriptor("size-adjust", "+50%"), Some("50%".into()));
+        assert_eq!(descriptor("size-adjust", "-5%"), None);
+        assert_eq!(descriptor("ascent-override", "normal"), Some("normal".into()));
+        assert_eq!(descriptor("unicode-range", "U+0-7F, U+4??"), Some("U+0-7F, U+400-4FF".into()));
+        assert_eq!(descriptor("font-weight", "heavy"), None);
+        assert_eq!(descriptor("no-such", "x"), None);
+    }
 
     fn face(family: &str, weight: (f64, f64), slanted: bool) -> FaceRecord {
         FaceRecord { weight, slanted, ..FaceRecord::of(family.to_owned()) }
