@@ -212,9 +212,10 @@ pub(crate) const CLIP: usize = 2;
 pub(crate) struct CanvasStateHandle {
     state: RefCell<State>,
     refs: [UnsafeCell<v8::TracedReference<v8::Object>>; 3],
-    // The states `save()` pushed — and their objects, three a state in one array on V8's heap, which the handle traces
-    // through a reference of its own: the collector reads only fixed fields of the handle, whatever the stack does.
-    stack: RefCell<Vec<State>>,
+    // The states `save()` pushed, each with whether it has objects — those it has three a state in one array on V8's
+    // heap, which the handle traces through a reference of its own: the collector reads only fixed fields of the
+    // handle, whatever the stack does.
+    stack: RefCell<Vec<(State, bool)>>,
     saved: UnsafeCell<v8::TracedReference<v8::Object>>,
 }
 
@@ -256,19 +257,30 @@ impl CanvasStateHandle {
     }
     // "Push a copy of the current drawing state onto the drawing state stack."
     fn save(&self, scope: &mut v8::PinScope<'_, '_>) {
-        let saved = self.saved(scope);
-        // (…own data properties, whatever setters a page put on `Array.prototype`)
-        for slot in 0..3 {
-            let object: v8::Local<'_, v8::Value> = self.object(scope, slot).map_or_else(|| v8::null(scope).into(), Into::into);
-            let index = v8::Integer::new_from_unsigned(scope, saved.length()).to_string(scope).expect("an index");
-            saved.create_data_property(scope, index.into(), object);
+        let objects = [0, 1, 2].map(|slot| self.object(scope, slot));
+        // (…none kept for a state with no paint object and no clip, as most are)
+        let any = objects.iter().any(Option::is_some);
+        if any {
+            let saved = self.saved(scope);
+            // (…own data properties, whatever setters a page put on `Array.prototype`)
+            for object in objects {
+                let object: v8::Local<'_, v8::Value> = object.map_or_else(|| v8::null(scope).into(), Into::into);
+                let index = v8::Integer::new_from_unsigned(scope, saved.length()).to_string(scope).expect("an index");
+                saved.create_data_property(scope, index.into(), object);
+            }
         }
-        self.stack.borrow_mut().push(self.state.borrow().clone());
+        self.stack.borrow_mut().push((self.state.borrow().clone(), any));
     }
     // "Pop the top entry in the drawing state stack, and reset the drawing state it describes" — none: nothing.
     fn restore(&self, scope: &mut v8::PinScope<'_, '_>) {
-        let Some(state) = self.stack.borrow_mut().pop() else { return };
+        let Some((state, any)) = self.stack.borrow_mut().pop() else { return };
         *self.state.borrow_mut() = state;
+        if !any {
+            for slot in 0..3 {
+                self.set_object(scope, slot, None);
+            }
+            return;
+        }
         let saved = self.saved(scope);
         let base = saved.length().saturating_sub(3);
         for slot in 0..3 {
