@@ -836,6 +836,10 @@ pub(crate) struct RealmArena {
     // Each sheet owner's sheet as the bindings last made it — its id in `sheets`, and the owner's count of sheets then
     // (`NodeData::sheet_gen`): the owner's sheet while that count holds (sheet_owners.rs `sheetOwned`).
     pub(crate) owner_sheets: std::collections::HashMap<NodeId, (u32, u32)>,
+    // …and the last document's style sheet sets (sheet_owners.rs `sheet_set`), as of `mutations` and `sheet_epoch` —
+    // which moves with what else they turn on: a sheet disabled, an owner's sheet made, a `<link>` explicitly enabled.
+    pub(crate) sheet_sets: Option<(NodeId, u64, u32, std::rc::Rc<crate::sheet_owners::SheetSet>)>,
+    pub(crate) sheet_epoch: u32,
     // Each element's nonce, once its `nonce` attribute was written or the element cloned with one (nonce.rs).
     pub(crate) nonces: std::collections::HashMap<NodeId, Vec<u16>>,
     // Each dialog's return value, once a close or a script gave it one (dialogs.rs).
@@ -4142,6 +4146,10 @@ fn sheet_disabled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let Some(sheet) = handle_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let value = (args.length() > 1).then(|| args.get(1).boolean_value(scope));
     let disabled = with_sheets(scope, &args, |store, _| store.disabled(sheet, value));
+    if value.is_some() {
+        let cid = realm_id(scope, &args);
+        realm(scope, cid).sheet_epoch += 1;
+    }
     rv.set_bool(disabled);
 }
 // __dom.mediaText(text) -> `text` as a media list, as the engine serializes one.

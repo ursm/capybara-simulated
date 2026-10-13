@@ -74,8 +74,8 @@ fn renew_sheet_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let Some(id) = nid_arg(scope, &args, 0) else { return };
     let enabled = args.get(1).is_true();
     let arena = &mut crate::dom::dom(scope).arena;
-    if arena.renew_sheet(id) && enabled {
-        arena.explicitly_enabled.insert(id);
+    if arena.renew_sheet(id) && enabled && arena.explicitly_enabled.insert(id) {
+        arena.sheet_epoch += 1;
     }
 }
 // __dom.explicitlyEnabled(nid) -> whether the `<link>` is explicitly enabled (`RealmArena::explicitly_enabled`).
@@ -92,6 +92,7 @@ fn sheet_owned_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let arena = crate::dom::realm(scope, cid);
     let Some(count) = arena.get(id).map(|n| n.sheet_gen) else { return };
     arena.owner_sheets.insert(id, (sheet, count));
+    arena.sheet_epoch += 1;
 }
 
 // HTML's style sheet sets, for a document's `<style>` / `<link>` sheets: a sheet with a `title` belongs to the set of
@@ -101,7 +102,7 @@ fn sheet_owned_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // one — a titleless alternate never — and a `<link>` explicitly enabled (its `disabled` removed) whatever its set.
 // Before all that, a sheet takes part only where it is one: a `<style>` whose `type` is CSS, a `<link>` whose `rel` says
 // `stylesheet` with an `href`, no `disabled` attribute — and neither's sheet disabled (CSSOM).
-struct SheetSet {
+pub(crate) struct SheetSet {
     // A hash of everything the sheets' taking part turns on: which sheets there are and what each was made of (its count
     // of sheets, which a new block or an attribute change moves), their titles, media, alternate-ness, explicit
     // enabling, and the selected set — what the cascade is rebuilt on a change of.
@@ -118,7 +119,19 @@ impl RealmArena {
         self.get(owner).is_some_and(|n| n.sheet_gen == count) && self.sheets.disabled(sheet, None)
     }
 
-    fn sheet_set(&mut self, doc: NodeId) -> SheetSet {
+    // …kept until the tree or what else they turn on changes.
+    fn sheet_set(&mut self, doc: NodeId) -> std::rc::Rc<SheetSet> {
+        if let Some((d, mutations, epoch, set)) = &self.sheet_sets {
+            if *d == doc && *mutations == self.mutations && *epoch == self.sheet_epoch {
+                return set.clone();
+            }
+        }
+        let set = std::rc::Rc::new(self.make_sheet_set(doc));
+        self.sheet_sets = Some((doc, self.mutations, self.sheet_epoch, set.clone()));
+        set
+    }
+
+    fn make_sheet_set(&mut self, doc: NodeId) -> SheetSet {
         use std::hash::{Hash, Hasher};
         let trimmed = |v: Option<&str>| v.unwrap_or("").trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}').to_string();
         // (…the owners and the `<meta>`s of the document's tree, in tree order — not in a shadow tree, nor a template's
