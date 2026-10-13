@@ -168,6 +168,11 @@ impl Painter<'_> {
         }
         opaque(v.to_owned())
     }
+    // Whether what `el` (or its pseudo-element) draws shows: a `visibility: hidden` or `collapse` box is laid out and draws
+    // nothing — its descendants, inheriting it, likewise unless one is `visible` again (CSS 2 §11.2).
+    fn visible(&mut self, el: NodeId, pseudo: Option<&str>) -> bool {
+        self.value(el, "visibility", pseudo).is_none_or(|v| v == "visible")
+    }
     // The COMPUTED `color`, which is what text is painted in.
     fn text_color(&mut self, owner: Owner) -> String {
         self.value(owner.element, "color", owner.pseudo).unwrap_or_else(|| "rgb(0, 0, 0)".to_owned())
@@ -199,8 +204,9 @@ impl Painter<'_> {
         if !(width > 0.0) {
             return None;
         }
-        let color = match self.paint_color(el, &format!("border-{side}-color")) {
-            Some(c) => c,
+        // (…a transparent one paints nothing; one with no colour of its own the text's)
+        let color = match self.value(el, &format!("border-{side}-color"), None) {
+            Some(_) => self.paint_color(el, &format!("border-{side}-color"))?,
             None => self.value(el, "color", None).unwrap_or_else(|| "rgb(0, 0, 0)".to_owned()),
         };
         Some((width, color))
@@ -280,6 +286,9 @@ impl Painter<'_> {
     // One box: its background and its borders — four rectangles, which is what a solid border IS. (A dashed or dotted
     // one is painted solid for now, and a radius is not honoured.)
     fn paint_box(&mut self, el: NodeId) {
+        if !self.visible(el, None) {
+            return;
+        }
         let Some((r, m)) = self.box_frame(el) else { return };
         let (x, y) = (r[0] + self.dx, r[1] + self.dy);
         self.clipped(el, m, false, |p| {
@@ -305,6 +314,9 @@ impl Painter<'_> {
     // layout sized it to sit. The bindings hold the bitmap (an image's decoded one, a canvas's backing store), so the
     // command names the element and draws nothing where it has none.
     fn paint_bitmap(&mut self, el: NodeId) {
+        if !self.visible(el, None) {
+            return;
+        }
         let Some((r, m)) = self.box_frame(el) else { return };
         let (x, y) = (r[0] + self.dx, r[1] + self.dy);
         self.clipped(el, m, true, |p| {
@@ -320,6 +332,9 @@ impl Painter<'_> {
 
     // One text piece of `box_owner`'s, in its owner's font and colour, where the flow put it.
     fn paint_run(&mut self, painted: &Painted, row: usize, owner: Owner, box_owner: NodeId) {
+        if !self.visible(owner.element, owner.pseudo) {
+            return;
+        }
         let at = row * ROW;
         let r = &painted.rows[at..at + ROW];
         if crate::geometry::laid_out_box(self.arena, box_owner).is_none() {
@@ -358,7 +373,7 @@ impl Painter<'_> {
             // The piece's text in visual order on its paragraph's base direction (its element's, or — `unicode-bidi:
             // plaintext` — its own first strong character's), drawn from its left edge whichever that is.
             let rtl = match p.value(owner.element, "unicode-bidi", owner.pseudo).as_deref() {
-                Some("plaintext") => crate::unicode::first_strong_direction(units),
+                Some("plaintext") => crate::unicode::paragraph_direction(units),
                 _ => None,
             }
             .unwrap_or_else(|| p.value(owner.element, "direction", owner.pseudo).as_deref() == Some("rtl"));
@@ -540,7 +555,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // __dom.paintList(root, body, width, height, dx, dy, now) -> [commands, strings, nodes]: the display list of the page
-// whose root element is `root` (-1 for none), as the last pass that paints placed its text (`display_list`) — its
+// whose root element is `root` (-1 for none), as the last pass that paints placed its text, which it takes
+// (`display_list`) — its
 // commands a Float64Array, the strings and the nodes they name by index.
 fn paint_list(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
@@ -555,9 +571,9 @@ fn paint_list_unguarded(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCal
     let now = args.get(6).number_value(scope).filter(|n| n.is_finite()).unwrap_or(f64::NAN);
     let d = crate::dom::dom(scope);
     let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
+    // (…what the paint's own recording pass placed, taken: none where it laid nothing out)
     let painted = arena.painted.take().unwrap_or_default();
     let list = display_list(arena, engine, &painted, root, body, frame, now);
-    arena.painted.replace(Some(painted));
     let cmds: v8::Local<v8::Value> = crate::dom::f64_array(scope, &list.cmds).into();
     let strings: Vec<v8::Local<v8::Value>> =
         list.strings.iter().map(|s| v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into)).collect();
@@ -567,8 +583,8 @@ fn paint_list_unguarded(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCal
     rv.set(v8::Array::new_with_elements(scope, &[cmds, strings, nodes]).into());
 }
 
-// __dom.paintRuns() -> [rows, texts]: the text pieces the last pass that paints placed (`Painted`), for the specs that ask
-// WHERE a piece was told to go — the pixels can only say that ink landed somewhere.
+// __dom.paintRuns() -> [rows, texts]: the text pieces the last pass that paints placed (`Painted`), taken — for the specs
+// that ask WHERE a piece was told to go, the pixels only saying that ink landed somewhere.
 fn paint_runs(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(arena) = crate::dom::dom(scope).arena.enter_known(cid) else { return };
@@ -580,9 +596,6 @@ fn paint_runs(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         .map(|t| v8::String::new_from_two_byte(scope, t, v8::NewStringType::Normal).map_or_else(|| v8::undefined(scope).into(), Into::into))
         .collect();
     let texts: v8::Local<v8::Value> = v8::Array::new_with_elements(scope, &texts).into();
-    if let Some(arena) = crate::dom::dom(scope).arena.enter_known(cid) {
-        arena.painted.replace(Some(painted));
-    }
     rv.set(v8::Array::new_with_elements(scope, &[rows, texts]).into());
 }
 

@@ -1383,7 +1383,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "layoutRootAlone", layout_root_alone, context_id);
 }
 
-
 // __dom.laidOutBox(nid, out) / renderedBox(nid, out) / scrollSize(nid, out) -> whether `nid` has one: its box where the
 // page's scrolling carried it (`laid_out_box`), that box as the page measures it (`rendered_box`), and its scrollable
 // overflow region's size (`scroll_size`) — written to the Float64Array `out`.
@@ -1465,7 +1464,6 @@ fn frame_viewport_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     answer_into(scope, &args, rv, frame_viewport);
 }
 
-
 // __dom.offsets(nid, out) -> whether `nid` has a box, and `[offsetParent nid, left, top, width, height]` written to `out`
 // (`offsets`).
 fn offsets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
@@ -1480,7 +1478,6 @@ fn client_rects_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         .unwrap_or_default();
     rv.set(crate::dom::f64_array(scope, &flat).into());
 }
-
 
 // __dom.scrollOffset(nid, axis, shown) -> the scroll offset `nid` keeps in `axis` (0 x, 1 y) — or, with `shown`, the
 // one it shows: 0 while the last layout gave it no box (CSSOM View: `scrollTop` of an element with no associated box

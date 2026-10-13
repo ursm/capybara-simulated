@@ -752,7 +752,7 @@ impl RealmArena {
     }
 
     // The element a run of `owner`'s moves with: `owner`, or the nearest flat-tree ancestor with a box (a box-less one's
-    // text is laid out in its parent's line — the painter's `runBoxOwner`).
+    // text is laid out in its parent's line — as paint.rs `box_owner` finds it).
     fn box_owner(&self, owner: NodeId) -> Option<NodeId> {
         let mut at = Some(owner);
         while let Some(n) = at {

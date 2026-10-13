@@ -715,7 +715,6 @@ fn hit_test_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     rv.set(crate::dom::nodes_value(scope, cid, &hits));
 }
 
-
 // __dom.observedVisible(nids, now) -> Float64Array: for each element `nids` names, 1 where an intersection observer
 // tracking visibility sees it visible, else 0 (`Painting::visible`) — one painting for all of them.
 fn observed_visible_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

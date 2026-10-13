@@ -115,8 +115,8 @@ pub(crate) fn line_break_glues(prev: u32, next: u32) -> bool {
 }
 
 // The first STRONG directional character of a text (HTML §3.2.6.4, `dir=auto`): Some(true) for one of Bidi_Class R or AL,
-// Some(false) for L, None where there is none. The Unicode Bidi_Class itself — the style engine's `:dir()` and the JS
-// side (`__dom.firstStrongDirection`) both ask it here, so the answer is the spec's and there is one: an Arabic-Indic
+// Some(false) for L, None where there is none. The Unicode Bidi_Class itself — the style engine's `:dir()` asks it here,
+// so the answer is the spec's and there is one: an Arabic-Indic
 // digit (AN), a Hebrew point (NSM) and a leading LRM (L) are what Chrome and Firefox make of them, where a script
 // approximation calls the first two right-to-left and the third nothing.
 pub(crate) fn first_strong_direction(units: &[u16]) -> Option<bool> {
@@ -127,6 +127,16 @@ pub(crate) fn first_strong_direction(units: &[u16]) -> Option<bool> {
         BidiClass::RightToLeft | BidiClass::ArabicLetter => Some(true),
         _ => None,
     })
+}
+
+// …and a PARAGRAPH's base direction by UAX #9 P2–P3 (`unicode-bidi: plaintext`): its first strong character's that is
+// not inside an isolate (LRI / RLI / FSI … PDI), none past its first paragraph separator.
+pub(crate) fn paragraph_direction(units: &[u16]) -> Option<bool> {
+    match unicode_bidi::get_base_direction(String::from_utf16_lossy(units).as_str()) {
+        unicode_bidi::Direction::Rtl => Some(true),
+        unicode_bidi::Direction::Ltr => Some(false),
+        unicode_bidi::Direction::Mixed => None,
+    }
 }
 
 fn in_ranges(table: &[(u32, u32)], cp: u32) -> bool {

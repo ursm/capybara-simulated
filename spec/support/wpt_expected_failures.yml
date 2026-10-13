@@ -4381,10 +4381,6 @@ html/rendering/widgets/input-checkbox-disabled-checked.html:
 - "!= html/rendering/widgets/input-checkbox-disabled-checked-notref.html"
 html/rendering/widgets/input-checkbox-no-centering.html:
 - "== html/rendering/widgets/input-no-centering-ref.html"
-html/rendering/widgets/input-date-baseline-print.html:
-- "== html/rendering/widgets/input-date-baseline-ref.html"
-html/rendering/widgets/input-date-baseline.html:
-- "== html/rendering/widgets/input-date-baseline-ref.html"
 html/rendering/widgets/input-radio-disabled-checked.html:
 - "!= html/rendering/widgets/input-radio-disabled-checked-notref.html"
 html/rendering/widgets/input-radio-no-centering.html:
@@ -4857,8 +4853,6 @@ html/semantics/interactive-elements/the-details-element/details-toggle-source.ht
 - 'ToggleEvent.source on <details> elements: click details.'
 html/semantics/interactive-elements/the-dialog-element/backdrop-descendant-selector.html:
 - "== html/semantics/interactive-elements/the-dialog-element/backdrop-descendant-selector-ref.html"
-html/semantics/interactive-elements/the-dialog-element/backdrop-dynamic-display-none.html:
-- "== html/semantics/interactive-elements/the-dialog-element/backdrop-dynamic-display-none-ref.html"
 html/semantics/interactive-elements/the-dialog-element/backdrop-dynamic-style-change.html:
 - "== html/semantics/interactive-elements/the-dialog-element/backdrop-dynamic-style-change-ref.html"
 html/semantics/interactive-elements/the-dialog-element/backdrop-in-flow.html:
@@ -4922,8 +4916,6 @@ html/semantics/interactive-elements/the-dialog-element/dialog-requestclose-3.htm
 html/semantics/interactive-elements/the-dialog-element/dialog-showModal.html:
 - When the document is not attached to any pages, showModal() should throw.
 - when opening multiple dialogs, the most recently opened is rendered on top
-html/semantics/interactive-elements/the-dialog-element/dialogs-with-no-backdrop.html:
-- "== html/semantics/interactive-elements/the-dialog-element/dialogs-with-no-backdrop-ref.html"
 html/semantics/interactive-elements/the-dialog-element/dont-share-style-to-top-layer.html:
 - "== html/semantics/interactive-elements/the-dialog-element/dont-share-style-to-top-layer-ref.html"
 html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with-contain-ancestor.html:

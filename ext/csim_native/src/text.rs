@@ -521,18 +521,6 @@ fn base_baselines(face: &Face, size: f64) -> Option<(f64, f64)> {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "canvasText", canvas_text, context_id);
-    crate::dom::register(scope, ns, "firstStrongDirection", first_strong_direction, context_id);
-}
-
-// __dom.firstStrongDirection(text) -> whether a paragraph's first strong character is right-to-left (UAX #9 P2–P3:
-// true for R or AL, false for L), undefined where it has none.
-fn first_strong_direction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let text = args.get(0).to_rust_string_lossy(scope);
-    match unicode_bidi::get_base_direction(text.as_str()) {
-        unicode_bidi::Direction::Rtl => rv.set_bool(true),
-        unicode_bidi::Direction::Ltr => rv.set_bool(false),
-        unicode_bidi::Direction::Mixed => {}
-    }
 }
 
 // __dom.canvasText(text, handle, size, kerning, smallCaps, rtl[, place]) -> the line `text` makes in the face `handle` at

@@ -521,4 +521,39 @@ RSpec.describe 'save_screenshot' do
       expect(px.call(160, 120)).to eq([255, 255, 255])
     end
   end
+
+  it 'paints no transparent border and no hidden box' do
+    s = page_with('<div class="t"></div><div class="h"><i>hidden</i></div>',
+                  css: '.t{width:100px;height:40px;border:10px solid transparent;color:red}' \
+                       '.h{width:100px;height:40px;background:red;visibility:hidden}')
+    shot(s) do |_img, px, _path|
+      expect(px.call(5, 5)).to eq([255, 255, 255])     # the transparent border: the page through it
+      expect(px.call(50, 80)).to eq([255, 255, 255])   # the hidden box's background
+    end
+  end
+
+  # A screenshot of a page whose root is gone draws nothing the last one placed: a paint takes the text its own pass
+  # placed, and a document with no root places none.
+  it 'paints none of the text an earlier paint placed' do
+    s = page_with('<p style="font-size:40px;color:red">Hello</p>')
+    shot(s) {}
+    s.execute_script('document.documentElement.remove()')
+    expect(s.evaluate_script('__csimPaintRuns()')).to eq([])
+  end
+
+  # `unicode-bidi: plaintext` takes a paragraph's direction from its first strong character outside any isolate (UAX #9
+  # P2), as CSS Writing Modes says: an RLI…PDI around Latin text, then Hebrew, is a right-to-left paragraph.
+  it "takes a plaintext paragraph's direction past its isolates" do
+    s = page_with('<p dir=ltr style="unicode-bidi:plaintext">&#x2067;abc&#x2069;&#x5e9;&#x5dc;</p>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const seen = [];
+        const d = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'direction');
+        Object.defineProperty(CanvasRenderingContext2D.prototype, 'direction', { configurable: true, get: d.get, set(v) { seen.push(v); d.set.call(this, v); } });
+        try { __csimScreenshot(false); } finally { Object.defineProperty(CanvasRenderingContext2D.prototype, 'direction', d); }
+        return seen;
+      })()
+    JS
+    expect(got).to eq(['rtl'])
+  end
 end
