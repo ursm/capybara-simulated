@@ -104,6 +104,24 @@ RSpec.describe 'HTML element bindings' do
     expect(got).to eq('é')
   end
 
+  # The title element is the document's first HTML `title` in tree order — its root one too (Chrome) — and an access key
+  # is one code point of the value, a lone surrogate one.
+  it 'takes a root title element, and a lone surrogate access key' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const d = document.implementation.createDocument('http://www.w3.org/1999/xhtml', 'title');
+        d.documentElement.textContent = ' root ';
+        const read = d.title;
+        d.title = 'set';
+        const b = document.createElement('b');
+        b.setAttribute('accesskey', '\\uD800');
+        return [read, d.documentElement.textContent, b.accessKeyLabel.charCodeAt(4)];
+      })()
+    JS
+    expect(got).to eq(['root', 'set', 0xd800])
+  end
+
   it 'keeps the case of an attribute name given an HTML element in an XML document' do
     session.visit '/'
     got = session.evaluate_script(<<~JS)

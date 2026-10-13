@@ -7780,9 +7780,10 @@ module Capybara
         list
       end
 
-      # `font-family: "Helvetica Neue", Arial, sans-serif` → the family names, unquoted.
+      # `font-family: "Helvetica Neue", Arial, sans-serif` → the family names, unquoted — parsed as CSS, a comma inside a
+      # quoted one no separator (font_faces.rs `family_list`).
       private def split_font_stack(stack)
-        stack.to_s.split(',').map {|f| f.strip.gsub(/\A["']|["']\z/, '').strip }.reject(&:empty?)
+        Native.font_family_list(stack.to_s)
       end
 
       # fontconfig treats `-`, `:` and `,` as pattern syntax — a family called

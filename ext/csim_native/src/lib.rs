@@ -165,6 +165,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("font_sfnt", magnus::function!(font::sfnt_for_ruby, 1))?;
     // A font pattern matched, and the families it is substituted through, by this machine's fontconfig.
     native.define_module_function("font_match", magnus::function!(fontconfig::font_match_for_ruby, 1))?;
+    native.define_module_function("font_family_list", magnus::function!(font_faces::family_list_for_ruby, 1))?;
     native.define_module_function("font_strong_families", magnus::function!(fontconfig::strong_families_for_ruby, 1))?;
     // A URL's parts as the URL Standard's parser makes them, the page's own (url_ops.rs).
     native.define_module_function("url_parts", magnus::function!(url_ops::parts_for_ruby, 2))?;

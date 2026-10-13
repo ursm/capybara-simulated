@@ -479,7 +479,7 @@ fn relevant_value_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(crate::dom::utf16_value(scope, &units));
 }
 // __dom.childText(element) -> the data of its direct child Text nodes (`child_text`): a textarea's raw value — what its
-// `defaultValue` is, its newlines as written.
+// `defaultValue` is, its newlines as written — a `<title>`'s and a `<script>`'s `text`.
 fn child_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = crate::node_handle::nid_of(scope, args.get(0));
     let units = id.map_or_else(Vec::new, |id| crate::dom::dom(scope).arena.child_text(id));

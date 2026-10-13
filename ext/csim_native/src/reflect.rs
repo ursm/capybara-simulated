@@ -77,9 +77,14 @@ fn element_reflection_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
             rv.set_uint32(state);
         }
         ACCESS_KEY_LABEL => {
-            let key = arena.get(id).and_then(|n| n.plain_attr("accesskey")).filter(|k| k.chars().count() == 1).map(|k| format!("Alt+{k}"));
-            let text = v8::String::new(scope, key.as_deref().unwrap_or("")).unwrap();
-            rv.set(text.into());
+            // (…one code point of the value's UTF-16, a lone surrogate one too)
+            let key = arena.get(id).and_then(|n| n.plain_attr_units("accesskey")).filter(|k| char::decode_utf16(k.iter().copied()).count() == 1);
+            let mut label: Vec<u16> = "Alt+".encode_utf16().collect();
+            match key {
+                Some(k) => label.extend(k),
+                None => label.clear(),
+            }
+            rv.set(crate::dom::utf16_value(scope, &label));
         }
         _ => {}
     }
