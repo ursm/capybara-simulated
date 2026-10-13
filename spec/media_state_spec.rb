@@ -45,6 +45,33 @@ RSpec.describe 'Media element state' do
     expect(s.evaluate_script('[v.currentTime, events.join()]')).to eq([3, 'emptied,timeupdate'])
   end
 
+  # …and once there is media data, the position seeks to it where it is past 0 (`seeked` after `loadedmetadata`), and it
+  # is 0 whatever it was — a negative one reads 0 then, and no longer stands in for a later seek. Chrome: -1 before the
+  # data, 0 after it.
+  it 'applies the default playback start position as the media data comes' do
+    video = File.binread(File.expand_path('wpt/media/movie_5.webm', __dir__))
+    app = lambda {|env|
+      next [200, {'content-type' => 'video/webm'}, [video]] if env['PATH_INFO'] == '/m.webm'
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']]
+    }
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    s.execute_script(<<~'JS')
+      window.events = [];
+      window.negative = document.createElement('video');
+      negative.currentTime = -1;
+      window.before = negative.currentTime;
+      negative.src = 'm.webm';
+      window.positive = document.createElement('video');
+      positive.currentTime = 3;
+      for (const t of ['loadedmetadata', 'seeked', 'loadeddata']) positive.addEventListener(t, () => events.push(t));
+      positive.src = 'm.webm';
+    JS
+    expect(s.evaluate_script('[before, negative.readyState, negative.currentTime]')).to eq([-1, 4, 0])
+    s.execute_script('negative.currentTime = 2')
+    expect(s.evaluate_script('[negative.currentTime, positive.currentTime, events.join()]')).to eq([2, 3, 'loadedmetadata,seeked,loadeddata'])
+  end
+
   # The resource selection's first step is NO_SOURCE at once; its mode is decided once the script has run: none — no
   # `src`, no `<source>` — EMPTY; a `<source>` child the children mode, `loadstart` and NO_SOURCE still (its resource is
   # not modelled), whatever `src` the load began with. Chrome: [3, 0, ""] and [3, 3, "emptied,loadstart"].

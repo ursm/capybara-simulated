@@ -72,9 +72,9 @@ impl Default for Media {
 }
 
 impl Media {
-    // What `currentTime` reads.
+    // What `currentTime` reads: the default playback start position while there is no media data and it is not 0.
     fn current_time(&self) -> f64 {
-        if self.default_start != 0.0 { self.default_start } else { self.current_time }
+        if self.ready == HAVE_NOTHING && self.default_start != 0.0 { self.default_start } else { self.current_time }
     }
 }
 
@@ -302,9 +302,10 @@ const AUDIO_USABLE: u32 = 2;
 
 // __dom.mediaResource(media, outcome, width, height, duration): the resource's outcome — a failure the dedicated media
 // source failure steps (MEDIA_ERR_SRC_NOT_SUPPORTED, no media data, NO_SOURCE: an earlier resource no longer there);
-// a decoded video all its data (HAVE_ENOUGH_DATA), its size and duration, IDLE — the playback position the default
-// playback start position where there is one (a seek to it, within the duration), that 0; a usable audio IDLE.
-fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// a decoded video all its data (HAVE_ENOUGH_DATA), its size and duration, IDLE — a seek to the default playback start
+// position where that is past 0 (within the duration), which then is 0 whatever it was; a usable audio IDLE. -> whether
+// it seeked: its `seeked` owed.
+fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
     let outcome = args.get(1).uint32_value(scope).unwrap_or(RESOURCE_FAILED);
     let [w, h, duration] = [2, 3, 4].map(|k| args.get(k).number_value(scope).unwrap_or(f64::NAN));
@@ -314,9 +315,10 @@ fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
             m.video_size = [w as u32, h as u32];
             m.duration = duration;
             m.ready = HAVE_ENOUGH_DATA;
-            if m.default_start > 0.0 {
-                m.current_time = if duration.is_finite() { m.default_start.min(duration) } else { m.default_start };
-                m.default_start = 0.0;
+            let start = std::mem::take(&mut m.default_start);
+            if start > 0.0 {
+                m.current_time = if duration.is_finite() { start.min(duration) } else { start };
+                return rv.set_bool(true);
             }
             m.network = NETWORK_IDLE;
         }
