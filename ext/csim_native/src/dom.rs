@@ -2111,6 +2111,11 @@ pub(crate) struct Dom {
     pub(crate) next_serialized: u32,
     // Every live range's boundary points (ranges.rs).
     pub(crate) ranges: crate::ranges::Ranges,
+    // Each realm's hook a clone of a shadow host attaches the copy's shadow root through (cloning.rs
+    // `clone_shadow_root`) — weakly, as its realm holds it — and whether one failed — threw — since a clone's caller last
+    // asked (`clone_failed`).
+    pub(crate) clone_shadow_hooks: std::collections::HashMap<i32, v8::Weak<v8::Function>>,
+    pub(crate) clone_failed: bool,
     pub(crate) iterators: crate::node_iterators::Iterators,
     // Each realm's style engine (made by `styleSheets`).
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
@@ -4911,6 +4916,7 @@ fn drop_realm(
         d.styles.remove(&id);          // (…and its style engine)
         d.walk_reuse.remove(&id);      // (…and its Rust walk's last pass)
         d.arenas.remove(&id);          // (…and its arena object, which holds its global's `__dom`)
+        d.clone_shadow_hooks.remove(&id);   // (…and its shadow root cloning hook)
         crate::text_codec::drop_realm(scope, id);   // (…and the stream decoders it left open)
     }
 }

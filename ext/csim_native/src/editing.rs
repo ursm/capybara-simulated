@@ -397,7 +397,16 @@ pub(crate) fn rebalance_space(scope: &mut v8::PinScope<'_, '_>, caller: i32, nod
 pub(crate) fn document_of<'s>(scope: &mut v8::PinScope<'s, '_>, near: NodeId) -> Option<v8::Local<'s, v8::Object>> {
     let handle = crate::dom::dom(scope).arena.get(near).and_then(|n| n.link.handle().map(|h| h as *const crate::node_handle::NodeHandle));
     // SAFETY: the node's handle lives while its node is in the arena, which this reads before anything allocates.
-    handle.and_then(|h| unsafe { &*h }.document(scope))
+    if let Some(doc) = handle.and_then(|h| unsafe { &*h }.document(scope)) {
+        return Some(doc);
+    }
+    // (…none kept for a node of its realm's own document, whose objects default to it: that document, its root — as
+    // which realm's code asks must not decide)
+    let arena = &crate::dom::dom(scope).arena;
+    let root = arena.shadow_including_root(near);
+    let root = arena.get(root).filter(|n| n.kind == NodeKind::Document).map(|_| root)?;
+    let doc = crate::dom::node_value(scope, Some(root));
+    v8::Local::<v8::Object>::try_from(doc).ok()
 }
 // A node the engine makes of `data`, in `near`'s node document, by realm `caller`'s code — and what holds its handle
 // until a tree does.

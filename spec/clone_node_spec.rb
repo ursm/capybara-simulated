@@ -116,4 +116,42 @@ RSpec.describe 'cloneNode' do
       })()
     JS
   end
+
+  # The copies' custom elements are upgraded in the order the clone makes them — a host, its light tree, then its shadow
+  # tree (DOM "clone a node" steps 5 and 6) — by the realm whose document they are in, whichever realm's code clones
+  # them. Chrome: ["h:Y1", "l:YL", "l:YLL", "s:YLS", "s:YS"], and ["ms", "ms"] for a frame's range over the page.
+  it 'upgrades a clone\'s custom elements in the order it makes them, by their own realm' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [<<~HTML]] }).tap {|session| session.visit '/' }
+      <!DOCTYPE html><meta charset=utf-8><iframe id=f srcdoc="<!DOCTYPE html><body>x</body>"></iframe>
+    HTML
+    s.evaluate_async_script(<<~'JS')
+      const done = arguments[0];
+      const ready = () => document.getElementById('f').contentDocument?.readyState === 'complete' ? done() : setTimeout(ready, 10);
+      ready();
+    JS
+    expect(s.evaluate_script(<<~'JS')).to eq([%w[h:Y1 l:YL l:YLL s:YLS s:YS], %w[ms ms]])
+      (() => {
+        const log = [];
+        for (const [name, tag] of [['x-h', 'h'], ['x-l', 'l'], ['x-s', 's']]) {
+          customElements.define(name, class extends HTMLElement { constructor() { super(); log.push(tag + ':' + this.id); } });
+        }
+        const y = document.createElement('div');
+        y.innerHTML = '<x-h id=Y1><x-l id=YL><x-l id=YLL></x-l></x-l></x-h>';
+        y.firstChild.attachShadow({mode: 'open', clonable: true}).innerHTML = '<x-s id=YS></x-s>';
+        y.firstChild.firstChild.attachShadow({mode: 'open', clonable: true}).innerHTML = '<x-s id=YLS></x-s>';
+        log.length = 0;
+        y.cloneNode(true);
+        const order = log.splice(0);
+        customElements.define('x-m', class extends HTMLElement { constructor() { super(); log.push('ms'); } });
+        const host = document.body.appendChild(document.createElement('div'));
+        host.innerHTML = '<b>q</b><x-m></x-m>';
+        host.attachShadow({mode: 'open', clonable: true}).innerHTML = '<x-m></x-m><slot></slot>';
+        log.length = 0;
+        const range = document.getElementById('f').contentDocument.createRange();
+        range.selectNode(host);
+        range.cloneContents();
+        return [order, log];
+      })()
+    JS
+  end
 end

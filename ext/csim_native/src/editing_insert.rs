@@ -61,7 +61,7 @@ fn edit_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         LINE_BREAK => edit.line_break(scope, caret),
         _ => edit.paragraph(scope, caret),
     };
-    let Some(caret) = caret else { return };
+    let Some(caret) = caret.filter(|_| !crate::cloning::clone_failed(scope)) else { return };
     let mut out: Vec<v8::Local<'_, v8::Value>> = vec![crate::dom::node_value(scope, Some(caret.0))];
     if crate::dom::factory_threw(scope) {
         return;

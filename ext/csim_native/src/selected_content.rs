@@ -4,7 +4,7 @@
 // `<selectedcontent>` (re)connects, which the bindings decide; an update that would leave one as it is leaves it alone
 // (no record), unless `force`d — a re-insertion, which re-clones (selectedcontent-mutations).
 
-use crate::cloning::{clonable, BindingsSteps};
+use crate::cloning::BindingsSteps;
 use crate::dom::{realm, realm_id, NodeId, RealmArena};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -26,8 +26,7 @@ fn selected_contents(arena: &RealmArena, select: NodeId) -> Vec<NodeId> {
 }
 
 // __dom.updateSelectedContent(selectNid, force, steps) -> `[copies, copies…, changes…]` as `editInsert` answers them;
-// undefined where it changed nothing, null where the engine does not clone the content (a shadow host in it — the
-// bindings' to then, as `cloneNode`'s).
+// undefined where it changed nothing, or where a copy failed (a shadow root's hook threw, its exception pending).
 fn update_selected_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(select) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let force = args.get(1).is_true();
@@ -42,9 +41,6 @@ fn update_selected_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     let multiple = arena.get(select).is_some_and(|n| n.plain_attr("multiple").is_some());
     let options: Vec<NodeId> = arena.selected_options(select, !multiple).into_iter().map(|(_, o)| o).collect();
     let sources: Vec<Vec<NodeId>> = options.iter().map(|&o| arena.get(o).map_or_else(Vec::new, |n| n.children.clone())).collect();
-    if !sources.iter().flatten().all(|&c| clonable(arena, c, true)) {
-        return rv.set_null();
-    }
     // (…what one shows when it is as it should be: the content serialized, each option's in a `<div>` for a multiple
     // select)
     let units = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
@@ -88,7 +84,7 @@ fn update_selected_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
         let Some(change) = crate::mutation::replace_all(scope, cid, caller, target, &clones, steps) else { break };
         changes.push(change);
     }
-    if changes.is_empty() {
+    if crate::cloning::clone_failed(scope) || changes.is_empty() {
         return;
     }
     let mut out: Vec<v8::Local<'_, v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, copies.len() as u32).into()];

@@ -6,7 +6,7 @@
 // (cloning.rs). What each change ends with — the bindings' disconnections, insertion steps, connections — they take as
 // the op returns, in order, with the copies' own cloning steps; the range's new point is theirs to set.
 
-use crate::cloning::{clonable, clone_into, BindingsSteps};
+use crate::cloning::{clone_into, BindingsSteps};
 use crate::dom::{realm, NodeData, NodeId, NodeKind, RealmArena};
 use crate::mutation::Change;
 use crate::node_handle::NodeHandle;
@@ -191,35 +191,8 @@ impl<'s> Run<'s> {
     }
 }
 
-// Whether the engine takes the contents from (`sc`, `so`) to (`ec`, `eo`) — no partially contained node it could not
-// copy, and, for a copy, no contained child it could not (cloning.rs `clonable`) but a doctype, which is an error of its
-// own (`DOCTYPE_CONTAINED`): the bindings take what it declines.
-fn takes(arena: &RealmArena, mode: u32, sc: NodeId, so: u32, ec: NodeId, eo: u32) -> bool {
-    if sc == ec && (so == eo || is_character_data(arena, sc)) {
-        return true;
-    }
-    let (common, _, _, contained, _) = crate::ranges::contents_plan(arena, sc, so, ec, eo);
-    // (…every node between a boundary node and the common ancestor is partially contained: copied shallow)
-    let partial_ok = |end: NodeId| {
-        let mut at = Some(end);
-        while let Some(n) = at.filter(|&n| n != common) {
-            if !is_character_data(arena, n) && !clonable(arena, n, false) {
-                return false;
-            }
-            at = arena.parent_of(n);
-        }
-        true
-    };
-    if mode == DELETE {
-        return true;
-    }
-    let kids = arena.get(common).map_or(&[][..], |n| &n.children[..]);
-    let copies = |c: NodeId| clonable(arena, c, true) || arena.get(c).is_some_and(|n| n.kind == NodeKind::Other);
-    partial_ok(sc) && partial_ok(ec) && (mode != CLONE || kids.get(contained).unwrap_or(&[]).iter().all(|&c| copies(c)))
-}
-
 // __dom.processRangeContents(startNode, startOffset, endNode, endOffset, mode, steps) -> [fragment, collapseNode,
-// collapseOffset, changes, …], `DOCTYPE_CONTAINED`, or undefined where the engine declines: the contents cloned
+// collapseOffset, changes, …], `DOCTYPE_CONTAINED`, or undefined where making the answer threw: the contents cloned
 // (`mode` 0), extracted (1) or deleted (2) — the fragment null for a deletion, the collapse point null where the range
 // collapses to its start; then the count of changes and each one as `[parent, added, removed, connected]`, for the
 // bindings to finish in order; then the copies whose cloning steps are the bindings' too, as `cloneTree` answers them.
@@ -231,9 +204,6 @@ fn process_range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let caller = crate::dom::realm_id(scope, &args);
     let Some(cid) = crate::dom::dom(scope).arena.get(sc).map(|n| n.realm) else { return };
     let arena = realm(scope, cid);
-    if !takes(arena, mode, sc, so, ec, eo) {
-        return;
-    }
     if mode != DELETE && !(sc == ec && (so == eo || is_character_data(arena, sc))) && crate::ranges::contents_plan(arena, sc, so, ec, eo).4 {
         return rv.set_uint32(DOCTYPE_CONTAINED);
     }
@@ -244,7 +214,7 @@ fn process_range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     }
     let doc = match crate::dom::dom(scope).arena.get(sc).map(|n| n.kind) {
         Some(NodeKind::Document) => v8::Local::<v8::Object>::try_from(start).ok(),
-        _ => crate::node_handle::handle_of(scope, start).and_then(|h| unsafe { h.as_ref() }.document(scope)),
+        _ => crate::editing::document_of(scope, sc),
     };
     // (…the steps re-rooted in this scope, as the run's other handles are)
     let steps = v8::Local::new(scope, steps);
@@ -253,6 +223,10 @@ fn process_range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     // (…what changed handed back whatever stopped it — a cut a script's steps had made impossible: the changes made are
     // the bindings' to finish, and the range collapses to its start)
     let collapse = run.process(scope, sc, so, ec, eo, frag).flatten();
+    // (…none where a copy failed — a shadow root's hook threw: its exception is what the op ends with)
+    if crate::cloning::clone_failed(scope) {
+        return;
+    }
     // (…each answer made, and none past a node factory that threw: its exception is what the op ends with)
     let mut out: Vec<v8::Local<'_, v8::Value>> = vec![crate::dom::node_value(scope, frag)];
     if crate::dom::factory_threw(scope) {

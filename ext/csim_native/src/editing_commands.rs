@@ -86,6 +86,10 @@ fn edit_command(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
             vec![(a, ao), (b, bo)]
         }
     };
+    // (…none where a copy failed — a shadow root's hook threw: its exception is what the op ends with)
+    if crate::cloning::clone_failed(scope) {
+        return;
+    }
     for (node, offset) in places {
         out.push(crate::dom::node_value(scope, Some(node)));
         if crate::dom::factory_threw(scope) {
