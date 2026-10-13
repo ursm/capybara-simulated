@@ -916,6 +916,9 @@ pub(crate) struct RealmArena {
     // linked or unlinked, freed, an `id` attribute written — and with nothing else (`mutations` moves with every write,
     // a layout's and a `data-` attribute's alike, where `getElementById(x).setAttribute(…)` is how a page asks).
     pub(crate) id_epoch: u64,
+    // How many HTML `<base>` elements the arena holds, anywhere: none, and a document has no base element without a
+    // walk of its tree (`base_element`) — the common page, whose base URL every URL read after a mutation asks again.
+    pub(crate) base_elements: u32,
     // Per tree root, the facts element_state.rs asks of every control in turn, as of `mutations` (`form_facts`).
     pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
     // Each element's resolved directionality asked so far, true for rtl, as of `mutations` (`is_rtl`)…
@@ -1269,6 +1272,9 @@ impl RealmArena {
     // its NodeId at the slot's CURRENT generation. A recycled slot's gen was already bumped at free.
     fn alloc(&mut self, mut data: NodeData) -> NodeId {
         self.mutations += 1;
+        if data.is_html_named("base") {
+            self.base_elements += 1;
+        }
         self.external += NODE_WEIGHT;
         data.stamp.set(self.layout_epoch.get());
         let list = self.realm_nodes.entry(data.realm).or_default();
@@ -1318,6 +1324,9 @@ impl RealmArena {
         self.mutations += 1;
         if self.get(id).is_some_and(|n| n.plain_attr("id").is_some()) {
             self.id_epoch += 1;
+        }
+        if self.get(id).is_some_and(|n| n.is_html_named("base")) {
+            self.base_elements = self.base_elements.saturating_sub(1);
         }
         self.id_index.get_mut().forget(id);
         self.ce_reactions.forget_node(id);

@@ -76,6 +76,34 @@ RSpec.describe 'HTML element bindings' do
     expect(got).to eq([true, '/early/p'])
   end
 
+  # …in whichever realm's code asks: an element made in the page and put in a frame resolves against the frame's base.
+  it "resolves an element moved into a frame against the frame's base" do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const a = document.createElement('a');
+        a.setAttribute('href', 'q');
+        document.querySelector('iframe').contentDocument.body.append(a);
+        return a.href;
+      })()
+    JS
+    expect(got).to end_with('/x/q')
+  end
+
+  # A `data:` script's text is its body decoded in its MIME type's charset (Encoding Standard "decode").
+  it "decodes a data: script in its charset" do
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const script = document.createElement('script');
+      script.src = 'data:text/javascript;charset=windows-1252,window.s%3D%27%E9%27';
+      script.onload = () => done(window.s);
+      script.onerror = () => done('error');
+      document.head.append(script);
+    JS
+    expect(got).to eq('é')
+  end
+
   it 'keeps the case of an attribute name given an HTML element in an XML document' do
     session.visit '/'
     got = session.evaluate_script(<<~JS)

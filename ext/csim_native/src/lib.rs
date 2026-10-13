@@ -180,6 +180,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("cors_safelisted_request_header", magnus::function!(fetch_rules::cors_safelisted_request_header_for_ruby, 2))?;
     native.define_module_function("cors_safelisted_response_header", magnus::function!(fetch_rules::cors_safelisted_response_header_for_ruby, 1))?;
     native.define_module_function("forbidden_response_header", magnus::function!(fetch_rules::forbidden_response_header_for_ruby, 1))?;
+    native.define_module_function("http_token", magnus::function!(fetch_rules::http_token_for_ruby, 1))?;
+    native.define_module_function("javascript_content", magnus::function!(script::javascript_content_for_ruby, 1))?;
     // A driver session's IndexedDB storage: a new partition of the one registry, cleared as the session resets, and
     // whether an agent of it has notices to take — its event loop has work (idb_databases.rs).
     native.define_module_function("idb_partition_new", magnus::function!(idb_databases::partition_new, 0))?;

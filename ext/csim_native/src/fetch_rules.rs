@@ -194,6 +194,9 @@ pub(crate) fn cors_safelisted_response_header_for_ruby(name: magnus::RString) ->
 pub(crate) fn forbidden_response_header_for_ruby(name: magnus::RString) -> bool {
     forbidden_response_header(&ruby_bytes(name))
 }
+pub(crate) fn http_token_for_ruby(s: magnus::RString) -> bool {
+    is_token(&ruby_bytes(s))
+}
 
 #[cfg(test)]
 mod tests {

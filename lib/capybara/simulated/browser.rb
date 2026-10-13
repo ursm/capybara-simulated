@@ -5731,30 +5731,10 @@ module Capybara
         {'changed' => changed, 'body' => changed ? RuntimeShared.utf8_text(body.dup) : nil}
       end
 
-      # The JavaScript MIME type essences ("fetch a classic worker script" requires one;
-      # a service worker script with any other Content-Type fails with a SecurityError).
-      JS_MIME_ESSENCES = %w[
-        application/ecmascript
-        application/javascript
-        application/x-ecmascript
-        application/x-javascript
-        text/ecmascript
-        text/javascript
-        text/javascript1.0
-        text/javascript1.1
-        text/javascript1.2
-        text/javascript1.3
-        text/javascript1.4
-        text/javascript1.5
-        text/jscript
-        text/livescript
-        text/x-ecmascript
-        text/x-javascript
-      ].freeze
-      private_constant :JS_MIME_ESSENCES
-
+      # Whether a Content-Type is a JavaScript MIME type's ("fetch a classic worker script" requires one; a service worker
+      # script with any other fails with a SecurityError) — the engine's (script.rs), the type extracted as Fetch does.
       private def js_mime_type?(content_type)
-        JS_MIME_ESSENCES.include?(content_type.to_s.split(';', 2).first.to_s.strip.downcase)
+        Native.javascript_content(content_type.to_s)
       end
 
       # The registration handle controlling `url` — the one whose serialized scope is the longest
@@ -11876,9 +11856,6 @@ module Capybara
       # "simple" (no preflight) iff its method is safelisted AND every author header is — a safelisted name with a value
       # that keeps it so (Content-Type only a urlencoded / multipart / text/plain one, no CORS-unsafe byte, 128 bytes at
       # most).
-      # RFC 7230 `token` (tchar+) — a valid HTTP method / field-name. Used to reject a
-      # preflight whose Access-Control-Allow-Methods / -Headers carries a malformed value.
-      HTTP_TOKEN = /\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/.freeze
 
       # The sorted, lowercased author header names that are NOT CORS-safelisted. A
       # safelisted NAME still counts as unsafe when its VALUE fails the safelisting (an
@@ -12023,7 +12000,8 @@ module Capybara
         # (`Access-Control-Allow-Methods: Bad value` — a space isn't a tchar), and a failed
         # extraction is a network error (cors-preflight-response-validation). Methods and
         # header names are both HTTP tokens; `*` is a valid tchar so the wildcard passes.
-        return nil unless (allow_methods + allow_headers).all? {|t| t.match?(HTTP_TOKEN) }
+        # (…each an HTTP token — a valid method or field-name — the engine's: fetch_rules.rs)
+        return nil unless (allow_methods + allow_headers).all? {|t| Native.http_token(t) }
         return nil unless cors_grant_allows?(allow_methods, allow_headers, method, unsafe, credentialed)
         {methods: allow_methods, headers: allow_headers, max_age: cors_header(ph, 'access-control-max-age').to_i}
       end
