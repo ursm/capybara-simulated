@@ -12,6 +12,77 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "meterValue", meter_value, context_id);
     register(scope, ns, "progressValue", progress_value, context_id);
     register(scope, ns, "autofill", autofill_op, context_id);
+    register(scope, ns, "elementReflection", element_reflection_op, context_id);
+}
+
+// HTMLElement's reflected members whose answers are more than an attribute's value (HTML §6.6.3, §3.2.6.6, §6.7.2,
+// §6.10): what `elementReflection` names by these.
+const TAB_INDEX: u32 = 0;
+const TRANSLATE: u32 = 1;
+const WRITING_SUGGESTIONS: u32 = 2;
+const HIDDEN: u32 = 3;
+const ACCESS_KEY_LABEL: u32 = 4;
+// The elements `tabIndex` defaults to 0 on (else -1): these HTML ones, an SVG `<a>`, and a summary that is its details'.
+// (…its local name as written: `createElementNS(HTML, "BUTTON")` is no button)
+const TABBABLE_BY_DEFAULT: [&str; 9] = ["a", "area", "button", "frame", "iframe", "input", "object", "select", "textarea"];
+fn tab_index(arena: &crate::dom::RealmArena, id: crate::dom::NodeId) -> f64 {
+    let Some(n) = arena.get(id) else { return -1.0 };
+    let given = reflected(n.plain_attr("tabindex"), LONG, f64::NAN, 0.0, 0.0);
+    if !given.is_nan() {
+        return given;
+    }
+    let tag = &*n.local_name;
+    let zero = if n.ns == web_atoms::ns!(svg) {
+        tag == "a"
+    } else {
+        n.is_html() && (TABBABLE_BY_DEFAULT.contains(&tag) || (tag == "summary" && arena.is_details_summary(id)))
+    };
+    if zero { 0.0 } else { -1.0 }
+}
+// An inherited enumerated attribute's state: the nearest inclusive element ancestor's valid one — `on` for any of `on`,
+// `off` for `off` — else `missing`.
+fn inherited_state(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, name: &str, on: &[&str], off: &str, missing: bool) -> bool {
+    let mut at = Some(id);
+    while let Some(e) = at.filter(|&e| arena.is_element(e)) {
+        if let Some(v) = arena.get(e).and_then(|n| n.plain_attr(name)) {
+            let v = v.to_ascii_lowercase();
+            if on.contains(&v.as_str()) {
+                return true;
+            }
+            if v == off {
+                return false;
+            }
+        }
+        at = arena.parent_of(e);
+    }
+    missing
+}
+// __dom.elementReflection(el, which) -> `tabIndex` (its attribute's long, else its default), `translate` (inherited:
+// yes or ''; no), `writingSuggestions` ('true' / 'false', inherited), `hidden` (0 none, 1 hidden, 2 until-found),
+// `accessKeyLabel` (`Alt+` and the key where `accesskey` is one code point, else '').
+fn element_reflection_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let which = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
+    let arena = &crate::dom::dom(scope).arena;
+    match which {
+        TAB_INDEX => rv.set_double(tab_index(arena, id)),
+        TRANSLATE => rv.set_bool(inherited_state(arena, id, "translate", &["yes", ""], "no", true)),
+        WRITING_SUGGESTIONS => {
+            let on = inherited_state(arena, id, "writingsuggestions", &["true", ""], "false", true);
+            let text = v8::String::new(scope, if on { "true" } else { "false" }).unwrap();
+            rv.set(text.into());
+        }
+        HIDDEN => {
+            let state = arena.get(id).and_then(|n| n.plain_attr("hidden")).map_or(0, |v| if v.eq_ignore_ascii_case("until-found") { 2 } else { 1 });
+            rv.set_uint32(state);
+        }
+        ACCESS_KEY_LABEL => {
+            let key = arena.get(id).and_then(|n| n.plain_attr("accesskey")).filter(|k| k.chars().count() == 1).map(|k| format!("Alt+{k}"));
+            let text = v8::String::new(scope, key.as_deref().unwrap_or("")).unwrap();
+            rv.set(text.into());
+        }
+        _ => {}
+    }
 }
 
 // The kinds, as reflect.js names them.
