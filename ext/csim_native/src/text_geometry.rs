@@ -839,6 +839,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "caretLineEdge", caret_line_edge, context_id);
     crate::dom::register(scope, ns, "caretMoveKeep", caret_move_keep, context_id);
     crate::dom::register(scope, ns, "caretMoveForget", caret_move_forget, context_id);
+    crate::dom::register(scope, ns, "charDirection", char_direction, context_id);
 }
 
 // What a query of the realm's text asks of its arena and its text geometry (`RealmArena::with_text`).
@@ -992,4 +993,29 @@ fn caret_move_keep(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 fn caret_move_forget(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     crate::dom::dom(scope).caret_moves.remove(&cid);
+}
+
+// __dom.charDirection(nid, offset) -> 1, 0 or -1: the strong direction of the text at a place in a text node, as
+// `Selection.modify()` reads 'left' and 'right' by a character or a word — the code unit after it, else the one before
+// it: a right-to-left script's character (Hebrew, Arabic, Syriac, Thaana, N'Ko, Samaritan, Mandaic, Adlam) rtl (1), any
+// other letter ltr (0); neither, none (-1: its element's `direction` decides).
+fn char_direction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    use icu_properties::props::Script;
+    let Some(node) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_int32(-1) };
+    let offset = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let Some(data) = arena.get(node).filter(|n| n.kind == crate::dom::NodeKind::Text).map(|n| &n.data) else { return rv.set_int32(-1) };
+    const RTL: [Script; 8] = [Script::Hebrew, Script::Arabic, Script::Syriac, Script::Thaana, Script::Nko, Script::Samaritan, Script::Mandaic, Script::Adlam];
+    let at = [Some(offset), offset.checked_sub(1)];
+    for unit in at.into_iter().flatten().filter_map(|i| data.get(i).copied()) {
+        let cp = u32::from(unit);
+        if crate::unicode::script(cp).is_some_and(|s| RTL.contains(&s)) {
+            return rv.set_int32(1);
+        }
+        if crate::unicode::is_letter(cp) {
+            return rv.set_int32(0);
+        }
+    }
+    rv.set_int32(-1);
 }
