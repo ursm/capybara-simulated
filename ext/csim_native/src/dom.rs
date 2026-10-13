@@ -836,9 +836,9 @@ pub(crate) struct RealmArena {
     // Each sheet owner's sheet as the bindings last made it — its id in `sheets`, and the owner's count of sheets then
     // (`NodeData::sheet_gen`): the owner's sheet while that count holds (sheet_owners.rs `sheetOwned`).
     pub(crate) owner_sheets: std::collections::HashMap<NodeId, (u32, u32)>,
-    // …and the last document's style sheet sets (sheet_owners.rs `sheet_set`), as of `mutations` and `sheet_epoch` —
-    // which moves with what else they turn on: a sheet disabled, an owner's sheet made, a `<link>` explicitly enabled.
-    pub(crate) sheet_sets: Option<(NodeId, u64, u32, std::rc::Rc<crate::sheet_owners::SheetSet>)>,
+    // …and each tree's style sheet sets (sheet_owners.rs `sheet_set`) — a document's, a shadow root's — as of `mutations`
+    // and `sheet_epoch`, which moves with what else they turn on: a sheet disabled or renewed, an owner's sheet made.
+    pub(crate) sheet_sets: std::collections::HashMap<NodeId, (u64, u32, std::rc::Rc<crate::sheet_owners::SheetSet>)>,
     pub(crate) sheet_epoch: u32,
     // Each element's nonce, once its `nonce` attribute was written or the element cloned with one (nonce.rs).
     pub(crate) nonces: std::collections::HashMap<NodeId, Vec<u16>>,

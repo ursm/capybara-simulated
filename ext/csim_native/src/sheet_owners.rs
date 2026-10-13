@@ -116,19 +116,25 @@ impl RealmArena {
         self.get(owner).is_some_and(|n| n.sheet_gen == count) && self.sheets.disabled(sheet)
     }
 
-    // …kept until the tree or what else they turn on changes.
-    fn sheet_set(&mut self, doc: NodeId) -> std::rc::Rc<SheetSet> {
-        if let Some((d, mutations, epoch, set)) = &self.sheet_sets {
-            if *d == doc && *mutations == self.mutations && *epoch == self.sheet_epoch {
+    // …kept until the tree or what else they turn on changes (the trees asked about bounded: a page's shadow roots).
+    fn sheet_set(&mut self, root: NodeId) -> std::rc::Rc<SheetSet> {
+        if let Some((mutations, epoch, set)) = self.sheet_sets.get(&root) {
+            if *mutations == self.mutations && *epoch == self.sheet_epoch {
                 return set.clone();
             }
         }
-        let set = std::rc::Rc::new(self.make_sheet_set(doc));
-        self.sheet_sets = Some((doc, self.mutations, self.sheet_epoch, set.clone()));
+        let set = std::rc::Rc::new(self.make_sheet_set(root));
+        if self.sheet_sets.len() >= 256 {
+            self.sheet_sets.clear();
+        }
+        self.sheet_sets.insert(root, (self.mutations, self.sheet_epoch, set.clone()));
         set
     }
 
+    // A shadow root's sheets have no sets — no `<meta>` selects one, every sheet takes part — and an alternate `<link>`
+    // is none there.
     fn make_sheet_set(&self, doc: NodeId) -> SheetSet {
+        let shadow = self.get(doc).is_some_and(|n| n.host.is_some());
         use std::hash::{Hash, Hasher};
         // (…a sheet's title its owner's `title` as written: CSSOM, Chrome — no whitespace trimmed)
         let title = |v: Option<&str>| v.unwrap_or("").to_string();
@@ -164,6 +170,9 @@ impl RealmArena {
                     continue;
                 }
                 let alternate = rel.contains(&"alternate");
+                if shadow && alternate {
+                    continue;
+                }
                 let (title, href, media) = (title(n.plain_attr("title")), n.plain_attr("href").unwrap_or("").to_string(), n.plain_attr("media").map(str::to_string));
                 let count = n.sheet_gen;
                 if self.owner_sheet_disabled(owner) {
@@ -194,21 +203,21 @@ impl RealmArena {
             }
         }
         // (…the selected set only where a titled or alternate sheet makes it matter: none decides nothing)
-        let selected = any_titled_or_alternate.then(|| default_style.or(preferred).unwrap_or_default());
+        let selected = (any_titled_or_alternate && !shadow).then(|| default_style.or(preferred).unwrap_or_default());
         selected.hash(&mut hasher);
         let set = selected.as_deref().unwrap_or("");
         let taking_part = sheets
             .into_iter()
-            .filter(|(_, title, alternate, enabled)| *enabled || if title.is_empty() { !alternate } else { title == set })
+            .filter(|(_, title, alternate, enabled)| shadow || *enabled || if title.is_empty() { !alternate } else { title == set })
             .map(|(owner, ..)| owner)
             .collect();
         SheetSet { key: hasher.finish(), selected, taking_part }
     }
 }
 
-// __dom.sheetSet(docNid) -> [key, selectedSet, [owner, …]]: the document's style sheet sets (`RealmArena::sheet_set`)
-// — a number keying what the sheets' taking part turns on, the selected set ('' where none matters), and the `<style>`
-// / `<link>` elements whose sheets take part, in tree order.
+// __dom.sheetSet(rootNid) -> [key, selectedSet, [owner, …]]: a document's style sheet sets, or a shadow root's sheets
+// (`RealmArena::sheet_set`) — a number keying what the sheets' taking part turns on, the selected set ('' where none
+// matters), and the `<style>` / `<link>` elements whose sheets take part, in tree order.
 fn sheet_set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);

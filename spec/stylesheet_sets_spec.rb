@@ -244,4 +244,19 @@ RSpec.describe 'stylesheet sets + data: CSS' do
       })()
     JS
   end
+
+  # A shadow root's `<link disabled>` applies nothing, as a document's does not, and an alternate one none either (HTML;
+  # Chrome 155: rgb(0, 0, 0) and no background).
+  it 'applies no disabled or alternate link of a shadow root' do
+    s = session_for('')
+    expect(s.evaluate_script(<<~'JS')).to eq(['rgb(0, 0, 0)', 'rgba(0, 0, 0, 0)'])
+      (() => {
+        const sr = document.getElementById('a').attachShadow({ mode: 'open' });
+        sr.innerHTML = '<link rel=stylesheet disabled href="data:text/css,p{color:rgb(255,0,0)}">' +
+          '<link rel="alternate stylesheet" href="data:text/css,p{background-color:rgb(0,0,255)}"><p>x</p>';
+        const cs = getComputedStyle(sr.querySelector('p'));
+        return [cs.color, cs.backgroundColor];
+      })()
+    JS
+  end
 end
