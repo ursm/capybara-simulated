@@ -3928,33 +3928,25 @@ module Capybara
         socket.flush
       end
 
-      # The stream's events as its chunks come, by HTML's "interpret an event stream" (the engine's, the page's too): what
-      # follows the last complete record waits for the next chunk, and the last event ID carries on from record to record.
+      # The stream's events as its chunks come, by HTML's "interpret an event stream" (the engine's, the page's too) — a
+      # parser kept from chunk to chunk, so a record or a line a chunk ends in the middle of goes on in the next.
       private def read_event_source_body(socket, id, queue, chunked:)
-        buffer  = String.new(encoding: Encoding::BINARY)
-        last_id = ''
-        started = false
+        parser = Native.event_stream_open
         loop do
           if chunked
             size_line = socket.gets
             break unless size_line
             size = size_line.strip.to_i(16)
             break if size.zero?
-            buffer << socket.read(size).to_s
+            chunk = socket.read(size).to_s
             socket.read(2)  # trailing CRLF
           else
-            buffer << socket.readpartial(4096)
+            chunk = socket.readpartial(4096)
           end
-          # (…a UTF-8 BOM opening the stream no part of it: its decoding takes it)
-          unless started
-            next if buffer.bytesize < 3 && "\xEF\xBB\xBF".b.start_with?(buffer)
-            buffer = buffer.byteslice(3..) if buffer.start_with?("\xEF\xBB\xBF".b)
-            started = true
-          end
-          events, taken, last_id = Native.event_stream(buffer, last_id)
-          buffer = buffer.byteslice(taken..)
-          events.each {|type, data, event_id| queue << {id: id, type: type, data: data, lastEventId: event_id} }
+          Native.event_stream_feed(parser, chunk).each {|type, data, event_id| queue << {id: id, type: type, data: data, lastEventId: event_id} }
         end
+      ensure
+        Native.event_stream_close(parser) if parser
       end
 
       def reset_event_sources

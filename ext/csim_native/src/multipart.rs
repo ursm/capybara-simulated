@@ -2,8 +2,9 @@
 // multipart/form-data parser): from the first delimiter — `--` and the boundary its `Content-Type` names — each part to
 // the next: transport padding and a CRLF after the delimiter, header lines to a blank line, the body to the next CRLF
 // and delimiter, until the close delimiter (`--` after it), which only padding and a CRLF (an epilogue) may follow. Every
-// part names its field in its `Content-Disposition`; one with a `filename` is a file, of the type its `Content-Type`
-// gives. Anything else is no such body.
+// part is a `Content-Disposition: form-data` naming its field (`name`, quoted or a token); one with a `filename` is a
+// file, of the type its `Content-Type` gives (RFC 7578: `text/plain` where it gives none). Anything else is no such body
+// (where Chrome and Firefox agree).
 
 // A part: its field's name, its filename (a file's), the type a file's part gives, and its body's bytes.
 #[derive(Debug, PartialEq)]
@@ -52,16 +53,20 @@ pub(crate) fn parse(body: &[u8], boundary: &str) -> Option<Vec<Part>> {
             return None;
         }
         at += 2;
-        let header_end = find(body, b"\r\n\r\n", at)?;
+        // (…a part with no header lines none of a field's)
+        let header_end = if body[at..].starts_with(b"\r\n") { at } else { find(body, b"\r\n\r\n", at)? };
         let headers = &body[at..header_end];
-        at = header_end + 4;
-        let disposition = header(headers, "content-disposition")?;
-        let name = parameter(&disposition, "name")?;
+        at = header_end + if header_end == at { 2 } else { 4 };
+        let disposition = disposition(&header(headers, "content-disposition")?)?;
+        let name = disposition.iter().find(|(k, _)| k == "name")?.1.clone();
         let body_end = find(body, &[b"\r\n", dash.as_slice()].concat(), at)?;
         let value = body[at..body_end].to_vec();
         at = body_end + 2 + dash.len();
-        let filename = parameter(&disposition, "filename");
-        let content_type = if filename.is_some() { header(headers, "content-type").map(|t| t.trim().to_owned()).unwrap_or_default() } else { String::new() };
+        let filename = disposition.iter().find(|(k, _)| k == "filename").map(|(_, v)| v.clone());
+        let content_type = match filename {
+            Some(_) => header(headers, "content-type").map(|t| t.trim().to_owned()).unwrap_or_else(|| "text/plain".to_owned()),
+            None => String::new(),
+        };
         parts.push(Part { name, filename, content_type, value });
     }
 }
@@ -73,21 +78,32 @@ fn header(headers: &[u8], name: &str) -> Option<String> {
         line[..colon].eq_ignore_ascii_case(name.as_bytes()).then(|| String::from_utf8_lossy(&line[colon + 1..]).trim_start().to_owned())
     })
 }
-// …and a `Content-Disposition`'s `name="…"` parameter — one whose name begins a word (`filename` holds no `name`).
-fn parameter(disposition: &str, name: &str) -> Option<String> {
-    let lower = disposition.to_ascii_lowercase();
-    let key = format!("{name}=\"");
-    let mut from = 0;
-    while let Some(i) = lower[from..].find(&key).map(|i| i + from) {
-        let word_start = i == 0 || !lower.as_bytes()[i - 1].is_ascii_alphanumeric() && lower.as_bytes()[i - 1] != b'_';
-        let start = i + key.len();
-        if word_start {
-            let end = disposition[start..].find('"')? + start;
-            return Some(disposition[start..end].to_owned());
-        }
-        from = start;
+// …and a `Content-Disposition` of type `form-data`: its parameters, each name lowercased, each value a quoted string's
+// contents (as written: no escape undone) or a token — none where it is of another type.
+fn disposition(value: &str) -> Option<Vec<(String, String)>> {
+    let (kind, mut rest) = value.split_once(';').unwrap_or((value, ""));
+    if !kind.trim().eq_ignore_ascii_case("form-data") {
+        return None;
     }
-    None
+    let mut params = Vec::new();
+    loop {
+        rest = rest.trim_start_matches([' ', '\t', ';']);
+        if rest.is_empty() {
+            return Some(params);
+        }
+        let (key, after) = rest.split_once('=')?;
+        let key = key.trim().to_ascii_lowercase();
+        let after = after.trim_start();
+        let (value, tail) = match after.strip_prefix('"') {
+            Some(quoted) => {
+                let end = quoted.find('"')?;
+                (&quoted[..end], &quoted[end + 1..])
+            }
+            None => after.split_once(';').map_or((after.trim_end(), ""), |(v, t)| (v.trim_end(), t)),
+        };
+        params.push((key, value.to_owned()));
+        rest = tail;
+    }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -138,6 +154,12 @@ mod tests {
         assert!(parse(b"--AaB--trailing", "AaB").is_none());
         assert!(parse(b"--aab--", "AaB").is_none());
         assert_eq!(boundary("Multipart/Form-Data; boundary=\"AaB\""), Some("AaB".into()));
+        // (…as Chrome and Firefox both read them: a token name, a file part's default type, no header lines, no
+        // `form-data`)
+        let parts = parse(b"--B\r\nContent-Disposition: form-data; name=a; filename=\"f\"\r\n\r\nx\r\n--B--", "B").expect("a body");
+        assert_eq!((parts[0].name.as_str(), parts[0].content_type.as_str()), ("a", "text/plain"));
+        assert!(parse(b"--B\r\n\r\nv\r\n--B\r\nContent-Disposition: form-data; name=\"b\"\r\n\r\n2\r\n--B--", "B").is_none());
+        assert!(parse(b"--B\r\nContent-Disposition: attachment; name=\"a\"\r\n\r\n1\r\n--B--", "B").is_none());
         assert_eq!(boundary("text/plain; boundary=x"), None);
     }
 }

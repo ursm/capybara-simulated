@@ -2448,8 +2448,6 @@ fetch/api/response/response-consume-empty.any.js:
 - Consume empty FormData response body as text
 - "[dedicatedworker] Consume empty FormData response body as text"
 - "[serviceworker] Consume empty FormData response body as text"
-fetch/api/response/response-consume.html:
-- 'Consume response''s body: from multipart form data blob to formData'
 fetch/api/response/response-stream-with-broken-then.any.js:
 - Attempt to inject 8.2 via Object.prototype.then.
 - Attempt to inject undefined via Object.prototype.then.

@@ -24,7 +24,10 @@ fn data_url_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 }
 
 // Capybara::Simulated::Native.data_url(url) -> [mime type, body bytes], or nil for a failure.
-pub(crate) fn process_for_ruby(ruby: &magnus::Ruby, input: String) -> Option<(String, magnus::RString)> {
+// (…the URL's bytes, in whatever encoding the string says, read as UTF-8 — a byte that is none replaced)
+pub(crate) fn process_for_ruby(ruby: &magnus::Ruby, input: magnus::RString) -> Option<(String, magnus::RString)> {
+    // SAFETY: copied at once, before anything could run Ruby code that moves or frees it.
+    let input = String::from_utf8_lossy(unsafe { input.as_slice() }).into_owned();
     process(&input).map(|(mime, body)| (mime, ruby.str_from_slice(&body)))
 }
 

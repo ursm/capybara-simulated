@@ -164,8 +164,11 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("url_parts", magnus::function!(url_ops::parts_for_ruby, 2))?;
     // A `data:` URL's MIME type and body, by Fetch's data: URL processor, the page's too (data_url.rs).
     native.define_module_function("data_url", magnus::function!(data_url::process_for_ruby, 1))?;
-    // A live `text/event-stream`'s chunks read into events, as the page reads a whole one (event_stream.rs).
-    native.define_module_function("event_stream", magnus::function!(event_stream::interpret_for_ruby, 2))?;
+    // A live `text/event-stream`'s chunks read into events by a parser kept between them, as the page reads a whole one
+    // (event_stream.rs).
+    native.define_module_function("event_stream_open", magnus::function!(event_stream::open_for_ruby, 0))?;
+    native.define_module_function("event_stream_feed", magnus::function!(event_stream::feed_for_ruby, 2))?;
+    native.define_module_function("event_stream_close", magnus::function!(event_stream::close_for_ruby, 1))?;
     // Fetch's fixed header, method and port rules, the page's too (fetch_rules.rs).
     native.define_module_function("bad_port", magnus::function!(fetch_rules::bad_port_for_ruby, 1))?;
     native.define_module_function("cors_safelisted_method", magnus::function!(fetch_rules::cors_safelisted_method_for_ruby, 1))?;
