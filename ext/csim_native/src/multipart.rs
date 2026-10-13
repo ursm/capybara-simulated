@@ -120,8 +120,94 @@ fn disposition(value: &str) -> Option<Vec<(String, String)>> {
     }
 }
 
+// An entry of a list to encode: a field's value, or a file's name, type and bytes.
+pub(crate) enum Value<'a> {
+    Text(String),
+    File { name: String, kind: &'a str, bytes: &'a [u8] },
+}
+// The "multipart/form-data encoding algorithm" (HTML §4.10.21.8) of `entries` with `boundary`: each a part — its name
+// and a file's filename with CR, LF and `"` escaped (`%0D`, `%0A`, `%22`; a name's newlines first normalized to CRLF), a
+// field's value with its newlines normalized — the text encoded in `encoding` (a character it cannot encode a numeric
+// character reference; none: UTF-8), a file its own bytes under its type (`application/octet-stream` for none).
+pub(crate) fn encode(entries: &[(String, Value<'_>)], encoding: Option<&'static encoding_rs::Encoding>, boundary: &str) -> Vec<u8> {
+    fn crlf(s: &str) -> String {
+        s.replace("\r\n", "\n").replace('\r', "\n").replace('\n', "\r\n")
+    }
+    fn escaped(s: &str) -> String {
+        s.replace('\r', "%0D").replace('\n', "%0A").replace('"', "%22")
+    }
+    let text = |s: &str| -> Vec<u8> { encoding.map_or_else(|| s.as_bytes().to_vec(), |e| e.encode(s).0.into_owned()) };
+    let mut body = Vec::new();
+    for (name, value) in entries {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(b"Content-Disposition: form-data; name=\"");
+        body.extend(text(&escaped(&crlf(name))));
+        match value {
+            Value::Text(v) => {
+                body.extend_from_slice(b"\"\r\n\r\n");
+                body.extend(text(&crlf(v)));
+            }
+            Value::File { name: filename, kind, bytes } => {
+                body.extend_from_slice(b"\"; filename=\"");
+                body.extend(text(&escaped(filename)));
+                let kind = if kind.is_empty() { "application/octet-stream" } else { kind };
+                body.extend_from_slice(format!("\"\r\nContent-Type: {kind}\r\n\r\n").as_bytes());
+                body.extend_from_slice(bytes);
+            }
+        }
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    body
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "multipartFormData", multipart_op, context_id);
+    crate::dom::register(scope, ns, "multipartEncode", encode_op, context_id);
+}
+// __dom.multipartEncode(entries, encoding, boundary) -> the body (`encode`) as a byte string: `entries` a flat array, each
+// entry `name, value` for a field or `name, [filename, type, bytes]` for a file (its bytes a byte string); `encoding` the
+// form's (null: UTF-8).
+fn encode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
+    let label = args.get(1);
+    let encoding = if label.is_null_or_undefined() { None } else { encoding_rs::Encoding::for_label(label.to_rust_string_lossy(scope).as_bytes()) };
+    let boundary = args.get(2).to_rust_string_lossy(scope);
+    // (…a file's bytes read first, borrowed by the entries after)
+    let mut raw: Vec<(String, Result<String, (String, String, Vec<u8>)>)> = Vec::new();
+    let mut k = 0;
+    while k + 1 < list.length() {
+        let name = list.get_index(scope, k).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
+        let value = list.get_index(scope, k + 1);
+        let entry = match value.and_then(|v| v8::Local::<v8::Array>::try_from(v).ok()) {
+            Some(file) => {
+                let mut part = |i: u32| file.get_index(scope, i);
+                let filename = part(0).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
+                let kind = part(1).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
+                let bytes = part(2).and_then(|v| v8::Local::<v8::String>::try_from(v).ok()).map(|s| {
+                    let mut units = vec![0u16; s.length()];
+                    s.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
+                    units.into_iter().map(|u| u as u8).collect::<Vec<u8>>()
+                });
+                Err((filename, kind, bytes.unwrap_or_default()))
+            }
+            None => Ok(value.map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default()),
+        };
+        raw.push((name, entry));
+        k += 2;
+    }
+    let entries: Vec<(String, Value<'_>)> = raw
+        .iter()
+        .map(|(name, v)| {
+            let value = match v {
+                Ok(text) => Value::Text(text.clone()),
+                Err((filename, kind, bytes)) => Value::File { name: filename.clone(), kind, bytes },
+            };
+            (name.clone(), value)
+        })
+        .collect();
+    let body = encode(&entries, encoding, &boundary);
+    rv.set(v8::String::new_from_one_byte(scope, &body, v8::NewStringType::Normal).map_or_else(|| v8::undefined(scope).into(), Into::into));
 }
 // __dom.multipartFormData(bytes, contentType) -> [name, filename (null for a field), type, value, …] — a field's value
 // UTF-8 decoded (a BOM kept), a file's a byte string — or null where the body is no `multipart/form-data` of the type's
@@ -156,6 +242,23 @@ fn string<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Va
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn entries_encode_as_html_says() {
+        let entries = vec![
+            ("a\nb\"".to_owned(), Value::Text("x\ry".to_owned())),
+            ("f".to_owned(), Value::File { name: "n\".txt".to_owned(), kind: "", bytes: b"\x00\xff" }),
+            ("é".to_owned(), Value::Text("€".to_owned())),
+        ];
+        let body = encode(&entries, Some(encoding_rs::WINDOWS_1252), "B");
+        assert_eq!(
+            body,
+            b"--B\r\nContent-Disposition: form-data; name=\"a%0D%0Ab%22\"\r\n\r\nx\r\ny\r\n--B\r\nContent-Disposition: form-data; name=\"f\"; \
+              filename=\"n%22.txt\"\r\nContent-Type: application/octet-stream\r\n\r\n\x00\xff\r\n--B\r\nContent-Disposition: form-data; \
+              name=\"\xe9\"\r\n\r\n\x80\r\n--B--\r\n"
+                .to_vec()
+        );
+    }
 
     #[test]
     fn parts_parse_and_bad_bodies_do_not() {
