@@ -5725,8 +5725,11 @@ module Capybara
         return {'error' => 'mime'} unless js_mime_type?(ct)
         # (…and the scope one the script may control: its directory, or the path its Service-Worker-Allowed names)
         allowed = (res['headers'] || {}).find {|k, _| k.to_s.casecmp('service-worker-allowed').zero? }&.last
-        allowed = Array(allowed).join(', ') unless allowed.nil?
-        return {'error' => 'scope'} unless Native.service_worker_scope_allowed(scope.to_s, script_url.to_s, allowed)
+        # (…a header given more than once — Rack 3's array, Rack 2's lines — none to take: "extracting header list
+        # values" fails, a network error)
+        allowed = allowed.is_a?(Array) ? allowed : allowed&.to_s&.then {|v| v.empty? ? [v] : v.split("\n") }
+        return {'error' => 'network'} if allowed && allowed.size > 1
+        return {'error' => 'scope'} unless Native.service_worker_scope_allowed(scope.to_s, script_url.to_s, allowed&.first)
 
         w       = @workers[newest_handle.to_i]
         body    = res['body'].to_s
@@ -9112,7 +9115,7 @@ module Capybara
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -9149,6 +9152,9 @@ module Capybara
         # falls back to the top document, keeping the creator-inherited behavior those
         # contexts had before client threading.
         client = client_url.to_s.match?(%r{\Ahttps?://}i) ? client_url : @current_url
+        # …and its ORIGIN, where the realm says it (`client_origin`, its document's): a sandboxed document at a real URL
+        # is of an opaque origin ("null") its URL does not carry — every request it makes cross-origin, as Fetch has it.
+        client_origin = client_origin.to_s.empty? ? url_origin(client) : client_origin.to_s
         # The request's origin for EVERY fetch mode — Fetch appends an Origin header to
         # every non-GET/HEAD request regardless of mode (a same-origin or no-cors
         # POST/PUT still carries it, for the server's CSRF/Origin check). CORS
@@ -9156,7 +9162,7 @@ module Capybara
         # (navigation / asset GET) has no origin semantics. An explicit `initiator` (a SW
         # re-issuing a navigation via `fetch(event.request)`) is the request's origin for
         # ALL modes — so a passthrough 'navigate'-mode POST still carries its Origin.
-        req_origin  = initiator || (%w[cors no-cors same-origin].include?(cors_mode) ? url_origin(client) : nil)
+        req_origin  = initiator || (%w[cors no-cors same-origin].include?(cors_mode) ? client_origin : nil)
         # Fetch request "mode" (fetch threads it; XHR is always 'cors'; a non-fetch/xhr
         # caller passes nil → no mode semantics, a plain 'basic' response). `no-cors`
         # filters a cross-origin response to opaque; `same-origin` makes a cross-origin
@@ -9165,7 +9171,7 @@ module Capybara
         # any hop leaves the document origin.
         no_cors_mode     = cors_mode == 'no-cors'
         same_origin_mode = cors_mode == 'same-origin'
-        doc_origin       = %w[cors no-cors same-origin].include?(cors_mode) ? url_origin(client) : nil
+        doc_origin       = %w[cors no-cors same-origin].include?(cors_mode) ? client_origin : nil
         crossed          = false
         # Sec-Fetch-Site latches the widest initiator↔hop relationship across the redirect chain
         # (like the navigation path), computed vs the request's referrer-source origin below. A SW

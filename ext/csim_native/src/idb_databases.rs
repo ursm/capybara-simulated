@@ -776,14 +776,15 @@ fn finished(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     lock().finished(tx);
 }
 // __dom.idbTxState(tx, state?) -> its state (0 active, 1 inactive, 2 committing, 3 finished — finished where it is gone),
-// set to `state` where one is given (a value cloned while it is inactive, then put back): what it was.
+// set to `state` where one is given (a value cloned while it is inactive, then put back) — but a finished one, which
+// nothing brings back (a getter the clone ran may have aborted it): what it was.
 fn tx_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let tx = u32_arg(scope, &args, 0);
     let set = (!args.get(1).is_undefined()).then(|| u32_arg(scope, &args, 1));
     let mut reg = lock();
     let Some(t) = reg.transactions.get_mut(&tx) else { return rv.set_uint32(FINISHED) };
     let was = t.state;
-    if let Some(state) = set {
+    if let Some(state) = set.filter(|_| was != FINISHED) {
         t.state = state;
     }
     rv.set_uint32(was);

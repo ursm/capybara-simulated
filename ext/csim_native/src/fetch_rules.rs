@@ -133,13 +133,14 @@ pub(crate) fn no_cors_safelisted_request_header(name: &[u8], value: &[u8]) -> bo
     let lower = name.to_ascii_lowercase();
     [&b"accept"[..], b"accept-language", b"content-language", b"content-type"].contains(&lower.as_slice()) && cors_safelisted_request_header(name, value)
 }
-// "Simple range header value": a single range, no white space in it.
+// The CORS-safelisted `Range`: a single range, no white space in it, its start given (a suffix one is not: browsers never
+// sent one, Fetch §2.2.2).
 fn simple_range(value: &[u8]) -> bool {
-    single_range(value, false).is_some()
+    matches!(single_range(value, false), Some((Some(_), _)))
 }
-// Fetch "parse a single range header value": `bytes` (ASCII case-insensitive), `=`, a start, `-`, an end — each number
-// ASCII digits, either omitted but not both, a start past its end none — with HTTP tabs or spaces between where
-// `allow_whitespace`; the start and the end, None for failure.
+// Fetch "parse a single range header value": `bytes` (byte for byte), `=`, a start, `-`, an end — each number ASCII
+// digits, either omitted but not both, a start past its end none — with HTTP tabs or spaces between where
+// `allow_whitespace`; the start and the end (one past a u64 its greatest — past any body's end), None for failure.
 pub(crate) fn single_range(value: &[u8], allow_whitespace: bool) -> Option<(Option<u64>, Option<u64>)> {
     let mut rest = value;
     let skip = |rest: &mut &[u8]| {
@@ -148,16 +149,18 @@ pub(crate) fn single_range(value: &[u8], allow_whitespace: bool) -> Option<(Opti
         }
     };
     let expect = |rest: &mut &[u8], what: &[u8]| -> Option<()> {
-        let head = rest.get(..what.len()).filter(|h| h.eq_ignore_ascii_case(what))?;
-        *rest = &rest[head.len()..];
+        *rest = rest.strip_prefix(what)?;
         Some(())
     };
-    let number = |rest: &mut &[u8]| {
+    // (…its digits, leading zeros gone: two numbers compare by these, whatever their size)
+    let number = |rest: &mut &[u8]| -> Option<Vec<u8>> {
         let n = rest.iter().take_while(|b| b.is_ascii_digit()).count();
-        let digits = &rest[..n];
+        let digits = rest[..n].to_vec();
         *rest = &rest[n..];
-        // (…one too long for a u64 past any body's end)
-        (n > 0).then(|| std::str::from_utf8(digits).ok().and_then(|d| d.parse::<u64>().ok()).unwrap_or(u64::MAX))
+        (n > 0).then(|| {
+            let zeros = digits.iter().take_while(|&&d| d == b'0').count().min(n - 1);
+            digits[zeros..].to_vec()
+        })
     };
     expect(&mut rest, b"bytes")?;
     skip(&mut rest);
@@ -169,8 +172,9 @@ pub(crate) fn single_range(value: &[u8], allow_whitespace: bool) -> Option<(Opti
     skip(&mut rest);
     let end = number(&mut rest);
     skip(&mut rest);
-    let past_end = matches!((start, end), (Some(a), Some(b)) if a > b);
-    (rest.is_empty() && (start.is_some() || end.is_some()) && !past_end).then_some((start, end))
+    let past_end = matches!((&start, &end), (Some(a), Some(b)) if (a.len(), a) > (b.len(), b));
+    let value = |d: Vec<u8>| std::str::from_utf8(&d).ok().and_then(|d| d.parse::<u64>().ok()).unwrap_or(u64::MAX);
+    (rest.is_empty() && (start.is_some() || end.is_some()) && !past_end).then(|| (start.map(value), end.map(value)))
 }
 // …and the bytes of a body `total` long a blob URL's range takes (Fetch's blob URL fetch, white space allowed): its first
 // and last, None where the range is none or none of the body — a suffix its last bytes (all of them where it is longer),
@@ -341,10 +345,14 @@ mod tests {
         assert!(cors_safelisted_request_header(b"content-type", b"text/plain;charset=\xe9"));
         assert!(!cors_safelisted_request_header(b"content-type", b"application/json"));
         assert!(cors_safelisted_request_header(b"range", b"bytes=0-"));
-        assert!(cors_safelisted_request_header(b"range", b"bytes=-5"));
+        assert!(!cors_safelisted_request_header(b"range", b"bytes=-5"));
+        assert!(!cors_safelisted_request_header(b"range", b"BYTES=0-"));
+        assert!(!cors_safelisted_request_header(b"range", b"bytes=99999999999999999999999-99999999999999999999998"));
+        assert!(cors_safelisted_request_header(b"range", b"bytes=007-8"));
         assert!(!cors_safelisted_request_header(b"range", b"bytes=5-1"));
         assert!(!cors_safelisted_request_header(b"range", b"bytes= 0-"));
-        assert_eq!(blob_range(b"BYTES = 2 - ", 10), Some((2, 9)));
+        assert_eq!(blob_range(b"bytes = 2 - ", 10), Some((2, 9)));
+        assert_eq!(blob_range(b"BYTES=0-2", 10), None);
         assert_eq!(blob_range(b"bytes=-3", 10), Some((7, 9)));
         assert_eq!(blob_range(b"bytes=-30", 10), Some((0, 9)));
         assert_eq!(blob_range(b"bytes=2-99", 10), Some((2, 9)));

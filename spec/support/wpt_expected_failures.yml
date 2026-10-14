@@ -2278,14 +2278,6 @@ fetch/api/basic/stream-safe-creation.any.js:
 - "[serviceworker] throwing Object.prototype.type accessor should not affect stream
   creation by 'fetch'"
 - throwing Object.prototype.type accessor should not affect stream creation by 'fetch'
-fetch/api/cors/data-url-iframe.html:
-- fetching "top.txt" without ACAO should be rejected.
-fetch/api/cors/data-url-shared-worker.html:
-- fetching "top.txt" without ACAO should be rejected.
-fetch/api/cors/data-url-worker.html:
-- fetching "top.txt" without ACAO should be rejected.
-fetch/api/cors/sandboxed-iframe.html:
-- CORS with sandboxed iframe
 fetch/api/headers/header-values.any.js:
 - XMLHttpRequest with all valid values
 - "[dedicatedworker] fetch() with all valid values"
@@ -5435,7 +5427,6 @@ service-workers/service-worker/intercepted-referrer.https.html:
 - document.referrer for a navigation intercepted by a Service Worker is unchanged
   and matches the parent URL
 service-workers/service-worker/local-url-inherit-controller.https.html:
-- Data URL iframe should not intercept fetch().
 - Data URL worker should not inherit service worker controller.
 - Data URL worker should not intercept fetch().
 - Same-origin blob URL iframe should inherit service worker controller.
@@ -6051,8 +6042,6 @@ webstorage/storage_session_window_reopen.window.js:
 - ensure that re-opening a named window doesn't copy sessionStorage
 xhr/abort-after-stop.window.js:
 - abort-after-stop
-xhr/access-control-basic-allow-access-control-origin-header-data-url.htm:
-- Access granted to null-origin iframe
 xhr/access-control-basic-allow-preflight-cache-timeout.any.js:
 - Preflight cache should be invalidated on timeout
 - "[dedicatedworker] Preflight cache should be invalidated on timeout"
@@ -6060,10 +6049,6 @@ xhr/access-control-preflight-credential-async.htm:
 - CORS async request with URL credentials
 xhr/access-control-preflight-credential-sync.htm:
 - CORS sync request with URL credentials
-xhr/access-control-sandboxed-iframe-denied-without-wildcard.htm:
-- Sandboxed iframe is denied CORS access to server that allows parent origin
-xhr/access-control-sandboxed-iframe-denied.htm:
-- Sandboxed iframe is denied access to path
 xhr/event-error.sub.any.js:
 - "[dedicatedworker] error while reading body should report zeros for loaded and total"
 - error while reading body should report zeros for loaded and total
