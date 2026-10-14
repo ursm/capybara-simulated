@@ -3859,32 +3859,49 @@ module Capybara
       # surface so this stays a real network read.
       private def run_event_source_reader(id, url, queue)
         target = resolve_against_current(url)
-        uri    = uri_for(target)
-        unless uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
-          queue << {id: id, type: '__error', message: "unsupported scheme: #{uri.scheme.inspect}"}
+        socket = nil
+        # Fetch with redirect mode "follow": a 3xx with a Location is followed, re-resolved against the URL it came from,
+        # up to the redirect limit — an HTTP(S) one alone, each hop its own cookies.
+        (MAX_FETCH_REDIRECTS + 1).times do
+          uri = uri_for(target)
+          unless uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
+            queue << {id: id, type: '__error', message: "unsupported scheme: #{uri.scheme.inspect}"}
+            return
+          end
+          socket = open_event_source_socket(uri)
+          send_event_source_request(socket, uri)
+          status_line = socket.gets
+          unless status_line
+            queue << {id: id, type: '__error', message: 'empty response'}
+            return
+          end
+          code = status_line[%r{HTTP/[\d.]+\s+(\d+)}, 1].to_i
+          chunked = false
+          content_types = []
+          location = nil
+          while (line = socket.gets) && line.strip != ''
+            chunked = true if line =~ /\Atransfer-encoding:\s*chunked/i
+            # (…a header value's bytes each one character, as Fetch reads a header — a non-ASCII byte a Latin-1 one)
+            value = line.split(':', 2)[1].to_s.strip.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
+            content_types << value if line =~ /\Acontent-type:/i
+            location = value if line =~ /\Alocation:/i
+          end
+          if REDIRECT_STATUSES.include?(code) && location
+            socket.close
+            target = carry_fragment(target, resolve_against(location, target))
+            next
+          end
+          # HTML "establish the connection": a response that is not a 200 of `text/event-stream` fails it — no
+          # reconnection.
+          unless code == 200 && Native.content_type_essence(content_types.join(', ')) == 'text/event-stream'
+            queue << {id: id, type: '__error', message: "HTTP #{code} #{content_types.join(', ')}".strip}
+            return
+          end
+          queue << {id: id, type: '__open'}
+          read_event_source_body(socket, id, queue, chunked: chunked)
           return
         end
-        socket = open_event_source_socket(uri)
-        send_event_source_request(socket, uri)
-        status_line = socket.gets
-        unless status_line
-          queue << {id: id, type: '__error', message: 'empty response'}
-          return
-        end
-        code = status_line[%r{HTTP/[\d.]+\s+(\d+)}, 1].to_i
-        chunked = false
-        content_types = []
-        while (line = socket.gets) && line.strip != ''
-          chunked = true if line =~ /\Atransfer-encoding:\s*chunked/i
-          content_types << line[/\Acontent-type:(.*)/i, 1].strip if line =~ /\Acontent-type:/i
-        end
-        # HTML "establish the connection": a response that is not a 200 of `text/event-stream` fails it — no reconnection.
-        unless code == 200 && Native.content_type_essence(content_types.join(', ')) == 'text/event-stream'
-          queue << {id: id, type: '__error', message: "HTTP #{code} #{content_types.join(', ')}".strip}
-          return
-        end
-        queue << {id: id, type: '__open'}
-        read_event_source_body(socket, id, queue, chunked: chunked)
+        queue << {id: id, type: '__error', message: 'too many redirects'}
       rescue EOFError, Errno::ECONNRESET
         # Server closed mid-stream — normal lifecycle, not an error
         # worth surfacing.
