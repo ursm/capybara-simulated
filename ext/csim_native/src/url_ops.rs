@@ -13,6 +13,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "urlParse", url_parse, context_id);
     register(scope, ns, "urlSet", url_set, context_id);
     register(scope, ns, "urlHasOpaquePath", url_has_opaque_path, context_id);
+    register(scope, ns, "postMessageTarget", post_message_target_op, context_id);
+    register(scope, ns, "postMessageReaches", post_message_reaches_op, context_id);
     register(scope, ns, "urlencodedParse", urlencoded_parse, context_id);
     register(scope, ns, "urlencodedSerialize", urlencoded_serialize, context_id);
 }
@@ -141,6 +143,41 @@ fn url_has_opaque_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     rv.set_bool(Url::parse(href.as_str(), None).is_ok_and(|u| has_opaque_path(&u)));
 }
 
+// HTML "window post message steps": the target origin a `targetOrigin` names — "*" and "/" themselves, else the origin
+// of the absolute URL it is (serialized: "null" for an opaque one) — None where it is no URL (a SyntaxError).
+fn post_message_target(arg: &str) -> Option<String> {
+    if arg == "*" || arg == "/" {
+        return Some(arg.to_owned());
+    }
+    Url::parse(arg, None).ok().map(|u| u.origin())
+}
+// …and whether a message so targeted reaches a window of origin `target` from one of `sender` (origins serialized,
+// `same_window` where it is posted to itself): "*" any, "/" the sender's own origin, any other the origin it names — an
+// opaque origin same origin with nothing but itself, which a serialization cannot say: "/" reaches an opaque window from
+// itself alone, and a named origin (a `data:` URL's is a new opaque one) never reaches one.
+fn post_message_reaches(arg: &str, sender: &str, target: &str, same_window: bool) -> Option<bool> {
+    let wanted = post_message_target(arg)?;
+    Some(match wanted.as_str() {
+        "*" => true,
+        "/" => same_window || (sender != "null" && sender == target),
+        origin => origin != "null" && origin == target,
+    })
+}
+// __dom.postMessageTarget(targetOrigin) -> `post_message_target`, or null.
+fn post_message_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let arg = usv(scope, args.get(0));
+    match post_message_target(&arg).and_then(|t| v8::String::new(scope, &t)) {
+        Some(t) => rv.set(t.into()),
+        None => rv.set_null(),
+    }
+}
+// __dom.postMessageReaches(targetOrigin, senderOrigin, targetWindowOrigin, sameWindow) -> 1 it reaches, 0 it does not,
+// -1 the target origin is no URL (`post_message_reaches`).
+fn post_message_reaches_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (arg, sender, target) = (usv(scope, args.get(0)), usv(scope, args.get(1)), usv(scope, args.get(2)));
+    rv.set_int32(post_message_reaches(&arg, &sender, &target, args.get(3).is_true()).map_or(-1, i32::from));
+}
+
 // __dom.urlSet(href, part, value) -> the URL's parts once `part` is set to `value`, as the interface's setter sets it
 // (a value it rejects leaves the URL as it was); null when `href` itself does not parse, or — for `href` — `value`
 // does not. `part` "query" sets the query to the already-serialized `value` (null: none), the URLSearchParams update
@@ -204,5 +241,21 @@ fn urlencoded_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let text = serializer.finish();
     if let Some(string) = v8::String::new(scope, &text) {
         rv.set(string.into());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_posted_message_reaches_its_target_origin() {
+        assert_eq!(post_message_reaches("*", "null", "https://a", false), Some(true));
+        assert_eq!(post_message_reaches("/", "https://a", "https://a", false), Some(true));
+        assert_eq!(post_message_reaches("/", "null", "null", false), Some(false));
+        assert_eq!(post_message_reaches("/", "null", "null", true), Some(true));
+        assert_eq!(post_message_reaches("https://a/x?y", "https://b", "https://a", false), Some(true));
+        assert_eq!(post_message_reaches("data:,x", "null", "null", true), Some(false));
+        assert_eq!(post_message_reaches("nope", "https://a", "https://a", false), None);
     }
 }

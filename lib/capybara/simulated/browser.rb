@@ -5724,12 +5724,13 @@ module Capybara
         ct = (res['headers'] || {}).find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
         return {'error' => 'mime'} unless js_mime_type?(ct)
         # (…and the scope one the script may control: its directory, or the path its Service-Worker-Allowed names)
+        # (…a header given more than once — Rack 3's array, Rack 2's lines — combined, as a header list combines one)
         allowed = (res['headers'] || {}).find {|k, _| k.to_s.casecmp('service-worker-allowed').zero? }&.last
-        # (…a header given more than once — Rack 3's array, Rack 2's lines — none to take: "extracting header list
-        # values" fails, a network error)
-        allowed = allowed.is_a?(Array) ? allowed : allowed&.to_s&.then {|v| v.empty? ? [v] : v.split("\n") }
-        return {'error' => 'network'} if allowed && allowed.size > 1
-        return {'error' => 'scope'} unless Native.service_worker_scope_allowed(scope.to_s, script_url.to_s, allowed&.first)
+        allowed = Array(allowed).flat_map {|v| v.to_s.split("\n") }.join(', ') unless allowed.nil?
+        case Native.service_worker_max_scope(scope.to_s, script_url.to_s, allowed)
+        when 'network' then return {'error' => 'network'}
+        when 'scope'   then return {'error' => 'scope'}
+        end
 
         w       = @workers[newest_handle.to_i]
         body    = res['body'].to_s
@@ -9353,7 +9354,8 @@ module Capybara
           # navigation's destination. The navigation's dest ('document'/'iframe', threaded as
           # `nav_dest`) still drives the SameSite Lax gate below, which is top-level-only.
           if cors_mode
-            sec_site = widen_sec_fetch_site(sec_site, sec_fetch_site(sec_initiator, target))
+            # (…an opaque-origin client's request is of no site at all: cross-site, wherever it goes)
+            sec_site = widen_sec_fetch_site(sec_site, client_origin == 'null' ? 'cross-site' : sec_fetch_site(sec_initiator, target))
             env['HTTP_SEC_FETCH_SITE'] = sec_site
             env['HTTP_SEC_FETCH_MODE'] = cors_mode
             env['HTTP_SEC_FETCH_DEST'] = 'empty'
