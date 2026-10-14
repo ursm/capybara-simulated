@@ -458,3 +458,9 @@ pub(crate) fn media_text(text: &str) -> String {
     let url = crate::cssom_decl::url_data("about:blank");
     crate::sheets::media_list(text, &url, QuirksMode::NoQuirks).css()
 }
+// …and its media queries, each serialized (`MediaList.item`): the queries a list holds, whatever separates them.
+pub(crate) fn media_queries(text: &str) -> Vec<String> {
+    use style_traits::ToCss as _;
+    let url = crate::cssom_decl::url_data("about:blank");
+    crate::sheets::media_list(text, &url, QuirksMode::NoQuirks).media_queries.iter().map(|q| q.to_css_string()).collect()
+}

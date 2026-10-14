@@ -2578,6 +2578,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "sheetMedia", sheet_media, context_id);
     register(scope, ns, "sheetDisabled", sheet_disabled, context_id);
     register(scope, ns, "mediaText", media_text, context_id);
+    register(scope, ns, "mediaQueries", media_queries, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
     register(scope, ns, "styleProperties", style_properties, context_id);
     // CSSOM's declaration blocks, over the engine's (cssom_decl.rs): each takes the block's TEXT, its kind and the
@@ -4310,6 +4311,15 @@ fn sheet_disabled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 fn media_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let text = args.get(0).to_rust_string_lossy(scope);
     set_str(scope, &mut rv, &crate::cssom_rule::media_text(&text));
+}
+// __dom.mediaQueries(text) -> the media queries `text` parses to as a media list, each serialized.
+fn media_queries(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    let items: Vec<v8::Local<v8::Value>> = crate::cssom_rule::media_queries(&text)
+        .iter()
+        .filter_map(|q| v8::String::new(scope, q).map(Into::into))
+        .collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.ruleDrop(handle): the CSSOM object naming the rule is gone.
 fn rule_drop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
