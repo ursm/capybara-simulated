@@ -73,6 +73,12 @@ struct Range {
 }
 
 impl Range {
+    // Whether `key` is in it ("in a key range"): not below an open lower bound or at it, nor above an upper.
+    fn contains(&self, key: &Key) -> bool {
+        let above_lower = self.lower.as_ref().is_none_or(|l| if self.lower_open { l < key } else { l <= key });
+        let below_upper = self.upper.as_ref().is_none_or(|u| if self.upper_open { key < u } else { key <= u });
+        above_lower && below_upper
+    }
     // (…its lower and upper bounds as bounds of (key, primary key) pairs)
     fn lower_pair(&self) -> Bound<(Key, Key)> {
         match &self.lower {
@@ -186,6 +192,7 @@ const MAX_GENERATED: f64 = 9_007_199_254_740_992.0; // 2^53
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "idbCompare", compare_op, context_id);
+    register(scope, ns, "idbInRange", in_range_op, context_id);
     register(scope, ns, "idbStore", store_info, context_id);
     register(scope, ns, "idbStoreLive", store_live, context_id);
     register(scope, ns, "idbIndexCreate", index_create, context_id);
@@ -328,6 +335,12 @@ fn index_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgume
     (v >= 0).then_some(v as u32)
 }
 
+// __dom.idbInRange(range, key) -> whether the key is in the range (`Range::contains`).
+fn in_range_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let range = range_arg(scope, args.get(0));
+    let Some(key) = key_arg(scope, args.get(1)) else { return };
+    rv.set_bool(range.contains(&key));
+}
 // __dom.idbCompare(a, b) -> -1, 0 or 1: "compare two keys".
 fn compare_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(a), Some(b)) = (key_arg(scope, args.get(0)), key_arg(scope, args.get(1))) else { return };

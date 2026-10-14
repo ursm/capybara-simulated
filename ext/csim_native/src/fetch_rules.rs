@@ -121,6 +121,7 @@ pub(crate) fn cors_safelisted_response_header(name: &[u8]) -> bool {
 // ── For the bindings ──
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "badPort", bad_port_op, context_id);
+    crate::dom::register(scope, ns, "corsSafelistedMethod", cors_safelisted_method_op, context_id);
     crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
     crate::dom::register(scope, ns, "headerRule", header_rule_op, context_id);
     crate::dom::register(scope, ns, "httpToken", http_token_op, context_id);
@@ -136,6 +137,11 @@ fn units(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> V
 fn bad_port_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let port = args.get(0).uint32_value(scope).unwrap_or(0);
     rv.set_bool(bad_port(port));
+}
+// __dom.corsSafelistedMethod(method) -> whether it is a CORS-safelisted method.
+fn cors_safelisted_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let method = units(scope, args.get(0));
+    rv.set_bool(cors_safelisted_method(&method));
 }
 // __dom.forbiddenMethod(method) -> whether it is a forbidden method.
 fn forbidden_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

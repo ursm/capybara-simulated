@@ -511,6 +511,25 @@ impl RealmArena {
         });
         named
     }
+    // …and the names they are reachable by (HTML §4.10.3 "supported property names", but the past names map's, which
+    // the bindings keep): each named element's id and then its name, in tree order, an empty one or one already given
+    // left out.
+    pub(crate) fn form_supported_names(&self, form: NodeId) -> Vec<Vec<u16>> {
+        let root = self.form_tree(form);
+        let mut names: Vec<Vec<u16>> = Vec::new();
+        self.find_in_tree(root, |c, n| {
+            if c != root && self.is_form_named_candidate(form, c) {
+                for attr in ["id", "name"] {
+                    let value = n.get_attr_u16(attr).map(<[u16]>::to_vec).or_else(|| n.plain_attr(attr).map(|v| v.encode_utf16().collect()));
+                    if let Some(v) = value.filter(|v| !v.is_empty() && !names.contains(v)) {
+                        names.push(v);
+                    }
+                }
+            }
+            false
+        });
+        names
+    }
     // …and a fieldset's (its `elements`): its listed descendants in tree order, image buttons and nested fieldsets
     // included.
     pub(crate) fn fieldset_listed(&self, fieldset: NodeId) -> Vec<NodeId> {

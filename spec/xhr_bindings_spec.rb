@@ -145,4 +145,22 @@ RSpec.describe 'XMLHttpRequest bindings' do
       'text' => [6, 6, true], 'arraybuffer' => [2, 2, true], 'sync' => [3, 3, true]
     )
   end
+
+  # The final MIME type is the one the Content-Type gives (Fetch's "extract a MIME type"), and an XML document is
+  # parsed only for an XML MIME type (MIME Sniffing: a `+xml` subtype, text/xml, application/xml) — not any `*/xml`.
+  it 'parses responseXML for an XML MIME type alone' do
+    session.execute_script(<<~JS)
+      window.got = {};
+      for (const type of ['application/xml', 'image/svg+xml', 'image/xml', 'text/plain']) {
+        const x = new XMLHttpRequest();
+        x.open('GET', URL.createObjectURL(new Blob(['<r/>'], {type})));
+        x.onload = () => { window.got[type] = x.responseXML ? x.responseXML.documentElement.localName : null; };
+        x.send();
+      }
+    JS
+    poll_until { session.evaluate_script('Object.keys(window.got).length === 4') }
+    expect(session.evaluate_script('window.got')).to eq(
+      'application/xml' => 'r', 'image/svg+xml' => 'r', 'image/xml' => nil, 'text/plain' => nil
+    )
+  end
 end

@@ -28,4 +28,24 @@ RSpec.describe 'a form named control' do
     JS
     expect(got).to eq([true, 'FORM', '_method', 'submit', true])
   end
+
+  # Web IDL [[OwnPropertyKeys]] of a legacy platform object: its indices, then its supported property names —
+  # [LegacyUnenumerableNamedProperties] keeps them out of Object.keys, not out of the keys — then its own properties.
+  # The names are each named control's id then its name in tree order (an image button none), then the past names map's.
+  # (Chrome and Firefox both leave the names out; the spec's step is explicit.)
+  it 'lists its supported property names among its own keys, unenumerable' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const f = document.createElement('form');
+        f.innerHTML = '<input name=a id=x><input name=b><img name=pic id=pi><input type=image name=btn><fieldset name=fs></fieldset>';
+        document.body.append(f);
+        const b = f.elements.b;
+        f.b;
+        b.name = 'renamed';
+        const names = Object.getOwnPropertyNames(f).filter((k) => !k.startsWith('_'));
+        return [names, Object.keys(f).filter((k) => !k.startsWith('_'))];
+      })()
+    JS
+    expect(got).to eq([%w[0 1 2 x a renamed pi pic fs b], %w[0 1 2]])
+  end
 end

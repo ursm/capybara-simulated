@@ -12,6 +12,7 @@ use crate::dom::register;
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "urlParse", url_parse, context_id);
     register(scope, ns, "urlSet", url_set, context_id);
+    register(scope, ns, "urlHasOpaquePath", url_has_opaque_path, context_id);
     register(scope, ns, "urlencodedParse", urlencoded_parse, context_id);
     register(scope, ns, "urlencodedSerialize", urlencoded_serialize, context_id);
 }
@@ -127,6 +128,17 @@ fn encode(encoding: &'static encoding_rs::Encoding, text: &str) -> Vec<u8> {
         }
     }
     out
+}
+
+// Whether a URL has an opaque path (URL Standard): one with no host whose path is no list — a pathname not starting
+// with "/" (`mailto:x`, `foo:`), where `foo://` has an empty host and `foo:/x` a list.
+fn has_opaque_path(url: &Url) -> bool {
+    !url.has_hostname() && !url.pathname().starts_with('/')
+}
+// __dom.urlHasOpaquePath(href) -> `has_opaque_path` (false for no URL).
+fn url_has_opaque_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let href = usv(scope, args.get(0));
+    rv.set_bool(Url::parse(href.as_str(), None).is_ok_and(|u| has_opaque_path(&u)));
 }
 
 // __dom.urlSet(href, part, value) -> the URL's parts once `part` is set to `value`, as the interface's setter sets it

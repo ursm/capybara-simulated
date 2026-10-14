@@ -673,6 +673,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "arrowDefault", arrow_default, context_id);
     crate::dom::register(scope, ns, "fieldsetListed", fieldset_listed, context_id);
     crate::dom::register(scope, ns, "formNamed", form_named, context_id);
+    crate::dom::register(scope, ns, "formSupportedNames", form_supported_names, context_id);
     crate::dom::register(scope, ns, "isFormNamedCandidate", is_form_named_candidate, context_id);
     crate::dom::register(scope, ns, "formSubmittables", form_submittables, context_id);
     crate::dom::register(scope, ns, "implicitSubmissionForm", implicit_submission_form, context_id);
@@ -786,6 +787,17 @@ fn default_button(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set(crate::dom::nodes_value(scope, cid, button.as_slice()));
 }
 
+// __dom.formSupportedNames(formNid) -> the names its named elements are reachable by (`form_supported_names`).
+fn form_supported_names(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(form) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let names = crate::dom::realm(scope, cid).form_supported_names(form);
+    let items: Vec<v8::Local<v8::Value>> = names
+        .iter()
+        .filter_map(|n| v8::String::new_from_two_byte(scope, n, v8::NewStringType::Normal).map(Into::into))
+        .collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
 // __dom.formNamed(formNid, name) -> the form's named elements of `name` (`element_state::form_named`), from its tree.
 fn form_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
