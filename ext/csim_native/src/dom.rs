@@ -2661,6 +2661,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::sandbox::install(scope, ns, context_id);
     crate::webcrypto::install(scope, ns, context_id);
     crate::integrity::install(scope, ns, context_id);
+    crate::pointer::install(scope, ns, context_id);
     crate::import_map::install(scope, ns, context_id);
     crate::canvas_path::install(scope, ns, context_id);
     crate::text::install(scope, ns, context_id);
