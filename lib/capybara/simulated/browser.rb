@@ -3878,14 +3878,22 @@ module Capybara
           code = status_line[%r{HTTP/[\d.]+\s+(\d+)}, 1].to_i
           chunked = false
           content_types = []
-          location = nil
+          set_cookies   = []
+          location      = nil
           while (line = socket.gets) && line.strip != ''
             chunked = true if line =~ /\Atransfer-encoding:\s*chunked/i
-            # (…a header value's bytes each one character, as Fetch reads a header — a non-ASCII byte a Latin-1 one)
-            value = line.split(':', 2)[1].to_s.strip.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
-            content_types << value if line =~ /\Acontent-type:/i
-            location = value if line =~ /\Alocation:/i
+            raw = line.split(':', 2)[1].to_s.strip
+            # (…a Content-Type's bytes each one character, as Fetch reads a header — a non-ASCII byte a Latin-1 one; a
+            # Location UTF-8, as the URL parser takes it, Latin-1 where it is none)
+            content_types << raw.dup.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8) if line =~ /\Acontent-type:/i
+            set_cookies << raw.dup.force_encoding(Encoding::UTF_8).scrub if line =~ /\Aset-cookie:/i
+            if line =~ /\Alocation:/i
+              utf8     = raw.dup.force_encoding(Encoding::UTF_8)
+              location = utf8.valid_encoding? ? utf8 : raw.dup.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
+            end
           end
+          # (…a hop's cookies kept before the next is asked for: a login bounce sets one the stream needs)
+          merge_set_cookie({'set-cookie' => set_cookies}, target) unless set_cookies.empty?
           if REDIRECT_STATUSES.include?(code) && location
             socket.close
             target = carry_fragment(target, resolve_against(location, target))
