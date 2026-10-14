@@ -47,26 +47,31 @@ pub(crate) fn request_body_header(name: &[u8]) -> bool {
     ["content-encoding", "content-language", "content-location", "content-type"].iter().any(|h| h.as_bytes().eq_ignore_ascii_case(name))
 }
 // What following a redirect from `current` to `location` does to a request of `method` (`cors_mode`: its mode "cors"),
-// made by a document of `request_origin`, its response CORS-tainted already where `tainted` (an earlier hop of a CORS
-// request was at another origin than its own: a tainting stays) — None where it is a network error: a location that is
-// no HTTP(S) URL (steps 5 and 6), one with credentials where the request is CORS-mode and the location of another origin
-// (step 7) or where its response is CORS-tainted, now this hop is at another origin too (step 8). Else whether it
-// becomes a bodyless GET (step 12), whether its `Authorization` goes, as it does to another origin (step 13), and
-// whether its response is tainted from here on.
+// made by a document of `request_origin`, its chain at another origin than that already where `crossed` (a response
+// tainting stays) — None where it is a network error: a location that is no HTTP(S) URL (steps 5 and 6), one with
+// credentials where the request is CORS-mode and the location of another origin (step 7) or where its response is
+// CORS-tainted, a CORS-mode chain that has been at another origin, this hop included (step 8). Else whether it becomes a
+// bodyless GET (step 12), whether its `Authorization` goes, as it does to another origin (step 13), and whether the
+// chain has been at another origin once it is at the location — what makes a no-cors response opaque, a CORS one
+// tainted.
 pub(crate) struct Redirect {
     pub(crate) to_get: bool,
     pub(crate) drop_authorization: bool,
-    pub(crate) tainted: bool,
+    pub(crate) crossed: bool,
 }
-pub(crate) fn redirect(status: u32, method: &[u8], current: &str, location: &str, cors_mode: bool, request_origin: &str, tainted: bool) -> Option<Redirect> {
+pub(crate) fn redirect(status: u32, method: &[u8], current: &str, location: &str, cors_mode: bool, request_origin: &str, crossed: bool) -> Option<Redirect> {
     let to = ada_url::Url::parse(location, None).ok().filter(|u| matches!(u.protocol(), "http:" | "https:"))?;
     let from = ada_url::Url::parse(current, None).ok()?;
     let credentials = !to.username().is_empty() || !to.password().is_empty();
-    let tainted = tainted || (cors_mode && from.origin() != request_origin);
-    if credentials && ((cors_mode && to.origin() != request_origin) || tainted) {
+    let crossed = crossed || from.origin() != request_origin;
+    if credentials && cors_mode && (to.origin() != request_origin || crossed) {
         return None;
     }
-    Some(Redirect { to_get: redirect_to_get(status, method), drop_authorization: to.origin() != from.origin(), tainted })
+    Some(Redirect {
+        to_get: redirect_to_get(status, method),
+        drop_authorization: to.origin() != from.origin(),
+        crossed: crossed || to.origin() != request_origin,
+    })
 }
 
 const FORBIDDEN_REQUEST_HEADERS: [&str; 22] = [
@@ -177,15 +182,15 @@ fn cors_safelisted_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
     let method = units(scope, args.get(0));
     rv.set_bool(cors_safelisted_method(&method));
 }
-// __dom.httpRedirect(status, method, currentUrl, locationUrl, corsMode, requestOrigin, tainted) -> null for a network error
-// (`redirect`), else its bits: 1 the request a bodyless GET, 2 its Authorization dropped, 4 its response tainted.
+// __dom.httpRedirect(status, method, currentUrl, locationUrl, corsMode, requestOrigin, crossed) -> null for a network error
+// (`redirect`), else its bits: 1 the request a bodyless GET, 2 its Authorization dropped, 4 its chain at another origin.
 fn http_redirect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let status = args.get(0).uint32_value(scope).unwrap_or(0);
     let method = units(scope, args.get(1));
     let (current, location) = (args.get(2).to_rust_string_lossy(scope), args.get(3).to_rust_string_lossy(scope));
     let origin = args.get(5).to_rust_string_lossy(scope);
     match redirect(status, &method, &current, &location, args.get(4).is_true(), &origin, args.get(6).is_true()) {
-        Some(r) => rv.set_int32(r.to_get as i32 | (r.drop_authorization as i32) << 1 | (r.tainted as i32) << 2),
+        Some(r) => rv.set_int32(r.to_get as i32 | (r.drop_authorization as i32) << 1 | (r.crossed as i32) << 2),
         None => rv.set_null(),
     }
 }
@@ -272,8 +277,11 @@ mod tests {
         assert_eq!(r(301, b"GET", "http://u:p@b.test/", true), None);
         assert_eq!(r(301, b"GET", "http://u:p@a.test/", true), Some((false, false)));
         assert!(redirect(301, b"GET", "http://b.test/x", "http://u:p@b.test/", true, "http://a.test", false).is_none());
-        // (…a chain that left its origin and came back is still tainted)
+        // (…a chain that left its origin and came back is still tainted; and has crossed, whatever its mode)
         assert!(redirect(301, b"GET", "http://a.test/x", "http://u:p@a.test/", true, "http://a.test", true).is_none());
+        assert!(redirect(301, b"GET", "http://a.test/x", "http://b.test/", false, "http://a.test", false).is_some_and(|r| r.crossed));
+        assert!(redirect(301, b"GET", "http://b.test/x", "http://a.test/", false, "http://a.test", false).is_some_and(|r| r.crossed));
+        assert!(redirect(301, b"GET", "http://a.test/x", "http://a.test/y", false, "http://a.test", false).is_some_and(|r| !r.crossed));
         assert!(request_body_header(b"Content-Type") && !request_body_header(b"content-length"));
     }
 
