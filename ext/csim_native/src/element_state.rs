@@ -517,11 +517,12 @@ impl RealmArena {
     pub(crate) fn form_supported_names(&self, form: NodeId) -> Vec<Vec<u16>> {
         let root = self.form_tree(form);
         let mut names: Vec<Vec<u16>> = Vec::new();
+        let mut given = std::collections::HashSet::new();
         self.find_in_tree(root, |c, n| {
             if c != root && self.is_form_named_candidate(form, c) {
                 for attr in ["id", "name"] {
                     let value = n.get_attr_u16(attr).map(<[u16]>::to_vec).or_else(|| n.plain_attr(attr).map(|v| v.encode_utf16().collect()));
-                    if let Some(v) = value.filter(|v| !v.is_empty() && !names.contains(v)) {
+                    if let Some(v) = value.filter(|v| !v.is_empty() && given.insert(v.clone())) {
                         names.push(v);
                     }
                 }

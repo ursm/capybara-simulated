@@ -3137,20 +3137,22 @@ module Capybara
         # a named target that matches THIS window's own `window.name` navigates in
         # place (HTML named-context targeting), so it isn't a new window.
         target = spec['target'].to_s
+        # (…the keywords, and the `rel` tokens below, ASCII case-insensitive, the tokens split on ASCII whitespace)
+        keyword      = target.downcase(:ascii)
         named_target = frame_entry.nil? && !target.empty? &&
-                       !%w[_self _top _parent].include?(target.downcase) &&
+                       !%w[_self _top _parent].include?(keyword) &&
                        @driver.respond_to?(:open_aux_window)
         own_name   = named_target ? (@runtime.call('__csimReadWindowProp', false, 'name').to_s rescue '') : ''
-        new_window = named_target && (target.casecmp?('_blank') || target != own_name)
-        window_name = target.casecmp?('_blank') ? '' : target
+        new_window = named_target && (keyword == '_blank' || target != own_name)
+        window_name = keyword == '_blank' ? '' : target
         # Opener exposure for a `<form target>` new context, per the link-relation
         # model: `noopener`/`noreferrer` always drop the opener; `target=_blank`
         # ALSO defaults to noopener unless `rel=opener` opts back in (a named target
         # keeps its opener by default). `noreferrer` additionally empties the referrer.
-        rel_tokens  = spec['rel'].to_s.downcase.split(/\s+/)
+        rel_tokens  = spec['rel'].to_s.downcase(:ascii).split(/[\t\n\f\r ]+/)
         no_referrer = rel_tokens.include?('noreferrer')
         keep_opener = !no_referrer && !rel_tokens.include?('noopener') &&
-                      (target.downcase != '_blank' || rel_tokens.include?('opener'))
+                      (keyword != '_blank' || rel_tokens.include?('opener'))
         referrer    = no_referrer ? '' : (@current_url || '')
         # Opening a new top-level browsing context consumes transient user activation.
         @runtime.call('__csimConsumeTransientActivation') if new_window rescue nil
