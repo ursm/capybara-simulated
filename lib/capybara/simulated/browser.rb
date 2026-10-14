@@ -3873,11 +3873,14 @@ module Capybara
         end
         code = status_line[%r{HTTP/[\d.]+\s+(\d+)}, 1].to_i
         chunked = false
+        content_types = []
         while (line = socket.gets) && line.strip != ''
           chunked = true if line =~ /\Atransfer-encoding:\s*chunked/i
+          content_types << line[/\Acontent-type:(.*)/i, 1].strip if line =~ /\Acontent-type:/i
         end
-        if code >= 400
-          queue << {id: id, type: '__error', message: "HTTP #{code}"}
+        # HTML "establish the connection": a response that is not a 200 of `text/event-stream` fails it — no reconnection.
+        unless code == 200 && Native.content_type_essence(content_types.join(', ')) == 'text/event-stream'
+          queue << {id: id, type: '__error', message: "HTTP #{code} #{content_types.join(', ')}".strip}
           return
         end
         queue << {id: id, type: '__open'}
