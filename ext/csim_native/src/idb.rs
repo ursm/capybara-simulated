@@ -211,8 +211,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "idbCursor", cursor, context_id);
     register(scope, ns, "idbPopulate", populate, context_id);
     register(scope, ns, "idbJournal", journal, context_id);
-    register(scope, ns, "idbJournalUndo", journal_undo, context_id);
-    register(scope, ns, "idbJournalEnd", journal_end, context_id);
 }
 
 // ── Names and key paths as the bindings hold them ───────────────────────────────────────────────────────────────────
@@ -883,30 +881,24 @@ fn populate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 }
 
 // __dom.idbJournal(store, transaction): what transaction `tx` — the one transaction that may write the store — finds
-// before each write it makes kept, which `idbJournalUndo` puts back (it aborted) and `idbJournalEnd` lets go (it
-// committed).
+// before its first write into it kept, which its abort puts back (`undo_transaction`) and its commit lets go
+// (`keep_transaction`).
 fn journal(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let (store, tx) = (id_arg(scope, &args, 0), id_arg(scope, &args, 1));
     with(|s| {
-        if let Some(st) = s.stores.get_mut(&store) {
+        // (…once a transaction: its first write into the store journaled, every later one already in it)
+        if let Some(st) = s.stores.get_mut(&store).filter(|st| st.journal.as_ref().is_none_or(|j| j.tx != tx)) {
             st.journal = Some(Journal::of(st, tx));
         }
     });
 }
-fn journal_undo(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let (store, tx) = (id_arg(scope, &args, 0), id_arg(scope, &args, 1));
-    with(|s| {
-        let Some(st) = s.stores.get_mut(&store) else { return };
-        if let Some(journal) = st.journal.take_if(|j| j.tx == tx) {
-            st.undo(journal);
-        }
-    });
+// …and kept: its journals let go (it committed).
+pub(crate) fn keep_transaction(reg: &mut Registry, tx: u32) {
+    for st in reg.stores.values_mut() {
+        st.journal.take_if(|j| j.tx == tx);
+    }
 }
-fn journal_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let (store, tx) = (id_arg(scope, &args, 0), id_arg(scope, &args, 1));
-    with(|s| s.stores.get_mut(&store).map(|st| st.journal.take_if(|j| j.tx == tx)));
-}
-// What transaction `tx` wrote, put back in every store it wrote (its agent gone mid-transaction).
+// What transaction `tx` wrote, put back in every store it wrote (its agent gone mid-transaction, or aborted).
 pub(crate) fn undo_transaction(reg: &mut Registry, tx: u32) {
     for st in reg.stores.values_mut() {
         if let Some(journal) = st.journal.take_if(|j| j.tx == tx) {

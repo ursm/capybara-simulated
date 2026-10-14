@@ -57,14 +57,43 @@ struct Connection {
     closed: bool,
 }
 
-// A transaction: its connection, its scope (store names, sorted), its mode, whether it started.
+// A transaction: its connection, its scope (store names, sorted), its mode, whether it started — and its lifecycle
+// (§2.7): its state, its requests in order (the agent's numbers for them, whose operations the bindings hold), whether one
+// is running (a task of it queued), whether its commit is finishing (its `complete` task queued), and whether it may
+// commit by itself, inactive with every request done — an upgrade transaction only after its `upgradeneeded`, whose
+// listeners are where its requests come from.
 struct Transaction {
     conn: u32,
     db: DbKey,
     scope: Vec<Name>,
     mode: u32,
     started: bool,
+    state: u32,
+    requests: VecDeque<u32>,
+    running: bool,
+    finishing: bool,
+    armed: bool,
 }
+impl Transaction {
+    fn new(conn: u32, db: DbKey, scope: Vec<Name>, mode: u32, started: bool) -> Transaction {
+        let upgrade = mode == VERSIONCHANGE;
+        let state = if upgrade { INACTIVE } else { ACTIVE };
+        Transaction { conn, db, scope, mode, started, state, requests: VecDeque::new(), running: false, finishing: false, armed: !upgrade }
+    }
+    // Every request done: none running, none waiting.
+    fn processed(&self) -> bool {
+        !self.running && self.requests.is_empty()
+    }
+}
+// A transaction's states.
+const ACTIVE: u32 = 0;
+const INACTIVE: u32 = 1;
+const COMMITTING: u32 = 2;
+const FINISHED: u32 = 3;
+// What a lifecycle step asks the bindings to do next (`steps`' bits): queue a task running its next request, queue the
+// task finishing its commit.
+const RUN_NEXT: u32 = 1;
+const FINISH_COMMIT: u32 = 2;
 const READONLY: u32 = 0;
 const VERSIONCHANGE: u32 = 2;
 
@@ -279,7 +308,7 @@ impl Registry {
             if let Some(c) = self.connections.get_mut(&conn) {
                 c.version = version;
             }
-            self.transactions.insert(tx, Transaction { conn, db: key.clone(), scope, mode: VERSIONCHANGE, started: true });
+            self.transactions.insert(tx, Transaction::new(conn, key.clone(), scope, VERSIONCHANGE, true));
             self.tell(agent, UPGRADE, [f64::from(request), f64::from(conn), f64::from(tx), old], later);
         } else {
             let Some(db) = self.databases.remove(key) else { return };
@@ -368,6 +397,37 @@ impl Registry {
             }
         }
     }
+    // ── A transaction's lifecycle ──
+    // What it asks of the bindings once something moved: a run of its next request where it started, none runs and one
+    // waits; and — a started transaction inactive and armed with every request done committing — the task finishing a
+    // commit where it is committing with every request done, none queued yet ("commit a transaction": no request made
+    // after, `complete` a task later).
+    fn steps(&mut self, tx: u32) -> u32 {
+        let Some(t) = self.transactions.get_mut(&tx) else { return 0 };
+        let mut asks = 0;
+        if t.started && !t.running && t.state != FINISHED && !t.requests.is_empty() {
+            t.running = true;
+            asks |= RUN_NEXT;
+        }
+        if t.state == INACTIVE && t.started && t.armed && t.processed() {
+            t.state = COMMITTING;
+        }
+        if t.state == COMMITTING && t.started && t.processed() && !t.finishing {
+            t.finishing = true;
+            asks |= FINISH_COMMIT;
+        }
+        asks
+    }
+    // "Abort a transaction": finished at once, what it wrote put back, its waiting requests handed back to be failed —
+    // None where it had finished.
+    fn abort(&mut self, tx: u32) -> Option<Vec<u32>> {
+        let t = self.transactions.get_mut(&tx).filter(|t| t.state != FINISHED)?;
+        t.state = FINISHED;
+        let unprocessed = t.requests.drain(..).collect();
+        crate::idb::undo_transaction(self, tx);
+        Some(unprocessed)
+    }
+
     // A transaction finished: gone from its database's schedule — which may start the next — and its connection closed
     // where that waited on it.
     fn finished(&mut self, tx: u32) {
@@ -532,6 +592,17 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "idbClose", close, context_id);
     register(scope, ns, "idbTransaction", transaction, context_id);
     register(scope, ns, "idbFinished", finished, context_id);
+    register(scope, ns, "idbTxState", tx_state, context_id);
+    register(scope, ns, "idbTxEnter", tx_enter, context_id);
+    register(scope, ns, "idbTxLeave", tx_leave, context_id);
+    register(scope, ns, "idbTxRequest", tx_request, context_id);
+    register(scope, ns, "idbTxTake", tx_take, context_id);
+    register(scope, ns, "idbTxRequeue", tx_requeue, context_id);
+    register(scope, ns, "idbTxSteps", tx_steps, context_id);
+    register(scope, ns, "idbTxCommit", tx_commit, context_id);
+    register(scope, ns, "idbTxArm", tx_arm, context_id);
+    register(scope, ns, "idbTxComplete", tx_complete, context_id);
+    register(scope, ns, "idbTxAbort", tx_abort, context_id);
     register(scope, ns, "idbUpgradeEnd", upgrade_end, context_id);
     register(scope, ns, "idbRequestDone", request_done, context_id);
     register(scope, ns, "idbStoreId", store_id, context_id);
@@ -672,7 +743,7 @@ fn close(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'
     let conn = u32_arg(scope, &args, 0);
     lock().close(conn);
 }
-// __dom.idbTransaction(connection, scope, mode) -> [a transaction's number, whether it started]: scheduled — `STARTED`
+// __dom.idbTransaction(connection, scope, mode) -> a transaction's number (whether it started its lifecycle's): scheduled — `STARTED`
 // told once it may run, where it may not at once; 0 where a store of the scope is none of the database's.
 fn transaction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let conn = u32_arg(scope, &args, 0);
@@ -694,18 +765,107 @@ fn transaction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         return rv.set_uint32(0);
     }
     let tx = reg.next_id();
-    reg.transactions.insert(tx, Transaction { conn, db: key.clone(), scope: names, mode, started: false });
+    reg.transactions.insert(tx, Transaction::new(conn, key.clone(), names, mode, false));
     reg.databases.get_mut(&key).expect("looked up").transactions.push(tx);
     reg.schedule(&key, Some(tx));
-    let started = reg.transactions[&tx].started;
-    drop(reg);
-    let items = [v8::Integer::new_from_unsigned(scope, tx).into(), v8::Boolean::new(scope, started).into()];
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
+    rv.set_uint32(tx);
 }
 // __dom.idbFinished(transaction): it finished.
 fn finished(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let tx = u32_arg(scope, &args, 0);
     lock().finished(tx);
+}
+// __dom.idbTxState(tx, state?) -> its state (0 active, 1 inactive, 2 committing, 3 finished — finished where it is gone),
+// set to `state` where one is given (a value cloned while it is inactive, then put back): what it was.
+fn tx_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let tx = u32_arg(scope, &args, 0);
+    let set = (!args.get(1).is_undefined()).then(|| u32_arg(scope, &args, 1));
+    let mut reg = lock();
+    let Some(t) = reg.transactions.get_mut(&tx) else { return rv.set_uint32(FINISHED) };
+    let was = t.state;
+    if let Some(state) = set {
+        t.state = state;
+    }
+    rv.set_uint32(was);
+}
+// __dom.idbTxEnter(tx): active while a request's event's listeners run, where it was inactive.
+fn tx_enter(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let tx = u32_arg(scope, &args, 0);
+    if let Some(t) = lock().transactions.get_mut(&tx).filter(|t| t.state == INACTIVE) {
+        t.state = ACTIVE;
+    }
+}
+// __dom.idbTxLeave(tx) -> whether it was still active after them — inactive again now (where it was not, a listener
+// committed or aborted it).
+fn tx_leave(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let tx = u32_arg(scope, &args, 0);
+    let mut reg = lock();
+    let active = reg.transactions.get_mut(&tx).filter(|t| t.state == ACTIVE).map(|t| t.state = INACTIVE).is_some();
+    rv.set_bool(active);
+}
+// __dom.idbTxRequest(tx, request) -> `steps`: a request (the agent's number for it) to run after every earlier one.
+fn tx_request(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (tx, request) = (u32_arg(scope, &args, 0), u32_arg(scope, &args, 1));
+    let mut reg = lock();
+    if let Some(t) = reg.transactions.get_mut(&tx) {
+        t.requests.push_back(request);
+    }
+    rv.set_uint32(reg.steps(tx));
+}
+// __dom.idbTxTake(tx) -> the request its run task runs, or -1 (none: an abort finished it meanwhile).
+fn tx_take(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let tx = u32_arg(scope, &args, 0);
+    let mut reg = lock();
+    let Some(t) = reg.transactions.get_mut(&tx) else { return rv.set_int32(-1) };
+    t.running = false;
+    let next = if t.state == FINISHED { None } else { t.requests.pop_front() };
+    rv.set_int32(next.map_or(-1, |r| r as i32));
+}
+// __dom.idbTxRequeue(tx, request): a request taken back to the front (one failing in a committing transaction, which
+// aborts it — the request still unprocessed).
+fn tx_requeue(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let (tx, request) = (u32_arg(scope, &args, 0), u32_arg(scope, &args, 1));
+    if let Some(t) = lock().transactions.get_mut(&tx) {
+        t.requests.push_front(request);
+    }
+}
+// __dom.idbTxSteps(tx) -> `steps`, once something moved (it started, a request was processed, it went inactive).
+fn tx_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let tx = u32_arg(scope, &args, 0);
+    rv.set_uint32(lock().steps(tx));
+}
+// __dom.idbTxCommit(tx) -> `steps`: "commit a transaction" — committing at once.
+fn tx_commit(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let tx = u32_arg(scope, &args, 0);
+    let mut reg = lock();
+    if let Some(t) = reg.transactions.get_mut(&tx) {
+        t.state = COMMITTING;
+    }
+    rv.set_uint32(reg.steps(tx));
+}
+// __dom.idbTxArm(tx): an upgrade transaction's `upgradeneeded` dispatched — it may commit by itself from now.
+fn tx_arm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let tx = u32_arg(scope, &args, 0);
+    if let Some(t) = lock().transactions.get_mut(&tx) {
+        t.armed = true;
+    }
+}
+// __dom.idbTxComplete(tx) -> whether its commit finishes now (its `complete` to fire): finished where it was still
+// committing, what it wrote kept.
+fn tx_complete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let tx = u32_arg(scope, &args, 0);
+    let mut reg = lock();
+    let Some(t) = reg.transactions.get_mut(&tx).filter(|t| t.state == COMMITTING) else { return rv.set_bool(false) };
+    t.state = FINISHED;
+    crate::idb::keep_transaction(&mut reg, tx);
+    rv.set_bool(true);
+}
+// __dom.idbTxAbort(tx) -> the requests it had waiting, to fail, or null where it had finished (`abort`).
+fn tx_abort(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let tx = u32_arg(scope, &args, 0);
+    let Some(unprocessed) = lock().abort(tx) else { return rv.set_null() };
+    let items: Vec<f64> = unprocessed.into_iter().map(f64::from).collect();
+    rv.set(crate::dom::f64_array(scope, &items).into());
 }
 // __dom.idbUpgradeEnd(transaction, aborted): an upgrade transaction committed or aborted — what it began from let go, or
 // put back.
@@ -878,7 +1038,7 @@ mod tests {
         reg.databases.insert(key("db"), Database { version: 1.0, stores: BTreeMap::from([(name("s"), 9)]), connections: vec![1], transactions: Vec::new(), upgrade: None });
         reg.connections.insert(1, Connection { db: key("db"), agent: a, version: 1.0, store_names: vec![name("s")], close_pending: false, closed: false });
         let mut new_tx = |reg: &mut Registry, id: u32, mode: u32| {
-            reg.transactions.insert(id, Transaction { conn: 1, db: key("db"), scope: vec![name("s")], mode, started: false });
+            reg.transactions.insert(id, Transaction::new(1, key("db"), vec![name("s")], mode, false));
             reg.databases.get_mut(&key("db")).expect("made").transactions.push(id);
             reg.schedule(&key("db"), None);
         };
