@@ -629,19 +629,27 @@ pub fn is_valid(text: &str) -> bool {
 
 // CSSOM getComputedStyle's pseudo-element argument "parsed as a <pseudo-element-selector>": the pseudo-element's name
 // (lowercase, a functional one's alone) where `text` is one — `::before`, a legacy `:before`, `::highlight(x)`,
-// nothing before or after it — and None where it is not, `::slotted()` and `::part()` included.
+// nothing before or after it (white space included, but inside a function its end closes) — and None where it is not:
+// `::slotted()` and `::part()`, and a view transition pseudo-element of `*`, which names no one pseudo-element (the
+// WPT's getComputedStyle-pseudo-with-argument, Chrome and Firefox alike).
 pub fn pseudo_element_selector(text: &str) -> Option<String> {
     use selectors::parser::{Combinator, Component};
-    if text.trim_matches(|c: char| c.is_ascii_whitespace()).len() != text.len() {
+    let open = text.matches('(').count() > text.matches(')').count();
+    if text.starts_with(|c: char| c.is_ascii_whitespace()) || (!open && text.ends_with(|c: char| c.is_ascii_whitespace())) {
         return None;
     }
-    with_parsed(text, None, |list| {
+    let name = with_parsed(text, None, |list| {
         let [selector] = list?.slice() else { return None };
         let alone = selector
             .iter_raw_match_order()
             .all(|c| matches!(c, Component::PseudoElement(_) | Component::Combinator(Combinator::PseudoElement)));
         alone.then(|| selector.pseudo_element().map(|p| p.0.clone())).flatten()
-    })
+    })?;
+    let argument = text.split_once('(').map(|(_, a)| a.trim_start_matches(|c: char| c.is_ascii_whitespace()));
+    if name.starts_with("view-transition-") && argument.is_some_and(|a| a.starts_with('*')) {
+        return None;
+    }
+    Some(name)
 }
 
 // Parsed-selector cache — the driver emits a small recurring set of selectors, so parsing each once
