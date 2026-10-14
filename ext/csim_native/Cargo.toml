@@ -128,6 +128,30 @@ rusty_vp9 = "0.1"
 # build) — a machine without it fails `require`, loudly, rather than resolving no family.
 libloading = "0.8"
 
+# Web Crypto's primitives (webcrypto.rs), pure Rust (RustCrypto): the SHA digests, HMAC, HKDF and PBKDF2; the AES block
+# cipher its modes (CBC, CTR, GCM, KW) are built on, GCM's GHASH; RSA (PKCS#1 v1.5, PSS, OAEP); the NIST curves' ECDSA and
+# ECDH; Ed25519 and X25519 — and the operating system's random bytes.
+sha1 = { version = "0.10", features = ["oid"] }
+sha2 = { version = "0.10", features = ["oid"] }
+hmac = "0.12"
+hkdf = "0.12"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+aes = "0.8"
+ghash = "0.5"
+rsa = { version = "0.9", features = ["sha2", "hazmat"] }
+# …its primes generated over its big integers, tested by their Miller–Rabin and Lucas tests (webcrypto.rs `random_prime`).
+num-bigint-dig = { version = "0.8", features = ["prime"] }
+p256 = { version = "0.13", features = ["ecdsa", "ecdh", "pkcs8"] }
+p384 = { version = "0.13", features = ["ecdsa", "ecdh", "pkcs8"] }
+p521 = { version = "0.13", features = ["ecdsa", "ecdh", "pkcs8"] }
+ed25519-dalek = { version = "2", features = ["pkcs8", "rand_core"] }
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+# …and the DER the keys are read from and written as (SPKI, PKCS #8).
+der = { version = "0.7", features = ["alloc", "oid"] }
+spki = { version = "0.7", features = ["alloc"] }
+pkcs8 = { version = "0.10", features = ["alloc"] }
+
 # The HTML parser: Servo's html5ever — tokenizer and tree builder, the select parser relaxation and `selectedcontent`
 # included — run natively, the page side taking the tree it builds as steps (html_parse.rs).
 html5ever = "0.40"

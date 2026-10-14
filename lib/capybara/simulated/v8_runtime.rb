@@ -1541,14 +1541,12 @@ module Capybara
 
       # Class-level attach so Worker isolates (Ruby-thread-owned
       # contexts that don't have a Runtime instance wrapping them)
-      # reuse the same `BROWSER_HOST_FNS` + `STDLIB_HOST_FNS` table
-      # the main runtime wires up.
+      # reuse the same `BROWSER_HOST_FNS` table the main runtime wires up.
       def self.attach_host_fns(c, browser)
         fns = {}
         RuntimeShared::BROWSER_HOST_FNS.each {|name, body|
           fns[name] = ->(*a) { RuntimeShared.safe_call { body.call(browser, *a) } }
         }
-        fns.update(RuntimeShared::STDLIB_HOST_FNS)
         # One rendezvous for the whole table (~50 fns) — this runs per cold
         # build, per worker, and per warm realm reset.
         c.attach_many(fns)

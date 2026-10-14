@@ -962,7 +962,7 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
   const legacyNull = extAttrs.some((e) => e.name === 'LegacyNullToEmptyString');
   const enforceRange = extAttrs.some((e) => e.name === 'EnforceRange');
   const clamp = extAttrs.some((e) => e.name === 'Clamp');
-  const ranged = ['unsigned short', 'unsigned long', 'long', 'unsigned long long', 'long long'];
+  const ranged = ['octet', 'unsigned short', 'unsigned long', 'long', 'unsigned long long', 'long long'];
   if ((enforceRange || clamp) && !ranged.includes(t.idlType)) throw new Error(`${label}: no binding enforces or clamps the range of ${t.idlType} yet`);
   let c;
   // (…a buffer source type (Web IDL §3.2.26): an object of the type, its buffer not shared but where [AllowShared], not
@@ -1158,13 +1158,15 @@ for (const key of Object.keys(OMITTED_DICTIONARY_MEMBERS)) {
 // or null an empty dictionary, any other non-object a TypeError; each member, its inherited dictionaries' first and
 // each's (its partials' included) in lexicographic order, got from the object, converted, or its default where it is
 // undefined (a required one missing a TypeError). Its messages follow `prefix`, what converts the dictionary's.
+// (`after`: a dictionary it inherits whose members — and its own inherited ones' — the caller has converted already, the
+// function `to<name>MembersAfter<after>` converting the rest)
 const dictionaryConverters = new Map();
-function dictionaryConverter(name) {
-  const fn = `to${name}`;
-  if (dictionaryConverters.has(name)) return fn;
-  dictionaryConverters.set(name, null);
+function dictionaryConverter(name, after = null) {
+  const fn = after ? `to${name}MembersAfter${after}` : `to${name}`;
+  if (dictionaryConverters.has(fn)) return fn;
+  dictionaryConverters.set(fn, null);
   const chain = [];
-  for (let d = dictionaries.get(name); d; d = d.inheritance && dictionaries.get(d.inheritance)) {
+  for (let d = dictionaries.get(name); d && d.name !== after; d = d.inheritance && dictionaries.get(d.inheritance)) {
     if (d.inheritance && !dictionaries.has(d.inheritance)) throw new Error(`${d.name}: inherits ${d.inheritance}, which no spec defines`);
     chain.unshift(d);
   }
@@ -1210,7 +1212,7 @@ function dictionaryConverter(name) {
   if (!defaults) lines.splice(head, 0, '  if (v == null) return EMPTY_DICTIONARY;');
   lines.push(`  return dict;`);
   lines.push(`}`);
-  dictionaryConverters.set(name, lines.join('\n'));
+  dictionaryConverters.set(fn, lines.join('\n'));
   return fn;
 }
 
@@ -1913,8 +1915,30 @@ ${htmlElementInstalls.map((n) => `  ${n}: install${n}`).join(',\n')}
 };`;
 
 // The dictionaries an implementation converts itself — an `any` argument's, as the type its steps name: a canvas's
-// getContext('2d') options a CanvasRenderingContext2DSettings.
-for (const name of ['CanvasRenderingContext2DSettings']) dictionaryConverter(name);
+// getContext('2d') options a CanvasRenderingContext2DSettings; and the types Web Crypto's "normalize an algorithm"
+// converts an algorithm to, by the type its registry names (webcrypto.rs `registered`) — an Algorithm for its name, then
+// the rest of the type's members (webcrypto.js `normalizeAlgorithm`: the name read once).
+const CRYPTO_ALGORITHM_DICTIONARIES = [
+  'HmacImportParams',
+  'HmacKeyGenParams',
+  'AesCbcParams',
+  'AesCtrParams',
+  'AesGcmParams',
+  'AesKeyGenParams',
+  'AesDerivedKeyParams',
+  'RsaHashedKeyGenParams',
+  'RsaHashedImportParams',
+  'RsaPssParams',
+  'RsaOaepParams',
+  'EcdsaParams',
+  'EcKeyGenParams',
+  'EcKeyImportParams',
+  'EcdhKeyDeriveParams',
+  'HkdfParams',
+  'Pbkdf2Params'
+];
+for (const name of ['CanvasRenderingContext2DSettings', 'Algorithm']) dictionaryConverter(name);
+for (const name of CRYPTO_ALGORITHM_DICTIONARIES) dictionaryConverter(name, 'Algorithm');
 const dictionaryParts = [...dictionaryConverters.values()];
 const body = [...dictionaryParts, ...parts, parentTable].join('\n\n');
 // (…every interface whose test some binding asks for, which the runtime holds registered once the bundle has run:

@@ -154,7 +154,7 @@ const TREES = [
                                        // scope. Storage partitioning earns out per rule 1.
   'WebCryptoAPI',                      // SubtleCrypto — digest / sign / verify / encrypt / decrypt / importKey /
                                        // exportKey / deriveBits / deriveKey / generateKey / wrapKey / unwrapKey,
-                                       // backed by Ruby's OpenSSL (the same host-fn model as `__csim_subtleDigest`).
+                                       // the engine's (webcrypto.rs, on RustCrypto's primitives).
                                        // The crypto every auth stack (jose / OIDC / oidc-client-ts), Web Push
                                        // (Mastodon: ECDH + HKDF + AES-GCM), and Signal/E2E library rides on. All
                                        // `.https.any.js` — run via the synthesized window wrapper (JS_TREES). Data

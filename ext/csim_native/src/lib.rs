@@ -74,6 +74,7 @@ mod paint;
 mod keys;
 mod cache_matching;
 mod sandbox;
+mod webcrypto;
 mod import_map;
 mod image_source;
 // Layout: the records the walk builds (mod walk) laid out, driven by the `layoutBuild` op (mod walk_ops).
