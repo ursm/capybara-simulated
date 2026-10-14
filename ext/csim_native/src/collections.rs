@@ -367,6 +367,7 @@ const SHEET_OWNERS: u32 = 10;
 const SHADOW_HOSTS: u32 = 11;
 const STATE: u32 = 12;
 const CUSTOM_CANDIDATES: u32 = 13;
+const SHADOW_INCLUDING_ELEMENTS: u32 = 14;
 
 // A string argument, or None for "*" (any).
 fn name_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Option<String> {
@@ -379,8 +380,9 @@ fn name_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Op
 // local name; "*" any), a qualified name (2: `a`, "*" any; `b` an HTML document), a legacy document collection
 // (3 forms, 4 images, 5 links, 6 scripts, 7 anchors, 8 embeds), a `name` (9: `a`), the stylesheets' owners (10) —
 // or the shadow hosts among its shadow-including descendants (11: shadow-including tree order, a host before its
-// shadow tree's own), those with a state bit of a mask (12: `a`), or those a custom element definition could be for
-// (13).
+// shadow tree's own), those with a state bit of a mask (12: `a`), those a custom element definition could be for
+// (13), or every element of its shadow-including inclusive descendants (14: in the shadow hosts' order, the scope
+// itself first where it is one).
 fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let kind = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
@@ -420,9 +422,10 @@ fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         SHEET_OWNERS => Filter::SheetOwners,
         STATE => Filter::State(a.uint32_value(scope).unwrap_or(0)),
         CUSTOM_CANDIDATES => Filter::CustomCandidates,
-        SHADOW_HOSTS => {
+        SHADOW_HOSTS | SHADOW_INCLUDING_ELEMENTS => {
             let cid = realm_id(scope, &args);
-            let ids = crate::dom::realm(scope, cid).shadow_including_elements(root, |n| n.shadow_root.is_some());
+            let hosts = kind == SHADOW_HOSTS;
+            let ids = crate::dom::realm(scope, cid).shadow_including_elements(root, |n| !hosts || n.shadow_root.is_some());
             return rv.set(crate::dom::nodes_value(scope, cid, &ids));
         }
         _ => return,
