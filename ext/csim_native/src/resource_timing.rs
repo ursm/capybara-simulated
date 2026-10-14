@@ -128,15 +128,42 @@ pub(crate) fn content_encoding(header: &str) -> String {
 
 // Fetch's "TAO check" for a cross-origin response: its `Timing-Allow-Origin` values, comma-separated, one `*` or the
 // requesting document's origin serialized.
-pub(crate) fn timing_allowed(tao: &str, origin: &str) -> bool {
+fn timing_allowed(tao: &str, origin: &str) -> bool {
     tao.split(',').map(|v| v.trim_matches([' ', '\t'])).any(|v| v == "*" || (!v.is_empty() && v == origin))
+}
+
+// What a resource's entry lets the document see (Resource Timing §4.7, Fetch): whether its timing is allowed — a
+// response that is not opaque, of the document's own origin (or a URL with none) or admitted by its
+// `Timing-Allow-Origin`, and, where a redirect crossed origins, its final URL so too (the hops between are not kept) —
+// and whether its response's status and type are exposed: not an opaque response, not a cross-origin document's (a
+// frame's), not a no-cors element load's of a cross-origin URL.
+pub(crate) struct Exposure {
+    pub(crate) allowed: bool,
+    pub(crate) exposed: bool,
+}
+pub(crate) fn exposure(name: &str, final_url: &str, document_origin: &str, tao: Option<&str>, opaque: bool, document: bool, no_cors: bool) -> Exposure {
+    let origin_of = |url: &str| ada_url::Url::parse(url, None).ok().map(|u| u.origin());
+    let here = (!document_origin.is_empty()).then_some(document_origin);
+    let allowed_for = |url: &str| {
+        !opaque
+            && match origin_of(url) {
+                None => true,
+                Some(there) => Some(there.as_str()) == here || tao.is_some_and(|t| timing_allowed(t, here.unwrap_or_default())),
+            }
+    };
+    let cross_origin_chain = final_url != name && origin_of(final_url) != origin_of(name);
+    let cross_origin = origin_of(name).as_deref() != here;
+    Exposure {
+        allowed: allowed_for(name) && (!cross_origin_chain || allowed_for(final_url)),
+        exposed: !opaque && !(cross_origin && (document || no_cors)),
+    }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "serverTiming", server_timing_op, context_id);
     crate::dom::register(scope, ns, "minimizeMime", minimize_mime_op, context_id);
     crate::dom::register(scope, ns, "contentEncoding", content_encoding_op, context_id);
-    crate::dom::register(scope, ns, "timingAllowed", timing_allowed_op, context_id);
+    crate::dom::register(scope, ns, "resourceExposure", exposure_op, context_id);
 }
 fn text<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Value> {
     v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into)
@@ -164,10 +191,13 @@ fn content_encoding_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let answer = content_encoding(&value);
     rv.set(text(scope, &answer));
 }
-// __dom.timingAllowed(tao, origin) -> `timing_allowed`.
-fn timing_allowed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (tao, origin) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
-    rv.set_bool(timing_allowed(&tao, &origin));
+// __dom.resourceExposure(name, finalUrl, documentOrigin, tao, opaque, document, noCors) -> `exposure`, its bits: 1
+// allowed, 2 exposed. `tao` null for no header.
+fn exposure_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (name, final_url, origin) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
+    let tao = (!args.get(3).is_null_or_undefined()).then(|| args.get(3).to_rust_string_lossy(scope));
+    let e = exposure(&name, &final_url, &origin, tao.as_deref(), args.get(4).is_true(), args.get(5).is_true(), args.get(6).is_true());
+    rv.set_int32(e.allowed as i32 | (e.exposed as i32) << 1);
 }
 
 #[cfg(test)]
@@ -207,6 +237,16 @@ mod tests {
         assert_eq!(content_encoding("gzip, br"), "multiple");
         assert_eq!(content_encoding("identity"), "@unknown");
         assert!(timing_allowed(" https://a.test , *", "https://b.test"));
+        let seen = |name, final_url, tao, opaque, document, no_cors| {
+            let e = exposure(name, final_url, "https://a.test", tao, opaque, document, no_cors);
+            (e.allowed, e.exposed)
+        };
+        assert_eq!(seen("https://a.test/x", "https://a.test/x", None, false, false, false), (true, true));
+        assert_eq!(seen("https://b.test/x", "https://b.test/x", None, false, false, false), (false, true));
+        assert_eq!(seen("https://b.test/x", "https://b.test/x", Some("https://a.test"), false, false, true), (true, false));
+        assert_eq!(seen("https://a.test/x", "https://b.test/y", None, false, false, false), (false, true));
+        assert_eq!(seen("https://a.test/x", "https://a.test/x", None, true, false, false), (false, false));
+        assert_eq!(seen("https://b.test/f", "https://b.test/f", Some("*"), false, true, false), (true, false));
         assert!(!timing_allowed("https://a.test", "https://b.test"));
     }
 }
