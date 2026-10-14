@@ -133,19 +133,53 @@ pub(crate) fn no_cors_safelisted_request_header(name: &[u8], value: &[u8]) -> bo
     let lower = name.to_ascii_lowercase();
     [&b"accept"[..], b"accept-language", b"content-language", b"content-type"].contains(&lower.as_slice()) && cors_safelisted_request_header(name, value)
 }
-// "Simple range header value": `bytes=` a start and an end, either one omitted but not both.
+// "Simple range header value": a single range, no white space in it.
 fn simple_range(value: &[u8]) -> bool {
-    let Some(rest) = value.strip_prefix(b"bytes=") else { return false };
-    let Some(dash) = rest.iter().position(|&b| b == b'-') else { return false };
-    let (start, end) = (&rest[..dash], &rest[dash + 1..]);
-    let digits = |s: &[u8]| s.iter().all(u8::is_ascii_digit);
-    if !digits(start) || !digits(end) || (start.is_empty() && end.is_empty()) {
-        return false;
-    }
-    let number = |s: &[u8]| std::str::from_utf8(s).ok().and_then(|s| s.parse::<u64>().ok());
-    match (number(start), number(end)) {
-        (Some(a), Some(b)) => a <= b,
-        _ => true,
+    single_range(value, false).is_some()
+}
+// Fetch "parse a single range header value": `bytes` (ASCII case-insensitive), `=`, a start, `-`, an end — each number
+// ASCII digits, either omitted but not both, a start past its end none — with HTTP tabs or spaces between where
+// `allow_whitespace`; the start and the end, None for failure.
+pub(crate) fn single_range(value: &[u8], allow_whitespace: bool) -> Option<(Option<u64>, Option<u64>)> {
+    let mut rest = value;
+    let skip = |rest: &mut &[u8]| {
+        while allow_whitespace && matches!(rest.first(), Some(b'\t' | b' ')) {
+            *rest = &rest[1..];
+        }
+    };
+    let expect = |rest: &mut &[u8], what: &[u8]| -> Option<()> {
+        let head = rest.get(..what.len()).filter(|h| h.eq_ignore_ascii_case(what))?;
+        *rest = &rest[head.len()..];
+        Some(())
+    };
+    let number = |rest: &mut &[u8]| {
+        let n = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+        let digits = &rest[..n];
+        *rest = &rest[n..];
+        // (…one too long for a u64 past any body's end)
+        (n > 0).then(|| std::str::from_utf8(digits).ok().and_then(|d| d.parse::<u64>().ok()).unwrap_or(u64::MAX))
+    };
+    expect(&mut rest, b"bytes")?;
+    skip(&mut rest);
+    expect(&mut rest, b"=")?;
+    skip(&mut rest);
+    let start = number(&mut rest);
+    skip(&mut rest);
+    expect(&mut rest, b"-")?;
+    skip(&mut rest);
+    let end = number(&mut rest);
+    skip(&mut rest);
+    let past_end = matches!((start, end), (Some(a), Some(b)) if a > b);
+    (rest.is_empty() && (start.is_some() || end.is_some()) && !past_end).then_some((start, end))
+}
+// …and the bytes of a body `total` long a blob URL's range takes (Fetch's blob URL fetch, white space allowed): its first
+// and last, None where the range is none or none of the body — a suffix its last bytes (all of them where it is longer),
+// an end past the body's the body's last.
+pub(crate) fn blob_range(value: &[u8], total: u64) -> Option<(u64, u64)> {
+    match single_range(value, true)? {
+        (None, Some(suffix)) => (suffix > 0 && total > 0).then(|| (total.saturating_sub(suffix), total - 1)),
+        (Some(start), end) if start < total => Some((start, end.map_or(total - 1, |e| e.min(total - 1)))),
+        _ => None,
     }
 }
 // "CORS-safelisted response-header name" (with no `Access-Control-Expose-Headers` naming more).
@@ -158,6 +192,7 @@ pub(crate) fn cors_safelisted_response_header(name: &[u8]) -> bool {
 // ── For the bindings ──
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "badPort", bad_port_op, context_id);
+    crate::dom::register(scope, ns, "blobRange", blob_range_op, context_id);
     crate::dom::register(scope, ns, "corsSafelistedMethod", cors_safelisted_method_op, context_id);
     crate::dom::register(scope, ns, "httpRedirect", http_redirect_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
@@ -198,6 +233,15 @@ fn http_redirect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 fn request_body_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = units(scope, args.get(0));
     rv.set_bool(request_body_header(&name));
+}
+// __dom.blobRange(value, total) -> [first, last] of `blob_range`, or null.
+fn blob_range_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let value = units(scope, args.get(0));
+    let total = args.get(1).number_value(scope).unwrap_or(0.0) as u64;
+    match blob_range(&value, total) {
+        Some((first, last)) => rv.set(crate::dom::f64_array(scope, &[first as f64, last as f64]).into()),
+        None => rv.set_null(),
+    }
 }
 // __dom.forbiddenMethod(method) -> whether it is a forbidden method.
 fn forbidden_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -299,6 +343,14 @@ mod tests {
         assert!(cors_safelisted_request_header(b"range", b"bytes=0-"));
         assert!(cors_safelisted_request_header(b"range", b"bytes=-5"));
         assert!(!cors_safelisted_request_header(b"range", b"bytes=5-1"));
+        assert!(!cors_safelisted_request_header(b"range", b"bytes= 0-"));
+        assert_eq!(blob_range(b"BYTES = 2 - ", 10), Some((2, 9)));
+        assert_eq!(blob_range(b"bytes=-3", 10), Some((7, 9)));
+        assert_eq!(blob_range(b"bytes=-30", 10), Some((0, 9)));
+        assert_eq!(blob_range(b"bytes=2-99", 10), Some((2, 9)));
+        assert_eq!(blob_range(b"bytes=10-", 10), None);
+        assert_eq!(blob_range(b"bytes=-0", 10), None);
+        assert_eq!(blob_range(b"bytes=0-1,3-4", 10), None);
         assert!(!no_cors_safelisted_request_header(b"range", b"bytes=0-"));
         assert!(bad_port(6000) && !bad_port(80) && !bad_port(70000));
         assert!(!forbidden_request_header(b"x-method-override", b"\nTRACE"));
