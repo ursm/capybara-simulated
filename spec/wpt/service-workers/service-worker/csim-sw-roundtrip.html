@@ -2,7 +2,8 @@
 <!-- Local capybara-simulated test (NOT upstream WPT). Guards the service-worker
      client↔SW messaging and fetch-interception round-trips (register → activate →
      postMessage echo; clients.claim → controllerchange → intercepted / fall-through /
-     POST-body fetches) until a vendored upstream service-worker slice covers them. -->
+     POST-body fetches) until a vendored upstream service-worker slice covers them. The fetch worker controls the page's
+     directory, above its own: its Service-Worker-Allowed header (csim-fetch-worker.js.headers) allows it. -->
 <meta charset=utf-8>
 <script src="/resources/testharness.js"></script>
 <script src="/resources/testharnessreport.js"></script>

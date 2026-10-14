@@ -5723,6 +5723,10 @@ module Capybara
         return {'error' => 'network'} unless (200..299).cover?(res['status'].to_i)
         ct = (res['headers'] || {}).find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
         return {'error' => 'mime'} unless js_mime_type?(ct)
+        # (…and the scope one the script may control: its directory, or the path its Service-Worker-Allowed names)
+        allowed = (res['headers'] || {}).find {|k, _| k.to_s.casecmp('service-worker-allowed').zero? }&.last
+        allowed = Array(allowed).join(', ') unless allowed.nil?
+        return {'error' => 'scope'} unless Native.service_worker_scope_allowed(scope.to_s, script_url.to_s, allowed)
 
         w       = @workers[newest_handle.to_i]
         body    = res['body'].to_s

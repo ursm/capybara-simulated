@@ -5303,13 +5303,6 @@ service-workers/cache-storage/cache-storage-buckets.https.any.js:
 - "[serviceworker] [harness] no subtests"
 service-workers/cache-storage/credentials.https.html:
 - Cache API matching includes credentials
-service-workers/service-worker/Service-Worker-Allowed-header.https.html:
-- Registering outside Service-Worker-Allowed path
-- Registering outside Service-Worker-Allowed path with parent reference
-- Service-Worker-Allowed is cross-origin to script, registering on a normally allowed
-  scope
-- Service-Worker-Allowed is cross-origin to script, registering on a normally disallowed
-  scope
 service-workers/service-worker/ServiceWorkerGlobalScope/error-message-event.https.html:
 - Verify error event is received
 service-workers/service-worker/ServiceWorkerGlobalScope/extendable-message-event.https.html:
@@ -5514,20 +5507,12 @@ service-workers/service-worker/referrer-policy-header.https.html:
   have origin.
 - Referrer for fetch requests initiated from a service worker with referrer-policy
   (origin) should only have origin.
-service-workers/service-worker/register-default-scope.https.html:
-- null scope
-service-workers/service-worker/registration-iframe.https.html:
-- A scope url should start with the given script url
 service-workers/service-worker/registration-script-module.https.html:
 - Registering invalid chunked encoding script with flush
 service-workers/service-worker/registration-script.https.html:
 - Registering invalid chunked encoding script with flush
 service-workers/service-worker/registration-security-error.https.html:
 - Registering redirected script
-- Registering same scope as the script directory without the last slash
-- Registration scope outside the script directory
-- Scope including parent-reference and not under the script directory
-- Script URL including consecutive slashes
 service-workers/service-worker/resource-timing-bodySize.https.html:
 - 'Response body size: constructed, cors, TAO fail'
 - 'Response body size: constructed, cors, TAO pass'

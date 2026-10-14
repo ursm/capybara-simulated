@@ -74,6 +74,7 @@ mod paint;
 mod keys;
 mod cache_matching;
 mod sandbox;
+mod service_worker;
 mod integrity;
 mod pointer;
 mod webcrypto;
@@ -188,6 +189,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("bad_port", magnus::function!(fetch_rules::bad_port_for_ruby, 1))?;
     native.define_module_function("cors_safelisted_method", magnus::function!(fetch_rules::cors_safelisted_method_for_ruby, 1))?;
     native.define_module_function("redirect_to_get", magnus::function!(fetch_rules::redirect_to_get_for_ruby, 2))?;
+    native.define_module_function("service_worker_scope_allowed", magnus::function!(service_worker::scope_allowed_for_ruby, 3))?;
     native.define_module_function("cors_safelisted_request_header", magnus::function!(fetch_rules::cors_safelisted_request_header_for_ruby, 2))?;
     native.define_module_function("cors_safelisted_response_header", magnus::function!(fetch_rules::cors_safelisted_response_header_for_ruby, 1))?;
     native.define_module_function("forbidden_response_header", magnus::function!(fetch_rules::forbidden_response_header_for_ruby, 1))?;
