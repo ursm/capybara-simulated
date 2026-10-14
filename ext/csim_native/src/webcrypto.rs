@@ -367,7 +367,7 @@ impl Key {
     pub(crate) fn rsa_info(&self) -> Option<(u32, Vec<u8>)> {
         let (n, e) = match self.kind {
             Kind::Private => rsa::RsaPrivateKey::from_pkcs8_der(&self.material).ok().map(|k| (k.n().clone(), k.e().clone()))?,
-            _ => rsa::RsaPublicKey::from_public_key_der(&self.material).ok().map(|k| (k.n().clone(), k.e().clone()))?,
+            _ => rsa_public_key(&self.material).map(|k| (k.n().clone(), k.e().clone()))?,
         };
         Some((n.bits() as u32, e.to_bytes_be()))
     }
@@ -1143,13 +1143,30 @@ fn pkcs8_der<K: pkcs8::EncodePrivateKey>(key: &K) -> Outcome<Vec<u8>> {
     key.to_pkcs8_der().map(|d| d.as_bytes().to_vec()).or_else(|_| data_error("the key cannot be encoded"))
 }
 
+// An RSA public key from its SubjectPublicKeyInfo (rsaEncryption's) — of up to 16384 bits, as Chrome takes: the
+// crate's own parse refuses one over 4096.
+const RSA_ENCRYPTION: spki::ObjectIdentifier = spki::ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1");
+fn rsa_public_key(der: &[u8]) -> Option<rsa::RsaPublicKey> {
+    let info = spki::SubjectPublicKeyInfoRef::try_from(der).ok()?;
+    if info.algorithm.oid != RSA_ENCRYPTION {
+        return None;
+    }
+    let key = rsa::pkcs1::RsaPublicKey::try_from(info.subject_public_key.as_bytes()?).ok()?;
+    rsa_public_from(rsa::BigUint::from_bytes_be(key.modulus.as_bytes()), rsa::BigUint::from_bytes_be(key.public_exponent.as_bytes()))
+}
+// …and from its modulus and exponent: a modulus odd and of up to 16384 bits, an exponent odd, from 3 and below it.
+fn rsa_public_from(n: rsa::BigUint, e: rsa::BigUint) -> Option<rsa::RsaPublicKey> {
+    let odd = |x: &rsa::BigUint| x.to_bytes_be().last().is_some_and(|b| b & 1 == 1);
+    (n.bits() <= 16384 && odd(&n) && odd(&e) && e >= rsa::BigUint::from(3u32) && e < n).then(|| rsa::RsaPublicKey::new_unchecked(n, e))
+}
+
 fn rsa_import(alg: Alg, format: &str, data: KeyData, p: &Params, extractable: bool, usages: Usages) -> Outcome<Key> {
     let (public_usages, private_usages) = rsa_usages(alg);
     let hash = p.hash()?;
     let (kind, material) = match (format, data) {
         ("spki", KeyData::Bytes(der)) => {
             allow(usages, public_usages)?;
-            let key = rsa::RsaPublicKey::from_public_key_der(&der).or_else(|_| data_error("not an RSA SubjectPublicKeyInfo"))?;
+            let key = rsa_public_key(&der).map_or_else(|| data_error("not an RSA SubjectPublicKeyInfo"), Ok)?;
             (Kind::Public, spki_der(&key)?)
         }
         ("pkcs8", KeyData::Bytes(der)) => {
@@ -1172,7 +1189,7 @@ fn rsa_import(alg: Alg, format: &str, data: KeyData, p: &Params, extractable: bo
             check_jwk(&jwk, usages, extractable, if alg == Alg::RsaOaep { "enc" } else { "sig" })?;
             let (n, e) = (big(&jwk.n)?, big(&jwk.e)?);
             if jwk.d.is_none() {
-                let key = rsa::RsaPublicKey::new(n, e).or_else(|_| data_error("not a valid RSA public key"))?;
+                let key = rsa_public_from(n, e).map_or_else(|| data_error("not a valid RSA public key"), Ok)?;
                 (Kind::Public, spki_der(&key)?)
             } else {
                 let d = big(&jwk.d)?;
@@ -1206,7 +1223,7 @@ fn rsa_export(format: &str, key: &Key) -> Outcome<Exported> {
                 (jwk.n, jwk.e, jwk.d, jwk.p, jwk.q) = (b(k.n()), b(k.e()), b(k.d()), b(p), b(q));
                 (jwk.dp, jwk.dq, jwk.qi) = (k.dp().and_then(b), k.dq().and_then(b), k.crt_coefficient().as_ref().and_then(b));
             } else {
-                let k = rsa::RsaPublicKey::from_public_key_der(&key.material).or_else(|_| data_error("not an RSA key"))?;
+                let k = rsa_public_key(&key.material).map_or_else(|| data_error("not an RSA key"), Ok)?;
                 (jwk.n, jwk.e) = (b(k.n()), b(k.e()));
             }
             Ok(Exported::Jwk(jwk))
@@ -1318,7 +1335,7 @@ fn rsa_verify(p: &Params, key: &Key, signature: &[u8], data: &[u8]) -> Outcome<b
         return fail("InvalidAccessError", "only a public key verifies");
     }
     let hash = key.hash.unwrap_or(Hash::Sha256);
-    let Ok(public) = rsa::RsaPublicKey::from_public_key_der(&key.material) else { return Ok(false) };
+    let public = rsa_public_key(&key.material).map_or_else(|| operation_error("not an RSA key"), Ok)?;
     let digest = hash.digest(data);
     Ok(with_digest!(hash, D => if p.alg == Alg::RsaPss {
         public.verify(rsa::Pss::new_with_salt::<D>(p.salt_length.unwrap_or(0) as usize), &digest, signature)
@@ -1345,7 +1362,7 @@ fn rsa_oaep_encrypt(p: &Params, key: &Key, data: &[u8]) -> Outcome<Vec<u8>> {
         return fail("InvalidAccessError", "only a public key encrypts");
     }
     let hash = key.hash.unwrap_or(Hash::Sha1);
-    let public = rsa::RsaPublicKey::from_public_key_der(&key.material).or_else(|_| operation_error("not an RSA key"))?;
+    let public = rsa_public_key(&key.material).map_or_else(|| operation_error("not an RSA key"), Ok)?;
     let (k, h_len) = (public.size(), hash.digest(b"").len());
     if k < 2 * h_len + 2 || data.len() > k - 2 * h_len - 2 {
         return operation_error("the plaintext is too long for the key");
@@ -1404,8 +1421,12 @@ fn left_pad(bytes: Vec<u8>, len: usize) -> Vec<u8> {
 fn ec_usages(alg: Alg) -> (Usages, Usages) {
     if alg == Alg::Ecdh { (Usages::NONE, Usages::DERIVE) } else { (Usages::VERIFY, Usages::SIGN) }
 }
-// A public key (SEC 1, compressed or not) on `curve`, as its uncompressed point — None for no point on it.
+// A public key (SEC 1 §2.3.4, compressed or not) on `curve`, as its uncompressed point — None for no point on it, and
+// for the "compact" form (0x05) SEC 1 does not define, which the curves' decoder would take.
 fn ec_point(curve: Curve, sec1: &[u8]) -> Option<Vec<u8>> {
+    if !matches!(sec1.first(), Some(2..=4)) {
+        return None;
+    }
     on_curve!(curve, m => {
         use m::elliptic_curve::sec1::ToEncodedPoint as _;
         m::PublicKey::from_sec1_bytes(sec1).ok().map(|k| k.to_encoded_point(false).as_bytes().to_vec())
@@ -1432,10 +1453,10 @@ fn ec_import(alg: Alg, format: &str, data: KeyData, p: &Params, extractable: boo
         ("spki", KeyData::Bytes(der)) => {
             allow(usages, public_usages)?;
             let curve = Curve::named(requested).map_or_else(|| data_error("not a curve of this key"), Ok)?;
-            let point = on_curve!(curve, m => {
-                use m::elliptic_curve::sec1::ToEncodedPoint as _;
-                m::PublicKey::from_public_key_der(&der).ok().map(|k| k.to_encoded_point(false).as_bytes().to_vec())
-            });
+            // (…its point checked as a raw one is, after the structure the curve's parse checks)
+            let sec1 = spki::SubjectPublicKeyInfoRef::try_from(der.as_slice()).ok().and_then(|i| i.subject_public_key.as_bytes().map(<[u8]>::to_vec));
+            let parsed = on_curve!(curve, m => m::PublicKey::from_public_key_der(&der).is_ok());
+            let point = sec1.filter(|_| parsed).and_then(|p| ec_point(curve, &p));
             (Kind::Public, curve, point.map_or_else(|| data_error("not an EC SubjectPublicKeyInfo of the curve"), Ok)?)
         }
         ("pkcs8", KeyData::Bytes(der)) => {
@@ -2219,5 +2240,16 @@ mod tests {
         let compressed = [&[2 + (point[64] & 1)][..], &point[1..33]].concat();
         let imported = import_key("raw", KeyData::Bytes(compressed), &p, true, Usages::VERIFY).unwrap();
         assert_eq!(&imported.material, point);
+        let compact = [&[5u8][..], &point[1..33]].concat();
+        assert_eq!(import_key("raw", KeyData::Bytes(compact), &p, true, Usages::VERIFY).unwrap_err().name, "DataError");
+    }
+
+    #[test]
+    fn rsa_public_keys_up_to_16384_bits() {
+        let big = |bits: usize| rsa::BigUint::from_bytes_be(&[&[0xc0u8][..], &vec![0u8; bits / 8 - 2], &[1u8][..]].concat());
+        assert!(rsa_public_from(big(8192), rsa::BigUint::from(65537u32)).is_some());
+        assert!(rsa_public_from(big(16392), rsa::BigUint::from(65537u32)).is_none());
+        assert!(rsa_public_from(big(2048), rsa::BigUint::from(1u64 << 40 | 1)).is_some());
+        assert!(rsa_public_from(big(2048), rsa::BigUint::from(4u32)).is_none());
     }
 }
