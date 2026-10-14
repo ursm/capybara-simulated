@@ -627,6 +627,23 @@ pub fn is_valid(text: &str) -> bool {
     with_parsed(text, None, |list| list.is_some())
 }
 
+// CSSOM getComputedStyle's pseudo-element argument "parsed as a <pseudo-element-selector>": the pseudo-element's name
+// (lowercase, a functional one's alone) where `text` is one — `::before`, a legacy `:before`, `::highlight(x)`,
+// nothing before or after it — and None where it is not, `::slotted()` and `::part()` included.
+pub fn pseudo_element_selector(text: &str) -> Option<String> {
+    use selectors::parser::{Combinator, Component};
+    if text.trim_matches(|c: char| c.is_ascii_whitespace()).len() != text.len() {
+        return None;
+    }
+    with_parsed(text, None, |list| {
+        let [selector] = list?.slice() else { return None };
+        let alone = selector
+            .iter_raw_match_order()
+            .all(|c| matches!(c, Component::PseudoElement(_) | Component::Combinator(Combinator::PseudoElement)));
+        alone.then(|| selector.pseudo_element().map(|p| p.0.clone())).flatten()
+    })
+}
+
 // Parsed-selector cache — the driver emits a small recurring set of selectors, so parsing each once
 // and reusing it keeps matching off the parser. Keyed by the selector text, and BOUNDED: a page's own
 // queries interpolate ids (`#comment_123`, `[data-id="7"]`) without end, and the cache outlives sessions.

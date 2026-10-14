@@ -1741,13 +1741,11 @@ css/cssom/getComputedStyle-pseudo-with-argument.html:
 - 'This pseudo-element should parse: ::highlight(name)'
 css/cssom/getComputedStyle-pseudo.html:
 - "::file-selector-button resolves to the file input button element"
-- Pseudo-elements can use the full range of CSS syntax
 - 'Unknown pseudo-element with a known identifier: backdrop'
 - 'Unknown pseudo-element with a known identifier: file-selector-button'
 - 'Unknown pseudo-element with a known identifier: grammar-error'
 - 'Unknown pseudo-element with a known identifier: highlight(name)'
 - 'Unknown pseudo-element with a known identifier: marker'
-- 'Unknown pseudo-element with a known identifier: placeholder'
 - 'Unknown pseudo-element with a known identifier: spelling-error'
 - 'Unknown pseudo-element with a known identifier: view-transition'
 - 'Unknown pseudo-element with a known identifier: view-transition-group(name)'

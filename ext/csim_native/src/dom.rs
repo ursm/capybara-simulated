@@ -2548,6 +2548,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "matchesId", matches_id, context_id);
     register(scope, ns, "closest", closest, context_id);
     register(scope, ns, "selectorValid", selector_valid, context_id);
+    register(scope, ns, "pseudoElementSelector", pseudo_element_selector, context_id);
     register(scope, ns, "xpathPrefixes", xpath_prefixes, context_id);
     register(scope, ns, "xpathEvaluate", xpath_evaluate, context_id);
     register(scope, ns, "resetArena", reset_arena, context_id);
@@ -4097,6 +4098,15 @@ fn closest(
     }
 }
 
+// __dom.pseudoElementSelector(text) -> the name of the pseudo-element `text` is (`selector::pseudo_element_selector`), or
+// null.
+fn pseudo_element_selector(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    match crate::selector::pseudo_element_selector(&text).and_then(|n| v8::String::new(scope, &n)) {
+        Some(name) => rv.set(name.into()),
+        None => rv.set_null(),
+    }
+}
 // __dom.selectorValid(text) -> bool: a selector this engine parses — `CSS.supports('selector(…)')`.
 fn selector_valid(
     scope: &mut v8::PinScope<'_, '_>,
