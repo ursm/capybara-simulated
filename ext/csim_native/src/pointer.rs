@@ -46,8 +46,8 @@ pub(crate) fn orientation(tilt_x: Option<f64>, tilt_y: Option<f64>, altitude: Op
     } else {
         ((azimuth.cos() / altitude.tan()).atan(), (azimuth.sin() / altitude.tan()).atan())
     };
-    // (…rounded as ECMAScript's Math.round does: a half up, one from -0.5 to 0 to -0)
-    let round = |v: f64| if (-0.5..0.0).contains(&v) { -0.0 } else { (v + 0.5).floor() };
+    // (…rounded as ECMAScript's Math.round does, a half up — to a `long`, which has no -0)
+    let round = |v: f64| (v + 0.5).floor() + 0.0;
     [round(x.to_degrees()), round(y.to_degrees()), altitude, azimuth]
 }
 

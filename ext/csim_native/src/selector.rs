@@ -629,15 +629,11 @@ pub fn is_valid(text: &str) -> bool {
 
 // CSSOM getComputedStyle's pseudo-element argument "parsed as a <pseudo-element-selector>": the pseudo-element's name
 // (lowercase, a functional one's alone) where `text` is one — `::before`, a legacy `:before`, `::highlight(x)`,
-// nothing before or after it (white space included, but inside a function its end closes) — and None where it is not:
-// `::slotted()` and `::part()`, and a view transition pseudo-element of `*`, which names no one pseudo-element (the
-// WPT's getComputedStyle-pseudo-with-argument, Chrome and Firefox alike).
+// nothing before or after it, white space included (inside a function its end closes, it is the function's) — and None
+// where it is not: `::slotted()` and `::part()`, and a view transition pseudo-element of anything but one name (`*`, a
+// class), which names no one pseudo-element (the WPT's getComputedStyle-pseudo-with-argument, Chrome and Firefox alike).
 pub fn pseudo_element_selector(text: &str) -> Option<String> {
     use selectors::parser::{Combinator, Component};
-    let open = text.matches('(').count() > text.matches(')').count();
-    if text.starts_with(|c: char| c.is_ascii_whitespace()) || (!open && text.ends_with(|c: char| c.is_ascii_whitespace())) {
-        return None;
-    }
     let name = with_parsed(text, None, |list| {
         let [selector] = list?.slice() else { return None };
         let alone = selector
@@ -645,11 +641,35 @@ pub fn pseudo_element_selector(text: &str) -> Option<String> {
             .all(|c| matches!(c, Component::PseudoElement(_) | Component::Combinator(Combinator::PseudoElement)));
         alone.then(|| selector.pseudo_element().map(|p| p.0.clone())).flatten()
     })?;
-    let argument = text.split_once('(').map(|(_, a)| a.trim_start_matches(|c: char| c.is_ascii_whitespace()));
-    if name.starts_with("view-transition-") && argument.is_some_and(|a| a.starts_with('*')) {
-        return None;
+    standalone_argument(text, name.starts_with("view-transition-")).then_some(name)
+}
+// …its tokens: no white space first or last at the top level (comments none of them), and — `one_name` — its function's
+// argument one identifier.
+fn standalone_argument(text: &str, one_name: bool) -> bool {
+    use cssparser::Token;
+    let mut input = ParserInput::new(text);
+    let mut parser = CssParser::new(&mut input);
+    let (mut first, mut last_white) = (true, false);
+    while let Ok(token) = parser.next_including_whitespace_and_comments() {
+        match token.clone() {
+            Token::Comment(_) => continue,
+            Token::WhiteSpace(_) if first => return false,
+            Token::WhiteSpace(_) => last_white = true,
+            Token::Function(_) => {
+                last_white = false;
+                let named: Result<(), cssparser::ParseError<'_, ()>> = parser.parse_nested_block(|arg| {
+                    arg.expect_ident()?;
+                    arg.expect_exhausted().map_err(Into::into)
+                });
+                if one_name && named.is_err() {
+                    return false;
+                }
+            }
+            _ => last_white = false,
+        }
+        first = false;
     }
-    Some(name)
+    !last_white
 }
 
 // Parsed-selector cache — the driver emits a small recurring set of selectors, so parsing each once
@@ -814,4 +834,33 @@ pub fn matches_text(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod pseudo_argument_tests {
+    use super::pseudo_element_selector;
+
+    #[test]
+    fn a_get_computed_style_argument_is_one_pseudo_element() {
+        for (text, want) in [
+            ("::before", Some("before")),
+            (":before", Some("before")),
+            ("::BEFORE", Some("before")),
+            ("::before ", None),
+            (" ::before", None),
+            ("::before/*(*/ ", None),
+            ("::before /*(*/", None),
+            ("::highlight(x/*)*/ ", Some("highlight")),
+            ("::highlight(name\t", Some("highlight")),
+            ("::view-transition-new(name)", Some("view-transition-new")),
+            ("::view-transition-new(*)", None),
+            ("::view-transition-new(/**/*)", None),
+            ("::view-transition-new(a.b)", None),
+            ("::view-transition-group(.b)", None),
+            ("::slotted(*)", None),
+            (":placeholder", None),
+        ] {
+            assert_eq!(pseudo_element_selector(text).as_deref(), want, "{text:?}");
+        }
+    }
 }
