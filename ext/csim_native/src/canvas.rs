@@ -1131,11 +1131,33 @@ fn canvas_clip(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     h.set_object(scope, crate::canvas_state::CLIP, made);
 }
 
-// __dom.canvasConvert(pixels, fromP3, toP3): an RGBA buffer converted in place from one colour space to the other.
-fn canvas_convert(_scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(m) = matrix(args.get(1).is_true(), args.get(2).is_true()) else { return };
-    if let Some(data) = bytes_mut(args.get(0)) {
+// __dom.canvasConvert(pixels, from, to): an RGBA buffer converted in place from one PredefinedColorSpace to another —
+// "srgb" and "display-p3" by the matrix between them (a wide colour clipped into sRGB, as a browser reads one back), each
+// one's linear counterpart ("srgb-linear", "display-p3-linear") through the sRGB transfer function both share, decoded
+// to its base space first and encoded from it last; its alpha untouched, nothing done where they match.
+fn canvas_convert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let (from, to) = (args.get(1).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
+    if from == to {
+        return;
+    }
+    let Some(data) = bytes_mut(args.get(0)) else { return };
+    let (from_base, from_linear) = from.strip_suffix("-linear").map_or((from.as_str(), false), |b| (b, true));
+    let (to_base, to_linear) = to.strip_suffix("-linear").map_or((to.as_str(), false), |b| (b, true));
+    let transfer = |data: &mut [u8], f: fn(f64) -> f64| {
+        for px in data.chunks_exact_mut(4) {
+            for c in &mut px[..3] {
+                *c = byte(f(unit(*c)) * 255.0);
+            }
+        }
+    };
+    if from_linear {
+        transfer(data, oetf);
+    }
+    if let Some(m) = matrix(from_base == "display-p3", to_base == "display-p3") {
         convert_buffer(m, data);
+    }
+    if to_linear {
+        transfer(data, eotf);
     }
 }
 
