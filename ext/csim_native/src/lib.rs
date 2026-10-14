@@ -74,6 +74,7 @@ mod paint;
 mod keys;
 mod cache_matching;
 mod sandbox;
+mod integrity;
 mod webcrypto;
 mod import_map;
 mod image_source;

@@ -81,7 +81,7 @@ impl Hash {
             Hash::Sha384 | Hash::Sha512 => 1024,
         }
     }
-    fn digest(self, data: &[u8]) -> Vec<u8> {
+    pub(crate) fn digest(self, data: &[u8]) -> Vec<u8> {
         with_digest!(self, D => D::digest(data).to_vec())
     }
 }
