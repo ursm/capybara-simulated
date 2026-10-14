@@ -37,6 +37,35 @@ pub(crate) fn cors_safelisted_method(method: &[u8]) -> bool {
     ["GET", "HEAD", "POST"].iter().any(|m| m.as_bytes() == method)
 }
 
+// Fetch "HTTP-redirect fetch" (§4.4) step 12: whether a redirect of `status` makes a request of `method` a bodyless GET —
+// a 301 or 302 of a POST, a 303 of anything but a GET or HEAD.
+pub(crate) fn redirect_to_get(status: u32, method: &[u8]) -> bool {
+    ((status == 301 || status == 302) && method == b"POST") || (status == 303 && method != b"GET" && method != b"HEAD")
+}
+// …and a "request-body-header name", which that step removes with the body.
+pub(crate) fn request_body_header(name: &[u8]) -> bool {
+    ["content-encoding", "content-language", "content-location", "content-type"].iter().any(|h| h.as_bytes().eq_ignore_ascii_case(name))
+}
+// What following a redirect from `current` to `location` does to a request of `method` (`cors_mode`: its mode "cors"),
+// made by a document of `request_origin` — None where it is a network error: a location that is no HTTP(S) URL (steps 5
+// and 6), one with credentials where the request is CORS-mode and the location of another origin (step 7) or where its
+// response is CORS-tainted — a CORS-mode request at another origin than its own (step 8). Else whether it becomes a
+// bodyless GET (step 12) and whether its `Authorization` goes, as it does to another origin (step 13).
+pub(crate) struct Redirect {
+    pub(crate) to_get: bool,
+    pub(crate) drop_authorization: bool,
+}
+pub(crate) fn redirect(status: u32, method: &[u8], current: &str, location: &str, cors_mode: bool, request_origin: &str) -> Option<Redirect> {
+    let to = ada_url::Url::parse(location, None).ok().filter(|u| matches!(u.protocol(), "http:" | "https:"))?;
+    let from = ada_url::Url::parse(current, None).ok()?;
+    let credentials = !to.username().is_empty() || !to.password().is_empty();
+    let tainted = cors_mode && from.origin() != request_origin;
+    if credentials && ((cors_mode && to.origin() != request_origin) || tainted) {
+        return None;
+    }
+    Some(Redirect { to_get: redirect_to_get(status, method), drop_authorization: to.origin() != from.origin() })
+}
+
 const FORBIDDEN_REQUEST_HEADERS: [&str; 22] = [
     "accept-charset", "accept-encoding", "access-control-request-headers", "access-control-request-method", "connection",
     "content-length", "cookie", "cookie2", "date", "dnt", "expect", "host", "keep-alive", "origin", "permissions-policy",
@@ -122,6 +151,8 @@ pub(crate) fn cors_safelisted_response_header(name: &[u8]) -> bool {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "badPort", bad_port_op, context_id);
     crate::dom::register(scope, ns, "corsSafelistedMethod", cors_safelisted_method_op, context_id);
+    crate::dom::register(scope, ns, "httpRedirect", http_redirect_op, context_id);
+    crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
     crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
     crate::dom::register(scope, ns, "headerRule", header_rule_op, context_id);
     crate::dom::register(scope, ns, "httpToken", http_token_op, context_id);
@@ -142,6 +173,23 @@ fn bad_port_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 fn cors_safelisted_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let method = units(scope, args.get(0));
     rv.set_bool(cors_safelisted_method(&method));
+}
+// __dom.httpRedirect(status, method, currentUrl, locationUrl, corsMode, requestOrigin) -> null for a network error (`redirect`),
+// else its bits: 1 the request a bodyless GET, 2 its Authorization dropped.
+fn http_redirect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let status = args.get(0).uint32_value(scope).unwrap_or(0);
+    let method = units(scope, args.get(1));
+    let (current, location) = (args.get(2).to_rust_string_lossy(scope), args.get(3).to_rust_string_lossy(scope));
+    let origin = args.get(5).to_rust_string_lossy(scope);
+    match redirect(status, &method, &current, &location, args.get(4).is_true(), &origin) {
+        Some(r) => rv.set_int32(r.to_get as i32 | (r.drop_authorization as i32) << 1),
+        None => rv.set_null(),
+    }
+}
+// __dom.requestBodyHeader(name) -> whether it is a request-body-header name.
+fn request_body_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let name = units(scope, args.get(0));
+    rv.set_bool(request_body_header(&name));
 }
 // __dom.forbiddenMethod(method) -> whether it is a forbidden method.
 fn forbidden_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -188,6 +236,9 @@ fn ruby_bytes(s: magnus::RString) -> Vec<u8> {
 pub(crate) fn bad_port_for_ruby(port: u32) -> bool {
     bad_port(port)
 }
+pub(crate) fn redirect_to_get_for_ruby(status: u32, method: magnus::RString) -> bool {
+    redirect_to_get(status, &ruby_bytes(method))
+}
 pub(crate) fn cors_safelisted_method_for_ruby(method: magnus::RString) -> bool {
     cors_safelisted_method(&ruby_bytes(method))
 }
@@ -207,6 +258,19 @@ pub(crate) fn http_token_for_ruby(s: magnus::RString) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_redirect_follows_the_fetch_steps() {
+        let r = |status, method: &[u8], to: &str, cors| redirect(status, method, "http://a.test/x", to, cors, "http://a.test").map(|r| (r.to_get, r.drop_authorization));
+        assert_eq!(r(302, b"POST", "http://a.test/y", false), Some((true, false)));
+        assert_eq!(r(307, b"POST", "http://b.test/y", false), Some((false, true)));
+        assert_eq!(r(303, b"HEAD", "http://a.test/y", false), Some((false, false)));
+        assert_eq!(r(301, b"GET", "data:,x", false), None);
+        assert_eq!(r(301, b"GET", "http://u:p@b.test/", true), None);
+        assert_eq!(r(301, b"GET", "http://u:p@a.test/", true), Some((false, false)));
+        assert!(redirect(301, b"GET", "http://b.test/x", "http://u:p@b.test/", true, "http://a.test").is_none());
+        assert!(request_body_header(b"Content-Type") && !request_body_header(b"content-length"));
+    }
 
     #[test]
     fn headers_keep_to_the_tables() {

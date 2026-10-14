@@ -3329,12 +3329,12 @@ module Capybara
         if (loc = redirect_location(status, headers))
           next_url = resolve_against_current(loc)
           resp_body.close if resp_body.respond_to?(:close)
-          # HTTP semantics: 301/302/303 → method becomes GET; 307/308
-          # require the method (and body) to be preserved.
-          if [307, 308].include?(status)
-            return navigate_post(next_url, body, content_type, depth: depth + 1, initiator: initiator, site_seed: nav_site)
-          else
+          # Fetch "HTTP-redirect fetch": a 301 / 302 / 303 of a POST makes it a GET; a 307 / 308 keeps the method and
+          # the body.
+          if Native.redirect_to_get(status.to_i, 'POST')
             return navigate(next_url, depth: depth + 1, initiator: initiator, site_seed: nav_site)
+          else
+            return navigate_post(next_url, body, content_type, depth: depth + 1, initiator: initiator, site_seed: nav_site)
           end
         end
         if download_response?(headers)
@@ -6389,7 +6389,7 @@ module Capybara
             site        = widen_sec_fetch_site(site, sec_fetch_site(initiator, target))
             next_url    = carry_fragment(target, resolve_against(loc, target))
             origin_null = redirect_taints_origin?(origin_null, initiator, target, next_url)
-            if ([301, 302].include?(status) && meth == 'POST') || (status == 303 && !%w[GET HEAD].include?(meth))
+            if Native.redirect_to_get(status.to_i, meth)
               meth     = 'GET'
               req_body = ''.b
               req_ct   = nil
@@ -9465,7 +9465,7 @@ module Capybara
             # GET/HEAD redirected via 301/302/303 keeps its method and Content-Type,
             # and 307/308 always preserve (xhr send-redirect basics).
             up = method.to_s.upcase
-            if ([301, 302].include?(status) && up == 'POST') || (status == 303 && !%w[GET HEAD].include?(up))
+            if Native.redirect_to_get(status.to_i, up)
               method  = 'GET'
               body    = nil
               headers = headers.reject {|k, _| REDIRECT_DROPPED_HEADERS.include?(k.to_s.downcase) } if headers.is_a?(Hash)
@@ -10375,7 +10375,7 @@ module Capybara
           # 307/308 preserve method + body; 301/302/303 → GET the frame (routed
           # through the realm that OWNS the iframe, as in navigate_realm_self_get). Latch the
           # redirect chain's Sec-Fetch-Site (widened) + Origin taint (redirect_taints_origin?).
-          if [307, 308].include?(status)
+          unless Native.redirect_to_get(status.to_i, 'POST')
             return navigate_realm_self_post(realm_id, next_url, body, content_type, depth: depth + 1, is_reload: is_reload, is_history: is_history,
                                                        site_seed: site, origin_null: redirect_taints_origin?(origin_null, initiator, url.to_s, next_url),
                                                        resulting_client_id: url_origin(next_url) == url_origin(url.to_s) ? rid : nil)
@@ -10863,10 +10863,10 @@ module Capybara
           next_url = carry_fragment(url, resolve_against_current(loc))
           resp_body.close if resp_body.respond_to?(:close)
           # 301/302/303 → GET; 307/308 preserve method + body (same as navigate_post).
-          if [307, 308].include?(status)
-            return navigate_frame_post(next_url, body, content_type, depth: depth + 1, entry: entry)
-          else
+          if Native.redirect_to_get(status.to_i, 'POST')
             return navigate_frame(next_url, depth: depth + 1, entry: entry)
+          else
+            return navigate_frame_post(next_url, body, content_type, depth: depth + 1, entry: entry)
           end
         end
         if download_response?(headers)
