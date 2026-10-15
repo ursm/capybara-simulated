@@ -58837,15 +58837,6 @@ shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadopteds
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-invalid-specifier.html:
-- name: 'Mixed valid/invalid specifiers: only valid ones produce entries and apply
-    styles.'
-  reason: Asserts CSS-module-map resolution of importmap specifiers into live shadowRoot.adoptedStyleSheets
-    entries; needs module-loading pipeline we don't model (adoptedStyleSheets is a
-    []-stub).
-- name: Unresolvable bare specifier produces no entry and applies no styles.
-  reason: Asserts module-specifier resolution outcome (unresolvable -> no adoptedStyleSheets
-    entry); requires CSS module loading/module-map, not modeled.
 shadow-dom/declarative/tentative/shadowrootadoptedstylesheets/shadowrootadoptedstylesheets-modulepreload-async.html:
 - name: Modulepreload after shadow root creation resolves the placeholder.
   reason: Requires <link rel=modulepreload as=style> async CSS-module fetch populating
