@@ -22,6 +22,8 @@ const TRANSLATE: u32 = 1;
 const WRITING_SUGGESTIONS: u32 = 2;
 const HIDDEN: u32 = 3;
 const ACCESS_KEY_LABEL: u32 = 4;
+const AUTOCAPITALIZE: u32 = 5;
+const AUTOCORRECT: u32 = 6;
 // The elements `tabIndex` defaults to 0 on (else -1): these HTML ones, an SVG `<a>`, and a summary that is its details'.
 // (…its local name as written: `createElementNS(HTML, "BUTTON")` is no button)
 const TABBABLE_BY_DEFAULT: [&str; 9] = ["a", "area", "button", "frame", "iframe", "input", "object", "select", "textarea"];
@@ -57,9 +59,42 @@ fn inherited_state(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, name:
     }
     missing
 }
+// HTML autocapitalization and autocorrection (§6.8.6, §6.8.7): an element's own state, else — for a button, fieldset,
+// input, output, select or textarea with a form owner — that form's, else the default. The element whose form owner
+// answers for it where it states nothing:
+fn inheriting_form_owner(arena: &crate::dom::RealmArena, id: crate::dom::NodeId) -> Option<crate::dom::NodeId> {
+    const INHERITING: [&str; 6] = ["button", "fieldset", "input", "output", "select", "textarea"];
+    let n = arena.get(id)?;
+    (n.is_html() && INHERITING.contains(&&*n.local_name)).then(|| arena.form_owner(id)).flatten()
+}
+// …the autocapitalization hint's keyword (`autocapitalize`): an empty attribute no state of its own, `off` none, `on`
+// sentences, an invalid value sentences; '' for the default.
+fn autocapitalization_hint(arena: &crate::dom::RealmArena, id: crate::dom::NodeId) -> &'static str {
+    let given = arena.get(id).and_then(|n| n.plain_attr("autocapitalize")).filter(|v| !v.is_empty());
+    match given.map(str::to_ascii_lowercase).as_deref() {
+        Some("off" | "none") => "none",
+        Some("words") => "words",
+        Some("characters") => "characters",
+        Some(_) => "sentences",
+        None => inheriting_form_owner(arena, id).map_or("", |form| autocapitalization_hint(arena, form)),
+    }
+}
+// …and whether autocorrection is on (`autocorrect`): never for an input whose type has none; any attribute present its
+// state — on but for `off`, its invalid value default on, not the form's.
+fn autocorrection(arena: &crate::dom::RealmArena, id: crate::dom::NodeId) -> bool {
+    let Some(n) = arena.get(id) else { return true };
+    if n.is_html_named("input") && crate::input_types::facts(n.input_type()) & crate::input_types::NO_AUTOCORRECT != 0 {
+        return false;
+    }
+    if let Some(v) = n.plain_attr("autocorrect") {
+        return !v.eq_ignore_ascii_case("off");
+    }
+    inheriting_form_owner(arena, id).is_none_or(|form| autocorrection(arena, form))
+}
 // __dom.elementReflection(el, which) -> `tabIndex` (its attribute's long, else its default), `translate` (inherited:
 // yes or ''; no), `writingSuggestions` ('true' / 'false', inherited), `hidden` (0 none, 1 hidden, 2 until-found),
-// `accessKeyLabel` (`Alt+` and the key where `accesskey` is one code point, else '').
+// `accessKeyLabel` (`Alt+` and the key where `accesskey` is one code point, else ''), `autocapitalize` (the hint's
+// keyword) and `autocorrect`.
 fn element_reflection_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
     let which = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
@@ -76,6 +111,12 @@ fn element_reflection_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
             let state = arena.get(id).and_then(|n| n.plain_attr("hidden")).map_or(0, |v| if v.eq_ignore_ascii_case("until-found") { 2 } else { 1 });
             rv.set_uint32(state);
         }
+        AUTOCAPITALIZE => {
+            let hint = autocapitalization_hint(arena, id);
+            let keyword = v8::String::new(scope, hint).unwrap();
+            rv.set(keyword.into());
+        }
+        AUTOCORRECT => rv.set_bool(autocorrection(arena, id)),
         ACCESS_KEY_LABEL => {
             // (…one code point of the value's UTF-16, a lone surrogate one too)
             let key = arena.get(id).and_then(|n| n.plain_attr_units("accesskey")).filter(|k| char::decode_utf16(k.iter().copied()).count() == 1);
