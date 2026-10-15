@@ -452,7 +452,8 @@ module Capybara
       # / module state, exactly like the main page's per-visit rebuild. `parent_id`
       # keeps the new realm's `parent`/`top` wired to the owning realm, and `seed`
       # is what the container gives the document, seeded as on the first build
-      # (`__csimFrameSeed`: its viewport and margins). The Browser then re-points
+      # (`__csimFrameSeed`: its viewport and margins, and the container itself, whose
+      # navigable the new realm is linked to as it is made). The Browser then re-points
       # the iframe element at the new id (`__csimRebindFrameRealm`).
       def reload_frame_realm(old_id, parent_id, url, body, content_type, client_id = nil, seed = nil)
         # A re-navigated document discards its child browsing contexts, so dispose the old realm's
@@ -460,10 +461,9 @@ module Capybara
         # free (the old document's iframe elements go away → DOM-unregister disposes their realms);
         # the Ruby reload path (navigate_realm_self_get/_post) rebuilds without that DOM teardown, so
         # a descendant frame's realm would otherwise linger and its contentWindow stay live.
-        container = realm_call(parent_id.to_i, '__csimFrameContainerOf', old_id)
         dispose_frame_realm_tree(old_id)
         seed ||= {}
-        create_frame_realm(ctx, url, body, content_type, parent_id, container, nil, nil, nil, nil, seed['viewport'], client_id, seed['margins'])
+        create_frame_realm(ctx, url, body, content_type, parent_id, seed['container'], nil, nil, nil, nil, seed['viewport'], client_id, seed['margins'])
       end
 
       # Dispose a frame realm and every descendant frame realm (transitively), deepest first so a
