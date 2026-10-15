@@ -3566,10 +3566,10 @@ module Capybara
         Thread.current[:csim_asset_no_store] = result && result['headers']&.any? {|k, v|
           k.to_s.casecmp?('cache-control') && Array(v).join(',').match?(/(?:\A|,)\s*no-store\s*(?:,|\z)/i)
         }
-        # …and its bytes where its text is not them (a byte-order mark taken off, an encoding other than UTF-8 decoded):
-        # what an integrity check hashes (`external_asset_bytes`).
-        raw = result && result['body_bytes']
-        Thread.current[:csim_asset_bytes] = raw if raw && raw.b != result['body'].to_s.b
+        # …and its bytes where it has any but ASCII — which its text may not be (a byte-order mark taken off, an encoding
+        # other than UTF-8 decoded), and which a document of another encoding decodes otherwise: what a script's integrity
+        # is a digest of and its source is decoded from (`external_asset_bytes`).
+        Thread.current[:csim_asset_bytes] = result && result['body_bytes']
         return nil unless result && result['status'].to_i < 400
         result['body'].to_s
       end
@@ -3792,8 +3792,8 @@ module Capybara
         (@asset_meta ||= {})[key] = meta
         return nil unless body
         # Script / stylesheet source is TEXT, but the raw Rack / binread body
-        # arrives BINARY-tagged (see `RuntimeShared.utf8_text`). (…its bytes kept beside it where the text is not them, for
-        # an integrity check: `rack_fetch_body`)
+        # arrives BINARY-tagged (see `RuntimeShared.utf8_text`). (…its bytes kept beside it where it has any but ASCII:
+        # `rack_fetch_body`)
         text  = RuntimeShared.utf8_text(body)
         bytes = Thread.current[:csim_asset_bytes] || (body.b if text.b != body.b)
         (@asset_bytes ||= {})[key] = bytes
@@ -3807,8 +3807,8 @@ module Capybara
         text
       end
 
-      # The bytes of the asset `external_asset_source` last served for `url` where its text is not them (nil where it
-      # is): what an integrity check hashes.
+      # The bytes of the asset `external_asset_source` last served for `url` where it has any but ASCII (nil where its
+      # text is them): what a script's integrity check hashes and its source is decoded from.
       def external_asset_bytes(url)
         needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
         key = resolve_against_current(url.to_s, use_base: needs_base)
