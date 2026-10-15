@@ -29,7 +29,7 @@ RSpec.describe 'native arena upkeep' do
   it 'sends a coalesced text only the chunks appended to it' do
     text   = 'a ' * 10_000
     length = text.length + 1   # (the surrogate is one unit of it)
-    chars  = crossed(%w[setData appendData createNode], "Document.parseHTMLUnsafe('<pre>\\uD800#{text}</pre>')",
+    chars  = crossed(%w[setData appendData createNode], "Document.parseHTMLUnsafe(`<pre>\\uD800#{text}</pre>`)",
                      units: 'a => typeof a[1] === "string" ? a[1].length : 0')
     expect(chars).to be <= 2 * length
     expect(chars).to be >= length
