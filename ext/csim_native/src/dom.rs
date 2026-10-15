@@ -4596,9 +4596,10 @@ fn style_shadow_sheets_unguarded(
     engine.set_shadow_sheets(arena, root, &sheets);
 }
 
-// __dom.styleSheetFacts() -> [cssImage, sheetIndex, faceText, …]: what the document's sheets declare that the page side
-// asks of them (`StyleEngine::sheet_facts`) — whether one could paint an image, then each `@font-face` that applies, by
-// the index of its sheet in the last `styleSheets` set and its declarations as text. Undefined with no engine yet.
+// __dom.styleSheetFacts() -> [cssImage, sheetIndex, faceText, firstUrl, …]: what the document's sheets declare that the
+// page side asks of them (`StyleEngine::sheet_facts`) — whether one could paint an image, then each `@font-face` that
+// applies, by the index of its sheet in the last `styleSheets` set, its declarations as text and its first `url()`
+// source resolved (null for none). Undefined with no engine yet.
 fn style_sheet_facts(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -4617,13 +4618,11 @@ fn style_sheet_facts_unguarded(
     let (Some(engine), Some(arena)) = (d.styles.get(&cid), d.arena.enter_known(cid)) else { return };
     let (css_image, faces) = engine.sheet_facts(&arena.sheets);
     let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Boolean::new(scope, css_image).into()];
-    for (sheet, text) in faces {
+    for (sheet, text, first_url) in faces {
+        let (Some(text), url) = (v8::String::new(scope, &text), first_url.and_then(|u| v8::String::new(scope, &u))) else { continue };
         items.push(v8::Number::new(scope, sheet as f64).into());
-        if let Some(text) = v8::String::new(scope, &text) {
-            items.push(text.into());
-        } else {
-            items.pop();
-        }
+        items.push(text.into());
+        items.push(url.map_or_else(|| v8::null(scope).into(), Into::into));
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }

@@ -67,12 +67,14 @@ fn edit_command(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return };
     crate::cloning::begin_clone(scope);
     let steps = v8::Local::new(scope, steps);
+    // (…its range as the selection's in the editing host it is in — its anchor's, the focus clamped to it, nothing
+    // selected in a comment: editing.rs `selection_host` — where `host` is the anchor's root editable element (a
+    // `contenteditable=true` nested in an editable one edits in its own, the outer root firing `input`); a selection of
+    // another host's, or none, edits nothing: Chrome)
+    let arena = realm(scope, cid);
+    let Some((host, range)) = crate::editing::selection_host(arena, (anchor, ao), (focus, fo)).filter(|_| arena.editing_root(anchor) == Some(host)) else { return };
     let (mut changes, mut copies, mut held) = (Vec::new(), Vec::new(), Vec::new());
     let mut edit = Edit { cid, caller, steps, host, changes: &mut changes, copies: &mut copies, held: &mut held };
-    // (…its range as the selection's in the host it edits — its anchor's, the focus clamped to it, nothing selected in a
-    // comment: editing.rs `selection_host` — where that is this host; a selection of another host's, or none, edits
-    // nothing: Chrome)
-    let Some((_, range)) = crate::editing::selection_host(realm(scope, cid), (anchor, ao), (focus, fo)).filter(|&(h, _)| h == host) else { return };
     let done = match command.as_str() {
         "insertorderedlist" => list(scope, &mut edit, range.0, "ol"),
         "insertunorderedlist" => list(scope, &mut edit, range.0, "ul"),

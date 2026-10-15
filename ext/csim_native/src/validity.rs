@@ -735,7 +735,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "implicitSubmissionForm", implicit_submission_form, context_id);
     crate::dom::register(scope, ns, "editingHost", editing_host, context_id);
     crate::dom::register(scope, ns, "optionText", option_text_op, context_id);
-    crate::dom::register(scope, ns, "outermostEditable", outermost_editable, context_id);
+    crate::dom::register(scope, ns, "editingRoot", editing_root, context_id);
     crate::dom::register(scope, ns, "isLabelable", is_labelable, context_id);
     crate::dom::register(scope, ns, "labeledControl", labeled_control, context_id);
     crate::dom::register(scope, ns, "labelsOf", labels_of, context_id);
@@ -823,9 +823,9 @@ fn editing_host(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     nodes_answer(scope, &args, rv, |arena, id| arena.editing_host(id).into_iter().collect());
 }
 
-// __dom.outermostEditable(nid) -> [the outermost editable inclusive ancestor element] or [] (`element_state::outermost_editable`).
-fn outermost_editable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    nodes_answer(scope, &args, rv, |arena, id| arena.outermost_editable(id).into_iter().collect());
+// __dom.editingRoot(nid) -> [the root editable element of the node] or [] (`element_state::editing_root`).
+fn editing_root(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    nodes_answer(scope, &args, rv, |arena, id| arena.editing_root(id).into_iter().collect());
 }
 
 // __dom.formOwner(nid) -> [the control's form owner] or [] (`element_state::form_owner`).

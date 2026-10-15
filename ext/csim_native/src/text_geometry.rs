@@ -1063,9 +1063,9 @@ fn modify_target(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackAr
         visual => (visual == "right") != visual_rtl(scope, args, cid, node, offset, granularity),
     };
     let arena = crate::dom::realm(scope, cid);
-    // (…the editing host the focus is in — its outermost editable ancestor — or the body, or the root of its tree: one
+    // (…the root editable element the focus is in (`editing_root`), or the body, or the root of its tree: one
     // through its shadow hosts, as the flat tree a line is laid out in holds no shadow root)
-    let root = arena.outermost_editable(node).unwrap_or_else(|| {
+    let root = arena.editing_root(node).unwrap_or_else(|| {
         let top = arena.shadow_including_root(node);
         arena.relative(top, crate::dom::RELATIVE_BODY).filter(|_| arena.is_document(top)).unwrap_or(top)
     });

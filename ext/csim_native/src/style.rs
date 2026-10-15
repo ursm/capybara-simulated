@@ -662,9 +662,10 @@ impl StyleEngine {
 
     // What the document's sheets declare that the page side asks of them without styling anything: whether one could
     // paint an image (`css_image`), and its `@font-face` rules — each the index of the sheet it is in (an `@import`ed
-    // one's, its importer's) and the declarations it holds, its sources' URLs resolved — the ones that apply, inside an
-    // `@media` / `@supports` that holds and an `@import` that does, in the order a CSSOM walk finds them.
-    pub(crate) fn sheet_facts(&self, store: &crate::sheets::SheetStore) -> (bool, Vec<(usize, String)>) {
+    // one's, its importer's), the declarations it holds, its sources' URLs resolved, and the first of those URLs — the
+    // ones that apply, inside an `@media` / `@supports` that holds and an `@import` that does, in the order a CSSOM walk
+    // finds them.
+    pub(crate) fn sheet_facts(&self, store: &crate::sheets::SheetStore) -> (bool, Vec<(usize, String, Option<String>)>) {
         use style::font_face::DescriptorId;
         use style::stylesheets::{CssRule, StylesheetInDocument};
         const DESCRIPTORS: [DescriptorId; 13] = [
@@ -701,7 +702,13 @@ impl StyleEngine {
                 if let Some(src) = &d.src {
                     text.push_str(&format!("src: {}; ", font_face_src(src)));
                 }
-                faces.push((i, text.trim_end().to_owned()));
+                let first_url = d.src.as_ref().and_then(|src| {
+                    src.0.iter().find_map(|source| match source {
+                        style::font_face::Source::Url(u) => u.url.url().map(|url| url.as_str().to_owned()),
+                        style::font_face::Source::Local(_) => None,
+                    })
+                });
+                faces.push((i, text.trim_end().to_owned(), first_url));
             }
         }
         (image, faces)
