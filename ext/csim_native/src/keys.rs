@@ -184,7 +184,9 @@ pub(crate) fn plan(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, key: 
     let input_type = if tag == "input" { n.input_type() } else { "" };
     let check_or_radio = matches!(input_type, "checkbox" | "radio");
     let control = matches!(tag, "input" | "textarea") && n.plain_attr("readonly").is_none() && n.plain_attr("disabled").is_none();
-    let host = arena.is_editable(id);
+    // (…a text control edits its own value, wherever it is: one inside an editing host — a design-mode document's
+    // included — is no part of the host's content to a key, Chrome)
+    let host = !matches!(tag, "input" | "textarea") && arena.is_editable(id);
     let button = tag == "button" || (tag == "input" && n.input_has(crate::input_types::BUTTON));
     let mut plan = 0;
     let mut set = |bit: u32, on: bool| {

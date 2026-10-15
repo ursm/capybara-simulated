@@ -5329,12 +5329,13 @@ module Capybara
         Native.service_worker_response_allowed(mode.to_s, redirect, (r['type'] || 'default').to_s, r['redirected'] == true)
       end
 
-      # Every registration with a live active worker, `[scope, handle, script URL]`, in the order they were registered —
-      # see __csim_swActiveRegistrations.
-      def sw_active_registrations
-        @sw_registrations.filter_map {|scope, handle|
-          w = @workers[handle]
-          [scope, handle, w[:script_url].to_s] if w&.dig(:thread)&.alive?
+      # Every registration, `[scope, handle, script URL]` in the order they were registered — `handle` its active
+      # worker, one still activating too, 0 (and no URL) for one with none alive yet: see __csim_swRegistrations.
+      def sw_registration_list
+        @sw_registered_scopes.keys.map {|scope|
+          handle = @sw_activating_scopes[scope] || @sw_registrations[scope]
+          w      = handle && @workers[handle]
+          w&.dig(:thread)&.alive? ? [scope, handle, w[:script_url].to_s] : [scope, 0, '']
         }
       end
 
@@ -5466,6 +5467,9 @@ module Capybara
         @sw_registered_scopes[scope.to_s] = true
         @sw_activating_scopes.delete(scope.to_s)
         seed_client_mirror(handle.to_i) if fresh
+        # Every realm's registration object at the scope takes the new active worker — another realm's update
+        # activated it (the registration is the origin's; its objects are per realm).
+        broadcast_to_realms('__csim_swRegistrationActivated', scope.to_s, handle.to_i, @workers.dig(handle.to_i, :script_url).to_s)
         # Flush any clients.claim() that arrived before this scope was mirrored (a worker's
         # `activate → clients.claim()` fires decoupled from the client-side lifecycle that populates
         # @sw_registrations, so the claim can be drained first — see the claim handler above).

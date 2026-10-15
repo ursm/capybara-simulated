@@ -57,9 +57,10 @@ fn tabindex(n: &NodeData) -> Option<i64> {
 fn out_of_sequence(n: &NodeData) -> bool {
     tabindex(n).map_or(n.is_html_named("dialog"), |t| t < 0)
 }
-// An editing host itself (element_state.rs `editing_host`): one its own attribute makes one, asking no ancestor.
+// An editing host itself (element_state.rs `editing_host`): one its own attribute makes one, or a design-mode
+// document's document element.
 fn editing_host(arena: &RealmArena, id: NodeId) -> bool {
-    arena.get(id).is_some_and(|n| n.contenteditable_state() == Some(true))
+    arena.editing_host(id) == Some(id)
 }
 // The element ancestors of `id`, nearest first, up to the first node that is none (a shadow root, a document).
 fn element_ancestors(arena: &RealmArena, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {

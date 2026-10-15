@@ -151,6 +151,17 @@ RSpec.describe 'inserting in an editing host' do
     expect([on, off]).to eq([['azb', true, true], ['off', false, false]])
   end
 
+  # …but a text control in it edits its own value, as one in any editing host does: its child text is its default.
+  it 'types into a text control in an editing host as into its value' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><input id=i value=v><textarea id=t>tt</textarea><div contenteditable><input id=j></div><script>document.designMode = "on"</script>']] })
+    s.visit '/'
+    s.find(:css, '#i').send_keys('Z', :backspace, :backspace, 'Q')
+    s.find(:css, '#t').send_keys('Q')
+    s.find(:css, '#j').send_keys('R')
+
+    expect(s.evaluate_script('[i.value, i.childNodes.length, t.value, t.defaultValue, j.value, j.childNodes.length]')).to eq(['Q', 0, 'ttQ', 'tt', 'R', 0])
+  end
+
   # …and never one the keys were not sent to: an element its keydown makes an editing host types nothing into another
   # host the selection sits in (Chrome: no beforeinput, no input).
   it 'edits no host outside the element the keys were sent to' do

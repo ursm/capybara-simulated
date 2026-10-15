@@ -469,6 +469,24 @@ RSpec.describe 'Service Worker client enumeration' do
     expect(session.evaluate_script('globalThis.__regs')).to eq([['/scope/'], 'activated', true])
   end
 
+  # …and as they are: one unregistered from another realm is gone from it too, and one another realm updated has the
+  # new active worker.
+  it 'drops from a frame the registration another realm unregistered' do
+    session = session_with_frames({'out' => '/outside.html'})
+    session.execute_script(<<~JS)
+      const win = document.getElementById('out').contentWindow;
+      win.navigator.serviceWorker.getRegistration('/scope/x').then(async seen => {
+        const reg = await navigator.serviceWorker.getRegistration('/scope/x');
+        await reg.unregister();
+        const after = await win.navigator.serviceWorker.getRegistration('/scope/x');
+        globalThis.__regs = [!!seen, after === undefined, (await win.navigator.serviceWorker.getRegistrations()).length];
+      });
+    JS
+    poll_until { session.evaluate_script('!!globalThis.__regs') }
+
+    expect(session.evaluate_script('globalThis.__regs')).to eq([true, true, 0])
+  end
+
   # A srcdoc frame has no URL a scope could match: it takes its creator's controller — the one the creator has when the
   # frame is made, which a claim since the creator's load gave it.
   it 'controls a srcdoc frame made after a claim took its creator' do
