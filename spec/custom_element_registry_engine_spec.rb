@@ -134,4 +134,30 @@ RSpec.describe 'custom element registries in the engine' do
     JS
     expect(got).to eq(['window window window', 'window window', 'R null null'])
   end
+
+  # "Create an element for a token" looks its registry up through the intended parent, so a declarative shadow root of
+  # the null registry holds elements of none even in a fragment parsed in a scoped registry's context — whether the
+  # engine builds the parse or the bindings replay it (a lone surrogate in the markup). Chrome 155:
+  # `scoped scoped null null null scoped` (Firefox has no scoped registries).
+  it "gives a null-registry declarative shadow root's elements none in a scoped context" do
+    s = session_for('/' => '<!doctype html><meta charset=utf-8><body><div id=h></div>')
+    got = s.evaluate_script(<<~'JS')
+      (() => {
+        const r = new CustomElementRegistry();
+        r.define('x-a', class extends HTMLElement {});
+        const sr = document.getElementById('h').attachShadow({ mode: 'open', customElementRegistry: r });
+        const name = (x) => (x === r ? 'scoped' : x === null ? 'null' : String(x));
+        return ['', '\uD800'].map((lone) => {
+          sr.innerHTML = '<div id=c></div>';
+          const c = sr.getElementById('c');
+          c.setHTMLUnsafe(`<div id=host><template shadowrootmode=open shadowrootcustomelementregistry>${lone}<x-a id=in></x-a>` +
+                          '<p id=p></p></template></div><x-a id=out></x-a>');
+          const host = c.querySelector('#host'), inner = host.shadowRoot;
+          return [c, host, inner, inner.getElementById('in'), inner.getElementById('p'), c.querySelector('#out')]
+            .map((n) => name(n.customElementRegistry)).join(' ');
+        });
+      })()
+    JS
+    expect(got).to eq(['scoped scoped null null null scoped'] * 2)
+  end
 end

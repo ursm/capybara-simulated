@@ -1077,15 +1077,17 @@ impl<'s> Build<'s> {
     }
     // The parser's registry for an element it inserts under a node of a null one — its intended parent's, which "create
     // an element for the token" looks a definition up in: the tracking null passed on, the null registry given to one
-    // that has none set.
+    // that has none set but the build's own (`registry`: a declarative shadow root of the null registry in a scoped
+    // context's fragment holds elements of none, Chrome 155).
     fn inherit_registry(&self, scope: &mut v8::PinScope<'s, '_>, parent: crate::dom::NodeId, child: crate::dom::NodeId) {
         let arena = crate::dom::realm(scope, self.cid);
         let from = arena.get(parent).and_then(|n| n.link.handle());
         let to = arena.get(child).filter(|n| n.kind == crate::dom::NodeKind::Element).and_then(|n| n.link.handle());
         let (Some(from), Some(to)) = (from, to) else { return };
+        let stamped = self.registry.is_some_and(|(code, _)| code == to.registry());
         match from.registry() {
             crate::ce_reactions::TRACKING => to.set_registry_state(crate::ce_reactions::TRACKING),
-            crate::ce_reactions::NULL if to.registry() == 0 => to.set_registry_state(crate::ce_reactions::NULL),
+            crate::ce_reactions::NULL if to.registry() == 0 || stamped => to.set_registry_state(crate::ce_reactions::NULL),
             _ => {}
         }
     }
