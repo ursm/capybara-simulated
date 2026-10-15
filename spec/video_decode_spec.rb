@@ -45,6 +45,39 @@ RSpec.describe 'video decode' do
     expect(got['/html/canvas/element/manual/wide-gamut-canvas/resources/Rec2020-3FF000000.mp4']).to eq([4, true])
   end
 
+  # HTML §4.8.11.5's media data processing steps, as Chrome 155 fires them for movie_5.webm: the duration and the size
+  # before `loadedmetadata`, the seek to a default start position (`currentTime` set before the load) after it, and a
+  # script's seek once loaded — `seeking`, `timeupdate`, `seeked`. (Chrome then repeats `canplay` and `canplaythrough`,
+  # its ready state having dipped during the seek; ours, with the whole resource decoded, does not dip.)
+  it 'fires the load events in the order of the media data processing steps' do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const names = ['loadstart', 'durationchange', 'resize', 'loadedmetadata', 'seeking', 'timeupdate', 'seeked',
+                     'loadeddata', 'canplay', 'canplaythrough', 'play', 'playing'];
+      const watch = (start) => new Promise(resolve => {
+        const v = document.createElement('video'), log = [];
+        names.forEach(n => v.addEventListener(n, () => log.push(n)));
+        v.addEventListener('canplaythrough', () => setTimeout(() => resolve(log), 50), {once: true});
+        v.src = '/media/movie_5.webm';
+        if (start) v.currentTime = start;
+      });
+      Promise.all([watch(0), watch(1)]).then(([plain, started]) => {
+        const v = document.createElement('video'), log = [];
+        v.addEventListener('canplaythrough', () => {
+          ['seeking', 'timeupdate', 'seeked'].forEach(n => v.addEventListener(n, () => log.push(n)));
+          v.currentTime = 2;
+          setTimeout(() => done({plain, started, seek: log}), 50);
+        }, {once: true});
+        v.src = '/media/movie_5.webm';
+      });
+    JS
+    expect(got['plain']).to eq(%w[loadstart durationchange resize loadedmetadata loadeddata canplay canplaythrough])
+    expect(got['started']).to eq(%w[loadstart durationchange resize loadedmetadata seeking timeupdate seeked loadeddata canplay canplaythrough])
+    expect(got['seek']).to eq(%w[seeking timeupdate seeked])
+  end
+
   # Chrome's answers but one (measured): it says 'maybe' to `video/ogg`, which it plays; we decode no Theora, and the
   # spec's answer for a type the UA knows it cannot render is ''.
   it 'answers canPlayType by what it decodes' do

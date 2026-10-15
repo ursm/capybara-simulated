@@ -346,34 +346,75 @@ const AUDIO_USABLE: u32 = 2;
 // __dom.mediaResource(media, outcome, width, height, duration): the resource's outcome — a failure the dedicated media
 // source failure steps (MEDIA_ERR_SRC_NOT_SUPPORTED, no media data, NO_SOURCE: an earlier resource no longer there);
 // a decoded video all its data (HAVE_ENOUGH_DATA), its size and duration, IDLE — a seek to the default playback start
-// position where that is past 0 (within the duration), which then is 0 whatever it was; a usable audio IDLE. -> whether
-// it seeked: its `seeked` owed.
+// position where that is past 0 (within the duration), which then is 0 whatever it was; a usable audio IDLE. -> the
+// events the media data processing steps owe, in order (`resource_events`): none for a failure.
 fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
     let outcome = args.get(1).uint32_value(scope).unwrap_or(RESOURCE_FAILED);
     let [w, h, duration] = [2, 3, 4].map(|k| args.get(k).number_value(scope).unwrap_or(f64::NAN));
+    let autoplay = crate::dom::dom(scope).arena.get(id).is_some_and(|n| n.plain_attr("autoplay").is_some());
     let m = crate::dom::dom(scope).arena.media_mut(id);
-    match outcome {
+    let events = match outcome {
         VIDEO_DECODED => {
+            let had_duration = m.duration;
             m.video_size = [w as u32, h as u32];
             m.duration = duration;
             m.ready = HAVE_ENOUGH_DATA;
             m.network = NETWORK_IDLE;
             let start = std::mem::take(&mut m.default_start);
-            if start > 0.0 {
+            let seeked = start > 0.0;
+            if seeked {
                 m.current_time = if duration.is_finite() { start.min(duration) } else { start };
-                rv.set_bool(true);
             }
+            let played = autoplay && !m.playing;
+            if played {
+                m.playing = true;
+            }
+            resource_events(!same_number(had_duration, duration), w > 0.0 && h > 0.0, seeked, played)
         }
-        AUDIO_USABLE => m.network = NETWORK_IDLE,
+        // (…an audio's resource is not decoded: it stays HAVE_NOTHING, its events the ladder all the same)
+        AUDIO_USABLE => {
+            m.network = NETWORK_IDLE;
+            resource_events(false, false, false, false)
+        }
         _ => {
             m.duration = f64::NAN;
             m.ready = HAVE_NOTHING;
             m.error = MEDIA_ERR_SRC_NOT_SUPPORTED;
             m.failures += 1;
             m.network = NETWORK_NO_SOURCE;
+            Vec::new()
         }
+    };
+    let items: Vec<v8::Local<v8::Value>> = events.iter().filter_map(|e| v8::String::new(scope, e)).map(Into::into).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// The events a media element's resource owes as it is loaded (HTML §4.8.11.5, the media data processing steps): a
+// `durationchange` where the duration changed and a video's `resize` where it has a size (both before the ready state
+// reaches HAVE_METADATA, as Chrome 155 fires them), then `loadedmetadata`; the seek to the default playback start position (`seeking`,
+// `timeupdate`, `seeked`); `loadeddata` (HAVE_CURRENT_DATA), `canplay` (HAVE_FUTURE_DATA), `canplaythrough`
+// (HAVE_ENOUGH_DATA); and where `autoplay` has it play, `play` and then — it has the data — `playing`.
+fn resource_events(duration_changed: bool, sized: bool, seeked: bool, played: bool) -> Vec<&'static str> {
+    let mut events = Vec::new();
+    if duration_changed {
+        events.push("durationchange");
     }
+    if sized {
+        events.push("resize");
+    }
+    events.push("loadedmetadata");
+    if seeked {
+        events.extend(["seeking", "timeupdate", "seeked"]);
+    }
+    events.extend(["loadeddata", "canplay", "canplaythrough"]);
+    if played {
+        events.extend(["play", "playing"]);
+    }
+    events
+}
+// …two numbers the same, NaN the same as NaN.
+fn same_number(a: f64, b: f64) -> bool {
+    a == b || (a.is_nan() && b.is_nan())
 }
 
 #[cfg(test)]
