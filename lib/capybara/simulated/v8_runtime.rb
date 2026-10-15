@@ -467,7 +467,7 @@ module Capybara
       end
 
       # Dispose a frame realm and every descendant frame realm (transitively), deepest first so a
-      # parent's child-realm set is consistent as each level is torn down.
+      # parent's child realms (the engine's) are consistent as each level is torn down.
       def dispose_frame_realm_tree(id)
         frame_realm_parents.select {|_child, parent| parent == id }.each_key {|child| dispose_frame_realm_tree(child) }
         dispose_frame_realm(id)
@@ -511,12 +511,12 @@ module Capybara
         @frame_realm_depths&.delete(id)
         @frame_realm_parents&.delete(id)
         @window_realm_meta&.delete(id)
-        # Evict from the main realm's child-realm set so `drainChildRealms` stops
+        # Evict from the main realm's stepped windows so `drainChildRealms` stops
         # stepping a disposed context. A FRAME realm is also evicted via the DOM
         # unregister path (its iframe element going away), but a WINDOW realm has no
         # element — this is its only eviction, and it covers the reload (dispose +
         # recreate) path too, where the old id would otherwise leak in the set.
-        ctx.eval_void("globalThis.__csimChildRealmIds && globalThis.__csimChildRealmIds.delete(#{id.to_i});") rescue nil
+        ctx.eval_void("globalThis.__dom && __dom.setSteppedWindow(#{id.to_i}, false);") rescue nil
         # The custom element reactions the backup element queue owes its elements run first, as its microtask would have
         # before the old document went. Then what nothing can run any more goes, which the engine keeps: its mutation
         # observers (nothing can notify them), its timers, whose handlers held its global, and the reactions still owed
@@ -1047,7 +1047,7 @@ module Capybara
       rescue StandardError => e
         @browser.log_console('warn', "frame realm load failed: #{e.message}")
         # A realm created before the failure (load threw) is untracked — not in
-        # frame_realms nor __csimChildRealmIds — so nothing would ever drain or
+        # frame_realms nor the engine's child realms — so nothing would ever drain or
         # dispose it. Tear it down here (safe: it's non-executing in the rescue),
         # including any module handles its scripts compiled before the throw.
         if realm
@@ -1118,10 +1118,10 @@ module Capybara
         # parent maps before the load for the same reason.
         frame_realms[realm.id]        = realm
         frame_realm_parents[realm.id] = 0   # top-level (no parent frame)
-        # Register with the opener (main) realm's child-realm set so `drainChildRealms`
+        # Register with the page's (main) realm's stepped windows so `drainChildRealms`
         # steps THIS realm's event loop too — otherwise its queued tasks (e.g. a
         # BroadcastChannel delivery from a blob document) never fire.
-        ctx.eval_void("(globalThis.__csimChildRealmIds || (globalThis.__csimChildRealmIds = new Set())).add(#{realm.id});")
+        ctx.eval_void("__dom.setSteppedWindow(#{realm.id}, true);")
         # Remember the window's opener / name so a self-navigation (reload_window_realm
         # builds a FRESH realm) can carry them across — a real popup keeps window.opener
         # and window.name through its own navigation.
@@ -1134,7 +1134,7 @@ module Capybara
       rescue StandardError => e
         @browser.log_console('warn', "window realm load failed: #{e.message}")
         if realm
-          # The realm is registered (frame_realms / parents / __csimChildRealmIds)
+          # The realm is registered (frame_realms / parents / the stepped windows)
           # BEFORE the document loads, so a load-time throw must roll all of that back
           # — otherwise frame_realm_alive? and drainChildRealms keep treating a
           # disposed context as live. dispose_frame_realm unwinds the registries (and

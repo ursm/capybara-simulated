@@ -26,6 +26,20 @@ pub(crate) struct Navigables {
     containers: HashMap<i32, NodeId>,
     top_names: HashMap<i32, Vec<u16>>,
     documents: HashMap<i32, NodeId>,
+    // The windows `window.open` made in this isolate (auxiliary browsing contexts, top-level ones), which the page's
+    // event loop — realm 0's — steps with its own, as it does its frames', in the order they were made.
+    windows: Vec<i32>,
+    // How many realms some realm's event loop steps with its own — child navigables with a realm their active document
+    // is in, and those windows — read with no call by every realm's bindings (`__dom.childFrames`): none, the common
+    // page's, keeps the event loop's step of its child realms and a dispatch's multi-realm path a load of a word.
+    pub(crate) linked: crate::dom::SharedWord,
+}
+
+impl Navigables {
+    fn note_linked(&mut self) {
+        let linked = self.children.values().filter(|c| c.realm.is_some()).count() + self.windows.len();
+        self.linked.set(u32::try_from(linked).unwrap_or(u32::MAX));
+    }
 }
 
 // What a target name chooses (HTML "the rules for choosing a navigable"): no navigable; one the current navigable is not
@@ -81,6 +95,7 @@ impl RealmArena {
         if let Some(realm) = realm {
             nav.containers.insert(realm, container);
         }
+        nav.note_linked();
     }
     // Whether `container`'s navigable's target name is `name` — its container's `name` while it has no navigable yet.
     pub(crate) fn target_name_is(&self, container: NodeId, node: &crate::dom::NodeData, name: &[u16]) -> bool {
@@ -104,6 +119,45 @@ impl RealmArena {
     // `container`'s navigable destroyed — its container left its document.
     pub(crate) fn discard_navigable(&mut self, container: NodeId) {
         self.navigables.children.remove(&container);
+        self.navigables.note_linked();
+    }
+    // The realms whose documents are the active documents of the child navigables of realm `cid`'s document — the
+    // containers in it — and, the page's, the windows its script opened: in the order they were made (realm ids only
+    // grow), what its event loop steps with its own.
+    pub(crate) fn child_realms(&self, cid: i32) -> Vec<i32> {
+        let mut realms: Vec<i32> = self
+            .navigables
+            .children
+            .iter()
+            .filter_map(|(&c, child)| child.realm.filter(|_| self.get(c).is_some_and(|n| n.realm == cid)))
+            .collect();
+        if cid == 0 {
+            realms.extend(&self.navigables.windows);
+        }
+        realms.sort_unstable();
+        realms
+    }
+    // A window `window.open` made in this isolate (realm `realm`) the page's event loop steps now (`on`), or no more.
+    pub(crate) fn set_stepped_window(&mut self, realm: i32, on: bool) {
+        let nav = &mut self.navigables;
+        nav.windows.retain(|&w| w != realm);
+        if on {
+            nav.windows.push(realm);
+        }
+        nav.note_linked();
+    }
+    // Whether realm `realm`'s document is in the page's browsing-context tree: the page's own (realm 0), or the active
+    // document of a child navigable whose container's document is, up to it — a frame removed takes the realms below it
+    // out with its own.
+    pub(crate) fn realm_in_tree(&self, mut realm: i32) -> bool {
+        loop {
+            if realm == 0 {
+                return true;
+            }
+            let Some(container) = self.live_container(realm).filter(|&c| self.frame_realm(c) == Some(realm)) else { return false };
+            let Some(parent) = self.get(container).map(|n| n.realm) else { return false };
+            realm = parent;
+        }
     }
     pub(crate) fn set_realm_document(&mut self, cid: i32, doc: NodeId) {
         self.navigables.documents.insert(cid, doc);
@@ -116,6 +170,7 @@ impl RealmArena {
         let nav = &mut self.navigables;
         nav.documents.remove(&cid);
         if dropped {
+            nav.windows.retain(|&w| w != cid);
             if let Some(container) = nav.containers.remove(&cid) {
                 if let Some(child) = nav.children.get_mut(&container).filter(|c| c.realm == Some(cid)) {
                     child.realm = None;
@@ -126,6 +181,7 @@ impl RealmArena {
             for container in dead {
                 self.navigables.children.remove(&container);
             }
+            self.navigables.note_linked();
             let gone: Vec<i32> = self.navigables.containers.iter().filter(|&(_, &c)| self.get(c).is_none()).map(|(&r, _)| r).collect();
             for realm in gone {
                 self.navigables.containers.remove(&realm);
@@ -227,6 +283,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setRealmDocument", set_realm_document, context_id);
     crate::dom::register(scope, ns, "findNavigable", find_navigable, context_id);
     crate::dom::register(scope, ns, "childNavigables", child_navigables, context_id);
+    crate::dom::register(scope, ns, "childRealms", child_realms, context_id);
+    crate::dom::register(scope, ns, "realmInTree", realm_in_tree, context_id);
+    crate::dom::register(scope, ns, "setSteppedWindow", set_stepped_window, context_id);
+    let linked = crate::dom::dom(scope).arena.navigables.linked.store();
+    crate::dom::view_word(scope, ns, "childFrames", linked);
 }
 
 // __dom.windowName() -> this realm's navigable's target name (`window.name`).
@@ -313,4 +374,28 @@ fn child_navigables(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let cid = realm_id(scope, &args);
     let found = crate::dom::realm(scope, cid).child_navigable_containers(doc, limit);
     rv.set(crate::dom::nodes_value(scope, cid, &found));
+}
+
+// __dom.childRealms() -> this realm's child realms (`RealmArena::child_realms`), ids ascending.
+fn child_realms(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let realms = crate::dom::realm(scope, cid).child_realms(cid);
+    let values: Vec<v8::Local<'_, v8::Value>> = realms.into_iter().map(|r| v8::Integer::new(scope, r).into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+
+// __dom.realmInTree(realm) -> whether the realm's document is in the page's browsing-context tree (`realm_in_tree`).
+fn realm_in_tree(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(-1);
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).realm_in_tree(realm));
+}
+
+// __dom.setSteppedWindow(realm, on) — a window `window.open` made in this isolate stepped by the page's event loop
+// (`on`), or no more (`RealmArena::set_stepped_window`).
+fn set_stepped_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(realm) = args.get(0).int32_value(scope) else { return };
+    let on = args.get(1).is_true();
+    let cid = realm_id(scope, &args);
+    crate::dom::realm(scope, cid).set_stepped_window(realm, on);
 }
