@@ -534,10 +534,15 @@ const CUSTOM_ELEMENT_INSERTED: i32 = -2;
 const CE_DEFINED: u32 = 1 << 1;
 const OBSERVED: u32 = 1 << 2;
 
+// Whether a token's attributes hold `customelementregistry` (no namespace): the element's registry the null one, and no
+// constructor run for it.
+fn names_null_registry(attrs: &[(String, i32, String, String)]) -> bool {
+    attrs.iter().any(|(prefix, ns, local, _)| prefix.is_empty() && *ns == 0 && local == "customelementregistry")
+}
+
 // Whether the engine leaves a live document's batch of `ops` to the bindings: one where the parser runs page code or
 // steps of the bindings' own as it makes or inserts a node — a customized built-in's (`ce_defined`: an `is`), which the
-// bindings upgrade as they connect it, a `<selectedcontent>`, a `customelementregistry` attribute — or one that gives a
-// document a second doctype.
+// bindings upgrade as they connect it, a `<selectedcontent>` — or one that gives a document a second doctype.
 fn declines(ops: &[Operand], ce_defined: bool, has_doctype: bool) -> bool {
     let int = |k: usize| match ops.get(k) {
         Some(Operand::Int(v)) => Some(*v),
@@ -551,7 +556,7 @@ fn declines(ops: &[Operand], ce_defined: bool, has_doctype: bool) -> bool {
     let refused = |at: usize, n: usize| {
         (0..n).any(|k| {
             string(at + 4 * k).is_some_and(str::is_empty)
-                && string(at + 4 * k + 2).is_some_and(|l| l == "customelementregistry" || (ce_defined && l == "is"))
+                && string(at + 4 * k + 2).is_some_and(|l| ce_defined && l == "is")
         })
     };
     let mut i = 0;
@@ -903,6 +908,7 @@ impl<'s> Build<'s> {
             ns: arena_namespace(ns),
             ..crate::dom::NodeData::of_kind(crate::dom::NodeKind::Element, Vec::new())
         });
+        self.stamp_registry(scope, id);
         self.attributes(scope, id, attrs, Vec::new());
         self.is_value(scope, id);
         id
@@ -996,7 +1002,14 @@ impl<'s> Build<'s> {
     }
     // `attrs` (prefix, namespace code, local name, value) given to `id` after `existing` — none already there taken
     // again — and the steps they have that are the bindings'.
+    // (…a `customelementregistry` one among them its registry the null one, which the elements the parser inserts under it
+    // take after it)
     fn attributes(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId, attrs: Vec<(String, i32, String, String)>, existing: Vec<(String, String)>) {
+        if names_null_registry(&attrs) {
+            if let Some(handle) = crate::dom::realm(scope, self.cid).get(id).and_then(|n| n.link.handle()) {
+                handle.set_registry_state(crate::ce_reactions::NULL);
+            }
+        }
         let named = attrs.into_iter().map(|(prefix, ns, local, value)| {
             let name = if prefix.is_empty() { local.clone() } else { format!("{prefix}:{local}") };
             (name, value, (ns != 0).then(|| (attribute_namespace(ns).to_owned(), local)))
@@ -1225,8 +1238,8 @@ impl<'s> Build<'s> {
                     let contents = int(ops.next())?;
                     let reused = self.live.as_mut().and_then(|l| l.reuse(ns, &local));
                     let constructed = match reused {
-                        None => self.construct(scope, ns, &local, handle, ops.as_slice()),
-                        Some(_) => None,
+                        None if !names_null_registry(&list) => self.construct(scope, ns, &local, handle, ops.as_slice()),
+                        _ => None,
                     };
                     let el = match (reused, constructed) {
                         (Some(el), _) => {
@@ -1237,11 +1250,7 @@ impl<'s> Build<'s> {
                             self.constructed(scope, el, list, custom);
                             el
                         }
-                        (None, None) => {
-                            let el = self.element(scope, ns, &local, list);
-                            self.stamp_registry(scope, el);
-                            el
-                        }
+                        (None, None) => self.element(scope, ns, &local, list),
                     };
                     self.set(handle, el);
                     if contents != 0 {
@@ -1382,14 +1391,13 @@ impl<'s> Build<'s> {
 // of any parent, then the elements the bindings have steps for (`BUILT_*`), each with the names of its attributes whose
 // steps are theirs (undefined for none). With `declarative` (setHTMLUnsafe's), the declarative shadow roots the markup
 // makes are attached; with a `registry` code (ce_reactions.rs: 0 none), the context's registry association, which every
-// element made takes — `registryObject` the registry it names. Left to the bindings: markup with a lone surrogate or a
-// `customelementregistry` attribute.
+// element made takes — `registryObject` the registry it names. Left to the bindings: markup with a lone surrogate.
 fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     parser_op(scope, None, &mut rv, &[-1], |scope, rv| {
         let mut standins = StandIns::default();
         let well_formed = args.get(1).boolean_value(scope);
         let html = parser_text(scope, args.get(0), well_formed, &mut standins);
-        if !buildable(&html, &standins) {
+        if !buildable(&standins) {
             return;
         }
         let ns = args.get(2).int32_value(scope).unwrap_or(1);
@@ -1440,7 +1448,7 @@ fn html_parse_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         let well_formed = args.get(1).boolean_value(scope);
         let html = parser_text(scope, args.get(0), well_formed, &mut standins);
         let Some(document) = crate::node_handle::nid_of(scope, args.get(2)) else { return };
-        if !buildable(&html, &standins) {
+        if !buildable(&standins) {
             return;
         }
         let opts = TreeBuilderOpts { scripting_enabled: false, ..Default::default() };
@@ -1462,17 +1470,9 @@ fn html_parse_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     });
 }
 
-// Whether the engine builds a parse of `html`: one with no lone surrogate (the stand-ins' text is the bindings'), no
-// `customelementregistry` attribute (a null registry an element takes, propagated down the parse) — in any case; a
-// declarative shadow root's `shadowrootcustomelementregistry` the shadow root's hook takes as it attaches it.
-fn buildable(html: &str, standins: &StandIns) -> bool {
-    const NAME: &[u8] = b"customelementregistry";
-    const ROOT: &[u8] = b"shadowroot";
-    let bytes = html.as_bytes();
-    let registry_attribute = (0..bytes.len().saturating_sub(NAME.len() - 1))
-        .filter(|&i| bytes[i] | 0x20 == b'c' && bytes[i..i + NAME.len()].eq_ignore_ascii_case(NAME))
-        .any(|i| !(i >= ROOT.len() && bytes[i - ROOT.len()..i].eq_ignore_ascii_case(ROOT)));
-    standins.base.is_none() && !registry_attribute
+// Whether the engine builds a parse of `html`: one with no lone surrogate (the stand-ins' text is the bindings').
+fn buildable(standins: &StandIns) -> bool {
+    standins.base.is_none()
 }
 // A document mode as `htmlParse` numbers it.
 fn quirks_mode(code: Option<i32>) -> QuirksMode {
