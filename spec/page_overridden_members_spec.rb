@@ -82,4 +82,15 @@ RSpec.describe 'members a page overrides' do
     JS
     expect(got).to eq(['ok', 'rejected why'])
   end
+
+  # …and the driver's active element is the document's, not the page's `Document.prototype.activeElement`.
+  it "answers the driver's active element from the engine" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><input id="i">']] })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      Object.defineProperty(Document.prototype, 'activeElement', { get() { throw new Error('page member'); }, configurable: true });
+      document.getElementById('i').focus();
+    JS
+    expect(s.active_element[:id]).to eq('i')
+  end
 end
