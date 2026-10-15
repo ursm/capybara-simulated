@@ -9415,8 +9415,9 @@ module Capybara
           # Authorization (an explicit setRequestHeader / a pre-emptively-attached cached credential) —
           # is re-sent ONCE with them; only the authenticated response reaches script, the 401 never does
           # (send-authentication-basic / -existing-session). `omit` sends no credentials at all.
-          if challenge_authz && status.to_i == 401 && credentials != 'omit' &&
-             !env.key?('HTTP_AUTHORIZATION') && www_authenticate_basic?(resp_headers)
+          answered = challenge_authz && status.to_i == 401 && credentials != 'omit' &&
+                     !env.key?('HTTP_AUTHORIZATION') && www_authenticate_basic?(resp_headers)
+          if answered
             resp_body.close if resp_body.respond_to?(:close)
             env['HTTP_AUTHORIZATION'] = challenge_authz
             status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
@@ -9424,16 +9425,14 @@ module Capybara
           # Fetch credentials mode "omit" ignores credentials the response sends back too —
           # its Set-Cookie is dropped, not stored (cors-cookies / credentials "omit mode").
           merge_set_cookie(resp_headers, target) unless credentials == 'omit'
-          # Cache the credentials this origin ACCEPTED (AUTHENTICATION credentials — a pre-emptively
-          # attached cached credential, or the challenge credential the 401-retry above just supplied —
-          # that weren't rejected with a 401), for the pre-emptive send above. `omit` neither sends nor
-          # caches. Only the request's OWN origin is cached: Authorization is stripped on a cross-origin
-          # redirect hop (above), so origin A's credentials can't seed origin B's cache. (A non-2xx
-          # same-origin response — an opaque status-0 no-cors fetch, a same-origin 3xx — still
-          # establishes the credentials for THAT origin, so the gate is "not a 401", not "is a 2xx".)
-          if challenge_authz && credentials != 'omit' && status.to_i != 401
-            @auth_cache[url_origin(target)] = env['HTTP_AUTHORIZATION'] || challenge_authz
-          end
+          # Cache the challenge credential the 401-retry above just supplied, where the origin ACCEPTED it
+          # (no 401 again), for the pre-emptive send above — an authentication entry exists only once a
+          # challenge was answered (Fetch "HTTP-network-or-cache fetch"; Chrome sends nothing pre-emptively
+          # for credentials a server never asked for, measured). Only the request's OWN origin is cached:
+          # Authorization is stripped on a cross-origin redirect hop (above), so origin A's credentials
+          # can't seed origin B's cache. (A non-2xx same-origin response — an opaque status-0 no-cors
+          # fetch, a same-origin 3xx — still establishes them, so the gate is "not a 401", not "is a 2xx".)
+          @auth_cache[url_origin(target)] = challenge_authz if answered && status.to_i != 401
           if status == 304 && cache_entry
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
             resp_body.close if resp_body.respond_to?(:close)
@@ -9697,9 +9696,9 @@ module Capybara
         timing  = {'bytes' => raw.bytesize, 'encoded' => encoded || raw.bytesize, 'cached' => cached}
         (raw_headers || headers).each do |k, v|
           case k.to_s.downcase
-          when 'timing-allow-origin' then timing['tao'] = v.is_a?(Array) ? v.join(', ') : v.to_s
-          when 'server-timing'       then timing['serverTiming'] = v.is_a?(Array) ? v.join(', ') : v.to_s
-          when 'content-encoding'    then timing['contentEncoding'] = v.is_a?(Array) ? v.join(', ') : v.to_s
+          when 'timing-allow-origin' then timing['tao'] = header_text(v)
+          when 'server-timing'       then timing['serverTiming'] = header_text(v)
+          when 'content-encoding'    then timing['contentEncoding'] = header_text(v)
           end
         end
         # A NUL in a header value is not a valid HTTP message; a real server can't
@@ -11692,13 +11691,26 @@ module Capybara
       # app host needs to come through @app again. Real-browser drivers
       # get this for free; we have to detect the boundary.
       def dispatch_rack_or_http(url, env, method: 'GET', body: nil)
-        return @app.call(env) if url_is_local?(url)
         # External fetch: if the network is blocked (WebMock) or the
         # host is unreachable, fall back to @app — Rails will 404 or
         # otherwise handle it, matching the pre-cross-host behavior
         # for tests that route through an external OAuth provider URL
         # without intending the call to land.
-        net_http_fetch(url, env, method: method, body: body) || @app.call(env)
+        status, headers, body = url_is_local?(url) ? @app.call(env) : (net_http_fetch(url, env, method: method, body: body) || @app.call(env))
+        [status, utf8_tagged_headers(headers), body]
+      end
+
+      # A response's header values as UTF-8-tagged strings of the same bytes: a binary-tagged one (a Net::HTTP-backed
+      # proxy's — rack-proxy's) is the wire's bytes all the same, and every reader takes a header as text — a Location
+      # parsed, a Last-Modified, a Timing-Allow-Origin handed to the page.
+      def utf8_tagged_headers(headers)
+        binary = ->(v) { v.is_a?(String) && v.encoding == Encoding::BINARY }
+        return headers unless headers.respond_to?(:each_pair) && headers.any? {|_, v| Array(v).any?(&binary) }
+
+        tagged = ->(v) { binary.(v) ? v.dup.force_encoding(Encoding::UTF_8) : v }
+        out = headers.frozen? ? headers.dup : headers
+        headers.each_pair.to_a.each {|k, v| out[k] = v.is_a?(Array) ? v.map(&tagged) : tagged.(v) }
+        out
       end
 
       # Whether this is a universal-server context (the WPT runner's wptserve shim
@@ -11858,11 +11870,12 @@ module Capybara
       # `, ` — the WHATWG "combine" separator getAllResponseHeaders exposes, matching
       # both real browsers and the harness's combine_headers.
       def stringify(headers)
-        out = {}
-        headers.each do |k, v|
-          out[k.to_s] = (v.is_a?(Array) ? v.join(', ') : v.to_s).b.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
-        end
-        out
+        headers.each_with_object({}) {|(k, v), out| out[k.to_s] = header_text(v) }
+      end
+
+      # …a header's value as script reads it: its fields combined with `, `, each byte the code point it is.
+      def header_text(value)
+        (value.is_a?(Array) ? value.join(', ') : value.to_s).b.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
       end
 
       # The Fetch "redirect status" set — ONLY these are followed. 300 (multiple
