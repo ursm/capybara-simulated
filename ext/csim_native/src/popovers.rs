@@ -14,6 +14,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "popoverKind", popover_kind_op, context_id);
     crate::dom::register(scope, ns, "closeRequestTarget", close_request_target, context_id);
     crate::dom::register(scope, ns, "popoverCheck", popover_check, context_id);
+    crate::dom::register(scope, ns, "popoverChanging", popover_changing, context_id);
+    crate::dom::register(scope, ns, "setPopoverChanging", set_popover_changing, context_id);
+    crate::dom::register(scope, ns, "lightDismissPress", light_dismiss_press, context_id);
 }
 
 // A `popover` attribute's state, of those the lists hold: auto (an empty value, `auto`) or hint; manual (`manual`, an
@@ -212,4 +215,39 @@ fn popover_check(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     } else {
         VALID
     });
+}
+
+// __dom.popoverChanging(element) -> whether the popover is in the middle of being shown or hidden (HTML's "popover
+// showing or hiding" flag): a show or a hide of it begun from inside its own — a listener's — is nested.
+fn popover_changing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some((id, cid)) = element(scope, args.get(0)) else { return rv.set_bool(false) };
+    rv.set_bool(realm(scope, cid).popovers_changing.contains(&id));
+}
+// __dom.setPopoverChanging(element, on) — its flag set (a show or a hide begins) or cleared (it ends).
+fn set_popover_changing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some((id, cid)) = element(scope, args.get(0)) else { return };
+    let changing = &mut realm(scope, cid).popovers_changing;
+    if args.get(1).is_true() {
+        changing.insert(id);
+    } else {
+        changing.remove(&id);
+    }
+}
+
+// __dom.lightDismissPress(document, kind, clicked, down) -> for a user's `pointerdown` (`down`), the document's popover
+// (kind 0) or dialog (1) pointerdown target set to what it clicked — the topmost clicked popover, the nearest clicked
+// dialog, or none (null) — and false; for its `pointerup`, whether it clicked the same as the press before it did, the
+// target cleared (HTML "light dismiss open popovers" / "light dismiss open dialogs"): a release with no press before
+// it clicked nothing the same.
+fn light_dismiss_press(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some((doc, cid)) = element(scope, args.get(0)) else { return rv.set_bool(false) };
+    let kind = (args.get(1).uint32_value(scope).unwrap_or(0) as usize).min(1);
+    let clicked = crate::node_handle::nid_of(scope, args.get(2));
+    let down = args.get(3).is_true();
+    let targets = realm(scope, cid).pointerdown_targets.entry(doc).or_default();
+    if down {
+        targets[kind] = Some(clicked);
+        return rv.set_bool(false);
+    }
+    rv.set_bool(targets[kind].take() == Some(clicked));
 }

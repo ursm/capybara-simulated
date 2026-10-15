@@ -904,6 +904,10 @@ pub(crate) struct RealmArena {
     // close request goes to first (popovers.rs `closeRequestTarget`).
     pub(crate) close_watcher_order: std::collections::HashMap<NodeId, u64>,
     pub(crate) close_watcher_count: u64,
+    // …and its popover and dialog pointerdown targets (popovers.rs `lightDismissPress`).
+    pub(crate) pointerdown_targets: std::collections::HashMap<NodeId, [Option<Option<NodeId>>; 2]>,
+    // The popovers in the middle of being shown or hidden (HTML's "popover showing or hiding" flag).
+    pub(crate) popovers_changing: std::collections::HashSet<NodeId>,
     // The close watchers running their cancel action (dialogs.rs `dialogRequestClose`).
     pub(crate) running_cancel: std::collections::HashSet<u64>,
     // The keys of the tasks the platform queues on the realms' timer lists, the isolate's (timers.rs).
@@ -1211,6 +1215,8 @@ impl RealmArena {
         self.media.retain(|id, _| live(slots, id));
         self.images.retain(|id, _| live(slots, id));
         self.close_watcher_order.retain(|id, _| live(slots, id));
+        self.pointerdown_targets.retain(|doc, _| live(slots, doc));
+        self.popovers_changing.retain(|id| live(slots, id));
         self.showing_popovers.retain(|doc, list| {
             list.retain(|(p, _)| live(slots, p));
             live(slots, doc) && !list.is_empty()
