@@ -434,7 +434,7 @@ impl RealmArena {
         self.find_in_tree(doc, |_, n| n.is_html_named("base") && n.plain_attr("href").is_some())
     }
     // The first element of `root`'s tree (itself included, shadow trees not) that `pred` takes, in tree order.
-    fn find_in_tree(&self, root: NodeId, mut pred: impl FnMut(NodeId, &NodeData) -> bool) -> Option<NodeId> {
+    pub(crate) fn find_in_tree(&self, root: NodeId, mut pred: impl FnMut(NodeId, &NodeData) -> bool) -> Option<NodeId> {
         let mut stack = vec![root];
         while let Some(c) = stack.pop() {
             let Some(n) = self.get(c) else { continue };

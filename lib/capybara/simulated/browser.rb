@@ -11061,6 +11061,12 @@ module Capybara
       # Mirrors `navigate` / `navigate_post`'s fetch + redirect-follow but
       # terminates in `reload_current_frame_realm` instead of a main-page boot.
 
+      # The Referer an entered frame's navigation of itself sends to `url`: its document's URL under its referrer policy
+      # (`compute_referrer`, the policy its `<meta name="referrer">` sets — the default where none does).
+      def frame_navigation_referer(entry, url)
+        compute_referrer(entry && entry[:realm_id] ? frame_document_referrer_policy(entry[:realm_id]) : '', current_browsing_context_url, url)
+      end
+
       def navigate_frame(url, depth: 0, entry: @frame_stack.last)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
@@ -11069,7 +11075,8 @@ module Capybara
           return
         end
         env = rack_env_for(url, method: 'GET')
-        apply_default_request_env(env, referer: current_browsing_context_url)
+        # (…its Referer the frame document's, under its referrer policy — its `<meta name="referrer">`)
+        apply_default_request_env(env, referer: frame_navigation_referer(entry, url))
         status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
@@ -11090,7 +11097,7 @@ module Capybara
         env = rack_env_for(url, method: 'POST', input: body)
         env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
-        apply_default_request_env(env, referer: current_browsing_context_url)
+        apply_default_request_env(env, referer: frame_navigation_referer(entry, url))
         status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
