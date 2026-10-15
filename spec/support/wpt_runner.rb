@@ -289,7 +289,9 @@ module WptRunner
     return nil unless nl
     meta  = JSON.parse(out.byteslice(0, nl))
     rbody = out.byteslice(nl + 1, meta['body_len'].to_i) || ''.b
-    hdrs = combine_headers(meta['headers'])
+    # (…the handler's header bytes, which its JSON carries Latin-1-decoded, as the bytes they are — what wptserve puts
+    # on the wire)
+    hdrs = combine_headers(Array(meta['headers']).map {|name, value| [name, value.to_s.encode(Encoding::ISO_8859_1).b] })
     hdrs['content-type'] ||= 'text/plain'
     # A custom HTTP reason phrase (status.py's `status = (code, "text")`) rides an
     # internal header; rack_fetch lifts it into the response's statusText and strips it.
