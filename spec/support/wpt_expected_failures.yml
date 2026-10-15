@@ -5585,8 +5585,6 @@ service-workers/service-worker/service-worker-csp-script.https.html:
 - importScripts test for script-src
 service-workers/service-worker/skip-waiting-installed.https.html:
 - Test skipWaiting when a installed worker is waiting
-service-workers/service-worker/skip-waiting-using-registration.https.html:
-- Test skipWaiting while a client is using the registration
 service-workers/service-worker/skip-waiting-without-using-registration.https.html:
 - Test skipWaiting while a client is not being controlled
 service-workers/service-worker/svg-target-reftest.https.html:

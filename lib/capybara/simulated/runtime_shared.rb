@@ -195,25 +195,18 @@ module Capybara
         # A controlled client cancelled a streaming respondWith body → cancel the SW's source stream
         # (routed to the worker that owns this [realm, fetch] stream). See sw_stream_cancel.
         '__csim_swStreamCancel'               => ->(b, *a) { b.sw_stream_cancel(a[0], a[1]); nil },
-        # Client lifecycle mirrors scope→active-worker into Ruby so a navigation (fetched
-        # Ruby-side before the destination realm's JS exists) can find its controlling SW.
-        '__csim_swRegisterScope'      => ->(b, *a) { b.sw_register_scope(a[0], a[1]); nil },
         # A Register job made the registration at this scope (its first worker evaluated) — claim's
         # longest-registration-wins must see it before any worker state exists. Its number.
         '__csim_swNoteRegistered'     => ->(b, *a) { b.sw_note_registered(a[0]) },
-        # A registration's versions `[installing, waiting, active]` (each a worker's handle or null) and setting one —
-        # what every realm's registration objects read — and a worker's `[script URL, type, state, registration]`.
+        # A registration's versions `[installing, waiting, active]` (each a worker's handle or null) — what every realm's
+        # registration objects read — and a worker's `[script URL, type, state, registration]`.
         '__csim_swVersions'           => ->(b, *a) { b.sw_versions(a[0]) },
-        '__csim_swSetVersion'         => ->(b, *a) { b.sw_set_version(a[0], a[1], a[2]) },
         '__csim_swWorker'             => ->(b, *a) { b.sw_worker(a[0]) },
-        # Update Worker State and the Install's `updatefound`, which every realm's objects observe.
-        '__csim_swUpdateWorkerState'  => ->(b, *a) { b.sw_update_worker_state(a[0], a[1]) },
-        '__csim_swUpdateFound'        => ->(b, *a) { b.sw_update_found(a[0]) },
-        # The calling realm steps a worker's lifecycle — which ends with the realm (see sw_note_stepper).
-        '__csim_swNoteStepper'        => ->(b, *a) { b.sw_note_stepper(a[0], a[1]) },
-        # The lifecycle reached 'activating': the scope's active worker exists but its
-        # activate waitUntil hasn't settled — Handle Fetch parks functional events on it.
-        '__csim_swNoteActivating'     => ->(b, *a) { b.sw_note_activating(a[0], a[1]); nil },
+        # A Register or Update job's worker evaluated: the registration's installing worker, its lifecycle the host's
+        # from here (see sw_install).
+        '__csim_swInstall'            => ->(b, *a) { b.sw_install(a[0], a[1]); nil },
+        # A version's next lifecycle step, the task the host queued for it (see sw_step).
+        '__csim_swStep'               => ->(b, *a) { b.sw_step(a[0]); nil },
         # The Unregister job at a scope: whether the map held a registration there (see sw_unregister).
         '__csim_swUnregister'         => ->(b, *a) { b.sw_unregister(a[0]) },
         # The worker serving an EXACT scope (0 if none) — a service worker's own registration is live while it is one of
@@ -222,11 +215,6 @@ module Capybara
         # Every registration a Register job made, `[id, scope]` in registration order — the registration map every
         # realm's getRegistration() / getRegistrations() read.
         '__csim_swRegistrations'        => ->(b, *_a) { b.sw_registration_list },
-        # HTML "try activate" in one atomic verdict: may `candidate` (installed, in the waiting
-        # slot) take over from `outgoing`? Extended work / controllees / skipWaiting are all
-        # host state — see sw_may_activate? and sw-client.js scheduleLifecycle.
-        '__csim_swMayActivate'        => ->(b, *a) { b.sw_may_activate?(a[0], a[1]) },
-        '__csim_swNoteActivationParked' => ->(b, *_) { b.sw_note_activation_parked; nil },
         # Navigation Preload state (NavigationPreloadManager), keyed by the registration's scope —
         # reached identically from the client's registration and the worker's own. Get returns
         # {enabled, headerValue}; set leaves a nil field as-is.

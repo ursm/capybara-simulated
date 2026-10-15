@@ -8,7 +8,9 @@
 // is the job's, not yet a registration a client sees), its updateViaCache mode and its navigation preload state
 // ({enabled, header value}, which survives an update) — and, for the host, the worker it routes a navigation to
 // (`serving`: its active worker once that is activated, until it dies) and the one it parks a fetch on while it
-// activates (`activating`). A worker is its script's URL, its type, its state and the registration it is a version of.
+// activates (`activating`). A worker is its script's URL, its type, its state, the registration it is a version of —
+// and, once a Register or Update job made it its registration's installing worker, where its lifecycle stands
+// (`Lifecycle`): which step it takes next, and what of its own phases the worker has finished.
 //
 // The host reads it to route a navigation to its controller and to settle claims, every realm's registration and
 // ServiceWorker objects read it — one registration seen alike wherever a client looks at it.
@@ -61,6 +63,29 @@ struct Worker {
     script_type: String,
     state: String,
     registration: u32,
+    lifecycle: Lifecycle,
+}
+
+// A version's way from installing to activated (Service Workers §8 Install, Try Activate, Activate), one step at a
+// time — each a task of its own, so an observer sees every state between. The worker's isolate runs its install and
+// activate events (run_worker): a step that waits on one waits for its marker — whether every install `waitUntil`
+// fulfilled, and that activation completed.
+#[derive(Default)]
+struct Lifecycle {
+    step: Step,
+    installed: Option<bool>,
+    activated: bool,
+}
+
+#[derive(Default, PartialEq)]
+enum Step {
+    // Not yet installing (a worker spawned, its job not finished), or done.
+    #[default]
+    Idle,
+    UpdateFound,
+    Installed,
+    Activating,
+    Activated,
 }
 
 #[derive(Default)]
@@ -171,7 +196,7 @@ pub(crate) fn set_version_for_ruby(partition: u64, id: u32, slot: String, handle
 }
 // A service worker of the session, spawned: its script's URL and type, 'parsed' until a registration holds it.
 pub(crate) fn worker_new_for_ruby(partition: u64, handle: u32, script_url: String, script_type: String) {
-    let worker = Worker { script_url, script_type, state: "parsed".to_owned(), registration: 0 };
+    let worker = Worker { script_url, script_type, state: "parsed".to_owned(), registration: 0, lifecycle: Lifecycle::default() };
     lock().partition(partition).workers.insert(handle, worker);
 }
 // The worker `handle`: `[script URL, type, state, registration]` (0 for none yet), nil for none.
@@ -187,6 +212,55 @@ pub(crate) fn set_worker_state_for_ruby(partition: u64, handle: u32, state: Stri
     let changed = w.state != state;
     w.state = state;
     changed
+}
+// The worker `handle` begins its lifecycle (its job made it its registration's installing worker): `updatefound` next.
+pub(crate) fn begin_lifecycle_for_ruby(partition: u64, handle: u32) {
+    if let Some(w) = lock().existing(partition).and_then(|p| p.workers.get_mut(&handle)) {
+        w.lifecycle.step = Step::UpdateFound;
+    }
+}
+// The worker `handle` finished a phase of its own: its install ('install', `ok` whether every `waitUntil` fulfilled) or
+// its activation ('activated').
+pub(crate) fn note_phase_for_ruby(partition: u64, handle: u32, phase: String, ok: bool) {
+    if let Some(w) = lock().existing(partition).and_then(|p| p.workers.get_mut(&handle)) {
+        match phase.as_str() {
+            "install" => w.lifecycle.installed = Some(ok),
+            "activated" => w.lifecycle.activated = true,
+            _ => {}
+        }
+    }
+}
+// The worker `handle`'s next lifecycle step, taken: "updatefound", "installed", "install_failed", "activating" —
+// where `may_activate` (Try Activate's verdict: the outgoing worker holds no clients and no extended work, or the worker
+// skipped waiting) — or "activated"; else what it waits for: "install" or "activation" (its own phase), "try_activate"
+// (the verdict), or "done" (no step left — finished, failed, redundant, or no such worker).
+pub(crate) fn advance_for_ruby(partition: u64, handle: u32, may_activate: bool) -> &'static str {
+    let mut reg = lock();
+    let Some(w) = reg.existing(partition).and_then(|p| p.workers.get_mut(&handle)) else { return "done" };
+    if w.state == "redundant" {
+        w.lifecycle.step = Step::Idle;
+        return "done";
+    }
+    let lc = &mut w.lifecycle;
+    let (next, taken) = match lc.step {
+        Step::Idle => return "done",
+        Step::UpdateFound => (Step::Installed, "updatefound"),
+        Step::Installed => match lc.installed {
+            None => return "install",
+            Some(true) => (Step::Activating, "installed"),
+            Some(false) => (Step::Idle, "install_failed"),
+        },
+        Step::Activating if !may_activate => return "try_activate",
+        Step::Activating => (Step::Activated, "activating"),
+        Step::Activated if !lc.activated => return "activation",
+        Step::Activated => (Step::Idle, "activated"),
+    };
+    lc.step = next;
+    taken
+}
+// Whether the worker `handle` stands at Try Activate (installed, its activation not yet allowed).
+pub(crate) fn awaits_activation_for_ruby(partition: u64, handle: u32) -> bool {
+    lock().existing(partition).and_then(|p| p.workers.get(&handle)).is_some_and(|w| w.lifecycle.step == Step::Activating)
 }
 // The worker `handle` is activating the registration at `scope`.
 pub(crate) fn note_activating_for_ruby(partition: u64, scope: String, handle: u32) {
@@ -275,6 +349,37 @@ pub(crate) fn set_navigation_preload_for_ruby(partition: u64, scope: String, ena
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn steps_a_version_from_installing_to_activated() {
+        let p = partition_new_for_ruby();
+        worker_new_for_ruby(p, 3, "a/sw.js".into(), "classic".into());
+        assert_eq!(advance_for_ruby(p, 3, true), "done");
+        begin_lifecycle_for_ruby(p, 3);
+        assert_eq!(advance_for_ruby(p, 3, true), "updatefound");
+        assert_eq!(advance_for_ruby(p, 3, true), "install");
+        note_phase_for_ruby(p, 3, "install".into(), true);
+        assert_eq!(advance_for_ruby(p, 3, true), "installed");
+        assert!(awaits_activation_for_ruby(p, 3));
+        assert_eq!(advance_for_ruby(p, 3, false), "try_activate");
+        assert_eq!(advance_for_ruby(p, 3, true), "activating");
+        assert_eq!(advance_for_ruby(p, 3, true), "activation");
+        note_phase_for_ruby(p, 3, "activated".into(), true);
+        assert_eq!(advance_for_ruby(p, 3, true), "activated");
+        assert_eq!(advance_for_ruby(p, 3, true), "done");
+        // A failed install ends it; a redundant worker takes no step.
+        worker_new_for_ruby(p, 4, "a/sw.js".into(), "classic".into());
+        begin_lifecycle_for_ruby(p, 4);
+        assert_eq!(advance_for_ruby(p, 4, true), "updatefound");
+        note_phase_for_ruby(p, 4, "install".into(), false);
+        assert_eq!(advance_for_ruby(p, 4, true), "install_failed");
+        assert_eq!(advance_for_ruby(p, 4, true), "done");
+        worker_new_for_ruby(p, 5, "a/sw.js".into(), "classic".into());
+        begin_lifecycle_for_ruby(p, 5);
+        set_worker_state_for_ruby(p, 5, "redundant".into());
+        assert_eq!(advance_for_ruby(p, 5, true), "done");
+        clear_for_ruby(p);
+    }
 
     #[test]
     fn keeps_a_registration_from_its_job_to_its_clear() {
