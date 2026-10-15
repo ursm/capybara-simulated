@@ -985,9 +985,9 @@ module Capybara
         # The frame never called register(), so its per-realm registration Map is empty — set the
         # controller directly from Ruby's scope→handle mirror. An OPAQUE child (about:blank / srcdoc)
         # has no scope of its own, so it INHERITS its parent frame's controller (HTML: an about:blank
-        # document is controlled by its creator). Inheritance chains through controlled FRAME realms
-        # (sw_note_realm_controller); recording it BEFORE the load also lets a NESTED frame built during
-        # this frame's load inherit the controller.
+        # document is controlled by its creator) — the controller its creator has now, from the client
+        # registry, which wiring it here records before the load: a NESTED frame built during this
+        # frame's load inherits it too.
         opaque = opaque_frame_url?(url)
         # A sandboxed frame WITHOUT allow-same-origin has an OPAQUE origin (doc origin 'null'), which
         # is cross-origin to everything — so it is NOT CONTROLLED AT ALL. It inherits no controller
@@ -1006,7 +1006,6 @@ module Capybara
             # Wiring the controller is what registers this frame as a client — the realm reports
             # itself from installController (js/src/sw-client.js), before the document below loads.
             realm.call('__csim_swSetControllerDirect', *ctrl)
-            @browser.sw_note_realm_controller(realm.id, ctrl)
           end
         end
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)

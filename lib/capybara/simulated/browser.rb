@@ -533,13 +533,12 @@ module Capybara
         @sw_direct_lock    = Mutex.new
         @sw_direct_seq     = SW_DIRECT_FID_BASE
         @sw_direct_replies = {}
-        # Service-worker Client registry: realm id → {handle, rec} for every
-        # controlled frame/window client, mirrored into the SW's clientsById so
-        # matchAll / getClientByURL see the real set. `@sw_realm_controller` records
-        # each realm's controller so an opaque child (about:blank / srcdoc) inherits
-        # it. Both keyed by realm id, cleared when the last worker exits.
+        # Service-worker Client registry: client id → {handle, rec} for every
+        # frame/window and worker client, mirrored into the SW's clientsById so
+        # matchAll / getClientByURL see the real set — and what an opaque child
+        # (about:blank / srcdoc) inherits its creator's controller from. Cleared when
+        # the last worker exits.
         @sw_clients          = {}
-        @sw_realm_controller = {}
         # The realm holding the focus chain (`note_focused_realm`); nil until a first focus.
         @focused_realm_id    = nil
         # Cross-isolate MessagePort channels: each end's holder and the messages waiting for one
@@ -5910,23 +5909,14 @@ module Capybara
       # The controller an OPAQUE child browsing context (about:blank / srcdoc)
       # inherits from its creator. An about:blank document has no URL to scope-match,
       # so it's controlled by its parent's active service worker (HTML "create and
-      # initialize a Document" inherits the creator's controller). Keyed by the
-      # parent frame realm's id, recorded when that realm was wired (below).
+      # initialize a Document" inherits the creator's controller) — the one the parent
+      # has NOW, in the client registry, which a claim since its load updated too.
       def sw_inherited_controller_for(parent_realm_id)
-        return nil if parent_realm_id.nil? || parent_realm_id.to_i.zero?
-        ctrl = @sw_realm_controller[parent_realm_id.to_i]
-        return nil unless ctrl && @workers[ctrl[0]]&.dig(:thread)&.alive?
+        handle = @sw_clients.dig(sw_client_id(parent_realm_id), :handle) or return nil
+        w = @workers[handle]
+        return nil unless w&.dig(:thread)&.alive?
 
-        ctrl
-      end
-
-      # Remember a frame/window realm's controller so its OWN opaque children can
-      # inherit it (sw_inherited_controller_for). Set at frame-realm build for both
-      # a scope-matched and an inherited controller, so inheritance chains through
-      # nested about:blank frames.
-      def sw_note_realm_controller(realm_id, ctrl)
-        @sw_realm_controller[realm_id.to_i] = ctrl
-        nil
+        [handle, sw_interception_worthy?(w), w[:script_url].to_s, @sw_registrations.key(handle).to_s]
       end
 
       # Every live service worker's handle. A service-worker client belongs to the ORIGIN, not
@@ -6102,7 +6092,6 @@ module Capybara
       # Drop a client whose realm was disposed (frame navigated away / removed) so
       # matchAll stops returning a dead client. No-op for an unregistered realm.
       def sw_unregister_client(realm_id)
-        @sw_realm_controller.delete(realm_id.to_i)
         unregister_client(sw_client_id(realm_id))
         # Prune the disposed realm's adopted-id alias AFTER the record removal consumed it
         # (sw_client_id above resolves through the alias). Realm ids are never reused
@@ -6815,7 +6804,7 @@ module Capybara
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
-        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @sw_clients = {}; @sw_realm_controller = {}; @port_ends = {}; @sw_pending_claims = []; @sw_navpreload = {}; @sw_open_streams.clear) if @workers.empty?
+        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @sw_clients = {}; @port_ends = {}; @sw_pending_claims = []; @sw_navpreload = {}; @sw_open_streams.clear) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
         # A dead SERVICE worker's holds are cleared with its record (extended / sw_msgs read
@@ -8040,7 +8029,6 @@ module Capybara
         @sw_navpreload       = {}
         @sw_pending_claims   = []
         @sw_clients          = {}
-        @sw_realm_controller = {}
         @sw_direct_replies   = {}
         # Adopted-id aliases go with the client registry. @sw_resulting_seq is NOT reset:
         # id uniqueness across the whole process is the invariant the aliases rely on.

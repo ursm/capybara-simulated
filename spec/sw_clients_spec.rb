@@ -455,6 +455,23 @@ RSpec.describe 'Service Worker client enumeration' do
     expect(urls.first).to start_with('blob:')
   end
 
+  # A srcdoc frame has no URL a scope could match: it takes its creator's controller — the one the creator has when the
+  # frame is made, which a claim since the creator's load gave it.
+  it 'controls a srcdoc frame made after a claim took its creator' do
+    session = session_with_frames({}, scope: '/')
+    poll_until { session.evaluate_script('!!navigator.serviceWorker.controller') }
+    session.execute_script(<<~JS)
+      const f = document.createElement('iframe');
+      f.srcdoc = 'srcdoc';
+      f.addEventListener('load', () => { globalThis.__srcdocLoaded = true; }, {once: true});
+      document.body.appendChild(f);
+    JS
+    poll_until { session.evaluate_script('globalThis.__srcdocLoaded === true') }
+    expect(session.evaluate_script('globalThis.__srcdocLoaded')).to be(true)
+
+    expect(match_all(session, via: :top).map {|c| c['url'] }).to include('about:srcdoc')
+  end
+
   # …and its ORIGIN from that context too — the blob URL entry's environment's — which a srcdoc frame inherits from its
   # parent though its location's is opaque: the worker is one of the service worker's clients, and its blob URL names the
   # origin.
