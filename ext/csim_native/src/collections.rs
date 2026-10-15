@@ -87,6 +87,18 @@ fn collect(arena: &RealmArena, scope: NodeId, filter: &Filter) -> Vec<NodeId> {
     out
 }
 
+// The descendant elements of `scope` that are form-associated custom elements naming their form owner by a `form`
+// attribute, in tree order.
+pub(crate) fn form_naming_customs(arena: &RealmArena, scope: NodeId) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    each_element(arena, scope, |id, n| {
+        if n.state & crate::dom::STATE_FORM_ASSOCIATED != 0 && n.get_attr("form").is_some() {
+            out.push(id);
+        }
+    });
+    out
+}
+
 // Each descendant element of `scope` in tree order — not into a shadow tree or a template's contents.
 fn each_element(arena: &RealmArena, scope: NodeId, mut visit: impl FnMut(NodeId, &NodeData)) {
     let mut stack: Vec<NodeId> = arena.get(scope).map_or(Vec::new(), |n| n.children.iter().rev().copied().collect());
