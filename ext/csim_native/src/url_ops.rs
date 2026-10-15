@@ -22,6 +22,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "javascriptUrlSource", javascript_url_source_op, context_id);
     register(scope, ns, "documentBaseUrl", document_base_url_op, context_id);
     register(scope, ns, "metaReferrerPolicy", meta_referrer_policy_op, context_id);
+    register(scope, ns, "hyperlinkReferrerPolicy", hyperlink_referrer_policy_op, context_id);
 }
 
 // A URL's parts, in `parts`' order.
@@ -84,20 +85,41 @@ fn encoding_parse(input: &str, base: Option<&str>, label: Option<&str>) -> Optio
     Some(url)
 }
 
+// The referrer policy tokens (Referrer Policy §3).
+const POLICIES: [&str; 8] = [
+    "no-referrer",
+    "no-referrer-when-downgrade",
+    "same-origin",
+    "origin",
+    "strict-origin",
+    "origin-when-cross-origin",
+    "strict-origin-when-cross-origin",
+    "unsafe-url",
+];
+
+// The referrer policy a hyperlink is followed under (HTML "follow the hyperlink" steps 8-9): `no-referrer` where its
+// link types include `noreferrer`, else its `referrerpolicy` attribute's state — a token matched ASCII
+// case-insensitively, '' (the document's policy) for none or an invalid one.
+pub(crate) fn hyperlink_referrer_policy(node: &crate::dom::NodeData) -> &'static str {
+    let rel = node.plain_attr("rel").unwrap_or("");
+    if rel.split(['\t', '\n', '\x0c', '\r', ' ']).any(|t| t.eq_ignore_ascii_case("noreferrer")) {
+        return "no-referrer";
+    }
+    let attr = node.plain_attr("referrerpolicy").unwrap_or("");
+    POLICIES.iter().find(|p| p.eq_ignore_ascii_case(attr)).copied().unwrap_or("")
+}
+// __dom.hyperlinkReferrerPolicy(nid) -> the policy the hyperlink is followed under (`hyperlink_referrer_policy`).
+fn hyperlink_referrer_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let cid = crate::dom::realm_id(scope, &args);
+    let policy = crate::dom::realm(scope, cid).get(id).map_or("", hyperlink_referrer_policy);
+    rv.set(v8::String::new(scope, policy).unwrap().into());
+}
+
 // The referrer policy a document's `<meta name="referrer">` elements set (HTML §4.2.5.3, the referrer metadata name):
 // each one's `content` ASCII-lowercased — a legacy keyword mapped to its policy (`never`, `default`, `always`,
 // `origin-when-crossorigin`) — the last that is a referrer policy token in tree order winning; '' for none.
 pub(crate) fn meta_referrer_policy(arena: &crate::dom::RealmArena, doc: crate::dom::NodeId) -> &'static str {
-    const POLICIES: [&str; 8] = [
-        "no-referrer",
-        "no-referrer-when-downgrade",
-        "same-origin",
-        "origin",
-        "strict-origin",
-        "origin-when-cross-origin",
-        "strict-origin-when-cross-origin",
-        "unsafe-url",
-    ];
     let mut policy = "";
     arena.find_in_tree(doc, |_, n| {
         if n.is_html_named("meta") && n.plain_attr("name").is_some_and(|v| v.eq_ignore_ascii_case("referrer")) {

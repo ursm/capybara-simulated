@@ -99,4 +99,91 @@ RSpec.describe 'choosing a navigable by name' do
     s.execute_script('frames[0].frameElement.src = "/x7"')
     expect(poll_until { s.evaluate_script('[frames[0].location.pathname, frames[0].name]').then {|v| v if v[0] == '/x7' } }).to eq(['/x7', 'kept'])
   end
+
+  def session_for(pages)
+    log = []
+    s = simulated_session(->(env) {
+      log << [env['PATH_INFO'], env['HTTP_REFERER']]
+      body = pages[env['PATH_INFO']] || "<p id=\"p\">#{env['PATH_INFO']}</p>"
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{body}"]]
+    })
+    s.visit '/p'
+    [s, log]
+  end
+
+  # Chrome: a document under a `sandbox` may navigate its own navigable and its descendants alone ("allowed by sandboxing
+  # to navigate") — a link and a form whose target names a sibling of its frame leave the sibling as it was, and open
+  # no window.
+  it 'navigates nothing a sandbox keeps the frame from navigating' do
+    s, log = session_for(
+      '/p' => '<iframe id="sb" sandbox="allow-scripts allow-same-origin" src="/s"></iframe><iframe name="other" src="/o"></iframe>',
+      '/s' => '<a id="go" href="/x" target="other">go</a><form action="/fx" target="other"><button>sub</button></form>'
+    )
+    s.within_frame(s.find('#sb')) do
+      s.find('#go').click
+      s.click_button 'sub'
+    end
+    expect([s.evaluate_script('frames[1].location.pathname'), s.windows.size]).to eq(['/o', 1])
+    expect(log.map(&:first)).not_to include('/x', '/fx')
+  end
+
+  # The Referer is the document the link was followed in as it was followed — not as it is once the frame's own
+  # navigation, which its click handler started, has replaced it — under the policy its `rel` / `referrerpolicy` sets.
+  it "sends the Referer of the document the link was followed in, under the link's policy" do
+    s, log = session_for(
+      '/p' => '<a id="nr" href="/x1" target="b" rel="noreferrer">n</a> <a id="or" href="/x2" target="b" referrerpolicy="origin">o</a>' \
+              '<iframe name="a" src="/a"></iframe><iframe name="b" src="/b"></iframe>',
+      '/a' => %(<a id="go" href="/x" target="b" onclick="location.href='/self'">go</a>)
+    )
+    s.execute_script('frames[0].document.getElementById("go").click()')
+    expect(poll_until { s.evaluate_script('frames[1].location.pathname').then {|v| v if v == '/x' } }).to eq('/x')
+    s.find('#nr').click
+    s.find('#or').click
+    expect(log.select {|path,| %w[/x /x1 /x2].include?(path) }).to eq([['/x', 'http://www.example.com/a'], ['/x1', nil], ['/x2', 'http://www.example.com/']])
+  end
+
+  # HTML §7.2.2.3: a frame's self-given name is its parent window's named property only where the frame's document is
+  # same origin with the parent's (Chrome: a cross-origin frame's is not), its container's `name` always.
+  it "hides a cross-origin frame's own name from its parent" do
+    s, = session_for(
+      '/p' => '<iframe name="f" src="http://other.test/c"></iframe><iframe name="a" src="/r"></iframe>',
+      '/c' => '<script>window.name = "zz"</script>',
+      '/r' => '<script>window.name = "b"</script>'
+    )
+    s.evaluate_script('frames[0].length')
+    expect(s.evaluate_script('["zz" in window, window.b === frames[1]]')).to eq([false, true])
+  end
+
+  # A frame removed has no browsing context: its window has no name, and none to set.
+  it "keeps no name for a removed frame's window" do
+    s, = session_for('/p' => '<iframe name="a" src="/c"></iframe>')
+    expect(s.evaluate_script(<<~JS)).to eq(['a', ''])
+      (() => {
+        const f = document.querySelector('iframe'), w = f.contentWindow, before = w.name;
+        f.remove();
+        w.name = 'q';
+        return [before, w.name];
+      })()
+    JS
+  end
+
+  # A frame made in one document and inserted into another's is that document's child navigable: entered there and
+  # navigated by a link of its own, it keeps its realm (the navigable's container found where it now is).
+  it 'navigates a frame inserted into another document' do
+    s, = session_for('/p' => '<iframe id="host" src="/h"></iframe>')
+    s.evaluate_script('frames[0].length')
+    s.execute_script(<<~JS)
+      const f = document.createElement('iframe');
+      f.id = 'adopted';
+      document.getElementById('host').contentDocument.body.append(f);
+      f.contentWindow.document.body.innerHTML = '<a id="go" href="/d">go</a>';
+    JS
+    s.within_frame(s.find('#host')) do
+      s.within_frame(s.find('#adopted')) do
+        s.find('#go').click
+        expect(s).to have_css('#p', text: '/d')
+      end
+    end
+    expect(s.evaluate_script('frames[0].frames[0].location.pathname')).to eq('/d')
+  end
 end

@@ -1098,8 +1098,8 @@ impl RealmArena {
         faces.with(|f| *f = Default::default());
         self.state = RealmState { faces, sheets, state_epoch: state_epoch + 1, ..RealmState::default() };
         self.observers.drop_realm(cid);
-        self.navigables.drop_realm(cid);
         self.free_realm_nodes(cid);
+        self.forget_navigables_of(cid, true);
         self.forget_dead_focus_records();
         // (…and what the isolate latched for any realm's page, where this is the only realm left)
         if self.parked.is_empty() {
@@ -1123,6 +1123,7 @@ impl RealmArena {
     // whose handlers held its global (as the step running in it ends, where one is).
     pub(crate) fn discard_realm(&mut self, cid: i32) {
         self.observers.drop_realm(cid);
+        self.forget_navigables_of(cid, false);
         self.discard_timers(cid);
         self.forget_reactions_of(cid);
     }
@@ -1154,6 +1155,7 @@ impl RealmArena {
         }
         self.observers.drop_realm(cid);
         self.free_realm_nodes(cid);
+        self.forget_navigables_of(cid, true);
         self.forget_dead_focus_records();
     }
     // How many nodes the realm an op works in has made and not freed.

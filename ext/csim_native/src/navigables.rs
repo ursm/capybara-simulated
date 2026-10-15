@@ -1,19 +1,19 @@
 // Navigables (HTML §7.3): each frame container's child navigable — the realm its active document is in, and its target
-// name — each top-level one's target name, and each realm's document; and the navigable a target name chooses ("find a
-// navigable by target name"). A child navigable is its CONTAINER's: its target name is made from the container's `name`
-// when the navigable is first given a document, and stays the navigable's whatever its documents and the attribute do
-// after (Chrome: a name set by `window.name` outlives the frame's navigation; a changed `name` attribute changes no
-// window's name); it goes with the container leaving its document (`discard`). The realms themselves are the host's,
-// which tells this side which realm a container's navigable is in (`setFrameRealm`).
+// name — each top-level one's target name, and each realm's document; and the navigable a target name chooses ("the
+// rules for choosing a navigable"). A child navigable is its CONTAINER's: its target name is made from the container's
+// `name` when the navigable is first given a document, and stays the navigable's whatever its documents and the
+// attribute do after (Chrome: a name set by `window.name` outlives the frame's navigation; a changed `name` attribute
+// changes no window's name); it goes with the container leaving its document (`discard`). The container's node document
+// is the realm the container node is in — the one it was adopted into. The realms themselves are the host's, which
+// tells this side which realm a container's navigable is in (`setFrameRealm`).
 
 use std::collections::HashMap;
 
 use crate::dom::{nid_arg, realm_id, utf16_arg, NodeId, RealmArena};
 
 struct Child {
-    // The realm the container's node document is in, and the realm the navigable's active document is in — none while
-    // the navigable has none yet (an `about:blank` frame no script has looked into) or is between two of them.
-    parent: i32,
+    // The realm the navigable's active document is in — none while it has none yet (an `about:blank` frame no script
+    // has looked into) or is between two of them.
     realm: Option<i32>,
     name: Vec<u16>,
 }
@@ -21,52 +21,56 @@ struct Child {
 #[derive(Default)]
 pub(crate) struct Navigables {
     children: HashMap<NodeId, Child>,
+    // Each nested realm's container — kept once the container's navigable is gone (its container left its document): a
+    // window whose browsing context is discarded is no top-level one, its name '' and not to be set.
     containers: HashMap<i32, NodeId>,
     top_names: HashMap<i32, Vec<u16>>,
     documents: HashMap<i32, NodeId>,
 }
 
-impl Navigables {
-    pub(crate) fn drop_realm(&mut self, cid: i32) {
-        if let Some(container) = self.containers.remove(&cid) {
-            if let Some(child) = self.children.get_mut(&container).filter(|c| c.realm == Some(cid)) {
-                child.realm = None;
-            }
-        }
-        // (…and the navigables its containers had, which go with its document)
-        self.children.retain(|_, c| c.parent != cid);
-        self.top_names.remove(&cid);
-        self.documents.remove(&cid);
-    }
+// What a target name chooses (HTML "the rules for choosing a navigable"): no navigable; one the current navigable is not
+// allowed by sandboxing to navigate — which nothing is done for; or a navigable — the realm its active document is in
+// (none yet: an `about:blank` frame no script has looked into) and its container with the realm its node document is
+// in (none: a top-level one).
+pub(crate) enum Chosen {
+    None,
+    Blocked,
+    Navigable(Option<i32>, Option<(i32, NodeId)>),
 }
 
 impl RealmArena {
     // The target name of the navigable realm `cid`'s document is the active document of.
+    // A frame's window whose document is no longer its navigable's active one — the frame removed, or navigated since —
+    // has none: no name, and none to set.
     pub(crate) fn window_name(&self, cid: i32) -> &[u16] {
         let nav = &self.navigables;
         match nav.containers.get(&cid) {
-            Some(container) => nav.children.get(container).map_or(&[], |c| &c.name),
+            Some(container) => nav.children.get(container).filter(|c| c.realm == Some(cid)).map_or(&[], |c| &c.name),
             None => nav.top_names.get(&cid).map_or(&[], Vec::as_slice),
         }
     }
     pub(crate) fn set_window_name(&mut self, cid: i32, name: Vec<u16>) {
         let nav = &mut self.navigables;
-        match nav.containers.get(&cid).and_then(|container| nav.children.get_mut(container)) {
-            Some(child) => child.name = name,
+        match nav.containers.get(&cid) {
+            Some(container) => {
+                if let Some(child) = nav.children.get_mut(container).filter(|c| c.realm == Some(cid)) {
+                    child.name = name;
+                }
+            }
             None => {
                 nav.top_names.insert(cid, name);
             }
         }
     }
-    // Realm `realm`'s document is the active document of `container`'s navigable (in realm `parent`'s document) now, or
-    // (None) none is; the navigable made the first time it is given one, its target name the container's `name`.
-    pub(crate) fn set_frame_realm(&mut self, parent: i32, container: NodeId, realm: Option<i32>) {
+    // Realm `realm`'s document is the active document of `container`'s navigable now, or (None) none is; the navigable
+    // made the first time it is given one, its target name the container's `name`.
+    pub(crate) fn set_frame_realm(&mut self, container: NodeId, realm: Option<i32>) {
         if !self.navigables.children.contains_key(&container) {
             if realm.is_none() {
                 return;
             }
             let name = self.get(container).and_then(|n| n.plain_attr_units("name")).unwrap_or_default();
-            self.navigables.children.insert(container, Child { parent, realm: None, name });
+            self.navigables.children.insert(container, Child { realm: None, name });
         }
         let nav = &mut self.navigables;
         let Some(child) = nav.children.get_mut(&container) else { return };
@@ -90,56 +94,86 @@ impl RealmArena {
     }
     // The container, in realm `parent`'s document, of the navigable realm `realm`'s document is the active document of.
     pub(crate) fn frame_container(&self, parent: i32, realm: i32) -> Option<NodeId> {
+        self.live_container(realm).filter(|&c| self.get(c).is_some_and(|n| n.realm == parent))
+    }
+    // …in whichever realm's document: none for a top-level navigable's realm, or a discarded one's.
+    fn live_container(&self, realm: i32) -> Option<NodeId> {
         let nav = &self.navigables;
-        nav.containers.get(&realm).copied().filter(|c| nav.children.get(c).is_some_and(|child| child.parent == parent))
+        nav.containers.get(&realm).copied().filter(|c| nav.children.contains_key(c))
     }
     // `container`'s navigable destroyed — its container left its document.
     pub(crate) fn discard_navigable(&mut self, container: NodeId) {
-        let nav = &mut self.navigables;
-        if let Some(child) = nav.children.remove(&container) {
-            if let Some(realm) = child.realm {
-                nav.containers.remove(&realm);
-            }
-        }
+        self.navigables.children.remove(&container);
     }
     pub(crate) fn set_realm_document(&mut self, cid: i32, doc: NodeId) {
         self.navigables.documents.insert(cid, doc);
     }
-
-    // The navigable whose target name `name` is, chosen from realm `current`'s (HTML "find a navigable by target name",
-    // its order the UA's — Chrome's, FrameTree::FindFrameForNavigation): the current navigable and its descendants
-    // first, then the rest of its top-level traversable's, each in tree order — the containers of a document's child
-    // navigables in shadow-including tree order (a frame in a shadow tree is one: Chrome finds it). A navigable is
-    // (realm, container): a top-level one no container, a child one with no document yet no realm — its container with
-    // the realm its node document is in.
-    pub(crate) fn find_navigable(&self, current: i32, name: &[u16]) -> Option<(Option<i32>, Option<(i32, NodeId)>)> {
-        if name.is_empty() {
-            return None;
+    // Realm `cid`'s context disposed: its document has no descendants to search any more (a navigable whose active
+    // document it still is keeps it: the realm's window, which no frame builds again, answers none — a frame in a
+    // discarded document stays without a browsing context); or (`dropped`) gone with its nodes: what is kept for it goes,
+    // and the navigables of the containers among its nodes.
+    pub(crate) fn forget_navigables_of(&mut self, cid: i32, dropped: bool) {
+        let nav = &mut self.navigables;
+        nav.documents.remove(&cid);
+        if dropped {
+            if let Some(container) = nav.containers.remove(&cid) {
+                if let Some(child) = nav.children.get_mut(&container).filter(|c| c.realm == Some(cid)) {
+                    child.realm = None;
+                }
+            }
+            nav.top_names.remove(&cid);
+            let dead: Vec<NodeId> = self.navigables.children.keys().copied().filter(|&c| self.get(c).is_none()).collect();
+            for container in dead {
+                self.navigables.children.remove(&container);
+            }
+            let gone: Vec<i32> = self.navigables.containers.iter().filter(|&(_, &c)| self.get(c).is_none()).map(|(&r, _)| r).collect();
+            for realm in gone {
+                self.navigables.containers.remove(&realm);
+            }
         }
-        let nav = &self.navigables;
-        let container = nav.containers.get(&current).and_then(|&c| nav.children.get(&c).map(|child| (child.parent, c)));
-        if let Some(found) = self.find_in(current, container, name) {
-            return Some(found);
+    }
+
+    // The navigable a target name chooses from realm `current`'s (HTML "find a navigable by target name", its order the
+    // UA's — Chrome's, FrameTree::FindFrameForNavigation): the current navigable and its descendants first, then the rest
+    // of its top-level traversable's, each in tree order — the containers of a document's child navigables in
+    // shadow-including tree order (a frame in a shadow tree is one: Chrome finds it). One of the rest a document under a
+    // `sandbox` may not navigate ("allowed by sandboxing to navigate": its own navigable and its descendants alone, and
+    // its top-level traversable where every sandbox around it grants `allow-top-navigation`) — Chrome leaves it as it
+    // was.
+    pub(crate) fn find_navigable(&self, current: i32, name: &[u16]) -> Chosen {
+        if name.is_empty() {
+            return Chosen::None;
+        }
+        let own = self.live_container(current).and_then(|c| self.get(c).map(|n| (n.realm, c)));
+        if let Some(found) = self.find_in(current, own, name) {
+            return found;
         }
         let mut top = current;
-        while let Some(parent) = nav.containers.get(&top).and_then(|c| nav.children.get(c)).map(|c| c.parent) {
+        while let Some(parent) = self.live_container(top).and_then(|c| self.get(c)).map(|n| n.realm) {
             top = parent;
         }
         if top == current {
-            return None;
+            return Chosen::None;
         }
-        self.find_in(top, None, name)
+        match self.find_in(top, None, name) {
+            None => Chosen::None,
+            Some(Chosen::Navigable(_, None)) if self.sandboxes_around(current).all(|s| allows_top_navigation(&s)) => {
+                Chosen::Navigable(Some(top), None)
+            }
+            Some(found) if self.sandboxes_around(current).next().is_none() => found,
+            Some(_) => Chosen::Blocked,
+        }
     }
     // …among `realm`'s navigable (`container`'s, or a top-level one) and its descendants.
-    fn find_in(&self, realm: i32, container: Option<(i32, NodeId)>, name: &[u16]) -> Option<(Option<i32>, Option<(i32, NodeId)>)> {
+    fn find_in(&self, realm: i32, container: Option<(i32, NodeId)>, name: &[u16]) -> Option<Chosen> {
         if self.window_name(realm) == name {
-            return Some((Some(realm), container));
+            return Some(Chosen::Navigable(Some(realm), container));
         }
         let doc = *self.navigables.documents.get(&realm)?;
         for frame in self.leaving_elements(doc, true) {
-            let found = match self.navigables.children.get(&frame).and_then(|c| c.realm) {
+            let found = match self.frame_realm(frame) {
                 Some(r) => self.find_in(r, Some((realm, frame)), name),
-                None => self.get(frame).is_some_and(|n| self.target_name_is(frame, n, name)).then_some((None, Some((realm, frame)))),
+                None => self.get(frame).is_some_and(|n| self.target_name_is(frame, n, name)).then_some(Chosen::Navigable(None, Some((realm, frame)))),
             };
             if found.is_some() {
                 return found;
@@ -147,6 +181,21 @@ impl RealmArena {
         }
         None
     }
+    // The `sandbox` attributes of the containers realm `realm`'s document and its ancestors' sit in, innermost first —
+    // each sets the sandboxed navigation browsing context flag of every document in its frame (HTML §7.6.5, "iframe
+    // sandboxing flag set", which a nested document's active sandboxing flag set takes on from its container's document).
+    fn sandboxes_around(&self, realm: i32) -> impl Iterator<Item = String> + '_ {
+        std::iter::successors(self.live_container(realm), |&c| self.get(c).and_then(|n| self.live_container(n.realm)))
+            .filter_map(|c| self.get(c).and_then(|n| n.is_html_named("iframe").then(|| n.plain_attr("sandbox").map(str::to_owned)).flatten()))
+    }
+}
+
+// Whether a `sandbox` attribute grants its documents navigating their top-level traversable (`allow-top-navigation`, or
+// `allow-top-navigation-by-user-activation`: the activation it asks for is not modelled here).
+fn allows_top_navigation(tokens: &str) -> bool {
+    tokens
+        .split(['\t', '\n', '\x0c', '\r', ' '])
+        .any(|t| t.eq_ignore_ascii_case("allow-top-navigation") || t.eq_ignore_ascii_case("allow-top-navigation-by-user-activation"))
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -182,7 +231,7 @@ fn set_frame_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let realm = args.get(1).int32_value(scope).filter(|&r| r >= 0);
     let cid = realm_id(scope, &args);
-    crate::dom::realm(scope, cid).set_frame_realm(cid, container, realm);
+    crate::dom::realm(scope, cid).set_frame_realm(container, realm);
 }
 
 // __dom.frameRealm(containerNid) -> the realm the container's navigable's active document is in, or -1.
@@ -215,14 +264,17 @@ fn set_realm_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     crate::dom::realm(scope, cid).set_realm_document(cid, doc);
 }
 
-// __dom.findNavigable(name) -> null, or [realm, container, containerRealm]: the navigable the target name chooses from
-// this realm's (`RealmArena::find_navigable`) — the realm its active document is in (-1: none yet), its container (null:
-// a top-level one) and the realm the container's node document is in (-1: none).
+// __dom.findNavigable(name) -> null, false, or [realm, container, containerRealm]: the navigable the target name chooses
+// from this realm's (`RealmArena::find_navigable`) — none; one this realm's document may not navigate; or the realm its
+// active document is in (-1: none yet), its container (null: a top-level one) and the realm the container's node
+// document is in (-1: none).
 fn find_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = utf16_arg(scope, args.get(0));
     let cid = realm_id(scope, &args);
-    let Some((realm, container)) = crate::dom::realm(scope, cid).find_navigable(cid, &name) else {
-        return rv.set_null();
+    let (realm, container) = match crate::dom::realm(scope, cid).find_navigable(cid, &name) {
+        Chosen::None => return rv.set_null(),
+        Chosen::Blocked => return rv.set_bool(false),
+        Chosen::Navigable(realm, container) => (realm, container),
     };
     let parent = v8::Integer::new(scope, container.map_or(-1, |(parent, _)| parent)).into();
     let container = crate::dom::node_value(scope, container.map(|(_, c)| c));

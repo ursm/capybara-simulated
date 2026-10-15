@@ -18,9 +18,10 @@ RSpec.describe 'the timer nesting clamp' do
       const id = setInterval(() => { ticks.push(performance.now() - i0); if (ticks.length === 9) clearInterval(id); }, 0);
       setTimeout(() => done({ chain, ticks }), 200);
     JS
-    # (…the gaps as the clamp has them — under 4 ms for the first five, at least 4 for the rest: the clock follows the
-    # wall a little on a loaded machine, so a clamped gap may measure 5, an unclamped one 1)
-    clamped = ->(times) { times.each_cons(2).map {|a, b| (b - a) >= 4 } }
+    # (…the gaps as the clamp has them — under 4 ms for the first five, at least 4 for the rest, and well under 8, a clamp
+    # and no coarser step: the clock follows the wall a little on a loaded machine, so a clamped gap may measure 5, an
+    # unclamped one 1)
+    clamped = ->(times) { times.each_cons(2).map {|a, b| (b - a) >= 4 && (b - a) < 8 } }
     expect(clamped.(got['chain'])).to eq([false] * 5 + [true] * 3)
     expect(clamped.(got['ticks'])).to eq([false] * 5 + [true] * 3)
   end
