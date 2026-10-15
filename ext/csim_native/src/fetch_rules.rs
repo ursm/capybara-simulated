@@ -86,8 +86,9 @@ pub(crate) fn redirect(status: u32, method: &[u8], current: &str, location: &str
 }
 
 // One hop of a request a service worker intercepts, and the response its `respondWith` handed back for it: Fetch "HTTP
-// fetch" (§4.4) step 5.5 over that response, then — a redirect status with a `Location` the client's redirect mode
-// follows — "HTTP-redirect fetch" over it, the next hop intercepted again (the worker observes every followed hop).
+// fetch" (§4.4) step 5.5 over that response, then — a redirect status — what the client's redirect mode makes of it: a
+// network error, an opaque redirect, or "HTTP-redirect fetch" over it, the next hop intercepted again (the worker
+// observes every followed hop).
 pub(crate) struct InterceptedHop<'a> {
     pub(crate) mode: &'a str,
     pub(crate) redirect_mode: &'a str,
@@ -125,22 +126,31 @@ pub(crate) fn intercepted_hop(hop: &InterceptedHop<'_>, response: &WorkerRespons
             hop.mode, hop.redirect_mode
         ));
     }
-    let location = response.location.filter(|_| matches!(response.status, 301 | 302 | 303 | 307 | 308) && t != "opaqueredirect");
-    let Some(location) = location else { return HopOutcome::Answer };
+    if !matches!(response.status, 301 | 302 | 303 | 307 | 308) || t == "opaqueredirect" {
+        return HopOutcome::Answer;
+    }
     match hop.redirect_mode {
         "error" => return HopOutcome::Fail(format!("redirect mode is \"error\" but the response is a redirect: {}", hop.url)),
         "manual" => return HopOutcome::OpaqueRedirect,
         _ => {}
     }
+    // (…"HTTP-redirect fetch": a redirect with no `Location` is the response itself)
+    let Some(location) = response.location else { return HopOutcome::Answer };
+    // The location resolves against the RESPONSE's URL — a synthetic response has none to anchor a relative one, which is
+    // a network error (`Response.redirect()` absolutizes at creation, so it always carries one) — and, where it names
+    // no fragment, takes the request's.
+    let base = ada_url::Url::parse(response.url, None).ok();
+    let Ok(mut next) = ada_url::Url::parse(location, base.as_ref().map(|b| b.href())) else {
+        return HopOutcome::Fail(format!("invalid redirect location: {location}"));
+    };
+    if !next.has_hash() {
+        if let Some(fragment) = ada_url::Url::parse(hop.url, None).ok().filter(|u| u.has_hash()) {
+            next.set_hash(Some(fragment.hash()));
+        }
+    }
     if hop.hops >= 20 {
         return HopOutcome::Fail("exceeded 20 redirects".to_owned());
     }
-    // The location resolves against the RESPONSE's URL — a synthetic response has none to anchor a relative one, which is
-    // a network error (`Response.redirect()` absolutizes at creation, so it always carries one).
-    let base = ada_url::Url::parse(response.url, None).ok();
-    let Ok(next) = ada_url::Url::parse(location, base.as_ref().map(|b| b.href())) else {
-        return HopOutcome::Fail(format!("invalid redirect location: {location}"));
-    };
     let next = next.href().to_owned();
     let Some(step) = redirect(response.status, hop.method, hop.url, &next, hop.mode == "cors", hop.request_origin, hop.crossed) else {
         return HopOutcome::Fail(format!("the redirect to {next} may not be followed"));
@@ -455,6 +465,18 @@ mod tests {
         assert!(matches!(intercepted_hop(&hop("follow", "cors", 0), &response(302, Some("y"), "")), HopOutcome::Fail(_)));
         assert!(matches!(intercepted_hop(&hop("follow", "same-origin", 0), &response(307, Some("http://b.test/"), "")), HopOutcome::Fail(_)));
         assert!(matches!(intercepted_hop(&hop("follow", "cors", 0), &response(304, Some("y"), "")), HopOutcome::Answer));
+        // (…a redirect with no `Location` the response where it is followed, and as any other redirect where it is not)
+        let bare = response(302, None, "http://a.test/x");
+        assert!(matches!(intercepted_hop(&hop("follow", "cors", 20), &bare), HopOutcome::Answer));
+        assert!(matches!(intercepted_hop(&hop("manual", "cors", 0), &bare), HopOutcome::OpaqueRedirect));
+        assert!(matches!(intercepted_hop(&hop("error", "cors", 0), &bare), HopOutcome::Fail(_)));
+        // (…and a location naming no fragment takes the request's)
+        let fragment = InterceptedHop { url: "http://a.test/x#f", ..hop("follow", "cors", 0) };
+        assert!(matches!(intercepted_hop(&fragment, &r302), HopOutcome::Follow(ref next, _) if next == "http://a.test/y#f"));
+        assert!(matches!(
+            intercepted_hop(&fragment, &response(302, Some("y#g"), "http://a.test/x")),
+            HopOutcome::Follow(ref next, _) if next == "http://a.test/y#g"
+        ));
     }
 
     #[test]
