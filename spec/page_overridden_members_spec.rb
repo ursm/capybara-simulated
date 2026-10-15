@@ -121,4 +121,31 @@ RSpec.describe 'members a page overrides' do
       ['t', 'n', 'log', 's'].map((id) => { const el = document.getElementById(id); return el.id === 'log' ? el.textContent : el.value; })
     JS
   end
+
+  # …and the tree's own reads: a node's text, its siblings, a frame's window, a document's window, `new Option(text)`,
+  # the driver's page text — whatever a page made of `textContent`, `nextSibling`, `contentWindow`, `defaultView`,
+  # `createElementNS`.
+  it "reads the tree, a frame's window and a document's window through the engine" do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><p id="p"><b>b</b></p><iframe name="f" srcdoc="x"></iframe>']]
+    })
+    s.visit '/'
+    s.evaluate_script('frames[0].length')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const boom = { get() { throw new Error('page member'); }, configurable: true };
+        for (const name of ['textContent', 'nextSibling', 'previousSibling', 'firstChild']) Object.defineProperty(Node.prototype, name, boom);
+        Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', boom);
+        Object.defineProperty(Document.prototype, 'defaultView', boom);
+        Document.prototype.createElementNS = () => { throw new Error('page member'); };
+        const b = document.querySelector('b');
+        b.before('a');
+        b.after('c');
+        const o = new Option('opt');
+        return [document.getElementById('p').innerHTML, o.text, typeof frames[0], typeof window.f];
+      })()
+    JS
+    expect(got).to eq(['a<b>b</b>c', 'opt', 'object', 'object'])
+    expect(s.text).to eq('abc')
+  end
 end
