@@ -36,4 +36,17 @@ RSpec.describe 'script load events' do
       ['onerror TypeError', 'classic load', 'module load true', 'mthrow load', 'missing error']
     )
   end
+
+  # A page that loads one URL twice runs it twice (each `<script>` element is a script of its own), each firing `load`.
+  it 'runs a script loaded twice by one page twice' do
+    s = simulated_session(->(env) {
+      next [200, {'content-type' => 'text/javascript'}, ['window.runs = (window.runs || 0) + 1']] if env['PATH_INFO'] == '/twice.js'
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8"><script>window.loads = 0;</script>
+        <script src="/twice.js" onload="loads++"></script><script src="/twice.js" onload="loads++"></script>
+      HTML
+    })
+    s.visit '/'
+    expect(s.evaluate_async_script('setTimeout(() => arguments[0]([runs, loads]), 10)')).to eq([2, 2])
+  end
 end
