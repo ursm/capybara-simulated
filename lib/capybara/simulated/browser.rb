@@ -3283,6 +3283,11 @@ module Capybara
         # `from_history` already flushed at its own entry point, which commits the
         # history index before it gets here.
         flush_outgoing_page_init if depth.zero? && !from_history && @timers_active
+        # (…a page's navigation's Referer its document's URL under its referrer policy — the policy its `<meta
+        # name="referrer">` sets, the default where none does — read before the page goes; a driver's visit sends none)
+        if depth.zero? && !from_history && !is_reload && referer
+          referer = compute_referrer(main_document_referrer_policy, referer, url)
+        end
         unless from_history || depth > 0
           capture_outgoing_form_state
           record_history({method: :post, url: url, body: body, content_type: content_type})
@@ -10333,6 +10338,11 @@ module Capybara
       # A frame document's referrer policy (its last valid `<meta name="referrer">`), read from
       # the live realm to compute a self-navigation's Referer under the initiating document's
       # policy. '' when the realm is gone / has no meta → the platform default applies.
+      def main_document_referrer_policy
+        @runtime.call('__csimDocumentReferrerPolicy').to_s
+      rescue StandardError
+        ''
+      end
       def frame_document_referrer_policy(realm_id)
         return '' unless @runtime.frame_realm_alive?(realm_id)
         @runtime.realm_call(realm_id, '__csimDocumentReferrerPolicy').to_s
@@ -11184,6 +11194,11 @@ module Capybara
         # `from_history` already flushed at its own entry point, which commits the
         # history index before it gets here.
         flush_outgoing_page_init if depth.zero? && !from_history && @timers_active
+        # (…a page's navigation's Referer its document's URL under its referrer policy — the policy its `<meta
+        # name="referrer">` sets, the default where none does — read before the page goes; a driver's visit sends none)
+        if depth.zero? && !from_history && !is_reload && referer
+          referer = compute_referrer(main_document_referrer_policy, referer, url)
+        end
         # Capture the entry referer (the page initiating this navigation,
         # e.g. clicked link's host page) at depth 0 — internal redirects
         # at deeper depths don't replace the user-visible referrer.

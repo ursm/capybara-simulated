@@ -26,4 +26,22 @@ RSpec.describe 'the meta referrer policy' do
     end
     expect(referers['/next']).to be_nil
   end
+
+  # …and a page's own: a link followed on the top-level page sends none under `no-referrer`, its origin alone under
+  # `origin`; a driver's visit sends none whatever the policy.
+  it "sets a page's navigation Referer by its policy" do
+    referers = []
+    policy = 'no-referrer'
+    s = simulated_session(->(env) {
+      referers << [env['PATH_INFO'], env['HTTP_REFERER']]
+      next [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><p id="done">next</p>']] if env['PATH_INFO'] == '/next'
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"#{policy}\"><a href=\"/next\">go</a>"]]
+    })
+    s.visit '/a'
+    s.click_link 'go'
+    policy = 'origin'
+    s.visit '/b'
+    s.click_link 'go'
+    expect(referers).to eq([['/a', nil], ['/next', nil], ['/b', nil], ['/next', 'http://www.example.com/']])
+  end
 end
