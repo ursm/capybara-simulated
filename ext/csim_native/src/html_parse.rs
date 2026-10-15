@@ -828,6 +828,8 @@ pub(crate) struct Build<'s> {
     in_contents: std::collections::HashSet<crate::dom::NodeId>,
     // …the template contents it made, roots of trees no later insertion runs steps over
     contents: Vec<crate::dom::NodeId>,
+    // …the declarative shadow roots it attached, whose slots no insertion into them assigned (one out of a live document)
+    shadows: Vec<crate::dom::NodeId>,
     steps: Vec<(crate::dom::NodeId, Vec<String>, u32)>,
     // A document's mode, as `htmlParse` numbers it, where the parse set one.
     quirks: Option<i32>,
@@ -1332,7 +1334,12 @@ impl<'s> Build<'s> {
                 OP_SHADOW_ROOT => {
                     let (host, template, root, parent) = (self.node(int(ops.next())?)?, self.node(int(ops.next())?)?, int(ops.next())?, int(ops.next())?);
                     let into = match self.attach_shadow(scope, host, template) {
-                        Some(shadow) => shadow,
+                        Some(shadow) => {
+                            if self.live.is_none() {
+                                self.shadows.push(shadow);
+                            }
+                            shadow
+                        }
                         None => {
                             let parent = self.node(parent)?;
                             self.insert(scope, parent, template, None);
@@ -1354,8 +1361,8 @@ impl<'s> Build<'s> {
 // its form element pointer, -1 for none; its document's mode, as `htmlParse` takes it), built by the engine — the nodes
 // in `document`, those in template contents in `templateDocument` — and answered as the parse's top-level nodes, out
 // of any parent, then the elements the bindings have steps for (`BUILT_*`), each with the names of its attributes whose
-// steps are theirs (undefined for none). Left to the bindings: markup with a lone surrogate or a `customelementregistry`
-// attribute.
+// steps are theirs (undefined for none). With `declarative` (setHTMLUnsafe's), the declarative shadow roots the markup
+// makes are attached. Left to the bindings: markup with a lone surrogate or a `customelementregistry` attribute.
 fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     parser_op(scope, None, &mut rv, &[-1], |scope, rv| {
         let mut standins = StandIns::default();
@@ -1369,7 +1376,8 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         let form = crate::dom::nid_arg(scope, &args, 4);
         let opts = TreeBuilderOpts { scripting_enabled: true, quirks_mode: quirks_mode(args.get(5).int32_value(scope)), ..Default::default() };
         let name = QualName::new(None, namespace_of(ns), LocalName::from(local.as_str()));
-        let builder = TreeBuilder::new_for_fragment(Sink::new(Some(name), false), 1, form.is_some().then_some(2), opts);
+        let declarative = args.get(8).boolean_value(scope);
+        let builder = TreeBuilder::new_for_fragment(Sink::new(Some(name), declarative), 1, form.is_some().then_some(2), opts);
         let initial_state = Some(builder.tokenizer_state_for_context_elem(true));
         let tokenizer = Tokenizer::new(builder, TokenizerOpts { initial_state, discard_bom: false, ..Default::default() });
         let cid = crate::dom::realm_id(scope, &args);
@@ -1397,10 +1405,11 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     });
 }
 
-// __dom.htmlParseDocument(html, wellFormed, document, templateDocument) -> [quirks, element, names, flags, …], or
-// undefined where the engine leaves it to the bindings: HTML's parse of a whole document no script runs in (DOMParser's,
-// scripting off), built by the engine into `document` (empty) as a fragment parse is (`htmlParseFragment`) — its doctype
-// too — answered as the mode it set (`htmlParse`'s numbers, -1 for none) and the elements the bindings have steps for.
+// __dom.htmlParseDocument(html, wellFormed, document, templateDocument, declarative) -> [quirks, element, names, flags,
+// …], or undefined where the engine leaves it to the bindings: HTML's parse of a whole document no script runs in
+// (DOMParser's, scripting off), built by the engine into `document` (empty) as a fragment parse is (`htmlParseFragment`)
+// — its doctype too, and with `declarative` (parseHTMLUnsafe's) its declarative shadow roots — answered as the mode it
+// set (`htmlParse`'s numbers, -1 for none) and the elements the bindings have steps for.
 fn html_parse_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     parser_op(scope, None, &mut rv, &[-2], |scope, rv| {
         let mut standins = StandIns::default();
@@ -1411,7 +1420,8 @@ fn html_parse_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
             return;
         }
         let opts = TreeBuilderOpts { scripting_enabled: false, ..Default::default() };
-        let tokenizer = Tokenizer::new(TreeBuilder::new(Sink::new(None, false), opts), TokenizerOpts { discard_bom: false, ..Default::default() });
+        let declarative = args.get(4).boolean_value(scope);
+        let tokenizer = Tokenizer::new(TreeBuilder::new(Sink::new(None, declarative), opts), TokenizerOpts { discard_bom: false, ..Default::default() });
         let cid = crate::dom::realm_id(scope, &args);
         let doc = v8::Local::<v8::Object>::try_from(args.get(2)).ok().map(|d| v8::Local::new(scope, d));
         let template_doc = v8::Local::<v8::Object>::try_from(args.get(3)).ok().map(|d| v8::Local::new(scope, d)).or(doc);
@@ -1461,6 +1471,7 @@ impl<'s> Build<'s> {
             held: Vec::new(),
             in_contents: std::collections::HashSet::new(),
             contents: Vec::new(),
+            shadows: Vec::new(),
             steps: Vec::new(),
             quirks: None,
             script: crate::script::SCRIPT_ALREADY_STARTED,
@@ -1471,7 +1482,8 @@ impl<'s> Build<'s> {
     }
     // The insertion steps of the engine's own over what no later insertion runs them for — a document's children, every
     // template's contents (a fragment's top-level nodes have theirs as they are inserted): its radio buttons' (a group's
-    // last checked one the one left checked, as each insertion in turn left it: dom.rs `insertion_steps`).
+    // last checked one the one left checked, as each insertion in turn left it: dom.rs `insertion_steps`), and its
+    // shadow trees' slots'.
     pub(crate) fn finish(&mut self, scope: &mut v8::PinScope<'s, '_>, document: Option<crate::dom::NodeId>) {
         let arena = crate::dom::realm(scope, self.cid);
         let mut roots: Vec<crate::dom::NodeId> = document.and_then(|d| arena.get(d)).map_or_else(Vec::new, |n| n.children.clone());
@@ -1480,6 +1492,10 @@ impl<'s> Build<'s> {
         }
         if arena.radio_insertion_steps(&roots) {
             arena.observers.note_state_changed();
+        }
+        // (…and the slots of each shadow tree it attached assigned, as the insertions into a live one assign them)
+        for &shadow in &self.shadows {
+            crate::dom::assign_slots_in(scope, self.cid, Some(shadow), &[]);
         }
     }
     // What the page is handed: the count of `tops` and their objects, then each element the bindings have steps for,
