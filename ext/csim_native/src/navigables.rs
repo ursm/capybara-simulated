@@ -133,6 +133,25 @@ impl RealmArena {
         }
     }
 
+    // A document's document-tree child navigables' containers (HTML §7.3.1): its HTML `<iframe>`s and `<frame>`s in its
+    // own tree — none in a shadow tree, which `window[n]`, `window.length` and `window.frames` do not count — in tree
+    // order; up to `limit` of them.
+    pub(crate) fn child_navigable_containers(&self, doc: NodeId, limit: usize) -> Vec<NodeId> {
+        let mut found = Vec::new();
+        let mut stack: Vec<NodeId> = self.get(doc).map_or(Vec::new(), |n| n.children.iter().rev().copied().collect());
+        while let Some(id) = stack.pop() {
+            if found.len() >= limit {
+                break;
+            }
+            let Some(n) = self.get(id) else { continue };
+            if n.is_html_named("iframe") || n.is_html_named("frame") {
+                found.push(id);
+            }
+            stack.extend(n.children.iter().rev());
+        }
+        found
+    }
+
     // The navigable a target name chooses from realm `current`'s (HTML "find a navigable by target name", its order the
     // UA's — Chrome's, FrameTree::FindFrameForNavigation): the current navigable and its descendants first, then the rest
     // of its top-level traversable's, each in tree order — the containers of a document's child navigables in
@@ -207,6 +226,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "discardNavigable", discard_navigable, context_id);
     crate::dom::register(scope, ns, "setRealmDocument", set_realm_document, context_id);
     crate::dom::register(scope, ns, "findNavigable", find_navigable, context_id);
+    crate::dom::register(scope, ns, "childNavigables", child_navigables, context_id);
 }
 
 // __dom.windowName() -> this realm's navigable's target name (`window.name`).
@@ -283,4 +303,14 @@ fn find_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
     let realm = v8::Integer::new(scope, realm.unwrap_or(-1)).into();
     rv.set(v8::Array::new_with_elements(scope, &[realm, container, parent]).into());
+}
+
+// __dom.childNavigables(docNid, limit) -> the containers of the document's document-tree child navigables, in tree order —
+// the first `limit` of them, where it is given (`window[n]` asks for n + 1) — as `nodes_value` answers.
+fn child_navigables(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return };
+    let limit = if args.get(1).is_undefined() { usize::MAX } else { args.get(1).uint32_value(scope).unwrap_or(0) as usize };
+    let cid = realm_id(scope, &args);
+    let found = crate::dom::realm(scope, cid).child_navigable_containers(doc, limit);
+    rv.set(crate::dom::nodes_value(scope, cid, &found));
 }
