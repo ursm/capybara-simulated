@@ -207,10 +207,10 @@ pub(crate) fn entry_fields(f: &Facts) -> Vec<(&'static str, Field)> {
         (true, Some("validated")) => 300.0,
         (true, _) => f.encoded + 300.0,
     };
-    let text = |yes: bool, s: String| Text(if yes { s } else { String::new() });
+    let shown = |yes: bool, s: String| Text(if yes { s } else { String::new() });
     vec![
-        ("deliveryType", text(allowed && cached == Some("cache"), "cache".to_owned())),
-        ("nextHopProtocol", text(allowed, "http/1.1".to_owned())),
+        ("deliveryType", shown(allowed && cached == Some("cache"), "cache".to_owned())),
+        ("nextHopProtocol", shown(allowed, "http/1.1".to_owned())),
         ("workerStart", Number(0.0)),
         ("redirectStart", at(allowed && f.redirected)),
         ("redirectEnd", at(allowed && f.redirected)),
@@ -234,8 +234,8 @@ pub(crate) fn entry_fields(f: &Facts) -> Vec<(&'static str, Field)> {
         ("decodedBodySize", Number(if allowed { f.decoded } else { 0.0 })),
         ("responseStatus", Number(if exposed { f.status } else { 0.0 })),
         ("renderBlockingStatus", Text(if f.render_blocking { "blocking" } else { "non-blocking" }.to_owned())),
-        ("contentType", text(exposed, f.content_type.as_deref().map(minimize_mime).unwrap_or_default())),
-        ("contentEncoding", text(allowed, f.content_encoding.as_deref().map(content_encoding).unwrap_or_default())),
+        ("contentType", shown(exposed, f.content_type.as_deref().map(minimize_mime).unwrap_or_default())),
+        ("contentEncoding", shown(allowed, f.content_encoding.as_deref().map(content_encoding).unwrap_or_default())),
         ("serverTiming", Metrics(if allowed { f.server_timing.as_deref().map(server_timing).unwrap_or_default() } else { Vec::new() })),
     ]
 }

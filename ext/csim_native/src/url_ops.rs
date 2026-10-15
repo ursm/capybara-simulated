@@ -317,7 +317,6 @@ mod tests {
         assert!(is_fragment_navigation("https://a.test/p", "https://a.test/p#z"));
     }
 
-
     #[test]
     fn a_posted_message_reaches_its_target_origin() {
         assert_eq!(post_message_reaches("*", "opaque:realm1", "https://a"), Some(true));
