@@ -64,6 +64,7 @@ mod html_parse;
 mod data_url;
 mod event_stream;
 mod fetch_rules;
+mod headers;
 mod idb;
 mod idb_databases;
 mod image_decode;

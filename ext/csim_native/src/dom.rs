@@ -2224,6 +2224,7 @@ pub(crate) struct Dom {
     pub(crate) clone_exception: Option<v8::Global<v8::Value>>,
     // The template a canvas context's state object is made from (canvas_state.rs), once per isolate.
     pub(crate) canvas_state_template: Option<v8::Global<v8::FunctionTemplate>>,
+    pub(crate) headers_template: Option<v8::Global<v8::FunctionTemplate>>,
     // …and a selection's (selection.rs).
     pub(crate) selection_template: Option<v8::Global<v8::FunctionTemplate>>,
     // …and a gradient's or a pattern's (canvas_paint.rs).
@@ -2673,6 +2674,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::data_url::install(scope, ns, context_id);
     crate::event_stream::install(scope, ns, context_id);
     crate::fetch_rules::install(scope, ns, context_id);
+    crate::headers::install(scope, ns, context_id);
     crate::resource_timing::install(scope, ns, context_id);
     crate::multipart::install(scope, ns, context_id);
     crate::idb::install(scope, ns, context_id);
