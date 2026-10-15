@@ -292,28 +292,7 @@ fn urlencoded_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 // percent-decoded and UTF-8 decoded — an escape that is no UTF-8 U+FFFD, a `%` without two hex digits after it itself.
 pub(crate) fn javascript_url_source(href: &str) -> String {
     let encoded = href.get(..11).filter(|s| s.eq_ignore_ascii_case("javascript:")).map_or(href, |_| &href[11..]);
-    String::from_utf8_lossy(&percent_decode(encoded.as_bytes())).into_owned()
-}
-// The URL Standard's "percent-decode" of `input`: each `%` followed by two hex digits the byte they name, any other byte
-// as it is.
-fn percent_decode(input: &[u8]) -> Vec<u8> {
-    let hex = |b: u8| char::from(b).to_digit(16).map(|d| d as u8);
-    let mut out = Vec::with_capacity(input.len());
-    let mut i = 0;
-    while i < input.len() {
-        let pair = (input[i] == b'%').then(|| Some((hex(*input.get(i + 1)?)?, hex(*input.get(i + 2)?)?))).flatten();
-        match pair {
-            Some((high, low)) => {
-                out.push(high << 4 | low);
-                i += 3;
-            }
-            None => {
-                out.push(input[i]);
-                i += 1;
-            }
-        }
-    }
-    out
+    percent_encoding::percent_decode_str(encoded).decode_utf8_lossy().into_owned()
 }
 // __dom.javascriptUrlSource(href) -> the script the `javascript:` URL `href` (serialized) runs (`javascript_url_source`).
 fn javascript_url_source_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

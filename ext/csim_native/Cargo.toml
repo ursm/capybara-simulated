@@ -58,6 +58,8 @@ ada-url = "4"
 encoding_rs = "0.8"
 # Fetch's "data: URL processor", forgiving-base64 included (data_url.rs).
 data-url = "0.3"
+# The URL Standard's percent-decode (url_ops.rs: a `javascript:` URL's script).
+percent-encoding = "2"
 bitflags = "2"
 
 # An `<input>`'s `pattern` is an ECMAScript regular expression (compiled with the `v` flag): regress is a JS-syntax

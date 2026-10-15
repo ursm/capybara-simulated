@@ -416,6 +416,7 @@ dependencies = [
  "p384",
  "p521",
  "pbkdf2",
+ "percent-encoding",
  "pkcs8",
  "png",
  "precomputed-hash",
