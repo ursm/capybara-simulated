@@ -1879,3 +1879,27 @@ mod tests {
         assert_eq!(p, vec!["svg".to_string(), "xlink".to_string()]);
     }
 }
+
+// An element's path as Capybara reports one (`Node#path`, Selenium's and Cuprite's shape): from its tree's top element
+// down, each element by its local name and its position among its parent's element children of that name —
+// `/html[1]/body[1]/div[2]`. None for an element in a shadow tree, which no document-level path reaches.
+pub(crate) fn node_path(arena: &crate::dom::RealmArena, id: crate::dom::NodeId) -> Option<String> {
+    if arena.get(arena.root_of(id)).is_some_and(|r| r.host.is_some()) {
+        return None;
+    }
+    let mut segments = Vec::new();
+    let mut cur = id;
+    while let (Some(n), Some(parent)) = (arena.get(cur).filter(|n| n.kind == crate::dom::NodeKind::Element), arena.parent_of(cur)) {
+        let name = &n.local_name;
+        let siblings = arena.get(parent).map_or(&[][..], |p| &p.children[..]);
+        let index = siblings
+            .iter()
+            .filter(|&&c| arena.get(c).is_some_and(|s| s.kind == crate::dom::NodeKind::Element && s.local_name == *name))
+            .position(|&c| c == cur)
+            .map_or(0, |i| i + 1);
+        segments.push(format!("{name}[{index}]"));
+        cur = parent;
+    }
+    segments.reverse();
+    Some(format!("/{}", segments.join("/")))
+}

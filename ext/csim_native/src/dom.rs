@@ -2572,6 +2572,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "pseudoElementSelector", pseudo_element_selector, context_id);
     register(scope, ns, "xpathPrefixes", xpath_prefixes, context_id);
     register(scope, ns, "xpathEvaluate", xpath_evaluate, context_id);
+    register(scope, ns, "nodePath", node_path_op, context_id);
     register(scope, ns, "resetArena", reset_arena, context_id);
     // The style engine (stylo): a document's sheets and the sheets their `@import`s ask for, and an element's computed
     // value.
@@ -4360,6 +4361,16 @@ fn rule_drop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let cid = realm_id(scope, &args);
     if let Some(arena) = dom(scope).arena.enter_known(cid) {
         arena.sheets.drop_rule(handle);
+    }
+}
+
+// __dom.nodePath(element) -> its path as Capybara reports one (xpath.rs `node_path`), or null in a shadow tree.
+fn node_path_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_null() };
+    let cid = realm_id(scope, &args);
+    match crate::xpath::node_path(realm(scope, cid), id).and_then(|p| v8::String::new(scope, &p)) {
+        Some(path) => rv.set(path.into()),
+        None => rv.set_null(),
     }
 }
 
