@@ -223,4 +223,27 @@ RSpec.describe 'typing into a text control' do
     s.find(:css, '#n').send_keys(:up)
     expect(s.evaluate_script('[log, n.value]')).to eq([[], '1'])
   end
+
+  # An Arrow on a number field steps its value — `input` where the VALUE moved, not its raw text alone (a typed "5." at
+  # its max stepped to "5" is "5" still) — and commits the edit, typed or stepped: `change` where the value moved since
+  # it last was, the field keeping focus, its blur firing none again. Chrome 155.
+  it 'commits a number field edit as its Arrow steps it' do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><input id="a" type="number">' \
+        '<input id="b" type="number" value="1"><input id="m" type="number" max="5"><input id="z">']]
+    })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.L = [];
+      for (const id of ['a', 'b', 'm']) {
+        const e = document.getElementById(id);
+        for (const t of ['input', 'change']) e.addEventListener(t, () => L.push(`${id}:${t}:${e.value}`));
+      }
+    JS
+    s.find(:css, '#a').send_keys('3', :up)
+    s.find(:css, '#b').send_keys(:up)
+    s.find(:css, '#m').send_keys('5', '.', :up)
+    s.find(:css, '#z').click
+    expect(s.evaluate_script('L')).to eq(%w[a:input:3 a:input:4 a:change:4 b:input:2 b:change:2 m:input:5 m:input:5 m:change:5])
+  end
 end
