@@ -3571,7 +3571,9 @@ module Capybara
         # (`external_asset_bytes`).
         raw = result && result['body_bytes']
         Thread.current[:csim_asset_bytes] = raw if raw && raw.b != result['body'].to_s.b
-        return nil unless result && result['status'].to_i < 400
+        # (…a script's or a style sheet's resource loads with an ok status alone, 200 to 299: HTML "fetch a classic script",
+        # "fetch and process the linked resource")
+        return nil unless result && (200..299).cover?(result['status'].to_i)
         result['body'].to_s
       end
 
@@ -3738,8 +3740,8 @@ module Capybara
       # Body of an external durably-cacheable asset (classic script or stylesheet),
       # served from the cross-visit cache when still fresh, else fetched (which
       # read-throughs the per-visit asset cache) and cached iff durably cacheable.
-      # Returns nil on 4xx / fetch failure so the JS caller skips it exactly as the
-      # old `__rackFetch` branch did.
+      # Returns nil on a status that is not ok (not 200 to 299) / fetch failure, so the
+      # JS caller fails the load.
       # A document starts loading — the page's, a frame's, an auxiliary window's (the bridge's `__csimLoadDocument` asks,
       # and keeps the answer as `__csimDocToken`): a token of its own, naming its asset memo in `external_asset_source`.
       # The last ASSET_DOCUMENTS documents' memos are kept, so a page's survives the frames it builds while it loads.
