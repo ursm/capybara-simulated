@@ -95,4 +95,14 @@ RSpec.describe 'HTMLCollection bindings' do
     session.execute_script("f.elements.r.value = 'x'")
     expect(session.find(:css, '#f').text).to eq('Y')
   end
+
+  # DOM §4.2.10.1 namedItem: the FIRST element in the collection whose id is the key or — an HTML element — whose name
+  # is. Measured 2026-10-15: Firefox answers the first (a name match before a later id match); Chrome the id match,
+  # Blink's MSDN-era id-first search — a Blink departure from an explicit spec rule, so the spec's (CLAUDE.md rule 1).
+  it 'answers a name with the first element either names it' do
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<input name="x" class="first"><input id="x" class="second">']] })
+    session.visit '/'
+
+    expect(probe(session, "const c = document.getElementsByTagName('input'); return [c.namedItem('x').className, c.x.className];")).to eq(%w[first first])
+  end
 end
