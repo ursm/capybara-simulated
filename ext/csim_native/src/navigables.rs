@@ -29,16 +29,28 @@ pub(crate) struct Navigables {
     // The windows `window.open` made in this isolate (auxiliary browsing contexts, top-level ones), which the page's
     // event loop — realm 0's — steps with its own, as it does its frames', in the order they were made.
     windows: Vec<i32>,
+    // The realms whose contexts are disposed and not yet dropped: a child navigable whose container is in the document
+    // of one, or whose active document is one's, is stepped and counted no more — though it keeps its realm, so a
+    // `contentWindow` read of a frame in a discarded document stays null.
+    discarded: std::collections::HashSet<i32>,
     // How many realms some realm's event loop steps with its own — child navigables with a realm their active document
     // is in, and those windows — read with no call by every realm's bindings (`__dom.childFrames`): none, the common
     // page's, keeps the event loop's step of its child realms and a dispatch's multi-realm path a load of a word.
     pub(crate) linked: crate::dom::SharedWord,
 }
 
-impl Navigables {
+impl RealmArena {
+    // The realm `child`'s navigable has its active document in, where some realm's event loop steps it: the child's
+    // container in a live realm's document, its own realm live.
+    fn stepped_realm(&self, container: NodeId, child: &Child) -> Option<i32> {
+        let nav = &self.navigables;
+        let parent = self.get(container).map(|n| n.realm)?;
+        child.realm.filter(|r| !nav.discarded.contains(r) && !nav.discarded.contains(&parent))
+    }
     fn note_linked(&mut self) {
-        let linked = self.children.values().filter(|c| c.realm.is_some()).count() + self.windows.len();
-        self.linked.set(u32::try_from(linked).unwrap_or(u32::MAX));
+        let frames = self.navigables.children.iter().filter(|&(&c, child)| self.stepped_realm(c, child).is_some()).count();
+        let linked = frames + self.navigables.windows.len();
+        self.navigables.linked.set(u32::try_from(linked).unwrap_or(u32::MAX));
     }
 }
 
@@ -95,7 +107,7 @@ impl RealmArena {
         if let Some(realm) = realm {
             nav.containers.insert(realm, container);
         }
-        nav.note_linked();
+        self.note_linked();
     }
     // Whether `container`'s navigable's target name is `name` — its container's `name` while it has no navigable yet.
     pub(crate) fn target_name_is(&self, container: NodeId, node: &crate::dom::NodeData, name: &[u16]) -> bool {
@@ -119,7 +131,7 @@ impl RealmArena {
     // `container`'s navigable destroyed — its container left its document.
     pub(crate) fn discard_navigable(&mut self, container: NodeId) {
         self.navigables.children.remove(&container);
-        self.navigables.note_linked();
+        self.note_linked();
     }
     // The realms whose documents are the active documents of the child navigables of realm `cid`'s document — the
     // containers in it — and, the page's, the windows its script opened: in the order they were made (realm ids only
@@ -129,7 +141,7 @@ impl RealmArena {
             .navigables
             .children
             .iter()
-            .filter_map(|(&c, child)| child.realm.filter(|_| self.get(c).is_some_and(|n| n.realm == cid)))
+            .filter_map(|(&c, child)| self.stepped_realm(c, child).filter(|_| self.get(c).is_some_and(|n| n.realm == cid)))
             .collect();
         if cid == 0 {
             realms.extend(&self.navigables.windows);
@@ -144,14 +156,15 @@ impl RealmArena {
         if on {
             nav.windows.push(realm);
         }
-        nav.note_linked();
+        self.note_linked();
     }
     // Whether realm `realm`'s document is in the page's browsing-context tree: the page's own (realm 0), or the active
     // document of a child navigable whose container's document is, up to it — a frame removed takes the realms below it
     // out with its own.
     pub(crate) fn realm_in_tree(&self, mut realm: i32) -> bool {
         loop {
-            if realm == 0 {
+            // (…the page's, or a window `window.open` made in this isolate, which the page's event loop steps)
+            if realm == 0 || self.navigables.windows.contains(&realm) {
                 return true;
             }
             let Some(container) = self.live_container(realm).filter(|&c| self.frame_realm(c) == Some(realm)) else { return false };
@@ -169,7 +182,11 @@ impl RealmArena {
     pub(crate) fn forget_navigables_of(&mut self, cid: i32, dropped: bool) {
         let nav = &mut self.navigables;
         nav.documents.remove(&cid);
-        if dropped {
+        if !dropped {
+            nav.discarded.insert(cid);
+            self.note_linked();
+        } else {
+            nav.discarded.remove(&cid);
             nav.windows.retain(|&w| w != cid);
             if let Some(container) = nav.containers.remove(&cid) {
                 if let Some(child) = nav.children.get_mut(&container).filter(|c| c.realm == Some(cid)) {
@@ -181,7 +198,7 @@ impl RealmArena {
             for container in dead {
                 self.navigables.children.remove(&container);
             }
-            self.navigables.note_linked();
+            self.note_linked();
             let gone: Vec<i32> = self.navigables.containers.iter().filter(|&(_, &c)| self.get(c).is_none()).map(|(&r, _)| r).collect();
             for realm in gone {
                 self.navigables.containers.remove(&realm);

@@ -1047,10 +1047,12 @@ module Capybara
       rescue StandardError => e
         @browser.log_console('warn', "frame realm load failed: #{e.message}")
         # A realm created before the failure (load threw) is untracked — not in
-        # frame_realms nor the engine's child realms — so nothing would ever drain or
-        # dispose it. Tear it down here (safe: it's non-executing in the rescue),
-        # including any module handles its scripts compiled before the throw.
+        # frame_realms — so nothing would ever drain or dispose it. Tear it down here
+        # (safe: it's non-executing in the rescue), including any module handles its
+        # scripts compiled before the throw, and take it off its container's navigable,
+        # which was linked to it before the load (none of its parent's child realms).
         if realm
+          realm_call(parent_id.to_i, '__csimLinkFrameRealm', container, -1) rescue nil if container
           @realm_module_handles&.delete(realm.id)
           @module_sw_ctxs&.delete(realm.id)
           realm.dispose rescue nil

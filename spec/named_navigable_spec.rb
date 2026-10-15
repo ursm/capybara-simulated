@@ -196,4 +196,24 @@ RSpec.describe 'choosing a navigable by name' do
     end
     expect(s.evaluate_script('frames[0].frames[0].location.pathname')).to eq('/d')
   end
+
+  # A callback of a window `window.open` made, or of a frame in it, is runnable as long as the window is open: a
+  # NodeIterator's filter from either runs over the page's document and the window's (DOM "the callback is no longer
+  # runnable" only where its realm left the page's browsing-context tree — a removed frame's).
+  it "runs a filter of an opened window's frame" do
+    s, = session_for('/p' => '<p>main</p>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const pop = window.open();
+        const frame = pop.document.body.appendChild(pop.document.createElement('iframe')).contentWindow;
+        const run = (doc, filter) => { try { doc.createNodeIterator(doc.body, 1, filter).nextNode(); return 'ok'; } catch (e) { return e.name; } };
+        return [
+          run(document, pop.eval('(function () { return 1; })')),
+          run(pop.document, frame.eval('(function () { return 1; })')),
+          run(document, frame.eval('(function () { return 1; })'))
+        ];
+      })()
+    JS
+    expect(got).to eq(%w[ok ok ok])
+  end
 end
