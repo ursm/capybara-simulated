@@ -5941,15 +5941,15 @@ module Capybara
       # whenever control is installed, because only the realm knows its own URL and frame type.
       # The client id is realm-scoped and stable for the realm's life. Pushed to the SW inbox,
       # which is FIFO, so it precedes any later message that matchAll's it.
-      def sw_note_client(realm_id, url, frame_type, controller_handle = nil)
-        note_client(sw_client_id(realm_id), url, 'window', frame_type, controller_handle)
+      def sw_note_client(realm_id, url, frame_type, controller_handle = nil, origin = nil)
+        note_client(sw_client_id(realm_id), url, 'window', frame_type, controller_handle, origin)
       end
 
       # A dedicated / shared WORKER that a service worker controls is a client too — with no
       # visibilityState or focus (those are WindowClient's), `frameType` 'none', and its script
       # URL. Keyed by worker handle, which outlives nothing else and is unique per worker.
       def sw_note_worker_client(handle, url, shared, controller_handle)
-        note_client(sw_worker_client_id(handle), url, shared ? 'sharedworker' : 'worker', 'none', controller_handle)
+        note_client(sw_worker_client_id(handle), url, shared ? 'sharedworker' : 'worker', 'none', controller_handle, url_origin(url.to_s.delete_prefix('blob:')))
       end
 
       # A worker CLIENT's controller changed (a clients.claim() the worker isolate adopted):
@@ -5967,7 +5967,9 @@ module Capybara
         nil
       end
 
-      private def note_client(client_id, url, type, frame_type, controller_handle)
+      # (…`origin` the client's own — a window's its document's, which an about:blank one inherits — what a service worker
+      # filters the clients it sees by)
+      private def note_client(client_id, url, type, frame_type, controller_handle, origin)
         ctrl = controller_handle.to_i
         ctrl = nil if ctrl.zero?
         # Within one document a controller is only ever GAINED (a claim / register
@@ -5979,7 +5981,7 @@ module Capybara
            prev[:rec]['url'] == url.to_s && @workers.dig(prev[:handle], :thread)&.alive?
           ctrl = prev[:handle]
         end
-        rec  = {'id' => client_id, 'url' => url.to_s, 'type' => type.to_s, 'frameType' => frame_type.to_s}
+        rec  = {'id' => client_id, 'url' => url.to_s, 'type' => type.to_s, 'frameType' => frame_type.to_s, 'origin' => origin&.to_s}
         @sw_clients[client_id] = {handle: ctrl, rec: rec}
         focused = focused_client_ids
         sw_worker_handles.each do |h|
