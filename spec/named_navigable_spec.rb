@@ -252,4 +252,13 @@ RSpec.describe 'choosing a navigable by name' do
     s.execute_script('document.getElementById("x").remove()')
     expect(s.evaluate_script('L')).to eq(%w[unload])
   end
+
+  # …nor does a teardown handler removing its own frame begin the teardown again: its pagehide and unload fire once.
+  it "fires a frame's teardown once when a handler of it removes the frame" do
+    child = '<script>for (const t of ["beforeunload", "pagehide", "unload"]) addEventListener(t, () => { parent.L.push(t); if (t === "beforeunload") frameElement.remove(); });</script>'
+    s, = session_for('/p' => '<script>window.L = []</script><iframe id="x" src="/c"></iframe>', '/c' => child)
+    s.evaluate_script('frames[0].length')
+    s.execute_script('document.getElementById("x").src = "/e"')
+    expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 3 } }).to eq(%w[beforeunload pagehide unload])
+  end
 end
