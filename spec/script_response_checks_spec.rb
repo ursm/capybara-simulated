@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'digest'
 require 'base64'
+require 'cgi'
 require_relative 'support/session_teardown'
 
 # A classic script's response is refused before it runs — its `error` event, no run — where Fetch's main fetch makes it
@@ -48,5 +49,41 @@ RSpec.describe 'script response checks' do
     JS
     expect(s.evaluate_script('window.ran.slice().sort()')).to eq(%w[d-good d-plain p-good p-plain])
     expect(s.evaluate_script('window.failed.slice().sort()')).to eq(%w[d-bad d-image d-sniff p-bad p-image p-sniff])
+  end
+
+  # Integrity is a digest of the response's BYTES — a byte-order mark and a body in an encoding other than UTF-8
+  # included, whatever its text came to — and an about:blank or srcdoc document's origin is its creator's, so a
+  # same-origin script there is no opaque response. Chrome 155 runs each.
+  it 'checks integrity against the bytes, and the origin a document has' do
+    bodies = {
+      'bom' => "\xEF\xBB\xBFwindow.ran.push('bom')".b,
+      'latin' => "window.ran.push('latin'); window.e = '\xE9';".b,
+      'framed' => "parent.ran.push('framed')".b
+    }
+    sri = bodies.transform_values {|b| "sha256-#{Base64.strict_encode64(Digest::SHA256.digest(b))}" }
+    srcdoc = %(<script src="/framed.js" integrity="#{sri['framed']}" onerror="parent.failed.push('framed')"></script>)
+    page = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8>
+      <script>window.ran = []; window.failed = [];</script>
+      <script src="/bom.js" integrity="#{sri['bom']}" onerror="failed.push('bom')"></script>
+      <script src="/latin.js" integrity="#{sri['latin']}" onerror="failed.push('latin')"></script>
+      <iframe srcdoc="#{CGI.escapeHTML(srcdoc)}"></iframe>
+    HTML
+    app = lambda do |env|
+      name = env['PATH_INFO'][%r{\A/(\w+)\.js\z}, 1]
+      next [200, {'content-type' => 'text/html'}, [page]] unless name
+
+      type = name == 'latin' ? 'text/javascript; charset=iso-8859-1' : 'text/javascript'
+      [200, {'content-type' => type}, [bodies.fetch(name)]]
+    end
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    s.execute_script(<<~JS)
+      const el = document.createElement('script');
+      el.src = '/bom.js?again';
+      el.integrity = #{sri['bom'].to_json};
+      el.onerror = () => failed.push('bom again');
+      document.body.appendChild(el);
+    JS
+    expect(s.evaluate_script('[ran.slice().sort(), failed, window.e]')).to eq([%w[bom bom framed latin], [], "\u00e9"])
   end
 end

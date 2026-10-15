@@ -3566,6 +3566,10 @@ module Capybara
         Thread.current[:csim_asset_no_store] = result && result['headers']&.any? {|k, v|
           k.to_s.casecmp?('cache-control') && Array(v).join(',').match?(/(?:\A|,)\s*no-store\s*(?:,|\z)/i)
         }
+        # …and its bytes where its text is not them (a byte-order mark taken off, an encoding other than UTF-8 decoded):
+        # what an integrity check hashes (`external_asset_bytes`).
+        raw = result && result['body_bytes']
+        Thread.current[:csim_asset_bytes] = raw if raw && raw.b != result['body'].to_s.b
         return nil unless result && result['status'].to_i < 400
         result['body'].to_s
       end
@@ -3766,12 +3770,14 @@ module Capybara
         memo = document && @page_asset_src&.[](document.to_i)
         if memo && (e = memo[key])
           (@asset_meta ||= {})[key] = Thread.current[:csim_asset_meta] = e[1]
+          (@asset_bytes ||= {})[key] = e[2]
           return e[0]
         end
         @@asset_src_lock.synchronize do
           if (e = @@asset_src[key])
             if e[1].nil? || Time.now < e[1]
               (@asset_meta ||= {})[key] = Thread.current[:csim_asset_meta] = e[2]
+              (@asset_bytes ||= {})[key] = e[3]
               return e[0]
             end
             @@asset_src.delete(key)
@@ -3780,22 +3786,33 @@ module Capybara
         # `durable_source` already does the spec-compliant fetch + header-driven
         # freshness (RFC 9111 max-age → absolute deadline); reuse it instead of
         # re-deriving `fresh_until` here.
-        Thread.current[:csim_asset_meta] = nil
+        Thread.current[:csim_asset_meta] = Thread.current[:csim_asset_bytes] = nil
         body, fresh_until = durable_source(key)
         meta = Thread.current[:csim_asset_meta]
         (@asset_meta ||= {})[key] = meta
         return nil unless body
         # Script / stylesheet source is TEXT, but the raw Rack / binread body
-        # arrives BINARY-tagged (see `RuntimeShared.utf8_text`).
-        body = RuntimeShared.utf8_text(body)
-        memo[key] = [body, meta] if memo && !Thread.current[:csim_asset_no_store]
+        # arrives BINARY-tagged (see `RuntimeShared.utf8_text`). (…its bytes kept beside it where the text is not them, for
+        # an integrity check: `rack_fetch_body`)
+        text  = RuntimeShared.utf8_text(body)
+        bytes = Thread.current[:csim_asset_bytes] || (body.b if text.b != body.b)
+        (@asset_bytes ||= {})[key] = bytes
+        memo[key] = [text, meta, bytes] if memo && !Thread.current[:csim_asset_no_store]
         if fresh_until
           @@asset_src_lock.synchronize do
             @@asset_src.clear if @@asset_src.size >= ASSET_SRC_MAX
-            @@asset_src[key] = [body, fresh_until, meta]
+            @@asset_src[key] = [text, fresh_until, meta, bytes]
           end
         end
-        body
+        text
+      end
+
+      # The bytes of the asset `external_asset_source` last served for `url` where its text is not them (nil where it
+      # is): what an integrity check hashes.
+      def external_asset_bytes(url)
+        needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
+        key = resolve_against_current(url.to_s, use_base: needs_base)
+        key.is_a?(String) ? @asset_bytes&.[](key) : nil
       end
 
       # Native ESM entry point: `Context#compile_module` +

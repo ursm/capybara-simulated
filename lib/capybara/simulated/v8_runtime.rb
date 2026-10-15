@@ -915,7 +915,10 @@ module Capybara
         # write here has already succeeded, aborting the rest of the frame's boot
         # (leaving it on the snapshot's default origin) over a value we never asked
         # for. Every eval below whose value we discard is spelled the same way.
+        # (…in a function of its own: a `var` of this script would be a global of the frame's, which no page enumerating
+        # its window may see, and which nothing could make non-enumerable)
         realm.eval_void(<<~JS)
+          (function () {
           var __NS        = globalThis.#{HOST_NAMESPACE_NAME};
           var __parentWin = __NS.contextGlobal(#{parent_id.to_i});
           if (__parentWin) {
@@ -940,6 +943,7 @@ module Capybara
               Object.defineProperty(globalThis, '__csimAdoptFrameContainer', { configurable: true, value: function (el) { own = el; } });
             })(__parentWin);
           }
+          })();
         JS
         # Pass the URL + document body as call ARGUMENTS, not interpolated into
         # an eval string: the marshaller carries them losslessly, so arbitrary
@@ -1081,8 +1085,8 @@ module Capybara
         unless opener_id.nil?
           realm.eval_void(<<~JS)
             if (typeof globalThis.__csimFrameWindowProxyFor === 'function') {
-              var __op = globalThis.__csimFrameWindowProxyFor(#{opener_id.to_i});
-              if (__op) globalThis.__csimOpener = __op;
+              const opener = globalThis.__csimFrameWindowProxyFor(#{opener_id.to_i});
+              if (opener) globalThis.__csimOpener = opener;
             }
           JS
         end

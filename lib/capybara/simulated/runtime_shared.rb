@@ -39,6 +39,7 @@ module Capybara
         '__csimExternalAsset'        => ->(b, *a) { b.external_asset_source(a[0], a[1]) },
         '__csimAssetDocumentStarted' => ->(b, *_a) { b.asset_document_started },
         '__csimExternalAssetMeta'    => ->(b, *a) { b.external_asset_meta(a[0]) },
+        '__csimExternalAssetBytes'   => ->(b, *a) { b.external_asset_bytes(a[0]) },
         # fetch(…, {keepalive}) — eager detached-thread dispatch + one-shot result poll.
         '__csim_keepaliveStart'      => ->(b, *a) { b.keepalive_start(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10]) },
         '__csim_keepaliveTake'       => ->(b, *a) { b.keepalive_take(a[0]) },

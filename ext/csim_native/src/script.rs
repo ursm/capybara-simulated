@@ -145,12 +145,20 @@ pub(crate) fn script_response_refused(content_type: &str, nosniff: &str, integri
     let integrity_fails = !crate::integrity::response_matches(body, integrity, !opaque);
     never || sniffed || integrity_fails
 }
-// __dom.scriptResponseRefused(contentType, nosniff, integrity, body, opaque) -> `script_response_refused`, the body a
-// string whose UTF-8 is its bytes.
+// __dom.scriptResponseRefused(contentType, nosniff, integrity, body, opaque) -> `script_response_refused`, the body its
+// bytes (a Uint8Array) or a string whose UTF-8 is them.
 fn script_response_refused_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let [content_type, nosniff, integrity, body] = [0, 1, 2, 3].map(|i| args.get(i).to_rust_string_lossy(scope));
+    let [content_type, nosniff, integrity] = [0, 1, 2].map(|i| args.get(i).to_rust_string_lossy(scope));
+    let body = match v8::Local::<v8::ArrayBufferView>::try_from(args.get(3)) {
+        Ok(view) => {
+            let mut bytes = vec![0u8; view.byte_length()];
+            view.copy_contents(&mut bytes);
+            bytes
+        }
+        Err(_) => args.get(3).to_rust_string_lossy(scope).into_bytes(),
+    };
     let opaque = args.get(4).is_true();
-    rv.set_bool(script_response_refused(&content_type, &nosniff, &integrity, body.as_bytes(), opaque));
+    rv.set_bool(script_response_refused(&content_type, &nosniff, &integrity, &body, opaque));
 }
 
 // __dom.scriptType(nid) -> what the script element's type is (`script_type`: `DATA_BLOCK`, `CLASSIC`, …).
