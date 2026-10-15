@@ -76,6 +76,7 @@ mod keys;
 mod cache_matching;
 mod sandbox;
 mod service_worker;
+mod sw_registry;
 mod integrity;
 mod pointer;
 mod webcrypto;
@@ -192,6 +193,20 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("redirect_to_get", magnus::function!(fetch_rules::redirect_to_get_for_ruby, 2))?;
     native.define_module_function("service_worker_response_allowed", magnus::function!(fetch_rules::service_worker_response_allowed_for_ruby, 4))?;
     native.define_module_function("service_worker_max_scope", magnus::function!(service_worker::max_scope_for_ruby, 3))?;
+    // A session's service worker registrations (sw_registry.rs).
+    native.define_module_function("sw_partition_new", magnus::function!(sw_registry::partition_new_for_ruby, 0))?;
+    native.define_module_function("sw_clear", magnus::function!(sw_registry::clear_for_ruby, 1))?;
+    native.define_module_function("sw_registrations", magnus::function!(sw_registry::registrations_for_ruby, 1))?;
+    native.define_module_function("sw_note_registered", magnus::function!(sw_registry::note_registered_for_ruby, 2))?;
+    native.define_module_function("sw_note_activating", magnus::function!(sw_registry::note_activating_for_ruby, 3))?;
+    native.define_module_function("sw_activated", magnus::function!(sw_registry::activated_for_ruby, 3))?;
+    native.define_module_function("sw_unregister", magnus::function!(sw_registry::unregister_for_ruby, 2))?;
+    native.define_module_function("sw_forget_worker", magnus::function!(sw_registry::forget_worker_for_ruby, 2))?;
+    native.define_module_function("sw_forget_activating", magnus::function!(sw_registry::forget_activating_for_ruby, 2))?;
+    native.define_module_function("sw_update_via_cache", magnus::function!(sw_registry::update_via_cache_for_ruby, 2))?;
+    native.define_module_function("sw_set_update_via_cache", magnus::function!(sw_registry::set_update_via_cache_for_ruby, 3))?;
+    native.define_module_function("sw_navigation_preload", magnus::function!(sw_registry::navigation_preload_for_ruby, 2))?;
+    native.define_module_function("sw_set_navigation_preload", magnus::function!(sw_registry::set_navigation_preload_for_ruby, 4))?;
     native.define_module_function("cors_safelisted_request_header", magnus::function!(fetch_rules::cors_safelisted_request_header_for_ruby, 2))?;
     native.define_module_function("cors_safelisted_response_header", magnus::function!(fetch_rules::cors_safelisted_response_header_for_ruby, 1))?;
     native.define_module_function("forbidden_response_header", magnus::function!(fetch_rules::forbidden_response_header_for_ruby, 1))?;
