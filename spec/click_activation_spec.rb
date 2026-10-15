@@ -121,4 +121,24 @@ RSpec.describe 'click activation' do
     s.find(:css, '#d').click
     expect([taken.call, s.evaluate_script('d.checked')]).to eq([[], false])
   end
+
+  # A `pointerdown` canceled keeps the press's compatibility mouse events from firing — its `mousedown` and its
+  # `mouseup`, not the click — and with the `mousedown` its default action: nothing is focused (Pointer Events; Chrome
+  # 155, Playwright's mouse).
+  it 'fires no mousedown or mouseup for a canceled pointerdown, nor focuses' do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8"><body><input id="i">
+        <script>
+          window.L = [];
+          const i = document.getElementById('i');
+          for (const t of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) i.addEventListener(t, () => L.push(t));
+          i.addEventListener('pointerdown', (e) => e.preventDefault());
+        </script>
+      HTML
+    })
+    s.visit '/'
+    s.find('#i').click
+    expect(s.evaluate_script('[L, document.activeElement.tagName]')).to eq([%w[pointerdown pointerup click], 'BODY'])
+  end
 end
