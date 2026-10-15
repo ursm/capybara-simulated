@@ -834,12 +834,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "caretFromPoint", caret_from_point, context_id);
     crate::dom::register(scope, ns, "textCurrent", text_current, context_id);
     crate::dom::register(scope, ns, "caretRect", caret_rect, context_id);
-    crate::dom::register(scope, ns, "lineWraps", line_wraps, context_id);
     crate::dom::register(scope, ns, "caretLineOver", caret_line_over, context_id);
     crate::dom::register(scope, ns, "caretLineEdge", caret_line_edge, context_id);
     crate::dom::register(scope, ns, "caretMoveKeep", caret_move_keep, context_id);
     crate::dom::register(scope, ns, "caretMoveForget", caret_move_forget, context_id);
     crate::dom::register(scope, ns, "charDirection", char_direction, context_id);
+    crate::dom::register(scope, ns, "selectionModifyTarget", selection_modify_target, context_id);
 }
 
 // What a query of the realm's text asks of its arena and its text geometry (`RealmArena::with_text`).
@@ -890,15 +890,6 @@ fn caret_rect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
 }
 
-// __dom.lineWraps(nid, offset) -> whether a soft wrap ends the line the caret at the place is on (`line_wraps`).
-fn line_wraps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(node) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let offset = args.get(1).uint32_value(scope).unwrap_or(0);
-    let cid = crate::dom::realm_id(scope, &args);
-    let wraps = with_text(scope, cid, |arena, g| arena.line_wraps(g, node, offset)).unwrap_or(false);
-    rv.set_bool(wraps);
-}
-
 // Where the last line-wise move left the caret, and what its place alone does not say: the x a vertical move set out
 // from, kept across consecutive ones (Chrome: from `abcd`'s 3rd place to `ef`'s end, then `ghij`'s 3rd), and whether a
 // place a wrap ends one line and starts the next is the end of the first — End's (`upstream`; Chrome: End and then Home
@@ -938,8 +929,19 @@ fn caret_line_over(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let up = args.get(3).is_true();
     let edge = crate::dom::nid_arg(scope, &args, 4).map(|n| (n, args.get(5).uint32_value(scope).unwrap_or(0)));
     let cid = crate::dom::realm_id(scope, &args);
+    let Some(((node, offset), x)) = line_over(scope, cid, root, node, offset, up, edge) else { return rv.set_null() };
+    let values = [
+        crate::dom::nodes_value(scope, cid, &[node]),
+        v8::Integer::new_from_unsigned(scope, offset).into(),
+        v8::Number::new(scope, x).into(),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+// The caret a line up or down from (`node`, `offset`) in `root`, at the x the moves set out from (the realm's kept move,
+// where it is there), past the first or last line to `edge` — and that x.
+fn line_over(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: NodeId, node: NodeId, offset: u32, up: bool, edge: Option<(NodeId, u32)>) -> Option<((NodeId, u32), f64)> {
     let from = move_from(scope, cid, node, offset);
-    let at = with_text(scope, cid, |arena, g| {
+    with_text(scope, cid, |arena, g| {
         let rect = arena.caret_rect(g, node, offset, from.is_some_and(|m| m.upstream)).or_else(|| arena.box_caret_rect(node, offset))?;
         let x = from.and_then(|m| m.x).unwrap_or(rect[0]);
         let at = match arena.line_over(g, root, rect[1], rect[1] + rect[3], up) {
@@ -949,28 +951,14 @@ fn caret_line_over(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         Some(at.map(|at| (at, x)))
     })
     .flatten()
-    .flatten();
-    let Some(((node, offset), x)) = at else { return rv.set_null() };
-    let values = [
-        crate::dom::nodes_value(scope, cid, &[node]),
-        v8::Integer::new_from_unsigned(scope, offset).into(),
-        v8::Number::new(scope, x).into(),
-    ];
-    rv.set(v8::Array::new_with_elements(scope, &values).into());
+    .flatten()
 }
-
-// __dom.caretLineEdge(root, nid, offset, end) -> [[node], offset, upstream]: Home / End — the first or last place of the
-// line in `root` the caret at (`nid`, `offset`) is on (`line_edge`), the line a wrap ends there where the kept move was
-// End's; or undefined.
 fn caret_line_edge(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(root), Some(node)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
     let offset = args.get(2).uint32_value(scope).unwrap_or(0);
     let end = args.get(3).is_true();
     let cid = crate::dom::realm_id(scope, &args);
-    let upstream = move_from(scope, cid, node, offset).is_some_and(|m| m.upstream);
-    let Some(((node, offset), wrapped)) = with_text(scope, cid, |arena, g| arena.line_edge(g, root, node, offset, upstream, end)).flatten() else {
-        return rv.set_null();
-    };
+    let Some(((node, offset), wrapped)) = line_edge(scope, cid, root, node, offset, end) else { return rv.set_null() };
     let values = [
         crate::dom::nodes_value(scope, cid, &[node]),
         v8::Integer::new_from_unsigned(scope, offset).into(),
@@ -978,9 +966,11 @@ fn caret_line_edge(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     ];
     rv.set(v8::Array::new_with_elements(scope, &values).into());
 }
-
-// __dom.caretMoveKeep(nid, offset, x | undefined, upstream): the move the caller set the selection to is the realm's kept
-// one (`CaretMove`)…
+// The first or last (`end`) place of the line (`node`, `offset`) is on in `root`, and whether a soft wrap ends it there.
+fn line_edge(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: NodeId, node: NodeId, offset: u32, end: bool) -> Option<((NodeId, u32), bool)> {
+    let upstream = move_from(scope, cid, node, offset).is_some_and(|m| m.upstream);
+    with_text(scope, cid, |arena, g| arena.line_edge(g, root, node, offset, upstream, end)).flatten()
+}
 fn caret_move_keep(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(node) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let offset = args.get(1).uint32_value(scope).unwrap_or(0);
@@ -1000,24 +990,28 @@ fn caret_move_forget(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 // it (a surrogate pair one character: Adlam's are all past the BMP): a right-to-left script's character (Hebrew, Arabic, Syriac, Thaana, N'Ko, Samaritan, Mandaic, Adlam) rtl (1), any
 // other letter ltr (0); neither, none (-1: its element's `direction` decides).
 fn char_direction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    use icu_properties::props::Script;
     let Some(node) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_int32(-1) };
     let offset = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
     let cid = crate::dom::realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let Some(data) = arena.get(node).filter(|n| n.kind == crate::dom::NodeKind::Text).map(|n| &n.data) else { return rv.set_int32(-1) };
+    rv.set_int32(char_direction_at(crate::dom::realm(scope, cid), node, offset).map_or(-1, i32::from));
+}
+// The strong direction of the character after (`node`, `offset`) in a text node — before it at its end: right-to-left
+// (true) for a right-to-left script's letter, left-to-right for any other letter, none for no letter.
+fn char_direction_at(arena: &RealmArena, node: NodeId, offset: usize) -> Option<bool> {
+    use icu_properties::props::Script;
+    let data = arena.get(node).filter(|n| n.kind == crate::dom::NodeKind::Text).map(|n| &n.data)?;
     const RTL: [Script; 8] = [Script::Hebrew, Script::Arabic, Script::Syriac, Script::Thaana, Script::Nko, Script::Samaritan, Script::Mandaic, Script::Adlam];
     let after = char::decode_utf16(data.get(offset..).unwrap_or(&[]).iter().copied()).next();
     let before = char_before(data, offset);
     for cp in [after.and_then(Result::ok), before].into_iter().flatten().map(u32::from) {
         if crate::unicode::script(cp).is_some_and(|s| RTL.contains(&s)) {
-            return rv.set_int32(1);
+            return Some(true);
         }
         if crate::unicode::is_letter(cp) {
-            return rv.set_int32(0);
+            return Some(false);
         }
     }
-    rv.set_int32(-1);
+    None
 }
 
 // The character ending at `offset`: a surrogate pair's where a low surrogate there follows a high one, the unit there
@@ -1046,4 +1040,111 @@ mod tests {
         assert_eq!(char_before(&[0x61, 0xDD00], 2), None);
         assert_eq!(char_before(&[], 0), None);
     }
+}
+
+// `Selection.modify(alter, direction, granularity)`'s motion (Selection API): where a focus at (`node`, `offset`) goes
+// by `granularity` — a character or a word, the caret steps ArrowLeft / ArrowRight take; a line, the caret a line over in
+// its editing host (or the body) at the x the moves set out from, to the host's first or last caret position past its
+// first or last line; a paragraph — which a `<br>`, a preserved newline or a block's end ends, a soft wrap not — a line
+// at a time until it is on another's; a line's boundary, the start or end of its line; the document's, of its editing
+// host (or the body) — forward or not. 'left' and 'right' go by the direction of the place: by a character or a word,
+// the strong direction of the character after it (before it, at its text's end) where it has one, else its element's
+// `direction` (Firefox: `Hello World` in an rtl paragraph moves right forward); to a line's boundary, the paragraph's
+// (Chrome and Firefox: 'right' to the start of an rtl line); by a line or more, none — 'right' is down. Sentences, and
+// the boundaries of a sentence or a paragraph, move nothing yet. None for a direction or a granularity the method does
+// not know; else whether it goes forward and where to, with the x a line-wise move went at and whether it is upstream.
+#[allow(clippy::type_complexity)]
+fn modify_target(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, cid: i32, node: NodeId, offset: u32, direction: &str, granularity: &str) -> Option<(bool, Option<((NodeId, u32), Option<f64>, bool)>)> {
+    const GRANULARITIES: [&str; 9] =
+        ["character", "word", "sentence", "line", "paragraph", "lineboundary", "sentenceboundary", "paragraphboundary", "documentboundary"];
+    if !["forward", "backward", "left", "right"].contains(&direction) || !GRANULARITIES.contains(&granularity) {
+        return None;
+    }
+    let forward = match direction {
+        "forward" => true,
+        "backward" => false,
+        visual => (visual == "right") != visual_rtl(scope, args, cid, node, offset, granularity),
+    };
+    let arena = crate::dom::realm(scope, cid);
+    // (…the editing host the focus is in — its outermost editable ancestor — or the body, or the root of its tree)
+    let root = arena.outermost_editable(node).unwrap_or_else(|| {
+        let top = arena.root_of(node);
+        arena.relative(top, crate::dom::RELATIVE_BODY).filter(|_| arena.is_document(top)).unwrap_or(top)
+    });
+    let step = |scope: &mut v8::PinScope<'_, '_>, word: bool| {
+        crate::rendered::with_engine(scope, args, 4, |engine, arena, now| {
+            if word { arena.caret_word_step(engine, now, node, offset, forward) } else { arena.caret_step(engine, now, node, offset, forward) }
+        })
+        .flatten()
+        .map(|at| (at, None, false))
+    };
+    let to = match granularity {
+        "character" => step(scope, false),
+        "word" => step(scope, true),
+        "line" => line_step(scope, args, cid, root, node, offset, forward),
+        "paragraph" => {
+            let (mut node, mut offset) = (node, offset);
+            loop {
+                let wraps = forward && with_text(scope, cid, |arena, g| arena.line_wraps(g, node, offset)).unwrap_or(false);
+                let at = line_step(scope, args, cid, root, node, offset, forward);
+                let Some(((n, o), x, upstream)) = at else { break None };
+                let next_wraps = forward && wraps || !forward && with_text(scope, cid, |arena, g| arena.line_wraps(g, n, o)).unwrap_or(false);
+                if (n, o) == (node, offset) || !next_wraps {
+                    break at;
+                }
+                // (…each line at the x the first set out from)
+                crate::dom::dom(scope).caret_moves.insert(cid, CaretMove { node: n, offset: o, x, upstream });
+                (node, offset) = (n, o);
+            }
+        }
+        "lineboundary" => line_edge(scope, cid, root, node, offset, forward).map(|(at, wrapped)| (at, None, wrapped)),
+        "documentboundary" => {
+            let end = if forward { crate::range_contents::node_length(crate::dom::realm(scope, cid), root) } else { 0 };
+            Some(((root, end), None, false))
+        }
+        _ => None,
+    };
+    Some((forward, to))
+}
+// …a line's: up or down a line, past the first or last to the host's first or last caret position.
+#[allow(clippy::type_complexity)]
+fn line_step(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, cid: i32, root: NodeId, node: NodeId, offset: u32, forward: bool) -> Option<((NodeId, u32), Option<f64>, bool)> {
+    let edge = crate::rendered::with_engine(scope, args, 4, |engine, arena, now| arena.caret_edge(engine, now, root, forward))?;
+    line_over(scope, cid, root, node, offset, !forward, Some(edge)).map(|(at, x)| (at, Some(x), false))
+}
+// …and whether 'left' and 'right' at (`node`, `offset`) go by right-to-left: the strong direction of the text there by a
+// character or a word, else (or to a line's boundary) its element's `direction`; by a line or more, never.
+fn visual_rtl(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, cid: i32, node: NodeId, offset: u32, granularity: &str) -> bool {
+    let by_character = granularity == "character" || granularity == "word";
+    if !by_character && granularity != "lineboundary" {
+        return false;
+    }
+    let arena = crate::dom::realm(scope, cid);
+    if by_character {
+        if let Some(rtl) = char_direction_at(arena, node, offset as usize) {
+            return rtl;
+        }
+    }
+    let element = if arena.is_element(node) { Some(node) } else { arena.parent_of(node).filter(|&p| arena.is_element(p)) };
+    let Some(element) = element else { return false };
+    crate::rendered::with_engine(scope, args, 4, |engine, arena, now| engine.value(arena, element, "direction", None, now)).flatten().as_deref() == Some("rtl")
+}
+// __dom.selectionModifyTarget(focusNode, focusOffset, direction, granularity, now) -> `[forward, node, offset, x,
+// upstream]` where `modify` moves the focus (`modify_target`, `direction` and `granularity` ASCII-lowercased), `[forward]`
+// where it moves it nowhere; undefined for a direction or a granularity it does not know.
+fn selection_modify_target(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(node) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let offset = args.get(1).uint32_value(scope).unwrap_or(0);
+    let direction = args.get(2).to_rust_string_lossy(scope).to_ascii_lowercase();
+    let granularity = args.get(3).to_rust_string_lossy(scope).to_ascii_lowercase();
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some((forward, to)) = modify_target(scope, &args, cid, node, offset, &direction, &granularity) else { return };
+    let mut values: Vec<v8::Local<v8::Value>> = vec![v8::Boolean::new(scope, forward).into()];
+    if let Some(((node, offset), x, upstream)) = to {
+        values.push(crate::dom::nodes_value(scope, cid, &[node]));
+        values.push(v8::Integer::new_from_unsigned(scope, offset).into());
+        values.push(x.map_or_else(|| v8::undefined(scope).into(), |x| v8::Number::new(scope, x).into()));
+        values.push(v8::Boolean::new(scope, upstream).into());
+    }
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
 }
