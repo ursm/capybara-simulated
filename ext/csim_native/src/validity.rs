@@ -13,7 +13,7 @@ use std::rc::Rc;
 use crate::input_value::{number_of, parse_float, step_scale};
 use web_atoms::local_name;
 use crate::dom::{
-    NodeData, NodeId, NodeKind, RealmArena, STATE_CHECKED, STATE_CHECKED_DIRTY, STATE_CUSTOM_ERROR, STATE_DIRTY_BY_USER, STATE_FORM_ASSOCIATED,
+    NodeData, NodeId, NodeKind, RealmArena, STATE_CHECKED, STATE_CHECKED_DIRTY, STATE_DIRTY_BY_USER, STATE_FORM_ASSOCIATED,
     STATE_HAS_FILES, STATE_SELECTED, STATE_SELECTED_DIRTY, STATE_SELECTED_INIT, STATE_USER_INTERACTED,
 };
 
@@ -28,6 +28,29 @@ pub(crate) const RANGE_OVERFLOW: u16 = 1 << 6;
 pub(crate) const STEP_MISMATCH: u16 = 1 << 7;
 pub(crate) const BAD_INPUT: u16 = 1 << 8;
 pub(crate) const CUSTOM_ERROR: u16 = 1 << 9;
+
+// HTML "normalize newlines": every CRLF and every lone CR a LF.
+fn normalize_newlines(units: impl Iterator<Item = u16>) -> Vec<u16> {
+    let mut units = units.peekable();
+    let mut out = Vec::new();
+    while let Some(u) = units.next() {
+        if u == 0x0D {
+            units.next_if_eq(&0x0A);
+            out.push(0x0A);
+        } else {
+            out.push(u);
+        }
+    }
+    out
+}
+
+// An element's custom validity: the flags it suffers from that no constraint of its own decides — a listed control's
+// custom error (`setCustomValidity`), a form-associated custom element's every flag (its internals' `setValidity`) — and
+// the validation message given with them.
+pub(crate) struct CustomValidity {
+    flags: u16,
+    message: Box<[u16]>,
+}
 
 fn is_ascii_ws(c: char) -> bool {
     matches!(c, '\t' | '\n' | '\x0C' | '\r' | ' ')
@@ -111,18 +134,8 @@ impl RealmArena {
             return v.to_vec();
         }
         if n.local_name == local_name!("textarea") {
-            let mut out = Vec::new();
             let text = n.children.iter().filter_map(|&c| self.get(c)).filter(|t| t.kind == NodeKind::Text).flat_map(|t| t.data.iter().copied());
-            let mut text = text.peekable();
-            while let Some(u) = text.next() {
-                if u == 0x0D {
-                    text.next_if_eq(&0x0A);
-                    out.push(0x0A);
-                } else {
-                    out.push(u);
-                }
-            }
-            return out;
+            return normalize_newlines(text);
         }
         n.plain_attr_units("value").unwrap_or_default()
     }
@@ -135,6 +148,47 @@ impl RealmArena {
     // `willValidate`: a submittable control of a validating kind — an `<input>` but a hidden / reset / button one, a
     // Submit-state `<button>`, a `<select>`, a `<textarea>`, a form-associated custom element — that is not actually
     // disabled, not `readonly` (an input, a textarea, a form-associated custom element), and not in a `<datalist>`.
+    // `id`'s custom validity becomes `flags`, with `message` its validation message, newlines normalized — none, and no
+    // message, for no flags — and whether that changed it (what `:valid` / `:invalid` read).
+    pub(crate) fn set_custom_validity(&mut self, id: NodeId, flags: u16, message: &[u16]) -> bool {
+        let next = (flags != 0).then(|| CustomValidity { flags, message: normalize_newlines(message.iter().copied()).into() });
+        let had = self.custom_validity.get(&id);
+        if had.map(|c| (c.flags, &c.message)) == next.as_ref().map(|c| (c.flags, &c.message)) {
+            return false;
+        }
+        match next {
+            Some(c) => self.custom_validity.insert(id, c),
+            None => self.custom_validity.remove(&id),
+        };
+        self.mutations += 1;
+        self.state_epoch += 1;
+        true
+    }
+    // `validationMessage`: a form-associated custom element's, the one its internals were given; a listed control's, none
+    // unless it is a candidate that suffers from a constraint — then its custom one, else the user agent's for the first
+    // it suffers from that has one (Chrome's words).
+    pub(crate) fn validation_message(&self, id: NodeId) -> Vec<u16> {
+        let custom = self.custom_validity.get(&id).map_or(&[][..], |c| &c.message);
+        if self.get(id).is_some_and(|n| n.state & STATE_FORM_ASSOCIATED != 0) {
+            return custom.to_vec();
+        }
+        if !self.will_validate(id) {
+            return Vec::new();
+        }
+        if !custom.is_empty() {
+            return custom.to_vec();
+        }
+        let v = self.validity(id);
+        let message = if v & VALUE_MISSING != 0 {
+            "Please fill out this field."
+        } else if v & (TYPE_MISMATCH | PATTERN_MISMATCH) != 0 {
+            "Please match the requested format."
+        } else {
+            ""
+        };
+        message.encode_utf16().collect()
+    }
+
     pub(crate) fn will_validate(&self, id: NodeId) -> bool {
         let Some(n) = self.get(id).filter(|n| n.is_html()) else { return false };
         let face = n.state & STATE_FORM_ASSOCIATED != 0;
@@ -164,7 +218,7 @@ impl RealmArena {
     // The constraints `id` suffers from (dom-nodes.js `validity`), as the flags above.
     pub(crate) fn validity(&self, id: NodeId) -> u16 {
         let Some(n) = self.get(id).filter(|n| n.is_html()) else { return 0 };
-        let mut v = if n.state & STATE_CUSTOM_ERROR != 0 { CUSTOM_ERROR } else { 0 };
+        let mut v = self.custom_validity.get(&id).map_or(0, |c| c.flags);
         let tag = &*n.local_name;
         if !matches!(tag, "input" | "textarea" | "select") {
             return v;
@@ -652,6 +706,8 @@ impl RealmArena {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "validityFlags", validity_flags, context_id);
     crate::dom::register(scope, ns, "willValidate", will_validate, context_id);
+    crate::dom::register(scope, ns, "setCustomValidity", set_custom_validity, context_id);
+    crate::dom::register(scope, ns, "validationMessage", validation_message, context_id);
     crate::dom::register(scope, ns, "actuallyDisabled", actually_disabled, context_id);
     crate::dom::register(scope, ns, "listOfOptions", list_of_options, context_id);
     crate::dom::register(scope, ns, "selectedOptions", selected_options, context_id);
@@ -1144,6 +1200,23 @@ fn will_validate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set_bool(crate::dom::realm(scope, cid).will_validate(id));
 }
 
+// __dom.setCustomValidity(nid, flags, message) -> whether the element's custom validity changed (`set_custom_validity`).
+fn set_custom_validity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let flags = args.get(1).uint32_value(scope).unwrap_or(0) as u16;
+    let message = crate::dom::utf16_arg(scope, args.get(2));
+    rv.set_bool(crate::dom::realm(scope, cid).set_custom_validity(id, flags, &message));
+}
+
+// __dom.validationMessage(nid) -> the element's validation message (`validation_message`).
+fn validation_message(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let message = crate::dom::realm(scope, cid).validation_message(id);
+    rv.set(crate::dom::utf16_value(scope, &message));
+}
+
 // __dom.actuallyDisabled(nid) -> whether the element is actually disabled (`element_state::is_actually_disabled`).
 fn actually_disabled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
@@ -1527,6 +1600,31 @@ mod form_tests {
         let dirty = html(&mut arena, None, "option", &["selected"]);
         arena.get_mut_quietly(dirty).unwrap().state = STATE_SELECTED_DIRTY;
         assert_eq!(arena.option_initialised(dirty), STATE_SELECTED_DIRTY | STATE_SELECTED_INIT);
+    }
+
+    #[test]
+    fn a_custom_validity_and_the_validation_message() {
+        let mut arena = RealmArena::default();
+        let units = |s: &str| s.encode_utf16().collect::<Vec<_>>();
+        let input = html(&mut arena, None, "input", &["required"]);
+        assert_eq!(arena.validation_message(input), units("Please fill out this field."));
+        // (…a custom message over the user agent's, its newlines normalized; and changed only by another)
+        assert!(arena.set_custom_validity(input, CUSTOM_ERROR, &units("a\r\nb\rc")));
+        assert!(!arena.set_custom_validity(input, CUSTOM_ERROR, &units("a\nb\nc")));
+        assert_eq!(arena.validity(input), CUSTOM_ERROR | VALUE_MISSING);
+        assert_eq!(arena.validation_message(input), units("a\nb\nc"));
+        assert!(arena.set_custom_validity(input, 0, &units("ignored")));
+        assert_eq!(arena.validity(input), VALUE_MISSING);
+        // (…none for a control barred from validation)
+        let disabled = html(&mut arena, None, "input", &["disabled"]);
+        arena.set_custom_validity(disabled, CUSTOM_ERROR, &units("x"));
+        assert!(arena.validation_message(disabled).is_empty());
+        // (…a form-associated custom element's flags are all its internals', and so is its message)
+        let face = html(&mut arena, None, "x-face", &[]);
+        arena.get_mut_quietly(face).unwrap().state = STATE_FORM_ASSOCIATED;
+        arena.set_custom_validity(face, VALUE_MISSING | TOO_LONG, &units("m"));
+        assert_eq!(arena.validity(face), VALUE_MISSING | TOO_LONG);
+        assert_eq!(arena.validation_message(face), units("m"));
     }
 
     #[test]

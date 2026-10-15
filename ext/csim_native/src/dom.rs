@@ -302,10 +302,9 @@ pub(crate) const STATE_FILTERED: u32 = 1 << 8;
 pub(crate) const STATE_FORM_ASSOCIATED: u32 = 1 << 9;
 pub(crate) const STATE_CUSTOM: u32 = 1 << 10;
 pub(crate) const STATE_IS_VALUE: u32 = 1 << 11;
-// …what constraint validation reads that no attribute records: a value last changed by the user, a custom validity
-// message, the user having interacted with the control, and an `<input type=file>` holding files…
+// …what constraint validation reads that no attribute records: a value last changed by the user, the user having
+// interacted with the control, and an `<input type=file>` holding files (a custom validity is `custom_validity`'s)…
 pub(crate) const STATE_DIRTY_BY_USER: u32 = 1 << 12;
-pub(crate) const STATE_CUSTOM_ERROR: u32 = 1 << 13;
 pub(crate) const STATE_USER_INTERACTED: u32 = 1 << 14;
 pub(crate) const STATE_HAS_FILES: u32 = 1 << 15;
 // …and an option's selectedness flags (HTML §4.10.10): dirty — set by script or the user, after which its `selected`
@@ -839,6 +838,8 @@ pub(crate) struct RealmArena {
     parser_form_owners: std::collections::HashMap<NodeId, NodeId>,
     // A custom element's custom states (`ElementInternals.states`, `:state()`), for the few elements that have any.
     custom_states: std::collections::HashMap<NodeId, Vec<String>>,
+    // An element's custom validity (validity.rs `set_custom_validity`), for the few that have one.
+    pub(crate) custom_validity: std::collections::HashMap<NodeId, crate::validity::CustomValidity>,
     // The `<link>`s whose `disabled` attribute was removed — "explicitly enabled" (HTML): an alternate style sheet one
     // applies then, whatever the selected set (sheet_owners.rs).
     pub(crate) explicitly_enabled: std::collections::HashSet<NodeId>,
@@ -1180,6 +1181,7 @@ impl RealmArena {
         let slots = &self.slots;
         self.parser_form_owners.retain(|id, _| live(slots, id));
         self.custom_states.retain(|id, _| live(slots, id));
+        self.custom_validity.retain(|id, _| live(slots, id));
         self.text_selections.retain(|id, _| live(slots, id));
         self.change_baselines.retain(|id, _| live(slots, id));
         self.explicit_elements.retain(|(id, _), _| live(slots, id));
@@ -1429,6 +1431,9 @@ impl RealmArena {
         }
         if !self.custom_states.is_empty() {
             self.custom_states.remove(&id);
+        }
+        if !self.custom_validity.is_empty() {
+            self.custom_validity.remove(&id);
         }
         self.observers.forget(id);
         // …and the slot it was assigned to no longer lists it: a change to the slot's flat children.
