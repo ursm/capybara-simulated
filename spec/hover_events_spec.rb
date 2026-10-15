@@ -3,7 +3,9 @@ require_relative 'support/session_teardown'
 
 # The pointer coming onto an element (UI Events): pointerover, pointerenter, mouseover, mouseenter — the element it came
 # from their relatedTarget — then pointermove and mousemove, whose relatedTarget is null; hovering it again moves it
-# alone. A click moves the pointer onto its target first, its enter events included, as a WebDriver click does.
+# alone. A click moves the pointer onto its target first — its enter events included where it comes onto it, its moves
+# each time — as a WebDriver click does (Chrome 155, Playwright: a second click on #b fires pointermove and mousemove
+# before its pointerdown).
 RSpec.describe 'hover events' do
   let(:session) {
     simulated_session(->(_env) {
@@ -27,10 +29,12 @@ RSpec.describe 'hover events' do
     session.find('#a').hover
     session.find('#a').hover
     session.find('#b').click
+    session.find('#b').click
     expect(session.evaluate_script('seen')).to eq([
       'a pointerover null', 'a pointerenter null', 'a mouseover null', 'a mouseenter null', 'a pointermove null', 'a mousemove null',
       'a pointermove null', 'a mousemove null',
-      'b pointerover a', 'b pointerenter a', 'b mouseover a', 'b mouseenter a', 'b pointermove null', 'b mousemove null'
+      'b pointerover a', 'b pointerenter a', 'b mouseover a', 'b mouseenter a', 'b pointermove null', 'b mousemove null',
+      'b pointermove null', 'b mousemove null'
     ])
   end
 end

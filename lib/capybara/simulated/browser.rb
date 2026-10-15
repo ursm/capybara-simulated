@@ -1721,7 +1721,8 @@ module Capybara
         # resolve against this element (Redmine's gantt tooltips +
         # context-menu submenus rely on CSS `:hover`). The host fn
         # call into `__csimSetHover` does the slot update on the JS
-        # side AND fires `mouseover` / `mouseenter` — keeping the
+        # side AND fires the hover events (`mouseover` / `mouseenter`
+        # where the hovered element changed, the moves) — keeping the
         # state-set and dispatch on the same path avoids the
         # double-eval recursion the inlined `globalThis.document.
         # _hoverElement = ...` triggered (the eval string ran inside
