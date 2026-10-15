@@ -52,4 +52,18 @@ RSpec.describe 'constraint validation' do
     JS
     expect(got).to eq([false, 'a,b'])
   end
+
+  # HTML leaves how a problem is reported to the user agent; Chrome 155 and Firefox both focus the control whose
+  # `invalid` was not canceled, and neither moves focus for one that was (`[false, "a", false, "z"]`).
+  it "reports a control's problem by focusing it" do
+    got = run(<<~JS)
+      document.body.innerHTML = '<input id=a required><input id=b required><button id=z>z</button>';
+      var a = document.getElementById('a'), b = document.getElementById('b'), z = document.getElementById('z'), out = [];
+      z.focus(); out.push(a.reportValidity(), document.activeElement.id);
+      b.addEventListener('invalid', function (e) { e.preventDefault(); });
+      z.focus(); out.push(b.reportValidity(), document.activeElement.id);
+      return out;
+    JS
+    expect(got).to eq([false, 'a', false, 'z'])
+  end
 end
