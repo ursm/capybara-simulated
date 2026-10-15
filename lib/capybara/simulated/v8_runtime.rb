@@ -1009,8 +1009,8 @@ module Capybara
           end
         end
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
-        # This document now has a URL and any host-wired controller, so it can announce itself
-        # as a service-worker client — an UNCONTROLLED context is still a client of its origin
+        # This document, loaded, refreshes the service-worker client record it made as it began loading
+        # (bridge.entry.js __csimLoadDocument) — an UNCONTROLLED context is still a client of its origin
         # and must show up in `matchAll({includeUncontrolled: true})`.
         realm.call('__csim_swReportClient') rescue nil
         # A `javascript:` URL frame: the initial empty document is now loaded and
@@ -1579,6 +1579,9 @@ module Capybara
         c.attach('__csim_swPostToClient', ->(client_id, data) { sw_hooks[:post_to_client]&.call(client_id, data); nil }) if sw_hooks[:post_to_client]
         c.attach('__csim_swNavigateClient', ->(client_id, url, nav_id) { sw_hooks[:navigate_client]&.call(client_id, url, nav_id); nil }) if sw_hooks[:navigate_client]
         c.attach('__csim_swClaim',        ->                  { sw_hooks[:claim]&.call; nil }) if sw_hooks[:claim]
+        # Its Clients, the host registry's as this worker sees them (Browser#run_worker).
+        c.attach('__csim_swClientRecord', ->(client_id) { sw_hooks[:client_record].call(client_id) }) if sw_hooks[:client_record]
+        c.attach('__csim_swMatchClients', ->(include_uncontrolled, type) { sw_hooks[:match_clients].call(include_uncontrolled, type) }) if sw_hooks[:match_clients]
         c.attach('__csim_swSkipWaitingRequest', ->             { sw_hooks[:skip_waiting]&.call; nil }) if sw_hooks[:skip_waiting]
         c.attach('__csim_swNoteRouterRules',    ->             { sw_hooks[:router]&.call; nil }) if sw_hooks[:router]
         c.attach('__csim_swRaceNetwork', ->(fetch_id, realm_id, url, method) { sw_hooks[:race_network]&.call(fetch_id, realm_id, url, method); nil }) if sw_hooks[:race_network]

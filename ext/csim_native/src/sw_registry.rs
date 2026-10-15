@@ -104,11 +104,27 @@ pub(crate) struct Job {
     creator_key: String,
 }
 
+// A service worker client (Service Workers §2.3): a window, frame or worker of the session — its id, URL, type
+// ("window", "worker", "sharedworker"), frame type, origin (its document's, which an about:blank one inherits; none for
+// one the host could not tell) and the worker controlling it.
+pub(crate) struct Client {
+    id: String,
+    url: String,
+    kind: String,
+    frame_type: String,
+    origin: Option<String>,
+    controller: Option<u32>,
+}
+
 #[derive(Default)]
 struct Partition {
     registrations: Vec<Registration>,
     workers: HashMap<u32, Worker>,
     jobs: Vec<Job>,
+    // (…in the order they were made: Query Service Worker Client Objects lists them so)
+    clients: Vec<Client>,
+    // (…the ids of the clients that count as focused: the focused context and its ancestors)
+    focused: Vec<String>,
 }
 
 impl Partition {
@@ -231,6 +247,96 @@ pub(crate) fn set_worker_state_for_ruby(partition: u64, handle: u32, state: Stri
     w.state = state;
     changed
 }
+// ── The clients ──
+// A client noted: its record, made — or, one with its id, refreshed in its place (a client keeps its creation order).
+pub(crate) fn note_client_for_ruby(
+    partition: u64,
+    id: String,
+    url: String,
+    kind: String,
+    frame_type: String,
+    origin: Option<String>,
+    controller: Option<u32>,
+) {
+    let mut reg = lock();
+    let clients = &mut reg.partition(partition).clients;
+    let client = Client { id, url, kind, frame_type, origin, controller };
+    match clients.iter_mut().find(|c| c.id == client.id) {
+        Some(c) => *c = client,
+        None => clients.push(client),
+    }
+}
+// …its controller set (a claim, a controller its worker adopted), where it is a client: whether it is.
+pub(crate) fn set_client_controller_for_ruby(partition: u64, id: String, controller: Option<u32>) -> bool {
+    let mut reg = lock();
+    let Some(c) = reg.existing(partition).and_then(|p| p.clients.iter_mut().find(|c| c.id == id)) else { return false };
+    c.controller = controller;
+    true
+}
+// Every client gone (no worker left to see one: the realms report themselves again to the next) — the focus, the
+// browser's, stays.
+pub(crate) fn forget_clients_for_ruby(partition: u64) {
+    if let Some(p) = lock().existing(partition) {
+        p.clients.clear();
+    }
+}
+// …and gone (its context discarded): whether it was a client.
+pub(crate) fn forget_client_for_ruby(partition: u64, id: String) -> bool {
+    let mut reg = lock();
+    let Some(p) = reg.existing(partition) else { return false };
+    let before = p.clients.len();
+    p.clients.retain(|c| c.id != id);
+    p.clients.len() != before
+}
+// The client `id`'s `[url, controller]`, nil for none.
+pub(crate) fn client_entry_for_ruby(partition: u64, id: String) -> Option<(String, Option<u32>)> {
+    let mut reg = lock();
+    let c = reg.existing(partition)?.clients.iter().find(|c| c.id == id)?;
+    Some((c.url.clone(), c.controller))
+}
+// Every client, `[id, url, controller]` each, in creation order — and the ids of those that count as focused, set.
+pub(crate) fn clients_for_ruby(partition: u64) -> Vec<(String, String, Option<u32>)> {
+    let mut reg = lock();
+    let Some(p) = reg.existing(partition) else { return Vec::new() };
+    p.clients.iter().map(|c| (c.id.clone(), c.url.clone(), c.controller)).collect()
+}
+pub(crate) fn set_focused_for_ruby(partition: u64, ids: Vec<String>) {
+    lock().partition(partition).focused = ids;
+}
+// The client `id` as the service worker `handle` of `origin` sees it — `[id, url, type, frame type, controlled by it,
+// focused]` — nil where it is none, or of another origin: Clients are origin-scoped (Query Service Worker Client
+// Objects filters on the service worker's origin; one whose origin is unknown is none of its).
+#[allow(clippy::type_complexity)]
+pub(crate) fn client_for_ruby(partition: u64, handle: u32, origin: String, id: String) -> Option<(String, String, String, String, bool, bool)> {
+    let mut reg = lock();
+    let p = reg.existing(partition)?;
+    let c = p.clients.iter().find(|c| c.id == id && c.origin.as_deref() == Some(origin.as_str()))?;
+    Some(client_seen(p, c, handle))
+}
+// …and Clients.matchAll(): every such client of the worker's origin — of `kind` ("all" for every one), controlled by it
+// unless `include_uncontrolled` — the focused ones first, then the rest, each in creation order.
+#[allow(clippy::type_complexity)]
+pub(crate) fn match_clients_for_ruby(
+    partition: u64,
+    handle: u32,
+    origin: String,
+    include_uncontrolled: bool,
+    kind: String,
+) -> Vec<(String, String, String, String, bool, bool)> {
+    let mut reg = lock();
+    let Some(p) = reg.existing(partition) else { return Vec::new() };
+    let matched = p.clients.iter().filter(|c| {
+        c.origin.as_deref() == Some(origin.as_str())
+            && (include_uncontrolled || c.controller == Some(handle))
+            && (kind == "all" || c.kind == kind)
+    });
+    let (focused, rest): (Vec<&Client>, Vec<&Client>) = matched.partition(|c| p.focused.contains(&c.id));
+    focused.into_iter().chain(rest).map(|c| client_seen(p, c, handle)).collect()
+}
+fn client_seen(p: &Partition, c: &Client, handle: u32) -> (String, String, String, String, bool, bool) {
+    (c.id.clone(), c.url.clone(), c.kind.clone(), c.frame_type.clone(), c.controller == Some(handle), p.focused.contains(&c.id))
+}
+
 // ── The job queues ──
 // Schedule Job: a job of `kind` ("register", "update" — of the registration `registration` — or "unregister") at `scope`
 // — its number, and whether it runs now (no job before it at the scope). A Register job equivalent to the last one queued
@@ -352,15 +458,12 @@ pub(crate) fn awaits_activation_for_ruby(partition: u64, handle: u32) -> bool {
 pub(crate) fn note_activating_for_ruby(partition: u64, scope: String, handle: u32) {
     lock().at(partition, &scope).activating = Some(handle);
 }
-// …and it is activated, the worker its navigations route to: whether no other registration had it already (a worker
-// new to the host's routing).
-pub(crate) fn activated_for_ruby(partition: u64, scope: String, handle: u32) -> bool {
+// …and it is activated, the worker its navigations route to.
+pub(crate) fn activated_for_ruby(partition: u64, scope: String, handle: u32) {
     let mut reg = lock();
-    let fresh = !reg.partition(partition).registrations.iter().any(|r| r.serving == Some(handle));
     let r = reg.registered(partition, &scope);
     r.serving = Some(handle);
     r.activating = None;
-    fresh
 }
 // The registration at `scope` unregistered — out of the map, its mode and navigation preload with it: its number, nil
 // where the map held none. One with no version left is gone at once; another stays until it is cleared.
@@ -437,6 +540,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn keeps_the_clients_a_service_worker_sees() {
+        let p = partition_new_for_ruby();
+        let a = || Some("https://a.test".to_owned());
+        note_client_for_ruby(p, "w".into(), "https://a.test/".into(), "window".into(), "top-level".into(), a(), Some(5));
+        note_client_for_ruby(p, "f".into(), "https://a.test/f".into(), "window".into(), "nested".into(), a(), None);
+        note_client_for_ruby(p, "x".into(), "https://b.test/".into(), "window".into(), "nested".into(), Some("https://b.test".into()), None);
+        note_client_for_ruby(p, "k".into(), "https://a.test/k.js".into(), "worker".into(), "none".into(), a(), Some(5));
+        let ids = |v: Vec<(String, String, String, String, bool, bool)>| v.into_iter().map(|c| c.0).collect::<Vec<_>>();
+        assert_eq!(ids(match_clients_for_ruby(p, 5, "https://a.test".into(), false, "window".into())), ["w"]);
+        assert_eq!(ids(match_clients_for_ruby(p, 5, "https://a.test".into(), true, "all".into())), ["w", "f", "k"]);
+        set_focused_for_ruby(p, vec!["f".into()]);
+        assert_eq!(ids(match_clients_for_ruby(p, 5, "https://a.test".into(), true, "window".into())), ["f", "w"]);
+        assert!(client_for_ruby(p, 5, "https://a.test".into(), "x".into()).is_none());
+        assert!(set_client_controller_for_ruby(p, "f".into(), Some(5)));
+        assert_eq!(client_for_ruby(p, 5, "https://a.test".into(), "f".into()).map(|c| (c.4, c.5)), Some((true, true)));
+        // Refreshed in place, gone when forgotten.
+        note_client_for_ruby(p, "w".into(), "https://a.test/2".into(), "window".into(), "top-level".into(), a(), Some(5));
+        assert_eq!(clients_for_ruby(p)[0], ("w".into(), "https://a.test/2".into(), Some(5)));
+        assert!(forget_client_for_ruby(p, "w".into()));
+        assert!(!forget_client_for_ruby(p, "w".into()));
+        clear_for_ruby(p);
+    }
+
+    #[test]
     fn queues_jobs_by_scope_and_joins_an_equivalent_register() {
         let p = partition_new_for_ruby();
         let (a, runs) = schedule_job_for_ruby(p, "register".into(), "s/".into(), "s/a.js".into(), Some("imports".into()), "classic".into(), 0, 0, String::new());
@@ -504,8 +631,8 @@ mod tests {
         set_version_for_ruby(p, id, "installing".into(), Some(7));
         note_activating_for_ruby(p, "a/".into(), 7);
         assert_eq!(registrations_for_ruby(p), [("a/".into(), true, Some(7), None, id)]);
-        assert!(activated_for_ruby(p, "a/".into(), 7));
-        assert!(!activated_for_ruby(p, "b/".into(), 7));
+        activated_for_ruby(p, "a/".into(), 7);
+        activated_for_ruby(p, "b/".into(), 7);
         set_navigation_preload_for_ruby(p, "a/".into(), Some(true), None);
         assert_eq!(navigation_preload_for_ruby(p, "a/".into()), (true, "true".into()));
         note_activating_for_ruby(p, "a/".into(), 8);

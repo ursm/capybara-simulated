@@ -531,12 +531,9 @@ module Capybara
         @sw_direct_lock    = Mutex.new
         @sw_direct_seq     = SW_DIRECT_FID_BASE
         @sw_direct_replies = {}
-        # Service-worker Client registry: client id → {handle, rec} for every
-        # frame/window and worker client, mirrored into the SW's clientsById so
-        # matchAll / getClientByURL see the real set — and what an opaque child
-        # (about:blank / srcdoc) inherits its creator's controller from. Cleared when
-        # the last worker exits.
-        @sw_clients          = {}
+        # (The service-worker clients — every frame/window and worker client, what a service
+        # worker's Clients and an opaque child's inherited controller read — are the engine's
+        # registry's, partition `@sw_partition`: sw_note_client. Forgotten when the last worker exits.)
         # The realm holding the focus chain (`note_focused_realm`); nil until a first focus.
         @focused_realm_id    = nil
         # Cross-isolate MessagePort channels: each end's holder and the messages waiting for one
@@ -4639,21 +4636,11 @@ module Capybara
         return worker_fail(handle, 'Worker script could not be loaded') if target.start_with?('blob:') && body.to_s.empty?
         # Pending until the worker's initial script has run (see @worker_initializing).
         @worker_init_lock.synchronize { @worker_initializing += 1 }
-        # A SERVICE worker may call `clients.matchAll()` while its script is still EVALUATING —
-        # before install, before any inbox drain — so its mirror has to be populated before the
-        # script runs. Snapshot it here, on the main thread that owns the registry, and let
-        # run_worker inject it pre-eval. The FOCUS chain rides along for the same reason
-        # `seed_client_mirror` pairs the two: `focused` is browser state the worker isolate cannot
-        # ask for, so without it an early `matchAll` reports every client unfocused and returns
-        # them in creation rather than focus-first order.
-        seed = service ? {clients: sw_client_records_for(handle), focused: focused_client_ids} : nil
         # Register the worker's record BEFORE its thread exists: the sw_hooks fire from the
         # worker thread as early as the script EVAL (a top-level skipWaiting(), the extended
         # counter) and write through `@workers[handle]` — created after Thread.new, a fast
         # worker could look itself up before the registry insert and silently drop the write.
-        # `service:` marks a SERVICE worker. The client mirror is pushed to every service worker
-        # (a client belongs to the ORIGIN; `controlled` only says whether a given worker controls
-        # it), and a dedicated/shared worker has no client registry to push into.
+        # `service:` marks a SERVICE worker.
         # `realm:` is the browsing context that created this worker — a dedicated worker belongs to
         # it and is terminated when it is discarded (terminate_realm_workers).
         # `sw_scope`: a SERVICE worker's registration scope — process_worker_unregister
@@ -4687,7 +4674,6 @@ module Capybara
             shared:      shared,
             service:     service,
             creator_key: creator_key,
-            seed:        seed,
             sw_scope:    sw_scope,
             controller:  ctrl,
             sw_script:   sw_script,
@@ -5665,10 +5651,11 @@ module Capybara
         # the handover. Matching by URL is also what makes the verdict DETERMINISTIC —
         # the per-client controller handle is re-reported by realms and can transiently
         # read stale (the activation.https flake), while the URL and the scope are not.
-        scope = sw_serving.key(h)
-        return @sw_clients.any? {|_id, entry| entry[:handle] == h } unless scope
+        scope   = sw_serving.key(h)
+        clients = Native.sw_clients(@sw_partition)
+        return clients.any? {|_id, _url, controller| controller == h } unless scope
 
-        @sw_clients.any? {|_id, entry| entry[:handle] == h || sw_scope_match(entry[:rec]['url'])&.last == scope }
+        clients.any? {|_id, url, controller| controller == h || sw_scope_match(url)&.last == scope }
       end
 
       # A Register job made the registration at `scope` (its first worker evaluated): its number. Idempotent; undone by
@@ -5743,14 +5730,9 @@ module Capybara
       end
 
       private def sw_register_scope(scope, handle)
-        # A service worker we haven't seen before starts with an EMPTY client mirror, and every
-        # context that already existed is one of its clients (a client belongs to the origin).
-        # Gating on "this handle is new" rather than on the registry being empty is what makes a
-        # SECOND registration see them too.
         # (…registered too: registered ⊇ activated — covers registration objects that reached activation without the
         # register()-time note, synthesized cross-realm ones)
-        fresh = Native.sw_activated(@sw_partition, scope.to_s, handle.to_i)
-        seed_client_mirror(handle.to_i) if fresh
+        Native.sw_activated(@sw_partition, scope.to_s, handle.to_i)
         # Flush any clients.claim() that arrived before this worker was its scope's active one (a worker's
         # `activate → clients.claim()` fires decoupled from the lifecycle step that makes it the
         # registry's active worker, so the claim can be drained first — see the claim handler above).
@@ -5761,32 +5743,6 @@ module Capybara
         nil
       end
 
-      # Every known client as `handle` sees it — `controlled` is per-worker, so it is decided here
-      # rather than at each call site.
-      private def sw_client_records_for(handle)
-        @sw_clients.each_value.map {|entry| entry[:rec].merge('controlled' => entry[:handle] == handle) }
-      end
-
-      # Fill a newly-registered service worker's client mirror. Two sources, because a client's
-      # record has two possible authors: a browsing context describes ITSELF (only the realm knows
-      # its URL / frame type / controller), while a worker client has no such voice and is only in
-      # the host registry. Replay the registry first, then ask the realms — a realm's own report
-      # simply refreshes its record.
-      private def seed_client_mirror(handle)
-        if (w = @workers[handle])
-          sw_client_records_for(handle).each do |rec|
-            w[:inbox] << {kind: 'client_register', client: rec}
-          end
-          focused = focused_client_ids
-          w[:inbox] << {kind: 'client_focus', ids: focused} if focused.any?
-        end
-        request_client_reports
-      end
-
-      # Ask every live browsing context to announce itself as a service-worker client. Each realm
-      # reports its own URL / frame type / controller (js/src/sw-client.js), so nothing here has
-      # to model what a realm is — the same broadcast shape as a claim.
-      private def request_client_reports = broadcast_to_realms('__csim_swReportClient')
 
       # Call a host fn in EVERY live browsing context — the main realm and each frame/window realm.
       # Service-worker registration state is per-realm (each has its own registration objects), so
@@ -5824,15 +5780,14 @@ module Capybara
         # claim transiently seize a client the longer one matches
         # (claim-not-using-registration under CI load).
         candidate_scopes = sw_regs.filter_map {|s, registered, activating, serving| s if registered || activating || serving } | [scope.to_s]
-        @sw_clients.each do |_id, entry|
-          u       = entry[:rec]['url'].to_s
-          matched = candidate_scopes.select {|s| u.start_with?(s) }.max_by(&:length)
+        Native.sw_clients(@sw_partition).each do |id, url, _controller|
+          matched = candidate_scopes.select {|s| url.start_with?(s) }.max_by(&:length)
           # A claim from a still-ACTIVATING worker: it isn't its scope's active worker
           # yet, so the host record must be written here for exactly this path too, or
           # the controller falls back to the realm re-report race the record exists to
           # kill. The claim wins a client only when its scope is that client's longest
           # match among every candidate registration.
-          entry[:handle] = handle.to_i if matched == scope
+          Native.sw_set_client_controller(@sw_partition, id, handle.to_i) if matched == scope
         end
         all_scopes = candidate_scopes
         @runtime.call('__csim_swClaimClient', handle, has_fetch, script_url, scope, all_scopes)
@@ -5915,7 +5870,7 @@ module Capybara
       # kills an uninstalling registration's worker today.
       private def sw_registration_clearable?(id)
         *, active = versions = sw_versions(id)
-        return false if active && @sw_clients.any? {|_id, e| e[:handle] == active }
+        return false if active && Native.sw_clients(@sw_partition).any? {|_id, _url, controller| controller == active }
 
         versions.compact.none? {|h| sw_worker_extended?(h) }
       end
@@ -6172,25 +6127,22 @@ module Capybara
       # initialize a Document" inherits the creator's controller) — the one the parent
       # has NOW, in the client registry, which a claim since its load updated too.
       def sw_inherited_controller_for(parent_realm_id)
-        handle = @sw_clients.dig(sw_client_id(parent_realm_id), :handle) or return nil
+        parent = sw_client_id(parent_realm_id)
+        _id, _url, handle = Native.sw_clients(@sw_partition).find {|id, *| id == parent }
+        return nil unless handle
         w = @workers[handle]
         return nil unless w&.dig(:thread)&.alive?
 
         [handle, sw_interception_worthy?(w), w[:script_url].to_s, sw_serving.key(handle).to_s]
       end
 
-      # Every live service worker's handle. A service-worker client belongs to the ORIGIN, not
-      # to one registration — `matchAll({includeUncontrolled: true})` must see contexts this
-      # worker doesn't control — so the client mirror goes to all of them.
-      private def sw_worker_handles = @workers.select {|_h, w| w[:service] }.keys
-
-      # Mirror a browsing context into every service worker's client set. `controller_handle` is
-      # the worker that CONTROLS it, or nil for an uncontrolled context — and `controlled` is
-      # per-worker, since a client controlled by worker A is genuinely uncontrolled from B's
-      # point of view. Reported by the realm itself (js/src/sw-client.js) at document load and
-      # whenever control is installed, because only the realm knows its own URL and frame type.
-      # The client id is realm-scoped and stable for the realm's life. Pushed to the SW inbox,
-      # which is FIFO, so it precedes any later message that matchAll's it.
+      # A browsing context as a service-worker client, in the registry every service worker's
+      # Clients read. `controller_handle` is the worker that CONTROLS it, or nil for an
+      # uncontrolled context — a client belongs to its ORIGIN, not to one registration, so
+      # `matchAll({includeUncontrolled: true})` sees it either way. Reported by the realm itself
+      # (js/src/sw-client.js) at document load and whenever control is installed, because only the
+      # realm knows its own URL and frame type. The client id is realm-scoped and stable for the
+      # realm's life.
       def sw_note_client(realm_id, url, frame_type, controller_handle = nil, origin = nil)
         note_client(sw_client_id(realm_id), url, 'window', frame_type, controller_handle, origin)
       end
@@ -6211,18 +6163,11 @@ module Capybara
         note_client(sw_worker_client_id(handle), url, shared ? 'sharedworker' : 'worker', 'none', controller_handle, origin)
       end
 
-      # A worker CLIENT's controller changed (a clients.claim() the worker isolate adopted):
-      # refresh the host-owned record + re-mirror to every SW, the worker-shaped counterpart
-      # of a realm's reportAsClient. Called from the WORKER's thread (host fn) — Hash writes
-      # and inbox pushes are the same cross-thread pattern the outbox protocol already uses.
+      # A worker CLIENT's controller changed (a clients.claim() the worker isolate adopted): its
+      # record's, the worker-shaped counterpart of a realm's reportAsClient. Called from the WORKER's
+      # thread (host fn) — the registry is the engine's, behind its lock.
       def sw_note_worker_controller(worker_handle, controller_handle)
-        entry = @sw_clients[sw_worker_client_id(worker_handle)] or return
-        ctrl  = controller_handle.to_i
-        entry[:handle] = ctrl.positive? ? ctrl : nil
-        sw_worker_handles.each do |h|
-          w = @workers[h] or next
-          w[:inbox] << {kind: 'client_register', client: entry[:rec].merge('controlled' => h == entry[:handle])}
-        end
+        Native.sw_set_client_controller(@sw_partition, sw_worker_client_id(worker_handle), controller_handle.to_i.nonzero?)
         nil
       end
 
@@ -6236,23 +6181,13 @@ module Capybara
         # stale racer (a load-time report overtaking the claim's install — the
         # activation.https flake), not a real loss: keep the recorded controller while
         # its worker lives. A NAVIGATED report (different URL) resets as before.
-        if ctrl.nil? && (prev = @sw_clients[client_id]) && prev[:handle] &&
-           prev[:rec]['url'] == url.to_s && @workers.dig(prev[:handle], :thread)&.alive?
-          ctrl = prev[:handle]
+        prev_url, prev_ctrl = Native.sw_client_entry(@sw_partition, client_id.to_s)
+        if ctrl.nil? && prev_ctrl && prev_url == url.to_s && @workers.dig(prev_ctrl, :thread)&.alive?
+          ctrl = prev_ctrl
         end
-        rec  = {'id' => client_id, 'url' => url.to_s, 'type' => type.to_s, 'frameType' => frame_type.to_s, 'origin' => origin&.to_s}
-        @sw_clients[client_id] = {handle: ctrl, rec: rec}
-        focused = focused_client_ids
-        sw_worker_handles.each do |h|
-          w = @workers[h] or next
-          # A re-registration with the same id refreshes the record, so a client that CHANGES
-          # controller needs no explicit removal: every worker is told, and the one that lost it
-          # simply learns `controlled` is now false.
-          w[:inbox] << {kind: 'client_register', client: rec.merge('controlled' => h == ctrl)}
-          # A client arriving after focus already moved needs the current id too — `client_focus`
-          # is only pushed on CHANGE, so this worker would otherwise never learn about it.
-          w[:inbox] << {kind: 'client_focus', ids: focused} if focused.any?
-        end
+        Native.sw_note_client(@sw_partition, client_id.to_s, url.to_s, type.to_s, frame_type.to_s, origin&.to_s, ctrl)
+        # (…and, a window's, the focused ids recomputed: its id is the one it adopted, which may be new)
+        Native.sw_set_focused(@sw_partition, focused_client_ids) if type.to_s == 'window'
         nil
       end
 
@@ -6364,12 +6299,8 @@ module Capybara
       end
 
       private def unregister_client(client_id)
-        @sw_clients.delete(client_id) or return nil
+        return nil unless Native.sw_forget_client(@sw_partition, client_id.to_s)
 
-        sw_worker_handles.each do |h|
-          w = @workers[h] or next
-          w[:inbox] << {kind: 'client_unregister', id: client_id}
-        end
         # The departed client may have been the last one USING an unregistered registration — cleared
         # before anything activates (Handle Service Worker Client Unload: Try Clear Registration, then
         # Try Activate), so an unregistered registration's waiting worker goes redundant, not active.
@@ -6405,18 +6336,14 @@ module Capybara
       # The focused BROWSING CONTEXT (HTML "focused area of the top-level traversable"):
       # the realm whose document owns the focus chain. Reported by the realm that commits a
       # focus — focusing an <iframe> hands focus to its NESTED context, so that realm is
-      # reported rather than the container's. Feeds `WindowClient.focused`, which is why the
-      # change is mirrored into every SW that holds a client (they can't query the browser).
+      # reported rather than the container's. Feeds `WindowClient.focused` — the registry's, which a
+      # service worker reads (it can't query the browser).
       def note_focused_realm(realm_id)
         rid = realm_id.to_i
         return nil if @focused_realm_id == rid
 
         @focused_realm_id = rid
-        ids = focused_client_ids
-        sw_worker_handles.each do |handle|
-          w = @workers[handle] or next
-          w[:inbox] << {kind: 'client_focus', ids: ids}
-        end
+        Native.sw_set_focused(@sw_partition, focused_client_ids)
         nil
       end
 
@@ -6600,7 +6527,7 @@ module Capybara
         reset_event_sources
         reset_websockets
         reset_hijacked_fetches
-        @sw_clients.keys.each {|id| unregister_client(id) }
+        Native.sw_clients(@sw_partition).each {|id, *| unregister_client(id) }
         # …and its IndexedDB connections, which a closed window's are not left open by: no other window's upgrade waits on
         # a page nothing runs any more.
         @runtime.call('__csimIdbDropAgents')
@@ -7069,7 +6996,7 @@ module Capybara
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
-        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @sw_clients = {}; @port_ends = {}; @sw_pending_claims = []; @sw_open_streams.clear) if @workers.empty?
+        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @port_ends = {}; @sw_pending_claims = []; @sw_open_streams.clear) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
         # A dead SERVICE worker's holds are cleared with its record (extended / sw_msgs read
@@ -8289,7 +8216,7 @@ module Capybara
         @sw_navs_deferred    = false
         @sw_scope_meta       = {}
         @sw_pending_claims   = []
-        @sw_clients          = {}
+        Native.sw_forget_clients(@sw_partition)
         @sw_direct_replies   = {}
         # Adopted-id aliases go with the client registry. @sw_resulting_seq is NOT reset:
         # id uniqueness across the whole process is the invariant the aliases rely on.
@@ -8506,7 +8433,7 @@ module Capybara
       # Worker thread entry. Builds an isolate via `V8Runtime.build_worker`,
       # evaluates the worker script, then loops draining microtasks + timers +
       # inbox until `:terminate` lands or an exception propagates.
-      private def run_worker(handle, url, body, inbox, outbox, record: nil, name: '', shared: false, service: false, creator_key: nil, seed: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil, module_worker: false, sw_uvc: nil, sw_imports_map: nil, sw_prev_active: nil)
+      private def run_worker(handle, url, body, inbox, outbox, record: nil, name: '', shared: false, service: false, creator_key: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil, module_worker: false, sw_uvc: nil, sw_imports_map: nil, sw_prev_active: nil)
         # Release the spawn-time `@worker_initializing` count exactly once, however
         # this method exits (normal start, `self.close()`, or an exception), so
         # worker_pending? doesn't stay stuck true forever.
@@ -8576,6 +8503,8 @@ module Capybara
         # Streams a race-network leg already beat — their remaining frames are
         # swallowed by the fetch_stream hook (this worker's thread only).
         sw_race_dropped_streams = {}
+        # (…and its origin, whose clients it sees)
+        sw_origin = url_origin(url).to_s
         sw_hooks = {
           # The worker's WebSockets: opened and written from this thread, their events into this worker's inbox.
           ws_open:        ->(ws_url, protocols) { ws_open(ws_url, protocols, WsWorker.new(handle, inbox, url)) },
@@ -8588,6 +8517,10 @@ module Capybara
           # inbox keyed by nav_id.
           navigate_client: ->(client_id, url, nav_id) { outbox << {handle: handle, kind: 'sw_client_navigate', client: client_id, url: url.to_s, nav_id: nav_id.to_i} },
           claim:          ->                  { outbox << {handle: handle, kind: 'sw_claim', has_fetch: sw_has_fetch} },
+          # Its Clients: the registry's clients of its origin as it sees them (sw_registry.rs — behind its lock, so read
+          # from this worker's own thread), `[id, url, type, frame type, controlled by it, focused]` each.
+          client_record:  ->(client_id) { Native.sw_client(@sw_partition, handle, sw_origin, client_id.to_s)&.to_a },
+          match_clients:  ->(include_uncontrolled, type) { Native.sw_match_clients(@sw_partition, handle, sw_origin, !!include_uncontrolled, type.to_s).map(&:to_a) },
           # skipWaiting() — record the flag HERE, on the worker's own thread, before the
           # broadcast is even queued: the activation gate (sw_may_activate?) reads it from the
           # worker record, so a broadcast consumed before the registering realm built its
@@ -8726,12 +8659,6 @@ module Capybara
           rt.eval_void("globalThis.__csimSwPrevActive = #{JSON.generate(sw_prev_active)};") if sw_prev_active
           rt.eval_void('__csim_installServiceWorkerScope();')
         end
-        # Seed the client mirror BEFORE the script evaluates: `clients.matchAll()` at top level is a
-        # real pattern (clients-matchall-on-evaluation), and an empty mirror there returns nothing.
-        if seed
-          seed[:clients].each {|rec| rt.call('__csim_swRegisterClient', rec) }
-          rt.call('__csim_swNoteFocusedClient', seed[:focused]) if seed[:focused].any?
-        end
         # A DEFERRED main script (worker_spawn found a controlling, fetch-handling SW for the
         # script URL): fetch it through the SW redirect chain NOW, on this worker's own thread
         # (worker_main_script_fetch) — per-hop interception, network fall-back included.
@@ -8761,9 +8688,8 @@ module Capybara
                 rt.call('__csim_swSetControllerDirect', controller, sw_interception_worthy?(cw), cw[:script_url].to_s, sw_serving.key(controller).to_s)
               end
             end
-            # Refresh the host-owned client record (URL + controller) and re-mirror it to
-            # every SW — called from this worker's thread, the same cross-thread pattern
-            # sw_note_worker_controller documents.
+            # Refresh the registry's client record (URL + controller) — called from this worker's
+            # thread, as sw_note_worker_controller is.
             sw_note_worker_client(handle, url, shared, controller)
           end
         end
@@ -8986,17 +8912,6 @@ module Capybara
               ensure
                 outbox << {handle: handle, kind: 'swack'}
               end
-            elsif msg.is_a?(Hash) && msg[:kind] == 'client_register'
-              # A controlled client (frame/window realm) came into existence: mirror it into the
-              # SW's clientsById so matchAll/getClientByURL see it. Fire-and-forget (no reply /
-              # pending counter): the inbox is FIFO, so it's processed before any later message
-              # whose handler matchAll's the client.
-              rt.call('__csim_swRegisterClient', msg[:client])
-            elsif msg.is_a?(Hash) && msg[:kind] == 'client_focus'
-              # The focus chain moved: `WindowClient.focused` is per-browsing-context state the
-              # worker isolate can't read, so the browser pushes the focused client's id on every
-              # change (and once at registration, for a worker that started after the move).
-              rt.call('__csim_swNoteFocusedClient', msg[:ids])
             elsif msg.is_a?(Hash) && msg[:kind] == 'client_navigate_result'
               # The outcome of a WindowClient.navigate() this worker is awaiting — settles the
               # promise it is holding (js/src/workers.js __csim_swClientNavigateResult).
@@ -9011,12 +8926,9 @@ module Capybara
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_client_message'
               # A service worker → THIS worker, which is one of its clients: `client.postMessage`
               # targets the client's `navigator.serviceWorker` 'message' event, which a worker
-              # isolate has just like a document (WorkerNavigator.serviceWorker). Fire-and-forget,
-              # like the register/focus mirrors — the SW's send is not awaiting a reply.
+              # isolate has just like a document (WorkerNavigator.serviceWorker). Fire-and-forget —
+              # the SW's send is not awaiting a reply.
               rt.call('__csim_swDeliverClientMessage', msg[:data], msg[:handle])
-            elsif msg.is_a?(Hash) && msg[:kind] == 'client_unregister'
-              # The client's realm was disposed — drop it so matchAll stops returning a dead client.
-              rt.call('__csim_swUnregisterClient', msg[:id])
             elsif msg.is_a?(Hash) && msg[:kind] == 'fetch'
               # A controlled client's fetch: dispatch a `fetch` event. The SW's respondWith result
               # (or a fall-through / network-error marker) is posted back as a `fetch_response`
@@ -11466,7 +11378,11 @@ module Capybara
         # visit is a no-op rather than a second event.
         # A document's style sheets are part of what `load` waits for; the JS side
         # flushes their pending load tasks before dispatching (`sheetLoadTask`),
-        # which is why nothing here advances the clock — an unrelated
+        # which is why nothing here advances the clock.
+        #
+        # The document, loaded, refreshes its service-worker client record (its URL may have moved since it reported
+        # itself as it began loading), as a frame's does (V8Runtime).
+        @runtime.call('__csim_swReportClient')
         # Marked, not fired: a `load` handler may navigate — submit a form, point an
         # iframe somewhere — and a navigation started while THIS one is still in
         # flight (`@navigating`) is not the same thing as one started from an idle

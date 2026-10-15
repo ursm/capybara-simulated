@@ -204,6 +204,15 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_worker_new", magnus::function!(sw_registry::worker_new_for_ruby, 4))?;
     native.define_module_function("sw_worker", magnus::function!(sw_registry::worker_for_ruby, 2))?;
     native.define_module_function("sw_set_worker_state", magnus::function!(sw_registry::set_worker_state_for_ruby, 3))?;
+    native.define_module_function("sw_note_client", magnus::function!(sw_registry::note_client_for_ruby, 7))?;
+    native.define_module_function("sw_set_client_controller", magnus::function!(sw_registry::set_client_controller_for_ruby, 3))?;
+    native.define_module_function("sw_forget_client", magnus::function!(sw_registry::forget_client_for_ruby, 2))?;
+    native.define_module_function("sw_forget_clients", magnus::function!(sw_registry::forget_clients_for_ruby, 1))?;
+    native.define_module_function("sw_clients", magnus::function!(sw_registry::clients_for_ruby, 1))?;
+    native.define_module_function("sw_client_entry", magnus::function!(sw_registry::client_entry_for_ruby, 2))?;
+    native.define_module_function("sw_set_focused", magnus::function!(sw_registry::set_focused_for_ruby, 2))?;
+    native.define_module_function("sw_client", magnus::function!(sw_registry::client_for_ruby, 4))?;
+    native.define_module_function("sw_match_clients", magnus::function!(sw_registry::match_clients_for_ruby, 5))?;
     native.define_module_function("sw_schedule_job", magnus::function!(sw_registry::schedule_job_for_ruby, 9))?;
     native.define_module_function("sw_job", magnus::function!(sw_registry::job_for_ruby, 2))?;
     native.define_module_function("sw_finish_job", magnus::function!(sw_registry::finish_job_for_ruby, 2))?;
