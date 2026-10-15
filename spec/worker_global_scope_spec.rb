@@ -27,6 +27,14 @@ RSpec.describe 'Worker global scope' do
           ]);
         JS
       when '/frame' then [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><p>f']]
+      when '/imp.js'
+        [200, {'content-type' => 'text/javascript'}, [<<~'JS']]
+          const out = [];
+          for (const u of ['/missing.js', 'http://[bad', 'data:text/javascript,self.v%3D%22%C3%A9%22']) {
+            try { importScripts(u); out.push(self.v); } catch (e) { out.push(e.name); }
+          }
+          postMessage(out);
+        JS
       when '/sw.js'
         [200, {'content-type' => 'text/javascript'}, [<<~JS]]
           const me = self.serviceWorker, seen = [[me && me.state, me && new URL(me.scriptURL).pathname]];
@@ -118,5 +126,16 @@ RSpec.describe 'Worker global scope' do
        'oscpu' in navigator, navigator.appVersion.startsWith('5.0 (X11'), navigator.platform, Object.isFrozen(navigator.languages),
        (() => { try { return Navigator.prototype.doNotTrack; } catch (e) { return e.name; } })()]
     JS
+  end
+
+  # HTML "import scripts into worker global scope": a URL that does not parse is a SyntaxError, a script that fails to
+  # load — a 404 — a NetworkError; a `data:` one is Fetch's data: URL processor's, its body UTF-8.
+  it 'throws what importScripts owes for a URL that does not parse or load' do
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      new Worker('/imp.js').onmessage = (e) => done(e.data);
+    JS
+    expect(got).to eq(%w[NetworkError SyntaxError é])
   end
 end
