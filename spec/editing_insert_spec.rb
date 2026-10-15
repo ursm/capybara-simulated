@@ -137,6 +137,22 @@ RSpec.describe 'inserting in an editing host' do
     ]).to eq(['<p>abcd<br>Z</p>', '<pre>ab<br>Z</pre>', 'ab<br>x', '<p>a <br>b</p>', '<br><div>Z</div>'])
   end
 
+  # …and never one the keys were not sent to: an element its keydown makes an editing host types nothing into another
+  # host the selection sits in (Chrome: no beforeinput, no input).
+  it 'edits no host outside the element the keys were sent to' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><div id=ce contenteditable>foo</div><div id=dv tabindex=0>div</div>']] })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      dv.addEventListener('keydown', () => { dv.contentEditable = 'true'; });
+      getSelection().collapse(ce.firstChild, 2);
+      globalThis.inputs = 0;
+      document.addEventListener('beforeinput', () => inputs++);
+    JS
+    s.find(:css, '#dv').send_keys('z')
+
+    expect(s.evaluate_script('[ce.textContent, dv.textContent, inputs]')).to eq(['foo', 'div', 0])
+  end
+
   # …in a host of its own: a list, or one inside a non-editable island inside another.
   it 'edits the host the selection is in' do
     hosts = lambda {|body, setup|

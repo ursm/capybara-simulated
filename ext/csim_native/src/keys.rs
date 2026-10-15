@@ -220,10 +220,14 @@ pub(crate) const EDIT_FORWARD: u32 = 1 << 4;
 pub(crate) const EDIT_WORD: u32 = 1 << 5;
 pub(crate) const EDIT_LINE: u32 = 1 << 6;
 
+// The selection a key edits, as `edit` takes it: none — an editing host's where the document's lies outside it — a
+// range, or a collapsed one.
+pub(crate) const SELECTION_NONE: u32 = 0;
+pub(crate) const SELECTION_COLLAPSED: u32 = 2;
+
 // What the key `key` — typing `char`, its edit `input_type` (`resolve`) — types into `id` with `modifiers` held: the
-// `inputType` of its `beforeinput` and `input`, and its edit; None where it types nothing — no typeable element, a
-// chord, a key with no edit, Enter in a single-line `<input>` (it submits). `collapsed` is whether the selection there
-// is. Enter in an editing host inserts a paragraph, a line break with Shift. Control alone with Backspace or Delete
+// `inputType` of its `beforeinput` and `input`, and its edit; None where it types nothing — no typeable element, an
+// editing host with no selection in it, a chord, a key with no edit, Enter in a single-line `<input>` (it submits). Enter in an editing host inserts a paragraph, a line break with Shift. Control alone with Backspace or Delete
 // deletes a word — with Shift, Backspace in a text control to the line's start, `deleteSoftLineBackward` — named so
 // where the selection is collapsed (one that is not is deleted as itself): Chrome on Linux.
 pub(crate) fn edit(
@@ -233,11 +237,12 @@ pub(crate) fn edit(
     char: Option<&[u16]>,
     input_type: Option<&'static str>,
     modifiers: u32,
-    collapsed: bool,
+    selection: u32,
 ) -> Option<(&'static str, u32)> {
     let facts = plan(arena, id, key, char, modifiers);
     let input_type = input_type?;
     let host = facts & EDITING_HOST != 0;
+    let collapsed = selection == SELECTION_COLLAPSED;
     let shift = modifiers & SHIFT != 0;
     let ctrl_only = modifiers & (CTRL | META | ALT) == CTRL;
     let forward = input_type == "deleteContentForward";
@@ -246,7 +251,7 @@ pub(crate) fn edit(
     let word = ctrl_only && !shift && deleting;
     let chord = modifiers & (CTRL | META | ALT) != 0;
     let single_line = arena.get(id).is_some_and(|n| &*n.local_name == "input");
-    if facts & TYPEABLE == 0 || (char.is_none() && !deleting) || (is_units(key, "Enter") && single_line) || (chord && !word && !line) {
+    if facts & TYPEABLE == 0 || (host && selection == SELECTION_NONE) || (char.is_none() && !deleting) || (is_units(key, "Enter") && single_line) || (chord && !word && !line) {
         return None;
     }
     if deleting {
@@ -289,7 +294,7 @@ fn plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let modifiers = args.get(3).uint32_value(scope).unwrap_or(0);
     rv.set_uint32(plan(crate::dom::realm(scope, cid), id, &key, ch.as_deref(), modifiers));
 }
-// __dom.keyEdit(element, key, char, inputType, modifiers, collapsed) -> [inputType, edit] (`edit`; `char` and
+// __dom.keyEdit(element, key, char, inputType, modifiers, selection) -> [inputType, edit] (`edit`; `char` and
 // `inputType` null for none, as `resolveKey` gives them), null for none.
 fn edit_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
@@ -299,8 +304,8 @@ fn edit_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let input_type = args.get(3).to_rust_string_lossy(scope);
     let input_type = ["insertText", "insertLineBreak", "deleteContentBackward", "deleteContentForward"].into_iter().find(|t| *t == input_type);
     let modifiers = args.get(4).uint32_value(scope).unwrap_or(0);
-    let collapsed = args.get(5).boolean_value(scope);
-    let Some((input_type, bits)) = edit(crate::dom::realm(scope, cid), id, &key, ch.as_deref(), input_type, modifiers, collapsed) else {
+    let selection = args.get(5).uint32_value(scope).unwrap_or(SELECTION_NONE);
+    let Some((input_type, bits)) = edit(crate::dom::realm(scope, cid), id, &key, ch.as_deref(), input_type, modifiers, selection) else {
         return rv.set_null();
     };
     let items: [v8::Local<v8::Value>; 2] = [v8::String::new(scope, input_type).unwrap().into(), v8::Integer::new_from_unsigned(scope, bits).into()];
