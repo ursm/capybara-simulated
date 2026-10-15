@@ -94,4 +94,17 @@ RSpec.describe 'Media element state' do
     expect(s.evaluate_script('[bareSync, bare.networkState, bareEvents.join()]')).to eq([3, 0, ''])
     expect(s.evaluate_script('[sourcedSync, sourced.networkState, sourcedEvents.join()]')).to eq([3, 3, 'emptied,loadstart'])
   end
+
+  # The internal pause steps run only for a playing element: `pause()` on a paused one fires neither `timeupdate` nor
+  # `pause`. Chrome: [true, ''].
+  it 'fires nothing for a pause of a paused element' do
+    s = session
+    s.execute_script(<<~'JS')
+      window.v = document.createElement('video');
+      window.log = [];
+      for (const t of ['play', 'playing', 'waiting', 'pause', 'timeupdate']) v.addEventListener(t, () => log.push(t));
+      v.pause(); v.pause();
+    JS
+    expect(s.evaluate_script('[v.paused, log.join()]')).to eq([true, ''])
+  end
 end

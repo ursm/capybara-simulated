@@ -254,10 +254,7 @@ fn media_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
             m.current_time = number + 0.0;
             CHANGED
         }
-        PAUSED => {
-            m.playing = !flag;
-            CHANGED
-        }
+        PAUSED => write(&mut m.playing, !flag),
         CURRENT_SRC => {
             m.current_src = text.unwrap_or_default();
             NO_EVENT
