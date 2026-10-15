@@ -45,4 +45,39 @@ RSpec.describe 'persisted form state' do
     JS
     expect(s.evaluate_script(read)).to eq(%w[a1= a2=Xa2 b1=Xb1 b2= b3= b4=h b5=Xb5 b6=true s1=y s2=x,z])
   end
+
+  # A form-associated custom element's state — what its internals' `setFormValue` was last given as its state, else its
+  # value — comes back to its formStateRestoreCallback with "restore": a string, or a FormData. `autocomplete` does not
+  # apply to one; its form owner's `off` keeps it. Chrome 155, the same page: f1 state1, f2 state2, f3 FormData a=b,
+  # f5 v5, and nothing for f4.
+  it "hands a form-associated custom element's state back to it" do
+    face = <<~HTML
+      <!DOCTYPE html>
+      <script>
+        window.log = [];
+        customElements.define('my-face', class extends HTMLElement {
+          static formAssociated = true;
+          constructor() { super(); this.i = this.attachInternals(); }
+          formStateRestoreCallback(state, mode) {
+            log.push([this.id, state instanceof FormData ? [...state].join(';') : state, mode].join(' '));
+          }
+        });
+      </script>
+      <form><my-face id="f1"></my-face><my-face id="f2" autocomplete="off"></my-face><my-face id="f3"></my-face></form>
+      <form autocomplete="off"><my-face id="f4"></my-face></form><my-face id="f5"></my-face>
+      <a href="/other">away</a>
+    HTML
+    app = lambda {|env| [200, {'content-type' => 'text/html'}, [env['PATH_INFO'] == '/other' ? '<p>other</p>' : face]] }
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      const f = (id) => document.getElementById(id).i;
+      f('f1').setFormValue('v1', 'state1'); f('f2').setFormValue('v2', 'state2');
+      const fd = new FormData(); fd.append('a', 'b'); f('f3').setFormValue('v3', fd);
+      f('f4').setFormValue('v4', 'state4'); f('f5').setFormValue('v5');
+    JS
+    s.click_link 'away'
+    s.go_back
+    expect(s.evaluate_script('log')).to eq(['f1 state1 restore', 'f2 state2 restore', 'f3 a,b restore', 'f5 v5 restore'])
+  end
 end

@@ -8,9 +8,11 @@
 // name is "off" — its own `autocomplete`, or its form owner's where its own says neither — keeps its data to itself, as
 // does a password field (Chrome). (Chrome also forgets the controls that say `on` in a form that says
 // `off`; the spec makes theirs "on".) A value is a control's own only in the value mode "value": a hidden field's value,
-// like a button's, is its attribute, which the document fetched again has.
+// like a button's, is its attribute, which the document fetched again has. A form-associated custom element's state is
+// the one its internals were last given, which the bindings hold and hand back to its `formStateRestoreCallback` with
+// "restore" (HTML §4.13.7.4); `autocomplete` does not apply to one, but its form owner's "off" keeps it (Chrome 155).
 
-use crate::dom::{nid_arg, realm, realm_id, NodeId, RealmArena, STATE_SELECTED, STATE_SELECTED_DIRTY};
+use crate::dom::{nid_arg, realm, realm_id, NodeId, RealmArena, STATE_FORM_ASSOCIATED, STATE_SELECTED, STATE_SELECTED_DIRTY};
 use crate::input_types::{value_mode, MODE_DEFAULT_ON, MODE_VALUE};
 
 pub(crate) enum PersistedState {
@@ -25,20 +27,16 @@ pub(crate) enum PersistedState {
 }
 
 impl RealmArena {
-    // The controls whose state a document keeps — its `<input>`s, `<textarea>`s and `<select>`s, in tree order.
+    // The controls whose state a document keeps — its `<input>`s, `<textarea>`s and `<select>`s, in tree order…
     pub(crate) fn persisted_state_controls(&self, doc: NodeId) -> Vec<NodeId> {
-        let mut out = Vec::new();
-        let mut stack = vec![doc];
-        while let Some(id) = stack.pop() {
-            let Some(n) = self.get(id) else { continue };
-            if n.is_html_named("input") || n.is_html_named("textarea") || n.is_html_named("select") {
-                out.push(id);
-            }
-            stack.extend(n.children.iter().rev().copied());
-        }
-        out
+        self.light_tree_elements(doc, |_, n| n.is_html_named("input") || n.is_html_named("textarea") || n.is_html_named("select"))
     }
-    // …and what each of them remembers.
+    // …and its form-associated custom elements whose state it keeps, in tree order: a list of their own, which an element
+    // not defined yet when the document is fetched again shifts no control's place in.
+    pub(crate) fn persisted_custom_elements(&self, doc: NodeId) -> Vec<NodeId> {
+        self.light_tree_elements(doc, |id, n| n.state & STATE_FORM_ASSOCIATED != 0 && !self.autofill_off(id))
+    }
+    // What each of the controls remembers.
     pub(crate) fn persisted_state(&self, control: NodeId) -> PersistedState {
         let Some(n) = self.get(control) else { return PersistedState::None };
         if self.autofill_off(control) {
@@ -59,11 +57,15 @@ impl RealmArena {
             _ => PersistedState::None,
         }
     }
-    // Whether a control's autofill field name is "off": its own `autocomplete` says so, or says neither and its form
-    // owner's does — an enumerated attribute, matched ASCII case-insensitively as written (" off " is an invalid value,
-    // so "on").
+    // Whether a control's autofill field name is "off": its own `autocomplete` says so (a form-associated custom
+    // element's says nothing), or says neither and its form owner's does — an enumerated attribute, matched ASCII
+    // case-insensitively as written (" off " is an invalid value, so "on").
     fn autofill_off(&self, control: NodeId) -> bool {
-        let own = self.get(control).and_then(|n| n.plain_attr("autocomplete")).map_or(String::new(), |v| crate::reflect::autofill(v, false));
+        let own = self
+            .get(control)
+            .filter(|n| n.state & STATE_FORM_ASSOCIATED == 0)
+            .and_then(|n| n.plain_attr("autocomplete"))
+            .map_or(String::new(), |v| crate::reflect::autofill(v, false));
         match own.as_str() {
             "off" => true,
             "" => self
@@ -98,11 +100,25 @@ impl RealmArena {
         }
         changed
     }
+    // The nodes of `doc`'s tree — not into a shadow tree or a template's contents — that `keep` keeps, in tree order.
+    fn light_tree_elements(&self, doc: NodeId, keep: impl Fn(NodeId, &crate::dom::NodeData) -> bool) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let mut stack = vec![doc];
+        while let Some(id) = stack.pop() {
+            let Some(n) = self.get(id) else { continue };
+            if keep(id, n) {
+                out.push(id);
+            }
+            stack.extend(n.children.iter().rev().copied());
+        }
+        out
+    }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "persistedStateControls", persisted_state_controls, context_id);
     crate::dom::register(scope, ns, "persistedFormState", persisted_form_state, context_id);
+    crate::dom::register(scope, ns, "persistedCustomElements", persisted_custom_elements, context_id);
     crate::dom::register(scope, ns, "restoreSelected", restore_selected, context_id);
 }
 
@@ -112,6 +128,15 @@ fn persisted_state_controls(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
     let cid = realm_id(scope, &args);
     let controls = realm(scope, cid).persisted_state_controls(doc);
     rv.set(crate::dom::nodes_value(scope, cid, &controls));
+}
+
+// __dom.persistedCustomElements(docNid) -> the document's form-associated custom elements whose state it keeps
+// (`persisted_custom_elements`).
+fn persisted_custom_elements(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let elements = realm(scope, cid).persisted_custom_elements(doc);
+    rv.set(crate::dom::nodes_value(scope, cid, &elements));
 }
 
 // __dom.persistedFormState(docNid) -> what each of those remembers (`persisted_state`), in their order: null for
