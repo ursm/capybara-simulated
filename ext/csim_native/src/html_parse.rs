@@ -1463,9 +1463,16 @@ fn html_parse_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 }
 
 // Whether the engine builds a parse of `html`: one with no lone surrogate (the stand-ins' text is the bindings'), no
-// `customelementregistry` attribute (a null registry propagated down the parse).
+// `customelementregistry` attribute (a null registry an element takes, propagated down the parse) — in any case; a
+// declarative shadow root's `shadowrootcustomelementregistry` the shadow root's hook takes as it attaches it.
 fn buildable(html: &str, standins: &StandIns) -> bool {
-    standins.base.is_none() && !html.contains("customelementregistry")
+    const NAME: &[u8] = b"customelementregistry";
+    const ROOT: &[u8] = b"shadowroot";
+    let bytes = html.as_bytes();
+    let registry_attribute = (0..bytes.len().saturating_sub(NAME.len() - 1))
+        .filter(|&i| bytes[i] | 0x20 == b'c' && bytes[i..i + NAME.len()].eq_ignore_ascii_case(NAME))
+        .any(|i| !(i >= ROOT.len() && bytes[i - ROOT.len()..i].eq_ignore_ascii_case(ROOT)));
+    standins.base.is_none() && !registry_attribute
 }
 // A document mode as `htmlParse` numbers it.
 fn quirks_mode(code: Option<i32>) -> QuirksMode {
