@@ -29,7 +29,7 @@
     if (refs != null) return '';
     // A custom element's ElementInternals supplies the DEFAULT semantics the
     // element's own attributes didn't override (ElementInternals-role).
-    const internals = element._internals;
+    const internals = globalThis.__csimInternalsOf(element);
     if (internals) {
       const irefs = internals.ariaLabelledByElements;
       if (irefs && irefs.length) return labelFromRefs(irefs);
@@ -79,7 +79,7 @@
       const r = validRoleOf(attr);
       if (r) return r;
     }
-    const internals = element._internals;
+    const internals = globalThis.__csimInternalsOf(element);
     if (internals && internals.role != null) {
       const r = validRoleOf(internals.role);
       if (r) return r;

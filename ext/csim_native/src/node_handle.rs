@@ -475,7 +475,14 @@ pub(crate) fn base_function<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::
             // (…and the isolate's roots handler, for the droppable references its handles hold their objects by)
             // SAFETY: the isolate is live, and keeps the handler for its life.
             unsafe { csim_install_roots_handler(scope.as_raw_isolate_ptr(), TAG) };
-            t.instance_template(scope).set_internal_field_count(1);
+            let instance = t.instance_template(scope);
+            instance.set_internal_field_count(1);
+            // (…and its own identity, `__csimSelf` — the Proxy a script holds, or itself — there from the start and NOT
+            // ENUMERABLE: a reference back to the node itself, which a page's `JSON.stringify(node)` would otherwise meet
+            // as a cycle and throw on, where a browser's gives `{}`. Only this one: a field declared here costs every node
+            // its instantiation — the bindings' other own fields, declared so, made a node 20% slower to create.)
+            let key = v8::String::new(scope, "__csimSelf")?;
+            instance.set_with_attr(key.into(), v8::undefined(scope).into(), v8::PropertyAttribute::DONT_ENUM);
             let global = v8::Global::new(scope, t);
             crate::dom::dom(scope).node_template = Some(global);
             t
