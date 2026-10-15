@@ -455,6 +455,30 @@ RSpec.describe 'Service Worker client enumeration' do
     expect(urls.first).to start_with('blob:')
   end
 
+  # …and its ORIGIN from that context too — the blob URL entry's environment's — which a srcdoc frame inherits from its
+  # parent though its location's is opaque: the worker is one of the service worker's clients, and its blob URL names the
+  # origin.
+  it 'gives a blob-URL worker made in a srcdoc frame its creator’s origin' do
+    session = session_with_frames({'a' => '/scope/page.html#a'})
+    session.execute_script(<<~JS)
+      const doc = document.getElementById('a').contentDocument;
+      const f = doc.createElement('iframe');
+      f.srcdoc = 'srcdoc';
+      f.addEventListener('load', () => {
+        const win = f.contentWindow;
+        win.__w = new win.Worker(win.URL.createObjectURL(new win.Blob(['self.onmessage = () => self.postMessage(1);'], {type: 'text/javascript'})));
+        win.__w.onmessage = () => { globalThis.__srcdocReady = true; };
+        win.__w.postMessage('ping');
+      }, {once: true});
+      doc.body.appendChild(f);
+    JS
+    poll_until { session.evaluate_script('globalThis.__srcdocReady === true') }
+    expect(session.evaluate_script('globalThis.__srcdocReady')).to be(true)
+    urls = match_all(session, via: 'a', options: {'type' => 'worker', 'includeUncontrolled' => true}).map {|c| c['url'] }
+
+    expect(urls).to contain_exactly(a_string_starting_with('blob:http://'))
+  end
+
   # `WindowClient.navigate()` — how a service worker sends a client somewhere ("open the article
   # the notification was about"). Unlike focus(), the worker is waiting on the OUTCOME, so this is
   # a real worker→host→worker round trip: the host navigates and reports where the client LANDED.

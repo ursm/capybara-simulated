@@ -4653,7 +4653,7 @@ module Capybara
         # contend for it are that stop and the worker's own dispose, and holding it across a native
         # call must not block anything else in the browser.
         # `url`: the worker's own URL — its script's, after redirects — which a nested worker's script fetch is judged against.
-        record = {thread: nil, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, url: target, rt: nil, rt_lock: Mutex.new}
+        record = {thread: nil, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, url: target, creator_key: creator_key, rt: nil, rt_lock: Mutex.new}
         # The Update algorithm byte-checks a new fetch against the running version's
         # script (+ its recorded imports — sw_note_import fills that map as the worker
         # evaluates). SW scripts are small; only service workers pay the retention.
@@ -5948,8 +5948,17 @@ module Capybara
       # A dedicated / shared WORKER that a service worker controls is a client too — with no
       # visibilityState or focus (those are WindowClient's), `frameType` 'none', and its script
       # URL. Keyed by worker handle, which outlives nothing else and is unique per worker.
+      # (…its origin its script URL's — a blob: worker's its creator's, the blob URL entry's environment's: the creator's
+      # origin key, which an opaque origin's is none a service worker sees)
       def sw_note_worker_client(handle, url, shared, controller_handle)
-        note_client(sw_worker_client_id(handle), url, shared ? 'sharedworker' : 'worker', 'none', controller_handle, url_origin(url.to_s.delete_prefix('blob:')))
+        origin =
+          if url.to_s.start_with?('blob:')
+            key = @workers[handle]&.dig(:creator_key).to_s
+            key.start_with?('http:', 'https:') ? key : nil
+          else
+            url_origin(url)
+          end
+        note_client(sw_worker_client_id(handle), url, shared ? 'sharedworker' : 'worker', 'none', controller_handle, origin)
       end
 
       # A worker CLIENT's controller changed (a clients.claim() the worker isolate adopted):
