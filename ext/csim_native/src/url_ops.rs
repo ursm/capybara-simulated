@@ -151,15 +151,15 @@ fn post_message_target(arg: &str) -> Option<String> {
     }
     Url::parse(arg, None).ok().map(|u| u.origin())
 }
-// …and whether a message so targeted reaches a window of origin `target` from one of `sender` (origins serialized,
-// `same_window` where it is posted to itself): "*" any, "/" the sender's own origin, any other the origin it names — an
-// opaque origin same origin with nothing but itself, which a serialization cannot say: "/" reaches an opaque window from
-// itself alone, and a named origin (a `data:` URL's is a new opaque one) never reaches one.
-fn post_message_reaches(arg: &str, sender: &str, target: &str, same_window: bool) -> Option<bool> {
+// …and whether a message so targeted reaches a window of origin `target` from one of `sender` — origins as their keys:
+// a tuple origin its serialization, an opaque one a token of its own, which the windows that share it (one created
+// inheriting it) share: "*" any, "/" the sender's own origin, any other the origin it names — never an opaque one,
+// which a URL names anew (a `data:` URL's).
+fn post_message_reaches(arg: &str, sender: &str, target: &str) -> Option<bool> {
     let wanted = post_message_target(arg)?;
     Some(match wanted.as_str() {
         "*" => true,
-        "/" => same_window || (sender != "null" && sender == target),
+        "/" => sender == target,
         origin => origin != "null" && origin == target,
     })
 }
@@ -171,11 +171,11 @@ fn post_message_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         None => rv.set_null(),
     }
 }
-// __dom.postMessageReaches(targetOrigin, senderOrigin, targetWindowOrigin, sameWindow) -> 1 it reaches, 0 it does not,
-// -1 the target origin is no URL (`post_message_reaches`).
+// __dom.postMessageReaches(targetOrigin, senderOriginKey, targetOriginKey) -> 1 it reaches, 0 it does not, -1 the target
+// origin is no URL (`post_message_reaches`).
 fn post_message_reaches_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (arg, sender, target) = (usv(scope, args.get(0)), usv(scope, args.get(1)), usv(scope, args.get(2)));
-    rv.set_int32(post_message_reaches(&arg, &sender, &target, args.get(3).is_true()).map_or(-1, i32::from));
+    rv.set_int32(post_message_reaches(&arg, &sender, &target).map_or(-1, i32::from));
 }
 
 // __dom.urlSet(href, part, value) -> the URL's parts once `part` is set to `value`, as the interface's setter sets it
@@ -250,12 +250,12 @@ mod tests {
 
     #[test]
     fn a_posted_message_reaches_its_target_origin() {
-        assert_eq!(post_message_reaches("*", "null", "https://a", false), Some(true));
-        assert_eq!(post_message_reaches("/", "https://a", "https://a", false), Some(true));
-        assert_eq!(post_message_reaches("/", "null", "null", false), Some(false));
-        assert_eq!(post_message_reaches("/", "null", "null", true), Some(true));
-        assert_eq!(post_message_reaches("https://a/x?y", "https://b", "https://a", false), Some(true));
-        assert_eq!(post_message_reaches("data:,x", "null", "null", true), Some(false));
-        assert_eq!(post_message_reaches("nope", "https://a", "https://a", false), None);
+        assert_eq!(post_message_reaches("*", "opaque:realm1", "https://a"), Some(true));
+        assert_eq!(post_message_reaches("/", "https://a", "https://a"), Some(true));
+        assert_eq!(post_message_reaches("/", "opaque:realm1", "opaque:realm2"), Some(false));
+        assert_eq!(post_message_reaches("/", "opaque:realm1", "opaque:realm1"), Some(true));
+        assert_eq!(post_message_reaches("https://a/x?y", "https://b", "https://a"), Some(true));
+        assert_eq!(post_message_reaches("data:,x", "opaque:realm1", "opaque:realm1"), Some(false));
+        assert_eq!(post_message_reaches("nope", "https://a", "https://a"), None);
     }
 }

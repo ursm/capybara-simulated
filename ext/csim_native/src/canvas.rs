@@ -845,6 +845,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "canvasClip", canvas_clip, context_id);
     crate::dom::register(scope, ns, "canvasConvert", canvas_convert, context_id);
     crate::dom::register(scope, ns, "canvasBlit", canvas_blit, context_id);
+    crate::dom::register(scope, ns, "bitmapPixels", bitmap_pixels_op, context_id);
 }
 
 // The bytes of a `Uint8ClampedArray` / `Uint8Array`: where they lie, and how many there are (none for a detached one).
@@ -1171,7 +1172,10 @@ fn canvas_blit(_scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     }
     let Some(src) = bytes_read(args.get(0), bytes_span(args.get(1))) else { return };
     let Some(dst) = bytes_mut(args.get(1)) else { return };
-    let [src_w, src_h, sx, sy, sw, sh, dst_w, dst_h, dx, dy, dw, dh] = g[..12].try_into().unwrap();
+    blit(&src, dst, g[..12].try_into().unwrap());
+}
+
+fn blit(src: &[u8], dst: &mut [u8], [src_w, src_h, sx, sy, sw, sh, dst_w, dst_h, dx, dy, dw, dh]: [f64; 12]) {
     if src.len() < (src_w * src_h * 4.0) as usize || dst.len() < (dst_w * dst_h * 4.0) as usize {
         return;
     }
@@ -1192,6 +1196,61 @@ fn canvas_blit(_scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
             dst[d..d + 4].copy_from_slice(&src[s..s + 4]);
         }
     }
+}
+
+// The largest bitmap createImageBitmap densely materializes (RGBA, ≈512 MB): a crop or a resize past it can't be backed
+// by a real buffer, and is refused — as a browser's max-texture limit would.
+const MAX_BITMAP_AREA: f64 = (1u64 << 27) as f64;
+
+// createImageBitmap's steps on the source's pixels (HTML §8.10 "crop the image to the source rectangle, scaled to the
+// resize size, flipped"): `geometry` is `[width, height, crop, sx, sy, sw, sh, resizeWidth, resizeHeight, flipY]`, `crop`
+// and `flipY` 0 or 1 and a resize size NaN when the options give none. The source rectangle's negative width or height
+// moves it rather than mirroring it; one resize size alone keeps the aspect ratio; the scaling is nearest-neighbour, what
+// falls outside the source transparent black. `None` when the output would be too large to hold.
+fn bitmap_pixels(src: &[u8], g: [f64; 10]) -> Option<(Vec<u8>, f64, f64)> {
+    let [w, h, crop, mut sx, mut sy, mut sw, mut sh, rw, rh, flip] = g;
+    if crop == 0.0 {
+        (sx, sy, sw, sh) = (0.0, 0.0, w, h);
+    }
+    if sw < 0.0 {
+        (sx, sw) = (sx + sw, -sw);
+    }
+    if sh < 0.0 {
+        (sy, sh) = (sy + sh, -sh);
+    }
+    let (ow, oh) = match (rw.is_nan(), rh.is_nan()) {
+        (true, true) => (sw, sh),
+        (false, true) => (rw, (sh * rw / sw).round().max(1.0)),
+        (true, false) => ((sw * rh / sh).round().max(1.0), rh),
+        (false, false) => (rw, rh),
+    };
+    if sw * sh > MAX_BITMAP_AREA || ow * oh > MAX_BITMAP_AREA {
+        return None;
+    }
+    let mut out = vec![0; (ow * oh * 4.0) as usize];
+    blit(src, &mut out, [w, h, sx, sy, sw, sh, ow, oh, 0.0, 0.0, ow, oh]);
+    if flip != 0.0 {
+        let row = ow as usize * 4;
+        let rows: Vec<&[u8]> = out.chunks_exact(row).rev().collect();
+        out = rows.concat();
+    }
+    Some((out, ow, oh))
+}
+
+// __dom.bitmapPixels(pixels, geometry) -> `{width, height, pixels}`, a new RGBA buffer: `bitmap_pixels`'s, null for one too
+// large to hold.
+fn bitmap_pixels_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let g = crate::dom::f64_arg(args.get(1)).to_vec();
+    let (Ok(g), Some(src)) = (<[f64; 10]>::try_from(g), bytes_read(args.get(0), None)) else { return rv.set_null() };
+    let Some((pixels, w, h)) = bitmap_pixels(&src, g) else { return rv.set_null() };
+    let obj = v8::Object::new(scope);
+    let (width, height) = (v8::Number::new(scope, w).into(), v8::Number::new(scope, h).into());
+    let pixels = crate::dom::u8_clamped_array(scope, pixels);
+    for (key, value) in [("width", width), ("height", height), ("pixels", pixels)] {
+        let key = v8::String::new(scope, key).expect("a short string");
+        obj.set(scope, key.into(), value);
+    }
+    rv.set(obj.into());
 }
 
 #[cfg(test)]
@@ -1225,6 +1284,18 @@ mod tests {
         Shape::Rings { rings: vec![vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]], even_odd: false }.cover(4, 4, (0.0, 0.0), &mut |x, y, c| got.push((x, y, c))).unwrap();
         assert_eq!(got.len(), 4);
         assert!(got.iter().all(|&(_, _, c)| c == 1.0));
+    }
+
+    #[test]
+    fn crops_resizes_and_flips_a_bitmap() {
+        let px: Vec<u8> = (0..4u8).flat_map(|n| [n, 0, 0, 255]).collect();   // 2 × 2: 0 1 / 2 3
+        let (out, w, h) = bitmap_pixels(&px, [2.0, 2.0, 1.0, 1.0, 0.0, -1.0, 2.0, f64::NAN, f64::NAN, 1.0]).unwrap();
+        assert_eq!((w, h), (1.0, 2.0));
+        assert_eq!([out[0], out[4]], [2, 0]);
+        let (out, w, h) = bitmap_pixels(&px, [2.0, 2.0, 1.0, -1.0, 0.0, 2.0, 1.0, 4.0, f64::NAN, 0.0]).unwrap();
+        assert_eq!((w, h), (4.0, 2.0));
+        assert_eq!(out[..16], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 0, 0, 0, 255]);
+        assert!(bitmap_pixels(&px, [2.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 65536.0, 65536.0, 0.0]).is_none());
     }
 
     #[test]
