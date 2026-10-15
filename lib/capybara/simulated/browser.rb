@@ -5324,6 +5324,15 @@ module Capybara
       # The active worker handle at an EXACT scope (0 if none) — see __csim_swActiveHandleForScope.
       def sw_active_handle_for_scope(scope) = @sw_registrations[scope.to_s].to_i
 
+      # Every registration with a live active worker, `[scope, handle, script URL]`, in the order they were registered —
+      # see __csim_swActiveRegistrations.
+      def sw_active_registrations
+        @sw_registrations.filter_map {|scope, handle|
+          w = @workers[handle]
+          [scope, handle, w[:script_url].to_s] if w&.dig(:thread)&.alive?
+        }
+      end
+
       # The registration's committed script type at an EXACT scope — a realm
       # synthesizing a registration object for a scope another realm registered
       # (cross-realm register / a directly-wired controller) mirrors it into

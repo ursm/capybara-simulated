@@ -455,6 +455,20 @@ RSpec.describe 'Service Worker client enumeration' do
     expect(urls.first).to start_with('blob:')
   end
 
+  # The registration map is the ORIGIN's: a frame that neither registered nor is controlled sees the registration its
+  # parent made, as an object of its own realm.
+  it 'shows a frame the registrations of its origin that another realm made' do
+    session = session_with_frames({'out' => '/outside.html'})
+    session.execute_script(<<~JS)
+      const win = document.getElementById('out').contentWindow;
+      Promise.all([win.navigator.serviceWorker.getRegistrations(), win.navigator.serviceWorker.getRegistration('/scope/x')])
+        .then(([all, one]) => { globalThis.__regs = [all.map(r => new URL(r.scope).pathname), one && one.active && one.active.state, one instanceof win.ServiceWorkerRegistration]; });
+    JS
+    poll_until { session.evaluate_script('!!globalThis.__regs') }
+
+    expect(session.evaluate_script('globalThis.__regs')).to eq([['/scope/'], 'activated', true])
+  end
+
   # A srcdoc frame has no URL a scope could match: it takes its creator's controller — the one the creator has when the
   # frame is made, which a claim since the creator's load gave it.
   it 'controls a srcdoc frame made after a claim took its creator' do

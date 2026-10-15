@@ -212,6 +212,9 @@ module Capybara
         # local registration (a different iframe registering an already-active scope) can synthesize a
         # registration reflecting the shared active worker instead of installing a duplicate.
         '__csim_swActiveHandleForScope' => ->(b, *a) { b.sw_active_handle_for_scope(a[0]) },
+        # Every registration with an active worker, `[scope, handle, scriptURL]`, so a realm's getRegistration() /
+        # getRegistrations() see the origin's registrations whichever realm registered them.
+        '__csim_swActiveRegistrations'  => ->(b, *_a) { b.sw_active_registrations },
         # The committed script type at that scope — the synthesized registration's
         # WorkerType (module SWs observed from a second realm).
         '__csim_swScopeWorkerType'      => ->(b, *a) { b.sw_scope_worker_type(a[0]) },
