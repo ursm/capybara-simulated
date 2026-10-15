@@ -240,4 +240,16 @@ RSpec.describe 'choosing a navigable by name' do
     s.execute_script('document.getElementById("a").remove(); document.getElementById("b").src = "/d"')
     expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 5 } }).to eq(%w[pagehide:a unload:a beforeunload:b pagehide:b unload:b])
   end
+
+  # …and a teardown handler re-navigating its own frame is ignored — HTML "navigate" with the document's unload counter
+  # above 0 — rather than tearing the document down again (its unload fired once; Chrome).
+  it 'ignores a navigation a frame starts from its own unload' do
+    child = '<script>addEventListener("unload", () => { parent.L.push("unload"); if (frameElement) frameElement.src = "/d"; });</script>'
+    s, = session_for('/p' => '<script>window.L = []</script><iframe id="x" src="/c"></iframe>', '/c' => child)
+    s.evaluate_script('frames[0].length')
+    s.execute_script('document.getElementById("x").src = "/e"')
+    expect(poll_until { s.evaluate_script('L').then {|l| l unless l.empty? } }).to eq(%w[unload])
+    s.execute_script('document.getElementById("x").remove()')
+    expect(s.evaluate_script('L')).to eq(%w[unload])
+  end
 end

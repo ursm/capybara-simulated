@@ -33,6 +33,10 @@ pub(crate) struct Navigables {
     // of one, or whose active document is one's, is stepped and counted no more — though it keeps its realm, so a
     // `contentWindow` read of a frame in a discarded document stays null.
     discarded: std::collections::HashSet<i32>,
+    // The realms whose documents are being unloaded now — their beforeunload / pagehide / unload firing (HTML's
+    // "unload counter" above 0): a navigation of their navigable is ignored meanwhile ("navigate" step 13), so a
+    // teardown handler re-navigating its own frame neither tears it down again nor wins over the navigation unloading it.
+    unloading: std::collections::HashSet<i32>,
     // How many realms some realm's event loop steps with its own — child navigables with a realm their active document
     // is in, and those windows — read with no call by every realm's bindings (`__dom.childFrames`): none, the common
     // page's, keeps the event loop's step of its child realms and a dispatch's multi-realm path a load of a word.
@@ -187,6 +191,7 @@ impl RealmArena {
             self.note_linked();
         } else {
             nav.discarded.remove(&cid);
+            nav.unloading.remove(&cid);
             nav.windows.retain(|&w| w != cid);
             if let Some(container) = nav.containers.remove(&cid) {
                 if let Some(child) = nav.children.get_mut(&container).filter(|c| c.realm == Some(cid)) {
@@ -304,6 +309,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "realmInTree", realm_in_tree, context_id);
     crate::dom::register(scope, ns, "setSteppedWindow", set_stepped_window, context_id);
     crate::dom::register(scope, ns, "ownContainer", own_container, context_id);
+    crate::dom::register(scope, ns, "setUnloading", set_unloading, context_id);
+    crate::dom::register(scope, ns, "unloading", unloading, context_id);
     let linked = crate::dom::dom(scope).arena.navigables.linked.store();
     crate::dom::view_word(scope, ns, "childFrames", linked);
 }
@@ -425,4 +432,23 @@ fn own_container(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let arena = crate::dom::realm(scope, cid);
     let container = arena.live_container(cid).filter(|&c| arena.frame_realm(c) == Some(cid));
     rv.set(crate::dom::node_value(scope, container));
+}
+
+// __dom.setUnloading(realm, on) — the realm's document begins (`on`) or ends being unloaded (`Navigables::unloading`).
+fn set_unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(realm) = args.get(0).int32_value(scope) else { return };
+    let on = args.get(1).is_true();
+    let cid = realm_id(scope, &args);
+    let unloading = &mut crate::dom::realm(scope, cid).navigables.unloading;
+    if on {
+        unloading.insert(realm);
+    } else {
+        unloading.remove(&realm);
+    }
+}
+// __dom.unloading(realm) -> whether the realm's document is being unloaded now — a navigation of its navigable ignored.
+fn unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(-1);
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).navigables.unloading.contains(&realm));
 }
