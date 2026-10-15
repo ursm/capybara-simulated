@@ -289,6 +289,8 @@ fn urlencoded_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn tells_a_url_a_document_may_rewrite_its_own_to() {
         assert!(can_rewrite("https://a.test/p?q#f", "https://a.test/other?z"));
@@ -315,7 +317,6 @@ mod tests {
         assert!(is_fragment_navigation("https://a.test/p", "https://a.test/p#z"));
     }
 
-    use super::*;
 
     #[test]
     fn a_posted_message_reaches_its_target_origin() {

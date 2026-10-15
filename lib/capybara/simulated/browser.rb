@@ -317,6 +317,8 @@ module Capybara
         @ticking                      = false
         @history                      = []
         @history_idx                  = -1
+        # The classic history API state the document a reload or traversal makes starts with (replay_history_entry).
+        @restoring_history_state      = nil
         @cors_preflight_cache         = {}
         @modal_handlers               = []
         # Geolocation override (CDP-ish). nil = no override configured →
@@ -1329,7 +1331,7 @@ module Capybara
           # rebuild its realm. A self-targeted pure-fragment link is already
           # handled in-realm by the frame's own location JS, so skip it.
           if (frame_entry = frame_nav_target_entry(target))
-            unless frame_entry.equal?(@frame_stack.last) && pure_fragment_navigation?(url)
+            unless frame_entry.equal?(@frame_stack.last) && pure_fragment_navigation?(url, use_base: true)
               tick_real_time
               navigate_frame(resolve_against_current(url, use_base: true), entry: frame_entry)
             end
@@ -1345,8 +1347,8 @@ module Capybara
           # In-page anchor links (`#frag` / current-page + `#frag`) move
           # the hash but don't fetch a new document. Pure-fragment also
           # short-circuits the `<a>`s test fixtures use as click sinks.
-          elsif pure_fragment_navigation?(url)
-            update_current_hash(url)
+          elsif pure_fragment_navigation?(url, use_base: true)
+            update_current_hash(resolve_against_current(url, use_base: true))
           else
             # Drain any work the click handler queued before the VM gets
             # rebuilt — analytics libraries (Ahoy / segment / GA) queue
@@ -1415,12 +1417,12 @@ module Capybara
       end
 
       # HTML "navigate": a navigation to `url` is one to a fragment of the current document where `url` has a fragment
-      # (`#` too — `location.hash = ''` gives one) and equals the document's URL but for their fragments (url_ops.rs).
-      def pure_fragment_navigation?(url)
-        return true if url.start_with?('#')
-
+      # (`#` too — `location.hash = ''` gives one) and equals the document's URL but for their fragments (url_ops.rs) —
+      # `url` as written resolved against the document's URL, or, a link's (`use_base`), against its base URL, where an
+      # `<a href="#x">` under `<base href="/other/">` goes to another document.
+      def pure_fragment_navigation?(url, use_base: false)
         doc_url = current_browsing_context_url
-        !doc_url.nil? && Native.url_fragment_navigation(doc_url.to_s, resolve_against_current(url).to_s)
+        !doc_url.nil? && Native.url_fragment_navigation(doc_url.to_s, resolve_against_current(url, use_base: use_base).to_s)
       end
 
       def update_current_hash(url)
@@ -2001,8 +2003,8 @@ module Capybara
           # `opener` reflects rel=opener (a bare target=_blank link is noopener);
           # open_aux_window forces noopener anyway for a cross-partition blob.
           @driver.open_aux_window(resolve_against_current(url, use_base: true), source: self, opener: !!pending['opener'], blob_snapshot: pending['blob'])
-        elsif pure_fragment_navigation?(url)
-          update_current_hash(url)
+        elsif pure_fragment_navigation?(url, use_base: true)
+          update_current_hash(resolve_against_current(url, use_base: true))
         else
           tick_real_time
           navigate(resolve_against_current(url, use_base: true))
@@ -2316,13 +2318,18 @@ module Capybara
       # `is_reload` distinguishes a RELOAD of the current entry (`refresh`) from a
       # history TRAVERSAL (`go_back`/`go_forward`) — a controlling SW observes the
       # difference on `event.request.isReloadNavigation` / `.isHistoryNavigation`.
+      # (…its document made with the entry's classic history API state — `history.state` before its scripts run, as a
+      # reload or a traversal to it gives it, HTML "update document for history step application")
       def replay_history_entry(entry, is_reload: false)
         return unless entry
+        @restoring_history_state = entry[:state]
         if entry[:method] == :post
           navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, initiator: nil)
         else
           navigate(entry[:url], from_history: true, is_reload: is_reload, initiator: nil)   # user traversal: site 'none'
         end
+      ensure
+        @restoring_history_state = nil
       end
       def active_element_handle
         tick_real_time
@@ -11342,6 +11349,7 @@ module Capybara
           opts['viewportH'] = @viewport_height
         end
         opts['touch'] = true if @touch_input
+        opts['historyState'] = @restoring_history_state unless @restoring_history_state.nil?
         @document_handle = @runtime.call('__csimBootContext', opts).to_i
         # Drain the app's deferred external-script (chunk) boot chain to quiescence.
         # A dynamically-inserted external <script> runs async (setTimeout 0; HTML

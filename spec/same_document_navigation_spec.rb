@@ -93,6 +93,32 @@ RSpec.describe 'same-document navigation' do
     expect(out).to eq('copy' => true, 'path' => '/sub/x', 'fn' => 'DataCloneError', 'xo' => 'SecurityError', 'history' => true)
   end
 
+  # The rest of the steps around it (HTML "shared history push/replace state steps", "navigate to a fragment", "update
+  # document for history step application"): an EMPTY url keeps the document's URL, fragment and all (Chrome 151 —
+  # under a `<base>` too, and in an about:srcdoc frame, where resolving it would have refused it); a navigation to a
+  # fragment makes an entry with no state (`history.state` null after `pushState({a: 1}); location.hash = 'y'`, Chrome);
+  # a reload restores the entry's state; a top-level document's `_top` / `_parent` link is a link to itself; and a
+  # `#z` link under `<base href="/sub/">` goes to /sub/ — another document.
+  it 'keeps the URL an empty one names, and the state a reload restores' do
+    app = lambda do |_env|
+      [200, {'content-type' => 'text/html'}, ['<!doctype html><base href="/sub/"><a id="t" href="/a#top" target="_top">t</a><a id="b" href="#z">b</a><script>window.hc = 0; addEventListener("hashchange", () => hc++)</script>']]
+    end
+    s = simulated_session(app)
+    s.visit '/a#x'
+    s.execute_script("history.pushState({k: 1}, '', '')")
+    expect(s.evaluate_script('[location.pathname + location.hash, history.state.k]')).to eq(['/a#x', 1])
+    s.execute_script("location.hash = 'y'")
+    expect(s.evaluate_script('history.state')).to be_nil
+    s.execute_script("history.replaceState({k: 2}, '')")
+    s.refresh
+    expect(s.evaluate_script('history.state')).to eq('k' => 2)
+    s.find(:css, '#t').click
+    poll_until { s.evaluate_script('hc') == 1 }
+    expect(s.evaluate_script('location.pathname + location.hash')).to eq('/a#top')
+    s.find(:css, '#b').click
+    expect(s.evaluate_script('location.pathname + location.hash')).to eq('/sub/#z')
+  end
+
   # The document being navigated away from keeps running until the new response
   # COMMITS, so a `replaceState` / `pushState` it had queued is real — it rewrites
   # and appends ITS OWN entries — but it cannot move the incoming document's URL.
