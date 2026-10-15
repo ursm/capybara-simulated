@@ -2277,7 +2277,7 @@ module Capybara
       # record_history advances the index or boot rebuilds the context.
       def capture_outgoing_form_state
         return if @history_idx < 0 || (entry = @history[@history_idx]).nil?
-        state = (@runtime.call('__csimCaptureFormState') rescue nil)
+        state = @runtime.call('__csimCaptureFormState')
         entry[:form_state] = state if state
       end
 
@@ -2286,7 +2286,7 @@ module Capybara
       # input/change, so a restored value doesn't look like a fresh user edit.
       def restore_form_state(entry)
         return unless entry && (state = entry[:form_state])
-        @runtime.call('__csimRestoreFormState', state) rescue nil
+        @runtime.call('__csimRestoreFormState', state)
       end
 
       # Same-document = every entry between `from` and `to` (inclusive)
@@ -10318,8 +10318,6 @@ module Capybara
       def capture_frame_form_state(realm_id)
         return nil unless @runtime.frame_realm_alive?(realm_id)
         @runtime.realm_call(realm_id, '__csimCaptureFormState')
-      rescue StandardError
-        nil
       end
       # Re-fetch a history entry's URL and rebuild the frame realm from it, then restore the entry's
       # captured form state (before the element load fires). Used for a history traversal
