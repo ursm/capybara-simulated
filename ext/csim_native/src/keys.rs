@@ -172,6 +172,7 @@ pub(crate) const SPACE_ACTIVATES: u32 = 1 << 10;
 pub(crate) const CTRL: u32 = 1;
 pub(crate) const META: u32 = 1 << 1;
 pub(crate) const ALT: u32 = 1 << 2;
+pub(crate) const SHIFT: u32 = 1 << 3;
 
 // `plan` of the key `key` (a KeyboardEvent `key`) typing `char` (None for none), pressed on `id` with `modifiers` held.
 pub(crate) fn plan(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, key: &[u16], char: Option<&[u16]>, modifiers: u32) -> u32 {
@@ -207,6 +208,68 @@ pub(crate) fn plan(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, key: 
     set(SPACE_ACTIVATES, is(" ") && (check_or_radio || button || tag == "summary"));
     plan
 }
+
+// The edit a key makes in a typeable element (`edit`), besides its `inputType`: a character typed (a textarea's line
+// break among them), an editing host's line break or paragraph, or a deletion — forward or back, of a word or to the
+// line's start.
+pub(crate) const EDIT_TYPE: u32 = 1;
+pub(crate) const EDIT_LINE_BREAK: u32 = 1 << 1;
+pub(crate) const EDIT_PARAGRAPH: u32 = 1 << 2;
+pub(crate) const EDIT_DELETE: u32 = 1 << 3;
+pub(crate) const EDIT_FORWARD: u32 = 1 << 4;
+pub(crate) const EDIT_WORD: u32 = 1 << 5;
+pub(crate) const EDIT_LINE: u32 = 1 << 6;
+
+// What the key `key` — typing `char`, its edit `input_type` (`resolve`) — types into `id` with `modifiers` held: the
+// `inputType` of its `beforeinput` and `input`, and its edit; None where it types nothing — no typeable element, a
+// chord, a key with no edit, Enter in a single-line `<input>` (it submits). `collapsed` is whether the selection there
+// is. Enter in an editing host inserts a paragraph, a line break with Shift. Control alone with Backspace or Delete
+// deletes a word — with Shift, Backspace in a text control to the line's start, `deleteSoftLineBackward` — named so
+// where the selection is collapsed (one that is not is deleted as itself): Chrome on Linux.
+pub(crate) fn edit(
+    arena: &crate::dom::RealmArena,
+    id: crate::dom::NodeId,
+    key: &[u16],
+    char: Option<&[u16]>,
+    input_type: Option<&'static str>,
+    modifiers: u32,
+    collapsed: bool,
+) -> Option<(&'static str, u32)> {
+    let facts = plan(arena, id, key, char, modifiers);
+    let input_type = input_type?;
+    let host = facts & EDITING_HOST != 0;
+    let shift = modifiers & SHIFT != 0;
+    let ctrl_only = modifiers & (CTRL | META | ALT) == CTRL;
+    let forward = input_type == "deleteContentForward";
+    let deleting = forward || input_type == "deleteContentBackward";
+    let line = ctrl_only && shift && !host && input_type == "deleteContentBackward";
+    let word = ctrl_only && !shift && deleting;
+    let chord = modifiers & (CTRL | META | ALT) != 0;
+    let single_line = arena.get(id).is_some_and(|n| &*n.local_name == "input");
+    if facts & TYPEABLE == 0 || (char.is_none() && !deleting) || (is_units(key, "Enter") && single_line) || (chord && !word && !line) {
+        return None;
+    }
+    if deleting {
+        let named = collapsed && (word || line);
+        let input_type = match (named, line, forward) {
+            (true, true, _) => "deleteSoftLineBackward",
+            (true, false, false) => "deleteWordBackward",
+            (true, false, true) => "deleteWordForward",
+            (false, ..) => input_type,
+        };
+        // (…an editing host deletes the selection, or the word its `inputType` names; a text control the word whatever
+        // its selection is)
+        let by_word = if host { named } else { word };
+        let bits = EDIT_DELETE | if forward { EDIT_FORWARD } else { 0 } | if by_word { EDIT_WORD } else { 0 } | if line { EDIT_LINE } else { 0 };
+        return Some((input_type, bits));
+    }
+    if is_units(key, "Enter") {
+        let paragraph = host && !shift;
+        let input_type = if paragraph { "insertParagraph" } else { "insertLineBreak" };
+        return Some((input_type, if !host { EDIT_TYPE } else if paragraph { EDIT_PARAGRAPH } else { EDIT_LINE_BREAK }));
+    }
+    Some((input_type, EDIT_TYPE))
+}
 fn is_units(units: &[u16], ascii: &str) -> bool {
     units.iter().copied().eq(ascii.bytes().map(u16::from))
 }
@@ -215,6 +278,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "resolveKey", resolve_op, context_id);
     crate::dom::register(scope, ns, "modifierKey", modifier_op, context_id);
     crate::dom::register(scope, ns, "keyPlan", plan_op, context_id);
+    crate::dom::register(scope, ns, "keyEdit", edit_op, context_id);
 }
 // __dom.keyPlan(element, key, char, modifiers) -> `plan` (its bits, `modifiers` CTRL | META | ALT).
 fn plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -224,6 +288,23 @@ fn plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let ch = (!args.get(2).is_null_or_undefined()).then(|| crate::dom::utf16_arg(scope, args.get(2)));
     let modifiers = args.get(3).uint32_value(scope).unwrap_or(0);
     rv.set_uint32(plan(crate::dom::realm(scope, cid), id, &key, ch.as_deref(), modifiers));
+}
+// __dom.keyEdit(element, key, char, inputType, modifiers, collapsed) -> [inputType, edit] (`edit`; `char` and
+// `inputType` null for none, as `resolveKey` gives them), null for none.
+fn edit_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_null() };
+    let key = crate::dom::utf16_arg(scope, args.get(1));
+    let ch = (!args.get(2).is_null_or_undefined()).then(|| crate::dom::utf16_arg(scope, args.get(2)));
+    let input_type = args.get(3).to_rust_string_lossy(scope);
+    let input_type = ["insertText", "insertLineBreak", "deleteContentBackward", "deleteContentForward"].into_iter().find(|t| *t == input_type);
+    let modifiers = args.get(4).uint32_value(scope).unwrap_or(0);
+    let collapsed = args.get(5).boolean_value(scope);
+    let Some((input_type, bits)) = edit(crate::dom::realm(scope, cid), id, &key, ch.as_deref(), input_type, modifiers, collapsed) else {
+        return rv.set_null();
+    };
+    let items: [v8::Local<v8::Value>; 2] = [v8::String::new(scope, input_type).unwrap().into(), v8::Integer::new_from_unsigned(scope, bits).into()];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.resolveKey(spec) -> [key, code, keyCode, char (null for none), inputType (null for none), named] (`resolve`).
 fn resolve_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
