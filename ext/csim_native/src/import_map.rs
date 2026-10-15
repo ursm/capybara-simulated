@@ -55,30 +55,45 @@ fn sort_map<T>(map: &mut [(String, T)]) {
     map.sort_by(|a, b| b.0.encode_utf16().cmp(a.0.encode_utf16()));
 }
 
-// "Parse an import map string": None where the text is no JSON object (a TypeError a page's `onerror` reports).
-pub(crate) fn parse(text: &str, base: &str) -> Option<ImportMap> {
-    let Value::Object(top) = serde_json::from_str(text).ok()? else { return None };
+// What "parse an import map string" throws, which registering the map reports: a SyntaxError for text that is no JSON, a
+// TypeError for JSON that is no map — or whose `imports`, `scopes`, one of its scopes or `integrity` is none.
+#[derive(Debug, PartialEq)]
+pub(crate) enum ParseError {
+    Syntax,
+    Type,
+}
+
+// "Parse an import map string".
+pub(crate) fn parse(text: &str, base: &str) -> Result<ImportMap, ParseError> {
+    let top = match serde_json::from_str(text) {
+        Ok(Value::Object(top)) => top,
+        Ok(_) => return Err(ParseError::Type),
+        Err(_) => return Err(ParseError::Syntax),
+    };
+    fn object(v: &Value) -> Result<&serde_json::Map<String, Value>, ParseError> {
+        v.as_object().ok_or(ParseError::Type)
+    }
     let mut map = ImportMap::default();
     if let Some(imports) = top.get("imports") {
-        map.imports = normalize_specifier_map(imports.as_object()?, base);
+        map.imports = normalize_specifier_map(object(imports)?, base);
     }
     if let Some(scopes) = top.get("scopes") {
-        for (prefix, imports) in scopes.as_object()? {
+        for (prefix, imports) in object(scopes)? {
             let Some(prefix) = parse_url(prefix, Some(base)) else { continue };
             // (…a later key for the same prefix replacing the earlier, as a map's set does)
             map.scopes.retain(|(p, _)| *p != prefix);
-            map.scopes.push((prefix, normalize_specifier_map(imports.as_object()?, base)));
+            map.scopes.push((prefix, normalize_specifier_map(object(imports)?, base)));
         }
         sort_map(&mut map.scopes);
     }
     if let Some(integrity) = top.get("integrity") {
-        for (url, metadata) in integrity.as_object()? {
+        for (url, metadata) in object(integrity)? {
             let (Some(url), Some(metadata)) = (resolve_url_like(url, base), metadata.as_str()) else { continue };
             map.integrity.retain(|(u, _)| *u != url);
             map.integrity.push((url, metadata.to_owned()));
         }
     }
-    Some(map)
+    Ok(map)
 }
 
 // "Merge existing and new import maps": the new map's entries added where the existing one has none for the key — the
@@ -217,10 +232,21 @@ fn string_or_null(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnValue<'_,
     }
 }
 // __dom.importMapMerge(existing, text, base) -> the document's map (JSON; null `existing` an empty one) with the map
-// `text` parses to against `base` merged in — or null where `text` is no import map.
+// `text` parses to against `base` merged in; where `text` is no import map, the SyntaxError or TypeError parsing it throws.
 fn merge_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (existing, map_text, base) = (text(scope, args.get(0)), text(scope, args.get(1)), text(scope, args.get(2)));
-    let Some(new) = parse(&map_text, &base) else { return rv.set_null() };
+    let new = match parse(&map_text, &base) {
+        Ok(new) => new,
+        Err(error) => {
+            let message = v8::String::new(scope, "Failed to parse import map").unwrap();
+            let exception = match error {
+                ParseError::Syntax => v8::Exception::syntax_error(scope, message),
+                ParseError::Type => v8::Exception::type_error(scope, message),
+            };
+            scope.throw_exception(exception);
+            return;
+        }
+    };
     let mut map = from_json(&existing);
     merge(&mut map, new);
     let json = to_json(&map);
@@ -267,7 +293,9 @@ mod tests {
         assert_eq!(resolve(&map, "unmapped", base), None);
         let back = from_json(&to_json(&map));
         assert_eq!(resolve(&back, "lodash", base).as_deref(), Some("https://a.test/js/lodash-app.js"));
-        assert!(parse("[]", base).is_none());
+        assert_eq!(parse("[]", base).err(), Some(ParseError::Type));
+        assert_eq!(parse("{", base).err(), Some(ParseError::Syntax));
+        assert_eq!(parse(r#"{"scopes": {"/a/": []}}"#, base).err(), Some(ParseError::Type));
         // (…a key normalized to another's, the later in the source winning)
         let dup = parse(r#"{"imports": {"/js/a1.js": "/js/a1.js", "./a1.js": "/js/a2.js"}}"#, "https://a.test/js/").unwrap();
         assert_eq!(resolve(&dup, "/js/a1.js", "https://a.test/").as_deref(), Some("https://a.test/js/a2.js"));

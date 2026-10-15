@@ -67,23 +67,28 @@ pub(crate) fn script_type(n: &NodeData) -> u32 {
     }
 }
 
-// What preparing a script element (`prepare`) found it is to do: nothing; fire `error` (an empty `src`); run as a classic
-// script; run as a module script — inline, or from its `src`, which the bindings fetch.
+// What preparing a script element (`prepare`) found it is to do: nothing; fire `error` (an empty `src`, an import map's
+// any `src`); run as a classic script; run as a module script — inline, or from its `src`, which the bindings fetch;
+// register its import map.
 pub(crate) const PREPARE_NONE: u32 = 0;
 pub(crate) const PREPARE_ERROR: u32 = 1;
 pub(crate) const PREPARE_CLASSIC: u32 = 2;
 pub(crate) const PREPARE_MODULE: u32 = 3;
+pub(crate) const PREPARE_IMPORT_MAP: u32 = 4;
 
 impl RealmArena {
-    // HTML "prepare the script element" for one no parser is preparing — its children changed, it was connected, its
-    // `src` set — as far as the element decides it: an "already started" one, one with neither a `src` nor child text, one
-    // not connected, and one whose type runs as nothing here (a data block; an import map or speculation rules, which
-    // only a parse registers) do nothing; any other is "already started" from here (and run by the after-parse pass's
-    // reckoning), and does nothing as a classic script marked `nomodule`, fires `error` with an empty `src`, and else runs.
+    // HTML "prepare the script element" — for one no parser is preparing (its children changed, it was connected, its
+    // `src` set), and for the parser's import maps — as far as the element decides it: an "already started" one, one with
+    // neither a `src` nor child text, one not connected, and one whose type runs as nothing here (a data block,
+    // speculation rules) do nothing; any other is "already started" from here (and run by the after-parse pass's
+    // reckoning), and does nothing as a classic script marked `nomodule`, fires `error` with an empty `src` — an import
+    // map with any, there being no external import maps — and else runs, or registers its import map.
     // (…and, `scripting` false — its node document has no browsing context — "already started" and nothing more: step 19)
-    pub(crate) fn prepare_script(&mut self, id: NodeId, scripting: bool) -> u32 {
+    // (…the `parser`'s script is "already started" here from its creation, as the insertion the parser makes prepares
+    // nothing, so what says it has been prepared is its having run)
+    pub(crate) fn prepare_script(&mut self, id: NodeId, scripting: bool, parser: bool) -> u32 {
         let Some(n) = self.get(id) else { return PREPARE_NONE };
-        if n.script_flags & SCRIPT_ALREADY_STARTED != 0 {
+        if n.script_flags & if parser { SCRIPT_RUN } else { SCRIPT_ALREADY_STARTED } != 0 {
             return PREPARE_NONE;
         }
         let src = n.plain_attr("src").map(str::is_empty);
@@ -93,7 +98,7 @@ impl RealmArena {
         }
         let Some(n) = self.get(id) else { return PREPARE_NONE };
         let ty = script_type(n);
-        if ty != CLASSIC && ty != MODULE {
+        if ty != CLASSIC && ty != MODULE && ty != IMPORT_MAP {
             return PREPARE_NONE;
         }
         let nomodule = ty == CLASSIC && n.plain_attr("nomodule").is_some();
@@ -102,8 +107,9 @@ impl RealmArena {
         }
         match (nomodule || !scripting, src, ty) {
             (true, _, _) => PREPARE_NONE,
-            (_, Some(true), _) => PREPARE_ERROR,
+            (_, Some(true), _) | (_, Some(false), IMPORT_MAP) => PREPARE_ERROR,
             (_, _, MODULE) => PREPARE_MODULE,
+            (_, _, IMPORT_MAP) => PREPARE_IMPORT_MAP,
             _ => PREPARE_CLASSIC,
         }
     }
@@ -184,12 +190,12 @@ fn set_script_flags_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     }
 }
 
-// __dom.prepareScript(nid, scripting) -> what preparing the script element found it is to do (`prepare_script`: `PREPARE_NONE`, …).
+// __dom.prepareScript(nid, scripting, parser) -> what preparing the script element found it is to do (`prepare_script`: `PREPARE_NONE`, …).
 fn prepare_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(PREPARE_NONE) };
     let cid = crate::dom::realm_id(scope, &args);
-    let scripting = args.get(1).is_true();
-    rv.set_uint32(crate::dom::realm(scope, cid).prepare_script(id, scripting));
+    let (scripting, parser) = (args.get(1).is_true(), args.get(2).is_true());
+    rv.set_uint32(crate::dom::realm(scope, cid).prepare_script(id, scripting, parser));
 }
 
 #[cfg(test)]

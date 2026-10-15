@@ -9180,7 +9180,7 @@ module Capybara
         out
       end
 
-      # Each realm's document's import map (import_map.rs, as JSON), which the realm's `ingestImportmaps` keeps and pushes
+      # Each realm's document's import map (import_map.rs, as JSON), which the realm's `registerImportMap` keeps and pushes
       # here, by realm id, so the host resolves a realm's module specifiers as that realm does — a frame's map neither
       # replaces its parent's nor clears it.
       def set_importmap(json, realm)
