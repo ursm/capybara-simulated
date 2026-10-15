@@ -93,4 +93,32 @@ RSpec.describe 'members a page overrides' do
     JS
     expect(s.active_element[:id]).to eq('i')
   end
+
+  # …and the keys the driver presses and the options it picks: Ctrl+A in a text field selects its text, an Arrow steps a
+  # number field, `select` picks an option by its value — whatever a page made of `select()`, `value`, an option's
+  # `value` (put back before the expectation reads them).
+  it "presses keys and picks options through the engine's values" do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><input id="t" value="abc"><input id="n" type="number" value="1">' \
+        '<select id="s"><option>one</option><option value="2">two</option></select><p id="log"></p>']]
+    })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      const boom = () => { throw new Error('page member'); };
+      window.saved = [
+        [HTMLInputElement.prototype, 'select'], [HTMLInputElement.prototype, 'value'], [HTMLOptionElement.prototype, 'value']
+      ].map(([proto, name]) => [proto, name, Object.getOwnPropertyDescriptor(proto, name)]);
+      HTMLInputElement.prototype.select = boom;
+      Object.defineProperty(HTMLInputElement.prototype, 'value', { get: boom, set: boom, configurable: true });
+      Object.defineProperty(HTMLOptionElement.prototype, 'value', { get: boom, configurable: true });
+      document.getElementById('n').addEventListener('change', () => document.getElementById('log').textContent += 'change');
+    JS
+    s.find('#t').send_keys([:control, 'a'], 'x')
+    s.find('#n').send_keys(:up)
+    s.find('#s').select('two')
+    s.execute_script('for (const [proto, name, desc] of saved) Object.defineProperty(proto, name, desc)')
+    expect(s.evaluate_script(<<~JS)).to eq(['x', '2', 'change', '2'])
+      ['t', 'n', 'log', 's'].map((id) => { const el = document.getElementById(id); return el.id === 'log' ? el.textContent : el.value; })
+    JS
+  end
 end
