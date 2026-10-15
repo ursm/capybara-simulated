@@ -159,50 +159,202 @@ pub(crate) fn exposure(name: &str, final_url: &str, document_origin: &str, tao: 
     }
 }
 
+// What a fetch tells its entry (Resource Timing §4.6 "mark resource timing" — the response's facts as the host has them):
+// its URL and the one it ended at, the document's origin, the response's `Timing-Allow-Origin`, whether it is opaque, a
+// frame's document or a no-cors element load, when it started and ended, whether it came from the cache ("cache") or
+// was revalidated ("validated"), its body's encoded and decoded sizes, whether it was redirected, its status, its
+// `Content-Type`, `Content-Encoding` and `Server-Timing` headers, whether it blocked rendering; and whether it failed
+// (a network error: nothing but its times).
+pub(crate) struct Facts {
+    pub(crate) name: String,
+    pub(crate) final_url: String,
+    pub(crate) document_origin: String,
+    pub(crate) tao: Option<String>,
+    pub(crate) opaque: bool,
+    pub(crate) document: bool,
+    pub(crate) no_cors: bool,
+    pub(crate) start: f64,
+    pub(crate) end: f64,
+    pub(crate) cached: Option<String>,
+    pub(crate) encoded: f64,
+    pub(crate) decoded: f64,
+    pub(crate) redirected: bool,
+    pub(crate) status: f64,
+    pub(crate) content_type: Option<String>,
+    pub(crate) content_encoding: Option<String>,
+    pub(crate) server_timing: Option<String>,
+    pub(crate) render_blocking: bool,
+    pub(crate) failed: bool,
+}
+// …and what the entry's attributes are made of them: a timing not allowed reads 0 (or ""), as its sizes and its
+// `Server-Timing`; a status and a content type not exposed too. Its times are the fetch's start, but `responseEnd` (the
+// network the driver models is instantaneous), a TLS handshake only for an https: URL, a redirect's only where one was;
+// its `transferSize` the body's encoded size and 300 octets of headers — nothing from the cache, the headers alone for a
+// revalidation.
+pub(crate) enum Field {
+    Number(f64),
+    Text(String),
+    Metrics(Vec<Metric>),
+}
+pub(crate) fn entry_fields(f: &Facts) -> Vec<(&'static str, Field)> {
+    use Field::{Metrics, Number, Text};
+    let Exposure { allowed, exposed } =
+        if f.failed { Exposure { allowed: false, exposed: false } } else { exposure(&f.name, &f.final_url, &f.document_origin, f.tao.as_deref(), f.opaque, f.document, f.no_cors) };
+    let at = |yes: bool| Number(if yes { f.start } else { 0.0 });
+    let cached = f.cached.as_deref();
+    let transfer = match (allowed, cached) {
+        (false, _) | (true, Some("cache")) => 0.0,
+        (true, Some("validated")) => 300.0,
+        (true, _) => f.encoded + 300.0,
+    };
+    let text = |yes: bool, s: String| Text(if yes { s } else { String::new() });
+    vec![
+        ("deliveryType", text(allowed && cached == Some("cache"), "cache".to_owned())),
+        ("nextHopProtocol", text(allowed, "http/1.1".to_owned())),
+        ("workerStart", Number(0.0)),
+        ("redirectStart", at(allowed && f.redirected)),
+        ("redirectEnd", at(allowed && f.redirected)),
+        ("fetchStart", Number(f.start)),
+        ("domainLookupStart", at(allowed)),
+        ("domainLookupEnd", at(allowed)),
+        ("connectStart", at(allowed)),
+        ("connectEnd", at(allowed)),
+        ("secureConnectionStart", at(allowed && f.name.get(..6).is_some_and(|s| s.eq_ignore_ascii_case("https:")))),
+        ("requestStart", at(allowed)),
+        ("finalResponseHeadersStart", at(allowed)),
+        ("firstInterimResponseStart", Number(0.0)),
+        ("responseStart", at(allowed)),
+        ("responseEnd", Number(f.end)),
+        ("workerRouterEvaluationStart", Number(0.0)),
+        ("workerCacheLookupStart", Number(0.0)),
+        ("workerMatchedRouterSource", Text(String::new())),
+        ("workerFinalRouterSource", Text(String::new())),
+        ("transferSize", Number(transfer)),
+        ("encodedBodySize", Number(if allowed { f.encoded } else { 0.0 })),
+        ("decodedBodySize", Number(if allowed { f.decoded } else { 0.0 })),
+        ("responseStatus", Number(if exposed { f.status } else { 0.0 })),
+        ("renderBlockingStatus", Text(if f.render_blocking { "blocking" } else { "non-blocking" }.to_owned())),
+        ("contentType", text(exposed, f.content_type.as_deref().map(minimize_mime).unwrap_or_default())),
+        ("contentEncoding", text(allowed, f.content_encoding.as_deref().map(content_encoding).unwrap_or_default())),
+        ("serverTiming", Metrics(if allowed { f.server_timing.as_deref().map(server_timing).unwrap_or_default() } else { Vec::new() })),
+    ]
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "serverTiming", server_timing_op, context_id);
-    crate::dom::register(scope, ns, "minimizeMime", minimize_mime_op, context_id);
-    crate::dom::register(scope, ns, "contentEncoding", content_encoding_op, context_id);
-    crate::dom::register(scope, ns, "resourceExposure", exposure_op, context_id);
+    crate::dom::register(scope, ns, "resourceTimingEntry", entry_op, context_id);
 }
 fn text<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Value> {
     v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into)
 }
-// __dom.serverTiming(value) -> [name, duration, description, …] (`server_timing`).
-fn server_timing_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let value = args.get(0).to_rust_string_lossy(scope);
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
-    for m in server_timing(&value) {
-        items.push(text(scope, &m.name));
-        items.push(v8::Number::new(scope, m.duration).into());
-        items.push(text(scope, &m.description));
+// The member `key` of `obj`, None where it is null or undefined.
+fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, key: &str) -> Option<v8::Local<'s, v8::Value>> {
+    let k = v8::String::new(scope, key)?;
+    obj.get(scope, k.into()).filter(|v| !v.is_null_or_undefined())
+}
+// __dom.resourceTimingEntry(facts) -> the entry's fields (`entry_fields`) as an object, `serverTiming` a flat
+// [name, duration, description, …] list — `facts` an object of `Facts`' members by their camel-cased names, a header
+// null for none.
+fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(obj) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
+    let string = |scope: &mut v8::PinScope<'_, '_>, key: &str| member(scope, obj, key).map(|v| v.to_rust_string_lossy(scope));
+    let flag = |scope: &mut v8::PinScope<'_, '_>, key: &str| member(scope, obj, key).is_some_and(|v| v.boolean_value(scope));
+    let number = |scope: &mut v8::PinScope<'_, '_>, key: &str| member(scope, obj, key).and_then(|v| v.number_value(scope)).unwrap_or(0.0);
+    let facts = Facts {
+        name: string(scope, "name").unwrap_or_default(),
+        final_url: string(scope, "finalUrl").unwrap_or_default(),
+        document_origin: string(scope, "documentOrigin").unwrap_or_default(),
+        tao: string(scope, "tao"),
+        opaque: flag(scope, "opaque"),
+        document: flag(scope, "document"),
+        no_cors: flag(scope, "noCors"),
+        start: number(scope, "start"),
+        end: number(scope, "end"),
+        cached: string(scope, "cached"),
+        encoded: number(scope, "encoded"),
+        decoded: number(scope, "decoded"),
+        redirected: flag(scope, "redirected"),
+        status: number(scope, "status"),
+        content_type: string(scope, "contentType"),
+        content_encoding: string(scope, "contentEncoding"),
+        server_timing: string(scope, "serverTiming"),
+        render_blocking: flag(scope, "renderBlocking"),
+        failed: flag(scope, "failed"),
+    };
+    let out = v8::Object::new(scope);
+    for (key, field) in entry_fields(&facts) {
+        let value: v8::Local<v8::Value> = match field {
+            Field::Number(n) => v8::Number::new(scope, n).into(),
+            Field::Text(t) => text(scope, &t),
+            Field::Metrics(metrics) => {
+                let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
+                for m in metrics {
+                    items.push(text(scope, &m.name));
+                    items.push(v8::Number::new(scope, m.duration).into());
+                    items.push(text(scope, &m.description));
+                }
+                v8::Array::new_with_elements(scope, &items).into()
+            }
+        };
+        if let Some(k) = v8::String::new(scope, key) {
+            out.set(scope, k.into(), value);
+        }
     }
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
-// __dom.minimizeMime(contentType) -> `minimize_mime`.
-fn minimize_mime_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let value = args.get(0).to_rust_string_lossy(scope);
-    let answer = minimize_mime(&value);
-    rv.set(text(scope, &answer));
-}
-// __dom.contentEncoding(header) -> `content_encoding`.
-fn content_encoding_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let value = args.get(0).to_rust_string_lossy(scope);
-    let answer = content_encoding(&value);
-    rv.set(text(scope, &answer));
-}
-// __dom.resourceExposure(name, finalUrl, documentOrigin, tao, opaque, document, noCors) -> `exposure`, its bits: 1
-// allowed, 2 exposed. `tao` null for no header.
-fn exposure_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (name, final_url, origin) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
-    let tao = (!args.get(3).is_null_or_undefined()).then(|| args.get(3).to_rust_string_lossy(scope));
-    let e = exposure(&name, &final_url, &origin, tao.as_deref(), args.get(4).is_true(), args.get(5).is_true(), args.get(6).is_true());
-    rv.set_int32(e.allowed as i32 | (e.exposed as i32) << 1);
+    rv.set(out.into());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn facts() -> Facts {
+        Facts {
+            name: "https://a.test/x.js".into(),
+            final_url: "https://a.test/x.js".into(),
+            document_origin: "https://a.test".into(),
+            tao: None,
+            opaque: false,
+            document: false,
+            no_cors: false,
+            start: 10.0,
+            end: 12.0,
+            cached: None,
+            encoded: 100.0,
+            decoded: 400.0,
+            redirected: false,
+            status: 200.0,
+            content_type: Some("text/javascript; charset=utf-8".into()),
+            content_encoding: Some("gzip".into()),
+            server_timing: Some("db;dur=5".into()),
+            render_blocking: true,
+            failed: false,
+        }
+    }
+    fn number(fields: &[(&str, Field)], key: &str) -> f64 {
+        match fields.iter().find(|(k, _)| *k == key) {
+            Some((_, Field::Number(n))) => *n,
+            _ => f64::NAN,
+        }
+    }
+    fn string(fields: &[(&str, Field)], key: &str) -> String {
+        match fields.iter().find(|(k, _)| *k == key) {
+            Some((_, Field::Text(t))) => t.clone(),
+            _ => "?".into(),
+        }
+    }
+
+    #[test]
+    fn an_entry_shows_what_its_fetch_lets_it() {
+        let own = entry_fields(&facts());
+        assert_eq!((number(&own, "transferSize"), number(&own, "secureConnectionStart"), number(&own, "responseStatus")), (400.0, 10.0, 200.0));
+        assert_eq!((string(&own, "contentType"), string(&own, "contentEncoding"), string(&own, "renderBlockingStatus")), ("text/javascript".into(), "gzip".into(), "blocking".into()));
+        let cross = entry_fields(&Facts { name: "https://b.test/x.js".into(), final_url: "https://b.test/x.js".into(), ..facts() });
+        assert_eq!((number(&cross, "transferSize"), number(&cross, "connectStart"), number(&cross, "responseStatus")), (0.0, 0.0, 200.0));
+        assert_eq!((string(&cross, "contentEncoding"), string(&cross, "nextHopProtocol")), ("".into(), "".into()));
+        let cached = entry_fields(&Facts { cached: Some("cache".into()), ..facts() });
+        assert_eq!((number(&cached, "transferSize"), string(&cached, "deliveryType")), (0.0, "cache".into()));
+        let failed = entry_fields(&Facts { failed: true, ..facts() });
+        assert_eq!((number(&failed, "fetchStart"), number(&failed, "responseEnd"), number(&failed, "requestStart")), (10.0, 12.0, 0.0));
+    }
 
     fn st(value: &str) -> Vec<(String, f64, String)> {
         server_timing(value).into_iter().map(|m| (m.name, m.duration, m.description)).collect()
