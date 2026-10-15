@@ -216,4 +216,18 @@ RSpec.describe 'choosing a navigable by name' do
     JS
     expect(got).to eq(%w[ok ok ok])
   end
+
+  # A frame's `frameElement` is its navigable's container: there from its document's first script on — a load handler
+  # finds it by it — and null once the frame is removed, its navigable with it (HTML §7.2.3.4).
+  it "answers a frame's frameElement from its navigable" do
+    s, = session_for('/p' => '<iframe id="f" src="/c"></iframe>', '/c' => '<script>window.seen = frameElement && frameElement.id</script>')
+    expect(s.evaluate_script(<<~JS)).to eq(['f', true, nil])
+      (() => {
+        const f = document.getElementById('f'), w = f.contentWindow;
+        const during = w.seen, same = w.frameElement === f;
+        f.remove();
+        return [during, same, w.frameElement];
+      })()
+    JS
+  end
 end

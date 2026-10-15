@@ -303,6 +303,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "childRealms", child_realms, context_id);
     crate::dom::register(scope, ns, "realmInTree", realm_in_tree, context_id);
     crate::dom::register(scope, ns, "setSteppedWindow", set_stepped_window, context_id);
+    crate::dom::register(scope, ns, "ownContainer", own_container, context_id);
     let linked = crate::dom::dom(scope).arena.navigables.linked.store();
     crate::dom::view_word(scope, ns, "childFrames", linked);
 }
@@ -415,4 +416,13 @@ fn set_stepped_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let on = args.get(1).is_true();
     let cid = realm_id(scope, &args);
     crate::dom::realm(scope, cid).set_stepped_window(realm, on);
+}
+
+// __dom.ownContainer() -> the container whose navigable this realm's document is the active document of — its
+// `frameElement`, before its origin is asked — or null: a top-level one's, or a frame's removed or navigated away from.
+fn own_container(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let container = arena.live_container(cid).filter(|&c| arena.frame_realm(c) == Some(cid));
+    rv.set(crate::dom::node_value(scope, container));
 }

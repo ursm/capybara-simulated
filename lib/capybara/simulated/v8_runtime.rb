@@ -452,7 +452,7 @@ module Capybara
       # / module state, exactly like the main page's per-visit rebuild. `parent_id`
       # keeps the new realm's `parent`/`top` wired to the owning realm, and `seed`
       # is what the container gives the document, seeded as on the first build
-      # (`__csimBeginFrameBuild`: its viewport and margins). The Browser then re-points
+      # (`__csimFrameSeed`: its viewport and margins). The Browser then re-points
       # the iframe element at the new id (`__csimRebindFrameRealm`).
       def reload_frame_realm(old_id, parent_id, url, body, content_type, client_id = nil, seed = nil)
         # A re-navigated document discards its child browsing contexts, so dispose the old realm's
@@ -933,16 +933,6 @@ module Capybara
             if (__topRaw.__csimRawWindow) __topRaw = __topRaw.__csimRawWindow;
             globalThis.__csimParent = __pf(__NS.contextOf(__parentWin)) || __parentWin;
             globalThis.__csimTop    = __pf(__NS.contextOf(__topRaw)) || __topRaw;
-            // The container is known from the document's first script on (Chrome): until the parent adopts it
-            // (`__csimAdoptFrameContainer`), it is the element the parent is building this realm for
-            // (`__csimBuildingFrame`). The driver reads it as `__csimFrameContainer`, and `frameElement` from it
-            // (window.js).
-            (function (pw) {
-              var own;
-              var container = function () { return own !== undefined ? own : (pw.__csimBuildingFrame || null); };
-              Object.defineProperty(globalThis, '__csimFrameContainer', { configurable: true, get: container });
-              Object.defineProperty(globalThis, '__csimAdoptFrameContainer', { configurable: true, value: function (el) { own = el; } });
-            })(__parentWin);
           }
           })();
         JS
