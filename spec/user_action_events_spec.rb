@@ -87,7 +87,9 @@ RSpec.describe 'User action events' do
     session.find('#z').hover
     log
     session.find('#z').right_click
+    # (…the pointer moved onto it first, as WebDriver's action does — over and enter none, it being hovered already)
     expect(log).to eq([
+      'pointermove PointerEvent true true true 0 -1 0 1',
       'pointerdown PointerEvent true true true 1 2 2',
       'mousedown MouseEvent true true true 1 2 2',
       'contextmenu PointerEvent true true true 1 2 2',
