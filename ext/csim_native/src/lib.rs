@@ -107,6 +107,7 @@ mod resize_observation;
 mod resource_timing;
 mod resolved;
 mod scroll_boxes;
+mod scroll_events;
 mod scroll_into_view;
 mod selection;
 mod selector;
