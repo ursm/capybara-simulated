@@ -95,4 +95,30 @@ RSpec.describe 'execCommand in the selection’s editing host' do
     JS
     expect(got).to eq([[true, '<b>k2</b>text'], [false, 'ro'], ['k2']])
   end
+
+  # Backspace's and Delete's deletion and a line break in a focused text control, as the keys make them. Chrome 155:
+  # `acd`, `ad`, `a\nd`, `a\n\nd` in the textarea, an input unchanged by a paragraph and `wyz` by a deletion — true
+  # each time, `input` for each change.
+  it 'deletes and breaks lines in a focused text control' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><textarea id=t>abcd</textarea><input id=i value=wxyz>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const t = document.getElementById('t'), i = document.getElementById('i'), seen = [];
+        document.addEventListener('input', (e) => seen.push(e.target.id + ':' + e.inputType));
+        t.focus();
+        t.setSelectionRange(2, 2);
+        const out = [document.execCommand('delete'), t.value, document.execCommand('forwardDelete'), t.value,
+                     document.execCommand('insertParagraph'), t.value, document.execCommand('insertLineBreak'), t.value];
+        i.focus();
+        i.setSelectionRange(2, 2);
+        out.push(document.execCommand('insertParagraph'), i.value, document.execCommand('delete'), i.value);
+        return [out, seen];
+      })()
+    JS
+    expect(got).to eq([
+      [true, 'acd', true, 'ad', true, "a\nd", true, "a\n\nd", true, 'wxyz', true, 'wyz'],
+      ['t:deleteContentBackward', 't:deleteContentForward', 't:insertParagraph', 't:insertLineBreak', 'i:deleteContentBackward']
+    ])
+  end
 end
