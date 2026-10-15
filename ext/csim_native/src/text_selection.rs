@@ -66,6 +66,9 @@ const EDIT_WORD_BACKSPACE: u32 = 10;
 const EDIT_WORD_DELETE: u32 = 11;
 const EDIT_LINE_BACKSPACE: u32 = 12;
 const EDIT_EXTEND: u32 = 16;
+// …made where the selection a script reads is — the start where none was ever set — as a scripted edit
+// (`execCommand`) makes it, not at the value's end, where a WebDriver key sent to the control finds its caret.
+const EDIT_AT_SELECTION: u32 = 32;
 
 // Why `setRangeText()` refused.
 #[derive(Debug, PartialEq)]
@@ -183,7 +186,7 @@ impl RealmArena {
         let password = n.is_html_named("input") && n.input_type() == "password";
         let len = value.len();
         let (sel, set) = self.text_selection(id);
-        let (start, end) = if set { (sel.start as usize, sel.end as usize) } else { (len, len) };
+        let (start, end) = if set || edit & EDIT_AT_SELECTION != 0 { (sel.start as usize, sel.end as usize) } else { (len, len) };
         let line_start = |i: usize| if multiline { value[..i].iter().rposition(|&u| u == 0x0A).map_or(0, |p| p + 1) } else { 0 };
         let line_end = |i: usize| if multiline { value[i..].iter().position(|&u| u == 0x0A).map_or(len, |p| i + p) } else { len };
         let word = |at: usize, forward: bool| match (password, forward) {
@@ -192,7 +195,7 @@ impl RealmArena {
             (true, false) => line_start(at),
         };
         let extend = edit & EDIT_EXTEND != 0;
-        let key = edit & !EDIT_EXTEND;
+        let key = edit & !(EDIT_EXTEND | EDIT_AT_SELECTION);
         // (…the focus the end the selection runs to, the anchor the other)
         let backward = sel.direction == Direction::Backward;
         let (anchor, focus) = if backward { (end, start) } else { (start, end) };

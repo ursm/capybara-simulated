@@ -121,4 +121,37 @@ RSpec.describe 'execCommand in the selection’s editing host' do
       ['t:deleteContentBackward', 't:deleteContentForward', 't:insertParagraph', 't:insertLineBreak', 'i:deleteContentBackward']
     ])
   end
+
+  # A scripted edit goes where the selection a script reads is — the start where none was set, Chrome's caret after
+  # focus() — and is a user edit: `change` on blur. insertText fires `input` where the value changed alone (a full
+  # `maxlength`: none), and with empty text deletes a contenteditable's selection. Chrome 155: `wxyz` unchanged by a
+  # delete at 0, `xyz` by a forward delete, a change on blur, no input for the full field, `hlo` with an insertText
+  # input of "".
+  it 'edits at the selection a script reads, as a user edit' do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><input id=i value=wxyz><input id=m maxlength=3 value=abc><div id=d contenteditable>hello</div>']]
+    })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const seen = [];
+        document.addEventListener('input', (e) => seen.push(e.target.id + ':' + e.inputType + ':' + JSON.stringify(e.data)));
+        document.addEventListener('change', (e) => seen.push(e.target.id + ':change'));
+        const i = document.getElementById('i'), m = document.getElementById('m');
+        i.focus();
+        const out = [document.execCommand('delete'), i.value, document.execCommand('forwardDelete'), i.value];
+        m.focus();
+        out.push(document.execCommand('insertText', false, 'Z'), m.value);
+        m.blur();
+        const t = document.getElementById('d').firstChild;
+        getSelection().setBaseAndExtent(t, 1, t, 3);
+        out.push(document.execCommand('insertText', false, ''), document.getElementById('d').textContent);
+        return [out, seen];
+      })()
+    JS
+    expect(got).to eq([
+      [true, 'wxyz', true, 'xyz', true, 'abc', true, 'hlo'],
+      ['i:deleteContentForward:null', 'i:change', 'd:insertText:""']
+    ])
+  end
 end
