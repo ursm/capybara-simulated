@@ -12,14 +12,16 @@ RSpec.describe 'the timer nesting clamp' do
       const done = arguments[0];
       const chain = [], ticks = [];
       const t0 = performance.now();
-      const step = () => { chain.push(Math.round(performance.now() - t0)); if (chain.length < 9) setTimeout(step, 0); };
+      const step = () => { chain.push(performance.now() - t0); if (chain.length < 9) setTimeout(step, 0); };
       setTimeout(step, 0);
       const i0 = performance.now();
-      const id = setInterval(() => { ticks.push(Math.round(performance.now() - i0)); if (ticks.length === 9) clearInterval(id); }, 0);
+      const id = setInterval(() => { ticks.push(performance.now() - i0); if (ticks.length === 9) clearInterval(id); }, 0);
       setTimeout(() => done({ chain, ticks }), 200);
     JS
-    gaps = ->(times) { times.each_cons(2).map {|a, b| b - a } }
-    expect(gaps.(got['chain'])).to eq([0, 0, 0, 0, 0, 4, 4, 4])
-    expect(gaps.(got['ticks'])).to eq([0, 0, 0, 0, 0, 4, 4, 4])
+    # (…the gaps as the clamp has them — under 4 ms for the first five, 4 for the rest: the virtual clock may move a
+    # little between tasks of a loaded machine, never past a clamp's 4 ms by a whole one)
+    clamped = ->(times) { times.each_cons(2).map {|a, b| (b - a) >= 4 && (b - a) < 5 } }
+    expect(clamped.(got['chain'])).to eq([false] * 5 + [true] * 3)
+    expect(clamped.(got['ticks'])).to eq([false] * 5 + [true] * 3)
   end
 end

@@ -139,6 +139,7 @@ module WptRunner
     '.xht'  => 'application/xhtml+xml',
     '.xml'  => 'application/xml',
     '.js'   => 'text/javascript',
+    '.mjs'  => 'text/javascript',
     '.json' => 'application/json',
     '.svg'  => 'image/svg+xml',
     '.css'  => 'text/css',
