@@ -192,9 +192,13 @@ impl HeaderList {
     // A response's list from the network's (name, value) pairs: the values VERBATIM — the HTTP stack stripped each field
     // before it combined duplicates with ", ", and normalizing the combined string again would cut one whose last part
     // is empty (two empty fields combine to ", ").
-    fn from_network(&mut self, pairs: &[(Vec<u8>, Vec<u8>)]) {
+    // `filtered` a basic filtered response's (Fetch §2.2.6): its forbidden response-header names — the cookies — left out.
+    fn from_network(&mut self, pairs: &[(Vec<u8>, Vec<u8>)], filtered: bool) {
         for (name, value) in pairs {
             let key = name.to_ascii_lowercase();
+            if filtered && forbidden_response_header(&key) {
+                continue;
+            }
             if key == SET_COOKIE {
                 self.set_cookie.push(value.clone());
             } else if let Some(i) = self.find(&key) {
@@ -298,6 +302,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "headersCopy", copy_op, context_id);
     crate::dom::register(scope, ns, "headersFromNetwork", from_network_op, context_id);
     crate::dom::register(scope, ns, "headerValue", header_value_op, context_id);
+    crate::dom::register(scope, ns, "headersForXhr", for_xhr_op, context_id);
 }
 
 // A ByteString argument's bytes (a code unit past 0xFF, which no ByteString has, as 0xFF), and bytes as a string again.
@@ -401,7 +406,7 @@ fn copy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
         to.borrow_mut().copy_from(&from.borrow(), how == COPY_REFILL);
     }
 }
-// __dom.headersFromNetwork(list, [name, value …]): `HeaderList::from_network`.
+// __dom.headersFromNetwork(list, [name, value …], filtered): `HeaderList::from_network`.
 fn from_network_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) else { return };
     let mut pairs = Vec::new();
@@ -410,7 +415,18 @@ fn from_network_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         pairs.push((bytes(scope, n), bytes(scope, v)));
     }
     let Some(l) = list(scope, args.get(0)) else { return };
-    l.borrow_mut().from_network(&pairs);
+    l.borrow_mut().from_network(&pairs, args.get(2).boolean_value(scope));
+}
+// __dom.headersForXhr(list) -> XMLHttpRequest's getAllResponseHeaders() (XHR §3.6.5): the list sorted and combined, then
+// by the names byte-uppercased — what browsers compare, which ranks `_` and `~` after the letters — each
+// "name: value\r\n".
+fn for_xhr_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(l) = list(scope, args.get(0)) else { return };
+    let l = l.borrow();
+    let mut pairs = l.sorted();
+    pairs.sort_by_key(|&(n, _)| n.to_ascii_uppercase());
+    let text: Vec<u8> = pairs.iter().flat_map(|&(n, v)| [n, b": ", v, b"\r\n"].concat()).collect();
+    rv.set(string(scope, &text));
 }
 // __dom.headerValue(value) -> the value normalized, null for one that is none (`normalized_value`): what
 // XMLHttpRequest's setRequestHeader() takes.
