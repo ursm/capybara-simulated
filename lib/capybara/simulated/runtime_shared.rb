@@ -198,29 +198,30 @@ module Capybara
         # Client lifecycle mirrors scope→active-worker into Ruby so a navigation (fetched
         # Ruby-side before the destination realm's JS exists) can find its controlling SW.
         '__csim_swRegisterScope'      => ->(b, *a) { b.sw_register_scope(a[0], a[1]); nil },
-        # A live registration object exists at this scope (Register job success) — claim's
-        # longest-registration-wins must see it before any worker state exists.
-        '__csim_swNoteRegistered'     => ->(b, *a) { b.sw_note_registered(a[0]); nil },
+        # A Register job made the registration at this scope (its first worker evaluated) — claim's
+        # longest-registration-wins must see it before any worker state exists. Its number.
+        '__csim_swNoteRegistered'     => ->(b, *a) { b.sw_note_registered(a[0]) },
+        # A registration's versions `[installing, waiting, active]` (each a worker's handle or null) and setting one —
+        # what every realm's registration objects read — and a worker's `[script URL, type, state, registration]`.
+        '__csim_swVersions'           => ->(b, *a) { b.sw_versions(a[0]) },
+        '__csim_swSetVersion'         => ->(b, *a) { b.sw_set_version(a[0], a[1], a[2]) },
+        '__csim_swWorker'             => ->(b, *a) { b.sw_worker(a[0]) },
+        # Update Worker State and the Install's `updatefound`, which every realm's objects observe.
+        '__csim_swUpdateWorkerState'  => ->(b, *a) { b.sw_update_worker_state(a[0], a[1]) },
+        '__csim_swUpdateFound'        => ->(b, *a) { b.sw_update_found(a[0]) },
+        # The calling realm steps a worker's lifecycle — which ends with the realm (see sw_note_stepper).
+        '__csim_swNoteStepper'        => ->(b, *a) { b.sw_note_stepper(a[0], a[1]) },
         # The lifecycle reached 'activating': the scope's active worker exists but its
         # activate waitUntil hasn't settled — Handle Fetch parks functional events on it.
         '__csim_swNoteActivating'     => ->(b, *a) { b.sw_note_activating(a[0], a[1]); nil },
-        '__csim_swUnregisterScope'    => ->(b, *a) { b.sw_unregister_scope(a[0]); nil },
-        # unregister() parked its Clear Registration: the workers live on until no client is
-        # using the registration and no extended work is pending (see sw_note_uninstalling).
-        '__csim_swNoteUninstalling'   => ->(b, *a) { b.sw_note_uninstalling(a[0], a[1], a[2] || []); nil },
-        # The active worker handle at an EXACT scope (0 if none), so a register() from a realm with no
-        # local registration (a different iframe registering an already-active scope) can synthesize a
-        # registration reflecting the shared active worker instead of installing a duplicate.
+        # The Unregister job at a scope: whether the map held a registration there (see sw_unregister).
+        '__csim_swUnregister'         => ->(b, *a) { b.sw_unregister(a[0]) },
+        # The worker serving an EXACT scope (0 if none) — a service worker's own registration is live while it is one of
+        # its versions.
         '__csim_swActiveHandleForScope' => ->(b, *a) { b.sw_active_handle_for_scope(a[0]) },
-        # Every registration, `[scope, activeHandle, scriptURL]` in registration order, so a realm's getRegistration() /
-        # getRegistrations() see the origin's registrations as they are, whichever realm registered or unregistered them.
+        # Every registration a Register job made, `[id, scope]` in registration order — the registration map every
+        # realm's getRegistration() / getRegistrations() read.
         '__csim_swRegistrations'        => ->(b, *_a) { b.sw_registration_list },
-        # The committed script type at that scope — the synthesized registration's
-        # WorkerType (module SWs observed from a second realm).
-        '__csim_swScopeWorkerType'      => ->(b, *a) { b.sw_scope_worker_type(a[0]) },
-        # Whether a worker has reached 'activated' — false while its registration still activates it — for a realm
-        # minting a worker it never saw the lifecycle of (a frame a still-activating worker controls).
-        '__csim_swWorkerActivated'      => ->(b, *a) { b.sw_worker_activated?(a[0]) },
         # HTML "try activate" in one atomic verdict: may `candidate` (installed, in the waiting
         # slot) take over from `outgoing`? Extended work / controllees / skipWaiting are all
         # host state — see sw_may_activate? and sw-client.js scheduleLifecycle.

@@ -432,18 +432,20 @@ module Capybara
         # separate from the fetch deadline so a message wait and a fetch hold don't share a spent
         # budget. Reset once no message/broadcast reply is outstanding.
         @sw_msg_wait_deadline = nil
-        # SW navigation-interception state. The session's registrations live in the engine's
-        # registry (sw_registry.rs), partition `@sw_partition`: each scope's — whether a Register
-        # job made it (clients.claim()'s longest-registration-wins check runs against
-        # registrations, not workers: a longer scope merely REGISTERED, its first worker still
-        # installing, must already shield a client from a shorter scope's claim —
-        # claim-not-using-registration "longer-matched"), the worker activating it (Handle Fetch
-        # PARKS a functional event against such a registration until activation completes —
-        # fetch-waits-for-activate: a frame navigation defers its whole build, see
-        # frame_navigation_fetch / __csim_swRetryDeferredNavs, a subresource fetch queues on the
-        # worker record, see service_worker_controller_fetch / flush_sw_deferred_fetches), and the
-        # one active (so a navigation fetched Ruby-side — before the destination realm's JS
-        # exists — finds its controlling SW), its updateViaCache mode and navigation preload state.
+        # SW navigation-interception state. The session's registrations and service workers live in
+        # the engine's registry (sw_registry.rs), partition `@sw_partition`: each registration's
+        # versions (which every realm's registration objects read), whether a Register job made it
+        # (clients.claim()'s longest-registration-wins check runs against registrations, not
+        # workers: a longer scope merely REGISTERED, its first worker still installing, must
+        # already shield a client from a shorter scope's claim — claim-not-using-registration
+        # "longer-matched"), the worker activating it (Handle Fetch PARKS a functional event
+        # against such a registration until activation completes — fetch-waits-for-activate: a
+        # frame navigation defers its whole build, see frame_navigation_fetch /
+        # __csim_swRetryDeferredNavs, a subresource fetch queues on the worker record, see
+        # service_worker_controller_fetch / flush_sw_deferred_fetches), the one serving it (so a
+        # navigation fetched Ruby-side — before the destination realm's JS exists — finds its
+        # controlling SW), its updateViaCache mode and navigation preload state; and each worker's
+        # script URL, type and state.
         # A navigation fetch is awaited SYNCHRONOUSLY on `@sw_nav_outbox` (a dedicated queue, off
         # the general outbox) keyed by a NEGATIVE `@sw_nav_seq` id so it never mixes with
         # client-fetch replies.
@@ -459,10 +461,14 @@ module Capybara
         # clients.claim() events that arrived before their scope's worker was active in the registry
         # (activate→claim() races the client-side lifecycle) — buffered here, flushed by sw_register_scope.
         @sw_pending_claims = []
-        # Unregistered registrations whose Clear Registration is deferred: unregister only unmaps
-        # the scope, and the workers live on until no client is using the registration and no
-        # extended work is pending (see sw_note_uninstalling / try_clear_uninstalls).
+        # Unregistered registrations (their numbers) whose Clear Registration is deferred:
+        # unregister only unmaps the scope, and the workers live on until no client is using the
+        # registration and no extended work is pending (see sw_unregister / try_clear_uninstalls).
+        # `@sw_steppers`: worker handle → the realm stepping its lifecycle (the one whose register()
+        # or update() installed it — sw-client.js scheduleLifecycle), until it is activated or
+        # redundant; a realm discarded meanwhile ends it (abandon_lifecycles).
         @sw_pending_uninstalls = []
+        @sw_steppers           = {}
         @sw_nav_outbox    = Thread::Queue.new
         # Race-network-and-fetch-handler bookkeeping: [realm, fetch_id] →
         # {resp:, server_ms:, t0:} — the network leg's PRE-FETCHED response (run
@@ -4655,11 +4661,9 @@ module Capybara
         # script (+ its recorded imports — sw_note_import fills that map as the worker
         # evaluates). SW scripts are small; only service workers pay the retention.
         record[:script_body] = body if service
-        # The version's script TYPE — a SECOND realm synthesizing a registration for
-        # this scope must reflect it (sw_scope_worker_type): update()/re-register from
-        # there would otherwise parse-check module source as classic and respawn the
-        # module worker under 'classic'.
-        record[:script_type] = (script_type.to_s.empty? ? 'classic' : script_type.to_s) if service
+        # …and the registry's worker, its script URL and TYPE what every realm's ServiceWorker of it reflects (an
+        # update()/re-register from any realm parse-checks and respawns as its newest worker's type).
+        Native.sw_worker_new(@sw_partition, handle, target, script_type.to_s.empty? ? 'classic' : script_type.to_s) if service
         @workers[handle] = record
         thread = Thread.new do
           Thread.current.report_on_exception = false
@@ -4693,7 +4697,7 @@ module Capybara
             # worker's `self.registration.active` snapshot during its own install phase (registration-attribute's
             # newer worker) and what its navigation preload is keyed by. Resolved here, on the registry-owning
             # thread.
-            sw_prev_active: service && (ah = sw_actives[sw_scope.to_s]) && @workers[ah] ? {url: @workers[ah][:script_url], handle: ah} : nil
+            sw_prev_active: service && (ah = sw_serving[sw_scope.to_s]) && @workers[ah] ? {url: @workers[ah][:script_url], handle: ah} : nil
           )
         end
         # A nested spawn runs THIS method on a worker thread, so other threads can observe
@@ -5319,13 +5323,13 @@ module Capybara
       end
 
       # The active worker handle at an EXACT scope (0 if none) — see __csim_swActiveHandleForScope.
-      def sw_active_handle_for_scope(scope) = sw_actives[scope.to_s].to_i
+      def sw_active_handle_for_scope(scope) = sw_serving[scope.to_s].to_i
 
-      # The session's registrations (sw_registry.rs), `[scope, registered, activating, active]` in the order made — and
-      # the active and the activating worker of each scope that has one.
+      # The registrations the session's map holds (sw_registry.rs), `[scope, registered, activating, serving, id]` in the
+      # order made — and the worker serving and the one activating each scope that has one.
       private def sw_regs = Native.sw_registrations(@sw_partition)
-      private def sw_actives = sw_regs.each_with_object({}) {|(scope, _, _, active), out| out[scope] = active if active }
-      private def sw_activatings = sw_regs.each_with_object({}) {|(scope, _, activating, _), out| out[scope] = activating if activating }
+      private def sw_serving = sw_regs.each_with_object({}) {|(scope, _, _, serving), out| out[scope] = serving if serving }
+      private def sw_activatings = sw_regs.each_with_object({}) {|(scope, _, activating), out| out[scope] = activating if activating }
 
       # Whether a service worker's response `r` (its wire form) may answer a request in `mode` with `redirect` (Fetch
       # "HTTP fetch" step 5.5 — the engine's).
@@ -5333,36 +5337,68 @@ module Capybara
         Native.service_worker_response_allowed(mode.to_s, redirect, (r['type'] || 'default').to_s, r['redirected'] == true)
       end
 
-      # Every registration, `[scope, handle, script URL]` in the order they were registered — `handle` its active
-      # worker, one still activating too, 0 (and no URL) for one with none alive yet: see __csim_swRegistrations.
+      # Every registration a Register job made, `[id, scope]` in the order they were registered: see
+      # __csim_swRegistrations.
       def sw_registration_list
-        sw_regs.filter_map {|scope, registered, activating, active|
-          next unless registered
-
-          handle = activating || active
-          w      = handle && @workers[handle]
-          w&.dig(:thread)&.alive? ? [scope, handle, w[:script_url].to_s] : [scope, 0, '']
-        }
+        sw_regs.filter_map {|scope, registered, _activating, _serving, id| [id, scope] if registered }
       end
 
-      # The registration's committed script type at an EXACT scope — a realm
-      # synthesizing a registration object for a scope another realm registered
-      # (cross-realm register / a directly-wired controller) mirrors it into
-      # WorkerType so a later update()/re-register from that realm runs the
-      # right parse check and respawns under the right type.
-      def sw_scope_worker_type(scope)
-        h = sw_actives[scope.to_s].to_i
-        (h.positive? && @workers.dig(h, :script_type)) || 'classic'
+      # The registration `id`'s versions, `[installing, waiting, active]` (each a worker's handle, nil for none) — and
+      # setting one (`slot`: 'installing', 'waiting' or 'active').
+      def sw_versions(id) = Native.sw_versions(@sw_partition, id.to_i).to_a
+
+      def sw_set_version(id, slot, handle)
+        Native.sw_set_version(@sw_partition, id.to_i, slot.to_s, handle&.to_i&.nonzero?)
+        nil
       end
 
-      # Whether the worker `handle` has reached 'activated': false only while a registration still activates it (its
-      # activated marker not yet processed).
-      def sw_worker_activated?(handle)
-        h = handle.to_i
-        return true unless sw_activatings.value?(h)
+      # The service worker `handle`, `[script URL, type, state, registration]` (the registration's number, 0 before one
+      # holds it), nil for none.
+      def sw_worker(handle) = Native.sw_worker(@sw_partition, handle.to_i)&.to_a
 
-        w = @workers[h]
-        !w || @worker_init_lock.synchronize { w[:sw_activated] } ? true : false
+      # The realm `realm_id` steps the lifecycle of the worker `handle` (see @sw_steppers).
+      def sw_note_stepper(handle, realm_id)
+        @sw_steppers[handle.to_i] = realm_id.to_i
+        nil
+      end
+
+      # Update Worker State: the worker `handle` in `state`, which every realm's ServiceWorker of it takes, its
+      # `statechange` fired (and, activated, a client it now controls has its `ready`).
+      def sw_update_worker_state(handle, state)
+        @sw_steppers.delete(handle.to_i) if %w[activated redundant].include?(state.to_s)
+        broadcast_to_realms('__csim_swWorkerStateChanged', handle.to_i, state.to_s) if Native.sw_set_worker_state(@sw_partition, handle.to_i, state.to_s)
+        nil
+      end
+
+      # The lifecycles a discarded realm was stepping end with it: a worker it left installing or installed is
+      # redundant and out of its registration — which, left with no version, is unregistered — and its isolate ended,
+      # so another realm's register() or update() at the scope does not wait on an install no one finishes. (One it
+      # left activating stays so: the host already routes to it.)
+      private def abandon_lifecycles(realm_id)
+        orphans = @sw_steppers.select {|_h, rid| rid == realm_id.to_i }.keys
+        orphans.each do |h|
+          @sw_steppers.delete(h)
+          worker = sw_worker(h)
+          next unless worker && %w[installing installed].include?(worker[2])
+
+          id = worker[3]
+          %w[installing waiting active].zip(sw_versions(id)).each do |slot, v|
+            sw_set_version(id, slot, nil) if v == h
+          end
+          sw_update_worker_state(h, 'redundant')
+          worker_terminate(h)
+          next if sw_versions(id).any?
+
+          scope, = sw_regs.find {|*, rid| rid == id }
+          sw_unregister(scope) if scope
+        end
+        nil
+      end
+
+      # A worker is installing the registration `id`: every realm's registration object of it fires `updatefound`.
+      def sw_update_found(id)
+        broadcast_to_realms('__csim_swRegistrationUpdateFound', id.to_i)
+        nil
       end
 
       # Does `handle` still control any client? HTML's "try activate" holds an installed worker in
@@ -5378,22 +5414,15 @@ module Capybara
         # the handover. Matching by URL is also what makes the verdict DETERMINISTIC —
         # the per-client controller handle is re-reported by realms and can transiently
         # read stale (the activation.https flake), while the URL and the scope are not.
-        scope = sw_actives.key(h)
+        scope = sw_serving.key(h)
         return @sw_clients.any? {|_id, entry| entry[:handle] == h } unless scope
 
         @sw_clients.any? {|_id, entry| entry[:handle] == h || sw_scope_match(entry[:rec]['url'])&.last == scope }
       end
 
-      # Mirror a registration's active-worker handle into Ruby, keyed by its (serialized) scope.
-      # Emitted by the client lifecycle at activation; survives rebuild_ctx so a navigation can
-      # find its controlling SW even after the destination realm's JS was rebuilt.
-      # A realm created a live registration object for this scope (Register job success —
-      # register() resolving, or a cross-realm registration synthesized from an existing
-      # active worker). Idempotent; undone by sw_unregister_scope.
-      def sw_note_registered(scope)
-        Native.sw_note_registered(@sw_partition, scope.to_s)
-        nil
-      end
+      # A Register job made the registration at `scope` (its first worker evaluated): its number. Idempotent; undone by
+      # sw_unregister.
+      def sw_note_registered(scope) = Native.sw_note_registered(@sw_partition, scope.to_s)
 
       # The client-side lifecycle reached 'activating' for this registration: the active
       # worker EXISTS from here on (Handle Fetch can find it), but its activate handler's
@@ -5471,8 +5500,7 @@ module Capybara
         # register()-time note, synthesized cross-realm ones)
         fresh = Native.sw_activated(@sw_partition, scope.to_s, handle.to_i)
         seed_client_mirror(handle.to_i) if fresh
-        # Every realm's registration object at the scope takes the new active worker — another realm's update
-        # activated it (the registration is the origin's; its objects are per realm).
+        # Every realm's client the registration controls takes the new worker as its controller (Activate).
         if (w = @workers[handle.to_i])
           broadcast_to_realms('__csim_swRegistrationActivated', scope.to_s, handle.to_i, w[:script_url].to_s, sw_interception_worthy?(w))
         end
@@ -5548,7 +5576,7 @@ module Capybara
         # candidate; comparing against the active registrations alone lets a shorter scope's
         # claim transiently seize a client the longer one matches
         # (claim-not-using-registration under CI load).
-        candidate_scopes = sw_regs.filter_map {|s, registered, activating, active| s if registered || activating || active } | [scope.to_s]
+        candidate_scopes = sw_regs.filter_map {|s, registered, activating, serving| s if registered || activating || serving } | [scope.to_s]
         @sw_clients.each do |_id, entry|
           u       = entry[:rec]['url'].to_s
           matched = candidate_scopes.select {|s| u.start_with?(s) }.max_by(&:length)
@@ -5597,38 +5625,31 @@ module Capybara
         scope ? Native.sw_navigation_preload(@sw_partition, scope.to_s).first : false
       end
 
-      def sw_unregister_scope(scope)
-        # (…its mode and navigation preload state with it: a registration made at the scope later is a new one)
-        Native.sw_unregister(@sw_partition, scope.to_s)
+      # The Unregister job at `scope` — a client's `registration.unregister()`, the service worker's own, or a Register
+      # job whose only version failed to install: the registration out of the map (its mode and navigation preload
+      # state with it: a registration made at the scope later is a new one), which every realm's registration object
+      # of it sees at once. Its Clear Registration is parked (spec "Try Clear Registration"): the workers stay live —
+      # an existing controllee keeps its controller and interception — until no client is USING the registration
+      # (controller == its active worker) and none of its workers has pending extended work. The verdict is host
+      # state, so the clear rides the same wakeup invariant as the activation gate: every hold-clearing transition
+      # (client teardown, extended drain, message dispatch, worker reap) funnels through unregister_client / the
+      # try_activate delivery point, and both re-run this check. Whether the map held one.
+      def sw_unregister(scope)
+        id = Native.sw_unregister(@sw_partition, scope.to_s)
         @sw_scope_meta.delete(scope.to_s)
+        @sw_pending_uninstalls << id if id
+        try_clear_uninstalls
         # A navigation parked on this scope's activation must not wait forever for an
         # activated marker that now never comes — replay it against the network.
         retry_deferred_navigations
-        nil
-      end
-
-      # An unregistered registration parked its Clear Registration here (spec "Try Clear
-      # Registration"): the workers stay live — an existing controllee keeps its controller
-      # and interception — until no client is USING the registration (controller == its
-      # active worker) and none of its workers has pending extended work. The verdict is
-      # host state, so the clear rides the same wakeup invariant as the activation gate:
-      # every hold-clearing transition (client teardown, extended drain, message dispatch,
-      # worker reap) funnels through unregister_client / the try_activate delivery point,
-      # and both re-run this check.
-      # `key` is the realm's uninstallingRegs map key, echoed back verbatim in the clear
-      # broadcast (an installing-only registration has no active handle to key by).
-      def sw_note_uninstalling(key, active_handle, handles)
-        @sw_pending_uninstalls << {key: key.to_i, active: active_handle.to_i, handles: handles.map(&:to_i)}
-        try_clear_uninstalls
-        nil
+        !id.nil?
       end
 
       # A service worker's own `registration.unregister()` (rode the outbox as
-      # 'sw_unregister'). Same job as the client-side call: unmap the scope host-side,
-      # tell every realm to drop its registration object and start the deferred
-      # uninstall, and answer the worker's parked promise with the had-status. A worker
+      # 'sw_unregister'). Same job as the client-side call (sw_unregister), the promise
+      # parked in the worker answered with the had-status. A worker
       # whose eval outcome hasn't been DELIVERED yet (a top-level unregister drained
-      # ahead of its 'sw_eval') has no realm objects to drop — buffer on the record and
+      # ahead of its 'sw_eval') has no registration yet to unregister — buffer on the record and
       # replay after the outcome lands (deliver_worker_messages). A worker whose
       # sw_eval was DEAD-LETTERED (parked-window outbox teardown) never replays —
       # deliberately matching the dead-letter semantics of its realm's equally
@@ -5647,14 +5668,10 @@ module Capybara
           return
         end
         scope = w[:sw_scope].to_s
-        scope = sw_actives.key(handle) if scope.empty?
-        had   = !scope.to_s.empty? && (sw_regs.any? {|s, *| s == scope } || @sw_scope_meta.key?(scope))
-        if had
-          sw_unregister_scope(scope)
-          broadcast_to_realms('__csim_swScopeUnregistered', scope)
-        end
+        scope = sw_serving.key(handle) if scope.empty?
+        had   = !scope.to_s.empty? && sw_unregister(scope)
         # The reply may never be consumed: an uncontrolled registration's uninstall
-        # clears IMMEDIATELY inside the broadcast above, terminating this very worker —
+        # clears IMMEDIATELY inside sw_unregister, terminating this very worker —
         # the promise dies with the isolate, like a real terminated worker's.
         (wk = @workers[handle]) && wk[:inbox] << {kind: 'unregister_result', ok: had}
         nil
@@ -5665,21 +5682,25 @@ module Capybara
       # client departs (records are only pruned on client teardown / the last-worker
       # reset) — bounded by the client's lifetime, and nothing outside try_clear itself
       # kills an uninstalling registration's worker today.
-      private def sw_registration_clearable?(entry)
-        return false if entry[:active].positive? && @sw_clients.any? {|_id, e| e[:handle] == entry[:active] }
+      private def sw_registration_clearable?(id)
+        *, active = versions = sw_versions(id)
+        return false if active && @sw_clients.any? {|_id, e| e[:handle] == active }
 
-        entry[:handles].none? {|h| sw_worker_extended?(h) }
+        versions.compact.none? {|h| sw_worker_extended?(h) }
       end
 
       private def try_clear_uninstalls
         return if @sw_pending_uninstalls.empty?
 
-        ready, @sw_pending_uninstalls = @sw_pending_uninstalls.partition {|e| sw_registration_clearable?(e) }
-        ready.each do |e|
-          # Realm side first (workers go redundant, slots empty — statechange fires from
-          # still-wired objects), then the isolates die host-side.
-          broadcast_to_realms('__csim_swClearRegistration', e[:key])
-          e[:handles].each {|h| worker_terminate(h) }
+        ready, @sw_pending_uninstalls = @sw_pending_uninstalls.partition {|id| sw_registration_clearable?(id) }
+        ready.each do |id|
+          # Clear Registration: the versions emptied, then each worker redundant in every realm — a `statechange`
+          # listener already finds the registration empty, as in Chrome (each realm runs its microtasks after each
+          # broadcast, so a later emptying would be seen half done) — then the isolates ended.
+          handles = sw_versions(id).compact.uniq
+          Native.sw_clear_registration(@sw_partition, id)
+          handles.each {|h| sw_update_worker_state(h, 'redundant') }
+          handles.each {|h| worker_terminate(h) }
         end
         nil
       end
@@ -5813,7 +5834,7 @@ module Capybara
         end
         best = nil
         best_len = -1
-        sw_actives.each do |scope, handle|
+        sw_serving.each do |scope, handle|
           next unless u.start_with?(scope) && scope.length > best_len
 
           best     = [handle, scope]
@@ -5935,7 +5956,7 @@ module Capybara
         w = @workers[handle]
         return nil unless w&.dig(:thread)&.alive?
 
-        [handle, sw_interception_worthy?(w), w[:script_url].to_s, sw_actives.key(handle).to_s]
+        [handle, sw_interception_worthy?(w), w[:script_url].to_s, sw_serving.key(handle).to_s]
       end
 
       # Every live service worker's handle. A service-worker client belongs to the ORIGIN, not
@@ -6112,6 +6133,7 @@ module Capybara
       # matchAll stops returning a dead client. No-op for an unregistered realm.
       def sw_unregister_client(realm_id)
         unregister_client(sw_client_id(realm_id))
+        abandon_lifecycles(realm_id)
         # Prune the disposed realm's adopted-id alias AFTER the record removal consumed it
         # (sw_client_id above resolves through the alias). Realm ids are never reused
         # (rusty's per-isolate counter is monotonic), so a stale pair is only growth —
@@ -6129,12 +6151,14 @@ module Capybara
           w = @workers[h] or next
           w[:inbox] << {kind: 'client_unregister', id: client_id}
         end
+        # The departed client may have been the last one USING an unregistered registration — cleared
+        # before anything activates (Handle Service Worker Client Unload: Try Clear Registration, then
+        # Try Activate), so an unregistered registration's waiting worker goes redundant, not active.
+        try_clear_uninstalls
         # Losing a controllee can be what finally lets a worker parked in `waiting` activate (the
         # non-skipWaiting half of "try activate"). Gated on a realm having actually parked one, so
         # the ordinary client-churn path stays free of a per-unregister broadcast (rule 3).
         broadcast_to_realms('__csim_swTryActivate') if @sw_activation_parked
-        # The departed client may have been the last one USING an unregistered registration.
-        try_clear_uninstalls
         nil
       end
 
@@ -6324,7 +6348,7 @@ module Capybara
       # navigation can actually be routed to (Driver#sw_navigation_fetch dedup +
       # parked-browser reclaim read this).
       def sw_live_scopes
-        sw_actives.select {|_scope, h| @workers[h]&.[](:thread)&.alive? }.keys
+        sw_serving.select {|_scope, h| @workers[h]&.[](:thread)&.alive? }.keys
       end
 
       # Whether this browser still hosts a live service-worker registration — a closing
@@ -6924,7 +6948,7 @@ module Capybara
         # An ACTIVATING worker's claim applies immediately too (claim is valid from state
         # 'activating'; fetch-waits-for-activate claims mid-activate and expects the client
         # controlled — its fetches then park on the activation, not the claim).
-        actives, activatings = sw_actives, sw_activatings
+        actives, activatings = sw_serving, sw_activatings
         claims.map {|e| [e, actives.key(e[:handle].to_i) || activatings.key(e[:handle].to_i)] }
               .sort_by {|_e, scope| -(scope ? scope.length : -1) }
               .each do |e, scope|
@@ -6968,9 +6992,10 @@ module Capybara
         # A worker's extended-lifetime work drained to 0 — a successor parked in
         # `waiting` may now activate (the waitUntil half of "try activate"; the
         # controllee half fires from unregister_client). Same parked gate (rule 3).
-        broadcast_to_realms('__csim_swTryActivate') if try_acts.any? && @sw_activation_parked
-        # The drained work may also have been the last hold on a deferred unregister's clear.
+        # The drained work may have been the last hold on a deferred unregister's clear — cleared
+        # first, as at a client's unload (unregister_client).
         try_clear_uninstalls if try_acts.any?
+        broadcast_to_realms('__csim_swTryActivate') if try_acts.any? && @sw_activation_parked
         # A worker's port → the other end of its channel: a realm's, a worker's, or none yet (held for it —
         # a client decodes a transferred port in the sw_client_msg processed just below).
         port_msgs.each {|e| port_post(e[:end], e[:data]) }
@@ -8018,6 +8043,7 @@ module Capybara
         # set would make every later SW message drain broadcast a try-activate forever.
         @sw_activation_parked = false
         @sw_pending_uninstalls = []
+        @sw_steppers           = {}
         @worker_outbox.clear
         @worker_outbox_head       = nil
         @worker_in_flight         = 0
@@ -8441,7 +8467,7 @@ module Capybara
         # route through the SW (__csimSWControllerHandle > 0) — the same pre-load wiring a
         # controlled frame realm gets (create_frame_realm).
         if !service && controller.to_i.positive? && (cw = @workers[controller.to_i])
-          rt.call('__csim_swSetControllerDirect', controller.to_i, sw_interception_worthy?(cw), cw[:script_url].to_s, sw_actives.key(controller.to_i).to_s)
+          rt.call('__csim_swSetControllerDirect', controller.to_i, sw_interception_worthy?(cw), cw[:script_url].to_s, sw_serving.key(controller.to_i).to_s)
         end
         # Set the worker's `self.location.href` so webpack /
         # rollup public-path derivation + `new URL(rel, import.meta.url)`
@@ -8512,7 +8538,7 @@ module Capybara
             if final_ctrl != controller.to_i
               controller = final_ctrl
               if controller.positive? && (cw = @workers[controller])
-                rt.call('__csim_swSetControllerDirect', controller, sw_interception_worthy?(cw), cw[:script_url].to_s, sw_actives.key(controller).to_s)
+                rt.call('__csim_swSetControllerDirect', controller, sw_interception_worthy?(cw), cw[:script_url].to_s, sw_serving.key(controller).to_s)
               end
             end
             # Refresh the host-owned client record (URL + controller) and re-mirror it to
@@ -11148,6 +11174,8 @@ module Capybara
         # numbered fetch with the old page's response.
         reset_sw_race_state
         terminate_document_workers
+        # …and the service-worker lifecycles it was stepping end with it (the main realm is 0, which the next page reuses).
+        abandon_lifecycles(0)
         drop_document_websockets
         # (…an about:blank document's its creator's — the document that navigated to it, or a pop-up's opener: it takes
         # its creator's policy container, the policies with it)

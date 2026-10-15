@@ -198,9 +198,15 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_clear", magnus::function!(sw_registry::clear_for_ruby, 1))?;
     native.define_module_function("sw_registrations", magnus::function!(sw_registry::registrations_for_ruby, 1))?;
     native.define_module_function("sw_note_registered", magnus::function!(sw_registry::note_registered_for_ruby, 2))?;
+    native.define_module_function("sw_versions", magnus::function!(sw_registry::versions_for_ruby, 2))?;
+    native.define_module_function("sw_set_version", magnus::function!(sw_registry::set_version_for_ruby, 4))?;
+    native.define_module_function("sw_worker_new", magnus::function!(sw_registry::worker_new_for_ruby, 4))?;
+    native.define_module_function("sw_worker", magnus::function!(sw_registry::worker_for_ruby, 2))?;
+    native.define_module_function("sw_set_worker_state", magnus::function!(sw_registry::set_worker_state_for_ruby, 3))?;
     native.define_module_function("sw_note_activating", magnus::function!(sw_registry::note_activating_for_ruby, 3))?;
     native.define_module_function("sw_activated", magnus::function!(sw_registry::activated_for_ruby, 3))?;
     native.define_module_function("sw_unregister", magnus::function!(sw_registry::unregister_for_ruby, 2))?;
+    native.define_module_function("sw_clear_registration", magnus::function!(sw_registry::clear_registration_for_ruby, 2))?;
     native.define_module_function("sw_forget_worker", magnus::function!(sw_registry::forget_worker_for_ruby, 2))?;
     native.define_module_function("sw_forget_activating", magnus::function!(sw_registry::forget_activating_for_ruby, 2))?;
     native.define_module_function("sw_update_via_cache", magnus::function!(sw_registry::update_via_cache_for_ruby, 2))?;

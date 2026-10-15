@@ -5301,6 +5301,8 @@ service-workers/service-worker/ServiceWorkerGlobalScope/extendable-message-event
 - Post an extendable message from a top-level client
 - Post extendable messages among service workers
 - "[harness] TIMEOUT"
+service-workers/service-worker/ServiceWorkerGlobalScope/fetch-on-the-right-interface.https.any.js:
+- Fetch method on the right interface
 service-workers/service-worker/ServiceWorkerGlobalScope/postmessage.https.html:
 - Post messages among service workers
 - "[harness] TIMEOUT"
@@ -5320,8 +5322,6 @@ service-workers/service-worker/add-routes.https.html:
 - addRoutes() will not be executed outside of installing
 service-workers/service-worker/claim-using-registration.https.html:
 - Test for the waiting worker claims a client which is using the same registration
-service-workers/service-worker/claim-with-redirect.https.html:
-- Claim works after redirection to another origin
 service-workers/service-worker/claim-worker-fetch.https.html:
 - "[harness] TIMEOUT"
 - fetch() in blob URL Worker should be intercepted after the client is claimed.
@@ -5411,6 +5411,9 @@ service-workers/service-worker/fetch-request-css-images.https.html:
 - Verify FetchEvent for css image-set (backgroundImage).
 - Verify FetchEvent for css image-set (shapeOutside).
 - "[harness] TIMEOUT"
+service-workers/service-worker/fetch-request-xhr-sync-error.https.window.js:
+- Verify synchronous XMLHttpRequest always throws a NetworkError for ReadableStream
+  errors
 service-workers/service-worker/fetch-request-xhr-sync-on-worker.https.html:
 - Verify SyncXHR on Worker is intercepted
 service-workers/service-worker/fetch-request-xhr-sync.https.html:
@@ -5431,9 +5434,6 @@ service-workers/service-worker/local-url-inherit-controller.https.html:
 - Same-origin blob URL iframe should intercept fetch().
 - Same-origin blob URL sharedworker should inherit service worker controller.
 - Same-origin blob URL sharedworker should intercept fetch().
-service-workers/service-worker/multi-globals/url-parsing.https.html:
-- getRegistration should use the relevant global of the object it was called on to
-  resolve the script URL
 service-workers/service-worker/multipart-image.https.html:
 - cross-origin multipart image via SW with approved CORS should be readable
 - cross-origin multipart image with no-cors via SW should not be readable
@@ -5471,6 +5471,14 @@ service-workers/service-worker/nested-blob-url-workers.https.html:
 service-workers/service-worker/next-hop-protocol.https.html:
 - nextHopProtocol reports H1 correctly when routed via a service worker.
 - nextHopProtocol reports H2 correctly when routed via a service worker.
+service-workers/service-worker/no-dynamic-import-in-module.any.js:
+- Another module URL
+- Module URL
+- 'Module data: URL'
+service-workers/service-worker/no-dynamic-import.any.js:
+- Another module URL
+- Module URL
+- 'Module data: URL'
 service-workers/service-worker/opaque-response-preloaded.https.html:
 - Opaque responses should not be reused for XHRs, done case
 - Opaque responses should not be reused for XHRs, loading case

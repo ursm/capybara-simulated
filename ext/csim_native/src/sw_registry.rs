@@ -1,28 +1,89 @@
 // Service workers' registrations (Service Workers §2.2), one registry for the process: each driver browsing session's
-// its own partition, in which a registration is named by its scope — whether a Register job made it (a registration
-// object exists, its first worker maybe still installing), the worker that is activating it and the one that is
-// active (each a worker's handle), its updateViaCache mode and its navigation preload state ({enabled, header value},
-// which survives an update). The host reads it to route a navigation to its controller and to settle claims, the
-// clients' registration objects read it, each in the order the registrations were made.
+// its own partition, holding its registrations and the service workers they are made of.
+//
+// A registration is named by a number, and the registration MAP names it by its scope: from a Register job's first
+// step until an unregister takes it out of the map — which leaves the registration itself in place, its versions
+// running for the clients still using it, until it is cleared. Each holds its versions (the installing, waiting and
+// active worker, each a worker's handle), whether a Register job made it (one only its updateViaCache mode was set on
+// is the job's, not yet a registration a client sees), its updateViaCache mode and its navigation preload state
+// ({enabled, header value}, which survives an update) — and, for the host, the worker it routes a navigation to
+// (`serving`: its active worker once that is activated, until it dies) and the one it parks a fetch on while it
+// activates (`activating`). A worker is its script's URL, its type, its state and the registration it is a version of.
+//
+// The host reads it to route a navigation to its controller and to settle claims, every realm's registration and
+// ServiceWorker objects read it — one registration seen alike wherever a client looks at it.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
 #[derive(Default)]
 pub(crate) struct Registration {
+    id: u32,
     scope: String,
+    mapped: bool,
     registered: bool,
-    activating: Option<u32>,
+    installing: Option<u32>,
+    waiting: Option<u32>,
     active: Option<u32>,
+    activating: Option<u32>,
+    serving: Option<u32>,
     update_via_cache: Option<String>,
     preload_enabled: Option<bool>,
     preload_header: Option<String>,
 }
 
+impl Registration {
+    fn versions(&self) -> [Option<u32>; 3] {
+        [self.installing, self.waiting, self.active]
+    }
+    // …its workers, each once, the installing one first.
+    fn workers(&self) -> Vec<u32> {
+        let mut handles = Vec::new();
+        for h in self.versions().into_iter().flatten() {
+            if !handles.contains(&h) {
+                handles.push(h);
+            }
+        }
+        handles
+    }
+    fn slot(&mut self, slot: &str) -> Option<&mut Option<u32>> {
+        match slot {
+            "installing" => Some(&mut self.installing),
+            "waiting" => Some(&mut self.waiting),
+            "active" => Some(&mut self.active),
+            _ => None,
+        }
+    }
+}
+
+struct Worker {
+    script_url: String,
+    script_type: String,
+    state: String,
+    registration: u32,
+}
+
+#[derive(Default)]
+struct Partition {
+    registrations: Vec<Registration>,
+    workers: HashMap<u32, Worker>,
+}
+
+impl Partition {
+    // The registration the map holds at `scope`.
+    fn mapped(&mut self, scope: &str) -> Option<&mut Registration> {
+        self.registrations.iter_mut().find(|r| r.mapped && r.scope == scope)
+    }
+    fn by_id(&mut self, id: u32) -> Option<&mut Registration> {
+        self.registrations.iter_mut().find(|r| r.id == id)
+    }
+}
+
 #[derive(Default)]
 struct Registry {
-    partitions: HashMap<u64, Vec<Registration>>,
+    partitions: HashMap<u64, Partition>,
     next_partition: u64,
+    next_registration: u32,
 }
 
 static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(|| Mutex::new(Registry::default()));
@@ -32,32 +93,33 @@ fn lock() -> MutexGuard<'static, Registry> {
 }
 
 impl Registry {
-    // The registrations of `partition` — none for one gone (a reap or a read after its session ended makes it no
-    // entry).
-    fn list(&self, partition: u64) -> &[Registration] {
-        self.partitions.get(&partition).map_or(&[], Vec::as_slice)
+    fn partition(&mut self, partition: u64) -> &mut Partition {
+        self.partitions.entry(partition).or_default()
     }
-    fn list_mut(&mut self, partition: u64) -> &mut [Registration] {
-        self.partitions.get_mut(&partition).map_or(&mut [], Vec::as_mut_slice)
+    // …one already made: none for a session gone (a reap or a read after it ended makes it no partition again).
+    fn existing(&mut self, partition: u64) -> Option<&mut Partition> {
+        self.partitions.get_mut(&partition)
     }
-    // The registration at `scope`, made where there is none.
+    // The registration the map holds at `scope`, made (and mapped) where it holds none.
     fn at(&mut self, partition: u64, scope: &str) -> &mut Registration {
-        let list = self.partitions.entry(partition).or_default();
-        let i = match list.iter().position(|r| r.scope == scope) {
-            Some(i) => i,
+        let id = match self.partition(partition).mapped(scope).map(|r| r.id) {
+            Some(id) => id,
             None => {
-                list.push(Registration { scope: scope.to_owned(), ..Registration::default() });
-                list.len() - 1
+                self.next_registration += 1;
+                let id = self.next_registration;
+                let registration = Registration { id, scope: scope.to_owned(), mapped: true, ..Registration::default() };
+                self.partition(partition).registrations.push(registration);
+                id
             }
         };
-        &mut list[i]
+        self.partition(partition).by_id(id).expect("just found or made")
     }
     // …which a Register job made: one made earlier only to hold its job's updateViaCache mode takes its place in the
     // registration order now, as the registration it then becomes (the job of one that failed left it behind).
     fn registered(&mut self, partition: u64, scope: &str) -> &mut Registration {
-        self.at(partition, scope);
-        let list = self.partitions.get_mut(&partition).expect("just made");
-        let mut i = list.iter().position(|r| r.scope == scope).expect("just made");
+        let id = self.at(partition, scope).id;
+        let list = &mut self.partition(partition).registrations;
+        let mut i = list.iter().position(|r| r.id == id).expect("just made");
         if !list[i].registered {
             let r = list.remove(i);
             list.push(r);
@@ -75,57 +137,118 @@ pub(crate) fn partition_new_for_ruby() -> u64 {
     reg.next_partition += 1;
     reg.next_partition
 }
-// A session's registrations gone (its storage cleared, or the session ended).
+// A session's registrations and workers gone (its storage cleared, or the session ended).
 pub(crate) fn clear_for_ruby(partition: u64) {
     lock().partitions.remove(&partition);
 }
-// Every registration of `partition`, in the order made: `[scope, registered, activating, active]`, a handle nil for none.
-pub(crate) fn registrations_for_ruby(partition: u64) -> Vec<(String, bool, Option<u32>, Option<u32>)> {
-    lock().list(partition).iter().map(|r| (r.scope.clone(), r.registered, r.activating, r.active)).collect()
+// Every registration the map of `partition` holds, in the order made: `[scope, registered, activating, serving, id]`, a
+// handle nil for none.
+pub(crate) fn registrations_for_ruby(partition: u64) -> Vec<(String, bool, Option<u32>, Option<u32>, u32)> {
+    let mut reg = lock();
+    let Some(p) = reg.existing(partition) else { return Vec::new() };
+    p.registrations.iter().filter(|r| r.mapped).map(|r| (r.scope.clone(), r.registered, r.activating, r.serving, r.id)).collect()
 }
-// A Register job made the registration at `scope`.
-pub(crate) fn note_registered_for_ruby(partition: u64, scope: String) {
-    lock().registered(partition, &scope);
+// A Register job made the registration at `scope`: its number.
+pub(crate) fn note_registered_for_ruby(partition: u64, scope: String) -> u32 {
+    lock().registered(partition, &scope).id
+}
+// The registration `id`'s versions, `[installing, waiting, active]` — none for a registration gone.
+pub(crate) fn versions_for_ruby(partition: u64, id: u32) -> (Option<u32>, Option<u32>, Option<u32>) {
+    let [installing, waiting, active] = lock().existing(partition).and_then(|p| p.by_id(id)).map_or([None; 3], |r| r.versions());
+    (installing, waiting, active)
+}
+// Its `slot` ("installing", "waiting" or "active") set to the worker `handle` — a version of it from then on — or
+// emptied.
+pub(crate) fn set_version_for_ruby(partition: u64, id: u32, slot: String, handle: Option<u32>) {
+    let mut reg = lock();
+    let Some(p) = reg.existing(partition) else { return };
+    if let Some(s) = p.by_id(id).and_then(|r| r.slot(&slot)) {
+        *s = handle;
+    }
+    if let Some(w) = handle.and_then(|h| p.workers.get_mut(&h)) {
+        w.registration = id;
+    }
+}
+// A service worker of the session, spawned: its script's URL and type, 'parsed' until a registration holds it.
+pub(crate) fn worker_new_for_ruby(partition: u64, handle: u32, script_url: String, script_type: String) {
+    let worker = Worker { script_url, script_type, state: "parsed".to_owned(), registration: 0 };
+    lock().partition(partition).workers.insert(handle, worker);
+}
+// The worker `handle`: `[script URL, type, state, registration]` (0 for none yet), nil for none.
+pub(crate) fn worker_for_ruby(partition: u64, handle: u32) -> Option<(String, String, String, u32)> {
+    let mut reg = lock();
+    let w = reg.existing(partition)?.workers.get(&handle)?;
+    Some((w.script_url.clone(), w.script_type.clone(), w.state.clone(), w.registration))
+}
+// …its state moved to `state`: whether that is a change.
+pub(crate) fn set_worker_state_for_ruby(partition: u64, handle: u32, state: String) -> bool {
+    let mut reg = lock();
+    let Some(w) = reg.existing(partition).and_then(|p| p.workers.get_mut(&handle)) else { return false };
+    let changed = w.state != state;
+    w.state = state;
+    changed
 }
 // The worker `handle` is activating the registration at `scope`.
 pub(crate) fn note_activating_for_ruby(partition: u64, scope: String, handle: u32) {
     lock().at(partition, &scope).activating = Some(handle);
 }
-// …and it is active: whether no other registration had it active already (a worker new to the registry).
+// …and it is activated, the worker its navigations route to: whether no other registration had it already (a worker
+// new to the host's routing).
 pub(crate) fn activated_for_ruby(partition: u64, scope: String, handle: u32) -> bool {
     let mut reg = lock();
-    let fresh = !reg.list(partition).iter().any(|r| r.active == Some(handle));
+    let fresh = !reg.partition(partition).registrations.iter().any(|r| r.serving == Some(handle));
     let r = reg.registered(partition, &scope);
-    r.active = Some(handle);
+    r.serving = Some(handle);
     r.activating = None;
     fresh
 }
-// The registration at `scope` unregistered — gone from the map, its mode and navigation preload with it: whether there
-// was one.
-pub(crate) fn unregister_for_ruby(partition: u64, scope: String) -> bool {
+// The registration at `scope` unregistered — out of the map, its mode and navigation preload with it: its number, nil
+// where the map held none. One with no version left is gone at once; another stays until it is cleared.
+pub(crate) fn unregister_for_ruby(partition: u64, scope: String) -> Option<u32> {
     let mut reg = lock();
-    let Some(list) = reg.partitions.get_mut(&partition) else { return false };
-    let before = list.len();
-    list.retain(|r| r.scope != scope);
-    list.len() != before
+    let p = reg.existing(partition)?;
+    let r = p.mapped(&scope)?;
+    r.mapped = false;
+    let id = r.id;
+    if r.workers().is_empty() {
+        p.registrations.retain(|r| r.id != id);
+    }
+    Some(id)
 }
-// A worker gone: no registration has it active any more — at once, from whichever thread reaped it, so a navigation is
-// routed to it no more.
+// Clear Registration: the registration `id`'s versions emptied — and it gone, where the map no longer holds it.
+pub(crate) fn clear_registration_for_ruby(partition: u64, id: u32) {
+    let mut reg = lock();
+    let Some(p) = reg.existing(partition) else { return };
+    let Some(r) = p.by_id(id) else { return };
+    r.installing = None;
+    r.waiting = None;
+    r.active = None;
+    if !r.mapped {
+        p.registrations.retain(|r| r.id != id);
+    }
+}
+// The registrations of a session made already (none for one gone).
+fn registrations_mut(reg: &mut Registry, partition: u64) -> &mut [Registration] {
+    reg.existing(partition).map_or(&mut [], |p| p.registrations.as_mut_slice())
+}
+// A worker gone: no registration routes a navigation to it any more — at once, from whichever thread reaped it. (Its
+// record stays, for the session: a client it controlled is still matched to its registration by it, as Activate moves
+// the client on.)
 pub(crate) fn forget_worker_for_ruby(partition: u64, handle: u32) {
-    for r in lock().list_mut(partition).iter_mut().filter(|r| r.active == Some(handle)) {
-        r.active = None;
+    for r in registrations_mut(&mut lock(), partition).iter_mut().filter(|r| r.serving == Some(handle)) {
+        r.serving = None;
     }
 }
 // …and one that never reached activated activates no registration any more — forgotten on the main thread, after the
 // reap (a claim it made in between still finds its scope).
 pub(crate) fn forget_activating_for_ruby(partition: u64, handle: u32) {
-    for r in lock().list_mut(partition).iter_mut().filter(|r| r.activating == Some(handle)) {
+    for r in registrations_mut(&mut lock(), partition).iter_mut().filter(|r| r.activating == Some(handle)) {
         r.activating = None;
     }
 }
-// The registration's updateViaCache mode — nil where none was set — and setting it.
+// The mapped registration's updateViaCache mode — nil where none was set — and setting it.
 pub(crate) fn update_via_cache_for_ruby(partition: u64, scope: String) -> Option<String> {
-    lock().list(partition).iter().find(|r| r.scope == scope).and_then(|r| r.update_via_cache.clone())
+    lock().existing(partition).and_then(|p| p.mapped(&scope)).and_then(|r| r.update_via_cache.clone())
 }
 pub(crate) fn set_update_via_cache_for_ruby(partition: u64, scope: String, mode: String) {
     lock().at(partition, &scope).update_via_cache = Some(mode);
@@ -133,8 +256,9 @@ pub(crate) fn set_update_via_cache_for_ruby(partition: u64, scope: String, mode:
 // Its navigation preload state: `[enabled, header value]`, the spec's default (false, "true") where none was set — and
 // setting either (a nil one left as it is).
 pub(crate) fn navigation_preload_for_ruby(partition: u64, scope: String) -> (bool, String) {
-    let reg = lock();
-    let r = reg.list(partition).iter().find(|r| r.scope == scope);
+    let mut reg = lock();
+    let r = reg.existing(partition).and_then(|p| p.mapped(&scope));
+    let r = r.as_deref();
     (r.and_then(|r| r.preload_enabled).unwrap_or(false), r.and_then(|r| r.preload_header.clone()).unwrap_or_else(|| "true".to_owned()))
 }
 pub(crate) fn set_navigation_preload_for_ruby(partition: u64, scope: String, enabled: Option<bool>, header: Option<String>) {
@@ -153,26 +277,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keeps_a_registration_from_its_job_to_its_unregister() {
+    fn keeps_a_registration_from_its_job_to_its_clear() {
         let p = partition_new_for_ruby();
-        note_registered_for_ruby(p, "a/".into());
+        let id = note_registered_for_ruby(p, "a/".into());
+        worker_new_for_ruby(p, 7, "a/sw.js".into(), "classic".into());
+        set_version_for_ruby(p, id, "installing".into(), Some(7));
         note_activating_for_ruby(p, "a/".into(), 7);
-        assert_eq!(registrations_for_ruby(p), [("a/".into(), true, Some(7), None)]);
+        assert_eq!(registrations_for_ruby(p), [("a/".into(), true, Some(7), None, id)]);
         assert!(activated_for_ruby(p, "a/".into(), 7));
         assert!(!activated_for_ruby(p, "b/".into(), 7));
         set_navigation_preload_for_ruby(p, "a/".into(), Some(true), None);
         assert_eq!(navigation_preload_for_ruby(p, "a/".into()), (true, "true".into()));
+        note_activating_for_ruby(p, "a/".into(), 8);
         forget_worker_for_ruby(p, 7);
-        assert_eq!(registrations_for_ruby(p)[0], ("a/".into(), true, None, None));
+        forget_worker_for_ruby(p, 8);
+        assert_eq!(registrations_for_ruby(p)[0], ("a/".into(), true, Some(8), None, id));
+        forget_activating_for_ruby(p, 8);
+        assert_eq!(registrations_for_ruby(p)[0], ("a/".into(), true, None, None, id));
         // A scope its job only set a mode on is no registration yet, and takes its place when one is made there.
         set_update_via_cache_for_ruby(p, "c/".into(), "all".into());
         note_registered_for_ruby(p, "b/".into());
         note_registered_for_ruby(p, "c/".into());
         let order: Vec<String> = registrations_for_ruby(p).into_iter().map(|r| r.0).collect();
         assert_eq!(order, ["a/", "b/", "c/"]);
-        assert!(unregister_for_ruby(p, "a/".into()));
-        assert!(!unregister_for_ruby(p, "a/".into()));
+        // Unregistered, it leaves the map but keeps its version until it is cleared.
+        assert_eq!(unregister_for_ruby(p, "a/".into()), Some(id));
+        assert_eq!(unregister_for_ruby(p, "a/".into()), None);
         assert_eq!(navigation_preload_for_ruby(p, "a/".into()), (false, "true".into()));
+        assert_eq!(versions_for_ruby(p, id), (Some(7), None, None));
+        let again = note_registered_for_ruby(p, "a/".into());
+        assert_ne!(again, id);
+        clear_registration_for_ruby(p, id);
+        assert_eq!(versions_for_ruby(p, id), (None, None, None));
+        assert!(set_worker_state_for_ruby(p, 7, "redundant".into()));
+        assert_eq!(worker_for_ruby(p, 7), Some(("a/sw.js".into(), "classic".into(), "redundant".into(), id)));
         clear_for_ruby(p);
         forget_worker_for_ruby(p, 7);
         assert!(lock().partitions.get(&p).is_none());

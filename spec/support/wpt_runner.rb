@@ -957,15 +957,15 @@ module WptRunner
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ + atob/
   # structured-clone + the fetch/ request slice (api/data-urls/h1-parsing) +
-  # service-workers/cache-storage/ (Cache Storage API — swept crasher-free save
-  # cache-abort, which streams an unbounded body and is on the skip list) — each was
+  # service-workers/ (swept crasher- and hang-free 2026-10-15 save cache-abort, which
+  # streams an unbounded body and is on the skip list) — each was
   # swept per-file with a hang timeout and found crasher-free (xhr 86, html/dom+forms
   # 26, fetch+atob+structured-clone 145: 0 hangs). The top-level dom/ tree's 34
   # `.any.js`/`.window.js` (abort / events / nodes / traversal) were swept per-file
   # under a hard `timeout -s KILL` and found crasher-free — the earlier
   # infinite-loop concern was in dom/ HTML files, not this JS slice. (.tentative
   # files auto-route to out-of-scope, so a tentative window.js here self-excludes.)
-  JS_TREES = '{dom,hr-time,resource-timing,css/css-font-loading,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/interactive-elements,html/semantics/forms,custom-elements,html/rendering,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,service-workers/cache-storage,webstorage,websockets,web-animations,WebCryptoAPI,css/geometry,selection,IndexedDB}'
+  JS_TREES = '{dom,hr-time,resource-timing,css/css-font-loading,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/scripting/events,xhr,html/dom,html/semantics/interactive-elements,html/semantics/forms,custom-elements,html/rendering,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,service-workers,webstorage,websockets,web-animations,WebCryptoAPI,css/geometry,selection,IndexedDB}'
 
   def test_files
     @test_files ||= (harness_files + js_files + reftest_files).sort
