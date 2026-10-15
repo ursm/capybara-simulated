@@ -71,4 +71,28 @@ RSpec.describe 'execCommand in the selection’s editing host' do
       ['a', 'bi', 'ci', 'BODY']
     ])
   end
+
+  # The selection's ANCHOR decides the root, as the engine's edits go by it: a backward selection from one host into
+  # another bolds in the anchor's, `input` there (Chrome 155: true, `<b>k2</b>text`, input at k2). A readonly text
+  # control is no target: insertText into a focused `<textarea readonly>` is false and changes nothing (Chrome 155).
+  it "takes the anchor's root, and refuses a readonly text control" do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><div id=k1 contenteditable>k1text</div><div id=k2 contenteditable>k2text</div><textarea id=ro readonly>ro</textarea>']]
+    })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const seen = [];
+        document.addEventListener('input', (ev) => seen.push(ev.target.id));
+        const k1 = document.getElementById('k1').firstChild, k2 = document.getElementById('k2').firstChild;
+        getSelection().setBaseAndExtent(k2, 2, k1, 2);
+        const bold = [document.execCommand('bold'), document.getElementById('k2').innerHTML];
+        const ro = document.getElementById('ro');
+        ro.focus();
+        const readonly = [document.execCommand('insertText', false, 'Q'), ro.value];
+        return [bold, readonly, seen];
+      })()
+    JS
+    expect(got).to eq([[true, '<b>k2</b>text'], [false, 'ro'], ['k2']])
+  end
 end
