@@ -80,6 +80,7 @@ RSpec.describe 'Service Worker client enumeration' do
   }
   let(:app) {
     sw = worker
+    versions = 0
     Rack::Builder.new {
       run lambda {|env|
         req = Rack::Request.new(env)
@@ -89,6 +90,10 @@ RSpec.describe 'Service Worker client enumeration' do
           # assertion about it as a client rests on becoming CONTROLLED and nothing else.
           [200, {'content-type' => 'text/html'}, ['<html><body>main<input id="top"></body></html>']]
         when '/sw.js', '/sw2.js' then [200, {'content-type' => 'text/javascript'}, [sw]]
+        # A worker whose every fetch is a new version, which takes over at once — an update() activates it.
+        when '/sw-versions.js'
+          versions += 1
+          [200, {'content-type' => 'text/javascript'}, ["self.addEventListener('install', () => self.skipWaiting()); // #{versions}"]]
         # A worker that snapshots what `clients.matchAll()` sees while its script is still
         # EVALUATING — before install, before any inbox drain — and replays it on request.
         when '/sw-early.js'
@@ -485,6 +490,31 @@ RSpec.describe 'Service Worker client enumeration' do
     poll_until { session.evaluate_script('!!globalThis.__regs') }
 
     expect(session.evaluate_script('globalThis.__regs')).to eq([true, true, 0])
+  end
+
+  # A worker another realm's update() activated controls the clients its registration controlled: their controller
+  # the new worker, a `controllerchange` fired (Service Workers "Activate").
+  it 'hands a controlled frame the worker an update from another realm activated' do
+    session = session_with_frames({})
+    session.execute_script(<<~JS)
+      const activated = (w) => new Promise(res => { const step = () => (w.state === 'activated' ? res() : w.addEventListener('statechange', step, {once: true})); step(); });
+      navigator.serviceWorker.register('/sw-versions.js', {scope: '/scope/'}).then(async reg => {
+        await activated(reg.installing || reg.waiting || reg.active);
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        await new Promise(res => f.addEventListener('load', res, {once: true}), document.body.appendChild(f));
+        const sw = f.contentWindow.navigator.serviceWorker, before = sw.controller;
+        let changed = false;
+        sw.addEventListener('controllerchange', () => { changed = true; });
+        await reg.update();
+        await activated(reg.installing || reg.waiting || reg.active);
+        const now = await sw.getRegistration('/scope/');
+        globalThis.__report = [!!before, changed, sw.controller !== before, sw.controller === now.active, sw.controller.state];
+      });
+    JS
+    poll_until { session.evaluate_script('!!globalThis.__report') }
+
+    expect(session.evaluate_script('globalThis.__report')).to eq([true, true, true, true, 'activated'])
   end
 
   # A srcdoc frame has no URL a scope could match: it takes its creator's controller — the one the creator has when the

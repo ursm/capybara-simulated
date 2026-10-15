@@ -5469,7 +5469,9 @@ module Capybara
         seed_client_mirror(handle.to_i) if fresh
         # Every realm's registration object at the scope takes the new active worker — another realm's update
         # activated it (the registration is the origin's; its objects are per realm).
-        broadcast_to_realms('__csim_swRegistrationActivated', scope.to_s, handle.to_i, @workers.dig(handle.to_i, :script_url).to_s)
+        if (w = @workers[handle.to_i])
+          broadcast_to_realms('__csim_swRegistrationActivated', scope.to_s, handle.to_i, w[:script_url].to_s, sw_interception_worthy?(w))
+        end
         # Flush any clients.claim() that arrived before this scope was mirrored (a worker's
         # `activate → clients.claim()` fires decoupled from the client-side lifecycle that populates
         # @sw_registrations, so the claim can be drained first — see the claim handler above).
@@ -11846,8 +11848,9 @@ module Capybara
         }
       end
 
-      # Header names/values are TEXT (RFC 9110: field values are ASCII); Rack
-      # hands them over BINARY-tagged (see `RuntimeShared.utf8_text`). Per-value HTTP
+      # Header names/values are BYTE sequences (RFC 9110), and script reads them
+      # isomorphic-decoded — each byte the code point it is (Fetch's header list,
+      # Chrome measured: UTF-8 `café` reads `cafÃ©`, a lone 0xE9 `é`). Per-value HTTP
       # -whitespace normalization happens upstream, BEFORE duplicate values are
       # combined (WptRunner.combine_headers) — not here, where a combined value like
       # `", "` (two empty fields) would wrongly lose its trailing space. An
@@ -11857,7 +11860,7 @@ module Capybara
       def stringify(headers)
         out = {}
         headers.each do |k, v|
-          out[k.to_s] = RuntimeShared.utf8_text(v.is_a?(Array) ? v.join(', ') : v.to_s)
+          out[k.to_s] = (v.is_a?(Array) ? v.join(', ') : v.to_s).b.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
         end
         out
       end

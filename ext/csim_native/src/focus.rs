@@ -60,7 +60,11 @@ fn out_of_sequence(n: &NodeData) -> bool {
 // An editing host itself (element_state.rs `editing_host`): one its own attribute makes one, or a design-mode
 // document's document element.
 fn editing_host(arena: &RealmArena, id: NodeId) -> bool {
-    arena.editing_host(id) == Some(id)
+    let Some(n) = arena.get(id) else { return false };
+    match n.contenteditable_state() {
+        Some(own) => own,
+        None => n.is_html() && arena.parent_of(id).and_then(|p| arena.get(p)).is_some_and(|p| p.kind == NodeKind::Document && p.state & crate::dom::STATE_DESIGN_MODE != 0),
+    }
 }
 // The element ancestors of `id`, nearest first, up to the first node that is none (a shadow root, a document).
 fn element_ancestors(arena: &RealmArena, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {

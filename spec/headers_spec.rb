@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # Headers, generated from its IDL: its arguments converted (a ByteString, a HeadersInit), its brand checked, its pair
 # iterator Web IDL's — and its header list, names first given and guard, slots no page can reach. The figures are
@@ -102,5 +103,28 @@ RSpec.describe 'Headers' do
       "DataCloneError: Failed to execute 'structuredClone' on 'Window': AbortController object could not be cloned.",
       "DataCloneError: Failed to execute 'structuredClone' on 'Window': [object Window] could not be cloned."
     ])
+  end
+
+  # A response's header values are bytes, which script reads isomorphic-decoded — each byte the code point it is: a
+  # UTF-8 `café` reads `cafÃ©`, a lone 0xE9 `é` — through fetch() and XMLHttpRequest alike (Chrome, measured).
+  it 'reads a response header byte by byte' do
+    app = lambda {|env|
+      return [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8">']] if env['PATH_INFO'] == '/'
+
+      [200, {'content-type' => 'text/plain', 'x-u' => 'café', 'x-l' => "caf\xE9".b}, ['ok']]
+    }
+    s = simulated_session(app)
+    s.visit('/')
+    s.execute_script(<<~JS)
+      fetch('/h').then(r => {
+        const x = new XMLHttpRequest();
+        x.open('GET', '/h', false);
+        x.send();
+        globalThis.__got = [r.headers.get('x-u'), r.headers.get('x-l'), x.getResponseHeader('x-u'), x.getResponseHeader('x-l')];
+      });
+    JS
+    poll_until { s.evaluate_script('!!globalThis.__got') }
+
+    expect(s.evaluate_script('globalThis.__got')).to eq(["caf\u00C3\u00A9", "caf\u00E9", "caf\u00C3\u00A9", "caf\u00E9"])
   end
 end
