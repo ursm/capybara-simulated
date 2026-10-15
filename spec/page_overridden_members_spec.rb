@@ -63,4 +63,23 @@ RSpec.describe 'members a page overrides' do
     s.execute_script('document.getElementById("i").focus(); document.execCommand("insertHTML", false, "<b>x</b><!--c-->y")')
     expect(s.evaluate_script('[document.getElementById("ce").textContent, document.getElementById("i").value]')).to eq(['', 'xy'])
   end
+
+  # …and a fetch reads its signal's state, not the page's `AbortSignal.prototype.aborted` / `reason`: one not aborted
+  # fetches, one aborted rejects with its reason.
+  it "reads a fetch's signal as the engine holds it" do
+    s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [env['PATH_INFO'] == '/' ? '<!DOCTYPE html><meta charset="utf-8"><body>' : 'ok']] })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const boom = () => { throw new Error('page member'); };
+      for (const name of ['aborted', 'reason']) Object.defineProperty(AbortSignal.prototype, name, { get: boom, configurable: true });
+      const aborted = new AbortController();
+      aborted.abort('why');
+      Promise.all([
+        fetch('/x', { signal: new AbortController().signal }).then((r) => r.text(), (e) => 'rejected ' + e),
+        fetch('/x', { signal: aborted.signal }).then(() => 'fetched', (e) => 'rejected ' + e)
+      ]).then(done);
+    JS
+    expect(got).to eq(['ok', 'rejected why'])
+  end
 end
