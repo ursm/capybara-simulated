@@ -141,11 +141,15 @@ RSpec.describe 'members a page overrides' do
         const b = document.querySelector('b');
         b.before('a');
         b.after('c');
+        const p = document.getElementById('p'), before = p.innerHTML;
+        p.insertBefore(b, b);
+        p.replaceChild(b, b);
+        b.replaceWith(document.createElement('u'));
         const o = new Option('opt');
-        return [document.getElementById('p').innerHTML, o.text, typeof frames[0], typeof window.f];
+        return [before, p.innerHTML, o.text, typeof frames[0], typeof window.f];
       })()
     JS
-    expect(got).to eq(['a<b>b</b>c', 'opt', 'object', 'object'])
-    expect(s.text).to eq('abc')
+    expect(got).to eq(['a<b>b</b>c', 'a<u></u>c', 'opt', 'object', 'object'])
+    expect(s.text).to eq('ac')
   end
 end
