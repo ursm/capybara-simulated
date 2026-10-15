@@ -1148,7 +1148,8 @@ module Capybara
       # `handles` its module-handle cache — the main ctx + `native_module_handles`
       # by default, or a frame realm + its realm-local cache (Module handles are
       # context-bound; sharing the main cache would link a frame's imports
-      # against main-context modules).
+      # against main-context modules). True where its graph was fetched and ran (a throw in it logged), false where it
+      # could not be fetched — the element's `error` (HTML "execute the script element": a null result).
       def eval_esm_module(url, inline_src = nil, target: nil, handles: nil, sw: nil)
         target  ||= ctx
         handles ||= native_module_handles
@@ -1163,7 +1164,7 @@ module Capybara
         # per-referring-script options; no vendored test observes the difference.
         module_sw_ctxs[realm_key(target)] = sw&.merge(root: url.to_s)
         m = native_module_for(url, inline_src, target, handles)
-        return nil unless m
+        return false unless m
         begin
           instantiate_native_module(m, url, target, handles)
           m.evaluate
@@ -1174,7 +1175,7 @@ module Capybara
           # deliberately propagates (a watchdog terminate must escalate).
           @browser.log_console('error', "module evaluate error in #{url}: #{e.message}")
         end
-        nil
+        true
       end
 
       # A `.json` module is exposed as the default export of its parsed value;
@@ -1293,8 +1294,7 @@ module Capybara
       # `attach_realm_esm_entry`.
       def attach_native_module_loader(c)
         c.attach('__csim_evalEsmEntry', ->(url, inline, *sw) {
-          RuntimeShared.safe_call { eval_esm_module(url, inline, sw: esm_sw_ctx(sw)) }
-          nil
+          RuntimeShared.safe_call { eval_esm_module(url, inline, sw: esm_sw_ctx(sw)) } == true
         })
         c.dynamic_import_resolver = ->(specifier, referrer, initiating) {
           target, handles =
@@ -1356,8 +1356,7 @@ module Capybara
         realm.attach('__csim_evalEsmEntry', ->(url, inline, *sw) {
           RuntimeShared.safe_call {
             eval_esm_module(url, inline, target: realm, handles: realm_module_handles(realm.id), sw: esm_sw_ctx(sw))
-          }
-          nil
+          } == true
         })
       end
 

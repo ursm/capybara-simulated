@@ -2328,6 +2328,9 @@ fetch/api/redirect/redirect-upload.h2.any.js:
 - "[serviceworker] Fetch upload streaming should fail on 308"
 fetch/api/request/destination/fetch-destination.https.html:
 - AudioWorklet module fetches with a "audioworklet" Request.destination
+- 'Import declaration with `type: "css"` fetches with a "style" Request.destination'
+- 'Import declaration with `type: "json"` fetches with a "json" Request.destination'
+- 'Import declaration with `type: "text"` fetches with a "text" Request.destination'
 fetch/api/request/request-consume-empty.any.js:
 - Consume empty FormData request body as text
 - "[dedicatedworker] Consume empty FormData request body as text"
