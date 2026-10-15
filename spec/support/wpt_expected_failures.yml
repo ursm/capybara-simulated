@@ -20,6 +20,7 @@ FileAPI/BlobURL/cross-partition.https.html:
 - Blob URL shouldn't be fetched from a cross-partition shared worker
 FileAPI/url/sandboxed-iframe.html:
 - Blob URL fragment is implemented.
+- Blob URLs can be used in iframes, and are treated same origin
 - "[harness] TIMEOUT"
 FileAPI/url/unicode-origin.sub.html:
 - Verify serialization of non-ascii origin in Blob URLs
