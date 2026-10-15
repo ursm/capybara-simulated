@@ -2607,7 +2607,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "cssColor", css_color, context_id);
     register(scope, ns, "canvasFont", canvas_font, context_id);
     register(scope, ns, "canvasSpacing", canvas_spacing, context_id);
-    register(scope, ns, "fontShorthandFamilies", font_shorthand_families, context_id);
     register(scope, ns, "setTouchInput", set_touch_input, context_id);
     register(scope, ns, "styleRestyled", style_restyled, context_id);
     register(scope, ns, "styleFlush", style_flush, context_id);
@@ -4942,15 +4941,6 @@ fn canvas_spacing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let Some((css, px)) = crate::cssom_decl::canvas_spacing(&text, em, rem) else { return rv.set_null() };
     let Some(css) = v8::String::new(scope, &css) else { return };
     let items: [v8::Local<v8::Value>; 2] = [css.into(), v8::Number::new(scope, px).into()];
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
-
-// __dom.fontShorthandFamilies(text) -> the families a `font` value names (`cssom_decl::font_shorthand_families`), or
-// null.
-fn font_shorthand_families(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let text = args.get(0).to_rust_string_lossy(scope);
-    let Some(families) = crate::cssom_decl::font_shorthand_families(&text) else { return rv.set_null() };
-    let items: Vec<v8::Local<v8::Value>> = families.iter().filter_map(|f| v8::String::new(scope, f)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 

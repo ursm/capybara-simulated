@@ -639,9 +639,20 @@ pub(crate) fn canvas_spacing(text: &str, em: f64, rem: f64) -> Option<(String, f
     Some((css, px))
 }
 
-// …and the families it names, as names (`document.fonts.check()` / `load()`): None where it is no `font` value.
-pub(crate) fn font_shorthand_families(text: &str) -> Option<Vec<String>> {
-    Some(font_shorthand(text)?.family.iter().map(family_name).collect())
+// …and what CSS Font Loading's "find the matching font faces" (§2.4, `document.fonts.check()` / `load()`) reads of it:
+// the families it names, as names, its weight — a relative one against the initial `normal` — and whether its style is
+// slanted. None where it is no `font` value.
+pub(crate) fn font_shorthand_match(text: &str) -> Option<(Vec<String>, f64, bool)> {
+    use style::values::specified::FontWeight;
+    let font = font_shorthand(text)?;
+    let weight = match &font.weight {
+        FontWeight::Absolute(w) => w.compute().map_or(400.0, |w| f64::from(w.value())),
+        FontWeight::Bolder => 700.0,
+        FontWeight::Lighter => 100.0,
+        _ => 400.0,
+    };
+    let slanted = font.style != "normal" && font.style != "oblique 0deg";
+    Some((font.family.iter().map(family_name).collect(), weight, slanted))
 }
 
 // `CSS.supports(conditionText)`: a `<supports-condition>`, or a bare declaration (`display: grid`), as the engine

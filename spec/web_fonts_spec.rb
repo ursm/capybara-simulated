@@ -503,6 +503,31 @@ RSpec.describe 'web fonts' do
     expect(s.evaluate_script("[document.fonts.check('bold 16px MyAhem'), document.fonts.check('12px/1.5 \"MyAhem\", monospace')]")).to eq([true, true])
   end
 
+  # CSS Font Loading's "find the matching font faces": for each family the shorthand names, the faces font matching picks
+  # for its style and weight, and of a `unicode-range` split the ones covering a character of the text (" " where none
+  # is given) — not every face of the family. Chrome 155 and Firefox, the same script: check false; the G face out of
+  # " b" and in for "A"; a bold load fetches the 700 face alone, an italic one the italic face alone.
+  it 'loads and checks only the faces font matching picks' do
+    s = session
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const f400 = new FontFace('F', 'url(nope400.woff)', { weight: '400' });
+        const f700 = new FontFace('F', 'url(nope700.woff)', { weight: '700' });
+        const fi = new FontFace('F', 'url(nopei.woff)', { style: 'italic' });
+        const g = new FontFace('G', 'url(nopeg.woff)', { unicodeRange: 'U+0041' });
+        for (const f of [f400, f700, fi, g]) document.fonts.add(f);
+        const out = [document.fonts.check('16px F'), document.fonts.check('16px G', 'b'), document.fonts.check('16px G', 'A')];
+        document.fonts.load('bold 16px F').catch(() => {});
+        out.push([f400, f700, fi].map((f) => f.status).join());
+        document.fonts.load('italic 16px F').catch(() => {});
+        out.push([f400, f700, fi].map((f) => f.status).join());
+        document.fonts.load('16px G', 'b').catch(() => {});
+        return out.concat(g.status);
+      })()
+    JS
+    expect(got).to eq([false, true, false, 'unloaded,loading,unloaded', 'unloaded,loading,loading', 'unloaded'])
+  end
+
   it 'builds a face from a buffer and measures with it' do
     s = session
     s.execute_script(<<~JS)
