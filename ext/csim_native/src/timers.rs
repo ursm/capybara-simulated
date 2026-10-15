@@ -20,7 +20,18 @@ struct Timer {
     seq: u64,
     handler: v8::Global<v8::Value>,
     args: Option<v8::Global<v8::Value>>,
+    // The timeout a repeating timer is scheduled again with (HTML: the timer initialization steps run again).
     period: Option<f64>,
+    // Its task's timer nesting level (HTML §8.6): one more than that of the timer task it was scheduled in, 0 outside one.
+    nesting: u32,
+}
+
+// HTML §8.6 timer initialization steps 5-7: a timer scheduled in a timer task whose nesting level is past 5, with a
+// timeout under 4 ms, falls due in 4.
+const NESTING_CLAMP_LEVEL: u32 = 5;
+const NESTING_CLAMP_MS: f64 = 4.0;
+fn clamped(timeout: f64, nesting: u32) -> f64 {
+    if nesting > NESTING_CLAMP_LEVEL && timeout < NESTING_CLAMP_MS { NESTING_CLAMP_MS } else { timeout }
 }
 
 #[derive(Default)]
@@ -36,6 +47,10 @@ pub(crate) struct Timers {
     frames: std::collections::VecDeque<(u32, v8::Global<v8::Value>)>,
     running: std::collections::VecDeque<(u32, v8::Global<v8::Value>)>,
     last_frame: u32,
+    // The nesting level of the timer task running now — none where the task running is none of a timer's (a platform
+    // task, an animation frame, a script the host runs) — which a timer it schedules nests in (`timerNext`,
+    // `timerTaskEnd`).
+    task_nesting: Option<u32>,
     // How many of the realm's event loop steps are running (`timerStep`): a step goes on with what is due in it though
     // the realm's context is disposed during it — a frame's script removing its own iframe, mid-step, still has the
     // request it sent fail as the step runs on — and the list goes as it ends.
@@ -73,10 +88,10 @@ impl Ord for Due {
 }
 
 impl Timers {
-    fn add(&mut self, key: i64, timer: (v8::Global<v8::Value>, Option<v8::Global<v8::Value>>), due: f64, period: Option<f64>) {
+    fn add(&mut self, key: i64, timer: (v8::Global<v8::Value>, Option<v8::Global<v8::Value>>), due: f64, period: Option<f64>, nesting: u32) {
         self.seq += 1;
         self.order.insert((Due(due), self.seq, key));
-        self.by_key.insert(key, Timer { due, seq: self.seq, handler: timer.0, args: timer.1, period });
+        self.by_key.insert(key, Timer { due, seq: self.seq, handler: timer.0, args: timer.1, period, nesting });
     }
     fn clear(&mut self, key: i64) -> bool {
         let Some(t) = self.by_key.remove(&key) else { return false };
@@ -130,6 +145,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "timerCount", timer_count, context_id);
     register(scope, ns, "timerNextDue", timer_next_due, context_id);
     register(scope, ns, "timerStep", timer_step, context_id);
+    register(scope, ns, "timerTaskEnd", timer_task_end, context_id);
     register(scope, ns, "frameAdd", frame_add, context_id);
     register(scope, ns, "frameCancel", frame_cancel, context_id);
     register(scope, ns, "frameBegin", frame_begin, context_id);
@@ -221,19 +237,25 @@ fn timer_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
 }
 
-// __dom.timerAdd(handler, args, due, period, task) -> its key: a timer of the calling realm's, falling due at `due` on
-// its clock — never, for one that is no finite time — and repeating every `period` ms where that is a number: a page's
-// (`task` false: a positive id) or one the platform queues (`task` true: a negative key).
+// __dom.timerAdd(handler, args, now, timeout, repeats, task) -> its key: a timer of the calling realm's, falling due
+// `timeout` ms after `now` on its clock — never, for one that is no finite time — and, `repeats`, again that long after
+// each run: a page's (`task` false: a positive id), nested in the timer task running and clamped by its nesting
+// level, or one the platform queues (`task` true: a negative key), which neither nests nor is clamped.
 fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let handler = v8::Global::new(scope, args.get(0));
     let list = args.get(1);
     let list = (!list.is_null_or_undefined()).then(|| v8::Global::new(scope, list));
-    let due = args.get(2).number_value(scope).filter(|d| d.is_finite()).unwrap_or(f64::MAX);
-    let period = args.get(3).is_number().then(|| args.get(3).number_value(scope).unwrap_or(0.0));
-    let task = args.get(4).is_true();
+    let now = args.get(2).number_value(scope).unwrap_or(0.0);
+    let timeout = args.get(3).number_value(scope).unwrap_or(0.0);
+    let repeats = args.get(4).is_true();
+    let task = args.get(5).is_true();
     let cid = realm_id(scope, &args);
     let arena = &mut dom(scope).arena;
     let takes = arena.takes_timers(cid);
+    let nesting = if task { 0 } else { arena.timers_of(cid).and_then(|t| t.task_nesting).unwrap_or(0) };
+    let timeout = if task { timeout } else { clamped(timeout, nesting) };
+    let due = Some(now + timeout).filter(|d| d.is_finite()).unwrap_or(f64::MAX);
+    let period = repeats.then_some(timeout);
     let key = if task {
         arena.task_keys.last -= 1;
         if takes {
@@ -247,7 +269,7 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     };
     // (…a realm that takes none answers with a key all the same, which names nothing)
     if takes {
-        arena.enter(cid).timers.add(key, (handler, list), due, period);
+        arena.enter(cid).timers.add(key, (handler, list), due, period, if task { 0 } else { nesting + 1 });
     }
     rv.set_double(key as f64);
 }
@@ -263,9 +285,19 @@ fn timer_clear(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     rv.set_bool(cleared);
 }
 
+// __dom.timerTaskEnd() — the task the calling realm's last `timerNext` took has run: what runs next — its microtasks,
+// each the running task of its own — is no timer task until another is taken.
+fn timer_task_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    if let Some(timers) = dom(scope).arena.timers_of(cid) {
+        timers.task_nesting = None;
+    }
+}
+
 // __dom.timerNext(now, limit) -> `[due, handler, args]`: the calling realm's next timer, where it falls due by `limit` —
-// taken from the list, or, one that repeats, due again a period after it runs (`now`, or its due time where that is
-// later); undefined for none.
+// taken from the list, or, one that repeats, due again its timeout after it runs (`now`, or its due time where that is
+// later), nested one level deeper and clamped by it; undefined for none. A page's is the timer task running from here
+// (`timerTaskEnd`), a platform task none.
 fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let now = args.get(0).number_value(scope).unwrap_or(0.0);
     let limit = args.get(1).number_value(scope).unwrap_or(f64::INFINITY);
@@ -277,14 +309,18 @@ fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let run = due.max(now);
     let repeats = timers.by_key.get(&key).and_then(|t| t.period);
     let (handler, list) = match repeats {
-        Some(period) => {
+        Some(timeout) => {
             let Some(t) = timers.by_key.get_mut(&key) else { return };
-            t.due = run + period;
+            // (…the timer initialization steps run again in its own task, at its nesting level)
+            timers.task_nesting = Some(t.nesting);
+            t.due = run + clamped(timeout, t.nesting);
+            t.nesting += 1;
             timers.order.insert((Due(t.due), seq, key));
             (t.handler.clone(), t.args.clone())
         }
         None => {
             let Some(t) = timers.by_key.remove(&key) else { return };
+            timers.task_nesting = (key > 0).then_some(t.nesting);
             arena.task_keys.realms.remove(&key);
             (t.handler, t.args)
         }
