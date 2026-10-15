@@ -10349,6 +10349,11 @@ module Capybara
       rescue StandardError
         ''
       end
+      def frame_document_origin_opaque?(realm_id)
+        @runtime.frame_realm_alive?(realm_id) && @runtime.realm_call(realm_id, '__csimDocumentOriginOpaque') == true
+      rescue StandardError
+        false
+      end
       def capture_frame_form_state(realm_id)
         return nil unless @runtime.frame_realm_alive?(realm_id)
         @runtime.realm_call(realm_id, '__csimCaptureFormState')
@@ -10380,9 +10385,10 @@ module Capybara
         # A reload / traversal creates a fresh document, so it gets its own reserved
         # client id, adopted by the rebuilt realm (same model as a fresh navigation).
         rid = mint_resulting_client_id
+        referrer_source, referrer_policy = realm_referrer_initiator(realm_id)
         if (!url.to_s.start_with?('https://') || secure_frame_ancestors?(realm_id)) &&
            (sw = any_window_sw_navigation_fetch(url, is_reload: is_reload, is_history: is_history,
-                                                      referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id),
+                                                      referrer_source: referrer_source, referrer_policy: referrer_policy,
                                                       resulting_client_id: rid, **post_args))
           return if sw['networkError']
 
@@ -10397,7 +10403,7 @@ module Capybara
           env['CONTENT_TYPE']   = entry[:content_type].to_s.empty? ? 'application/x-www-form-urlencoded' : entry[:content_type]
           env['CONTENT_LENGTH'] = body.bytesize.to_s
         end
-        apply_default_request_env(env, referer: current_browsing_context_url)
+        apply_default_request_env(env, referer: compute_referrer(referrer_policy, referrer_source, url))
         status, headers, resp_body = dispatch_rack_or_http(url, env, method: is_post ? 'POST' : 'GET', body: is_post ? body : nil)
         merge_set_cookie(headers, url)
         return if download_response?(headers)
@@ -10497,9 +10503,10 @@ module Capybara
         # serves the document, a network error fails it, nil falls through to the network GET below.
         # Skipped when an https navigation sits under an insecure ancestor (see
         # frame_navigation_fetch — the http-target carve-out is the app-suite fiction).
+        initiator, referrer_policy = realm_referrer_initiator(realm_id)
         if (!get_url.start_with?('https://') || secure_frame_ancestors?(realm_id)) &&
            (sw = any_window_sw_navigation_fetch(get_url, method: 'GET', is_reload: is_reload, is_history: is_history,
-                                                          referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id),
+                                                          referrer_source: initiator, referrer_policy: referrer_policy,
                                                           site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross, resulting_client_id: rid))
           return if sw['networkError']
 
@@ -10509,22 +10516,20 @@ module Capybara
           # navigate path). The chain latches Sec-Fetch-Site exactly like the network
           # redirect branch below.
           if (loc = redirect_location(sw['status'].to_i, sw['headers'] || {}))
-            init     = frame_realm_url(realm_id)
             next_url = carry_fragment(get_url, resolve_against(loc, get_url))
             return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, is_reload: is_reload, is_history: is_history, record: record,
-                                                     site_seed: widen_sec_fetch_site(site_seed, sec_fetch_site(init, get_url)),
-                                                     origin_null: redirect_taints_origin?(origin_null, init, get_url, next_url),
+                                                     site_seed: widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, get_url)),
+                                                     origin_null: redirect_taints_origin?(origin_null, initiator, get_url, next_url),
                                                      resulting_client_id: url_origin(next_url) == url_origin(get_url) ? rid : nil)
           end
           return reload_frame_realm_by_id(realm_id, get_url, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid)
         end
-        initiator = frame_realm_url(realm_id)
         site      = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, get_url))
         status, headers, resp_body = dispatch_navigation_request(
           get_url,
           method:            'GET',
           initiator:         initiator,
-          referrer_policy:   frame_document_referrer_policy(realm_id),
+          referrer_policy:   referrer_policy,
           site:              site,
           origin_null:       origin_null,
           cookie_cross_site: cookie_cross
@@ -10569,19 +10574,19 @@ module Capybara
         # a network error fails it, nil falls through to the network POST below.
         # Skipped when an https navigation sits under an insecure ancestor (see
         # frame_navigation_fetch — the http-target carve-out is the app-suite fiction).
+        initiator, referrer_policy = realm_referrer_initiator(realm_id)
         if (!url.to_s.start_with?('https://') || secure_frame_ancestors?(realm_id)) &&
            (sw = any_window_sw_navigation_fetch(url, method: 'POST', body: body, content_type: content_type, is_reload: is_reload, is_history: is_history,
-                                                      referrer_source: frame_realm_url(realm_id), referrer_policy: frame_document_referrer_policy(realm_id),
+                                                      referrer_source: initiator, referrer_policy: referrer_policy,
                                                       site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross, resulting_client_id: rid))
           return if sw['networkError']
 
           # SW-served redirect: 307/308 re-POST, everything else GETs — the same split
           # as the network branch below, re-entering interception at the new URL.
           if (loc = redirect_location(sw['status'].to_i, sw['headers'] || {}))
-            init     = frame_realm_url(realm_id)
             next_url = carry_fragment(url, resolve_against_current(loc))
-            site     = widen_sec_fetch_site(site_seed, sec_fetch_site(init, url.to_s))
-            taint    = redirect_taints_origin?(origin_null, init, url.to_s, next_url)
+            site     = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url.to_s))
+            taint    = redirect_taints_origin?(origin_null, initiator, url.to_s, next_url)
             next_rid = url_origin(next_url) == url_origin(url.to_s) ? rid : nil
             if [307, 308].include?(sw['status'].to_i)
               return navigate_realm_self_post(realm_id, next_url, body, content_type, depth: depth + 1, is_reload: is_reload, is_history: is_history,
@@ -10595,17 +10600,16 @@ module Capybara
           reload_frame_realm_by_id(realm_id, url.to_s, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid)
           return
         end
-        # The initiator is the FRAME's own document (still alive — the rebuild is below), not the
+        # The initiator is the FRAME's own document (an iframe srcdoc one's container's — `realm_referrer_initiator`; still alive — the rebuild is below), not the
         # top document `current_browsing_context_url` returns for a non-entered frame. A form POST
         # navigation carries that document's Origin + a Referer under its Referrer-Policy + the
         # Fetch-Metadata triple (Sec-Fetch-Dest 'iframe' for a subframe).
-        initiator = frame_realm_url(realm_id)
         site      = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url.to_s))
         status, headers, resp_body = dispatch_navigation_request(
           url,
           method:            'POST',
           initiator:         initiator,
-          referrer_policy:   frame_document_referrer_policy(realm_id),
+          referrer_policy:   referrer_policy,
           site:              site,
           origin_null:       origin_null,
           body:              body,
@@ -11073,12 +11077,21 @@ module Capybara
 
       # A navigation's initiating document as its Referer is made of it: its URL and its referrer policy (the policy its
       # `<meta name="referrer">` sets) — the browsing context the page is in, its link or form or script the initiator
-      # (`current_referrer_initiator`), or a frame's own document navigating itself (`realm_referrer_initiator`).
-      def current_referrer_initiator
-        [current_browsing_context_url, @current_realm_id ? frame_document_referrer_policy(@current_realm_id) : main_document_referrer_policy]
-      end
+      # (`current_referrer_initiator`), or a frame's own document navigating itself (`realm_referrer_initiator`; realm 0
+      # the main document). An iframe srcdoc document refers as its container document does (Referrer Policy's "determine
+      # request's referrer": "while document is an iframe srcdoc document, let document be document's browsing context's
+      # browsing context container's node document"), under the policy it inherits from it unless its own meta sets one.
+      # One whose origin is opaque — a sandboxed document's — refers as none, a step before (`no-referrer`): its URL stays
+      # the initiator its Origin and Sec-Fetch-Site are made of.
+      def current_referrer_initiator = realm_referrer_initiator(@current_realm_id.to_i)
       def realm_referrer_initiator(realm_id)
-        [frame_realm_url(realm_id), frame_document_referrer_policy(realm_id)]
+        return [@current_url, main_document_referrer_policy] if realm_id.zero?
+        url = frame_realm_url(realm_id)
+        return [url, 'no-referrer'] if frame_document_origin_opaque?(realm_id)
+        policy = frame_document_referrer_policy(realm_id)
+        return [url, policy] unless url.to_s.match?(/\Aabout:srcdoc\z/i)
+        container_url, container_policy = realm_referrer_initiator(@runtime.frame_realm_parent(realm_id).to_i)
+        [container_url, policy.empty? ? container_policy : policy]
       end
       # The top-level browsing context navigated by the page — a link followed in it or `target=_top` from a frame
       # within it — its Referer the browsing context it was followed in.

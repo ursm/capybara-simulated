@@ -68,4 +68,48 @@ RSpec.describe 'the meta referrer policy' do
     s.visit '/r'
     expect(referers).to eq([['/a', nil], ['/r', nil], ['/next', nil], ['/a', nil], ['/pb', nil], ['/r', nil], ['/next', nil]])
   end
+
+  # An iframe srcdoc document refers as its container document does, under the policy it inherits from it: a link in one
+  # sends the container's URL, whether it navigates the frame or the page.
+  it "sends an iframe srcdoc document's container as its Referer" do
+    referers = []
+    s = simulated_session(->(env) {
+      referers << [env['PATH_INFO'], env['HTTP_REFERER']]
+      next [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><p id="done">next</p>']] unless env['PATH_INFO'] == '/a'
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8"><meta name="referrer" content="origin">
+        <iframe srcdoc="<a href='/self'>self</a> <a href='/top' target='_top'>top</a>"></iframe>
+      HTML
+    })
+    s.visit '/a'
+    s.within_frame(0) do
+      s.click_link 'self'
+      expect(s).to have_css('#done')
+    end
+    s.visit '/a'
+    s.within_frame(0) { s.click_link 'top' }
+    expect(s).to have_css('#done')
+    expect(referers).to eq([['/a', nil], ['/self', 'http://www.example.com/'], ['/a', nil], ['/top', 'http://www.example.com/']])
+  end
+
+  # …but a sandboxed one's origin is opaque, and an opaque origin refers as none — a step before the container.
+  it 'sends no Referer from a sandboxed srcdoc document' do
+    referers = []
+    s = simulated_session(->(env) {
+      referers << [env['PATH_INFO'], env['HTTP_REFERER']]
+      next [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><p id="done">next</p>']] unless env['PATH_INFO'] == '/a'
+      [200, {'content-type' => 'text/html'}, [%(<!DOCTYPE html><meta charset="utf-8"><iframe sandbox="allow-forms" srcdoc="<a href='/self'>self</a> <form method=post action='/post'><button>post</button></form>"></iframe>)]]
+    })
+    s.visit '/a'
+    s.within_frame(0) do
+      s.click_link 'self'
+      expect(s).to have_css('#done')
+    end
+    s.visit '/a'
+    s.within_frame(0) do
+      s.click_button 'post'
+      expect(s).to have_css('#done')
+    end
+    expect(referers).to eq([['/a', nil], ['/self', nil], ['/a', nil], ['/post', nil]])
+  end
 end
