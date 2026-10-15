@@ -49,7 +49,7 @@ const SET_COOKIE: &[u8] = b"set-cookie";
 
 // "Normalize" a header value: its leading and trailing HTTP whitespace (tab, LF, CR, space) gone — None where what is
 // left has a NUL, CR or LF in it, which no header value may (a mid-value newline is a smuggling vector).
-pub(crate) fn normalized_value(value: &[u8]) -> Option<&[u8]> {
+fn normalized_value(value: &[u8]) -> Option<&[u8]> {
     let ws = |b: &u8| matches!(b, b'\t' | b'\n' | b'\r' | b' ');
     let start = value.iter().position(|b| !ws(b)).unwrap_or(value.len());
     let end = value.iter().rposition(|b| !ws(b)).map_or(start, |e| e + 1);
@@ -301,7 +301,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "headersGuard", guard_op, context_id);
     crate::dom::register(scope, ns, "headersCopy", copy_op, context_id);
     crate::dom::register(scope, ns, "headersFromNetwork", from_network_op, context_id);
-    crate::dom::register(scope, ns, "headerValue", header_value_op, context_id);
     crate::dom::register(scope, ns, "headersForXhr", for_xhr_op, context_id);
 }
 
@@ -428,16 +427,6 @@ fn for_xhr_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let text: Vec<u8> = pairs.iter().flat_map(|&(n, v)| [n, b": ", v, b"\r\n"].concat()).collect();
     rv.set(string(scope, &text));
 }
-// __dom.headerValue(value) -> the value normalized, null for one that is none (`normalized_value`): what
-// XMLHttpRequest's setRequestHeader() takes.
-fn header_value_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let value = bytes(scope, args.get(0));
-    match normalized_value(&value) {
-        Some(v) => rv.set(string(scope, v)),
-        None => rv.set_null(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
