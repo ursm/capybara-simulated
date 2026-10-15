@@ -1175,7 +1175,8 @@ impl RealmArena {
         !in_modal && modal.is_some_and(|m| self.root_of(m) == self.root_of(id) || self.shadow_including_root(m) == self.shadow_including_root(id))
     }
     // `id`'s editing host (HTML §6.8.1): itself or its nearest ancestor HTML element whose `contenteditable` is in the
-    // true or plaintext-only state — or none, where the nearest one that says is in the false state, or none says.
+    // true or plaintext-only state, or that is the document element of a document in design mode — or none, where the
+    // nearest one that says is in the false state, or none says.
     pub(crate) fn editing_host(&self, id: NodeId) -> Option<NodeId> {
         let mut cur = Some(id);
         while let Some(c) = cur {
@@ -1184,6 +1185,10 @@ impl RealmArena {
                 Some(true) => return Some(c),
                 Some(false) => return None,
                 None => cur = self.parent_of(c),
+            }
+            // (…an HTML element whose parent is a document in design mode is one too)
+            if cur.and_then(|p| self.get(p)).is_some_and(|p| p.kind == NodeKind::Document && p.state & crate::dom::STATE_DESIGN_MODE != 0) {
+                return n.is_html().then_some(c);
             }
         }
         None

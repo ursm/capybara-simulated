@@ -318,6 +318,8 @@ pub(crate) const STATE_UPGRADED: u32 = 1 << 18;
 // …and, on a document, that it is an XML document — not an HTML one, whose HTML elements' names are ASCII-lowercased
 // (DOM "HTML document").
 pub(crate) const STATE_XML_DOCUMENT: u32 = 1 << 19;
+// …and that its design mode is enabled (HTML §6.8.2 `designMode`): its document element an editing host.
+pub(crate) const STATE_DESIGN_MODE: u32 = 1 << 20;
 
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its
 // first and last child, its previous and next sibling, and the element ones of those — and the bindings' own upward

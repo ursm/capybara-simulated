@@ -137,6 +137,20 @@ RSpec.describe 'inserting in an editing host' do
     ]).to eq(['<p>abcd<br>Z</p>', '<pre>ab<br>Z</pre>', 'ab<br>x', '<p>a <br>b</p>', '<br><div>Z</div>'])
   end
 
+  # A document in design mode is edited as a whole: its document element is an editing host (HTML §6.8.1), so its
+  # elements are editable and `:read-write`, and keys sent to its body type at the selection — Chrome, measured.
+  it 'edits a document in design mode' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><p>ab</p><script>document.designMode = "on"</script>']] })
+    s.visit '/'
+    s.execute_script("getSelection().collapse(document.querySelector('p').firstChild, 1)")
+    s.find(:css, 'body').send_keys('z')
+    on = s.evaluate_script("[document.querySelector('p').textContent, document.body.isContentEditable, document.querySelector('p').matches(':read-write')]")
+    s.execute_script("document.designMode = 'off'")
+    off = s.evaluate_script("[document.designMode, document.body.isContentEditable, document.querySelector('p').matches(':read-write')]")
+
+    expect([on, off]).to eq([['azb', true, true], ['off', false, false]])
+  end
+
   # …and never one the keys were not sent to: an element its keydown makes an editing host types nothing into another
   # host the selection sits in (Chrome: no beforeinput, no input).
   it 'edits no host outside the element the keys were sent to' do
