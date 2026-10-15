@@ -128,18 +128,28 @@ RSpec.describe 'choosing a navigable by name' do
   end
 
   # The Referer is the document the link was followed in as it was followed — not as it is once the frame's own
-  # navigation, which its click handler started, has replaced it — under the policy its `rel` / `referrerpolicy` sets.
+  # navigation, which its click handler started, has replaced it — under the policy its `rel` / `referrerpolicy` sets (a
+  # form's `rel` too).
   it "sends the Referer of the document the link was followed in, under the link's policy" do
     s, log = session_for(
       '/p' => '<a id="nr" href="/x1" target="b" rel="noreferrer">n</a> <a id="or" href="/x2" target="b" referrerpolicy="origin">o</a>' \
-              '<iframe name="a" src="/a"></iframe><iframe name="b" src="/b"></iframe>',
+              '<form action="/x3" target="b" rel="noreferrer"><button>f</button></form>' \
+              '<iframe name="a" src="/a"></iframe><iframe name="b" src="/b"></iframe>' \
+              '<iframe id="sb" sandbox="allow-scripts" src="/s"></iframe>',
+      '/s' => '<a id="up" href="/x4" target="c" referrerpolicy="unsafe-url">u</a><iframe name="c"></iframe>',
       '/a' => %(<a id="go" href="/x" target="b" onclick="location.href='/self'">go</a>)
     )
     s.execute_script('frames[0].document.getElementById("go").click()')
     expect(poll_until { s.evaluate_script('frames[1].location.pathname').then {|v| v if v == '/x' } }).to eq('/x')
     s.find('#nr').click
     s.find('#or').click
-    expect(log.select {|path,| %w[/x /x1 /x2].include?(path) }).to eq([['/x', 'http://www.example.com/a'], ['/x1', nil], ['/x2', 'http://www.example.com/']])
+    s.click_button 'f'
+    # (…and a document of an opaque origin — a sandbox's — refers as none, whatever policy its link sets)
+    s.within_frame(s.find('#sb')) { s.find('#up').click }
+    expect(poll_until { log.find {|path,| path.start_with?('/x4') } }).to be_truthy
+    expect(log.select {|path,| %w[/x /x1 /x2].include?(path) || path.start_with?('/x3', '/x4') }).to eq(
+      [['/x', 'http://www.example.com/a'], ['/x1', nil], ['/x2', 'http://www.example.com/'], ['/x3', nil], ['/x4', nil]]
+    )
   end
 
   # HTML §7.2.2.3: a frame's self-given name is its parent window's named property only where the frame's document is

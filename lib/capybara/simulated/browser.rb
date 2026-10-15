@@ -10100,6 +10100,8 @@ module Capybara
       def frame_navigate_self(url, realm_id, initiator_realm = realm_id, policy = '')
         return if realm_id.nil? || realm_id.zero?
         source, document_policy = realm_referrer_initiator(initiator_realm)
+        # (…which no link's policy lifts for a document of an opaque origin: it refers as none, a step before any policy)
+        policy = '' if frame_document_origin_opaque?(initiator_realm)
         # Keyed by realm id (last URL wins per frame) so two different frames each
         # navigating in one turn both apply — a single slot would drop one.
         (@pending_frame_nav ||= {})[realm_id] = [url.to_s, [source, policy.to_s.empty? ? document_policy : policy.to_s]]
