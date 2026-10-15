@@ -7,8 +7,8 @@
 // What is remembered is what the autofill processing model lets be (HTML §4.10.18.7.1): a control whose autofill field
 // name is "off" — its own `autocomplete`, or its form owner's where its own says neither — keeps its data to itself, as
 // does a password field (Chrome). (Chrome also forgets the controls that say `on` in a form that says
-// `off`; the spec makes theirs "on".) A value is a control's own only in the value mode "value": a hidden field's, a
-// button's is its attribute, which the document fetched again has.
+// `off`; the spec makes theirs "on".) A value is a control's own only in the value mode "value": a hidden field's value,
+// like a button's, is its attribute, which the document fetched again has.
 
 use crate::dom::{nid_arg, realm, realm_id, NodeId, RealmArena, STATE_SELECTED, STATE_SELECTED_DIRTY};
 use crate::input_types::{value_mode, MODE_DEFAULT_ON, MODE_VALUE};
@@ -59,7 +59,9 @@ impl RealmArena {
             _ => PersistedState::None,
         }
     }
-    // Whether a control's autofill field name is "off".
+    // Whether a control's autofill field name is "off": its own `autocomplete` says so, or says neither and its form
+    // owner's does — an enumerated attribute, matched ASCII case-insensitively as written (" off " is an invalid value,
+    // so "on").
     fn autofill_off(&self, control: NodeId) -> bool {
         let own = self.get(control).and_then(|n| n.plain_attr("autocomplete")).map_or(String::new(), |v| crate::reflect::autofill(v, false));
         match own.as_str() {
@@ -68,7 +70,7 @@ impl RealmArena {
                 .form_owner(control)
                 .and_then(|f| self.get(f))
                 .and_then(|f| f.plain_attr("autocomplete"))
-                .is_some_and(|v| v.trim_matches(|c| matches!(c, '\t' | '\n' | '\x0C' | '\r' | ' ')).eq_ignore_ascii_case("off")),
+                .is_some_and(|v| v.eq_ignore_ascii_case("off")),
             _ => false,
         }
     }

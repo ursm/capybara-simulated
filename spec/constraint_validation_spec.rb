@@ -37,4 +37,19 @@ RSpec.describe 'constraint validation' do
     JS
     expect(got).to eq([false, true, false])
   end
+
+  # HTML "statically validate the constraints": the controls that suffer from a constraint are found FIRST, then each is
+  # fired `invalid` — so an `invalid` handler that fills in a later control does not save it from its own event, nor the
+  # form from failing. Chrome 155 and Firefox both validate each control only as they reach it, and fire none at `b`
+  # (`[false, "a"]`); the spec's steps are explicit, and it is them we follow.
+  it 'finds the invalid controls before it fires any invalid event' do
+    got = run(<<~JS)
+      document.body.innerHTML = '<form id=f><input id=a required><input id=b required></form>';
+      var log = [], b = document.getElementById('b');
+      document.getElementById('a').addEventListener('invalid', function () { log.push('a'); b.value = 'x'; });
+      b.addEventListener('invalid', function () { log.push('b'); });
+      return [document.getElementById('f').checkValidity(), log.join()];
+    JS
+    expect(got).to eq([false, 'a,b'])
+  end
 end

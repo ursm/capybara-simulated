@@ -145,9 +145,6 @@ impl RealmArena {
         crate::input_value::sanitize(ty, &self.raw_value(n), &crate::input_value::Attrs::of(n), &|v| v.to_string())
     }
 
-    // `willValidate`: a submittable control of a validating kind — an `<input>` but a hidden / reset / button one, a
-    // Submit-state `<button>`, a `<select>`, a `<textarea>`, a form-associated custom element — that is not actually
-    // disabled, not `readonly` (an input, a textarea, a form-associated custom element), and not in a `<datalist>`.
     // `id`'s custom validity becomes `flags`, with `message` its validation message, newlines normalized — none, and no
     // message, for no flags — and whether that changed it (what `:valid` / `:invalid` read).
     pub(crate) fn set_custom_validity(&mut self, id: NodeId, flags: u16, message: &[u16]) -> bool {
@@ -189,6 +186,9 @@ impl RealmArena {
         message.encode_utf16().collect()
     }
 
+    // `willValidate`: a submittable control of a validating kind — an `<input>` but a hidden / reset / button one, a
+    // Submit-state `<button>`, a `<select>`, a `<textarea>`, a form-associated custom element — that is not actually
+    // disabled, not `readonly` (an input, a textarea, a form-associated custom element), and not in a `<datalist>`.
     pub(crate) fn will_validate(&self, id: NodeId) -> bool {
         let Some(n) = self.get(id).filter(|n| n.is_html()) else { return false };
         let face = n.state & STATE_FORM_ASSOCIATED != 0;
