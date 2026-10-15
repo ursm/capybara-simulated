@@ -85,6 +85,73 @@ pub(crate) fn redirect(status: u32, method: &[u8], current: &str, location: &str
     })
 }
 
+// One hop of a request a service worker intercepts, and the response its `respondWith` handed back for it: Fetch "HTTP
+// fetch" (§4.4) step 5.5 over that response, then — a redirect status with a `Location` the client's redirect mode
+// follows — "HTTP-redirect fetch" over it, the next hop intercepted again (the worker observes every followed hop).
+pub(crate) struct InterceptedHop<'a> {
+    pub(crate) mode: &'a str,
+    pub(crate) redirect_mode: &'a str,
+    pub(crate) url: &'a str,
+    pub(crate) method: &'a [u8],
+    pub(crate) request_origin: &'a str,
+    // Whether the chain has been at another origin than the request's before this hop.
+    pub(crate) crossed: bool,
+    // How many redirects the chain has followed to reach this hop.
+    pub(crate) hops: u32,
+}
+pub(crate) struct WorkerResponse<'a> {
+    pub(crate) status: u32,
+    pub(crate) response_type: &'a str,
+    pub(crate) url: &'a str,
+    pub(crate) redirected: bool,
+    pub(crate) location: Option<&'a str>,
+}
+pub(crate) enum HopOutcome {
+    // The response answers the request as it is.
+    Answer,
+    // Filtered to an opaque redirect of the hop's URL: a redirect the request's mode is "manual" for.
+    OpaqueRedirect,
+    // The next hop, at that URL, its request changed as the redirect says.
+    Follow(String, Redirect),
+    // A network error, and why.
+    Fail(String),
+}
+pub(crate) fn intercepted_hop(hop: &InterceptedHop<'_>, response: &WorkerResponse<'_>) -> HopOutcome {
+    let t = response.response_type;
+    if !service_worker_response_allowed(hop.mode, hop.redirect_mode, t, response.redirected) {
+        let redirected = if response.redirected { ", redirected" } else { "" };
+        return HopOutcome::Fail(format!(
+            "the service worker response (type \"{t}\"{redirected}) is disallowed for request mode \"{}\" / redirect \"{}\"",
+            hop.mode, hop.redirect_mode
+        ));
+    }
+    let location = response.location.filter(|_| matches!(response.status, 301 | 302 | 303 | 307 | 308) && t != "opaqueredirect");
+    let Some(location) = location else { return HopOutcome::Answer };
+    match hop.redirect_mode {
+        "error" => return HopOutcome::Fail(format!("redirect mode is \"error\" but the response is a redirect: {}", hop.url)),
+        "manual" => return HopOutcome::OpaqueRedirect,
+        _ => {}
+    }
+    if hop.hops >= 20 {
+        return HopOutcome::Fail("exceeded 20 redirects".to_owned());
+    }
+    // The location resolves against the RESPONSE's URL — a synthetic response has none to anchor a relative one, which is
+    // a network error (`Response.redirect()` absolutizes at creation, so it always carries one).
+    let base = ada_url::Url::parse(response.url, None).ok();
+    let Ok(next) = ada_url::Url::parse(location, base.as_ref().map(|b| b.href())) else {
+        return HopOutcome::Fail(format!("invalid redirect location: {location}"));
+    };
+    let next = next.href().to_owned();
+    let Some(step) = redirect(response.status, hop.method, hop.url, &next, hop.mode == "cors", hop.request_origin, hop.crossed) else {
+        return HopOutcome::Fail(format!("the redirect to {next} may not be followed"));
+    };
+    // (…a same-origin request whose chain has been at another origin fails, as main fetch fails it at each hop)
+    if hop.mode == "same-origin" && step.crossed {
+        return HopOutcome::Fail(format!("a same-origin request was redirected to another origin: {next}"));
+    }
+    HopOutcome::Follow(next, step)
+}
+
 const FORBIDDEN_REQUEST_HEADERS: [&str; 22] = [
     "accept-charset", "accept-encoding", "access-control-request-headers", "access-control-request-method", "connection",
     "content-length", "cookie", "cookie2", "date", "dnt", "expect", "host", "keep-alive", "origin", "permissions-policy",
@@ -209,8 +276,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "badPort", bad_port_op, context_id);
     crate::dom::register(scope, ns, "blobRange", blob_range_op, context_id);
     crate::dom::register(scope, ns, "corsSafelistedMethod", cors_safelisted_method_op, context_id);
-    crate::dom::register(scope, ns, "serviceWorkerResponseAllowed", service_worker_response_allowed_op, context_id);
-    crate::dom::register(scope, ns, "httpRedirect", http_redirect_op, context_id);
+    crate::dom::register(scope, ns, "interceptedHop", intercepted_hop_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
     crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
     crate::dom::register(scope, ns, "headerRule", header_rule_op, context_id);
@@ -233,21 +299,38 @@ fn cors_safelisted_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
     let method = units(scope, args.get(0));
     rv.set_bool(cors_safelisted_method(&method));
 }
-// __dom.serviceWorkerResponseAllowed(mode, redirect, type, redirected) -> `service_worker_response_allowed`.
-fn service_worker_response_allowed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let [mode, redirect, response_type] = [0, 1, 2].map(|k| args.get(k).to_rust_string_lossy(scope));
-    rv.set_bool(service_worker_response_allowed(&mode, &redirect, &response_type, args.get(3).boolean_value(scope)));
-}
-// __dom.httpRedirect(status, method, currentUrl, locationUrl, corsMode, requestOrigin, crossed) -> null for a network error
-// (`redirect`), else its bits: 1 the request a bodyless GET, 2 its Authorization dropped, 4 its chain at another origin.
-fn http_redirect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let status = args.get(0).uint32_value(scope).unwrap_or(0);
-    let method = units(scope, args.get(1));
-    let (current, location) = (args.get(2).to_rust_string_lossy(scope), args.get(3).to_rust_string_lossy(scope));
-    let origin = args.get(5).to_rust_string_lossy(scope);
-    match redirect(status, &method, &current, &location, args.get(4).is_true(), &origin, args.get(6).is_true()) {
-        Some(r) => rv.set_int32(r.to_get as i32 | (r.drop_authorization as i32) << 1 | (r.crossed as i32) << 2),
-        None => rv.set_null(),
+// __dom.interceptedHop(mode, redirectMode, url, method, requestOrigin, crossed, hops, status, type, responseUrl, redirected,
+// location) -> `intercepted_hop`: 0 to answer, 1 for an opaque redirect, [nextUrl, bits] to follow (bits: 1 the request a
+// bodyless GET, 2 its Authorization dropped, 4 its chain at another origin), or a network error's message.
+fn intercepted_hop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let [mode, redirect_mode, url, request_origin, response_type, response_url] = [0, 1, 2, 4, 8, 9].map(|k| args.get(k).to_rust_string_lossy(scope));
+    let method = units(scope, args.get(3));
+    let location = (!args.get(11).is_null_or_undefined()).then(|| args.get(11).to_rust_string_lossy(scope));
+    let hop = InterceptedHop {
+        mode: &mode,
+        redirect_mode: &redirect_mode,
+        url: &url,
+        method: &method,
+        request_origin: &request_origin,
+        crossed: args.get(5).is_true(),
+        hops: args.get(6).uint32_value(scope).unwrap_or(0),
+    };
+    let response = WorkerResponse {
+        status: args.get(7).uint32_value(scope).unwrap_or(0),
+        response_type: &response_type,
+        url: &response_url,
+        redirected: args.get(10).is_true(),
+        location: location.as_deref(),
+    };
+    match intercepted_hop(&hop, &response) {
+        HopOutcome::Answer => rv.set_int32(0),
+        HopOutcome::OpaqueRedirect => rv.set_int32(1),
+        HopOutcome::Follow(next, r) => {
+            let next = v8::String::new(scope, &next).unwrap();
+            let bits = v8::Integer::new(scope, r.to_get as i32 | (r.drop_authorization as i32) << 1 | (r.crossed as i32) << 2);
+            rv.set(v8::Array::new_with_elements(scope, &[next.into(), bits.into()]).into());
+        }
+        HopOutcome::Fail(message) => rv.set(v8::String::new(scope, &message).unwrap().into()),
     }
 }
 // __dom.requestBodyHeader(name) -> whether it is a request-body-header name.
@@ -345,6 +428,33 @@ mod tests {
         assert!(service_worker_response_allowed("navigate", "manual", "opaqueredirect", false));
         assert!(!service_worker_response_allowed("cors", "follow", "opaqueredirect", false));
         assert!(!service_worker_response_allowed("no-cors", "follow", "error", false));
+    }
+
+    #[test]
+    fn an_intercepted_hop_answers_fails_or_follows() {
+        let hop = |redirect_mode, mode, hops| InterceptedHop {
+            mode,
+            redirect_mode,
+            url: "http://a.test/x",
+            method: b"POST",
+            request_origin: "http://a.test",
+            crossed: false,
+            hops,
+        };
+        let response = |status, location, url| WorkerResponse { status, response_type: "basic", url, redirected: false, location };
+        let r302 = response(302, Some("y"), "http://a.test/x");
+        assert!(matches!(intercepted_hop(&hop("follow", "cors", 0), &response(200, Some("y"), "")), HopOutcome::Answer));
+        assert!(matches!(intercepted_hop(&hop("manual", "cors", 0), &r302), HopOutcome::OpaqueRedirect));
+        assert!(matches!(intercepted_hop(&hop("error", "cors", 0), &r302), HopOutcome::Fail(_)));
+        assert!(matches!(intercepted_hop(&hop("follow", "cors", 20), &r302), HopOutcome::Fail(_)));
+        assert!(matches!(
+            intercepted_hop(&hop("follow", "cors", 19), &r302),
+            HopOutcome::Follow(ref next, Redirect { to_get: true, .. }) if next == "http://a.test/y"
+        ));
+        // (…a relative location with no response URL to anchor it, and a same-origin request led to another origin)
+        assert!(matches!(intercepted_hop(&hop("follow", "cors", 0), &response(302, Some("y"), "")), HopOutcome::Fail(_)));
+        assert!(matches!(intercepted_hop(&hop("follow", "same-origin", 0), &response(307, Some("http://b.test/"), "")), HopOutcome::Fail(_)));
+        assert!(matches!(intercepted_hop(&hop("follow", "cors", 0), &response(304, Some("y"), "")), HopOutcome::Answer));
     }
 
     #[test]
