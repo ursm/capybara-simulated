@@ -19,6 +19,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "postMessageReaches", post_message_reaches_op, context_id);
     register(scope, ns, "urlencodedParse", urlencoded_parse, context_id);
     register(scope, ns, "urlencodedSerialize", urlencoded_serialize, context_id);
+    register(scope, ns, "javascriptUrlSource", javascript_url_source_op, context_id);
 }
 
 // A URL's parts, in `parts`' order.
@@ -287,9 +288,51 @@ fn urlencoded_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     }
 }
 
+// The script a `javascript:` URL runs (HTML "evaluate a javascript: URL"): its serialization with the scheme taken off,
+// percent-decoded and UTF-8 decoded — an escape that is no UTF-8 U+FFFD, a `%` without two hex digits after it itself.
+pub(crate) fn javascript_url_source(href: &str) -> String {
+    let encoded = href.get(..11).filter(|s| s.eq_ignore_ascii_case("javascript:")).map_or(href, |_| &href[11..]);
+    String::from_utf8_lossy(&percent_decode(encoded.as_bytes())).into_owned()
+}
+// The URL Standard's "percent-decode" of `input`: each `%` followed by two hex digits the byte they name, any other byte
+// as it is.
+fn percent_decode(input: &[u8]) -> Vec<u8> {
+    let hex = |b: u8| char::from(b).to_digit(16).map(|d| d as u8);
+    let mut out = Vec::with_capacity(input.len());
+    let mut i = 0;
+    while i < input.len() {
+        let pair = (input[i] == b'%').then(|| Some((hex(*input.get(i + 1)?)?, hex(*input.get(i + 2)?)?))).flatten();
+        match pair {
+            Some((high, low)) => {
+                out.push(high << 4 | low);
+                i += 3;
+            }
+            None => {
+                out.push(input[i]);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+// __dom.javascriptUrlSource(href) -> the script the `javascript:` URL `href` (serialized) runs (`javascript_url_source`).
+fn javascript_url_source_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let href = usv(scope, args.get(0));
+    if let Some(string) = v8::String::new(scope, &javascript_url_source(&href)) {
+        rv.set(string.into());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_javascript_url_runs_its_percent_decoded_utf8() {
+        assert_eq!(javascript_url_source("javascript:f('%41','%')"), "f('A','%')");
+        assert_eq!(javascript_url_source("javascript:x=%22%C3%A9%22"), "x=\"é\"");
+        assert_eq!(javascript_url_source("javascript:x=%FF%zz%4"), "x=\u{FFFD}%zz%4");
+    }
 
     #[test]
     fn tells_a_url_a_document_may_rewrite_its_own_to() {

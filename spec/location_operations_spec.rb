@@ -104,4 +104,11 @@ RSpec.describe 'Location operations' do
     session.execute_script("location.replace('/other?a=%zz')")
     expect(session.evaluate_script('[history.length, location.pathname, location.search]')).to eq([length, '/other', '?a=%zz'])
   end
+
+  # HTML "evaluate a javascript: URL": the script is the URL's serialization percent-decoded as BYTES, then UTF-8
+  # decoded — an escape that is no UTF-8 U+FFFD, a `%` that begins none itself.
+  it 'runs a javascript: URL as its percent-decoded UTF-8' do
+    session.execute_script(%q(window.seen = null; location.href = 'javascript:seen = ["%C3%A9", "%FF", "%zz"]'))
+    expect(session.evaluate_script('seen')).to eq(["\u00e9", "\uFFFD", '%zz'])
+  end
 end
