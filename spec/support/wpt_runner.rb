@@ -290,8 +290,8 @@ module WptRunner
     meta  = JSON.parse(out.byteslice(0, nl))
     rbody = out.byteslice(nl + 1, meta['body_len'].to_i) || ''.b
     # (…the handler's header bytes, which its JSON carries Latin-1-decoded, as the bytes they are — what wptserve puts
-    # on the wire)
-    hdrs = combine_headers(Array(meta['headers']).map {|name, value| [name, value.to_s.encode(Encoding::ISO_8859_1).b] })
+    # on the wire — in the UTF-8-tagged string a Rack app hands over, valid or not)
+    hdrs = combine_headers(Array(meta['headers']).map {|name, value| [name, value.to_s.encode(Encoding::ISO_8859_1).force_encoding(Encoding::UTF_8)] })
     hdrs['content-type'] ||= 'text/plain'
     # A custom HTTP reason phrase (status.py's `status = (code, "text")`) rides an
     # internal header; rack_fetch lifts it into the response's statusText and strips it.
