@@ -114,8 +114,8 @@ pub(crate) fn resolved_value(engine: &mut StyleEngine, arena: &RealmArena, id: N
 
 // The custom properties a resolved-value declaration lists after its longhands: every one `id` — or its `pseudo`-element
 // — has a computed value for, its own, inherited, or a registered one's initial value, in the style engine's order (the
-// inheriting ones first): the set Firefox lists, in its order (Chrome lists one declared `initial` too). How many there
-// are, None for an element the engine does not style…
+// inheriting ones first): what stylo's computed map holds, which Firefox lists in that order (Chrome lists one declared
+// `initial` too, which the map drops). How many there are, None for an element the engine does not style…
 pub(crate) fn custom_property_count(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, pseudo: Option<&str>, now: f64) -> Option<usize> {
     let style = engine.computed_style(arena, id, pseudo, now)?;
     let custom = style.custom_properties();

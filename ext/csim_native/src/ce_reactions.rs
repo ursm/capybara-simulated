@@ -151,6 +151,9 @@ impl Reactions {
         self.custom.retain(|&id, _| !gone(id));
         self.form_states.retain(|&id, _| !gone(id));
         self.form_ids.retain(|(doc, _), _| !gone(*doc));
+        for found in self.form_ids.values_mut().filter(|f| f.is_some_and(&gone)) {
+            *found = None;
+        }
         self.queues.retain(|&id, _| !gone(id));
         self.backup.retain(|&(id, _)| !gone(id));
         for level in &mut self.levels {
