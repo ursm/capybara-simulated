@@ -51,6 +51,9 @@ pub(crate) struct Timers {
     // task, an animation frame, a script the host runs) — which a timer it schedules nests in (`timerNext`,
     // `timerTaskEnd`).
     task_nesting: Option<u32>,
+    // …and the repeating timer whose task that is, with when it ran: scheduled again as its task ends (`rearm`), after
+    // whatever its handler scheduled.
+    repeating: Option<(i64, f64)>,
     // How many of the realm's event loop steps are running (`timerStep`): a step goes on with what is due in it though
     // the realm's context is disposed during it — a frame's script removing its own iframe, mid-step, still has the
     // request it sent fail as the step runs on — and the list goes as it ends.
@@ -97,6 +100,21 @@ impl Timers {
         let Some(t) = self.by_key.remove(&key) else { return false };
         self.order.remove(&(Due(t.due), t.seq, key));
         true
+    }
+    // HTML §8.6 timer task step 7: a repeating timer, its handler run, runs the timer initialization steps again — due
+    // its timeout after it ran, clamped at its nesting level and a level deeper, ordered after every timer scheduled
+    // before now, its handler's own — unless the handler cleared it. Its task over, what runs next is no timer task.
+    fn end_task(&mut self) {
+        self.task_nesting = None;
+        let Some((key, run)) = self.repeating.take() else { return };
+        self.seq += 1;
+        let seq = self.seq;
+        let Some(t) = self.by_key.get_mut(&key) else { return };
+        let Some(timeout) = t.period else { return };
+        t.due = run + clamped(timeout, t.nesting);
+        t.nesting += 1;
+        t.seq = seq;
+        self.order.insert((Due(t.due), seq, key));
     }
 }
 
@@ -290,32 +308,30 @@ fn timer_clear(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 fn timer_task_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     if let Some(timers) = dom(scope).arena.timers_of(cid) {
-        timers.task_nesting = None;
+        timers.end_task();
     }
 }
 
 // __dom.timerNext(now, limit) -> `[due, handler, args]`: the calling realm's next timer, where it falls due by `limit` —
-// taken from the list, or, one that repeats, due again its timeout after it runs (`now`, or its due time where that is
-// later), nested one level deeper and clamped by it; undefined for none. A page's is the timer task running from here
-// (`timerTaskEnd`), a platform task none.
+// taken from the list, one that repeats to be scheduled again as its task ends (`timerTaskEnd`); undefined for none. A
+// page's is the timer task running from here, a platform task none. (A task a terminated handler never ended is ended
+// here first.)
 fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let now = args.get(0).number_value(scope).unwrap_or(0.0);
     let limit = args.get(1).number_value(scope).unwrap_or(f64::INFINITY);
     let cid = realm_id(scope, &args);
     let arena = &mut dom(scope).arena;
     let timers = &mut arena.enter(cid).timers;
+    timers.end_task();
     let Some(&(Due(due), seq, key)) = timers.order.first().filter(|&&(Due(due), _, _)| due <= limit) else { return };
     timers.order.remove(&(Due(due), seq, key));
     let run = due.max(now);
     let repeats = timers.by_key.get(&key).and_then(|t| t.period);
     let (handler, list) = match repeats {
-        Some(timeout) => {
-            let Some(t) = timers.by_key.get_mut(&key) else { return };
-            // (…the timer initialization steps run again in its own task, at its nesting level)
+        Some(_) => {
+            let Some(t) = timers.by_key.get(&key) else { return };
             timers.task_nesting = Some(t.nesting);
-            t.due = run + clamped(timeout, t.nesting);
-            t.nesting += 1;
-            timers.order.insert((Due(t.due), seq, key));
+            timers.repeating = Some((key, run));
             (t.handler.clone(), t.args.clone())
         }
         None => {
