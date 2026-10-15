@@ -37,6 +37,17 @@ pub(crate) fn cors_safelisted_method(method: &[u8]) -> bool {
     ["GET", "HEAD", "POST"].iter().any(|m| m.as_bytes() == method)
 }
 
+// Fetch "HTTP fetch" (§4.4) step 5.5: whether a service worker's response may answer a request in `mode` with
+// `redirect` — none of an error, a CORS response to a same-origin request, an opaque one to a request not no-cors, an
+// opaque redirect to one whose redirect mode is not manual, or a redirected response to one that does not follow.
+pub(crate) fn service_worker_response_allowed(mode: &str, redirect: &str, response_type: &str, redirected: bool) -> bool {
+    !(response_type == "error"
+        || (mode == "same-origin" && response_type == "cors")
+        || (mode != "no-cors" && response_type == "opaque")
+        || (redirect != "manual" && response_type == "opaqueredirect")
+        || (redirect != "follow" && redirected))
+}
+
 // Fetch "HTTP-redirect fetch" (§4.4) step 12: whether a redirect of `status` makes a request of `method` a bodyless GET —
 // a 301 or 302 of a POST, a 303 of anything but a GET or HEAD.
 pub(crate) fn redirect_to_get(status: u32, method: &[u8]) -> bool {
@@ -198,6 +209,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "badPort", bad_port_op, context_id);
     crate::dom::register(scope, ns, "blobRange", blob_range_op, context_id);
     crate::dom::register(scope, ns, "corsSafelistedMethod", cors_safelisted_method_op, context_id);
+    crate::dom::register(scope, ns, "serviceWorkerResponseAllowed", service_worker_response_allowed_op, context_id);
     crate::dom::register(scope, ns, "httpRedirect", http_redirect_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
     crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
@@ -220,6 +232,11 @@ fn bad_port_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 fn cors_safelisted_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let method = units(scope, args.get(0));
     rv.set_bool(cors_safelisted_method(&method));
+}
+// __dom.serviceWorkerResponseAllowed(mode, redirect, type, redirected) -> `service_worker_response_allowed`.
+fn service_worker_response_allowed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let [mode, redirect, response_type] = [0, 1, 2].map(|k| args.get(k).to_rust_string_lossy(scope));
+    rv.set_bool(service_worker_response_allowed(&mode, &redirect, &response_type, args.get(3).boolean_value(scope)));
 }
 // __dom.httpRedirect(status, method, currentUrl, locationUrl, corsMode, requestOrigin, crossed) -> null for a network error
 // (`redirect`), else its bits: 1 the request a bodyless GET, 2 its Authorization dropped, 4 its chain at another origin.
@@ -295,6 +312,9 @@ pub(crate) fn bad_port_for_ruby(port: u32) -> bool {
 pub(crate) fn redirect_to_get_for_ruby(status: u32, method: magnus::RString) -> bool {
     redirect_to_get(status, &ruby_bytes(method))
 }
+pub(crate) fn service_worker_response_allowed_for_ruby(mode: String, redirect: String, response_type: String, redirected: bool) -> bool {
+    service_worker_response_allowed(&mode, &redirect, &response_type, redirected)
+}
 pub(crate) fn cors_safelisted_method_for_ruby(method: magnus::RString) -> bool {
     cors_safelisted_method(&ruby_bytes(method))
 }
@@ -314,6 +334,18 @@ pub(crate) fn http_token_for_ruby(s: magnus::RString) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_service_worker_response_answers_only_the_requests_its_type_may() {
+        assert!(service_worker_response_allowed("no-cors", "follow", "opaque", false));
+        assert!(!service_worker_response_allowed("cors", "follow", "opaque", false));
+        assert!(!service_worker_response_allowed("same-origin", "follow", "cors", false));
+        assert!(service_worker_response_allowed("cors", "follow", "cors", true));
+        assert!(!service_worker_response_allowed("navigate", "manual", "basic", true));
+        assert!(service_worker_response_allowed("navigate", "manual", "opaqueredirect", false));
+        assert!(!service_worker_response_allowed("cors", "follow", "opaqueredirect", false));
+        assert!(!service_worker_response_allowed("no-cors", "follow", "error", false));
+    }
 
     #[test]
     fn a_redirect_follows_the_fetch_steps() {

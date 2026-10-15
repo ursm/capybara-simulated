@@ -4849,11 +4849,10 @@ module Capybara
             last_sw = sw
             r = sw_script_fetch_event(sw, current, client_handle, shared:, creator_client:)
             if r && !r['fallthrough']
-              # Handle Fetch response validation for a 'same-origin'-mode request: a
-              # network-error respondWith, or a cors / opaque(redirect) response, is a
-              # NETWORK ERROR — the worker must FAIL TO START (worker-interception
-              # "cors/no-cors … fails worker start").
-              return :error if r['networkError'] || %w[cors opaque opaqueredirect].include?(r['type'].to_s)
+              # Handle Fetch response validation for the script's 'same-origin'-mode request: a
+              # network-error respondWith, or a response its type forbids, is a NETWORK ERROR — the
+              # worker must FAIL TO START (worker-interception "cors/no-cors … fails worker start").
+              return :error if r['networkError'] || !sw_response_allowed?(r, 'same-origin')
               status = r['status'].to_i
               if REDIRECT_STATUSES.include?(status) && (loc = redirect_location(status, r['headers'] || {}))
                 current = resolve_against(loc, r['url'].to_s.empty? ? current : r['url'])
@@ -4959,7 +4958,7 @@ module Capybara
         # `new Response(text)` respondWith (text/plain) serving a stylesheet is
         # load-bearing for green static-router subtests.
         type = r['type'].to_s
-        return {'blocked' => true} if type == 'opaque' && mode.to_s != 'no-cors'
+        return {'blocked' => true} unless sw_response_allowed?(r, mode)
         return {'blocked' => true} unless type == 'opaque' || (200..299).cover?((r['status'] || 200).to_i)
 
         body_b64 = r['body_b64'].to_s
@@ -4985,7 +4984,7 @@ module Capybara
         )
         r = sw_direct_fetch(sw_handle, req, client_handle) or return nil
         return nil if r['fallthrough']
-        return {'blocked' => true} if r['networkError'] || %w[cors opaque opaqueredirect].include?(r['type'].to_s)
+        return {'blocked' => true} if r['networkError'] || !sw_response_allowed?(r, 'same-origin')
 
         {
           'status'  => (r['status'] || 200).to_i,
@@ -5323,6 +5322,12 @@ module Capybara
 
       # The active worker handle at an EXACT scope (0 if none) — see __csim_swActiveHandleForScope.
       def sw_active_handle_for_scope(scope) = @sw_registrations[scope.to_s].to_i
+
+      # Whether a service worker's response `r` (its wire form) may answer a request in `mode` with `redirect` (Fetch
+      # "HTTP fetch" step 5.5 — the engine's).
+      private def sw_response_allowed?(r, mode, redirect = 'follow')
+        Native.service_worker_response_allowed(mode.to_s, redirect, (r['type'] || 'default').to_s, r['redirected'] == true)
+      end
 
       # Every registration with a live active worker, `[scope, handle, script URL]`, in the order they were registered —
       # see __csim_swActiveRegistrations.
@@ -6621,14 +6626,11 @@ module Capybara
           # NETWORK leg — that is the network's own answer: it followed its
           # redirects itself and commits at the final URL like any network nav.
           unless from_network
-            # Handle Fetch: an OPAQUE response to a non-subresource (navigation) request
-            # is a network error — a document can never commit from a no-cors response.
-            return {'networkError' => true}   if resp['type'] == 'opaque'
-            # HTTP fetch response-to-request validity: a navigation request's redirect mode
-            # is 'manual', so a respondWith whose response was itself REDIRECTED (the SW
-            # re-fetched with redirect 'follow' and a redirect occurred — URL list > 1) is a
-            # network error; only an opaqueredirect (below) may carry a redirect to a nav.
-            return {'networkError' => true}   if resp['redirected']
+            # HTTP fetch response-to-request validity for a navigation request — mode 'navigate',
+            # redirect 'manual': an OPAQUE response (a document never commits from a no-cors
+            # response) or a REDIRECTED one (the SW re-fetched with 'follow' and a redirect occurred)
+            # is a network error; only an opaqueredirect (below) may carry a redirect to a nav.
+            return {'networkError' => true} unless sw_response_allowed?(resp, 'navigate', 'manual')
           end
           # An opaque-REDIRECT respondWith: the navigation processes the real redirect the
           # filtered surface (status 0 / empty headers) hides, carried on the private wire
