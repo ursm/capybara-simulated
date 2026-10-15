@@ -3758,7 +3758,7 @@ module Capybara
         # `<base href>` points at a real http(s) origin — so for THOSE documents
         # resolve against `<base href>` (HTML base-tag semantics) and the script loads.
         # Ordinary http(s) pages keep the document-URL base so the hot path skips the
-        # `base_href` dom_call (CLAUDE.md rule 3).
+        # `document_base_url` dom_call (CLAUDE.md rule 3).
         needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
         key = resolve_against_current(url.to_s, use_base: needs_base)
         return nil unless key.is_a?(String)
@@ -12098,9 +12098,10 @@ module Capybara
         # Inside a `within_frame` block the "current document" is the frame's,
         # so links / form actions resolve against the frame's URL + <base href>.
         doc_url = current_browsing_context_url || @default_host
-        # The document's base URL — its `<base href>`'s — when the page's own links / form actions are being resolved;
-        # `visit` passes no `use_base`, so an address-bar navigation reaches the URL the test typed.
-        base = (use_base && document_base_url) || doc_url
+        # The document's base URL — its `<base href>`'s — when the page's own links / form actions are being resolved,
+        # there being a document (before the first visit there is only the empty one, at about:blank); `visit` passes no
+        # `use_base`, so an address-bar navigation reaches the URL the test typed.
+        base = (use_base && current_browsing_context_url && document_base_url) || doc_url
         parse_url(url.to_s, base)&.fetch(:href) || url
       end
 

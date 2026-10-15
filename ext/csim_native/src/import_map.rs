@@ -56,7 +56,9 @@ fn sort_map<T>(map: &mut [(String, T)]) {
 }
 
 // What "parse an import map string" throws, which registering the map reports: a SyntaxError for text that is no JSON, a
-// TypeError for JSON that is no map — or whose `imports`, `scopes`, one of its scopes or `integrity` is none.
+// TypeError for JSON that is no map — or whose `imports`, `scopes`, one of its scopes or `integrity` is none. (The JSON
+// is serde_json's, stricter than the JSON.parse the spec names in two corners no import map is written in: a lone
+// surrogate's escape, and nesting past 128 levels — each a SyntaxError here.)
 #[derive(Debug, PartialEq)]
 pub(crate) enum ParseError {
     Syntax,
@@ -79,10 +81,12 @@ pub(crate) fn parse(text: &str, base: &str) -> Result<ImportMap, ParseError> {
     }
     if let Some(scopes) = top.get("scopes") {
         for (prefix, imports) in object(scopes)? {
+            // (…a scope that is no map throwing before a prefix that is no URL is skipped)
+            let imports = object(imports)?;
             let Some(prefix) = parse_url(prefix, Some(base)) else { continue };
             // (…a later key for the same prefix replacing the earlier, as a map's set does)
             map.scopes.retain(|(p, _)| *p != prefix);
-            map.scopes.push((prefix, normalize_specifier_map(object(imports)?, base)));
+            map.scopes.push((prefix, normalize_specifier_map(imports, base)));
         }
         sort_map(&mut map.scopes);
     }
@@ -296,6 +300,7 @@ mod tests {
         assert_eq!(parse("[]", base).err(), Some(ParseError::Type));
         assert_eq!(parse("{", base).err(), Some(ParseError::Syntax));
         assert_eq!(parse(r#"{"scopes": {"/a/": []}}"#, base).err(), Some(ParseError::Type));
+        assert_eq!(parse(r#"{"scopes": {"http://[": []}}"#, base).err(), Some(ParseError::Type));
         // (…a key normalized to another's, the later in the source winning)
         let dup = parse(r#"{"imports": {"/js/a1.js": "/js/a1.js", "./a1.js": "/js/a2.js"}}"#, "https://a.test/js/").unwrap();
         assert_eq!(resolve(&dup, "/js/a1.js", "https://a.test/").as_deref(), Some("https://a.test/js/a2.js"));

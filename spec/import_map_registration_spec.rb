@@ -48,4 +48,21 @@ RSpec.describe 'import map registration' do
     JS
     expect(got).to eq(42)
   end
+
+  # The XML parser prepares no script at its end tag here: the after-parse pass registers its import maps in tree order
+  # with its parser-blocking scripts, before the scripts after them run.
+  it "registers an XML document's map before its later scripts run" do
+    page = <<~XHTML
+      <html xmlns="http://www.w3.org/1999/xhtml"><head>
+      <script type="importmap">{"imports": {"x": "/m.js"}}</script>
+      <script>window.got = import('x').then(m => m.default, e => String(e));</script>
+      </head><body/></html>
+    XHTML
+    s = simulated_session(->(env) {
+      next [200, {'content-type' => 'text/javascript'}, ['export default 7']] if env['PATH_INFO'] == '/m.js'
+      [200, {'content-type' => 'application/xhtml+xml'}, [page]]
+    })
+    s.visit '/'
+    expect(s.evaluate_async_script('got.then(arguments[0])')).to eq(7)
+  end
 end
