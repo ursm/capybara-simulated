@@ -92,6 +92,7 @@ mod mime;
 mod multipart;
 mod mutation;
 mod mutation_observers;
+mod navigables;
 mod namespaces;
 mod node_handle;
 mod numbers;

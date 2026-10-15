@@ -48,10 +48,11 @@ module Capybara
         '__csim_swScriptFetch'       => ->(b, *a) { b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], a[4] || 'script', a[5] || 'no-cors', a[6] || 'include', binary: a[7] == true, integrity: a[8] || '') },
         '__locationAssign'           => ->(b, *a) { b.location_assign(a[0], replace: a[1] == true); nil },
         '__locationReload'           => ->(b, *_) { b.location_reload; nil },
-        # A nested browsing context navigating its OWN location (a[1] = the frame's
-        # realm id). Deferred + applied by re-navigating the owning iframe, so a
-        # frame's `location.href = …` navigates the frame, not the top page.
-        '__csimFrameNavigate'        => ->(b, *a) { b.frame_navigate_self(a[0], a[1].to_i); nil },
+        # A nested browsing context navigated (a[1] = the frame's realm id) — its OWN
+        # location, or (a[3] = the initiating realm id) a link whose target names it.
+        # Deferred + applied by re-navigating the owning iframe, so a frame's
+        # `location.href = …` navigates the frame, not the top page.
+        '__csimFrameNavigate'        => ->(b, *a) { b.frame_navigate_self(a[0], a[1].to_i, a[3].nil? ? a[1].to_i : a[3].to_i); nil },
         # A same-origin window realm (window.open in this isolate) navigating itself
         # (a[0] = url, a[1] = the window's realm id). Deferred + applied by reloading
         # that realm's document in place — see Browser#window_realm_navigate_self.

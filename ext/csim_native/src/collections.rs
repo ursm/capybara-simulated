@@ -340,9 +340,9 @@ impl RealmArena {
         out
     }
     // The named objects of the document's window with the name `name`, in tree order — by `kind`: 0 the containers of
-    // its child navigables whose target name it is (an iframe's or a frame's, the `name` its container gave it — one the
-    // navigable gave itself is not modelled); 1 the elements whose id it is; 2 those and the embed, form, img and object
-    // elements whose `name` it is.
+    // its document-tree child navigables whose target name it is (navigables.rs: an iframe's or a frame's, the one its
+    // container's `name` gave it or the one it gave itself); 1 the elements whose id it is; 2 those and the embed, form,
+    // img and object elements whose `name` it is.
     pub(crate) fn window_named(&self, doc: NodeId, name: &[u16], kind: i32) -> Vec<NodeId> {
         if name.is_empty() {
             return Vec::new();
@@ -354,7 +354,7 @@ impl RealmArena {
         each_element(self, doc, |id, n| {
             let named = |tags: &[&str]| n.ns == ns!(html) && tags.contains(&&*n.local_name) && n.plain_attr_is("name", name);
             let takes = if kind == 0 {
-                named(&["iframe", "frame"])
+                n.ns == ns!(html) && (&*n.local_name == "iframe" || &*n.local_name == "frame") && self.target_name_is(id, n, name)
             } else {
                 named(&["embed", "form", "img", "object"]) || n.plain_attr_is("id", name)
             };

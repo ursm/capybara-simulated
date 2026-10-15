@@ -864,6 +864,8 @@ pub(crate) struct RealmArena {
     pub(crate) images: std::collections::HashMap<NodeId, crate::image_requests::ImageRequest>,
     // Every node's registered observer list, and each mutation observer's nodes (mutation_observers.rs).
     pub(crate) observers: crate::mutation_observers::Observers,
+    // Each frame container's child navigable, each top-level one's target name, each realm's document (navigables.rs).
+    pub(crate) navigables: crate::navigables::Navigables,
     // Each top-level document's autofocus candidates (autofocus.rs).
     pub(crate) autofocus: crate::autofocus::Autofocus,
     // How many changes of the tree gave a sheet owner a new sheet (sheet_owners.rs), which a change's record asks of
@@ -1096,6 +1098,7 @@ impl RealmArena {
         faces.with(|f| *f = Default::default());
         self.state = RealmState { faces, sheets, state_epoch: state_epoch + 1, ..RealmState::default() };
         self.observers.drop_realm(cid);
+        self.navigables.drop_realm(cid);
         self.free_realm_nodes(cid);
         self.forget_dead_focus_records();
         // (…and what the isolate latched for any realm's page, where this is the only realm left)
@@ -2494,6 +2497,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // …and the element lists named by a filter (collections.rs)
     crate::collections::install(scope, ns, context_id);
     crate::mutation_observers::install(scope, ns, context_id);
+    crate::navigables::install(scope, ns, context_id);
     crate::timers::install(scope, ns, context_id);
     crate::ce_reactions::install(scope, ns, context_id);
     crate::scroll_boxes::install(scope, ns, context_id);
