@@ -1881,23 +1881,33 @@ mod tests {
 }
 
 // An element's path as Capybara reports one (`Node#path`, Selenium's and Cuprite's shape): from its tree's top element
-// down, each element by its local name and its position among its parent's element children of that name —
-// `/html[1]/body[1]/div[2]`. None for an element in a shadow tree, which no document-level path reaches.
+// down, each element by its place among its parent's element children of its namespace and local name — `div[2]` where
+// a name test finds it (an HTML document's HTML element of a lowercase local name; a no-namespace element of an XML
+// document's), else Selenium's `*[local-name()='g' and namespace-uri()='…'][1]` (an SVG or MathML element, one made
+// with an uppercase local name) — a path `find(:xpath, …)` finds it by again. None for an element in a shadow tree,
+// which no document-level path reaches.
 pub(crate) fn node_path(arena: &crate::dom::RealmArena, id: crate::dom::NodeId) -> Option<String> {
-    if arena.get(arena.root_of(id)).is_some_and(|r| r.host.is_some()) {
+    let root = arena.root_of(id);
+    if arena.get(root).is_some_and(|r| r.host.is_some()) {
         return None;
     }
+    let html = arena.get(root).is_some_and(|r| r.kind == crate::dom::NodeKind::Document && r.state & crate::dom::STATE_XML_DOCUMENT == 0);
     let mut segments = Vec::new();
     let mut cur = id;
     while let (Some(n), Some(parent)) = (arena.get(cur).filter(|n| n.kind == crate::dom::NodeKind::Element), arena.parent_of(cur)) {
-        let name = &n.local_name;
+        let same = |c: &crate::dom::NodeId| arena.get(*c).is_some_and(|s| s.kind == crate::dom::NodeKind::Element && s.ns == n.ns && s.local_name == n.local_name);
         let siblings = arena.get(parent).map_or(&[][..], |p| &p.children[..]);
-        let index = siblings
-            .iter()
-            .filter(|&&c| arena.get(c).is_some_and(|s| s.kind == crate::dom::NodeKind::Element && s.local_name == *name))
-            .position(|&c| c == cur)
-            .map_or(0, |i| i + 1);
-        segments.push(format!("{name}[{index}]"));
+        let index = siblings.iter().filter(|c| same(c)).position(|&c| c == cur).map_or(0, |i| i + 1);
+        let named = if html {
+            n.ns == web_atoms::ns!(html) && !n.local_name.bytes().any(|b| b.is_ascii_uppercase())
+        } else {
+            n.ns == web_atoms::ns!()
+        };
+        segments.push(if named {
+            format!("{}[{index}]", n.local_name)
+        } else {
+            format!("*[local-name()='{}' and namespace-uri()='{}'][{index}]", n.local_name, &*n.ns)
+        });
         cur = parent;
     }
     segments.reverse();

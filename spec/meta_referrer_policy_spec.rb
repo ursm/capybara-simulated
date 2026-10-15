@@ -44,4 +44,28 @@ RSpec.describe 'the meta referrer policy' do
     s.click_link 'go'
     expect(referers).to eq([['/a', nil], ['/next', nil], ['/b', nil], ['/next', 'http://www.example.com/']])
   end
+
+  # The policy holds on every redirect hop (Fetch determines the referrer anew per hop), a driver's visit sends none on
+  # any hop, and a form posting to a new window sends its own document's under its own policy.
+  it 'holds through redirects and into a new window' do
+    referers = []
+    s = simulated_session(->(env) {
+      referers << [env['PATH_INFO'], env['HTTP_REFERER']]
+      case env['PATH_INFO']
+      when '/r' then [302, {'location' => '/next'}, []]
+      when '/next', '/pb' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><p>next</p>']]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><meta charset="utf-8"><meta name="referrer" content="no-referrer"><a href="/r">go</a>
+          <form method="post" action="/pb" target="_blank"><button>post</button></form>
+        HTML
+      end
+    })
+    s.visit '/a'
+    s.click_link 'go'
+    s.visit '/a'
+    s.click_button 'post'
+    s.visit '/r'
+    expect(referers).to eq([['/a', nil], ['/r', nil], ['/next', nil], ['/a', nil], ['/pb', nil], ['/r', nil], ['/next', nil]])
+  end
 end

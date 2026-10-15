@@ -657,11 +657,11 @@ module Capybara
       # OPENER for a window.open'd window) — it seeds the navigation's
       # Sec-Fetch-Site, which the cookie layer's SameSite gate reads. A plain
       # driver-initiated visit has none (address-bar semantics, site 'none').
-      def visit(url, referer: nil, initiator: nil)
+      def visit(url, referer: nil, referrer_policy: nil, initiator: nil)
         # Explicitly nil for a driver-initiated visit (address-bar semantics, site
         # 'none') — page-initiated internal callers reach `navigate` directly and
         # inherit its @current_url default.
-        navigate(resolve_visit_url(url), referer: referer, initiator: initiator)
+        navigate(resolve_visit_url(url), referer: referer, referrer_policy: referrer_policy, initiator: initiator)
         # The native state of what earlier pages left unreachable freed, as a settle frees it (see the pump there): a
         # suite that only visits and reads never settles. A page's own FinalizationRegistry callbacks run here too, as a
         # browser runs them as tasks — and they may change the page.
@@ -1359,7 +1359,7 @@ module Capybara
             tick_real_time
             # Link clicks honour `<base href>` (HTML spec); `visit`
             # does not — that's address-bar navigation.
-            navigate(resolve_against_current(url, use_base: true))
+            navigate_top_from_page(resolve_against_current(url, use_base: true))
           end
         when 'submit'
           # Drain any work the click handler queued before the form
@@ -2008,7 +2008,7 @@ module Capybara
           update_current_hash(resolve_against_current(url, use_base: true))
         else
           tick_real_time
-          navigate(resolve_against_current(url, use_base: true))
+          navigate_top_from_page(resolve_against_current(url, use_base: true))
         end
       end
 
@@ -3276,18 +3276,18 @@ module Capybara
         body << "\r\n"
       end
 
-      def navigate_post(url, body, content_type, depth: 0, from_history: false, is_reload: false, referer: @current_url, initiator: @current_url, site_seed: nil)
+      def navigate_post(url, body, content_type, depth: 0, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url, site_seed: nil)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
         # `from_history` already flushed at its own entry point, which commits the
         # history index before it gets here.
         flush_outgoing_page_init if depth.zero? && !from_history && @timers_active
-        # (…a page's navigation's Referer its document's URL under its referrer policy — the policy its `<meta
-        # name="referrer">` sets, the default where none does — read before the page goes; a driver's visit sends none)
-        if depth.zero? && !from_history && !is_reload && referer
-          referer = compute_referrer(main_document_referrer_policy, referer, url)
-        end
+        # (…its Referer the initiating document's URL — `referer` — under that document's referrer policy, the policy its
+        # `<meta name="referrer">` sets (the default where none does) read before the page goes, determined anew at each
+        # redirect hop as Fetch's main fetch does; a driver's visit sends none on any hop)
+        referrer_policy ||= main_document_referrer_policy if referer && depth.zero?
+        hop_referer = referer && compute_referrer(referrer_policy.to_s, referer, url)
         unless from_history || depth > 0
           capture_outgoing_form_state
           record_history({method: :post, url: url, body: body, content_type: content_type})
@@ -3315,10 +3315,10 @@ module Capybara
           if (loc = redirect_location(sw['status'].to_i, sw_headers))
             next_url = carry_fragment(url, resolve_against_current(loc))
             if [307, 308].include?(sw['status'].to_i)
-              return navigate_post(next_url, body, content_type, depth: depth + 1, initiator: initiator, site_seed: nav_site)
+              return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
             end
 
-            return navigate(next_url, depth: depth + 1, initiator: initiator, site_seed: nav_site)
+            return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           end
           @current_url = url
           if download_response?(sw_headers)
@@ -3338,7 +3338,7 @@ module Capybara
         env['HTTP_SEC_FETCH_SITE'] ||= nav_site
         env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
-        apply_default_request_env(env, referer: referer)
+        apply_default_request_env(env, referer: hop_referer)
         status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
@@ -3347,9 +3347,9 @@ module Capybara
           # Fetch "HTTP-redirect fetch": a 301 / 302 / 303 of a POST makes it a GET; a 307 / 308 keeps the method and
           # the body.
           if Native.redirect_to_get(status.to_i, 'POST')
-            return navigate(next_url, depth: depth + 1, initiator: initiator, site_seed: nav_site)
+            return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           else
-            return navigate_post(next_url, body, content_type, depth: depth + 1, initiator: initiator, site_seed: nav_site)
+            return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           end
         end
         if download_response?(headers)
@@ -10110,7 +10110,7 @@ module Capybara
           # is in its parent realm's DOM (not yet routed — documented gap).
           entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
           if entry
-            navigate_frame(url, entry: entry)
+            navigate_frame(url, entry: entry, referrer: realm_referrer_initiator(realm_id))
           elsif url.match?(%r{\Ahttps?://}i)
             # An absolute http(s) self-nav (`self.location = …` / link click) is fetched Ruby-side so
             # it carries correct navigation request headers (Referer under policy / Sec-Fetch);
@@ -10199,7 +10199,7 @@ module Capybara
           url   = entry && @runtime.frame_realm_alive?(realm_id) ? @runtime.realm_call(realm_id, '__csimLocationHref').to_s : ''
           cur   = current_frame_history_entry(realm_id)
           if entry && !url.empty?
-            navigate_frame(url, entry: entry)
+            navigate_frame(url, entry: entry, referrer: realm_referrer_initiator(realm_id))
           elsif cur && cur[:method] == 'POST'
             # Reloading a document reached by POST re-POSTS it (isReloadNavigation) with the recorded
             # body, rather than the JS reload path's GET refetch of the frame's src.
@@ -10471,7 +10471,7 @@ module Capybara
         # (re-minted on a cross-origin hop) and adopted by the rebuilt realm on commit.
         rid = resulting_client_id || mint_resulting_client_id
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
-        return navigate_frame(resolve_against_current(get_url), entry: entry) if entry
+        return navigate_frame(resolve_against_current(get_url), entry: entry, referrer: realm_referrer_initiator(realm_id)) if entry
         # A frame reached via contentWindow (not on the entered stack). An ABSOLUTE http(s) target is
         # fetched Ruby-side (like navigate_realm_self_post) so the navigation carries correct request
         # headers — a Referer under the initiating document's Referrer-Policy, no Origin (GET), the
@@ -10558,7 +10558,7 @@ module Capybara
         # later reload / back — only a directly-served POST does.
         record_frame_nav(realm_id, url) if depth.zero? && !is_reload && !is_history
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
-        return navigate_frame_post(url, body, content_type, entry: entry) if entry
+        return navigate_frame_post(url, body, content_type, entry: entry, referrer: realm_referrer_initiator(realm_id)) if entry
         invalidate_find_cache
         # The navigation's reserved client id — same threading as navigate_realm_self_get.
         rid = resulting_client_id || mint_resulting_client_id
@@ -11071,13 +11071,25 @@ module Capybara
       # Mirrors `navigate` / `navigate_post`'s fetch + redirect-follow but
       # terminates in `reload_current_frame_realm` instead of a main-page boot.
 
-      # The Referer an entered frame's navigation of itself sends to `url`: its document's URL under its referrer policy
-      # (`compute_referrer`, the policy its `<meta name="referrer">` sets — the default where none does).
-      def frame_navigation_referer(entry, url)
-        compute_referrer(entry && entry[:realm_id] ? frame_document_referrer_policy(entry[:realm_id]) : '', current_browsing_context_url, url)
+      # A navigation's initiating document as its Referer is made of it: its URL and its referrer policy (the policy its
+      # `<meta name="referrer">` sets) — the browsing context the page is in, its link or form or script the initiator
+      # (`current_referrer_initiator`), or a frame's own document navigating itself (`realm_referrer_initiator`).
+      def current_referrer_initiator
+        [current_browsing_context_url, @current_realm_id ? frame_document_referrer_policy(@current_realm_id) : main_document_referrer_policy]
+      end
+      def realm_referrer_initiator(realm_id)
+        [frame_realm_url(realm_id), frame_document_referrer_policy(realm_id)]
+      end
+      # The top-level browsing context navigated by the page — a link followed in it or `target=_top` from a frame
+      # within it — its Referer the browsing context it was followed in.
+      def navigate_top_from_page(url)
+        source, policy = current_referrer_initiator
+        navigate(url, referer: source, referrer_policy: policy)
       end
 
-      def navigate_frame(url, depth: 0, entry: @frame_stack.last)
+      # An entered frame navigated (`entry`), its Referer its initiator's (`referrer`: `current_referrer_initiator`'s
+      # shape) under that document's policy, determined anew at each redirect hop.
+      def navigate_frame(url, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         if url.to_s.match?(%r{\Aabout:blank(?:[?#]|\z)}i)
@@ -11086,13 +11098,13 @@ module Capybara
         end
         env = rack_env_for(url, method: 'GET')
         # (…its Referer the frame document's, under its referrer policy — its `<meta name="referrer">`)
-        apply_default_request_env(env, referer: frame_navigation_referer(entry, url))
+        apply_default_request_env(env, referer: compute_referrer(referrer[1], referrer[0], url))
         status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(url, resolve_against_current(loc))
           body.close if body.respond_to?(:close)
-          return navigate_frame(next_url, depth: depth + 1, entry: entry)
+          return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer)
         end
         if download_response?(headers)
           save_downloaded_response(url, headers, body)
@@ -11101,13 +11113,13 @@ module Capybara
         reload_current_frame_realm(url.to_s, read_rack_body(body), response_content_type(headers), entry: entry)
       end
 
-      def navigate_frame_post(url, body, content_type, depth: 0, entry: @frame_stack.last)
+      def navigate_frame_post(url, body, content_type, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         env = rack_env_for(url, method: 'POST', input: body)
         env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
-        apply_default_request_env(env, referer: frame_navigation_referer(entry, url))
+        apply_default_request_env(env, referer: compute_referrer(referrer[1], referrer[0], url))
         status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
@@ -11115,9 +11127,9 @@ module Capybara
           resp_body.close if resp_body.respond_to?(:close)
           # 301/302/303 → GET; 307/308 preserve method + body (same as navigate_post).
           if Native.redirect_to_get(status.to_i, 'POST')
-            return navigate_frame(next_url, depth: depth + 1, entry: entry)
+            return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer)
           else
-            return navigate_frame_post(next_url, body, content_type, depth: depth + 1, entry: entry)
+            return navigate_frame_post(next_url, body, content_type, depth: depth + 1, entry: entry, referrer: referrer)
           end
         end
         if download_response?(headers)
@@ -11187,21 +11199,20 @@ module Capybara
         ct.to_s.empty? ? 'text/html' : ct.to_s
       end
 
-      def navigate(url, depth: 0, referer: @current_url, from_history: false, is_reload: false, initiator: @current_url, site_seed: nil, replace: false)
+      def navigate(url, depth: 0, referer: @current_url, referrer_policy: nil, from_history: false, is_reload: false, initiator: @current_url, site_seed: nil, replace: false)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
         # `from_history` already flushed at its own entry point, which commits the
         # history index before it gets here.
         flush_outgoing_page_init if depth.zero? && !from_history && @timers_active
-        # (…a page's navigation's Referer its document's URL under its referrer policy — the policy its `<meta
-        # name="referrer">` sets, the default where none does — read before the page goes; a driver's visit sends none)
-        if depth.zero? && !from_history && !is_reload && referer
-          referer = compute_referrer(main_document_referrer_policy, referer, url)
-        end
-        # Capture the entry referer (the page initiating this navigation,
-        # e.g. clicked link's host page) at depth 0 — internal redirects
-        # at deeper depths don't replace the user-visible referrer.
+        # (…its Referer the initiating document's URL — `referer` — under that document's referrer policy, the policy its
+        # `<meta name="referrer">` sets (the default where none does) read before the page goes, determined anew at each
+        # redirect hop as Fetch's main fetch does; a driver's visit sends none on any hop)
+        referrer_policy ||= main_document_referrer_policy if referer && depth.zero?
+        hop_referer = referer && compute_referrer(referrer_policy.to_s, referer, url)
+        # The document's referrer is the request's, the last hop's (a redirect determines it anew).
+        @current_referer = hop_referer.to_s
         # A full-document navigate also clears the pushState transition
         # queue: any URLs we'd queued during the prior page's lifetime
         # are stale once we cross a real document boundary. The pinned
@@ -11209,7 +11220,6 @@ module Capybara
         # drop it so it can't match (and wrongly suppress) a transition on
         # the new page.
         if depth == 0
-          @current_referer = referer.to_s
           @recent_urls.clear if @recent_urls
           @recent_urls_last_push_at = nil
           @action_url_baseline = nil
@@ -11259,7 +11269,7 @@ module Capybara
             # an attachment downloads — never booted as the document.
             sw_headers = sw['headers'] || {}
             if (loc = redirect_location(sw['status'].to_i, sw_headers))
-              return navigate(carry_fragment(url, resolve_against_current(loc)), depth: depth + 1, initiator: initiator, site_seed: nav_site)
+              return navigate(carry_fragment(url, resolve_against_current(loc)), depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
             end
             @current_url = url
             if download_response?(sw_headers)
@@ -11278,7 +11288,7 @@ module Capybara
           env['HTTP_SEC_FETCH_MODE'] ||= 'navigate'
           env['HTTP_SEC_FETCH_DEST'] ||= 'document'
           env['HTTP_SEC_FETCH_SITE'] ||= nav_site
-          apply_default_request_env(env, referer: referer)
+          apply_default_request_env(env, referer: hop_referer)
           status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
           merge_set_cookie(headers, url)
           if (loc = redirect_location(status, headers))
@@ -11290,7 +11300,7 @@ module Capybara
             body.close if body.respond_to?(:close)
             # Thread the initiator + widened site so the chain's SameSite verdict
             # latches (a same-origin nav THROUGH a cross-site hop stays cross-site).
-            return navigate(next_url, depth: depth + 1, initiator: initiator, site_seed: nav_site)
+            return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           end
           # Track the navigated URL even for download-shaped responses
           # so an aux window opened on a binary asset (PDF / image
@@ -12352,7 +12362,7 @@ module Capybara
       # within the `record_action` block, which handles begin/finish
       # step bookkeeping + on-failure DOM snapshot.
       module RecordedActions
-        def visit(url, referer: nil, initiator: nil)
+        def visit(url, referer: nil, referrer_policy: nil, initiator: nil)
           record_action(:visit, "visit #{url}") { super }
         end
         def refresh
