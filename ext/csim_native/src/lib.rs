@@ -180,6 +180,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("font_strong_families", magnus::function!(fontconfig::strong_families_for_ruby, 1))?;
     // A URL's parts as the URL Standard's parser makes them, the page's own (url_ops.rs).
     native.define_module_function("url_parts", magnus::function!(url_ops::parts_for_ruby, 2))?;
+    native.define_module_function("url_fragment_navigation", magnus::function!(url_ops::is_fragment_navigation_for_ruby, 2))?;
     // A `data:` URL's MIME type and body, by Fetch's data: URL processor, the page's too (data_url.rs).
     native.define_module_function("data_url", magnus::function!(data_url::process_for_ruby, 1))?;
     // A live `text/event-stream`'s chunks read into events by a parser kept between them, as the page reads a whole one

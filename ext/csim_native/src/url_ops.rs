@@ -13,6 +13,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "urlParse", url_parse, context_id);
     register(scope, ns, "urlSet", url_set, context_id);
     register(scope, ns, "urlHasOpaquePath", url_has_opaque_path, context_id);
+    register(scope, ns, "urlIsFragmentNavigation", url_is_fragment_navigation, context_id);
     register(scope, ns, "postMessageTarget", post_message_target_op, context_id);
     register(scope, ns, "postMessageReaches", post_message_reaches_op, context_id);
     register(scope, ns, "urlencodedParse", urlencoded_parse, context_id);
@@ -143,6 +144,27 @@ fn url_has_opaque_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     rv.set_bool(Url::parse(href.as_str(), None).is_ok_and(|u| has_opaque_path(&u)));
 }
 
+// HTML "navigate" (step "navigate to a fragment"): whether a navigation to `url` from a document at `current` is one to a
+// fragment of it — `url` has a fragment (an empty one too: `#`) and equals `current` but for their fragments. Not one
+// without a fragment: `/a#x` → `/a` loads the document again, as does assigning a fragmentless URL its own.
+pub(crate) fn is_fragment_navigation(current: &str, url: &str) -> bool {
+    let (Ok(mut current), Ok(mut url)) = (Url::parse(current, None), Url::parse(url, None)) else { return false };
+    if !url.has_hash() {
+        return false;
+    }
+    current.set_hash(None);
+    url.set_hash(None);
+    current.href() == url.href()
+}
+fn url_is_fragment_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (current, url) = (usv(scope, args.get(0)), usv(scope, args.get(1)));
+    rv.set_bool(is_fragment_navigation(&current, &url));
+}
+// …for the host.
+pub(crate) fn is_fragment_navigation_for_ruby(current: String, url: String) -> bool {
+    is_fragment_navigation(&current, &url)
+}
+
 // HTML "window post message steps": the target origin a `targetOrigin` names — "*" and "/" themselves, else the origin
 // of the absolute URL it is (serialized: "null" for an opaque one) — None where it is no URL (a SyntaxError).
 fn post_message_target(arg: &str) -> Option<String> {
@@ -246,6 +268,18 @@ fn urlencoded_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tells_a_navigation_to_a_fragment() {
+        let at = "https://a.test/p?q#x";
+        assert!(is_fragment_navigation(at, "https://a.test/p?q#y"));
+        assert!(is_fragment_navigation(at, "https://a.test/p?q#x"));
+        assert!(is_fragment_navigation(at, "https://a.test/p?q#"));
+        assert!(!is_fragment_navigation(at, "https://a.test/p?q"));
+        assert!(!is_fragment_navigation(at, "https://a.test/p?r#x"));
+        assert!(!is_fragment_navigation("https://a.test/p", "https://a.test/p"));
+        assert!(is_fragment_navigation("https://a.test/p", "https://a.test/p#z"));
+    }
+
     use super::*;
 
     #[test]

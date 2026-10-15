@@ -1414,19 +1414,13 @@ module Capybara
         save_downloaded_response(url, forced_headers, body)
       end
 
+      # HTML "navigate": a navigation to `url` is one to a fragment of the current document where `url` has a fragment
+      # (`#` too — `location.hash = ''` gives one) and equals the document's URL but for their fragments (url_ops.rs).
       def pure_fragment_navigation?(url)
-        return true  if url.start_with?('#')
+        return true if url.start_with?('#')
+
         doc_url = current_browsing_context_url
-        return false if doc_url.nil?
-        a = split_fragment(resolve_against_current(url))
-        b = split_fragment(parse_url(doc_url)&.fetch(:href) || doc_url)
-        # Same-document iff everything but the fragment matches AND the
-        # fragment actually changes — a differing fragment covers
-        # both adding/changing a fragment and *clearing* one (target has
-        # no fragment while the current URL does, e.g. `location.hash =
-        # ''`). The old `!a.fragment.nil?` missed the clearing case, so a
-        # hash-reset turned into a full document reload.
-        a[0] == b[0] && a[1] != b[1]
+        !doc_url.nil? && Native.url_fragment_navigation(doc_url.to_s, resolve_against_current(url).to_s)
       end
 
       def update_current_hash(url)

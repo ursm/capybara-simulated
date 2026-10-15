@@ -41,6 +41,32 @@ RSpec.describe 'same-document navigation' do
     expect(s.evaluate_script('globalThis.__log')).to eq(['assigned=#frag', 'hashchange=#frag', 'timer'])
   end
 
+  # HTML "navigate": a navigation to a fragment is one to a URL WITH a fragment — `#` too — equal to the document's but
+  # for their fragments (url_ops.rs `is_fragment_navigation`). Measured in Chrome 151 (2026-10-15): `location.href =
+  # '#x'` at `#x` neither loads nor fires `hashchange`; `location.hash = ''` lands on `…#` and fires it; `location.href
+  # = location.href` there does not load; `/a#` → `/a` loads the document again.
+  it 'tells a navigation to a fragment by the URL it navigates to' do
+    loads = 0
+    app = lambda do |_env|
+      loads += 1
+      [200, {'content-type' => 'text/html'}, ['<html><body><script>window.hc = []; addEventListener("hashchange", e => hc.push(e.newURL))</script></body></html>']]
+    end
+    s = simulated_session(app)
+    s.visit '/a#x'
+    step = lambda do |js|
+      s.execute_script(js)
+      s.execute_script('setTimeout(() => { window.settled = true }, 20)')
+      poll_until { s.evaluate_script('window.settled === true') }
+      s.execute_script('window.settled = false')
+      [loads, s.evaluate_script('location.href').sub(%r{\Ahttp://[^/]+}, ''), s.evaluate_script('hc.length')]
+    end
+
+    expect(step.("location.href = '#x'")).to eq([1, '/a#x', 0])
+    expect(step.("location.hash = ''")).to eq([1, '/a#', 1])
+    expect(step.('location.href = location.href')).to eq([1, '/a#', 1])
+    expect(step.("location.href = '/a'")).to eq([2, '/a', 0])
+  end
+
   # The document being navigated away from keeps running until the new response
   # COMMITS, so a `replaceState` / `pushState` it had queued is real — it rewrites
   # and appends ITS OWN entries — but it cannot move the incoming document's URL.
