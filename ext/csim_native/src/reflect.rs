@@ -107,8 +107,8 @@ fn draggable(arena: &crate::dom::RealmArena, id: crate::dom::NodeId) -> bool {
 // yes or ''; no), `writingSuggestions` ('true' / 'false', inherited), `hidden` (0 none, 1 hidden, 2 until-found),
 // `accessKeyLabel` (`Alt+` and the key where `accesskey` is one code point, else ''), `autocapitalize` (the hint's
 // keyword), `autocorrect`, `draggable` (`draggable`'s state) and `spellcheck` (inherited: true or ''; false — an element
-// that states neither its parent
-// element's, as Chrome 155 and Firefox both inherit it; on by default, as Chrome has it).
+// that states neither its parent element's, as Chrome 155 and Firefox both inherit it; on by default, as Chrome has it).
+// (…the parent ELEMENT's, as HTML says: a shadow tree's top takes no host's — Firefox; Chrome takes the host's)
 fn element_reflection_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
     let which = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);

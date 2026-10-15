@@ -1183,6 +1183,10 @@ impl RealmArena {
         let live = |slots: &[Slot], id: &NodeId| slots.get(id.idx as usize).is_some_and(|s| s.generation == id.generation && s.data.is_some());
         let slots = &self.slots;
         self.parser_form_owners.retain(|id, _| live(slots, id));
+        self.form_past_names.retain(|form, past| {
+            past.retain(|(_, el)| live(slots, el));
+            live(slots, form) && !past.is_empty()
+        });
         self.custom_states.retain(|id, _| live(slots, id));
         self.custom_validity.retain(|id, _| live(slots, id));
         self.text_selections.retain(|id, _| live(slots, id));

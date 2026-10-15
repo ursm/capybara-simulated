@@ -543,24 +543,22 @@ impl RealmArena {
         named
     }
     // HTML §4.10.3 a form's named getter for `name`: its named elements of the name — one, which its past names map
-    // keeps under the name from then on; several, a RadioNodeList the bindings make — or, with none, the element its past
-    // names map has under the name: while it is a named element of the form yet, as one that changed form owner is
-    // not, whose entry goes.
+    // keeps under the name from then on, its entry made anew; several, a RadioNodeList the bindings make — or, with none,
+    // the element its past names map has under the name: while it has not changed form owner (`past_name_holds`), the
+    // entry of one that has dropped.
     pub(crate) fn form_named_item(&mut self, form: NodeId, name: &[u16]) -> FormNamedItem {
         let named = self.form_named(form, name);
         match named[..] {
             [one] => {
                 let past = self.form_past_names.entry(form).or_default();
-                match past.iter_mut().find(|(n, _)| n == name) {
-                    Some(entry) => entry.1 = one,
-                    None => past.push((name.to_vec(), one)),
-                }
+                past.retain(|(n, _)| n != name);
+                past.push((name.to_vec(), one));
                 FormNamedItem::One(one)
             }
             [] => {
                 let Some(past) = self.form_past_names.get(&form) else { return FormNamedItem::None };
                 let Some(&(_, el)) = past.iter().find(|(n, _)| n == name) else { return FormNamedItem::None };
-                if self.is_form_named_candidate(form, el) {
+                if self.past_name_holds(form, el) {
                     return FormNamedItem::One(el);
                 }
                 if let Some(past) = self.form_past_names.get_mut(&form) {
@@ -571,15 +569,28 @@ impl RealmArena {
             _ => FormNamedItem::Several,
         }
     }
-    // …and the names they are reachable by (HTML §4.10.3 "supported property names"): each named element's id and then
-    // its name, in tree order, an empty one or one already given left out; then the past names map's whose element is
-    // a named element of the form yet.
+    // Whether a past names map entry's element still answers for its name: until it changes form owner — an image
+    // button it has become too — an img (which has none) while it is one of the form's named elements.
+    fn past_name_holds(&self, form: NodeId, el: NodeId) -> bool {
+        match self.get(el) {
+            Some(n) if n.is_html_named("img") => self.is_form_named_candidate(form, el),
+            Some(_) => self.form_owner(el) == Some(form),
+            None => false,
+        }
+    }
+    // …and the names they are reachable by (HTML §4.10.3 "supported property names"): element by element in tree
+    // order, its id, its name and then the past names map's for it, the oldest first — an empty one or one already
+    // given left out.
     pub(crate) fn form_supported_names(&self, form: NodeId) -> Vec<Vec<u16>> {
         let root = self.form_tree(form);
+        let past: &[(Vec<u16>, NodeId)] = self.form_past_names.get(&form).map_or(&[], Vec::as_slice);
         let mut names: Vec<Vec<u16>> = Vec::new();
         let mut given = std::collections::HashSet::new();
         self.find_in_tree(root, |c, n| {
-            if c != root && self.is_form_named_candidate(form, c) {
+            if c == root {
+                return false;
+            }
+            if self.is_form_named_candidate(form, c) {
                 for attr in ["id", "name"] {
                     let value = n.get_attr_u16(attr).map(<[u16]>::to_vec).or_else(|| n.plain_attr(attr).map(|v| v.encode_utf16().collect()));
                     if let Some(v) = value.filter(|v| !v.is_empty() && given.insert(v.clone())) {
@@ -587,13 +598,13 @@ impl RealmArena {
                     }
                 }
             }
+            for (name, _) in past.iter().filter(|(_, el)| *el == c) {
+                if self.past_name_holds(form, c) && given.insert(name.clone()) {
+                    names.push(name.clone());
+                }
+            }
             false
         });
-        for (name, el) in self.form_past_names.get(&form).into_iter().flatten() {
-            if self.is_form_named_candidate(form, *el) && given.insert(name.clone()) {
-                names.push(name.clone());
-            }
-        }
         names
     }
     // …and a fieldset's (its `elements`): its listed descendants in tree order, image buttons and nested fieldsets
