@@ -905,7 +905,7 @@ pub(crate) struct RealmArena {
     pub(crate) close_watcher_order: std::collections::HashMap<NodeId, u64>,
     pub(crate) close_watcher_count: u64,
     // …and its popover and dialog pointerdown targets (popovers.rs `lightDismissPress`).
-    pub(crate) pointerdown_targets: std::collections::HashMap<NodeId, [Option<Option<NodeId>>; 2]>,
+    pub(crate) pointerdown_targets: std::collections::HashMap<NodeId, [Option<NodeId>; 2]>,
     // The popovers in the middle of being shown or hidden (HTML's "popover showing or hiding" flag).
     pub(crate) popovers_changing: std::collections::HashSet<NodeId>,
     // The close watchers running their cancel action (dialogs.rs `dialogRequestClose`).

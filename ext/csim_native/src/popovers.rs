@@ -236,9 +236,9 @@ fn set_popover_changing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 
 // __dom.lightDismissPress(document, kind, clicked, down) -> for a user's `pointerdown` (`down`), the document's popover
 // (kind 0) or dialog (1) pointerdown target set to what it clicked — the topmost clicked popover, the nearest clicked
-// dialog, or none (null) — and false; for its `pointerup`, whether it clicked the same as the press before it did, the
-// target cleared (HTML "light dismiss open popovers" / "light dismiss open dialogs"): a release with no press before
-// it clicked nothing the same.
+// dialog, or none (null) — and false; for its `pointerup`, whether it clicked the same as the target is, which is null
+// again after (HTML "light dismiss open popovers" / "light dismiss open dialogs": a target null at first, and after
+// every release — a release with no press recorded before it, outside every popover, the same as null; Chrome).
 fn light_dismiss_press(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some((doc, cid)) = element(scope, args.get(0)) else { return rv.set_bool(false) };
     let kind = (args.get(1).uint32_value(scope).unwrap_or(0) as usize).min(1);
@@ -246,8 +246,8 @@ fn light_dismiss_press(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let down = args.get(3).is_true();
     let targets = realm(scope, cid).pointerdown_targets.entry(doc).or_default();
     if down {
-        targets[kind] = Some(clicked);
+        targets[kind] = clicked;
         return rv.set_bool(false);
     }
-    rv.set_bool(targets[kind].take() == Some(clicked));
+    rv.set_bool(targets[kind].take() == clicked);
 }

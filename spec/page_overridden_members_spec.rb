@@ -43,4 +43,24 @@ RSpec.describe 'members a page overrides' do
     s.find('#ce').send_keys('ab', :left, 'c', :end, 'd')
     expect(s.evaluate_script('document.getElementById("ce").textContent')).to eq('acbd')
   end
+
+  # …and a cut takes the selection's text from the engine — not the page's `toString` of a Selection or a Range, nor its
+  # `activeElement` — and an `insertHTML` into a text control its markup's text, not through the page's `createElement`.
+  it "cuts and inserts through the engine's text, not the page's members" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><div id="ce" contenteditable>hello</div><input id="i">']] })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      const boom = () => { throw new Error('page member'); };
+      Selection.prototype.toString = boom;
+      Range.prototype.toString = boom;
+      Object.defineProperty(Document.prototype, 'activeElement', { get: boom, configurable: true });
+      Document.prototype.createElement = boom;
+      const ce = document.getElementById('ce');
+      ce.focus();
+      getSelection().selectAllChildren(ce);
+    JS
+    s.find('#ce').send_keys([:control, 'x'])
+    s.execute_script('document.getElementById("i").focus(); document.execCommand("insertHTML", false, "<b>x</b><!--c-->y")')
+    expect(s.evaluate_script('[document.getElementById("ce").textContent, document.getElementById("i").value]')).to eq(['', 'xy'])
+  end
 end

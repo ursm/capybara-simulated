@@ -111,4 +111,27 @@ RSpec.describe 'Dialog and popover checks' do
       })()
     JS
   end
+
+  # HTML "light dismiss open popovers": the document's popover pointerdown target is null at first and after every
+  # release — so a press that found no popover showing (a `mousedown` listener showed it only then) is, at its release
+  # outside every popover, a press and release on the same (null): the popover hides. Chrome: shown by none of the clicks.
+  it 'light-dismisses a popover shown by the press itself' do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8"><body><div id="a" style="width:100px;height:50px">a</div><div id="p" popover>p</div>
+        <script>
+          const p = document.getElementById('p');
+          document.getElementById('a').addEventListener('mousedown', () => { if (!p.matches(':popover-open')) p.showPopover(); });
+        </script>
+      HTML
+    })
+    s.visit '/'
+    open = -> { s.evaluate_script("document.getElementById('p').matches(':popover-open')") }
+    got = []
+    2.times do
+      s.find('#a').click
+      got << open.()
+    end
+    expect(got).to eq([false, false])
+  end
 end
