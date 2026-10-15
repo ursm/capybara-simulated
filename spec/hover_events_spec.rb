@@ -37,4 +37,32 @@ RSpec.describe 'hover events' do
       'b pointermove null', 'b mousemove null'
     ])
   end
+
+  # Leaving one element for another, the pointer's boundary events come first — out on the element left, leave on each
+  # one left (innermost first), over on the one entered, enter on each one entered — then their compatibility mouse
+  # events in the same order (Pointer Events; Chrome 155, Playwright's mouse moved from #ai to #b).
+  it 'fires the pointer boundary events before the mouse ones' do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8"><body style="margin:0"><div id="a" style="width:100px;height:100px">
+        <span id="ai" style="display:block;width:50px;height:50px"></span></div><div id="b" style="width:100px;height:100px"></div>
+        <script>
+          window.L = [];
+          for (const id of ['a', 'ai', 'b']) {
+            for (const t of ['pointerover', 'pointerenter', 'pointerout', 'pointerleave', 'mouseover', 'mouseenter', 'mouseout', 'mouseleave']) {
+              document.getElementById(id).addEventListener(t, (e) => { if (e.target.id === id) L.push(`${id}:${t}`); });
+            }
+          }
+        </script>
+      HTML
+    })
+    s.visit '/'
+    s.find('#ai').hover
+    s.execute_script('L.length = 0')
+    s.find('#b').hover
+    expect(s.evaluate_script('L')).to eq(%w[
+      ai:pointerout ai:pointerleave a:pointerleave b:pointerover b:pointerenter
+      ai:mouseout ai:mouseleave a:mouseleave b:mouseover b:mouseenter
+    ])
+  end
 end
