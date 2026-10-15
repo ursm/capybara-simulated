@@ -12098,24 +12098,17 @@ module Capybara
         # Inside a `within_frame` block the "current document" is the frame's,
         # so links / form actions resolve against the frame's URL + <base href>.
         doc_url = current_browsing_context_url || @default_host
-        base =
-          if use_base && (bh = base_href) && !bh.empty?
-            # The document's `<base href>` takes precedence over the
-            # request URL when the page's own links / form actions are
-            # being resolved — HTML's base-tag semantics. `visit` skips
-            # this branch so an address-bar navigation reaches the URL
-            # the test typed.
-            parse_url(bh, doc_url)&.fetch(:href) || doc_url
-          else
-            doc_url
-          end
+        # The document's base URL — its `<base href>`'s — when the page's own links / form actions are being resolved;
+        # `visit` passes no `use_base`, so an address-bar navigation reaches the URL the test typed.
+        base = (use_base && document_base_url) || doc_url
         parse_url(url.to_s, base)&.fetch(:href) || url
       end
 
-      # The active document's `<base href>` — routed to the current frame realm
-      # inside `within_frame`, else the main document.
-      def base_href
-        dom_call('__csimBaseHref').to_s
+      # The active document's base URL (the engine's, as `document.baseURI` reads it) — routed to the current frame realm
+      # inside `within_frame`, else the main document — or nil for none.
+      def document_base_url
+        url = dom_call('__csimBaseURL').to_s
+        url.empty? ? nil : url
       end
 
       # Fetch "CORS-safelisted method" / "…request-header", the engine's (fetch_rules.rs) as the page's are: a request is

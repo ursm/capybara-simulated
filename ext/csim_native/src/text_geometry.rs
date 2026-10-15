@@ -838,7 +838,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "caretLineEdge", caret_line_edge, context_id);
     crate::dom::register(scope, ns, "caretMoveKeep", caret_move_keep, context_id);
     crate::dom::register(scope, ns, "caretMoveForget", caret_move_forget, context_id);
-    crate::dom::register(scope, ns, "charDirection", char_direction, context_id);
     crate::dom::register(scope, ns, "selectionModifyTarget", selection_modify_target, context_id);
 }
 
@@ -953,6 +952,10 @@ fn line_over(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: NodeId, node: Nod
     .flatten()
     .flatten()
 }
+
+// __dom.caretLineEdge(root, nid, offset, end) -> [[node], offset, upstream]: Home / End — the first or last place of the
+// line in `root` the caret at (`nid`, `offset`) is on (`line_edge`), the line a wrap ends there where the kept move was
+// End's; or null.
 fn caret_line_edge(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(root), Some(node)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
     let offset = args.get(2).uint32_value(scope).unwrap_or(0);
@@ -971,6 +974,9 @@ fn line_edge(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: NodeId, node: Nod
     let upstream = move_from(scope, cid, node, offset).is_some_and(|m| m.upstream);
     with_text(scope, cid, |arena, g| arena.line_edge(g, root, node, offset, upstream, end)).flatten()
 }
+
+// __dom.caretMoveKeep(nid, offset, x | undefined, upstream): the move the caller set the selection to is the realm's kept
+// one (`CaretMove`)…
 fn caret_move_keep(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(node) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let offset = args.get(1).uint32_value(scope).unwrap_or(0);
@@ -985,18 +991,9 @@ fn caret_move_forget(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     crate::dom::dom(scope).caret_moves.remove(&cid);
 }
 
-// __dom.charDirection(nid, offset) -> 1, 0 or -1: the strong direction of the text at a place in a text node, as
-// `Selection.modify()` reads 'left' and 'right' by a character or a word — the character after it, else the one before
-// it (a surrogate pair one character: Adlam's are all past the BMP): a right-to-left script's character (Hebrew, Arabic, Syriac, Thaana, N'Ko, Samaritan, Mandaic, Adlam) rtl (1), any
-// other letter ltr (0); neither, none (-1: its element's `direction` decides).
-fn char_direction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(node) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_int32(-1) };
-    let offset = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
-    let cid = crate::dom::realm_id(scope, &args);
-    rv.set_int32(char_direction_at(crate::dom::realm(scope, cid), node, offset).map_or(-1, i32::from));
-}
-// The strong direction of the character after (`node`, `offset`) in a text node — before it at its end: right-to-left
-// (true) for a right-to-left script's letter, left-to-right for any other letter, none for no letter.
+// The strong direction of the character after (`node`, `offset`) in a text node — before it at its end, a surrogate pair
+// one character (Adlam's are all past the BMP): right-to-left (true) for a right-to-left script's letter (Hebrew, Arabic,
+// Syriac, Thaana, N'Ko, Samaritan, Mandaic, Adlam), left-to-right for any other letter, none for no letter.
 fn char_direction_at(arena: &RealmArena, node: NodeId, offset: usize) -> Option<bool> {
     use icu_properties::props::Script;
     let data = arena.get(node).filter(|n| n.kind == crate::dom::NodeKind::Text).map(|n| &n.data)?;
@@ -1066,9 +1063,10 @@ fn modify_target(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackAr
         visual => (visual == "right") != visual_rtl(scope, args, cid, node, offset, granularity),
     };
     let arena = crate::dom::realm(scope, cid);
-    // (…the editing host the focus is in — its outermost editable ancestor — or the body, or the root of its tree)
+    // (…the editing host the focus is in — its outermost editable ancestor — or the body, or the root of its tree: one
+    // through its shadow hosts, as the flat tree a line is laid out in holds no shadow root)
     let root = arena.outermost_editable(node).unwrap_or_else(|| {
-        let top = arena.root_of(node);
+        let top = arena.shadow_including_root(node);
         arena.relative(top, crate::dom::RELATIVE_BODY).filter(|_| arena.is_document(top)).unwrap_or(top)
     });
     let step = |scope: &mut v8::PinScope<'_, '_>, word: bool| {

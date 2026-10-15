@@ -471,4 +471,23 @@ RSpec.describe 'stepping a caret by a character' do
     s.execute_script("n.dir = 'rtl'")
     expect(modify.('document.getElementById("n").firstChild', 12, 'lineboundary', 'right')).to eq("#{w}@10")
   end
+
+  # A line's move from a shadow tree that is no editing host goes through the flat tree its host lays it out in, its
+  # bounds the document's body, not the shadow root's (which holds no line): Chrome 155 moves from the shadow text a line
+  # down and up to the paragraphs either side of its host.
+  it 'moves by a line out of a shadow tree' do
+    s = session_for('<!DOCTYPE html><body><p id=a>a</p><div id=h></div><p id=b>b</p>')
+    expect(s.evaluate_script(<<~JS)).to eq(['b@0', 'a@0', 'b@0', 'a@0'])
+      (() => {
+        #{focus_js}
+        const sr = document.getElementById('h').attachShadow({mode: 'open'}), s = getSelection();
+        sr.innerHTML = 's';
+        return [['line', 'forward'], ['line', 'backward'], ['paragraph', 'forward'], ['paragraph', 'backward']].map(([by, dir]) => {
+          s.collapse(sr.firstChild, 0);
+          s.modify('move', dir, by);
+          return desc();
+        });
+      })()
+    JS
+  end
 end

@@ -209,7 +209,7 @@ fn media_get(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     }
 }
 
-// What `mediaSet` answers: nothing to fire; the event the change owes (`ratechange`, `volumechange`, `seeked`); or, for
+// What `mediaSet` answers: nothing to fire; the events the change owes (`ratechange`, `volumechange`, a seek's); or, for
 // a volume outside [0, 1], an IndexSizeError.
 const NO_EVENT: u32 = 0;
 const CHANGED: u32 = 1;
@@ -217,7 +217,7 @@ const OUT_OF_RANGE: u32 = 2;
 
 // __dom.mediaSet(media, member, value) -> `NO_EVENT`, `CHANGED` or `OUT_OF_RANGE`: the member set — a rate, the volume
 // (0 to 1), mutedness or pitch preservation, its event owed only where what it reads changed; the current time (a seek,
-// `seeked` owed where there is media data, else the default playback start position, which reads back — -0 as 0);
+// `seeking`, `timeupdate` and `seeked` owed where there is media data, else the default playback start position, which reads back — -0 as 0);
 // `PAUSED` false for play(), true for pause(), its events owed where it changed (the bindings fire them). A value that
 // reads the same is not written: -0 for 0 reads back 0.
 fn media_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -366,16 +366,20 @@ fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
             if seeked {
                 m.current_time = if duration.is_finite() { start.min(duration) } else { start };
             }
-            let played = autoplay && !m.playing;
-            if played {
+            let playing = if m.playing {
+                Playing::Already
+            } else if autoplay {
                 m.playing = true;
-            }
-            resource_events(!same_number(had_duration, duration), w > 0.0 && h > 0.0, seeked, played)
+                Playing::Autoplayed
+            } else {
+                Playing::Paused
+            };
+            resource_events(!same_number(had_duration, duration), w > 0.0 && h > 0.0, seeked, playing)
         }
         // (…an audio's resource is not decoded: it stays HAVE_NOTHING, its events the ladder all the same)
         AUDIO_USABLE => {
             m.network = NETWORK_IDLE;
-            resource_events(false, false, false, false)
+            resource_events(false, false, false, Playing::Paused)
         }
         _ => {
             m.duration = f64::NAN;
@@ -389,12 +393,21 @@ fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let items: Vec<v8::Local<v8::Value>> = events.iter().filter_map(|e| v8::String::new(scope, e)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// The events a media element's resource owes as it is loaded (HTML §4.8.11.5, the media data processing steps): a
-// `durationchange` where the duration changed and a video's `resize` where it has a size (both before the ready state
-// reaches HAVE_METADATA, as Chrome 155 fires them), then `loadedmetadata`; the seek to the default playback start position (`seeking`,
-// `timeupdate`, `seeked`); `loadeddata` (HAVE_CURRENT_DATA), `canplay` (HAVE_FUTURE_DATA), `canplaythrough`
-// (HAVE_ENOUGH_DATA); and where `autoplay` has it play, `play` and then — it has the data — `playing`.
-fn resource_events(duration_changed: bool, sized: bool, seeked: bool, played: bool) -> Vec<&'static str> {
+// Whether a media element whose resource is loaded plays: it is paused; it was not (`play()` before its data came); or
+// `autoplay` has it play.
+enum Playing {
+    Paused,
+    Already,
+    Autoplayed,
+}
+
+// The events a media element's resource owes as it is loaded (HTML §4.8.11.5, the media data processing steps, and
+// §4.8.11.7's ready states): a `durationchange` where the duration changed and a video's `resize` where it has a size
+// (both before the ready state reaches HAVE_METADATA, as Chrome 155 fires them), then `loadedmetadata`; the seek to the
+// default playback start position (`seeking`, `timeupdate`, `seeked`); `loadeddata` (HAVE_CURRENT_DATA), `canplay`
+// (HAVE_FUTURE_DATA) and — not paused — `playing`, or where `autoplay` has it play, `play` and `playing`; and finally
+// `canplaythrough` (HAVE_ENOUGH_DATA).
+fn resource_events(duration_changed: bool, sized: bool, seeked: bool, playing: Playing) -> Vec<&'static str> {
     let mut events = Vec::new();
     if duration_changed {
         events.push("durationchange");
@@ -406,10 +419,13 @@ fn resource_events(duration_changed: bool, sized: bool, seeked: bool, played: bo
     if seeked {
         events.extend(["seeking", "timeupdate", "seeked"]);
     }
-    events.extend(["loadeddata", "canplay", "canplaythrough"]);
-    if played {
-        events.extend(["play", "playing"]);
+    events.extend(["loadeddata", "canplay"]);
+    match playing {
+        Playing::Paused => {}
+        Playing::Already => events.push("playing"),
+        Playing::Autoplayed => events.extend(["play", "playing"]),
     }
+    events.push("canplaythrough");
     events
 }
 // …two numbers the same, NaN the same as NaN.

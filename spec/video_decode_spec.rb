@@ -78,6 +78,36 @@ RSpec.describe 'video decode' do
     expect(got['seek']).to eq(%w[seeking timeupdate seeked])
   end
 
+  # HTML §4.8.11.7, the ready state reaching HAVE_ENOUGH_DATA: `canplay`; where the element is not paused "notify about
+  # playing" (`playing`), and where `autoplay` has it play, `play` and `playing`; "finally" `canplaythrough`. (Chrome 155
+  # headless fires neither for a muted `autoplay`, its autoplay policy refusing; the spec's order is the one held.) A
+  # listener that sets `src` again drops the rest of the superseded load's events.
+  it 'fires playing before canplaythrough, and drops the events of a superseded load' do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const names = ['loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'play', 'playing', 'waiting'];
+      const watch = (setup) => new Promise(resolve => {
+        const v = document.createElement('video'), log = [];
+        names.forEach(n => v.addEventListener(n, () => log.push(n)));
+        setup(v);
+        setTimeout(() => resolve(log), 100);
+      });
+      Promise.all([
+        watch(v => { v.autoplay = true; v.src = '/media/movie_5.webm'; }),
+        watch(v => { v.src = '/media/movie_5.webm'; v.play(); }),
+        watch(v => {
+          v.src = '/media/movie_5.webm';
+          v.addEventListener('loadedmetadata', () => { v.src = ''; }, {once: true});
+        })
+      ]).then(([autoplayed, played, superseded]) => done({autoplayed, played, superseded}));
+    JS
+    expect(got['autoplayed']).to eq(%w[loadedmetadata loadeddata canplay play playing canplaythrough])
+    expect(got['played']).to eq(%w[play waiting loadedmetadata loadeddata canplay playing canplaythrough])
+    expect(got['superseded']).to eq(%w[loadedmetadata])
+  end
+
   # Chrome's answers but one (measured): it says 'maybe' to `video/ogg`, which it plays; we decode no Theora, and the
   # spec's answer for a type the UA knows it cannot render is ''.
   it 'answers canPlayType by what it decodes' do
