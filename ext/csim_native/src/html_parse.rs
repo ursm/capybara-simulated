@@ -552,12 +552,10 @@ fn declines(ops: &[Operand], ce_defined: bool, has_doctype: bool) -> bool {
         Some(Operand::Str(v)) => Some(v.as_str()),
         _ => None,
     };
-    // (…an attribute list of `n` from `at` holding one the bindings act on)
+    // (…an attribute list of `n` from `at` holding an `is` where custom elements are defined, a customized built-in the
+    // bindings upgrade)
     let refused = |at: usize, n: usize| {
-        (0..n).any(|k| {
-            string(at + 4 * k).is_some_and(str::is_empty)
-                && string(at + 4 * k + 2).is_some_and(|l| ce_defined && l == "is")
-        })
+        ce_defined && (0..n).any(|k| string(at + 4 * k).is_some_and(str::is_empty) && string(at + 4 * k + 2) == Some("is"))
     };
     let mut i = 0;
     while i < ops.len() {
@@ -1002,14 +1000,8 @@ impl<'s> Build<'s> {
     }
     // `attrs` (prefix, namespace code, local name, value) given to `id` after `existing` — none already there taken
     // again — and the steps they have that are the bindings'.
-    // (…a `customelementregistry` one among them its registry the null one, which the elements the parser inserts under it
-    // take after it)
     fn attributes(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId, attrs: Vec<(String, i32, String, String)>, existing: Vec<(String, String)>) {
-        if names_null_registry(&attrs) {
-            if let Some(handle) = crate::dom::realm(scope, self.cid).get(id).and_then(|n| n.link.handle()) {
-                handle.set_registry_state(crate::ce_reactions::NULL);
-            }
-        }
+        self.null_registry(scope, id, &attrs);
         let named = attrs.into_iter().map(|(prefix, ns, local, value)| {
             let name = if prefix.is_empty() { local.clone() } else { format!("{prefix}:{local}") };
             (name, value, (ns != 0).then(|| (attribute_namespace(ns).to_owned(), local)))
@@ -1077,6 +1069,16 @@ impl<'s> Build<'s> {
         let open_named = arena.get(child).is_some_and(|n| n.is_html_named("details") && n.plain_attr("open").is_some() && n.plain_attr("name").is_some_and(|v| !v.is_empty()));
         if open_named && !arena.open_details_in_group(child).is_empty() {
             self.close_details(scope, child);
+        }
+    }
+    // A `customelementregistry` attribute the parser gives an element: its registry the null one, which the elements the
+    // parser inserts under it take after it — where it makes the element, and where a later `<body>` or `<html>` tag adds
+    // it to the one there (Chrome 155: the body's registry null, and an element parsed into it after not defined).
+    fn null_registry(&self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId, attrs: &[(String, i32, String, String)]) {
+        if names_null_registry(attrs) {
+            if let Some(handle) = crate::dom::realm(scope, self.cid).get(id).and_then(|n| n.link.handle()) {
+                handle.set_registry_state(crate::ce_reactions::NULL);
+            }
         }
     }
     // …the registry association the build's elements take, given to one it made (`registry`).
