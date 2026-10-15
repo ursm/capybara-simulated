@@ -5345,11 +5345,12 @@ module Capybara
         Native.service_worker_response_allowed(mode.to_s, redirect, (r['type'] || 'default').to_s, r['redirected'] == true)
       end
 
-      # Every registration a Register job made, `[id, scope]` in the order they were registered: see
-      # __csim_swRegistrations.
-      def sw_registration_list
-        sw_regs.filter_map {|scope, registered, _activating, _serving, id| [id, scope] if registered }
-      end
+      # The registration map as a client of `origin` reads it — `[id, scope]` of each registration, in the order made —
+      # the registration `url` matches there (its longest scope covering it), `[id, scope]` or nil, and the number of the
+      # one the map holds at `scope` (0 for none).
+      def sw_registrations_of(origin) = Native.sw_registrations_of_origin(@sw_partition, origin.to_s)
+      def sw_match_registration(origin, url) = Native.sw_match_registration(@sw_partition, origin.to_s, url.to_s)
+      def sw_registered_at(scope) = Native.sw_registered_at(@sw_partition, scope.to_s)
 
       # The registration `id`'s versions, `[installing, waiting, active]` (each a worker's handle, nil for none) — and
       # setting one (`slot`: 'installing', 'waiting' or 'active').
@@ -5442,7 +5443,7 @@ module Capybara
             return sw_settle_job(id, 'TypeError', 'Failed to update a ServiceWorker: the registration has been unregistered.')
           end
         else
-          registration = Native.sw_registered_at(@sw_partition, scope)
+          registration = sw_registered_at(scope)
         end
         installing, waiting, active = sw_versions(registration)
         newest = installing || waiting || active

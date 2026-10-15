@@ -199,9 +199,11 @@ module Capybara
         # The worker serving an EXACT scope (0 if none) — a service worker's own registration is live while it is one of
         # its versions.
         '__csim_swActiveHandleForScope' => ->(b, *a) { b.sw_active_handle_for_scope(a[0]) },
-        # Every registration a Register job made, `[id, scope]` in registration order — the registration map every
-        # realm's getRegistration() / getRegistrations() read.
-        '__csim_swRegistrations'        => ->(b, *_a) { b.sw_registration_list },
+        # The registration map as a client of an origin reads it — `[id, scope]` each, in registration order — the
+        # registration a URL matches, and the one at a scope (see sw_registrations_of).
+        '__csim_swRegistrations'        => ->(b, *a) { b.sw_registrations_of(a[0]) },
+        '__csim_swMatchRegistration'    => ->(b, *a) { b.sw_match_registration(a[0], a[1]) },
+        '__csim_swRegisteredAt'         => ->(b, *a) { b.sw_registered_at(a[0]) },
         # Navigation Preload state (NavigationPreloadManager), keyed by the registration's scope —
         # reached identically from the client's registration and the worker's own. Get returns
         # {enabled, headerValue}; set leaves a nil field as-is.

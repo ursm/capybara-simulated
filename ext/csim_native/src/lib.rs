@@ -207,6 +207,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_schedule_job", magnus::function!(sw_registry::schedule_job_for_ruby, 9))?;
     native.define_module_function("sw_job", magnus::function!(sw_registry::job_for_ruby, 2))?;
     native.define_module_function("sw_finish_job", magnus::function!(sw_registry::finish_job_for_ruby, 2))?;
+    native.define_module_function("sw_registrations_of_origin", magnus::function!(sw_registry::registrations_of_origin_for_ruby, 2))?;
+    native.define_module_function("sw_match_registration", magnus::function!(sw_registry::match_registration_for_ruby, 3))?;
     native.define_module_function("sw_registered_at", magnus::function!(sw_registry::registered_at_for_ruby, 2))?;
     native.define_module_function("sw_begin_lifecycle", magnus::function!(sw_registry::begin_lifecycle_for_ruby, 2))?;
     native.define_module_function("sw_note_phase", magnus::function!(sw_registry::note_phase_for_ruby, 4))?;

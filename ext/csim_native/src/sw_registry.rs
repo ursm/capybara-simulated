@@ -276,6 +276,24 @@ pub(crate) fn finish_job_for_ruby(partition: u64, id: u32) -> Option<u32> {
     let scope = jobs.remove(i).scope;
     jobs.iter().find(|j| j.scope == scope).map(|j| j.id)
 }
+// The registrations a Register job made that the map holds for a client of `origin` (its storage key: an opaque one has
+// none) — `[id, scope]` each, in the order made — and Match Service Worker Registration: of those, the one whose scope is
+// the longest prefix of `url` (plain string starts-with on the serialized scope), nil for none.
+pub(crate) fn registrations_of_origin_for_ruby(partition: u64, origin: String) -> Vec<(u32, String)> {
+    let mut reg = lock();
+    let Some(p) = reg.existing(partition) else { return Vec::new() };
+    of_origin(p, &origin).map(|r| (r.id, r.scope.clone())).collect()
+}
+pub(crate) fn match_registration_for_ruby(partition: u64, origin: String, url: String) -> Option<(u32, String)> {
+    let mut reg = lock();
+    let p = reg.existing(partition)?;
+    let matched = of_origin(p, &origin).filter(|r| url.starts_with(&r.scope));
+    matched.max_by_key(|r| r.scope.len()).map(|r| (r.id, r.scope.clone()))
+}
+fn of_origin<'a>(p: &'a Partition, origin: &'a str) -> impl Iterator<Item = &'a Registration> {
+    let same = move |scope: &str| origin != "null" && ada_url::Url::parse(scope, None).is_ok_and(|u| u.origin() == origin);
+    p.registrations.iter().filter(move |r| r.mapped && r.registered && same(&r.scope))
+}
 // The registration a Register job made at `scope` that the map holds: its number, 0 for none.
 pub(crate) fn registered_at_for_ruby(partition: u64, scope: String) -> u32 {
     lock().existing(partition).and_then(|p| p.mapped(&scope)).filter(|r| r.registered).map_or(0, |r| r.id)
@@ -435,6 +453,15 @@ mod tests {
         assert_eq!(registered_at_for_ruby(p, "s/".into()), 0);
         note_registered_for_ruby(p, "s/".into());
         assert_ne!(registered_at_for_ruby(p, "s/".into()), 0);
+        let short = note_registered_for_ruby(p, "https://a.test/".into());
+        let long = note_registered_for_ruby(p, "https://a.test/x/".into());
+        note_registered_for_ruby(p, "https://b.test/".into());
+        let a = || "https://a.test".to_owned();
+        assert_eq!(match_registration_for_ruby(p, a(), "https://a.test/x/y".into()), Some((long, "https://a.test/x/".into())));
+        assert_eq!(match_registration_for_ruby(p, a(), "https://a.test/y".into()), Some((short, "https://a.test/".into())));
+        assert_eq!(match_registration_for_ruby(p, "null".into(), "https://a.test/y".into()), None);
+        let of_a: Vec<u32> = registrations_of_origin_for_ruby(p, "https://a.test".into()).into_iter().map(|r| r.0).collect();
+        assert_eq!(of_a, [short, long]);
         clear_for_ruby(p);
     }
 
