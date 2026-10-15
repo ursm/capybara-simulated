@@ -218,8 +218,8 @@ const OUT_OF_RANGE: u32 = 2;
 // __dom.mediaSet(media, member, value) -> `NO_EVENT`, `CHANGED` or `OUT_OF_RANGE`: the member set — a rate, the volume
 // (0 to 1), mutedness or pitch preservation, its event owed only where what it reads changed; the current time (a seek,
 // `seeked` owed where there is media data, else the default playback start position, which reads back — -0 as 0);
-// `PAUSED` false for play(), true for pause() (whose events the bindings fire whatever it was). A value that reads the
-// same is not written: -0 for 0 reads back 0.
+// `PAUSED` false for play(), true for pause(), its events owed where it changed (the bindings fire them). A value that
+// reads the same is not written: -0 for 0 reads back 0.
 fn media_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return rv.set_uint32(NO_EVENT) };
     let which = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
