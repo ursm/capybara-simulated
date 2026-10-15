@@ -5357,7 +5357,6 @@ service-workers/service-worker/dedicated-worker-service-worker-interception.http
 - "[harness] TIMEOUT"
 service-workers/service-worker/detached-context.https.html:
 - accessing a ServiceWorker object from a removed iframe
-- accessing a ServiceWorkerRegistration from a removed iframe
 - accessing navigator.serviceWorker on a detached iframe
 service-workers/service-worker/embed-and-object-are-not-intercepted.https.html:
 - "[harness] TIMEOUT"

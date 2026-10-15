@@ -154,18 +154,13 @@ module Capybara
         # CURRENT controller handle, which a DEDICATED worker inherits rather than scope-matching
         # its own — often opaque (blob:/data:) — script URL. 0 when the creator is uncontrolled.
         '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0], shared: !!a[1], creator_key: a[2], realm_id: a[3].to_i, controller_handle: a[4].to_i, script_type: a[5], name: a[6].to_s) },
-        # navigator.serviceWorker.register (universal-server only) — spawn a worker
-        # running the SW script as an executor context. Returns its handle.
-        '__csim_serviceWorkerRegister' => ->(b, *a) { b.worker_spawn(a[0], service: true, creator_key: a[1], sw_scope: a[2], script_type: a[3]) },
-        # Registration update surface: the updateViaCache mode is REGISTRATION-wide state
-        # (scope-keyed, host-owned — a frame's registration object must see the mode the
-        # top window set), and __csim_swUpdateFetch is the Update algorithm's fetch +
-        # byte-check (sw_registration_update_fetch).
-        '__csim_swSetUpdateViaCache'   => ->(b, *a) { b.sw_set_update_via_cache(a[0], a[1]) },
+        # A register(), update() or unregister(), scheduled as a job at its scope (see sw_schedule_job), and the job run, the task
+        # queued for it — and the registration's updateViaCache mode, REGISTRATION-wide state (a frame's
+        # registration object must see the mode the top window set).
+        '__csim_swScheduleJob'         => ->(b, *a) { b.sw_schedule_job(*a.first(10)) },
+        '__csim_swRunJob'              => ->(b, *a) { b.sw_run_job(a[0]); nil },
         '__csim_swScopeUpdateViaCache' => ->(b, *a) { b.sw_scope_update_via_cache(a[0]) },
-        '__csim_swUpdateFetch'         => ->(b, *a) { b.sw_registration_update_fetch(a[0], a[1], a[2].to_i, a[3]) },
         '__csim_swNoteImport'          => ->(b, *a) { b.sw_note_import(a[0].to_i, a[1], a[2]) },
-        '__csim_swDropPendingScript'   => ->(b, *a) { b.sw_drop_pending_script(a[0]) },
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         # ServiceWorker.postMessage from a client window → the SW's `message` event (source = client).
         '__csim_serviceWorkerPostMessage' => ->(b, *a) { b.service_worker_post_message(a[0], a[1], a[2], a[3]); nil },
@@ -195,20 +190,12 @@ module Capybara
         # A controlled client cancelled a streaming respondWith body → cancel the SW's source stream
         # (routed to the worker that owns this [realm, fetch] stream). See sw_stream_cancel.
         '__csim_swStreamCancel'               => ->(b, *a) { b.sw_stream_cancel(a[0], a[1]); nil },
-        # A Register job made the registration at this scope (its first worker evaluated) — claim's
-        # longest-registration-wins must see it before any worker state exists. Its number.
-        '__csim_swNoteRegistered'     => ->(b, *a) { b.sw_note_registered(a[0]) },
         # A registration's versions `[installing, waiting, active]` (each a worker's handle or null) — what every realm's
         # registration objects read — and a worker's `[script URL, type, state, registration]`.
         '__csim_swVersions'           => ->(b, *a) { b.sw_versions(a[0]) },
         '__csim_swWorker'             => ->(b, *a) { b.sw_worker(a[0]) },
-        # A Register or Update job's worker evaluated: the registration's installing worker, its lifecycle the host's
-        # from here (see sw_install).
-        '__csim_swInstall'            => ->(b, *a) { b.sw_install(a[0], a[1]); nil },
         # A version's next lifecycle step, the task the host queued for it (see sw_step).
         '__csim_swStep'               => ->(b, *a) { b.sw_step(a[0]); nil },
-        # The Unregister job at a scope: whether the map held a registration there (see sw_unregister).
-        '__csim_swUnregister'         => ->(b, *a) { b.sw_unregister(a[0]) },
         # The worker serving an EXACT scope (0 if none) — a service worker's own registration is live while it is one of
         # its versions.
         '__csim_swActiveHandleForScope' => ->(b, *a) { b.sw_active_handle_for_scope(a[0]) },

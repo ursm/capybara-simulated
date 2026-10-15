@@ -88,10 +88,27 @@ enum Step {
     Activated,
 }
 
+// A Register, Update or Unregister job (Service Workers §8 "Create Job"), queued at its scope until the jobs before it
+// there have finished: what it asks — the script, the updateViaCache mode (an Update job's: a re-register's changed one,
+// or none) and the worker type; an Update job's registration — and, for the host running it, who asked (a client realm,
+// or a service worker: the negative of its handle) and its origin key.
+pub(crate) struct Job {
+    id: u32,
+    kind: String,
+    scope: String,
+    script_url: String,
+    update_via_cache: Option<String>,
+    script_type: String,
+    registration: u32,
+    realm: i64,
+    creator_key: String,
+}
+
 #[derive(Default)]
 struct Partition {
     registrations: Vec<Registration>,
     workers: HashMap<u32, Worker>,
+    jobs: Vec<Job>,
 }
 
 impl Partition {
@@ -109,6 +126,7 @@ struct Registry {
     partitions: HashMap<u64, Partition>,
     next_partition: u64,
     next_registration: u32,
+    next_job: u32,
 }
 
 static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(|| Mutex::new(Registry::default()));
@@ -213,6 +231,56 @@ pub(crate) fn set_worker_state_for_ruby(partition: u64, handle: u32, state: Stri
     w.state = state;
     changed
 }
+// ── The job queues ──
+// Schedule Job: a job of `kind` ("register", "update" — of the registration `registration` — or "unregister") at `scope`
+// — its number, and whether it runs now (no job before it at the scope). A Register job equivalent to the last one queued
+// there (the same script, mode and type) is that job: its number, not to run again.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn schedule_job_for_ruby(
+    partition: u64,
+    kind: String,
+    scope: String,
+    script_url: String,
+    update_via_cache: Option<String>,
+    script_type: String,
+    registration: u32,
+    realm: i64,
+    creator_key: String,
+) -> (u32, bool) {
+    let mut reg = lock();
+    let queued = reg.partition(partition).jobs.iter().rev().find(|j| j.scope == scope);
+    if let Some(last) = queued.filter(|j| {
+        kind == "register" && j.kind == "register" && j.script_url == script_url && j.update_via_cache == update_via_cache && j.script_type == script_type
+    }) {
+        return (last.id, false);
+    }
+    let runs = queued.is_none();
+    reg.next_job += 1;
+    let id = reg.next_job;
+    let job = Job { id, kind, scope, script_url, update_via_cache, script_type, registration, realm, creator_key };
+    reg.partition(partition).jobs.push(job);
+    (id, runs)
+}
+// The job `id`: `[kind, scope, script URL, mode, type, registration, who asked, creator key]`, nil for one finished.
+#[allow(clippy::type_complexity)]
+pub(crate) fn job_for_ruby(partition: u64, id: u32) -> Option<(String, String, String, Option<String>, String, u32, i64, String)> {
+    let mut reg = lock();
+    let j = reg.existing(partition)?.jobs.iter().find(|j| j.id == id)?;
+    Some((j.kind.clone(), j.scope.clone(), j.script_url.clone(), j.update_via_cache.clone(), j.script_type.clone(), j.registration, j.realm, j.creator_key.clone()))
+}
+// Finish Job: the job `id` out of its queue — the next one there, to run now.
+pub(crate) fn finish_job_for_ruby(partition: u64, id: u32) -> Option<u32> {
+    let mut reg = lock();
+    let jobs = &mut reg.existing(partition)?.jobs;
+    let i = jobs.iter().position(|j| j.id == id)?;
+    let scope = jobs.remove(i).scope;
+    jobs.iter().find(|j| j.scope == scope).map(|j| j.id)
+}
+// The registration a Register job made at `scope` that the map holds: its number, 0 for none.
+pub(crate) fn registered_at_for_ruby(partition: u64, scope: String) -> u32 {
+    lock().existing(partition).and_then(|p| p.mapped(&scope)).filter(|r| r.registered).map_or(0, |r| r.id)
+}
+
 // The worker `handle` begins its lifecycle (its job made it its registration's installing worker): `updatefound` next.
 pub(crate) fn begin_lifecycle_for_ruby(partition: u64, handle: u32) {
     if let Some(w) = lock().existing(partition).and_then(|p| p.workers.get_mut(&handle)) {
@@ -349,6 +417,26 @@ pub(crate) fn set_navigation_preload_for_ruby(partition: u64, scope: String, ena
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queues_jobs_by_scope_and_joins_an_equivalent_register() {
+        let p = partition_new_for_ruby();
+        let (a, runs) = schedule_job_for_ruby(p, "register".into(), "s/".into(), "s/a.js".into(), Some("imports".into()), "classic".into(), 0, 0, String::new());
+        assert!(runs);
+        assert_eq!(schedule_job_for_ruby(p, "register".into(), "s/".into(), "s/a.js".into(), Some("imports".into()), "classic".into(), 0, 3, String::new()), (a, false));
+        let (b, runs) = schedule_job_for_ruby(p, "register".into(), "s/".into(), "s/b.js".into(), Some("imports".into()), "classic".into(), 0, 0, String::new());
+        assert!(!runs);
+        let (c, runs) = schedule_job_for_ruby(p, "update".into(), "t/".into(), "t/a.js".into(), None, "classic".into(), 9, 0, String::new());
+        assert!(runs);
+        assert_eq!(job_for_ruby(p, c).map(|j| j.0), Some("update".into()));
+        assert_eq!(finish_job_for_ruby(p, a), Some(b));
+        assert_eq!(finish_job_for_ruby(p, b), None);
+        assert!(job_for_ruby(p, b).is_none());
+        assert_eq!(registered_at_for_ruby(p, "s/".into()), 0);
+        note_registered_for_ruby(p, "s/".into());
+        assert_ne!(registered_at_for_ruby(p, "s/".into()), 0);
+        clear_for_ruby(p);
+    }
 
     #[test]
     fn steps_a_version_from_installing_to_activated() {
