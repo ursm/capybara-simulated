@@ -10,7 +10,8 @@
 // `off`; the spec makes theirs "on".) A value is a control's own only in the value mode "value": a hidden field's value,
 // like a button's, is its attribute, which the document fetched again has. A form-associated custom element's state is
 // the one its internals were last given, which the bindings hold and hand back to its `formStateRestoreCallback` with
-// "restore" (HTML §4.13.7.4); `autocomplete` does not apply to one, but its form owner's "off" keeps it (Chrome 155).
+// "restore" (HTML §4.13.7.4) — at once, or as it is upgraded where it was not yet (Chrome); `autocomplete` does not apply
+// to one, but its form owner's "off" keeps it (Chrome 155).
 
 use crate::dom::{nid_arg, realm, realm_id, NodeId, RealmArena, STATE_FORM_ASSOCIATED, STATE_SELECTED, STATE_SELECTED_DIRTY};
 use crate::input_types::{value_mode, MODE_DEFAULT_ON, MODE_VALUE};
@@ -31,10 +32,17 @@ impl RealmArena {
     pub(crate) fn persisted_state_controls(&self, doc: NodeId) -> Vec<NodeId> {
         self.light_tree_elements(doc, |_, n| n.is_html_named("input") || n.is_html_named("textarea") || n.is_html_named("select"))
     }
-    // …and its form-associated custom elements whose state it keeps, in tree order: a list of their own, which an element
-    // not defined yet when the document is fetched again shifts no control's place in.
-    pub(crate) fn persisted_custom_elements(&self, doc: NodeId) -> Vec<NodeId> {
-        self.light_tree_elements(doc, |id, n| n.state & STATE_FORM_ASSOCIATED != 0 && !self.autofill_off(id))
+    // …and the elements that are or may become form-associated custom elements — a valid custom element name, or an
+    // `is` value — in tree order, each with whether its state is kept: a list of their own, the same whichever of them
+    // a definition has upgraded by now, so that one defined only after the document is fetched again takes its place.
+    pub(crate) fn persisted_custom_elements(&self, doc: NodeId) -> Vec<(NodeId, bool)> {
+        let candidate = |n: &crate::dom::NodeData| {
+            n.state & STATE_FORM_ASSOCIATED != 0 || n.is_value.is_some() || crate::element_state::is_valid_custom_element_name(&n.local_name)
+        };
+        self.light_tree_elements(doc, |_, n| n.kind == crate::dom::NodeKind::Element && candidate(n))
+            .into_iter()
+            .map(|id| (id, !self.autofill_off(id)))
+            .collect()
     }
     // What each of the controls remembers.
     pub(crate) fn persisted_state(&self, control: NodeId) -> PersistedState {
@@ -130,13 +138,18 @@ fn persisted_state_controls(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
     rv.set(crate::dom::nodes_value(scope, cid, &controls));
 }
 
-// __dom.persistedCustomElements(docNid) -> the document's form-associated custom elements whose state it keeps
-// (`persisted_custom_elements`).
+// __dom.persistedCustomElements(docNid) -> `[element, kept, …]`: the document's elements that are or may become
+// form-associated custom elements, each with whether its state is kept (`persisted_custom_elements`).
 fn persisted_custom_elements(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
     let elements = realm(scope, cid).persisted_custom_elements(doc);
-    rv.set(crate::dom::nodes_value(scope, cid, &elements));
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(elements.len() * 2);
+    for (id, kept) in elements {
+        items.push(crate::dom::node_value(scope, Some(id)));
+        items.push(v8::Boolean::new(scope, kept).into());
+    }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // __dom.persistedFormState(docNid) -> what each of those remembers (`persisted_state`), in their order: null for
