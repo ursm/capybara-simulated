@@ -7,6 +7,7 @@
 
 use crate::dom::{NodeId, RealmArena};
 use crate::geometry::{box_style, inline_by_display, is_boxless, placed_box, used_value};
+use crate::rendered::with_engine;
 use crate::style::StyleEngine;
 use style::properties::{ComputedValues, LonghandId, PropertyDeclarationId, PropertyId, ShorthandId};
 
@@ -109,6 +110,22 @@ pub(crate) fn resolved_value(engine: &mut StyleEngine, arena: &RealmArena, id: N
         Err(_) => None,
     };
     value.map_or(Resolved::None, Resolved::Value)
+}
+
+// The custom properties a resolved-value declaration lists after its longhands: every one `id` — or its `pseudo`-element
+// — has a computed value for, its own, inherited, or a registered one's initial value, in the style engine's order (the
+// inheriting ones first). Chrome and Firefox list the same set, each in an order of its own. How many there are, None for
+// an element the engine does not style…
+pub(crate) fn custom_property_count(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, pseudo: Option<&str>, now: f64) -> Option<usize> {
+    let style = engine.computed_style(arena, id, pseudo, now)?;
+    let custom = style.custom_properties();
+    Some(custom.inherited.len() + custom.non_inherited.len())
+}
+// …and the `index`th's name.
+pub(crate) fn custom_property_name(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, pseudo: Option<&str>, index: usize, now: f64) -> Option<String> {
+    let style = engine.computed_style(arena, id, pseudo, now)?;
+    let (name, _) = style.custom_properties().property_at(index)?;
+    Some(format!("--{name}"))
 }
 
 // The node whose box a read measures: the element's, or the one its `::before` / `::after` generates (none for another
@@ -379,6 +396,8 @@ fn format_component(r: f64) -> String {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "resolvedValue", resolved_value_op, context_id);
+    crate::dom::register(scope, ns, "customPropertyCount", custom_property_count_op, context_id);
+    crate::dom::register(scope, ns, "customPropertyName", custom_property_name_op, context_id);
 }
 
 // __dom.resolvedValue(nid, pseudo, name, laidOut, now) -> the resolved value (`resolved_value`): a string; null where
@@ -388,19 +407,7 @@ fn resolved_value_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let pseudo = (!args.get(1).is_null_or_undefined()).then(|| args.get(1).to_rust_string_lossy(scope));
     let name = args.get(2).to_rust_string_lossy(scope);
     let laid_out = args.get(3).is_true();
-    let cid = crate::dom::realm_id(scope, &args);
-    let now = crate::dom::clock_arg(scope, &args, 4);
-    let mut answer = None;
-    crate::dom::style_op(scope, cid, |scope| {
-        let d = crate::dom::dom(scope);
-        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
-        let out = resolved_value(engine, arena, id, pseudo.as_deref(), &name, laid_out, now);
-        let failures = engine.take_verify_failures();
-        if !crate::dom::threw_verify_failures(scope, failures) {
-            answer = Some(out);
-        }
-    });
-    match answer {
+    match with_engine(scope, &args, 4, |engine, arena, now| resolved_value(engine, arena, id, pseudo.as_deref(), &name, laid_out, now)) {
         Some(Resolved::Value(v)) => {
             if let Some(s) = v8::String::new(scope, &v) {
                 rv.set(s.into());
@@ -408,5 +415,27 @@ fn resolved_value_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         }
         Some(Resolved::NeedsLayout) => rv.set_null(),
         Some(Resolved::None) | None => {}
+    }
+}
+
+// __dom.customPropertyCount(nid, pseudo, now) -> how many custom properties its resolved style lists
+// (`custom_property_count`); undefined where the engine does not style it, or the realm has no engine.
+fn custom_property_count_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let pseudo = (!args.get(1).is_null_or_undefined()).then(|| args.get(1).to_rust_string_lossy(scope));
+    if let Some(count) = with_engine(scope, &args, 2, |engine, arena, now| custom_property_count(engine, arena, id, pseudo.as_deref(), now)).flatten() {
+        rv.set_uint32(count as u32);
+    }
+}
+
+// __dom.customPropertyName(nid, pseudo, index, now) -> the `index`th of those's name (`custom_property_name`); undefined
+// past the last.
+fn custom_property_name_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let pseudo = (!args.get(1).is_null_or_undefined()).then(|| args.get(1).to_rust_string_lossy(scope));
+    let index = args.get(2).uint32_value(scope).unwrap_or(0) as usize;
+    let name = with_engine(scope, &args, 3, |engine, arena, now| custom_property_name(engine, arena, id, pseudo.as_deref(), index, now)).flatten();
+    if let Some(s) = name.and_then(|n| v8::String::new(scope, &n)) {
+        rv.set(s.into());
     }
 }
