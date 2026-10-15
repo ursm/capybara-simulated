@@ -1622,9 +1622,6 @@ css/cssom/css-style-attr-decl-block.html:
 - Changes to CSS declaration block after a base URL change
 css/cssom/cssom-getPropertyValue-common-checks.html:
 - All shorthands can serialize their longhands set to 'initial'
-css/cssom/cssstyledeclaration-registered-custom-properties.html:
-- Only relevant custom properties are included
-- Registered custom properties are included in CSSComputedStyleDeclaration
 css/cssom/flex-serialization.html:
 - Single value flex with non-CSS-wide value should serialize correctly.
 css/cssom/font-family-serialization-001.html:
