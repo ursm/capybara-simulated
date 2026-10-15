@@ -90,6 +90,9 @@ pub(crate) struct Reactions {
     // Each form-associated custom element's form owner and disabled state as its callbacks were last told them (none
     // before the first: no owner, enabled) — what a reset compares the element's new ones with.
     form_states: HashMap<NodeId, (Option<NodeId>, bool)>,
+    // …and each id such an element's `form` attribute has named in a document, with the element the document's id
+    // lookup gave it last: what an id's change there compares, so that one moving none of them resets nothing.
+    form_ids: HashMap<(NodeId, String), Option<NodeId>>,
     // Each realm's window registry (its `customElements`, the latest context's of a realm id): the registry of a node with
     // neither a registry set nor a node document.
     window_registries: HashMap<i32, u32>,
@@ -147,6 +150,7 @@ impl Reactions {
     pub(crate) fn forget(&mut self, gone: impl Fn(NodeId) -> bool) {
         self.custom.retain(|&id, _| !gone(id));
         self.form_states.retain(|&id, _| !gone(id));
+        self.form_ids.retain(|(doc, _), _| !gone(*doc));
         self.queues.retain(|&id, _| !gone(id));
         self.backup.retain(|&(id, _)| !gone(id));
         for level in &mut self.levels {
@@ -201,6 +205,12 @@ impl Reactions {
     pub(crate) fn forget_node(&mut self, id: NodeId) {
         self.custom.remove(&id);
         self.form_states.remove(&id);
+        if !self.form_ids.is_empty() {
+            self.form_ids.retain(|(doc, _), _| *doc != id);
+            for found in self.form_ids.values_mut().filter(|f| **f == Some(id)) {
+                *found = None;
+            }
+        }
         if self.queues.remove(&id).is_some() {
             self.backup.retain(|&(n, _)| n != id);
             for level in &mut self.levels {
@@ -833,17 +843,47 @@ fn ce_form_state_reset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 // __dom.ceFormOwnersReset(rootNid) -> the same bits for the form-associated custom elements of the root's tree whose
 // `form` attribute names their owner (HTML: "an element with an ID is inserted into or removed from the Document, or
 // its ID changes" — each resets its form owner, its formAssociatedCallback enqueued where it is another now): bit 0 any
-// owner changed, bit 1 the backup element queue's microtask to be queued.
+// owner changed, bit 1 the backup element queue's microtask to be queued. In a document only those naming an id whose
+// element is another than the id lookup last gave (`form_ids`) — a change there asks those few ids, and walks the tree
+// only where one moved; in any other tree (a shadow tree's) every one.
 fn ce_form_owners_reset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
     let cid = realm_id(scope, &args);
-    let naming = crate::collections::form_naming_customs(realm(scope, cid), root);
+    let moved = if realm(scope, cid).get(root).is_some_and(|n| n.kind == crate::dom::NodeKind::Document) {
+        let named: Vec<String> = dom(scope).arena.ce_reactions.form_ids.keys().filter(|(doc, _)| *doc == root).map(|(_, id)| id.clone()).collect();
+        let mut moved = Vec::new();
+        for id in named {
+            let now = realm(scope, cid).element_by_id(root, &id.encode_utf16().collect::<Vec<u16>>());
+            if let Some(had) = dom(scope).arena.ce_reactions.form_ids.get_mut(&(root, id.clone())).filter(|had| **had != now) {
+                *had = now;
+                moved.push(id);
+            }
+        }
+        if moved.is_empty() {
+            return rv.set_uint32(0);
+        }
+        Some(moved)
+    } else {
+        None
+    };
+    let naming = crate::collections::form_naming_customs(realm(scope, cid), root, moved.as_deref());
     let mut answer = 0;
     for id in naming {
         let element = crate::dom::node_value(scope, Some(id));
         answer |= reset_form_state(scope, cid, id, element, FORM_OWNER);
     }
     rv.set_uint32(answer);
+}
+// (…the id its `form` attribute names noted, in its document, with the element the id lookup gives it now)
+fn note_form_id(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId) {
+    let arena = realm(scope, cid);
+    let Some(named) = arena.get(id).and_then(|n| n.plain_attr("form")).map(str::to_owned) else { return };
+    let root = arena.root_of(id);
+    if arena.get(root).is_none_or(|n| n.kind != crate::dom::NodeKind::Document) || dom(scope).arena.ce_reactions.form_ids.contains_key(&(root, named.clone())) {
+        return;
+    }
+    let found = realm(scope, cid).element_by_id(root, &named.encode_utf16().collect::<Vec<u16>>());
+    dom(scope).arena.ce_reactions.form_ids.insert((root, named), found);
 }
 // (…one element's reset: its `element` object the receiver of the callbacks enqueued)
 fn reset_form_state(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, element: v8::Local<'_, v8::Value>, which: u32) -> u32 {
@@ -855,6 +895,9 @@ fn reset_form_state(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, elem
         (arena.form_owner(id), arena.is_actually_disabled(id))
     };
     let (told_owner, told_disabled) = dom(scope).arena.ce_reactions.form_states.get(&id).copied().unwrap_or((None, false));
+    if which & FORM_OWNER != 0 {
+        note_form_id(scope, cid, id);
+    }
     let owner_changed = which & FORM_OWNER != 0 && owner != told_owner;
     let disabled_changed = which & FORM_DISABLED_STATE != 0 && disabled != told_disabled;
     if !owner_changed && !disabled_changed {
