@@ -14,6 +14,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "urlSet", url_set, context_id);
     register(scope, ns, "urlHasOpaquePath", url_has_opaque_path, context_id);
     register(scope, ns, "urlIsFragmentNavigation", url_is_fragment_navigation, context_id);
+    register(scope, ns, "urlCanRewrite", url_can_rewrite, context_id);
     register(scope, ns, "postMessageTarget", post_message_target_op, context_id);
     register(scope, ns, "postMessageReaches", post_message_reaches_op, context_id);
     register(scope, ns, "urlencodedParse", urlencoded_parse, context_id);
@@ -165,6 +166,26 @@ pub(crate) fn is_fragment_navigation_for_ruby(current: String, url: String) -> b
     is_fragment_navigation(&current, &url)
 }
 
+// HTML "can have its URL rewritten": whether a document at `current` may have its URL replaced by `target` — by
+// pushState / replaceState — the two alike in scheme, username, password, host and port; an HTTP(S) one in nothing
+// more, a file: one in its path too, any other in its path and query as well (only its fragment may change).
+pub(crate) fn can_rewrite(current: &str, target: &str) -> bool {
+    let (Ok(current), Ok(target)) = (Url::parse(current, None), Url::parse(target, None)) else { return false };
+    let same = |f: fn(&Url) -> &str| f(&current) == f(&target);
+    if !(same(Url::protocol) && same(Url::username) && same(Url::password) && same(Url::host)) {
+        return false;
+    }
+    match target.protocol() {
+        "http:" | "https:" => true,
+        "file:" => same(Url::pathname),
+        _ => same(Url::pathname) && same(Url::search),
+    }
+}
+fn url_can_rewrite(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (current, target) = (usv(scope, args.get(0)), usv(scope, args.get(1)));
+    rv.set_bool(can_rewrite(&current, &target));
+}
+
 // HTML "window post message steps": the target origin a `targetOrigin` names — "*" and "/" themselves, else the origin
 // of the absolute URL it is (serialized: "null" for an opaque one) — None where it is no URL (a SyntaxError).
 fn post_message_target(arg: &str) -> Option<String> {
@@ -268,6 +289,20 @@ fn urlencoded_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tells_a_url_a_document_may_rewrite_its_own_to() {
+        assert!(can_rewrite("https://a.test/p?q#f", "https://a.test/other?z"));
+        assert!(!can_rewrite("https://a.test/p", "https://b.test/p"));
+        assert!(!can_rewrite("https://a.test/p", "http://a.test/p"));
+        assert!(!can_rewrite("https://a.test/p", "https://a.test:8443/p"));
+        assert!(!can_rewrite("https://a.test/p", "https://u@a.test/p"));
+        assert!(can_rewrite("file:///x/a", "file:///x/a?q"));
+        assert!(!can_rewrite("file:///x/a", "file:///x/b"));
+        assert!(can_rewrite("about:blank", "about:blank#x"));
+        assert!(!can_rewrite("about:blank", "about:blank?q"));
+        assert!(!can_rewrite("data:text/html,a", "data:text/html,b"));
+    }
+
     #[test]
     fn tells_a_navigation_to_a_fragment() {
         let at = "https://a.test/p?q#x";

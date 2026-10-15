@@ -67,6 +67,32 @@ RSpec.describe 'same-document navigation' do
     expect(step.("location.href = '/a'")).to eq([2, '/a', 0])
   end
 
+  # HTML "shared history push/replace state steps": the state is SERIALIZED (history.state a copy, a DataCloneError for
+  # what cannot be), the URL parsed against the document's BASE URL and refused (a SecurityError) where the document
+  # cannot have its URL rewritten to it (url_ops.rs `can_rewrite`). Measured in Chrome 151 (2026-10-15) on a page with
+  # `<base href="/sub/">`: pushState(o, '', 'x') lands on /sub/x with `history.state !== o`; a function state throws
+  # DataCloneError; a cross-origin URL throws SecurityError; `history` is a History.
+  it 'serializes the state and checks the URL pushState is given' do
+    app = ->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><base href="/sub/"><body></body>']] }
+    s = simulated_session(app)
+    s.visit '/h'
+    out = s.evaluate_script(<<~JS)
+      (() => {
+        const out = {};
+        const o = {a: 1};
+        history.pushState(o, '', 'x');
+        out.copy = history.state !== o && history.state.a === 1 && history.state === history.state;
+        out.path = location.pathname;
+        try { history.pushState(() => 1, ''); out.fn = 'none'; } catch (e) { out.fn = e.name; }
+        try { history.replaceState(null, '', 'https://example.org/'); out.xo = 'none'; } catch (e) { out.xo = e.name; }
+        out.history = Object.getPrototypeOf(history) === History.prototype;
+        return out;
+      })()
+    JS
+
+    expect(out).to eq('copy' => true, 'path' => '/sub/x', 'fn' => 'DataCloneError', 'xo' => 'SecurityError', 'history' => true)
+  end
+
   # The document being navigated away from keeps running until the new response
   # COMMITS, so a `replaceState` / `pushState` it had queued is real — it rewrites
   # and appends ITS OWN entries — but it cannot move the incoming document's URL.

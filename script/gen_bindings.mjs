@@ -377,6 +377,7 @@ const INTERFACES = [
   ['IndexedDB', 'IDBCursorWithValue', { install: true }],
   ['html', 'DOMStringList'],
   ['html', 'Location', { install: true }],
+  ['html', 'History', { install: true }],
   ['css-font-loading', 'FontFaceSetLoadEvent', { install: true }],
   ['gamepad', 'GamepadEvent', { install: true }],
   ['orientation-event', 'DeviceMotionEventAcceleration'],
