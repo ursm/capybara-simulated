@@ -25,12 +25,14 @@ RSpec.describe 'native arena upkeep' do
     JS
   end
 
+  # (…a parse the bindings replay: the engine builds the rest itself, and leaves them one with a lone surrogate)
   it 'sends a coalesced text only the chunks appended to it' do
-    text = 'a ' * 10_000
-    chars = crossed(%w[setData appendData createNode], "Document.parseHTMLUnsafe('<pre>#{text}</pre>')",
-                    units: 'a => typeof a[1] === "string" ? a[1].length : 0')
-    expect(chars).to be <= 2 * text.length
-    expect(chars).to be >= text.length
+    text   = 'a ' * 10_000
+    length = text.length + 1   # (the surrogate is one unit of it)
+    chars  = crossed(%w[setData appendData createNode], "Document.parseHTMLUnsafe('<pre>\\uD800#{text}</pre>')",
+                     units: 'a => typeof a[1] === "string" ? a[1].length : 0')
+    expect(chars).to be <= 2 * length
+    expect(chars).to be >= length
   end
 
   it 'sends appendData only what it appends' do

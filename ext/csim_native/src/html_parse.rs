@@ -839,6 +839,9 @@ pub(crate) struct Build<'s> {
     pub(crate) contents_script: u8,
     // A live document's build (`htmlRunBuilt`): what it does as the page's own insertions do, none otherwise.
     live: Option<Live>,
+    // The registry association every element it makes takes (ce_reactions.rs codes, and the registry a code names): a
+    // fragment parse's context's, where it has one — a scoped registry, the null one or the tracking null.
+    pub(crate) registry: Option<(u32, Option<v8::Local<'s, v8::Object>>)>,
     // …and whether it paused, a custom element it constructed inserted, for the bindings to connect it before it goes on.
     paused: bool,
 }
@@ -1063,6 +1066,15 @@ impl<'s> Build<'s> {
             self.close_details(scope, child);
         }
     }
+    // …the registry association the build's elements take, given to one it made (`registry`).
+    fn stamp_registry(&self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId) {
+        let Some((code, object)) = self.registry else { return };
+        let handle = crate::dom::realm(scope, self.cid).get(id).and_then(|n| n.link.handle().map(|h| h as *const crate::node_handle::NodeHandle));
+        // SAFETY: the node's handle lives while the build holds it, which it does every node it made.
+        if let Some(h) = handle {
+            unsafe { &*h }.set_registry(scope, code, object);
+        }
+    }
     // The parser's registry for an element it inserts under a node of a null one — its intended parent's, which "create
     // an element for the token" looks a definition up in: the tracking null passed on, the null registry given to one
     // that has none set.
@@ -1223,7 +1235,11 @@ impl<'s> Build<'s> {
                             self.constructed(scope, el, list, custom);
                             el
                         }
-                        (None, None) => self.element(scope, ns, &local, list),
+                        (None, None) => {
+                            let el = self.element(scope, ns, &local, list);
+                            self.stamp_registry(scope, el);
+                            el
+                        }
                     };
                     self.set(handle, el);
                     if contents != 0 {
@@ -1355,14 +1371,17 @@ impl<'s> Build<'s> {
     }
 }
 
-// __dom.htmlParseFragment(html, wellFormed, contextNs, contextLocalName, formNid, quirks, document, templateDocument)
-// -> [count, nodes…, element, names, flags, …], or undefined where the engine leaves it to the bindings: HTML's fragment
+// __dom.htmlParseFragment(html, wellFormed, contextNs, contextLocalName, formNid, quirks, document, templateDocument,
+// declarative, registry, registryObject) -> [count, nodes…, element, names, flags, …], or undefined where the engine
+// leaves it to the bindings: HTML's fragment
 // parsing algorithm in the context of an element (its namespace as `ns_code` numbers it, its local name; the nearest form
 // its form element pointer, -1 for none; its document's mode, as `htmlParse` takes it), built by the engine — the nodes
 // in `document`, those in template contents in `templateDocument` — and answered as the parse's top-level nodes, out
 // of any parent, then the elements the bindings have steps for (`BUILT_*`), each with the names of its attributes whose
 // steps are theirs (undefined for none). With `declarative` (setHTMLUnsafe's), the declarative shadow roots the markup
-// makes are attached. Left to the bindings: markup with a lone surrogate or a `customelementregistry` attribute.
+// makes are attached; with a `registry` code (ce_reactions.rs: 0 none), the context's registry association, which every
+// element made takes — `registryObject` the registry it names. Left to the bindings: markup with a lone surrogate or a
+// `customelementregistry` attribute.
 fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     parser_op(scope, None, &mut rv, &[-1], |scope, rv| {
         let mut standins = StandIns::default();
@@ -1386,6 +1405,9 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         let template_doc = v8::Local::<v8::Object>::try_from(args.get(7)).ok().map(|d| v8::Local::new(scope, d)).or(doc);
         let mut build = Build::new(cid, doc, template_doc, vec![None, None, form]);
         build.contents_script = crate::script::SCRIPT_ALREADY_STARTED;
+        let registry = args.get(9).uint32_value(scope).unwrap_or(0);
+        let registry_object = v8::Local::<v8::Object>::try_from(args.get(10)).ok().map(|r| v8::Local::new(scope, r));
+        build.registry = (registry != 0).then_some((registry, registry_object));
         let root = build.make(scope, crate::dom::NodeData::of_kind(crate::dom::NodeKind::Fragment, Vec::new()));
         build.set(0, root);
         if build.take(scope, parsed(tokenizer, html).into_iter()).is_none() {
@@ -1477,6 +1499,7 @@ impl<'s> Build<'s> {
             script: crate::script::SCRIPT_ALREADY_STARTED,
             contents_script: 0,
             live: None,
+            registry: None,
             paused: false,
         }
     }
