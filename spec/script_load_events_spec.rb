@@ -4,8 +4,10 @@ require_relative 'support/session_teardown'
 # HTML "execute the script element": a script from an external file fires `load` once it has run, whatever it threw —
 # the throw reported (`window.onerror`) — and `error` only where it could not be fetched; a module's `src` resolves
 # against its document's base URL. Chrome 155 on this page: `onerror TypeError | classic load | module load true |
-# onerror RangeError | mthrow load | missing error`. (A module's throw is logged, not yet reported: the host evaluates
-# the graph and the thrown value does not cross back — the `onerror RangeError` Chrome adds.)
+# onerror RangeError | mthrow load | missing error`. A module that does not parse — the script's, or one it imports — is
+# no failed fetch: Chrome reports its SyntaxError and fires `load`; one importing a module that cannot be fetched fires
+# `error`, as does one served as no JavaScript MIME type (`text/plain`), which never runs. (A module's throw and parse error are logged, not yet reported: the host evaluates the graph and the thrown
+# value does not cross back — the `onerror` Chrome adds for each.)
 RSpec.describe 'script load events' do
   let(:page) {
     <<~HTML
@@ -17,6 +19,10 @@ RSpec.describe 'script load events' do
       <script type="module" src="m.js" onload="log.push('module load ' + window.subran)" onerror="log.push('module error')"></script>
       <script type="module" src="/mthrow.js" onload="log.push('mthrow load')" onerror="log.push('mthrow error')"></script>
       <script type="module" src="/missing.js" onload="log.push('missing load')" onerror="log.push('missing error')"></script>
+      <script type="module" src="/syntax.js" onload="log.push('syntax load')" onerror="log.push('syntax error')"></script>
+      <script type="module" src="/depsyntax.js" onload="log.push('depsyntax load')" onerror="log.push('depsyntax error')"></script>
+      <script type="module" src="/depmissing.js" onload="log.push('depmissing load')" onerror="log.push('depmissing error')"></script>
+      <script type="module" src="/plain.txt" onload="log.push('plain load ' + !!window.plainran)" onerror="log.push('plain error ' + !!window.plainran)"></script>
     HTML
   }
 
@@ -28,12 +34,16 @@ RSpec.describe 'script load events' do
       when '/throw.js' then [200, {'content-type' => 'text/javascript'}, ['throw new TypeError("boom")']]
       when '/sub/m.js' then [200, {'content-type' => 'text/javascript'}, ['window.subran = true']]
       when '/mthrow.js' then [200, {'content-type' => 'text/javascript'}, ['throw new RangeError("mboom")']]
+      when '/syntax.js' then [200, {'content-type' => 'text/javascript'}, ['export {;']]
+      when '/depsyntax.js' then [200, {'content-type' => 'text/javascript'}, ['import "/syntax.js";']]
+      when '/depmissing.js' then [200, {'content-type' => 'text/javascript'}, ['import "/missing.js";']]
+      when '/plain.txt' then [200, {'content-type' => 'text/plain'}, ['window.plainran = true']]
       else [404, {'content-type' => 'text/javascript'}, ['']]
       end
     })
     s.visit '/'
     expect(s.evaluate_async_script('setTimeout(() => arguments[0](log), 10)')).to eq(
-      ['onerror TypeError', 'classic load', 'module load true', 'mthrow load', 'missing error']
+      ['onerror TypeError', 'classic load', 'module load true', 'mthrow load', 'missing error', 'syntax load', 'depsyntax load', 'depmissing error', 'plain error false']
     )
   end
 

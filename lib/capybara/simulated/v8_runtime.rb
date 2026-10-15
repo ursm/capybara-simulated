@@ -1165,9 +1165,14 @@ module Capybara
         module_sw_ctxs[realm_key(target)] = sw&.merge(root: url.to_s)
         m = native_module_for(url, inline_src, target, handles)
         return false unless m
+        return true if m == MODULE_PARSE_FAILED
         begin
           instantiate_native_module(m, url, target, handles)
           m.evaluate
+        rescue ModuleFetchFailed
+          return false
+        rescue ModuleParseFailed
+          nil   # (…logged as it was parsed)
         rescue RustyRacer::ParseError, RustyRacer::RuntimeError => e
           # A top-level module throw belongs on the page console
           # (trace-visible diagnostics), like a classic script's error —
@@ -1177,6 +1182,12 @@ module Capybara
         end
         true
       end
+      # What a module of the graph came to where it is no module record (HTML "fetch a single module script"): it could
+      # not be fetched — the graph's result null, the element's `error` — or it could not be parsed, its error to rethrow
+      # the graph's — the element's `load`, the error logged (`MODULE_PARSE_FAILED`, kept as the URL's handle).
+      MODULE_PARSE_FAILED = :parse_failed
+      class ModuleFetchFailed < StandardError; end
+      class ModuleParseFailed < StandardError; end
 
       # A `.json` module is exposed as the default export of its parsed value;
       # every other body is the fetched source as-is. Module SOURCE is text,
@@ -1184,7 +1195,10 @@ module Capybara
       # ASCII-8BIT (see `RuntimeShared.utf8_text`).
       def module_body(url, src)
         src = RuntimeShared.utf8_text(src)
-        url.to_s.match?(/\.json(?:\?|$)/) ? "export default #{src};" : src
+        json_module?(url) ? "export default #{src};" : src
+      end
+      def json_module?(url)
+        url.to_s.match?(/\.json(?:\?|$)/)
       end
 
       # `RustyRacer::Module` handles are bound to their realm; both rebuild
@@ -1236,6 +1250,10 @@ module Capybara
           # link fetched it too), none across visits while the response says it is fresh.
           src = @browser.external_asset_source(url_s, asset_document_of(target))
           @browser.note_module_fetch(url_s) if src   # its Resource Timing entry ('script')
+          # (…a response of a MIME type no module script is — no JavaScript one, nor a JSON one for a JSON module — no
+          # module at all: HTML "fetch a single module script")
+          content_type = @browser.external_asset_meta(url_s)&.dig('headers', 'content-type')
+          src = nil if src && !Native.module_content(Array(content_type).join(', '), json_module?(url_s))
         end
         return handles[url] = nil unless src
         body = module_body(url_s, src)
@@ -1268,7 +1286,7 @@ module Capybara
         handles[url] = m
       rescue RustyRacer::ParseError => e
         @browser.log_console('error', "module parse error in #{url}: #{e.message}")
-        handles[url] = nil
+        handles[url] = MODULE_PARSE_FAILED
       end
 
       def instantiate_native_module(m, importer_url, target, handles)
@@ -1278,7 +1296,8 @@ module Capybara
         m.instantiate do |specifier, referrer|
           resolved = browser.resolve_module_specifier(specifier, referrer || importer_url, realm)
           child = native_module_for(resolved, nil, target, handles)
-          raise "module not found: #{resolved}" unless child
+          raise ModuleFetchFailed, "module not found: #{resolved}" unless child
+          raise ModuleParseFailed, "module not parsed: #{resolved}" if child == MODULE_PARSE_FAILED
           child
         end
       end
@@ -1306,6 +1325,7 @@ module Capybara
           resolved = @browser.resolve_module_specifier(specifier, referrer, realm_key(target))
           m = native_module_for(resolved, nil, target, handles)
           raise "module not found: #{resolved}" unless m
+          raise "module not parsed: #{resolved}" if m == MODULE_PARSE_FAILED
           instantiate_native_module(m, resolved, target, handles)
           m
         }
