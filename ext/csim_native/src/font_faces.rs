@@ -29,6 +29,15 @@ pub(crate) struct FaceRecord {
     pub(crate) overrides: [Option<f64>; 3],
 }
 
+// How far a face is from a style, each of §5.2's steps in turn: stretch, slant, weight — compared in that order.
+#[derive(Clone, Copy, PartialEq)]
+struct Distance([f64; 3]);
+impl Distance {
+    fn cmp(&self, other: &Distance) -> std::cmp::Ordering {
+        self.0.iter().zip(&other.0).map(|(a, b)| a.total_cmp(b)).find(|o| o.is_ne()).unwrap_or(std::cmp::Ordering::Equal)
+    }
+}
+
 impl FaceRecord {
     // A face of `family` with every descriptor at its initial value.
     fn of(family: String) -> FaceRecord {
@@ -36,8 +45,8 @@ impl FaceRecord {
     }
     // How far it is from what a style asks for (CSS Fonts 4 §5.2): the nearest stretch first, then the same slant, then
     // the nearest weight.
-    fn distance(&self, stretch: f64, weight: f64, slanted: bool) -> f64 {
-        stretch_distance(stretch, self.stretch) * 1e12 + (if self.slanted == slanted { 0.0 } else { 1e9 }) + weight_distance(weight, self.weight)
+    fn distance(&self, stretch: f64, weight: f64, slanted: bool) -> Distance {
+        Distance([stretch_distance(stretch, self.stretch), f64::from(u8::from(self.slanted != slanted)), weight_distance(weight, self.weight)])
     }
     // Whether its `unicode-range` covers `c`.
     fn covers(&self, c: u32) -> bool {
@@ -134,7 +143,7 @@ pub(crate) fn pick(faces: &[FaceRecord], stack: &str, bucket: &str, all: bool) -
     let italic = bucket.contains("italic");
     let mut out = Vec::new();
     for family in families(stack) {
-        let mut scored: Vec<(f64, usize)> = faces
+        let mut scored: Vec<(Distance, usize)> = faces
             .iter()
             .enumerate()
             .filter(|(_, f)| f.family == family)
@@ -144,7 +153,7 @@ pub(crate) fn pick(faces: &[FaceRecord], stack: &str, bucket: &str, all: bool) -
             continue;
         }
         // (…best first, and of equal ones the LATER rule)
-        scored.sort_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)));
+        scored.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
         if !all {
             return vec![scored[0].1];
         }
@@ -161,9 +170,9 @@ pub(crate) fn matching(faces: &[FaceRecord], font: &str, text: &str) -> Option<V
     let (families, stretch, weight, slanted) = crate::cssom_decl::font_shorthand_match(font)?;
     let mut out = Vec::new();
     for family in families.iter().map(|f| f.to_ascii_lowercase()) {
-        let of_family: Vec<(f64, usize)> =
+        let of_family: Vec<(Distance, usize)> =
             faces.iter().enumerate().filter(|(_, f)| f.family == family).map(|(i, f)| (f.distance(stretch, weight, slanted), i)).collect();
-        let Some(best) = of_family.iter().map(|&(d, _)| d).min_by(f64::total_cmp) else { continue };
+        let Some(best) = of_family.iter().map(|&(d, _)| d).min_by(Distance::cmp) else { continue };
         for c in text.chars().map(u32::from) {
             // (…of the best ones covering it, the later rule)
             let picked = of_family.iter().rev().find(|&&(d, i)| d == best && faces[i].covers(c));

@@ -41,13 +41,13 @@ impl RealmArena {
         };
         self.light_tree_elements(doc, |_, n| n.kind == crate::dom::NodeKind::Element && candidate(n))
             .into_iter()
-            .map(|id| (id, !self.autofill_off(id)))
+            .map(|id| (id, !self.autofill_off(id, false)))
             .collect()
     }
     // What each of the controls remembers.
     pub(crate) fn persisted_state(&self, control: NodeId) -> PersistedState {
         let Some(n) = self.get(control) else { return PersistedState::None };
-        if self.autofill_off(control) {
+        if self.autofill_off(control, true) {
             return PersistedState::None;
         }
         if n.is_html_named("select") {
@@ -65,13 +65,13 @@ impl RealmArena {
             _ => PersistedState::None,
         }
     }
-    // Whether a control's autofill field name is "off": its own `autocomplete` says so (a form-associated custom
-    // element's says nothing), or says neither and its form owner's does — an enumerated attribute, matched ASCII
+    // Whether a control's autofill field name is "off": its own `autocomplete` says so (where it applies: a form-associated
+    // custom element's, defined or not yet, says nothing), or says neither and its form owner's does — an enumerated attribute, matched ASCII
     // case-insensitively as written (" off " is an invalid value, so "on").
-    fn autofill_off(&self, control: NodeId) -> bool {
+    fn autofill_off(&self, control: NodeId, own_applies: bool) -> bool {
         let own = self
             .get(control)
-            .filter(|n| n.state & STATE_FORM_ASSOCIATED == 0)
+            .filter(|_| own_applies)
             .and_then(|n| n.plain_attr("autocomplete"))
             .map_or(String::new(), |v| crate::reflect::autofill(v, false));
         match own.as_str() {

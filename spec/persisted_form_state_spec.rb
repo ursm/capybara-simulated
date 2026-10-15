@@ -82,17 +82,18 @@ RSpec.describe 'persisted form state' do
   end
 
   # …and one defined only after its document is traversed back to — after the restore — is handed its state as it is
-  # upgraded (Chrome restores it on upgrade), in its place among the elements that may be one.
+  # upgraded (Chrome restores it on upgrade), in its place among the elements that may be one; its own `autocomplete`
+  # no more its say before it is defined than after.
   it 'hands a form-associated custom element defined later its state as it is upgraded' do
     late = <<~HTML
       <!DOCTYPE html>
-      <x-plain></x-plain><my-late id="l"></my-late>
+      <x-plain></x-plain><form><my-late id="o" autocomplete="off"></my-late></form><my-late id="l"></my-late>
       <script>
         window.log = [];
         setTimeout(() => customElements.define('my-late', class extends HTMLElement {
           static formAssociated = true;
           constructor() { super(); this.i = this.attachInternals(); }
-          formStateRestoreCallback(state, mode) { log.push(state + ' ' + mode); }
+          formStateRestoreCallback(state, mode) { log.push(this.id + ' ' + state + ' ' + mode); }
         }), 0);
       </script>
       <a href="/other">away</a>
@@ -100,9 +101,9 @@ RSpec.describe 'persisted form state' do
     app = lambda {|env| [200, {'content-type' => 'text/html'}, [env['PATH_INFO'] == '/other' ? '<p>other</p>' : late]] }
     s = simulated_session(app)
     s.visit '/'
-    s.execute_script("document.getElementById('l').i.setFormValue('v', 'st')")
+    s.execute_script("document.getElementById('o').i.setFormValue('v', 'so'); document.getElementById('l').i.setFormValue('v', 'st')")
     s.click_link 'away'
     s.go_back
-    expect(s.evaluate_script('log')).to eq(['st restore'])
+    expect(s.evaluate_script('log')).to eq(['o so restore', 'l st restore'])
   end
 end
