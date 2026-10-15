@@ -156,7 +156,9 @@ RSpec.describe 'execCommand in the selection’s editing host' do
   end
 
   # A selection replaced by the same text is an edit all the same (Chrome 155: `input`, data "b", the value `abc`); a
-  # cut with nothing selected cuts nothing (false, no input); insertHTML into an input is an insertText's `input`.
+  # cut with nothing selected cuts nothing (false, no input — Blink's cut needs a range selected; headless Chrome
+  # refuses a scripted cut outright, so this is its rule, not a measurement); insertHTML into an input is an
+  # insertText's `input`.
   it 'fires input for a replaced selection, none for an empty cut' do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><input id=i value=abc>']] })
     s.visit '/'
@@ -168,10 +170,10 @@ RSpec.describe 'execCommand in the selection’s editing host' do
         i.setSelectionRange(1, 2);
         const out = [document.execCommand('insertText', false, 'b'), i.value];
         i.setSelectionRange(1, 1);
-        out.push(document.execCommand('cut'), i.value, document.execCommand('insertHTML', false, '<b>Q</b>'), i.value);
+        out.push(document.queryCommandEnabled('cut'), document.execCommand('cut'), i.value, document.execCommand('insertHTML', false, '<b>Q</b>'), i.value);
         return [out, seen];
       })()
     JS
-    expect(got).to eq([[true, 'abc', false, 'abc', true, 'aQbc'], ['insertText:"b"', 'insertText:"Q"']])
+    expect(got).to eq([[true, 'abc', false, false, 'abc', true, 'aQbc'], ['insertText:"b"', 'insertText:"Q"']])
   end
 end
