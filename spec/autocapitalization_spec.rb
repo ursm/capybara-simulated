@@ -31,4 +31,16 @@ RSpec.describe 'autocapitalization and autocorrection' do
     JS
     expect(got).to eq(['words', 'words', '', '', ['none', 'sentences', 'characters', 'sentences'], false, true, false, true])
   end
+
+  # `spellcheck`: true or '' on, false off — any other value, or none, the parent element's (Chrome 155 and Firefox both
+  # inherit it; with no parent element on, as Chrome has it, where Firefox says off).
+  it 'inherits spellcheck where an element states none' do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><div spellcheck=false><span id=s></span><p id=p spellcheck=bogus></p><i id=e spellcheck=""></i></div><b spellcheck=true><u id=u></u></b>']]
+    })
+    s.visit '/'
+    expect(s.evaluate_script("['s', 'p', 'e', 'u'].map((id) => document.getElementById(id).spellcheck).concat(document.createElement('div').spellcheck)")).to eq(
+      [false, false, true, true, true]
+    )
+  end
 end

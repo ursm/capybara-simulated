@@ -24,6 +24,7 @@ const HIDDEN: u32 = 3;
 const ACCESS_KEY_LABEL: u32 = 4;
 const AUTOCAPITALIZE: u32 = 5;
 const AUTOCORRECT: u32 = 6;
+const SPELLCHECK: u32 = 7;
 // The elements `tabIndex` defaults to 0 on (else -1): these HTML ones, an SVG `<a>`, and a summary that is its details'.
 // (…its local name as written: `createElementNS(HTML, "BUTTON")` is no button)
 const TABBABLE_BY_DEFAULT: [&str; 9] = ["a", "area", "button", "frame", "iframe", "input", "object", "select", "textarea"];
@@ -94,7 +95,8 @@ fn autocorrection(arena: &crate::dom::RealmArena, id: crate::dom::NodeId) -> boo
 // __dom.elementReflection(el, which) -> `tabIndex` (its attribute's long, else its default), `translate` (inherited:
 // yes or ''; no), `writingSuggestions` ('true' / 'false', inherited), `hidden` (0 none, 1 hidden, 2 until-found),
 // `accessKeyLabel` (`Alt+` and the key where `accesskey` is one code point, else ''), `autocapitalize` (the hint's
-// keyword) and `autocorrect`.
+// keyword), `autocorrect` and `spellcheck` (inherited: true or ''; false — an element that states neither its parent
+// element's, as Chrome 155 and Firefox both inherit it; on by default, as Chrome has it).
 fn element_reflection_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
     let which = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
@@ -117,6 +119,7 @@ fn element_reflection_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
             rv.set(keyword.into());
         }
         AUTOCORRECT => rv.set_bool(autocorrection(arena, id)),
+        SPELLCHECK => rv.set_bool(inherited_state(arena, id, "spellcheck", &["true", ""], "false", true)),
         ACCESS_KEY_LABEL => {
             // (…one code point of the value's UTF-16, a lone surrogate one too)
             let key = arena.get(id).and_then(|n| n.plain_attr_units("accesskey")).filter(|k| char::decode_utf16(k.iter().copied()).count() == 1);
