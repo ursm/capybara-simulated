@@ -11,6 +11,12 @@ const ALGORITHMS: [(&str, Hash); 3] = [("sha256", Hash::Sha256), ("sha384", Hash
 
 // "Do bytes match metadataList?"
 pub(crate) fn bytes_match(bytes: &[u8], metadata: &str) -> bool {
+    response_matches(bytes, metadata, true)
+}
+// …and SRI §3.3.5 "Does response match metadataList?": metadata with no entry it knows matches whatever the response;
+// otherwise a response not eligible for integrity validation (an opaque one) never does, and an eligible one's bytes
+// are matched.
+pub(crate) fn response_matches(bytes: &[u8], metadata: &str, eligible: bool) -> bool {
     let entries: Vec<(usize, &str)> = metadata
         .split(|c: char| c.is_ascii_whitespace())
         .filter_map(|token| {
@@ -21,6 +27,9 @@ pub(crate) fn bytes_match(bytes: &[u8], metadata: &str) -> bool {
         })
         .collect();
     let Some(strongest) = entries.iter().map(|&(s, _)| s).max() else { return true };
+    if !eligible {
+        return false;
+    }
     let actual = normalized(&crate::data_url::base64_encode(&ALGORITHMS[strongest].1.digest(bytes)));
     entries.iter().any(|&(s, digest)| s == strongest && normalized(digest) == actual)
 }

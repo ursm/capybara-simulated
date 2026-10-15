@@ -112,6 +112,7 @@ impl RealmArena {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "scriptType", script_type_op, context_id);
     crate::dom::register(scope, ns, "javaScriptContent", javascript_content_op, context_id);
+    crate::dom::register(scope, ns, "scriptResponseRefused", script_response_refused_op, context_id);
     crate::dom::register(scope, ns, "scriptFlags", script_flags_op, context_id);
     crate::dom::register(scope, ns, "setScriptFlags", set_script_flags_op, context_id);
     crate::dom::register(scope, ns, "prepareScript", prepare_script_op, context_id);
@@ -126,6 +127,30 @@ pub(crate) fn javascript_content_for_ruby(content_type: String) -> bool {
 fn javascript_content_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let header = args.get(0).to_rust_string_lossy(scope);
     rv.set_bool(crate::mime::extract(&header).is_some_and(|m| is_javascript_mime(&m.essence)));
+}
+
+// Whether a script's response is refused before it runs, its fetch a network error (Fetch "main fetch"): its MIME type
+// one a script never is — "should response to request be blocked due to its MIME type?": `audio/*`, `image/*`,
+// `video/*`, `text/csv` — or, with `X-Content-Type-Options: nosniff` (`nosniff`, the header's value), one that is no
+// JavaScript MIME type; or it failing the request's `integrity` metadata (SRI), as an opaque response — a cross-origin
+// no-cors one — fails any it knows an algorithm of.
+pub(crate) fn script_response_refused(content_type: &str, nosniff: &str, integrity: &str, body: &[u8], opaque: bool) -> bool {
+    let essence = crate::mime::extract(content_type).map(|m| m.essence);
+    let never = essence.as_deref().is_some_and(|e| {
+        ["audio/", "image/", "video/"].iter().any(|p| e.starts_with(p)) || e == "text/csv"
+    });
+    // (…the header's first value, as Fetch "determine nosniff" takes it)
+    let nosniff = nosniff.split(',').next().is_some_and(|v| v.trim_matches([' ', '\t']).eq_ignore_ascii_case("nosniff"));
+    let sniffed = nosniff && !essence.as_deref().is_some_and(is_javascript_mime);
+    let integrity_fails = !crate::integrity::response_matches(body, integrity, !opaque);
+    never || sniffed || integrity_fails
+}
+// __dom.scriptResponseRefused(contentType, nosniff, integrity, body, opaque) -> `script_response_refused`, the body a
+// string whose UTF-8 is its bytes.
+fn script_response_refused_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let [content_type, nosniff, integrity, body] = [0, 1, 2, 3].map(|i| args.get(i).to_rust_string_lossy(scope));
+    let opaque = args.get(4).is_true();
+    rv.set_bool(script_response_refused(&content_type, &nosniff, &integrity, body.as_bytes(), opaque));
 }
 
 // __dom.scriptType(nid) -> what the script element's type is (`script_type`: `DATA_BLOCK`, `CLASSIC`, …).
@@ -186,5 +211,19 @@ mod tests {
         assert_eq!(script_type(&script(&[("type", "importmap")])), IMPORT_MAP);
         assert_eq!(script_type(&script(&[("type", "speculationrules")])), SPECULATION_RULES);
         assert_eq!(script_type(&script(&[("type", "text/template")])), DATA_BLOCK);
+    }
+
+    #[test]
+    fn a_script_response_is_refused_as_fetch_says() {
+        let ok = |ct: &str, nosniff: &str| !script_response_refused(ct, nosniff, "", b"", false);
+        assert!(ok("text/javascript", "") && ok("text/plain", "") && ok("", ""));
+        assert!(!ok("image/png", "") && !ok("text/csv", "") && !ok("video/mp4; codecs=x", ""));
+        assert!(!ok("text/plain", "nosniff") && !ok("", "NoSniff, x") && ok("application/javascript", "nosniff"));
+        let body = b"alert(1)";
+        let sha = "sha256-bhHHL3z2vDgxUt0W3dWQOrprscmda2Y5pLsLg4GF+pI=";
+        assert!(!script_response_refused("text/javascript", "", sha, body, false));
+        assert!(script_response_refused("text/javascript", "", "sha256-AAAA", body, false));
+        assert!(script_response_refused("text/javascript", "", sha, body, true));
+        assert!(!script_response_refused("text/javascript", "", "md5-xx", body, true));
     }
 }

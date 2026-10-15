@@ -3628,12 +3628,15 @@ module Capybara
         result && resource_timing_meta(result)
       end
 
-      # The response facts a `PerformanceResourceTiming` entry is built from, without the body.
+      # The response facts a `PerformanceResourceTiming` entry is built from, without the body — and the headers a
+      # script's response is refused by (its MIME type, `X-Content-Type-Options`).
       def resource_timing_meta(result)
         {
           'url'             => result['url'],
           'status'          => result['status'].to_i,
-          'headers'         => {'content-type' => result['headers']&.find {|k, _| k.to_s.casecmp?('content-type') }&.last},
+          'headers'         => %w[content-type x-content-type-options].to_h {|name|
+            [name, result['headers']&.find {|k, _| k.to_s.casecmp?(name) }&.last]
+          },
           'bytes'           => result['bytes'].to_i,
           'encoded'         => result['encoded'].to_i,
           'cached'          => result['cached'],
