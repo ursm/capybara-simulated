@@ -3653,9 +3653,7 @@ html/dom/idlharness.https.html:
   - setting to a new value via Reflect.setPrototypeOf should return false'
 - 'Window interface: internal [[SetPrototypeOf]] method of interface prototype object
   - setting to a new value via __proto__ should throw a TypeError'
-- 'Window interface: window must inherit property "frames" with the proper type'
 - 'Window interface: window must inherit property "navigation" with the proper type'
-- Window must be primary interface of window
 - Worklet interface object length
 - Worklet interface object name
 - 'Worklet interface: existence and properties of interface object'
