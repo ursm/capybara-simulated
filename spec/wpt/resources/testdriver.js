@@ -50,11 +50,11 @@
   // the U+E000.. PUA block; real input surfaces the named `key`. Map at least the
   // keys whose default action this driver models (Tab → focus navigation).
   var WD_KEYS = {
-    '': 'Backspace', '': 'Tab', '': 'Enter', '': 'Enter',
-    '': 'Shift', '': 'Shift', '': 'Control', '': 'Control',
-    '': 'Alt', '': 'Alt', '': 'Escape', '': ' ', '': 'Delete',
-    '': 'PageUp', '': 'PageDown', '': 'End', '': 'Home',
-    '': 'ArrowLeft', '': 'ArrowUp', '': 'ArrowRight', '': 'ArrowDown'
+    '\uE003': 'Backspace', '\uE004': 'Tab', '\uE006': 'Enter', '\uE007': 'Enter',
+    '\uE008': 'Shift', '\uE050': 'Shift', '\uE009': 'Control', '\uE051': 'Control',
+    '\uE00A': 'Alt', '\uE052': 'Alt', '\uE00C': 'Escape', '\uE00D': ' ', '\uE017': 'Delete',
+    '\uE00E': 'PageUp', '\uE00F': 'PageDown', '\uE010': 'End', '\uE011': 'Home',
+    '\uE012': 'ArrowLeft', '\uE013': 'ArrowUp', '\uE014': 'ArrowRight', '\uE015': 'ArrowDown'
   };
   function keyName(ch) { return WD_KEYS[ch] || ch; }
   var __shiftHeld = false, __ctrlHeld = false, __metaHeld = false, __altHeld = false;
