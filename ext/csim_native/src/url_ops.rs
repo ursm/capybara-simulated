@@ -20,6 +20,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "urlencodedParse", urlencoded_parse, context_id);
     register(scope, ns, "urlencodedSerialize", urlencoded_serialize, context_id);
     register(scope, ns, "javascriptUrlSource", javascript_url_source_op, context_id);
+    register(scope, ns, "documentBaseUrl", document_base_url_op, context_id);
 }
 
 // A URL's parts, in `parts`' order.
@@ -65,17 +66,44 @@ fn usv(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Str
 fn url_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let input = usv(scope, args.get(0));
     let base = (!args.get(1).is_null_or_undefined()).then(|| usv(scope, args.get(1)));
-    let Ok(mut url) = Url::parse(input.as_str(), base.as_deref()) else { return rv.set_null() };
-    if !args.get(2).is_null_or_undefined() {
-        let label = usv(scope, args.get(2));
-        if let Some(encoding) = encoding_rs::Encoding::for_label(label.as_bytes()).map(|e| e.output_encoding()) {
-            if encoding != encoding_rs::UTF_8 {
-                encode_query_in(&mut url, &input, encoding);
-            }
-        }
-    }
+    let label = (!args.get(2).is_null_or_undefined()).then(|| usv(scope, args.get(2)));
+    let Some(url) = encoding_parse(&input, base.as_deref(), label.as_deref()) else { return rv.set_null() };
     let parts = parts(scope, &url);
     rv.set(parts.into());
+}
+// HTML's "encoding-parse a URL": `input` parsed against `base`, its query percent-encoded in the encoding `label` names
+// (none, or UTF-8, as the parser does it).
+fn encoding_parse(input: &str, base: Option<&str>, label: Option<&str>) -> Option<Url> {
+    let mut url = Url::parse(input, base).ok()?;
+    if let Some(encoding) = label.and_then(|l| encoding_rs::Encoding::for_label(l.as_bytes())).map(|e| e.output_encoding()) {
+        if encoding != encoding_rs::UTF_8 {
+            encode_query_in(&mut url, input, encoding);
+        }
+    }
+    Some(url)
+}
+
+// HTML "document base URL": the frozen base URL of the document's first `<base>` with an `href` (element_state.rs
+// `base_element`) — its `href` encoding-parsed against the `fallback` base URL in the document's `encoding`, the fallback
+// itself where it parses to no URL or to a `data:` or `javascript:` one — else the fallback.
+pub(crate) fn document_base_url(arena: &crate::dom::RealmArena, doc: crate::dom::NodeId, fallback: &str, encoding: Option<&str>) -> String {
+    let href = arena.base_element(doc).and_then(|b| arena.get(b)).and_then(|b| b.plain_attr("href").map(str::to_owned));
+    href.and_then(|href| encoding_parse(&href, Some(fallback), encoding))
+        .filter(|url| !matches!(url.protocol(), "data:" | "javascript:"))
+        .map_or_else(|| fallback.to_owned(), |url| url.href().to_owned())
+}
+// __dom.documentBaseUrl(docNid, fallback, encoding) -> the document's base URL (`document_base_url`).
+fn document_base_url_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let fallback = usv(scope, args.get(1));
+    let encoding = (!args.get(2).is_null_or_undefined()).then(|| usv(scope, args.get(2)));
+    let cid = crate::dom::realm_id(scope, &args);
+    let href = match crate::dom::nid_arg(scope, &args, 0) {
+        Some(doc) => document_base_url(crate::dom::realm(scope, cid), doc, &fallback, encoding.as_deref()),
+        None => fallback,
+    };
+    if let Some(s) = v8::String::new(scope, &href) {
+        rv.set(s.into());
+    }
 }
 
 // The URL's query as the input wrote it, percent-encoded in `encoding` (the parser did it in UTF-8). A query is what
