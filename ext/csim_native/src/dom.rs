@@ -2675,6 +2675,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::text::install(scope, ns, context_id);
     crate::dom_matrix::install(scope, ns, context_id);
     crate::validity::install(scope, ns, context_id);
+    crate::form_state::install(scope, ns, context_id);
     crate::input_types::install(scope, ns, context_id);
     crate::data_url::install(scope, ns, context_id);
     crate::event_stream::install(scope, ns, context_id);
