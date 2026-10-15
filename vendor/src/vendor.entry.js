@@ -1,7 +1,8 @@
 // Entry point for the combined vendor bundle.
 //
 // esbuild wraps the exports under `globalThis.__csimVendor` via
-// `--global-name=__csimVendor` so bridge.js consumes e.g.
+// `--global-name=__csimVendor` inside a function its banner and footer make (an assignment, not a top-level `var`: a
+// property the bridge can keep out of a page's enumeration of the window) so bridge.js consumes e.g.
 //   const V = globalThis.__csimVendor.streams;
 //
 // To rebuild after a `pnpm install` / dep bump:
