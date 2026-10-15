@@ -930,6 +930,9 @@ pub(crate) struct RealmArena {
     pub(crate) base_epoch: u64,
     // Per tree root, the facts element_state.rs asks of every control in turn, as of `mutations` (`form_facts`).
     pub(crate) form_facts: std::cell::RefCell<crate::element_state::FormFactsMemo>,
+    // Each form's past names map (HTML §4.10.3): the names its named getter has answered with one element, each with that
+    // element, in the order they were first added (`form_named_item`).
+    pub(crate) form_past_names: std::collections::HashMap<NodeId, Vec<(Vec<u16>, NodeId)>>,
     // Each element's resolved directionality asked so far, true for rtl, as of `mutations` (`is_rtl`)…
     pub(crate) directionality: std::cell::RefCell<(u64, std::collections::HashMap<NodeId, bool>)>,
     // …which nothing need be asked about until an element has ever been able to decide one of its own — a `dir`
@@ -1387,6 +1390,12 @@ impl RealmArena {
         }
         if !self.media.is_empty() {
             self.media.remove(&id);
+        }
+        if !self.form_past_names.is_empty() {
+            self.form_past_names.remove(&id);
+            for past in self.form_past_names.values_mut() {
+                past.retain(|&(_, el)| el != id);
+            }
         }
         if !self.images.is_empty() {
             self.images.remove(&id);

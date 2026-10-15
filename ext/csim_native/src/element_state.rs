@@ -63,6 +63,13 @@ pub(crate) fn is_valid_custom_element_name(name: &str) -> bool {
         && !RESERVED_CUSTOM_ELEMENT_NAMES.contains(&name)
 }
 
+// What a form's named getter answers (`form_named_item`): one element, several (a RadioNodeList), or none.
+pub(crate) enum FormNamedItem {
+    One(NodeId),
+    Several,
+    None,
+}
+
 // The radio groups holding a checked radio (name, form owner) and each form's default button, of one tree.
 #[derive(Default)]
 pub(crate) struct FormFacts {
@@ -76,11 +83,15 @@ pub(crate) struct FormFacts {
 pub(crate) struct FormFactsMemo {
     mutations: u64,
     per_root: std::collections::HashMap<NodeId, FormFacts>,
+    // …and each form's named elements of a name asked (`form_named`): a form's every property read asks its named
+    // getter, a builtin's name too once some control is named so.
+    named: std::collections::HashMap<(NodeId, Vec<u16>), Vec<NodeId>>,
     invalid_containers: std::collections::HashMap<NodeId, std::rc::Rc<std::collections::HashSet<NodeId>>>,
 }
 impl FormFactsMemo {
     pub(crate) fn clear(&mut self) {
         self.per_root.clear();
+        self.named.clear();
         self.invalid_containers.clear();
     }
 }
@@ -495,8 +506,28 @@ impl RealmArena {
         let image = n.is_html_named("input") && n.input_type() == "image";
         is_listed(n) && !image && self.form_owner(el) == Some(form)
     }
-    // …and those of them whose id or name is `name` (exactly, as UTF-16), in tree order.
+    // …and those of them whose id or name is `name` (exactly, as UTF-16), in tree order — kept until the arena next
+    // changes.
     pub(crate) fn form_named(&self, form: NodeId, name: &[u16]) -> Vec<NodeId> {
+        let key = (form, name.to_vec());
+        {
+            let memo = self.form_facts.borrow();
+            if memo.mutations == self.mutations {
+                if let Some(named) = memo.named.get(&key) {
+                    return named.clone();
+                }
+            }
+        }
+        let named = self.find_form_named(form, name);
+        let mut memo = self.form_facts.borrow_mut();
+        if memo.mutations != self.mutations {
+            memo.clear();
+            memo.mutations = self.mutations;
+        }
+        memo.named.insert(key, named.clone());
+        named
+    }
+    fn find_form_named(&self, form: NodeId, name: &[u16]) -> Vec<NodeId> {
         let root = self.form_tree(form);
         let is = |n: &NodeData, attr: &str| match n.get_attr_u16(attr) {
             Some(units) => units == name,
@@ -511,9 +542,38 @@ impl RealmArena {
         });
         named
     }
-    // …and the names they are reachable by (HTML §4.10.3 "supported property names", but the past names map's, which
-    // the bindings keep): each named element's id and then its name, in tree order, an empty one or one already given
-    // left out.
+    // HTML §4.10.3 a form's named getter for `name`: its named elements of the name — one, which its past names map
+    // keeps under the name from then on; several, a RadioNodeList the bindings make — or, with none, the element its past
+    // names map has under the name: while it is a named element of the form yet, as one that changed form owner is
+    // not, whose entry goes.
+    pub(crate) fn form_named_item(&mut self, form: NodeId, name: &[u16]) -> FormNamedItem {
+        let named = self.form_named(form, name);
+        match named[..] {
+            [one] => {
+                let past = self.form_past_names.entry(form).or_default();
+                match past.iter_mut().find(|(n, _)| n == name) {
+                    Some(entry) => entry.1 = one,
+                    None => past.push((name.to_vec(), one)),
+                }
+                FormNamedItem::One(one)
+            }
+            [] => {
+                let Some(past) = self.form_past_names.get(&form) else { return FormNamedItem::None };
+                let Some(&(_, el)) = past.iter().find(|(n, _)| n == name) else { return FormNamedItem::None };
+                if self.is_form_named_candidate(form, el) {
+                    return FormNamedItem::One(el);
+                }
+                if let Some(past) = self.form_past_names.get_mut(&form) {
+                    past.retain(|(n, _)| n != name);
+                }
+                FormNamedItem::None
+            }
+            _ => FormNamedItem::Several,
+        }
+    }
+    // …and the names they are reachable by (HTML §4.10.3 "supported property names"): each named element's id and then
+    // its name, in tree order, an empty one or one already given left out; then the past names map's whose element is
+    // a named element of the form yet.
     pub(crate) fn form_supported_names(&self, form: NodeId) -> Vec<Vec<u16>> {
         let root = self.form_tree(form);
         let mut names: Vec<Vec<u16>> = Vec::new();
@@ -529,6 +589,11 @@ impl RealmArena {
             }
             false
         });
+        for (name, el) in self.form_past_names.get(&form).into_iter().flatten() {
+            if self.is_form_named_candidate(form, *el) && given.insert(name.clone()) {
+                names.push(name.clone());
+            }
+        }
         names
     }
     // …and a fieldset's (its `elements`): its listed descendants in tree order, image buttons and nested fieldsets

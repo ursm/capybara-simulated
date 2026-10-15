@@ -729,8 +729,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "arrowDefault", arrow_default, context_id);
     crate::dom::register(scope, ns, "fieldsetListed", fieldset_listed, context_id);
     crate::dom::register(scope, ns, "formNamed", form_named, context_id);
+    crate::dom::register(scope, ns, "formNamedItem", form_named_item, context_id);
     crate::dom::register(scope, ns, "formSupportedNames", form_supported_names, context_id);
-    crate::dom::register(scope, ns, "isFormNamedCandidate", is_form_named_candidate, context_id);
     crate::dom::register(scope, ns, "formSubmittables", form_submittables, context_id);
     crate::dom::register(scope, ns, "implicitSubmissionForm", implicit_submission_form, context_id);
     crate::dom::register(scope, ns, "editingHost", editing_host, context_id);
@@ -863,13 +863,23 @@ fn form_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let named = arena.form_named(form, &name);
     rv.set(crate::dom::nodes_value(scope, cid, &named));
 }
-// __dom.isFormNamedCandidate(formNid, nid) -> whether the element is one of the form's named elements.
-fn is_form_named_candidate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.formNamedItem(formNid, name) -> what the form's named getter answers for `name` (`form_named_item`): the element,
+// true for several (the bindings' RadioNodeList), or undefined.
+fn form_named_item(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
-    let (Some(form), Some(el)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else {
-        return rv.set_bool(false);
-    };
-    rv.set_bool(crate::dom::realm(scope, cid).is_form_named_candidate(form, el));
+    let Some(form) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let name = crate::dom::utf16_arg(scope, args.get(1));
+    match crate::dom::realm(scope, cid).form_named_item(form, &name) {
+        crate::element_state::FormNamedItem::One(el) => {
+            let value = crate::dom::nodes_value(scope, cid, &[el]);
+            let one = v8::Local::<v8::Array>::try_from(value).ok().and_then(|a| a.get_index(scope, 0));
+            if let Some(one) = one {
+                rv.set(one);
+            }
+        }
+        crate::element_state::FormNamedItem::Several => rv.set_bool(true),
+        crate::element_state::FormNamedItem::None => {}
+    }
 }
 
 // __dom.fieldsetListed(nid) -> a fieldset's listed descendants (`element_state::fieldset_listed`), from the fieldset.
