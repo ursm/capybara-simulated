@@ -25,6 +25,7 @@ const ACCESS_KEY_LABEL: u32 = 4;
 const AUTOCAPITALIZE: u32 = 5;
 const AUTOCORRECT: u32 = 6;
 const SPELLCHECK: u32 = 7;
+const DRAGGABLE: u32 = 8;
 // The elements `tabIndex` defaults to 0 on (else -1): these HTML ones, an SVG `<a>`, and a summary that is its details'.
 // (…its local name as written: `createElementNS(HTML, "BUTTON")` is no button)
 const TABBABLE_BY_DEFAULT: [&str; 9] = ["a", "area", "button", "frame", "iframe", "input", "object", "select", "textarea"];
@@ -92,10 +93,21 @@ fn autocorrection(arena: &crate::dom::RealmArena, id: crate::dom::NodeId) -> boo
     }
     inheriting_form_owner(arena, id).is_none_or(|form| autocorrection(arena, form))
 }
+// HTML §6.11.7 an HTML element's `draggable` state: true or false, ASCII case-insensitive — any other value, or none,
+// auto: true for an img and an `a` with an `href`, as the spec and Firefox have it (Chrome 155 adds an `area`).
+fn draggable(arena: &crate::dom::RealmArena, id: crate::dom::NodeId) -> bool {
+    let Some(n) = arena.get(id).filter(|n| n.is_html()) else { return false };
+    match n.plain_attr("draggable").map(str::to_ascii_lowercase).as_deref() {
+        Some("true") => true,
+        Some("false") => false,
+        _ => &*n.local_name == "img" || (&*n.local_name == "a" && n.plain_attr("href").is_some()),
+    }
+}
 // __dom.elementReflection(el, which) -> `tabIndex` (its attribute's long, else its default), `translate` (inherited:
 // yes or ''; no), `writingSuggestions` ('true' / 'false', inherited), `hidden` (0 none, 1 hidden, 2 until-found),
 // `accessKeyLabel` (`Alt+` and the key where `accesskey` is one code point, else ''), `autocapitalize` (the hint's
-// keyword), `autocorrect` and `spellcheck` (inherited: true or ''; false — an element that states neither its parent
+// keyword), `autocorrect`, `draggable` (`draggable`'s state) and `spellcheck` (inherited: true or ''; false — an element
+// that states neither its parent
 // element's, as Chrome 155 and Firefox both inherit it; on by default, as Chrome has it).
 fn element_reflection_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
@@ -119,6 +131,7 @@ fn element_reflection_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
             rv.set(keyword.into());
         }
         AUTOCORRECT => rv.set_bool(autocorrection(arena, id)),
+        DRAGGABLE => rv.set_bool(draggable(arena, id)),
         SPELLCHECK => rv.set_bool(inherited_state(arena, id, "spellcheck", &["true", ""], "false", true)),
         ACCESS_KEY_LABEL => {
             // (…one code point of the value's UTF-16, a lone surrogate one too)
