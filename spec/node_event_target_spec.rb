@@ -98,6 +98,29 @@ RSpec.describe 'Node as an EventTarget' do
     expect(got).to eq('adopted,frame-body')
   end
 
+  # DOM "dispatch" invokes a target's event listeners, and an event handler is one only where an IDL attribute made it
+  # (HTML §8.1.8): an `on<type>` method of an EventTarget subclass is no handler, and a dispatched `<type>` does not call
+  # it; an interface's handler attribute (an AbortSignal's `onabort`) still is one.
+  it "calls no method an EventTarget subclass names on<type>" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const log = [];
+        class Pinger extends EventTarget { onping() { log.push('method'); } }
+        const t = new Pinger();
+        t.addEventListener('ping', () => log.push('listener'));
+        t.dispatchEvent(new Event('ping'));
+        const plain = new EventTarget();
+        plain.onping = () => log.push('field');
+        plain.dispatchEvent(new Event('ping'));
+        const c = new AbortController();
+        c.signal.onabort = () => log.push('onabort');
+        c.abort();
+        return log;
+      })()
+    JS
+    expect(got).to eq(%w[listener onabort])
+  end
+
   it 'constructs no Node of its own' do
     expect(session.evaluate_script('(() => { try { new Node(); } catch (e) { return e.message; } })()')).to eq("Failed to construct 'Node': Illegal constructor")
   end
