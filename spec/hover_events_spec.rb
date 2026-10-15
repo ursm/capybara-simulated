@@ -65,4 +65,33 @@ RSpec.describe 'hover events' do
       ai:mouseout ai:mouseleave a:mouseleave b:mouseover b:mouseenter
     ])
   end
+
+  # …and a node a listener took out of the document gets none of the boundary events after: a pointerleave handler
+  # removing the element it leaves leaves its mouseout and mouseleaves to nothing (Chrome 155: no `mouseout`, no
+  # `mouseleave` at the removed #ai or #a, `w:mouseleave` still).
+  it 'fires no boundary event at a node removed during them' do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8"><body style="margin:0"><div id="w"><div id="a" style="width:100px;height:100px">
+        <span id="ai" style="display:block;width:50px;height:50px"></span></div></div><div id="b" style="width:100px;height:100px"></div>
+        <script>
+          window.L = [];
+          for (const id of ['w', 'a', 'ai', 'b']) {
+            for (const t of ['pointerover', 'pointerenter', 'pointerout', 'pointerleave', 'mouseover', 'mouseenter', 'mouseout', 'mouseleave']) {
+              document.getElementById(id).addEventListener(t, (e) => { if (e.target.id === id) L.push(`${id}:${t}`); });
+            }
+          }
+          document.getElementById('a').addEventListener('pointerleave', (e) => e.target.remove());
+        </script>
+      HTML
+    })
+    s.visit '/'
+    s.find('#ai').hover
+    s.execute_script('L.length = 0')
+    s.find('#b').hover
+    expect(s.evaluate_script('L')).to eq(%w[
+      ai:pointerout ai:pointerleave a:pointerleave w:pointerleave b:pointerover b:pointerenter
+      w:mouseleave b:mouseover b:mouseenter
+    ])
+  end
 end

@@ -141,4 +141,28 @@ RSpec.describe 'click activation' do
     s.find('#i').click
     expect(s.evaluate_script('[L, document.activeElement.tagName]')).to eq([%w[pointerdown pointerup click], 'BODY'])
   end
+
+  # …a right click's press and release too (Chrome 155: `pointerdown, contextmenu, pointerup, auxclick`, nothing
+  # focused), and a drag's: no `mousedown`, no `dragstart`, no `mouseup` — no HTML5 drag without its `mousedown` (Chrome).
+  it 'fires no compatibility mouse events for a canceled pointerdown of a right click or a drag' do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8"><body><input id="i"><div id="d" draggable="true" style="width:50px;height:50px">d</div>
+        <div id="t" style="width:50px;height:50px">t</div>
+        <script>
+          window.L = [];
+          for (const id of ['i', 'd']) {
+            const el = document.getElementById(id);
+            for (const t of ['mousedown', 'mouseup', 'contextmenu', 'auxclick', 'dragstart']) el.addEventListener(t, () => L.push(`${id}:${t}`));
+            el.addEventListener('pointerdown', (e) => e.preventDefault());
+          }
+          document.getElementById('t').addEventListener('mouseup', () => L.push('t:mouseup'));
+        </script>
+      HTML
+    })
+    s.visit '/'
+    s.find('#i').right_click
+    s.find('#d').drag_to(s.find('#t'))
+    expect(s.evaluate_script('[L, document.activeElement.tagName]')).to eq([%w[i:contextmenu i:auxclick], 'BODY'])
+  end
 end

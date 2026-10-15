@@ -352,13 +352,20 @@
     dispatch(t, new W.WheelEvent('mousewheel', Object.assign({ cancelable: chainHasNonPassive(t, 'mousewheel') }, init)));
   }
 
+  // A `pointerdown` canceled keeps its compatibility mouse events from firing until the pointer is released — the
+  // `mousedown` (and its focus), the moves, the `mouseup` (Pointer Events; the driver's click and drag do the same).
+  var mouseSuppressed = false;
   function firePointer(target, pType, mType, x, y) {
     if (!target) return;
     var at = { clientX: x || 0, clientY: y || 0 };
     if (pType && W.PointerEvent) {
-      dispatch(target, new W.PointerEvent(pType, Object.assign({ bubbles: true, cancelable: true, composed: true, pointerType: 'mouse', isPrimary: true }, at)));
+      var pointer = new W.PointerEvent(pType, Object.assign({ bubbles: true, cancelable: true, composed: true, pointerType: 'mouse', isPrimary: true }, at));
+      dispatch(target, pointer);
+      if (pType === 'pointerdown') mouseSuppressed = pointer.defaultPrevented;
     }
-    if (mType) {
+    var suppressed = mouseSuppressed && (mType === 'mousedown' || mType === 'mousemove' || mType === 'mouseup');
+    if (pType === 'pointerup') mouseSuppressed = false;
+    if (mType && !suppressed) {
       var ev = new W.MouseEvent(mType, Object.assign({ bubbles: true, cancelable: true, composed: true }, at));
       dispatch(target, ev);
       // HTML mousedown default action: move focus to the clicked element, or — if
