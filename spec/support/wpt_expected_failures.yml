@@ -5145,7 +5145,6 @@ resource-timing/same-origin-from-cross-origin-redirect.html:
 - Verify that cross origin resources' timings are exposed when the final resource
   at the end of an HTTP redirect chain is same-origin.
 resource-timing/secure-iframe-in-insecure-context.html:
-- secureConnectionStart is reported for iframes loaded over https in http context
 - secureConnectionStart is reported for object documents loaded over https in http
   context
 resource-timing/sizes-cache.any.js:

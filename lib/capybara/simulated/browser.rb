@@ -699,8 +699,20 @@ module Capybara
       URL_PARTS = %i[href protocol username password host hostname port pathname search hash origin].freeze
       # The parts of the URL `input` parses to, by the page's parser (url_ops.rs) — or nil where it does not parse.
       def parse_url(input, base = nil)
-        parts = Native.url_parts(input, base)
+        parts = Native.url_parts(url_text(input), base && url_text(base))
         parts && URL_PARTS.zip(parts).to_h
+      end
+
+      # A URL string as the parser takes it, text: one handed over as bytes (a Location header's, binary-tagged or no
+      # UTF-8) its UTF-8 where it is that, else each byte past ASCII percent-encoded as itself — what Chrome makes of a
+      # Location that is no UTF-8 (`\xFF` → `%FF`: fetch/api/redirect/redirect-location-escape).
+      def url_text(s)
+        return s unless s.is_a?(String) && !(s.encoding == Encoding::UTF_8 && s.valid_encoding?)
+
+        utf8 = s.b.force_encoding(Encoding::UTF_8)
+        return utf8 if utf8.valid_encoding?
+
+        s.b.gsub(/[\x80-\xFF]/n) {|byte| format('%%%02X', byte.ord) }.force_encoding(Encoding::UTF_8)
       end
 
       # A URL's scheme, credentials and host — what a path is resolved under.
@@ -11700,16 +11712,22 @@ module Capybara
         [status, utf8_tagged_headers(headers), body]
       end
 
-      # A response's header values as UTF-8-tagged strings of the same bytes: a binary-tagged one (a Net::HTTP-backed
-      # proxy's — rack-proxy's) is the wire's bytes all the same, and every reader takes a header as text — a Location
-      # parsed, a Last-Modified, a Timing-Allow-Origin handed to the page.
+      # A response's header values tagged by what their bytes are — UTF-8 where they are that, binary where not: a
+      # binary-tagged one (a Net::HTTP-backed proxy's — rack-proxy's) is the wire's bytes all the same, and a reader takes
+      # a header as text — a Timing-Allow-Origin handed to the page, a Last-Modified; one that is no UTF-8 (a Latin-1
+      # filename or cookie byte), tagged UTF-8 or not, every reader takes as bytes. The app's own hash is left as it gave
+      # it.
       def utf8_tagged_headers(headers)
-        binary = ->(v) { v.is_a?(String) && v.encoding == Encoding::BINARY }
-        return headers unless headers.respond_to?(:each_pair) && headers.any? {|_, v| Array(v).any?(&binary) }
+        retag = ->(v) {
+          next v unless v.is_a?(String) && (v.encoding == Encoding::BINARY || (v.encoding == Encoding::UTF_8 && !v.valid_encoding?))
 
-        tagged = ->(v) { binary.(v) ? v.dup.force_encoding(Encoding::UTF_8) : v }
-        out = headers.frozen? ? headers.dup : headers
-        headers.each_pair.to_a.each {|k, v| out[k] = v.is_a?(Array) ? v.map(&tagged) : tagged.(v) }
+          utf8 = v.dup.force_encoding(Encoding::UTF_8)
+          utf8.valid_encoding? ? utf8 : (v.encoding == Encoding::BINARY ? v : v.b)
+        }
+        return headers unless headers.respond_to?(:each_pair) && headers.any? {|_, v| Array(v).any? {|e| !retag.(e).equal?(e) } }
+
+        out = headers.dup
+        headers.each_pair {|k, v| out[k] = v.is_a?(Array) ? v.map(&retag) : retag.(v) }
         out
       end
 
