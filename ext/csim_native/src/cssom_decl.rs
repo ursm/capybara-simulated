@@ -640,9 +640,9 @@ pub(crate) fn canvas_spacing(text: &str, em: f64, rem: f64) -> Option<(String, f
 }
 
 // …and what CSS Font Loading's "find the matching font faces" (§2.4, `document.fonts.check()` / `load()`) reads of it:
-// the families it names, as names, its weight — a relative one against the initial `normal` — and whether its style is
-// slanted. None where it is no `font` value.
-pub(crate) fn font_shorthand_match(text: &str) -> Option<(Vec<String>, f64, bool)> {
+// the families it names, as names, its stretch as a percentage, its weight — a relative one against the initial
+// `normal` — and whether its style is slanted. None where it is no `font` value.
+pub(crate) fn font_shorthand_match(text: &str) -> Option<(Vec<String>, f64, f64, bool)> {
     use style::values::specified::FontWeight;
     let font = font_shorthand(text)?;
     let weight = match &font.weight {
@@ -652,7 +652,19 @@ pub(crate) fn font_shorthand_match(text: &str) -> Option<(Vec<String>, f64, bool
         _ => 400.0,
     };
     let slanted = font.style != "normal" && font.style != "oblique 0deg";
-    Some((font.family.iter().map(family_name).collect(), weight, slanted))
+    // (…a `font` shorthand's stretch is one of the CSS3 keywords, CSS Fonts 4 §2.2's percentages)
+    let stretch = match font.stretch.as_str() {
+        "ultra-condensed" => 50.0,
+        "extra-condensed" => 62.5,
+        "condensed" => 75.0,
+        "semi-condensed" => 87.5,
+        "semi-expanded" => 112.5,
+        "expanded" => 125.0,
+        "extra-expanded" => 150.0,
+        "ultra-expanded" => 200.0,
+        other => other.strip_suffix('%').and_then(|p| p.parse().ok()).unwrap_or(100.0),
+    };
+    Some((font.family.iter().map(family_name).collect(), stretch, weight, slanted))
 }
 
 // `CSS.supports(conditionText)`: a `<supports-condition>`, or a bare declaration (`display: grid`), as the engine

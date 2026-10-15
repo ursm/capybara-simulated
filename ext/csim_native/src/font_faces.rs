@@ -19,6 +19,8 @@ pub(crate) struct FaceRecord {
     family: String,
     pub(crate) sources: Vec<FaceSource>,
     weight: (f64, f64),
+    // Its `font-stretch` range, in percent.
+    stretch: (f64, f64),
     slanted: bool,
     // The code points it covers, None for every one.
     pub(crate) ranges: Option<Vec<(u32, u32)>>,
@@ -30,11 +32,12 @@ pub(crate) struct FaceRecord {
 impl FaceRecord {
     // A face of `family` with every descriptor at its initial value.
     fn of(family: String) -> FaceRecord {
-        FaceRecord { family, sources: Vec::new(), weight: (400.0, 400.0), slanted: false, ranges: None, size_adjust: 1.0, overrides: [None; 3] }
+        FaceRecord { family, sources: Vec::new(), weight: (400.0, 400.0), stretch: (100.0, 100.0), slanted: false, ranges: None, size_adjust: 1.0, overrides: [None; 3] }
     }
-    // How far it is from what a style asks for (CSS Fonts 4 §5.2): the same slant first, then the nearest weight.
-    fn distance(&self, weight: f64, slanted: bool) -> f64 {
-        (if self.slanted == slanted { 0.0 } else { 1e9 }) + weight_distance(weight, self.weight)
+    // How far it is from what a style asks for (CSS Fonts 4 §5.2): the nearest stretch first, then the same slant, then
+    // the nearest weight.
+    fn distance(&self, stretch: f64, weight: f64, slanted: bool) -> f64 {
+        stretch_distance(stretch, self.stretch) * 1e12 + (if self.slanted == slanted { 0.0 } else { 1e9 }) + weight_distance(weight, self.weight)
     }
     // Whether its `unicode-range` covers `c`.
     fn covers(&self, c: u32) -> bool {
@@ -70,6 +73,11 @@ pub(crate) fn parse(text: &str, base: &str) -> Option<FaceRecord> {
             Source::Local(name) => sources.push(FaceSource::Local(name.name.to_string())),
         }
     }
+    let stretch = d
+        .font_stretch
+        .as_ref()
+        .and_then(|s| s.compute())
+        .map_or((100.0, 100.0), |s| (f64::from(s.0.to_percentage().0) * 100.0, f64::from(s.1.to_percentage().0) * 100.0));
     let weight = d
         .font_weight
         .as_ref()
@@ -89,6 +97,7 @@ pub(crate) fn parse(text: &str, base: &str) -> Option<FaceRecord> {
     Some(FaceRecord {
         sources,
         weight,
+        stretch,
         slanted,
         ranges,
         size_adjust,
@@ -129,7 +138,7 @@ pub(crate) fn pick(faces: &[FaceRecord], stack: &str, bucket: &str, all: bool) -
             .iter()
             .enumerate()
             .filter(|(_, f)| f.family == family)
-            .map(|(i, f)| (f.distance(want, italic), i))
+            .map(|(i, f)| (f.distance(100.0, want, italic), i))
             .collect();
         if scored.is_empty() {
             continue;
@@ -143,21 +152,22 @@ pub(crate) fn pick(faces: &[FaceRecord], stack: &str, bucket: &str, all: bool) -
     }
     out
 }
-// CSS Font Loading's "find the matching font faces" (§2.4) among `faces`: for each family the `font` shorthand names, the
-// face font matching picks (`distance`, of equal ones the later) for each character of `text` among the family's faces
-// whose `unicode-range` covers it — each once, in the order picked. None where `font` is no `font` value.
+// CSS Font Loading's "find the matching font faces" (§2.4) among `faces`: for each family the `font` shorthand names,
+// the faces font matching picks (CSS Fonts 4 §5.2) — its style and weight decide among ALL the family's faces first
+// (`distance`), and only of the faces that match best, a `unicode-range` split, are the ones covering a character of
+// `text` taken (a character none of them covers is the next family's) — each once, in the order picked. None where
+// `font` is no `font` value.
 pub(crate) fn matching(faces: &[FaceRecord], font: &str, text: &str) -> Option<Vec<usize>> {
-    let (families, weight, slanted) = crate::cssom_decl::font_shorthand_match(font)?;
+    let (families, stretch, weight, slanted) = crate::cssom_decl::font_shorthand_match(font)?;
     let mut out = Vec::new();
     for family in families.iter().map(|f| f.to_ascii_lowercase()) {
+        let of_family: Vec<(f64, usize)> =
+            faces.iter().enumerate().filter(|(_, f)| f.family == family).map(|(i, f)| (f.distance(stretch, weight, slanted), i)).collect();
+        let Some(best) = of_family.iter().map(|&(d, _)| d).min_by(f64::total_cmp) else { continue };
         for c in text.chars().map(u32::from) {
-            let best = faces
-                .iter()
-                .enumerate()
-                .filter(|(_, f)| f.family == family && f.covers(c))
-                .map(|(i, f)| (f.distance(weight, slanted), i))
-                .min_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)));
-            if let Some((_, i)) = best.filter(|(_, i)| !out.contains(i)) {
+            // (…of the best ones covering it, the later rule)
+            let picked = of_family.iter().rev().find(|&&(d, i)| d == best && faces[i].covers(c));
+            if let Some(&(_, i)) = picked.filter(|(_, i)| !out.contains(i)) {
                 out.push(i);
             }
         }
@@ -224,6 +234,20 @@ pub(crate) fn family_list_for_ruby(stack: String) -> Vec<String> {
 // How far a face's weight range is from the weight wanted, in the order CSS Fonts 4 §5.2 prefers them: 0 inside it;
 // for a wanted 400 or 500, heavier faces up to 500 ascending, then lighter ones descending, then heavier past 500; for
 // less, lighter descending then heavier; for more, heavier ascending then lighter.
+// How far a stretch range is from the stretch asked for (CSS Fonts 4 §5.2 step 4a): at or below 100%, the narrower ones
+// first, nearest first, then the wider; above it, the wider first.
+fn stretch_distance(want: f64, (lo, hi): (f64, f64)) -> f64 {
+    if (lo..=hi).contains(&want) {
+        return 0.0;
+    }
+    let (narrower, wider) = (want - hi, lo - want);
+    match want <= 100.0 {
+        true if narrower > 0.0 => narrower,
+        true => 1000.0 + wider,
+        false if wider > 0.0 => wider,
+        false => 1000.0 + narrower,
+    }
+}
 fn weight_distance(want: f64, (lo, hi): (f64, f64)) -> f64 {
     if (lo..=hi).contains(&want) {
         return 0.0;
@@ -404,6 +428,23 @@ fn font_face_sources(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_font_face_set_matches_by_style_before_unicode_range() {
+        let face = |block: &str| parse(block, "about:blank").unwrap();
+        let faces = [
+            face("font-family: Fa; font-weight: 400; unicode-range: U+0400-04FF"),
+            face("font-family: Fa; font-weight: 700; unicode-range: U+0000-00FF"),
+            face("font-family: Cn; font-stretch: condensed"),
+            face("font-family: Cn"),
+        ];
+        assert_eq!(matching(&faces, "bold 16px Fa", "\u{416}"), Some(vec![]));
+        assert_eq!(matching(&faces, "16px Fa", "\u{416}a"), Some(vec![0]));
+        assert_eq!(matching(&faces, "bold 16px Fa", " "), Some(vec![1]));
+        assert_eq!(matching(&faces, "condensed 16px Cn", " "), Some(vec![2]));
+        assert_eq!(matching(&faces, "16px Cn", " "), Some(vec![3]));
+        assert_eq!(matching(&faces, "Cn", " "), None);
+    }
 
     #[test]
     fn a_family_list_parses_as_css_fonts_says() {
