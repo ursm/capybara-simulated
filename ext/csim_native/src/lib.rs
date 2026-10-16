@@ -76,6 +76,7 @@ mod image_encode;
 mod image_requests;
 mod drag_data_store;
 mod paint;
+mod perf_timeline;
 mod keys;
 mod cache_matching;
 mod sandbox;

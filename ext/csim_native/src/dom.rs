@@ -1045,6 +1045,8 @@ pub(crate) struct RealmState {
     pub(crate) scrolled_nodes: Vec<NodeId>,
     // The document's `@font-face`s, as the page side last listed them (font_faces.rs).
     pub(crate) font_faces: Vec<crate::font_faces::FaceRecord>,
+    // Its performance timeline's entry buffers and ids (perf_timeline.rs).
+    pub(crate) perf_timeline: crate::perf_timeline::PerfTimeline,
 }
 
 impl std::ops::Deref for RealmArena {
@@ -1164,6 +1166,7 @@ impl RealmArena {
         self.discard_timers(cid);
         self.discard_resize_observers(cid);
         self.discard_intersection_observers(cid);
+        self.discard_perf_timeline(cid);
         self.forget_foreign_observations(Some(cid));
         self.forget_reactions_of(cid);
     }
@@ -2560,6 +2563,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::document_state::install(scope, ns, context_id);
     crate::toggle_tasks::install(scope, ns, context_id);
     crate::resize_observers::install(scope, ns, context_id);
+    crate::perf_timeline::install(scope, ns, context_id);
     crate::element_flags::install(scope, ns, context_id);
     crate::foreign_observations::install(scope, ns, context_id);
     crate::intersection_observers::install(scope, ns, context_id);
