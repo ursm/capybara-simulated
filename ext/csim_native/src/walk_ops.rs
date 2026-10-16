@@ -1,7 +1,7 @@
 // The Rust walk's ops: `layoutBuild`, the layout pass the Rust walk builds from the style engine's values, and the faces
 // it asks the JS side for (`styleFaces`, `walkFace`), which only that side resolves today.
 
-use crate::dom::{dom, realm_id, register, NodeId};
+use crate::dom::{dom, realm, realm_id, register, NodeId, GEN_CASCADE, GEN_DIRTY, GEN_SCROLL, GEN_SETTLE};
 use crate::walk::{self, Basis, Face, Outcome};
 use crate::walk_reuse;
 
@@ -10,6 +10,42 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "walkFace", walk_face, context_id);
     register(scope, ns, "fontMeasures", font_measures, context_id);
     register(scope, ns, "styleFaces", style_faces, context_id);
+    register(scope, ns, "layoutDue", layout_due, context_id);
+    register(scope, ns, "forgetLayout", forget_layout, context_id);
+    register(scope, ns, "layoutGeneration", layout_generation, context_id);
+    register(scope, ns, "noteScrolled", note_scrolled, context_id);
+}
+
+// __dom.layoutDue() -> whether the realm's document is to be laid out again: what a pass reads moved since the last —
+// the settle generation (a mutation), the rule set's, and the layout dirty sequence (the marks a restyle made, which move
+// neither) — taken as laid out as of them now.
+fn layout_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let now = [GEN_SETTLE, GEN_CASCADE, GEN_DIRTY].map(|w| arena.generations.get(w));
+    let due = arena.laid_out_at != Some(now);
+    arena.laid_out_at = Some(now);
+    rv.set_bool(due);
+}
+// __dom.forgetLayout(): the next layout read lays the document out whatever the generations say — a viewport moved
+// (the window's, or the frame's container), which moves none of them, or a pass recording what it lays out.
+fn forget_layout(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).laid_out_at = None;
+}
+// __dom.layoutGeneration() -> the generation geometry is valid for: two reads of one value cannot see different boxes,
+// so a repeated observer pass over unchanged geometry returns at once — the settle, rule set, scroll and layout dirty
+// generations' sum, which moves whenever one does (each only counts up; four u32 words stay inside a double's exact
+// integers).
+fn layout_generation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let g = &realm(scope, cid).generations;
+    rv.set_double([GEN_SETTLE, GEN_CASCADE, GEN_SCROLL, GEN_DIRTY].iter().map(|&w| f64::from(g.get(w))).sum());
+}
+// __dom.noteScrolled(): a scroll offset moved, or a scroll into view was asked for — the scroll generation moved.
+fn note_scrolled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).generations.bump(GEN_SCROLL);
 }
 
 // __dom.layoutBuild(rootNid, fontGeneration, rootCbW, rootCbH, records, check): a whole layout pass the Rust walk builds
