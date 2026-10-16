@@ -47289,12 +47289,6 @@ html/semantics/forms/form-submission-0/form-double-submit-requestsubmit.html:
     produces. The test''s spec-ideal `expected` is null, so Chrome itself fails these
     4 combos (callSubmit + passSubmitter). Earned out per CLAUDE.md "spec-correct
     = what browsers actually do"; see memory form-submission-planned-nav.'
-html/semantics/forms/form-submission-0/jsurl-form-submit.tentative.html:
-- name: 'Verifies that form submissions scheduled inside javascript: urls take precedence
-    over the javascript: url''s return value.'
-  reason: 'Unratified WPT .tentative spec (javascript: URL form-submission precedence);
-    no shipped-browser/app dependency. Deferred until it ratifies — re-enters in-scope
-    automatically when the test loses its .tentative marker.'
 html/semantics/forms/the-input-element/input-type-checkbox-switch.tentative.window.js:
 - name: Cloning a switch control
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

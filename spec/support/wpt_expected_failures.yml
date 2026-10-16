@@ -1852,17 +1852,6 @@ custom-elements/perform-microtask-checkpoint-before-construction.html:
 - HTML parser must perform a microtask checkpoint before constructing a custom element
 - HTML parser must perform a microtask checkpoint before constructing a custom element
   during the adoption agency algorithm
-custom-elements/pseudo-class-defined-customized-builtins.html:
-- <abbr is="my-abbr"> should not be :defined
-- "[harness] ERROR"
-- createElement("abbr", is:"my-abbr") should not be :defined
-- createElementNS("http://www.w3.org/1999/xhtml", "abbr", is:"my-abbr") should not
-  be :defined
-custom-elements/pseudo-class-defined.html:
-- "<a-a> should not be :defined"
-- "[harness] ERROR"
-- createElement("a-a") should not be :defined
-- createElementNS("http://www.w3.org/1999/xhtml", "a-a") should not be :defined
 custom-elements/reactions/Animation.html:
 - Animation.animate must enqueue an attributeChanged reaction when it adds the observed
   style attribute
@@ -2162,16 +2151,6 @@ dom/processing-instruction-attributes.html:
 - 'check attribute value: "axx"" (source: "html-parser")'
 - 'check attribute value: "axx>" (source: "html-parser")'
 - 'check attribute value: "some<>" (source: "html-parser")'
-dom/ranges/Range-cloneContents.html:
-- "[harness] ERROR"
-dom/ranges/Range-deleteContents.html:
-- "[harness] ERROR"
-dom/ranges/Range-extractContents.html:
-- "[harness] ERROR"
-dom/ranges/Range-insertNode.html:
-- "[harness] ERROR"
-dom/ranges/Range-surroundContents.html:
-- "[harness] ERROR"
 encoding/streams/realms.window.js:
 - TypeError for chunk with the wrong type should come from constructor realm of TextDecoderStream
 - TypeError for incomplete input should come from constructor realm of TextDecoderStream
@@ -5848,7 +5827,7 @@ web-animations/responsive/fontSize.html:
 web-animations/responsive/shapeOutside.html:
 - Neutral path() keyframes invalidate when the underlying <shape-box> changes
 web-animations/responsive/toggle-animated-iframe-visibility.html:
-- "== web-animations/responsive/toggle-animated-iframe-visibility-ref.html"
+- "== web-animations/responsive/toggle-animated-iframe-visibility-ref.html (a frame the painter never enters)"
 web-animations/timing-model/animations/invalidating-animation-before-start-time-synced.html:
 - Animation invalidated before startTime is set doesn't affect startTime
 web-animations/timing-model/animations/reversing-an-animation.html:
