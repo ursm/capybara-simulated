@@ -66,6 +66,9 @@ pub(crate) struct Observers {
     flags: Option<v8::SharedRef<v8::BackingStore>>,
     // The realm whose microtask queue holds the agent's mutation observer microtask, while one does (`moQueue`).
     queued_in: Option<i32>,
+    // The realms whose cascade a change asks for — refreshed (a document's sheet owner), or its version moved (a shadow
+    // tree's) — the realm whose tree it is, whichever realm's code made it (`takeCascadeChanges`).
+    cascade: Vec<(i32, bool)>,
 }
 
 const ANY_REGISTERED: usize = 0;
@@ -92,6 +95,13 @@ impl Observers {
         if let Some(flags) = &self.flags {
             flags[flag].set(1);
         }
+    }
+    // …the cascade of realm `cid` — the one whose tree changed — refreshed, or (`version`) its version moved.
+    pub(crate) fn note_cascade(&mut self, cid: i32, version: bool) {
+        if !self.cascade.contains(&(cid, version)) {
+            self.cascade.push((cid, version));
+        }
+        self.note(if version { CASCADE_VERSION } else { CASCADE_REFRESH });
     }
     // `observer` is pending, and so is its realm.
     fn pend_observer(&mut self, observer: u32) {
@@ -314,6 +324,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moRecord", record, context_id);
     crate::dom::register(scope, ns, "moTakeRecords", take_records, context_id);
     crate::dom::register(scope, ns, "moTakeBatch", take_batch, context_id);
+    crate::dom::register(scope, ns, "moTakeCascade", take_cascade, context_id);
     crate::dom::register(scope, ns, "moQueue", queue, context_id);
     crate::dom::register(scope, ns, "moTakePending", take_pending, context_id);
     crate::dom::register(scope, ns, "moHasPending", has_pending, context_id);
@@ -462,6 +473,14 @@ fn take_records(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 // longer pending — and its signal slots, in the order signaled, taken: a notification's part in this realm. Each
 // observer's records are taken as its turn comes (`moTakeRecords`): one an earlier callback queued for it is its, and
 // one an earlier callback took, or disconnected, has none.
+// __dom.moTakeCascade() -> [realm, version, …]: the realms whose cascade the changes since asked for (`note_cascade`) —
+// refreshed, or (`version` 1) its version moved — none any more.
+fn take_cascade(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let asked = std::mem::take(&mut crate::dom::dom(scope).arena.observers.cascade);
+    let items: Vec<v8::Local<v8::Value>> =
+        asked.iter().flat_map(|&(cid, version)| [f64::from(cid), f64::from(u8::from(version))]).map(|n| v8::Number::new(scope, n).into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
 fn take_batch(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let store = &mut arena(scope, &args).observers;

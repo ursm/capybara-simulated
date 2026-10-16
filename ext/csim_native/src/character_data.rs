@@ -8,7 +8,7 @@
 // observations a change schedules, the cascade a `<style>`'s text refreshes.
 
 use crate::dom::{realm, realm_id, GEN_DIRTY, GEN_NODES, GEN_SETTLE, GEN_SUBTREE_MARKS, GEN_TREE};
-use crate::mutation_observers::{CASCADE_REFRESH, CASCADE_VERSION, OBSERVATIONS};
+use crate::mutation_observers::OBSERVATIONS;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "replaceData", replace_data_op, context_id);
@@ -201,9 +201,11 @@ pub(crate) fn replace_data(
             arena.generations.bump(GEN_SUBTREE_MARKS);
             arena.generations.bump(GEN_DIRTY);
         }
-        let callers = &realm(scope, caller).generations;
-        callers.bump(GEN_SETTLE);
-        callers.bump(GEN_TREE);
+        for moved in [caller, cid].into_iter().take(if caller == cid { 1 } else { 2 }) {
+            let generations = &realm(scope, moved).generations;
+            generations.bump(GEN_SETTLE);
+            generations.bump(GEN_TREE);
+        }
         crate::dom::dom(scope).arena.observers.note(OBSERVATIONS);
     }
     let arena = realm(scope, cid);
@@ -212,10 +214,12 @@ pub(crate) fn replace_data(
     let style_element = |n: &crate::dom::NodeData| &*n.local_name == "style" && crate::sheet_owners::is_sheet_owner(n);
     if let Some(style) = parent.filter(|&p| arena.get(p).is_some_and(style_element)) {
         let in_shadow = arena.get(arena.root_of(style)).is_some_and(|r| r.host.is_some());
-        let callers = &realm(scope, caller).generations;
-        callers.bump(GEN_TREE);
-        callers.bump(GEN_NODES);
-        crate::dom::dom(scope).arena.observers.note(if in_shadow { CASCADE_VERSION } else { CASCADE_REFRESH });
+        for moved in [caller, cid].into_iter().take(if caller == cid { 1 } else { 2 }) {
+            let generations = &realm(scope, moved).generations;
+            generations.bump(GEN_TREE);
+            generations.bump(GEN_NODES);
+        }
+        crate::dom::dom(scope).arena.observers.note_cascade(cid, in_shadow);
     }
     Ok(())
 }

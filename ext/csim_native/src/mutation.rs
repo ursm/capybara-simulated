@@ -6,7 +6,7 @@
 // reactions, the connection walk — the bindings' to take as it returns.
 
 use crate::dom::{nid_arg, node_value, nodes_value, realm, realm_id, NodeId, NodeKind, RealmArena, GEN_DIRTY, GEN_NODES, GEN_SETTLE, GEN_STRUCTURE, GEN_SUBTREE_MARKS, GEN_TREE};
-use crate::mutation_observers::{CASCADE_REFRESH, CASCADE_VERSION, OBSERVATIONS};
+use crate::mutation_observers::OBSERVATIONS;
 
 // DOM node types, as the page side names them.
 const ELEMENT: u32 = 1;
@@ -527,17 +527,21 @@ pub(crate) fn record_child_list(
         generations.bump(GEN_DIRTY);
     }
     let in_shadow = arena.get(arena.root_of(target)).is_some_and(|r| r.host.is_some());
-    let callers = realm(scope, caller);
-    for which in [GEN_SETTLE, GEN_TREE, GEN_NODES, GEN_STRUCTURE] {
-        callers.generations.bump(which);
+    let shadow_hosts = arena.shadow_hosts;
+    // (…the calling realm's generations, and the target's, where its code is another's: what a memo of the tree's realm
+    // keys on moves with the tree)
+    for moved in [caller, cid].into_iter().take(if caller == cid { 1 } else { 2 }) {
+        let generations = &realm(scope, moved).generations;
+        for which in [GEN_SETTLE, GEN_TREE, GEN_NODES, GEN_STRUCTURE] {
+            generations.bump(which);
+        }
     }
-    let shadow_hosts = callers.shadow_hosts;
     let dom = crate::dom::dom(scope);
     dom.arena.observers.note(OBSERVATIONS);
     if renewals.is_some_and(|r| r != dom.arena.sheet_renewals) {
-        dom.arena.observers.note(if in_shadow { CASCADE_VERSION } else { CASCADE_REFRESH });
+        dom.arena.observers.note_cascade(cid, in_shadow);
         if shadow_hosts {
-            dom.arena.observers.note(CASCADE_VERSION);
+            dom.arena.observers.note_cascade(cid, true);
         }
     }
     // (…the record's arrays made only where an observer is to have it)
