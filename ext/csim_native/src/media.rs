@@ -41,6 +41,9 @@ pub(crate) struct Media {
     error: u8,
     failures: u32,
     video_size: [u32; 2],
+    // Whether the decoded frame taints a canvas it is drawn into (clears its origin-clean flag): its resource an opaque
+    // response — a no-cors cross-origin one — which a failed load discards with the frame.
+    tainted: bool,
     // Which load is the current one: a later load supersedes what an earlier one had queued.
     load: u32,
 }
@@ -62,6 +65,7 @@ static INITIAL: Media = Media {
     error: 0,
     failures: 0,
     video_size: [0, 0],
+    tainted: false,
     load: 0,
 };
 
@@ -176,6 +180,8 @@ const VIDEO_WIDTH: u32 = 10;
 const VIDEO_HEIGHT: u32 = 11;
 const CURRENT_SRC: u32 = 12;
 const ERROR: u32 = 13;
+// (…not an IDL member: whether a canvas the video's frame is drawn into is tainted by it)
+const TAINTED: u32 = 14;
 
 fn element(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<NodeId> {
     crate::node_handle::nid_of(scope, value)
@@ -205,6 +211,7 @@ fn media_get(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         VIDEO_WIDTH => rv.set_uint32(m.video_size[0]),
         VIDEO_HEIGHT => rv.set_uint32(m.video_size[1]),
         ERROR => rv.set_uint32(if m.error == 0 { 0 } else { m.failures }),
+        TAINTED => rv.set_bool(m.tainted),
         _ => {}
     }
 }
@@ -343,21 +350,23 @@ const RESOURCE_FAILED: u32 = 0;
 const VIDEO_DECODED: u32 = 1;
 const AUDIO_USABLE: u32 = 2;
 
-// __dom.mediaResource(media, outcome, width, height, duration): the resource's outcome — a failure the dedicated media
-// source failure steps (MEDIA_ERR_SRC_NOT_SUPPORTED, no media data, NO_SOURCE: an earlier resource no longer there);
-// a decoded video all its data (HAVE_ENOUGH_DATA), its size and duration, IDLE — a seek to the default playback start
+// __dom.mediaResource(media, outcome, width, height, duration, tainted): the resource's outcome — a failure the dedicated
+// media source failure steps (MEDIA_ERR_SRC_NOT_SUPPORTED, no media data, NO_SOURCE: an earlier resource no longer
+// there, its frame's taint with it); a decoded video all its data (HAVE_ENOUGH_DATA), its size, duration and taint, IDLE — a seek to the default playback start
 // position where that is past 0 (within the duration), which then is 0 whatever it was; a usable audio IDLE. -> the
 // events the media data processing steps owe, in order (`resource_events`): none for a failure.
 fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
     let outcome = args.get(1).uint32_value(scope).unwrap_or(RESOURCE_FAILED);
     let [w, h, duration] = [2, 3, 4].map(|k| args.get(k).number_value(scope).unwrap_or(f64::NAN));
+    let tainted = args.get(5).boolean_value(scope);
     let autoplay = crate::dom::dom(scope).arena.get(id).is_some_and(|n| n.plain_attr("autoplay").is_some());
     let m = crate::dom::dom(scope).arena.media_mut(id);
     let events = match outcome {
         VIDEO_DECODED => {
             let had_duration = m.duration;
             m.video_size = [w as u32, h as u32];
+            m.tainted = tainted;
             m.duration = duration;
             m.ready = HAVE_ENOUGH_DATA;
             m.network = NETWORK_IDLE;
@@ -384,6 +393,7 @@ fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         _ => {
             m.duration = f64::NAN;
             m.ready = HAVE_NOTHING;
+            m.tainted = false;
             m.error = MEDIA_ERR_SRC_NOT_SUPPORTED;
             m.failures += 1;
             m.network = NETWORK_NO_SOURCE;

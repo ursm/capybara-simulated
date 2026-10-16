@@ -6,7 +6,7 @@
 // references it traces, the current state's and each saved one's. Drawing reads it here (canvas.rs `canvas_draw`, the
 // shapes and paths of canvas_path.rs): the bindings pack none of it.
 
-use std::cell::{RefCell, UnsafeCell};
+use std::cell::{Cell, RefCell, UnsafeCell};
 
 use v8::cppgc::{GarbageCollected, Visitor};
 
@@ -217,6 +217,11 @@ pub(crate) struct CanvasStateHandle {
     // handle, whatever the stack does.
     stack: RefCell<Vec<(State, bool)>>,
     saved: UnsafeCell<v8::TracedReference<v8::Object>>,
+    // The bitmap's origin-clean flag: false once a source that is not origin-clean — a cross-origin image whose bytes
+    // are not CORS-approved, a tainted canvas or bitmap, a pattern made of one — was drawn or set as a paint, which
+    // getImageData / toDataURL / toBlob then refuse with a SecurityError. Not drawing state: `restore()` keeps it, a
+    // fresh bitmap (`reset()`, a resize) has it true again.
+    origin_clean: Cell<bool>,
 }
 
 unsafe impl GarbageCollected for CanvasStateHandle {
@@ -300,6 +305,7 @@ impl CanvasStateHandle {
         }
         // SAFETY: the main thread writes the reference.
         unsafe { (*self.saved.get()).reset(scope, None) };
+        self.origin_clean.set(true);
     }
 }
 
@@ -317,6 +323,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         refs: [(); 3].map(|_| UnsafeCell::new(v8::TracedReference::empty())),
         stack: RefCell::new(Vec::new()),
         saved: UnsafeCell::new(v8::TracedReference::empty()),
+        origin_clean: Cell::new(true),
     };
     let heap = scope.get_cpp_heap().expect("CanvasStateBase is installed only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
@@ -367,6 +374,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "canvasTransform", canvas_transform, context_id);
     crate::dom::register(scope, ns, "canvasLineDash", canvas_line_dash, context_id);
     crate::dom::register(scope, ns, "canvasFontFace", canvas_font_face, context_id);
+    crate::dom::register(scope, ns, "canvasOriginClean", canvas_origin_clean, context_id);
+    crate::dom::register(scope, ns, "canvasTaint", canvas_taint, context_id);
 }
 
 // The handle of a state argument.
@@ -558,6 +567,18 @@ fn canvas_stack(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         Some(RESTORE) => h.restore(scope),
         Some(RESET) => h.reset(scope),
         _ => {}
+    }
+}
+
+// __dom.canvasOriginClean(state) -> whether the bitmap is origin-clean — false for anything that is no state's object.
+fn canvas_origin_clean(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(handle(scope, args.get(0)).is_some_and(|h| h.origin_clean.get()));
+}
+
+// __dom.canvasTaint(state): the bitmap no longer origin-clean.
+fn canvas_taint(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    if let Some(h) = handle(scope, args.get(0)) {
+        h.origin_clean.set(false);
     }
 }
 
