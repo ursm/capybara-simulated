@@ -137,6 +137,7 @@ mod text_codec;
 mod text_geometry;
 mod text_selection;
 mod timers;
+mod toggle_tasks;
 mod token_list;
 mod traversal;
 // The Unicode classes layout asks of a character, parsed out of the regex that spells them by regex-syntax.

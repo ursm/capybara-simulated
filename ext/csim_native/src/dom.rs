@@ -882,6 +882,8 @@ pub(crate) struct RealmArena {
     pub(crate) frame_navigations: crate::frame_navigation::FrameNavigations,
     // Each document's mode, readiness and flags (document_state.rs).
     pub(crate) document_states: crate::document_state::DocumentStates,
+    // Each element's toggle task tracker (toggle_tasks.rs).
+    pub(crate) toggle_tasks: crate::toggle_tasks::ToggleTasks,
     // Each document's pending scroll and scrollend event targets (scroll_events.rs).
     pub(crate) pending_scroll_events: crate::scroll_events::PendingScrollEvents,
     // Each top-level document's autofocus candidates (autofocus.rs).
@@ -1131,6 +1133,7 @@ impl RealmArena {
         self.forget_freed_scroll_events();
         self.forget_freed_frame_navigations();
         self.forget_freed_document_states();
+        self.forget_freed_toggle_tasks();
         self.forget_dead_focus_records();
         // (…and what the isolate latched for any realm's page, where this is the only realm left)
         if self.parked.is_empty() {
@@ -1194,6 +1197,7 @@ impl RealmArena {
         self.forget_freed_scroll_events();
         self.forget_freed_frame_navigations();
         self.forget_freed_document_states();
+        self.forget_freed_toggle_tasks();
         self.forget_foreign_observations(Some(cid));
         self.forget_dead_focus_records();
     }
@@ -1414,6 +1418,9 @@ impl RealmArena {
         }
         if !self.document_states.is_empty() {
             self.document_states.forget(id);
+        }
+        if !self.toggle_tasks.is_empty() {
+            self.toggle_tasks.forget(id);
         }
         if !self.change_baselines.is_empty() {
             self.change_baselines.remove(&id);
@@ -2549,6 +2556,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::navigables::install(scope, ns, context_id);
     crate::frame_navigation::install(scope, ns, context_id);
     crate::document_state::install(scope, ns, context_id);
+    crate::toggle_tasks::install(scope, ns, context_id);
     crate::resize_observers::install(scope, ns, context_id);
     crate::element_flags::install(scope, ns, context_id);
     crate::foreign_observations::install(scope, ns, context_id);
