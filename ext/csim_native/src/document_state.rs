@@ -45,6 +45,14 @@ impl DocumentStates {
 }
 
 impl RealmArena {
+    // The mode a document's selectors match in — whether it is in quirks mode (a class or id selector folds ASCII
+    // case), whether it is an HTML document (a type selector and an attribute name fold case, where an XML document's
+    // do not: its content type's, the node's `STATE_XML_DOCUMENT`) — an HTML no-quirks one's for none.
+    pub(crate) fn document_mode(&self, doc: Option<NodeId>) -> (bool, bool) {
+        let quirks = doc.and_then(|d| self.document_states.0.get(&d)).is_some_and(|s| s.mode == 2);
+        let html = !doc.and_then(|d| self.get(d)).is_some_and(|n| n.state & crate::dom::STATE_XML_DOCUMENT != 0);
+        (quirks, html)
+    }
     // …and those of documents freed with their realm.
     pub(crate) fn forget_freed_document_states(&mut self) {
         let freed: Vec<NodeId> = self.document_states.0.keys().copied().filter(|&d| self.get(d).is_none()).collect();

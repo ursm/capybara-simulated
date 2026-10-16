@@ -388,21 +388,24 @@ fn name_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Op
     (s != "*").then_some(s)
 }
 
-// __dom.elementsBy(scopeNid, kind, a, b) -> the scope's descendant elements a filter takes, as `nodes_value` answers: class names
-// (`kind` 0: `a` the list, `b` quirks mode), a namespace and local name (1: `a` the namespace, null for none, `b` the
-// local name; "*" any), a qualified name (2: `a`, "*" any; `b` an HTML document), a legacy document collection
-// (3 forms, 4 images, 5 links, 6 scripts, 7 anchors, 8 embeds), a `name` (9: `a`), the stylesheets' owners (10) —
-// or the shadow hosts among its shadow-including descendants (11: shadow-including tree order, a host before its
-// shadow tree's own), those with a state bit of a mask (12: `a`), those a custom element definition could be for
-// (13), or every element of its shadow-including inclusive descendants (14: in the shadow hosts' order, the scope
-// itself first where it is one).
+// __dom.elementsBy(scopeNid, kind, a, b) -> the scope's descendant elements a filter takes, as `nodes_value` answers:
+// class names (`kind` 0: `a` the list, `b` the nid of the document whose mode they match in), a namespace and local
+// name (1: `a` the namespace, null for none, `b` the local name; "*" any), a qualified name (2: `a`, "*" any; `b` an
+// HTML document), a legacy document collection (3 forms, 4 images, 5 links, 6 scripts, 7 anchors, 8 embeds), a `name`
+// (9: `a`), the stylesheets' owners (10) — or the shadow hosts among its shadow-including descendants (11:
+// shadow-including tree order, a host before its shadow tree's own), those with a state bit of a mask (12: `a`), those
+// a custom element definition could be for (13), or every element of its shadow-including inclusive descendants (14: in
+// the shadow hosts' order, the scope itself first where it is one).
 fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let kind = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
     let (a, b) = (args.get(2), args.get(3));
     let filter = match kind {
         CLASSES => {
-            let quirks = b.is_true();
+            // (…in the mode of the scope's document, `b` its nid: `document_mode`)
+            let doc = if b.is_number() { nid_arg(scope, &args, 3) } else { None };
+            let cid = crate::dom::realm_id(scope, &args);
+            let quirks = crate::dom::realm(scope, cid).document_mode(doc).0;
             let list = utf16_arg(scope, a);
             let wanted: Vec<Vec<u16>> = list
                 .split(|&u| ascii_whitespace(u))

@@ -117,22 +117,28 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "paddingEdgeBox", padding_edge_box_op, context_id);
 }
 
-// __dom.scrollingElement(docNid, quirks, now) -> [the document's scrolling element] or [] (`scrolling_element`), as
-// `nodes_value` answers.
+// __dom.scrollingElement(docNid, now) -> [the document's scrolling element] or [] (`scrolling_element`), as
+// `nodes_value` answers — in the document's mode (`document_mode`).
 fn scrolling_element_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
-    let quirks = args.get(1).is_true();
-    let found = with_engine(scope, &args, 2, |engine, arena, now| scrolling_element(engine, arena, doc, quirks, now)).flatten();
+    let found = with_engine(scope, &args, 1, |engine, arena, now| {
+        let quirks = arena.document_mode(Some(doc)).0;
+        scrolling_element(engine, arena, doc, quirks, now)
+    })
+    .flatten();
     let cid = crate::dom::realm_id(scope, &args);
     rv.set(crate::dom::nodes_value(scope, cid, found.as_slice()));
 }
 
-// __dom.holdsScrollOffset(nid, quirks, now) -> whether the element keeps a scroll offset (`holds_scroll_offset`), its
-// document in quirks mode or not.
+// __dom.holdsScrollOffset(nid, docNid, now) -> whether the element keeps a scroll offset (`holds_scroll_offset`), in its
+// document's mode (`document_mode`).
 fn holds_scroll_offset_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    let quirks = args.get(1).is_true();
-    let holds = with_engine(scope, &args, 2, |engine, arena, now| holds_scroll_offset(engine, arena, id, quirks, now));
+    let doc = nid_arg(scope, &args, 1);
+    let holds = with_engine(scope, &args, 2, |engine, arena, now| {
+        let quirks = arena.document_mode(doc).0;
+        holds_scroll_offset(engine, arena, id, quirks, now)
+    });
     rv.set_bool(holds.unwrap_or(false));
 }
 

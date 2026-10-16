@@ -4110,7 +4110,7 @@ pub(crate) fn store_attribute(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: No
     attribute_steps(scope, cid, id, &[key], was_checked);
 }
 
-// __dom.query(rootNid, selector, quirks, firstOnly, scopeNid, xml) -> the elements matched, in document order, as
+// __dom.query(rootNid, selector, docNid, firstOnly, scopeNid) -> the elements matched, in document order, as
 // `nodes_value` answers them, or `null` for an invalid selector (the caller's SyntaxError); `undefined` for a root the
 // arena does not hold.
 fn query(
@@ -4123,12 +4123,12 @@ fn query(
     };
     let selector = args.get(1).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    // …in the mode of the root's document (arg 2: quirks; arg 5: an XML document); querySelector stops at the first
-    // (arg 3); `:scope` is the element arg 4 names, else the root.
-    let quirks = args.get(2).is_true();
+    // …in the mode of the root's document (arg 2, `document_mode`); querySelector stops at the first (arg 3); `:scope`
+    // is the element arg 4 names, else the root.
+    let doc = nid_arg(scope, &args, 2);
     let first_only = args.get(3).is_true();
     let scope_el = if args.get(4).is_number() { nid_arg(scope, &args, 4) } else { None }.unwrap_or(root);
-    let html_doc = !args.get(5).is_true();
+    let (quirks, html_doc) = realm(scope, cid).document_mode(doc);
     match crate::selector::query_text(realm(scope, cid), root, scope_el, &selector, first_only, quirks, html_doc) {
         Some(ids) => {
             let answer = nodes_value(scope, cid, &ids);
@@ -4138,7 +4138,7 @@ fn query(
     }
 }
 
-// __dom.matchesId(nodeNid, selector, quirks, scoped, xml) -> bool, or `null` for an invalid selector; `undefined`
+// __dom.matchesId(nodeNid, selector, docNid, scoped) -> bool, or `null` for an invalid selector; `undefined`
 // for a node the arena does not hold. Element.matches (`scoped`: `:scope` is the element), and the cascade's
 // does-this-element-match-this-rule.
 fn matches_id(
@@ -4151,16 +4151,16 @@ fn matches_id(
     };
     let selector = args.get(1).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    let quirks = args.get(2).is_true();
+    let doc = nid_arg(scope, &args, 2);
     let scoped = args.get(3).is_true();
-    let html_doc = !args.get(4).is_true();
+    let (quirks, html_doc) = realm(scope, cid).document_mode(doc);
     match crate::selector::matches_text(realm(scope, cid), id, &selector, None, quirks, html_doc, scoped, false) {
         Some(hit) => rv.set_bool(hit.is_some()),
         None => rv.set_null(),
     }
 }
 
-// __dom.closest(nid, selector, quirks, xml) -> the nearest inclusive ancestor element matching (Element.closest, `:scope`
+// __dom.closest(nid, selector, docNid) -> the nearest inclusive ancestor element matching (Element.closest, `:scope`
 // the element itself), as `node_value` answers it, -1 for none; `false` for an invalid selector (the caller's
 // SyntaxError), `undefined` as matchesId.
 fn closest(
@@ -4173,8 +4173,8 @@ fn closest(
     };
     let selector = args.get(1).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    let quirks = args.get(2).is_true();
-    let html_doc = !args.get(3).is_true();
+    let doc = nid_arg(scope, &args, 2);
+    let (quirks, html_doc) = realm(scope, cid).document_mode(doc);
     match crate::selector::matches_text(realm(scope, cid), id, &selector, None, quirks, html_doc, true, true) {
         Some(Some(hit)) => rv.set(node_value(scope, Some(hit))),
         Some(None) => rv.set_int32(-1),
