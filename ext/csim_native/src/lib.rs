@@ -37,6 +37,7 @@ mod cssom_decl;
 mod cssom_rule;
 // The native author cascade: a realm's static rules, and one element's winning declarations in one pass.
 mod document_encoding;
+mod document_state;
 mod dom;
 mod dom_matrix;
 mod easing;
