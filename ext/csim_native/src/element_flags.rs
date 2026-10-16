@@ -3,12 +3,12 @@
 // selection; a select's and a selectedcontent's "connected before" (a re-insertion re-snapshots); a select's "update
 // running", which an update it causes waits out; a `<form>`'s "constructing entry list", "firing submission events"
 // and "locked for reset" (HTML §4.10.21.3, §4.10.21.4, §4.10.22); a `<style>`'s queued `load`; custom element state
-// "failed", and the element a failed construction made in its stead, an HTMLUnknownElement. A clone starts without
-// any.
+// "failed", and the element a failed construction made in its stead, an HTMLUnknownElement; a `<script>`'s resource
+// timing entry filed. A clone starts without any.
 
 use crate::dom::nid_arg;
 
-const ELEMENT_FLAGS: u16 = 0b1_1111_1111;
+const ELEMENT_FLAGS: u16 = 0b11_1111_1111;
 // A `<style>`'s `load` queued for the sheet it has (element-flags.js `STYLE_LOAD_FIRED`): a new sheet owes another.
 pub(crate) const STYLE_LOAD_FIRED: u16 = 1 << 6;
 
