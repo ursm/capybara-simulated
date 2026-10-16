@@ -273,16 +273,15 @@ fn in_flight_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set_bool((s.ready == OPENED && s.send) || s.ready == HEADERS_RECEIVED || s.ready == LOADING);
 }
 
-// __dom.xhrTerminate(state) -> whether an upload was in progress, which the request error steps then fire the upload's
-// events for: the fetch terminated, DONE with the network error's response — set BEFORE the DONE readystatechange,
-// whose handler must see it (abort-during-loading) — the upload no more in progress.
-fn terminate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(s) = state(scope, args.get(0)) else { return rv.set_bool(false) };
+// __dom.xhrTerminate(state) — the request error steps' state: the fetch terminated, DONE with the network error's
+// response — set BEFORE the DONE readystatechange, whose handler must see it (abort-during-loading). Whether an upload
+// is in progress the bindings ask after that handler (`xhrTakeUpload`), which may have opened and sent again.
+fn terminate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(s) = state(scope, args.get(0)) else { return };
     let mut s = s.borrow_mut();
     s.aborted = true;
     s.ready = DONE;
     s.clear_response();
-    rv.set_bool(std::mem::replace(&mut s.upload_active, false));
 }
 
 // __dom.xhrUnsend(state) -> whether a DONE request went back to UNSENT, its response the network error's — abort()'s
