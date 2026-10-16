@@ -4,9 +4,9 @@
 // activating service worker or under way, a reload — which navigation is the container's latest (a load a superseded
 // one queued fires for nothing), the URLs it carries — the one it started with, the session history entry it pushes as
 // it commits, the document URL a reload keeps — and the documents it carries as bytes: a scripted navigation's
-// response the build loads, the one it loaded last (which a reload of a revoked blob: URL loads again), and a blob: URL's
-// a `location` navigation took a reference to before the page could revoke it. The container's, whatever document it is in or whether it is
-// in one: a frame moved keeps its navigation.
+// response the build loads, the one it loaded last (which a reload of a revoked blob: URL loads again), and a blob:
+// URL's a `location` navigation took a reference to before the page could revoke it. The container's, whatever
+// document it is in or whether it is in one: a frame moved keeps its navigation.
 
 use std::collections::HashMap;
 
@@ -108,6 +108,36 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameContent", frame_content, context_id);
     crate::dom::register(scope, ns, "setFrameContent", set_frame_content, context_id);
     crate::dom::register(scope, ns, "frameContentHeld", frame_content_held, context_id);
+    crate::dom::register(scope, ns, "frameContentUrl", frame_content_url, context_id);
+    crate::dom::register(scope, ns, "copyFrameContent", copy_frame_content, context_id);
+}
+
+// __dom.frameContentUrl(containerNid, slot) -> the URL of the document the navigation carries in `slot`, or null.
+fn frame_content_url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_null() };
+    let slot = args.get(1).uint32_value(scope).unwrap_or(u32::MAX) as usize;
+    let cid = realm_id(scope, &args);
+    let url = crate::dom::realm(scope, cid).frame_navigations.0.get(&container).and_then(|nav| nav.contents.get(slot)?.as_ref()).map(|c| c.url.clone());
+    match url {
+        Some(url) => rv.set(utf16_value(scope, &url)),
+        None => rv.set_null(),
+    }
+}
+
+// __dom.copyFrameContent(containerNid, from, to, take) — the document the navigation carries in `from` carried in `to`
+// too (none there where `from` holds none), its bytes copied where they lie; taken (`take`): carried in `from` no more.
+fn copy_frame_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let from = args.get(1).uint32_value(scope).unwrap_or(u32::MAX) as usize;
+    let to = args.get(2).uint32_value(scope).unwrap_or(u32::MAX) as usize;
+    let take = args.get(3).is_true();
+    if from >= CONTENT_SLOTS || to >= CONTENT_SLOTS || from == to {
+        return;
+    }
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let Some(nav) = arena.frame_navigations.0.get_mut(&container) else { return };
+    nav.contents[to] = if take { nav.contents[from].take() } else { nav.contents[from].clone() };
 }
 
 // __dom.frameContentHeld(containerNid, slot) -> whether the navigation carries a document in `slot` (its bytes copied
@@ -136,20 +166,17 @@ fn frame_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 }
 
 // __dom.setFrameContent(containerNid, slot, url, bytes, contentType) — the document the navigation carries in `slot`:
-// `url`, `bytes` (a Uint8Array) and `contentType`; none where `url` is null.
+// `url`, `bytes` (a Uint8Array) and `contentType`; none where no bytes are given (`setFrameContent(nid, slot)`).
 fn set_frame_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let slot = args.get(1).uint32_value(scope).unwrap_or(u32::MAX) as usize;
     if slot >= CONTENT_SLOTS {
         return;
     }
-    let content = (!args.get(2).is_null_or_undefined()).then(|| {
+    let content = v8::Local::<v8::ArrayBufferView>::try_from(args.get(3)).ok().map(|view| {
+        let mut bytes = vec![0u8; view.byte_length()];
+        view.copy_contents(&mut bytes);
         let url = utf16_arg(scope, args.get(2));
-        let bytes = v8::Local::<v8::ArrayBufferView>::try_from(args.get(3)).map_or_else(|_| Vec::new(), |view| {
-            let mut bytes = vec![0u8; view.byte_length()];
-            view.copy_contents(&mut bytes);
-            bytes
-        });
         let content_type = utf16_arg(scope, args.get(4));
         Content { url, bytes, content_type }
     });

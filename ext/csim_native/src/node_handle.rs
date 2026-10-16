@@ -417,13 +417,12 @@ pub(crate) fn object_of<'s>(scope: &mut v8::PinScope<'s, '_>, id: NodeId) -> Opt
     let factory = unsafe { &*factory }.to_local(scope)?;
     let n = crate::dom::dom(scope).arena.get(id)?;
     let node_type = n.node_type();
-    // (…its name exact: the UTF-16 the DOM holds, a lone surrogate kept — a doctype's its name and its public and
-    // system identifiers in those three places; an element's names, which repeat, internalized; none of anything else)
+    // (…its name exact: the UTF-16 the DOM holds, a lone surrogate kept; an element's names, which repeat, internalized;
+    // none of anything else — a doctype's are the engine's to read: `doctypeField`)
     let two_byte = |scope: &mut v8::PinScope<'s, '_>, units: &[u16]| v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal).map(Into::into);
     let name = |scope: &mut v8::PinScope<'s, '_>, s: &str| v8::String::new_from_utf8(scope, s.as_bytes(), v8::NewStringType::Internalized).map(Into::into);
     let exact = n.name_u16.as_deref().map(|e| (e.local.clone(), e.ns.clone(), e.prefix.clone()));
-    let doctype = n.doctype_ids.as_deref().map(|(public, system)| (n.data.clone(), public.clone(), Some(system.clone())));
-    let names: [v8::Local<'_, v8::Value>; 3] = match doctype.or(exact) {
+    let names: [v8::Local<'_, v8::Value>; 3] = match exact {
         Some((local, ns, prefix)) => [
             two_byte(scope, &local)?,
             two_byte(scope, &ns)?,

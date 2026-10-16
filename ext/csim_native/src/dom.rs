@@ -3395,8 +3395,9 @@ fn set_doctype(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 // the DOM holds them — '' for a node that is no doctype.
 fn doctype_field(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let field = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
-    let cid = realm_id(scope, &args);
-    let units = nid_arg(scope, &args, 0).and_then(|id| realm(scope, cid).get(id)).and_then(|n| {
+    // (…the node wherever it is — the arena is every realm's)
+    let id = nid_arg(scope, &args, 0);
+    let units = id.and_then(|id| dom(scope).arena.get(id)).and_then(|n| {
         let (public, system) = n.doctype_ids.as_deref()?;
         Some(match field {
             0 => n.data.clone(),
