@@ -289,7 +289,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "interceptedHop", intercepted_hop_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
     crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
-    crate::dom::register(scope, ns, "headerRule", header_rule_op, context_id);
     crate::dom::register(scope, ns, "httpToken", http_token_op, context_id);
     crate::dom::register(scope, ns, "normalizedMethod", normalized_method_op, context_id);
 }
@@ -375,24 +374,6 @@ fn normalized_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
         None => rv.set_null(),
     }
 }
-// The header rules `headerRule` answers.
-const FORBIDDEN_REQUEST: u32 = 0;
-const FORBIDDEN_RESPONSE: u32 = 1;
-const NO_CORS_SAFELISTED: u32 = 2;
-// __dom.headerRule(rule, name, value) -> whether the header is a forbidden request-header (`FORBIDDEN_REQUEST`), a
-// forbidden response-header name (`FORBIDDEN_RESPONSE`), or a no-CORS-safelisted request-header (`NO_CORS_SAFELISTED`).
-fn header_rule_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let rule = args.get(0).uint32_value(scope).unwrap_or(u32::MAX);
-    let name = units(scope, args.get(1));
-    let value = units(scope, args.get(2));
-    rv.set_bool(match rule {
-        FORBIDDEN_REQUEST => forbidden_request_header(&name, &value),
-        FORBIDDEN_RESPONSE => forbidden_response_header(&name),
-        NO_CORS_SAFELISTED => no_cors_safelisted_request_header(&name, &value),
-        _ => false,
-    });
-}
-
 // ── For the host ──
 // (…a Ruby string's bytes, whatever its encoding)
 fn ruby_bytes(s: magnus::RString) -> Vec<u8> {

@@ -2666,7 +2666,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register_fast(scope, ns, "isConnected", is_connected, IS_CONNECTED_FAST, context_id);
     register(scope, ns, "relativeNode", relative_node, context_id);
     register(scope, ns, "childAt", child_at, context_id);
-    register(scope, ns, "subtreeNodes", subtree_nodes, context_id);
     register(scope, ns, "nodeOf", node_of, context_id);
     register(scope, ns, "childNodes", child_nodes, context_id);
     register_fast(scope, ns, "childCount", child_count, CHILD_COUNT_FAST, context_id);
@@ -2697,7 +2696,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setParserFormOwner", set_parser_form_owner, context_id);
     register(scope, ns, "setCustomStates", set_custom_states, context_id);
     register(scope, ns, "targetElement", target_element, context_id);
-    register(scope, ns, "baseElement", base_element, context_id);
     register(scope, ns, "latchFocusRing", latch_focus_ring, context_id);
     register(scope, ns, "setFocusStart", set_focus_start, context_id);
     register(scope, ns, "query", query, context_id);
@@ -2987,22 +2985,6 @@ fn child_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 fn node_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = nid_arg(scope, &args, 0);
     rv.set(node_value(scope, id));
-}
-// __dom.subtreeNodes(nid) -> the node and its shadow-including descendants, as `nodes_value` answers them: in tree
-// order, a host's shadow tree before its light children (not into a template's contents).
-fn subtree_nodes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
-    let cid = realm_id(scope, &args);
-    let arena = realm(scope, cid);
-    let mut out = Vec::new();
-    let mut stack = vec![id];
-    while let Some(n) = stack.pop() {
-        let Some(node) = arena.get(n) else { continue };
-        out.push(n);
-        stack.extend(node.children.iter().rev().copied());
-        stack.extend(node.shadow_root);
-    }
-    rv.set(nodes_value(scope, cid, &out));
 }
 // __dom.leavingElements(nid, kind) -> the elements of the node's shadow-including subtree whose removing steps a subtree
 // leaving its document runs, in tree order: (kind 0) those an element state is on (`STATE_*`), which may have state to
@@ -3644,13 +3626,6 @@ fn target_element(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         Some(id) => set_nid(scope, &mut rv, id),
         None => rv.set_int32(-1),
     }
-}
-
-// __dom.baseElement(docNid) -> the document's first `<base>` with an `href` (`base_element`), or null.
-fn base_element(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    let base = nid_arg(scope, &args, 0).and_then(|doc| realm(scope, cid).base_element(doc));
-    rv.set(node_value(scope, base));
 }
 
 // __dom.shadowInit(root) -> a shadow root's init bits (`SHADOW_*`), 0 for anything else.

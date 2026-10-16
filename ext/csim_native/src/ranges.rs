@@ -259,7 +259,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "rangeCompareBoundaries", range_compare_boundaries, context_id);
     register(scope, ns, "rangeCollapsed", range_collapsed, context_id);
     register(scope, ns, "rangeCommonAncestor", range_common_ancestor, context_id);
-    register(scope, ns, "comparePoints", compare_points_op, context_id);
     register(scope, ns, "rangeIntersectsNode", range_intersects_node, context_id);
     register(scope, ns, "rangeText", range_text, context_id);
     register(scope, ns, "rangeContents", range_contents, context_id);
@@ -664,20 +663,6 @@ fn range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         c.partial_non_text as u8 as f64,
     ];
     rv.set(crate::dom::f64_array(scope, &plan).into());
-}
-
-// __dom.comparePoints(nidA, offsetA, nidB, offsetB) -> -1, 0 or 1: where the first boundary point is against the
-// second; null in another tree.
-fn compare_points_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(a), Some(b)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 2)) else { return };
-    let a = Boundary { node: a, offset: args.get(1).uint32_value(scope).unwrap_or(0) };
-    let b = Boundary { node: b, offset: args.get(3).uint32_value(scope).unwrap_or(0) };
-    let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    match ordering_value(compare(arena, a, b)) {
-        Some(v) => rv.set_int32(v),
-        None => rv.set_null(),
-    }
 }
 
 // __dom.isRange(value) -> whether `value` is a live range's object, any realm's (WebIDL's check for a `Range` argument).
