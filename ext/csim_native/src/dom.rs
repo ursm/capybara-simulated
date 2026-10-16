@@ -229,9 +229,9 @@ pub(crate) struct NodeData {
     pub(crate) state: u32,
     // A script element's flags (HTML §4.12.1.1: "already started", parser-inserted, "force async" — script.rs `SCRIPT_*`).
     pub(crate) script_flags: u8,
-    // A `<select>`'s and a `<selectedcontent>`'s flags (selected_content.rs `SELECT_*`): whether a select has a
-    // `<selectedcontent>` it updates, whether one was ever connected, whether a select's update is running.
-    pub(crate) select_flags: u8,
+    // The flags of an element's own steps that no attribute carries and the bindings set (element_flags.rs): a
+    // select's and a selectedcontent's, a form's.
+    pub(crate) element_flags: u8,
     // An HTML or SVG `<style>`'s, an HTML `<link>`'s count of the sheets it has had (sheet_owners.rs).
     pub(crate) sheet_gen: u32,
     // A shadow root's host (None for every other node): the shadow-including ancestor chain `:focus` walks…
@@ -374,7 +374,7 @@ impl NodeData {
             scroll: [0.0; 2],
             state: 0,
             script_flags: 0,
-            select_flags: 0,
+            element_flags: 0,
             sheet_gen: 0,
             host: None,
             shadow_root: None,
@@ -2539,6 +2539,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::navigables::install(scope, ns, context_id);
     crate::frame_navigation::install(scope, ns, context_id);
     crate::resize_observers::install(scope, ns, context_id);
+    crate::element_flags::install(scope, ns, context_id);
     crate::intersection_observers::install(scope, ns, context_id);
     crate::scroll_events::install(scope, ns, context_id);
     crate::timers::install(scope, ns, context_id);

@@ -41,6 +41,7 @@ mod dom;
 mod dom_matrix;
 mod easing;
 mod editing;
+mod element_flags;
 mod editing_commands;
 mod editing_delete;
 mod editing_insert;
