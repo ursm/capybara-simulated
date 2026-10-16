@@ -31,6 +31,10 @@ impl Default for RealmLocation {
 }
 
 impl RealmLocation {
+    // The realm's URL, serialized.
+    pub(crate) fn href(&self) -> &str {
+        &self.parts[HREF]
+    }
     // The realm's URL is `href` — where it is no URL, `href` its serialization, of a root path and no query nor fragment,
     // the rest as it was.
     fn set_url(&mut self, href: &str) {
