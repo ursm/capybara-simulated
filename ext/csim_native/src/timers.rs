@@ -2,7 +2,7 @@
 // handler — a function, or a string run as a script — with its arguments, when it falls due on the realm's virtual
 // clock, and the period it repeats at. They run in the order they fall due, and those due at once in the order they
 // were scheduled — an interval keeps its place among them as it repeats. The bindings run each as its turn comes
-// (timers.js `runLoopStepLocal`) and keep the clock, which every op here is told.
+// (timers.js `runLoopStepLocal`), moving the realm's clock (`RealmState::clock`) to when it falls due.
 //
 // And its animation frame callbacks (`frames`), which the rendering update runs (timers.js `runRenderPhase`): each a
 // function, run in the order requested, a frame's taken as it begins.
@@ -161,6 +161,8 @@ impl RealmArena {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    register(scope, ns, "clockNow", clock_now, context_id);
+    register(scope, ns, "clockTo", clock_to, context_id);
     register(scope, ns, "timerAdd", timer_add, context_id);
     register(scope, ns, "timerClear", timer_clear, context_id);
     register(scope, ns, "timerNext", timer_next, context_id);
@@ -259,20 +261,33 @@ fn timer_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
 }
 
-// __dom.timerAdd(handler, args, now, timeout, repeats, task) -> its key: a timer of the calling realm's, falling due
-// `timeout` ms after `now` on its clock — never, for one that is no finite time — and, `repeats`, again that long after
+// __dom.clockNow() -> the time the calling realm's clock reads.
+fn clock_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_double(dom(scope).arena.enter(cid).clock);
+}
+
+// __dom.clockTo(time) — the calling realm's clock reads `time`: its event loop has reached it.
+fn clock_to(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(time) = args.get(0).number_value(scope).filter(|t| t.is_finite()) else { return };
+    let cid = realm_id(scope, &args);
+    dom(scope).arena.enter(cid).clock = time;
+}
+
+// __dom.timerAdd(handler, args, timeout, repeats, task) -> its key: a timer of the calling realm's, falling due
+// `timeout` ms after now on its clock — never, for one that is no finite time — and, `repeats`, again that long after
 // each run: a page's (`task` false: a positive id), nested in the timer task running and clamped by its nesting
 // level, or one the platform queues (`task` true: a negative key), which neither nests nor is clamped.
 fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let handler = v8::Global::new(scope, args.get(0));
     let list = args.get(1);
     let list = (!list.is_null_or_undefined()).then(|| v8::Global::new(scope, list));
-    let now = args.get(2).number_value(scope).unwrap_or(0.0);
-    let timeout = args.get(3).number_value(scope).unwrap_or(0.0);
-    let repeats = args.get(4).is_true();
-    let task = args.get(5).is_true();
+    let timeout = args.get(2).number_value(scope).unwrap_or(0.0);
+    let repeats = args.get(3).is_true();
+    let task = args.get(4).is_true();
     let cid = realm_id(scope, &args);
     let arena = &mut dom(scope).arena;
+    let now = arena.enter(cid).clock;
     let takes = arena.takes_timers(cid);
     let nesting = if task { 0 } else { arena.timers_of(cid).and_then(|t| t.task_nesting).unwrap_or(0) };
     let timeout = if task { timeout } else { clamped(timeout, nesting) };
@@ -316,15 +331,15 @@ fn timer_task_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
 }
 
-// __dom.timerNext(now, limit) -> `[due, handler, args]`: the calling realm's next timer, where it falls due by `limit` —
+// __dom.timerNext(limit) -> `[due, handler, args]`: the calling realm's next timer, where it falls due by `limit` —
 // taken from the list, one that repeats to be scheduled again as its task ends (`timerTaskEnd`); undefined for none. A
 // page's is the timer task running from here, a platform task none. (A task a terminated handler never ended is ended
 // here first.)
 fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let now = args.get(0).number_value(scope).unwrap_or(0.0);
-    let limit = args.get(1).number_value(scope).unwrap_or(f64::INFINITY);
+    let limit = args.get(0).number_value(scope).unwrap_or(f64::INFINITY);
     let cid = realm_id(scope, &args);
     let arena = &mut dom(scope).arena;
+    let now = arena.enter(cid).clock;
     let timers = &mut arena.enter(cid).timers;
     timers.end_task();
     let Some(&(Due(due), seq, key)) = timers.order.first().filter(|&&(Due(due), _, _)| due <= limit) else { return };

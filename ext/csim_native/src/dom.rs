@@ -1020,6 +1020,9 @@ pub(crate) struct RealmState {
     // Its timers and the tasks the platform queues on their list (timers.rs) — a page's, which a new one's realm state
     // starts without.
     pub(crate) timers: crate::timers::Timers,
+    // …and its virtual clock: the time its event loop has reached, in milliseconds since its context began (timers.rs
+    // `clockNow`) — which runs on while a disposed context's code still does, as its timers do not.
+    pub(crate) clock: f64,
     // Its ResizeObservers that observe anything, and their observations (resize_observers.rs).
     pub(crate) resize_observers: crate::resize_observers::ResizeObservers,
     // The selects whose `<selectedcontent>` waits for an update at the end of the task (selected_content.rs).
