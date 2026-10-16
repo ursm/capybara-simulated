@@ -147,6 +147,10 @@ impl RealmArena {
         self.task_keys.discarded.remove(&cid);
         self.drop_timers(cid);
     }
+    // Whether realm `cid`'s context is gone — dropped, or disposed — where nothing it holds may root it again.
+    pub(crate) fn context_gone(&self, cid: i32) -> bool {
+        self.is_dropped(cid) || self.task_keys.discarded.contains(&cid)
+    }
     // Whether realm `cid` takes a timer: not one dropped, nor one disposed, but in a step still running in it.
     fn takes_timers(&mut self, cid: i32) -> bool {
         if self.is_dropped(cid) {

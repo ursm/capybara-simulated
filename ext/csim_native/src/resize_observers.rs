@@ -107,8 +107,13 @@ fn ro_observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     if !node.is_object() {
         return;
     }
-    let held = v8::Global::new(scope, node);
     let cid = realm_id(scope, &args);
+    // (…none by a realm whose context is gone — a frame its own callback removed, observing on: its target would root
+    // the context it is in, which nothing lets go of again before the next visit)
+    if crate::dom::realm(scope, cid).context_gone(cid) {
+        return;
+    }
+    let held = v8::Global::new(scope, node);
     let observers = &mut crate::dom::realm(scope, cid).resize_observers;
     let serial = observers.next_serial;
     observers.next_serial = serial.wrapping_add(1);
