@@ -403,7 +403,7 @@ fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let filter = match kind {
         CLASSES => {
             // (…in the mode of the scope's document, `b` its nid: `document_mode`)
-            let doc = if b.is_number() { nid_arg(scope, &args, 3) } else { None };
+            let doc = nid_arg(scope, &args, 3);
             let cid = crate::dom::realm_id(scope, &args);
             let quirks = crate::dom::realm(scope, cid).document_mode(doc).0;
             let list = utf16_arg(scope, a);

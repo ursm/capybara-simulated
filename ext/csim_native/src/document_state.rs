@@ -1,8 +1,9 @@
 // A document's state that is no node's tree (DOM §4.5, HTML §3.1): its mode (no-quirks, limited-quirks, quirks), its
-// readiness (loading, interactive, complete), whether it has a browsing context, whether it is an XML document,
-// whether a scoped custom element registry initialized it, and its throw-on-dynamic-markup-insertion counter (HTML
-// §8.4.1) — kept by the document's node, let go of with it. The bindings read and write each (`docState`, the
-// Document's `_quirks`, `_readyState`, … accessors: dom-nodes.js), and the parser sets the mode it finds.
+// readiness (loading, interactive, complete), whether it has a browsing context, whether it is an XMLDocument (the
+// interface's brand — no content type's XML-ness, the node's `STATE_XML_DOCUMENT`), whether a scoped custom element
+// registry initialized it, and its throw-on-dynamic-markup-insertion counter (HTML §8.4.1) — kept by the document's
+// node, let go of with it. The bindings read and write each (`docState`, the Document's `_quirks`, `_readyState`, …
+// accessors: dom-nodes.js), and the parser sets the mode it finds.
 
 use std::collections::HashMap;
 
@@ -63,7 +64,7 @@ impl RealmArena {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    // (…a fast call: `_quirks` is read by every `matches`, `closest` and class collection)
+    // (…a fast call: a sheet's cascade key and its owner's sheet memo read the mode on every refresh)
     crate::dom::register_fast(scope, ns, "docState", doc_state, DOC_STATE_FAST, context_id);
     crate::dom::register(scope, ns, "setDocState", set_doc_state, context_id);
 }

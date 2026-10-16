@@ -4127,7 +4127,7 @@ fn query(
     // is the element arg 4 names, else the root.
     let doc = nid_arg(scope, &args, 2);
     let first_only = args.get(3).is_true();
-    let scope_el = if args.get(4).is_number() { nid_arg(scope, &args, 4) } else { None }.unwrap_or(root);
+    let scope_el = nid_arg(scope, &args, 4).unwrap_or(root);
     let (quirks, html_doc) = realm(scope, cid).document_mode(doc);
     match crate::selector::query_text(realm(scope, cid), root, scope_el, &selector, first_only, quirks, html_doc) {
         Some(ids) => {
