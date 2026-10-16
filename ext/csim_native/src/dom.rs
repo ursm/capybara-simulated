@@ -4445,23 +4445,25 @@ fn sheet_disabled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let arena = realm(scope, cid);
     let owner = arena.owner_of_sheet(sheet);
     if let Some(value) = value {
-        arena.sheets.set_disabled(sheet, value);
-        // (…an owner's sheet enabled takes part whatever its set — an alternate one too — as a `<link>` whose `disabled`
-        // was removed does: its disabled flag unset)
-        if let Some(owner) = owner {
-            if value {
-                arena.explicitly_enabled.remove(&owner);
-            } else {
-                arena.explicitly_enabled.insert(owner);
-            }
+        // (…the sheet's own flag — an owner's sheet enabled takes part whatever its set, an alternate one too, until the
+        // owner has another sheet, which is added anew; the owner's explicitly enabled state the element's alone)
+        if let Some(stored) = arena.sheets.stored_mut(sheet) {
+            stored.disabled = value;
+            stored.enabled = !value && owner.is_some();
+            stored.set_excluded = false;
         }
         arena.sheet_epoch += 1;
     }
-    // (…an owner's sheet disabled where its document's sets leave it out — an alternate one, one of a set not selected — or
-    // its flag says so; any other by its flag)
+    // (…an owner's sheet disabled where its document's sets leave it out — an alternate one, one of a set not selected —
+    // or its flag says so, that kept once the owner lets it go; any other by its flag)
     let disabled = match owner.and_then(|o| arena.owner_sheet_takes_part(o)) {
-        Some(takes_part) => !takes_part,
-        None => arena.sheets.disabled(sheet),
+        Some(takes_part) => {
+            if let Some(stored) = arena.sheets.stored_mut(sheet) {
+                stored.set_excluded = !takes_part && !stored.disabled;
+            }
+            !takes_part
+        }
+        None => arena.sheets.get(sheet).is_some_and(|s| s.disabled || s.set_excluded),
     };
     rv.set_bool(disabled);
 }
@@ -4896,6 +4898,13 @@ fn owner_sheet(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let record = crate::sheet_owners::MadeSheet { realm: cid, id, rev, shown, text: kept, base, media: media.clone(), quirks, count };
     arena.made_sheets.insert(owner, record);
     if same.is_none() {
+        // (…a new sheet, made in place or anew, the owner's: its flags its own, as "add a CSS style sheet" begins them)
+        if let Some(stored) = arena.sheets.stored_mut(id) {
+            stored.owner = Some(owner);
+            stored.disabled = false;
+            stored.enabled = false;
+            stored.set_excluded = false;
+        }
         arena.owner_sheets.insert(owner, (id, count));
         arena.sheet_epoch += 1;
     }

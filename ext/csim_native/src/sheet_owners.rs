@@ -225,9 +225,17 @@ impl RealmArena {
         self.get(owner).is_some_and(|n| n.sheet_gen == count) && self.sheets.disabled(sheet)
     }
 
-    // The owner whose sheet the sheet `id` is, while it is — none for a constructed or an imported one.
+    // The owner whose sheet the sheet `id` is, while it is — none for a constructed or an imported one, nor once the
+    // owner obtained another.
     pub(crate) fn owner_of_sheet(&self, id: u32) -> Option<NodeId> {
-        self.owner_sheets.iter().find(|&(&owner, &(sheet, count))| sheet == id && self.get(owner).is_some_and(|n| n.sheet_gen == count)).map(|(&owner, _)| owner)
+        let owner = self.sheets.get(id).and_then(|s| s.owner)?;
+        let &(sheet, count) = self.owner_sheets.get(&owner)?;
+        (sheet == id && self.get(owner).is_some_and(|n| n.sheet_gen == count)).then_some(owner)
+    }
+    // …and whether a script unset the disabled flag of the sheet `owner` has (`StoredSheet::enabled`).
+    fn owner_sheet_enabled(&self, owner: NodeId) -> bool {
+        let Some(&(sheet, count)) = self.owner_sheets.get(&owner) else { return false };
+        self.get(owner).is_some_and(|n| n.sheet_gen == count) && self.sheets.get(sheet).is_some_and(|s| s.enabled)
     }
     // …and whether `owner`'s sheet takes part in its document's style sheet sets (CSSOM's disabled flag, which "add a CSS
     // style sheet" sets for one outside the selected set and a script's `disabled` writes) — none where it is in no
@@ -300,7 +308,7 @@ impl RealmArena {
                 if self.owner_sheet_disabled(owner) {
                     continue;
                 }
-                let enabled = self.explicitly_enabled.contains(&owner);
+                let enabled = self.explicitly_enabled.contains(&owner) || self.owner_sheet_enabled(owner);
                 (2u8, owner, n.sheet_gen, &title, &href, &media, alternate, enabled).hash(&mut hasher);
                 any_titled_or_alternate |= !title.is_empty() || alternate;
                 if !title.is_empty() && !alternate && preferred.is_none() {
@@ -322,7 +330,7 @@ impl RealmArena {
                 if self.owner_sheet_disabled(owner) {
                     continue;
                 }
-                let enabled = self.explicitly_enabled.contains(&owner);
+                let enabled = self.explicitly_enabled.contains(&owner) || self.owner_sheet_enabled(owner);
                 (1u8, owner, count, &title, &href, &media, alternate, enabled).hash(&mut hasher);
                 any_titled_or_alternate |= !title.is_empty() || alternate;
                 if !title.is_empty() && !alternate && preferred.is_none() {
@@ -338,7 +346,7 @@ impl RealmArena {
                 if self.owner_sheet_disabled(owner) {
                     continue;
                 }
-                let enabled = self.explicitly_enabled.contains(&owner);
+                let enabled = self.explicitly_enabled.contains(&owner) || self.owner_sheet_enabled(owner);
                 (0u8, owner, count, &title, &media, enabled).hash(&mut hasher);
                 if !title.is_empty() {
                     any_titled_or_alternate = true;
