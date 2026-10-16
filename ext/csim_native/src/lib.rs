@@ -95,6 +95,7 @@ mod mutation;
 mod mutation_observers;
 mod frame_navigation;
 mod navigables;
+mod observation_list;
 mod namespaces;
 mod node_handle;
 mod numbers;

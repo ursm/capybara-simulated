@@ -5,13 +5,12 @@
 // which name each by the number `roCreate` gave it, and which measure the targets (`resizeObservations`: the layout's
 // sizes, resize_observation.rs) for the gather to compare.
 
-use crate::dom::{nid_arg, realm_id, NodeId, RealmArena};
+use crate::dom::{nid_arg, realm_id, RealmArena};
+use crate::observation_list::ObservationList;
 
+// An observation, in its observer's list under the serial it was made with: a target observed again is observed by a
+// new one (§3.1 `observe`), which a broadcast of the old one's active entry leaves owing its first report.
 struct Observation {
-    // Which observation it is: a target observed again is observed by a new one (§3.1 `observe`), which a broadcast of
-    // the old one's active entry leaves owing its first report.
-    serial: u32,
-    target: NodeId,
     // The target, held — a root, which the realm's context going lets go of (`discard_resize_observers`).
     held: v8::Global<v8::Value>,
     // Where the observed box's `[inline, block]` sits among the sizes (resize_observation.rs `Sizes`): 0 the border
@@ -25,7 +24,7 @@ struct Observation {
 // One the gather found active: its target, its sizes and depth as the gather measured them, for the entry its
 // broadcast makes.
 struct Active {
-    serial: u32,
+    serial: u64,
     held: v8::Global<v8::Value>,
     sizes: [f64; 10],
     depth: f64,
@@ -33,7 +32,7 @@ struct Active {
 
 struct Observer {
     id: u32,
-    observations: Vec<Observation>,
+    observations: ObservationList<Observation>,
     active: Vec<Active>,
     skipped: bool,
 }
@@ -43,7 +42,6 @@ pub(crate) struct ResizeObservers {
     // In creation order: ids only grow, and an observer joins as it first observes something, so it is kept sorted.
     observing: Vec<Observer>,
     next: u32,
-    next_serial: u32,
 }
 
 impl RealmArena {
@@ -63,7 +61,7 @@ impl ResizeObservers {
     }
     // Every observation, in the order the gather visits them — the targets the bindings measure.
     fn targets(&self) -> impl Iterator<Item = &Observation> {
-        self.observing.iter().flat_map(|o| o.observations.iter())
+        self.observing.iter().flat_map(|o| o.observations.iter().map(|(_, _, ob)| ob))
     }
 }
 
@@ -115,15 +113,12 @@ fn ro_observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
     let held = v8::Global::new(scope, node);
     let observers = &mut crate::dom::realm(scope, cid).resize_observers;
-    let serial = observers.next_serial;
-    observers.next_serial = serial.wrapping_add(1);
     if observers.observer(id).is_none() {
         let at = observers.observing.partition_point(|o| o.id < id);
-        observers.observing.insert(at, Observer { id, observations: Vec::new(), active: Vec::new(), skipped: false });
+        observers.observing.insert(at, Observer { id, observations: ObservationList::default(), active: Vec::new(), skipped: false });
     }
     let observer = observers.observer(id).expect("inserted above");
-    observer.observations.retain(|o| o.target != target);
-    observer.observations.push(Observation { serial, target, held, box_at, last: [-1.0, -1.0] });
+    observer.observations.push(target, Observation { held, box_at, last: [-1.0, -1.0] });
 }
 
 // __dom.roUnobserve(id, target) -> whether the realm still holds the observer: one left observing nothing is no longer
@@ -135,7 +130,9 @@ fn ro_unobserve(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let cid = realm_id(scope, &args);
     let observers = &mut crate::dom::realm(scope, cid).resize_observers;
     let Some(observer) = observers.observer(id) else { return rv.set_bool(false) };
-    observer.observations.retain(|o| Some(o.target) != target);
+    if let Some(target) = target {
+        observer.observations.remove(target);
+    }
     let held = !observer.observations.is_empty() || !observer.active.is_empty();
     if !held {
         observers.observing.retain(|o| o.id != id);
@@ -178,7 +175,7 @@ fn ro_gather(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     for observer in &mut observers.observing {
         observer.active.clear();
         observer.skipped = false;
-        for ob in &observer.observations {
+        for (serial, _, ob) in observer.observations.iter() {
             let Some(m) = measured.get(at * 11..at * 11 + 11) else { break };
             at += 1;
             let sizes: [f64; 10] = m[..10].try_into().expect("ten sizes");
@@ -186,7 +183,7 @@ fn ro_gather(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
                 continue;
             }
             if m[10] > depth {
-                observer.active.push(Active { serial: ob.serial, held: ob.held.clone(), sizes, depth: m[10] });
+                observer.active.push(Active { serial, held: ob.held.clone(), sizes, depth: m[10] });
             } else {
                 observer.skipped = true;
             }
@@ -214,7 +211,7 @@ fn ro_take_active(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
     let mut shallowest = f64::INFINITY;
     for a in &active {
-        if let Some(ob) = observer.observations.iter_mut().find(|o| o.serial == a.serial) {
+        if let Some(ob) = observer.observations.by_serial_mut(a.serial) {
             ob.last = [a.sizes[ob.box_at], a.sizes[ob.box_at + 1]];
         }
         shallowest = shallowest.min(a.depth);

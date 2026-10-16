@@ -6,9 +6,9 @@
 // each by the number `ioCreate` gave it and measure the targets (`observeIntersections`: intersection.rs).
 
 use crate::dom::{nid_arg, realm_id, NodeId, RealmArena};
+use crate::observation_list::ObservationList;
 
 struct Registration {
-    target: NodeId,
     // The target, held — a root, which the realm's context going lets go of (`discard_intersection_observers`).
     held: v8::Global<v8::Value>,
     // -1 at first, which differs from every index an update computes, so the first update reports.
@@ -22,7 +22,7 @@ struct Observer {
     id: u32,
     delay: f64,
     // In the order observed: a target observed again keeps its place and its registration.
-    targets: Vec<Registration>,
+    targets: ObservationList<Registration>,
 }
 
 #[derive(Default)]
@@ -85,14 +85,13 @@ fn io_observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let observers = &mut crate::dom::realm(scope, cid).intersection_observers;
     if observers.observer(id).is_none() {
         let at = observers.observing.partition_point(|o| o.id < id);
-        observers.observing.insert(at, Observer { id, delay, targets: Vec::new() });
+        observers.observing.insert(at, Observer { id, delay, targets: ObservationList::default() });
     }
     let observer = observers.observer(id).expect("inserted above");
-    if observer.targets.iter().any(|r| r.target == target) {
+    if observer.targets.contains(target) {
         return rv.set_bool(false);
     }
-    observer.targets.push(Registration {
-        target,
+    observer.targets.push(target, Registration {
         held,
         previous_index: -1.0,
         previous_intersecting: false,
@@ -110,7 +109,9 @@ fn io_unobserve(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let cid = realm_id(scope, &args);
     let observers = &mut crate::dom::realm(scope, cid).intersection_observers;
     let Some(observer) = observers.observer(id) else { return rv.set_bool(false) };
-    observer.targets.retain(|r| Some(r.target) != target);
+    if let Some(target) = target {
+        observer.targets.remove(target);
+    }
     let held = !observer.targets.is_empty();
     if !held {
         observers.observing.retain(|o| o.id != id);
@@ -142,7 +143,7 @@ fn io_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     let mut due: Vec<(u32, Vec<v8::Global<v8::Value>>)> = Vec::new();
     for observer in &mut observers.observing {
         let mut targets = Vec::new();
-        for r in &mut observer.targets {
+        for (_, _, r) in observer.targets.iter_mut() {
             if time - r.last_update < observer.delay {
                 skipped = true;
                 continue;
@@ -183,13 +184,12 @@ fn io_record(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let cid = realm_id(scope, &args);
     let observers = &mut crate::dom::realm(scope, cid).intersection_observers;
     let mut moved = Vec::with_capacity(measured.len() / 4);
-    let observer = observers.observer(id);
-    let mut registrations = observer.map(|o| &mut o.targets);
+    let mut registrations = observers.observer(id).map(|o| &mut o.targets);
     for m in measured.chunks_exact(4) {
         let target = NodeId::from_i64(m[0] as i64);
         let (index, intersecting, visible) = (m[1], m[2] != 0.0, m[3] != 0.0);
         // (…none for one unobserved since it was measured — no page script runs between the two)
-        let Some(r) = registrations.as_mut().and_then(|rs| rs.iter_mut().find(|r| Some(r.target) == target)) else {
+        let Some(r) = registrations.as_mut().zip(target).and_then(|(rs, t)| rs.get_mut(t)) else {
             moved.push(0.0);
             continue;
         };
