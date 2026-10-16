@@ -32,4 +32,15 @@ RSpec.describe 'a nested document navigating itself' do
     poll_until { s.evaluate_script('document.getElementById("f").contentDocument.body?.textContent') == 'b' }
     expect(s.evaluate_script('[document.getElementById("f").getAttribute("src"), R]')).to eq(['/o', []])
   end
+
+  # …and a reload reloads the document it navigated to, not that `src`.
+  it 'reloads the URL it navigated to' do
+    s = session
+    poll_until { s.evaluate_script('document.getElementById("f").contentDocument?.body?.textContent') == 'o' }
+    s.execute_script('document.getElementById("f").contentWindow.location = "about:blank"')
+    poll_until { s.evaluate_script('document.getElementById("f").contentDocument.URL') == 'about:blank' }
+    s.execute_script('document.getElementById("f").contentWindow.location.reload()')
+    sleep 0.2
+    expect(poll_until { s.evaluate_script('document.getElementById("f").contentDocument.URL') }).to eq('about:blank')
+  end
 end
