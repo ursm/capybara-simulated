@@ -14,7 +14,7 @@ use style::properties::ComputedValues;
 use style::values::computed::Length;
 use style::values::specified::box_::{DisplayInside, DisplayOutside};
 
-// A node's parent in the FLAT tree (`flatTreeParent`, the style engine's `traversal_parent`): a slotted node's slot, a
+// A node's parent in the FLAT tree (the style engine's `traversal_parent`): a slotted node's slot, a
 // shadow tree's top-level node's host — none for a host's child no slot takes — and a generated box's element.
 pub(crate) fn flat_parent(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
     let node = arena.get(id)?;

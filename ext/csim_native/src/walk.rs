@@ -1653,7 +1653,7 @@ impl<'a> Walk<'a> {
     fn node(&self, id: NodeId) -> &'a crate::dom::NodeData {
         self.get(id).expect("a walked node is live")
     }
-    // …and its parent in the FLAT tree (`flatTreeParent`, the style engine's `traversal_parent`): a slotted node's slot,
+    // …and its parent in the FLAT tree (the style engine's `traversal_parent`): a slotted node's slot,
     // a shadow tree's top-level node's host — none for a host's child no slot takes — and a generated box's the
     // element it is of, which no tree says.
     fn parent_of(&self, id: NodeId) -> Option<NodeId> {

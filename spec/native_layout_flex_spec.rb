@@ -1034,7 +1034,7 @@ RSpec.describe 'native layout flex' do
     end
 
     # An atomic written through a `display: contents` wrapper inside a MIXED block, whose record hangs under the
-    # anonymous group: the route is asked by BOX (`layoutParent`), where `flatTreeParent` stopped at the wrapper
+    # anonymous group: the route is asked by BOX (`layoutParent`), where the flat-tree parent stopped at the wrapper
     # (119 against 102). Native hands the group's content the mixed block's own basis, not the group's auto height,
     # so its percentage HEIGHT resolves. Chrome's boxes.
     it 'sizes an item holding an atomic through `contents` in a mixed block natively' do
