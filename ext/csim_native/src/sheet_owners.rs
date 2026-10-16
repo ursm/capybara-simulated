@@ -214,8 +214,9 @@ pub(crate) struct SheetSet {
     // enabling, and the selected set — what the cascade is rebuilt on a change of.
     key: u64,
     selected: Option<String>,
-    // The owners that take part, in tree order.
+    // The owners that take part, in tree order — and those whose sheet the sets leave out.
     taking_part: Vec<NodeId>,
+    left_out: Vec<NodeId>,
 }
 
 impl RealmArena {
@@ -245,7 +246,9 @@ impl RealmArena {
         if self.get(root).is_none_or(|r| r.kind != NodeKind::Document) {
             return None;
         }
-        Some(self.sheet_set(root).taking_part.contains(&owner))
+        self.sheet_set(root);
+        let &(sheet, _) = self.owner_sheets.get(&owner)?;
+        self.sheets.get(sheet).map(|s| !s.set_excluded && !s.disabled)
     }
 
     // …kept until the tree or what else they turn on changes (the trees asked about bounded: a page's shadow roots).
@@ -256,6 +259,18 @@ impl RealmArena {
             }
         }
         let set = std::rc::Rc::new(self.make_sheet_set(root));
+        // (…each owner's sheet told whether the sets take it — the disabled flag "add a CSS style sheet" sets, which the
+        // sheet keeps once its owner lets it go, read or not while it had one)
+        for (owners, excluded) in [(&set.taking_part, false), (&set.left_out, true)] {
+            for &owner in owners {
+                let Some(&(sheet, count)) = self.owner_sheets.get(&owner) else { continue };
+                if self.get(owner).is_some_and(|n| n.sheet_gen == count) {
+                    if let Some(stored) = self.sheets.stored_mut(sheet) {
+                        stored.set_excluded = excluded;
+                    }
+                }
+            }
+        }
         if self.sheet_sets.len() >= 256 {
             self.sheet_sets.clear();
         }
@@ -362,12 +377,10 @@ impl RealmArena {
         let selected = (any_titled_or_alternate && !shadow).then(|| default_style.or(preferred).unwrap_or_default());
         selected.hash(&mut hasher);
         let set = selected.as_deref().unwrap_or("");
-        let taking_part = sheets
-            .into_iter()
-            .filter(|(_, title, alternate, enabled)| shadow || *enabled || if title.is_empty() { !alternate } else { title == set })
-            .map(|(owner, ..)| owner)
-            .collect();
-        SheetSet { key: hasher.finish(), selected, taking_part }
+        let (taking_part, left_out): (Vec<_>, Vec<_>) =
+            sheets.into_iter().partition(|(_, title, alternate, enabled)| shadow || *enabled || if title.is_empty() { !alternate } else { title == set });
+        let owners = |list: Vec<(NodeId, String, bool, bool)>| list.into_iter().map(|(owner, ..)| owner).collect();
+        SheetSet { key: hasher.finish(), selected, taking_part: owners(taking_part), left_out: owners(left_out) }
     }
 }
 

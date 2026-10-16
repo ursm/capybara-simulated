@@ -4457,12 +4457,7 @@ fn sheet_disabled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     // (…an owner's sheet disabled where its document's sets leave it out — an alternate one, one of a set not selected —
     // or its flag says so, that kept once the owner lets it go; any other by its flag)
     let disabled = match owner.and_then(|o| arena.owner_sheet_takes_part(o)) {
-        Some(takes_part) => {
-            if let Some(stored) = arena.sheets.stored_mut(sheet) {
-                stored.set_excluded = !takes_part && !stored.disabled;
-            }
-            !takes_part
-        }
+        Some(takes_part) => !takes_part,
         None => arena.sheets.get(sheet).is_some_and(|s| s.disabled || s.set_excluded),
     };
     rv.set_bool(disabled);
