@@ -26,7 +26,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // A URL's parts, in `parts`' order.
-fn texts(url: &Url) -> [String; 11] {
+pub(crate) fn texts(url: &Url) -> [String; 11] {
     [
         url.href(),
         url.protocol(),

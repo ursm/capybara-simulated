@@ -1008,6 +1008,8 @@ pub(crate) struct RealmState {
     // The realm document and its target fragments (as it stands, then decoded), when it has any — what `:target`
     // resolves (`is_target`).
     pub(crate) target: Option<(NodeId, Vec<String>)>,
+    // The realm's URL, as its `Location` reads it, and its document's target fragment (realm_location.rs).
+    pub(crate) location: crate::realm_location::RealmLocation,
     // The realm's style sheets, parsed under the arena's lock (sheets.rs): what its engine cascades and CSSOM reads.
     pub(crate) sheets: crate::sheets::SheetStore,
     // The generations its bindings key their memos on (`Generations`).
@@ -2575,6 +2577,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::document_state::install(scope, ns, context_id);
     crate::toggle_tasks::install(scope, ns, context_id);
     crate::selected_coordinates::install(scope, ns, context_id);
+    crate::realm_location::install(scope, ns, context_id);
     crate::resize_observers::install(scope, ns, context_id);
     crate::perf_timeline::install(scope, ns, context_id);
     crate::xhr_state::install(scope, ns, context_id);
@@ -2648,7 +2651,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "assignedNodesOf", assigned_nodes_of, context_id);
     register(scope, ns, "setParserFormOwner", set_parser_form_owner, context_id);
     register(scope, ns, "setCustomStates", set_custom_states, context_id);
-    register(scope, ns, "setTarget", set_target, context_id);
     register(scope, ns, "targetElement", target_element, context_id);
     register(scope, ns, "baseElement", base_element, context_id);
     register(scope, ns, "baseEpoch", base_epoch, context_id);
@@ -3586,28 +3588,6 @@ fn set_custom_states(
     if let Some(engine) = engine {
         engine.custom_states_changed(arena, id);
     }
-}
-
-// __dom.setTarget(docNid, fragments): the realm document's target fragments (target.js `targetFragments`) — none, one,
-// or the raw one and its decoded form.
-fn set_target(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(doc) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let mut fragments = Vec::new();
-    if let Ok(arr) = v8::Local::<v8::Array>::try_from(args.get(1)) {
-        for i in 0..arr.length() {
-            if let Some(v) = arr.get_index(scope, i) {
-                fragments.push(v.to_rust_string_lossy(scope));
-            }
-        }
-    }
-    let cid = realm_id(scope, &args);
-    realm(scope, cid).set_target(doc, fragments);
 }
 
 // __dom.targetElement(docNid) -> the realm document's target element — the indicated part of its target fragments
