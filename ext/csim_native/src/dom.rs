@@ -735,6 +735,9 @@ pub(crate) struct SharedWord {
 }
 
 impl SharedWord {
+    pub(crate) fn get(&self) -> u32 {
+        self.value
+    }
     pub(crate) fn set(&mut self, value: u32) {
         self.value = value;
         if let Some(buffer) = &self.buffer {
@@ -866,6 +869,10 @@ pub(crate) struct RealmArena {
     pub(crate) observers: crate::mutation_observers::Observers,
     // Each frame container's child navigable, each top-level one's target name, each realm's document (navigables.rs).
     pub(crate) navigables: crate::navigables::Navigables,
+    // Whether some realm's observer has ever observed another realm's node — a page's ResizeObserver or
+    // IntersectionObserver a frame's element — read with no call by every realm's bindings (`__dom.foreignObserved`):
+    // a frame's change then asks the realms above it for their observations too (observers.js).
+    pub(crate) foreign_observed: SharedWord,
     // Each frame container's navigation as it goes (frame_navigation.rs).
     pub(crate) frame_navigations: crate::frame_navigation::FrameNavigations,
     // Each document's pending scroll and scrollend event targets (scroll_events.rs).

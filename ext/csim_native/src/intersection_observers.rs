@@ -82,7 +82,9 @@ fn io_observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         return rv.set_bool(false);
     }
     let held = v8::Global::new(scope, node);
-    let observers = &mut crate::dom::realm(scope, cid).intersection_observers;
+    let arena = crate::dom::realm(scope, cid);
+    arena.note_observed(cid, target);
+    let observers = &mut arena.intersection_observers;
     if observers.observer(id).is_none() {
         let at = observers.observing.partition_point(|o| o.id < id);
         observers.observing.insert(at, Observer { id, delay, targets: ObservationList::default() });

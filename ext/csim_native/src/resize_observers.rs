@@ -45,6 +45,12 @@ pub(crate) struct ResizeObservers {
 }
 
 impl RealmArena {
+    // Realm `cid`'s observer observes `target`: another realm's node latches `foreign_observed`.
+    pub(crate) fn note_observed(&mut self, cid: i32, target: crate::dom::NodeId) {
+        if self.foreign_observed.get() == 0 && self.get(target).is_some_and(|n| n.realm != cid) {
+            self.foreign_observed.set(1);
+        }
+    }
     // Realm `cid`'s context disposed — a frame removed or navigated: its observations' targets held no more, nor what
     // they reach of its heap (the context with them), as a new context's realm state starts without them.
     pub(crate) fn discard_resize_observers(&mut self, cid: i32) {
@@ -76,6 +82,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "roTakeActive", ro_take_active, context_id);
     crate::dom::register(scope, ns, "roSkipped", ro_skipped, context_id);
     crate::dom::register(scope, ns, "roHolds", ro_holds, context_id);
+    let foreign = crate::dom::dom(scope).arena.foreign_observed.store();
+    crate::dom::view_word(scope, ns, "foreignObserved", foreign);
 }
 
 // __dom.roHolds(id) -> whether the realm holds the observer still: it observes something, or has an observation this
@@ -112,7 +120,9 @@ fn ro_observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         return;
     }
     let held = v8::Global::new(scope, node);
-    let observers = &mut crate::dom::realm(scope, cid).resize_observers;
+    let arena = crate::dom::realm(scope, cid);
+    arena.note_observed(cid, target);
+    let observers = &mut arena.resize_observers;
     if observers.observer(id).is_none() {
         let at = observers.observing.partition_point(|o| o.id < id);
         observers.observing.insert(at, Observer { id, observations: ObservationList::default(), active: Vec::new(), skipped: false });

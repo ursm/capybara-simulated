@@ -428,6 +428,23 @@ RSpec.describe 'Observer bindings' do
     expect(poll_until { session.evaluate_script('window.got.length >= 3 && window.got') }).to eq(%w[first second:1 second:1])
   end
 
+  # A frame's element a ResizeObserver of the page observes reports its frame's layout moving — no generation of the
+  # page's moves with it (Chrome: the outer observer's 30, then 40, before the frame's own).
+  it "reports a frame's element resized to a ResizeObserver of the page" do
+    session.execute_script(<<~JS)
+      document.body.innerHTML = '<iframe id=f srcdoc="<div id=x style=&quot;width: 30px; height: 30px&quot;></div>"></iframe>';
+      window.got = [];
+    JS
+    poll_until { session.evaluate_script('!!(document.getElementById("f").contentDocument && document.getElementById("f").contentDocument.getElementById("x"))') }
+    session.execute_script(<<~JS)
+      const x = document.getElementById('f').contentDocument.getElementById('x');
+      new ResizeObserver((entries) => window.got.push(entries[0].contentRect.width)).observe(x);
+    JS
+    poll_until { session.evaluate_script('window.got.length >= 1') }
+    session.execute_script('document.getElementById("f").contentDocument.getElementById("x").style.width = "40px"')
+    expect(poll_until { session.evaluate_script('window.got.length >= 2 && window.got') }).to eq([30, 40])
+  end
+
   # The loop (HTML "update the rendering"): a callback that resizes what it observes is called again in the same update
   # only for observations deeper than the shallowest it was given — the child the parent's width carries — and the
   # parent's, skipped, is reported as an ErrorEvent with no error, at the document's 0:0 (Chrome).
