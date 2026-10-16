@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::dom::{nid_arg, realm_id, utf16_arg, NodeId, RealmArena};
+use crate::dom::{nid_arg, realm_id, utf16_arg, NodeId, NodeKind, RealmArena};
 
 // MutationObserverInit, as `observe` gives it: which kinds of change, over the subtree or the node, with old values.
 const CHILD_LIST: u32 = 1;
@@ -325,6 +325,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moTakeRecords", take_records, context_id);
     crate::dom::register(scope, ns, "moTakeBatch", take_batch, context_id);
     crate::dom::register(scope, ns, "moTakeCascade", take_cascade, context_id);
+    crate::dom::register(scope, ns, "noteParsed", note_parsed, context_id);
+    crate::dom::register(scope, ns, "flushParsedMarks", flush_parsed_marks, context_id);
     crate::dom::register(scope, ns, "moQueue", queue, context_id);
     crate::dom::register(scope, ns, "moTakePending", take_pending, context_id);
     crate::dom::register(scope, ns, "moHasPending", has_pending, context_id);
@@ -473,6 +475,52 @@ fn take_records(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 // longer pending — and its signal slots, in the order signaled, taken: a notification's part in this realm. Each
 // observer's records are taken as its turn comes (`moTakeRecords`): one an earlier callback queued for it is its, and
 // one an earlier callback took, or disconnected, has none.
+// The streaming parser records nothing with nothing observing (its record is the observer path, and a coalesced text run
+// records nothing at all) — which is only right until a layout pass has run. A parser-blocking script that reads
+// geometry lays the PARTIAL tree out, and the boxes it laid out then kept their answers while the parse went on under
+// them: `#c`, parsed after such a read, had no box at all (Chrome: y 68, and the body 86 tall). So from the first pass
+// on, the parents the parse touches are kept — with whether their CHILDREN changed or only text was appended to the last
+// one — and marked as the next pass starts, as a childList record would have marked them: the element's subtree either
+// way (`li:last-of-type` stayed on the old last `<li>`, and a parsed `.flag` never reached `.c:has(.flag)`).
+#[derive(Default)]
+pub(crate) struct ParsedMarks {
+    layout_ran: bool,
+    parents: HashMap<NodeId, bool>,
+}
+
+// __dom.noteParsed(parentNid, children): the live document's parse changed `parent` — its children, or (`children`
+// false) the text of its last one — kept where a layout pass ran already (`ParsedMarks`).
+fn note_parsed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(parent) = nid_arg(scope, &args, 0) else { return };
+    let children = args.get(1).is_true();
+    let cid = realm_id(scope, &args);
+    let parsed = &mut crate::dom::realm(scope, cid).parsed;
+    if parsed.layout_ran {
+        *parsed.parents.entry(parent).or_default() |= children;
+    }
+}
+
+// __dom.flushParsedMarks() -> whether the parse changed anything since the last pass: a layout pass begins — the parents
+// it changed marked, in the realm whose tree each is in, each with its subtree where it is an element whose children
+// changed or whose last child is the text appended to (`GEN_DIRTY`, `GEN_SUBTREE_MARKS`) — and kept from now on.
+fn flush_parsed_marks(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    arena.parsed.layout_ran = true;
+    let parents = std::mem::take(&mut arena.parsed.parents);
+    for (&parent, &children) in &parents {
+        let Some(n) = arena.get(parent) else { continue };
+        let subtree = n.kind == NodeKind::Element
+            && (children || n.children.iter().rev().find_map(|&c| arena.get(c)).is_some_and(|c| c.kind == NodeKind::Text));
+        let Some(state) = arena.realm_state(n.realm) else { continue };
+        if subtree {
+            state.generations.bump(crate::dom::GEN_SUBTREE_MARKS);
+        }
+        state.generations.bump(crate::dom::GEN_DIRTY);
+    }
+    rv.set_bool(!parents.is_empty());
+}
+
 // __dom.moTakeCascade() -> [realm, version, …]: the realms whose cascade the changes since asked for (`note_cascade`) —
 // refreshed, or (`version` 1) its version moved — none any more.
 fn take_cascade(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

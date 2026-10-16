@@ -990,6 +990,8 @@ pub(crate) struct RealmArena {
 pub(crate) struct RealmState {
     // What its document's cascade was made of when last handed to its style engine (sheet_owners.rs `cascadeRekey`).
     pub(crate) cascade_key: Option<crate::sheet_owners::CascadeKey>,
+    // The parents its document's parse changed since its last layout pass began (mutation_observers.rs `noteParsed`).
+    pub(crate) parsed: crate::mutation_observers::ParsedMarks,
     // Moves with every write to the realm's nodes that can change an element's STATE (`:checked`, `:focus`, `:valid`, `:default`, …): a
     // state write, a value, a tree change (form owners, radio groups, fieldsets), an attribute a state reads.
     pub(crate) state_epoch: u64,
