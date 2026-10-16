@@ -580,7 +580,7 @@ fn listener_stores(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 
 // `__dom.listenedIn(rootNid)` -> the nodes among `root`'s shadow-including inclusive descendants that have a listener
 // store, as `nodes_value` answers them: those whose listeners — and event handlers, each a listener of its own while it
-// has a value — a `document.open()` erases. A node with no object has none.
+// has a value — a `document.open()` erases. A node with no handle has none: the store is the handle's.
 fn listened_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);
@@ -595,7 +595,8 @@ fn listened_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         stack.extend(n.shadow_root);
         stack.extend(n.children.iter().rev());
     }
-    // SAFETY: each handle lives while its node's object does, which nothing between here and the answer lets go of.
+    // SAFETY: the handles are traced through the tree's edges from the document (the receiver of the call), and nothing
+    // between the walk and this filter allocates on the V8 heap (`get` makes a Local): no collection can free one.
     let listened: Vec<crate::dom::NodeId> = held.into_iter().filter(|&(_, h)| unsafe { (*(*h).listeners.get()).get(scope) }.is_some()).map(|(id, _)| id).collect();
     rv.set(crate::dom::nodes_value(scope, cid, &listened));
 }
