@@ -89,4 +89,23 @@ RSpec.describe 'Form submission states' do
     s.execute_script('document.getElementById("a").submit(); location.href = "/b"')
     expect(s.current_path).to eq('/b')
   end
+
+  # …and of a hyperlink a script follows (Chrome: `/l` for the form first, `/g?q=1` for the link first), which a script
+  # the driver runs and a timer's task each take as they end.
+  it 'follows a hyperlink a script activates, the later of it and a form submission taken' do
+    received = []
+    s = simulated_session(app(received, '<form id=a action=/g><input name=q value=1></form><a id=l href=/l>l</a>'))
+    s.visit '/'
+    s.execute_script('document.getElementById("l").click()')
+    expect(s.current_path).to eq('/l')
+    s.visit '/'
+    s.execute_script('setTimeout(() => document.getElementById("l").click(), 5)')
+    expect(s).to have_current_path('/l')
+    s.visit '/'
+    s.execute_script('document.getElementById("a").submit(); document.getElementById("l").click()')
+    expect(s.current_path).to eq('/l')
+    s.visit '/'
+    s.execute_script('document.getElementById("l").click(); document.getElementById("a").submit()')
+    expect(s.current_path).to eq('/g')
+  end
 end
