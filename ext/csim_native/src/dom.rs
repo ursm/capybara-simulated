@@ -1010,6 +1010,8 @@ pub(crate) struct RealmState {
     pub(crate) target: Option<(NodeId, Vec<String>)>,
     // The realm's URL, as its `Location` reads it, and its document's target fragment (realm_location.rs).
     pub(crate) location: crate::realm_location::RealmLocation,
+    // The font files its faces' sources gave (font_files.rs).
+    pub(crate) font_files: crate::font_files::FontFiles,
     // The realm's style sheets, parsed under the arena's lock (sheets.rs): what its engine cascades and CSSOM reads.
     pub(crate) sheets: crate::sheets::SheetStore,
     // The generations its bindings key their memos on (`Generations`).
@@ -2581,6 +2583,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::toggle_tasks::install(scope, ns, context_id);
     crate::selected_coordinates::install(scope, ns, context_id);
     crate::realm_location::install(scope, ns, context_id);
+    crate::font_files::install(scope, ns, context_id);
     crate::resize_observers::install(scope, ns, context_id);
     crate::perf_timeline::install(scope, ns, context_id);
     crate::xhr_state::install(scope, ns, context_id);

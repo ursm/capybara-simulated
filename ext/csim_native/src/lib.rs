@@ -142,6 +142,7 @@ mod timers;
 mod toggle_tasks;
 mod selected_coordinates;
 mod realm_location;
+mod font_files;
 mod token_list;
 mod traversal;
 // The Unicode classes layout asks of a character, parsed out of the regex that spells them by regex-syntax.
