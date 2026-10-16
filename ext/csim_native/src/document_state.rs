@@ -1,8 +1,9 @@
 // A document's state that is no node's tree (DOM §4.5, HTML §3.1): its mode (no-quirks, limited-quirks, quirks), its
 // readiness (loading, interactive, complete), whether it has a browsing context, whether it is an XMLDocument (the
 // interface's brand — no content type's XML-ness, the node's `STATE_XML_DOCUMENT`), whether a scoped custom element
-// registry initialized it, and its throw-on-dynamic-markup-insertion counter (HTML §8.4.1) — kept by the document's
-// node, let go of with it. The bindings read and write each (`docState`, the Document's `_quirks`, `_readyState`, …
+// registry initialized it, its throw-on-dynamic-markup-insertion counter (HTML §8.4.1), and its currently executing
+// script (`currentScript`, HTML §3.1.5: the script element running, null in a shadow tree or a module) — kept by the
+// document's node, let go of with it. The bindings read and write each (`docState`, the Document's `_quirks`, `_readyState`, …
 // accessors: dom-nodes.js), and the parser sets the mode it finds.
 
 use std::collections::HashMap;
@@ -15,13 +16,14 @@ struct DocumentState {
     ready: u32,
     flags: u32,
     insertions: u32,
+    current_script: Option<NodeId>,
 }
 
 impl Default for DocumentState {
     // A document is complete and in no-quirks mode until it says otherwise (DOM "create a document": mode "no-quirks";
     // the parser makes one loading).
     fn default() -> Self {
-        DocumentState { mode: 0, ready: READY_COMPLETE, flags: 0, insertions: 0 }
+        DocumentState { mode: 0, ready: READY_COMPLETE, flags: 0, insertions: 0, current_script: None }
     }
 }
 
@@ -67,6 +69,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     // (…a fast call: a sheet's cascade key and its owner's sheet memo read the mode on every refresh)
     crate::dom::register_fast(scope, ns, "docState", doc_state, DOC_STATE_FAST, context_id);
     crate::dom::register(scope, ns, "setDocState", set_doc_state, context_id);
+    crate::dom::register(scope, ns, "currentScript", current_script, context_id);
+    crate::dom::register(scope, ns, "setCurrentScript", set_current_script, context_id);
 }
 
 // __dom.docState(docNid, field) -> the document's field (0 its mode — 0 no-quirks, 1 limited-quirks, 2 quirks; 1 its
@@ -120,4 +124,20 @@ fn set_doc_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         INSERTIONS => state.insertions = value,
         _ => {}
     }
+}
+
+// __dom.currentScript(docNid) -> the document's currently executing script, or null.
+fn current_script(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let doc = nid_arg(scope, &args, 0);
+    // (…none that is gone: a script freed since is no node to answer with)
+    let arena = &crate::dom::dom(scope).arena;
+    let script = doc.and_then(|d| arena.document_states.0.get(&d)).and_then(|s| s.current_script).filter(|&s| arena.get(s).is_some());
+    rv.set(crate::dom::node_value(scope, script));
+}
+
+// __dom.setCurrentScript(docNid, scriptNid) — the document's currently executing script, none for no node (`-1`).
+fn set_current_script(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return };
+    let script = nid_arg(scope, &args, 1);
+    crate::dom::dom(scope).arena.document_states.0.entry(doc).or_default().current_script = script;
 }
