@@ -1,8 +1,10 @@
 // An XMLHttpRequest's state (XHR §3): its state (UNSENT, OPENED, HEADERS_RECEIVED, LOADING, DONE), its request — method,
-// URL and the fragment kept apart from it, the synchronous flag, the timeout, the credentials mode — the send flag and
-// the upload-complete flag's opposite (an upload in progress), whether the fetch in flight was terminated, the response
-// type and override MIME type, the response's status, status message and URL, and how often it was opened (a fetch, a
-// delivery or a worker's answer of an earlier open() is stale). The steps that read and change them — open(), send(),
+// URL and the fragment kept apart from it, open()'s username and password, the synchronous flag, the timeout, the
+// credentials mode — the send flag and the upload-complete flag's opposite (an upload in progress, of its body's size),
+// when it was sent (the timeout's reference, on the virtual clock; the resource timing's start, on the timeline's),
+// whether the fetch in flight was terminated, the response type and override MIME type, the response's status, status
+// message and URL, and how often it was opened (a fetch, a delivery or a worker's answer of an earlier open() is
+// stale). The steps that read and change them — open(), send(),
 // abort()'s and the request error steps' state changes, the setters' checks — are here; the events they fire, the
 // fetch, the response body and the objects made of it are the bindings' (xhr.js). An XHR's object holds a handle on V8's
 // C++ heap (`__dom.XhrBase`, as a header list's does: headers.rs) that owns the state.
@@ -32,11 +34,16 @@ struct XhrState {
     method: Vec<u16>,
     url: Vec<u16>,
     fragment: Vec<u16>,
+    username: Option<Vec<u16>>,
+    password: Option<Vec<u16>>,
     synchronous: bool,
     timeout: u32,
     with_credentials: bool,
     send: bool,
     upload_active: bool,
+    upload_total: f64,
+    send_start: Option<f64>,
+    timing_start: f64,
     aborted: bool,
     response_type: usize,
     override_mime: Option<(Vec<u16>, Option<Vec<u16>>)>,
@@ -152,13 +159,19 @@ const URL: u32 = 12;
 const FRAGMENT: u32 = 13;
 const OVERRIDE_MIME: u32 = 14;
 const OVERRIDE_CHARSET: u32 = 15;
+const USERNAME: u32 = 16;
+const PASSWORD: u32 = 17;
+const SEND_START: u32 = 18;
+const UPLOAD_TOTAL: u32 = 19;
+const TIMING_START: u32 = 20;
 
 fn units<'s>(scope: &mut v8::PinScope<'s, '_>, units: &[u16]) -> v8::Local<'s, v8::Value> {
     crate::dom::utf16_value(scope, units)
 }
 
-// __dom.xhrGet(state, field) -> the field (`X_*`): a number, a boolean or a string — the override MIME type's essence
-// and charset null for none.
+// __dom.xhrGet(state, field) -> the field (`X_*`): a number, a boolean or a string — the response type its index in
+// `RESPONSE_TYPES` (xhr.js names them alike), the override MIME type's essence and charset, the username, the password
+// and when it was sent null for none.
 fn get_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let field = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
     let Some(s) = state(scope, args.get(0)) else { return rv.set_undefined() };
@@ -172,10 +185,17 @@ fn get_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
         ASYNC => rv.set_bool(!s.synchronous),
         SEND => rv.set_bool(s.send),
         UPLOAD_ACTIVE => rv.set_bool(s.upload_active),
-        RESPONSE_TYPE => {
-            let name = v8::String::new(scope, RESPONSE_TYPES[s.response_type]).map(Into::into);
-            rv.set(name.unwrap_or_else(|| v8::undefined(scope).into()));
-        }
+        RESPONSE_TYPE => rv.set_uint32(s.response_type as u32),
+        UPLOAD_TOTAL => rv.set_double(s.upload_total),
+        TIMING_START => rv.set_double(s.timing_start),
+        SEND_START => match s.send_start {
+            Some(at) => rv.set_double(at),
+            None => rv.set_null(),
+        },
+        USERNAME | PASSWORD => match if field == USERNAME { &s.username } else { &s.password } {
+            Some(text) => rv.set(units(scope, text)),
+            None => rv.set_null(),
+        },
         STATUS_TEXT => rv.set(units(scope, &s.status_text)),
         RESPONSE_URL => rv.set(units(scope, &s.response_url)),
         METHOD => rv.set(units(scope, &s.method)),
@@ -193,38 +213,54 @@ fn get_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     }
 }
 
-// __dom.xhrSet(state, field, value) — what the response's steps write: its state as the response arrives
-// (HEADERS_RECEIVED, LOADING, DONE), its status, status message and URL, the request URL its credentials were taken
-// out of, an upload no more in progress.
+// __dom.xhrSet(state, field, value) — what the send's and the response's steps write: when it was sent, an upload in
+// progress or no more and its size, its state as the response arrives (HEADERS_RECEIVED, LOADING, DONE), its status,
+// status message and URL, the request URL its credentials were taken out of.
 fn set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    enum Value {
+        Number(f64),
+        Text(Vec<u16>),
+        Flag(bool),
+    }
     let field = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
     let value = args.get(2);
-    let number = value.uint32_value(scope).unwrap_or(0);
-    let text = crate::dom::utf16_arg(scope, value);
+    // (…converted as the field takes it, before the state is borrowed)
+    let value = match field {
+        STATUS_TEXT | RESPONSE_URL | URL => Value::Text(crate::dom::utf16_arg(scope, value)),
+        UPLOAD_ACTIVE => Value::Flag(value.is_true()),
+        _ => Value::Number(value.number_value(scope).unwrap_or(0.0)),
+    };
     let Some(s) = state(scope, args.get(0)) else { return };
     let mut s = s.borrow_mut();
-    match field {
-        READY => s.ready = number.min(DONE),
-        STATUS => s.status = number,
-        STATUS_TEXT => s.status_text = text,
-        RESPONSE_URL => s.response_url = text,
-        URL => s.url = text,
-        UPLOAD_ACTIVE => s.upload_active = value.is_true(),
+    let whole = |n: f64| if n.is_finite() && n > 0.0 { n.min(f64::from(u32::MAX)) as u32 } else { 0 };
+    match (field, value) {
+        (READY, Value::Number(n)) => s.ready = whole(n).min(DONE),
+        (STATUS, Value::Number(n)) => s.status = whole(n),
+        (SEND_START, Value::Number(n)) => s.send_start = Some(n),
+        (UPLOAD_TOTAL, Value::Number(n)) => s.upload_total = n,
+        (TIMING_START, Value::Number(n)) => s.timing_start = n,
+        (STATUS_TEXT, Value::Text(t)) => s.status_text = t,
+        (RESPONSE_URL, Value::Text(t)) => s.response_url = t,
+        (URL, Value::Text(t)) => s.url = t,
+        (UPLOAD_ACTIVE, Value::Flag(on)) => s.upload_active = on,
         _ => {}
     }
 }
 
-// __dom.xhrOpen(state, method, url, fragment, async, inDocument) -> -1 where a synchronous request from a document set
-// a response type or a timeout (InvalidAccessError), else whether its readystatechange fires — none where it was OPENED
-// already (open-open-send / open-send-open): the open() steps past the method's and the URL's checks, the bindings'.
-// The request is the one opened, its method normalized (the bindings'), its fragment apart from its URL; the response
-// reset, the send flag unset, the fetch terminated — what is still queued for it made stale, as the count moves on.
+// __dom.xhrOpen(state, method, url, fragment, async, inDocument, username, password) -> -1 where a synchronous request
+// from a document set a response type or a timeout (InvalidAccessError), else whether its readystatechange fires —
+// none where it was OPENED already (open-open-send / open-send-open): the open() steps past the method's and the URL's
+// checks, the bindings'. The request is the one opened, its method normalized (the bindings'), its fragment apart from
+// its URL, its username and password (null for none given); the response reset, the send flag unset, the fetch
+// terminated — what is still queued for it made stale, as the count moves on.
 fn open_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let method = crate::dom::utf16_arg(scope, args.get(1));
     let url = crate::dom::utf16_arg(scope, args.get(2));
     let fragment = crate::dom::utf16_arg(scope, args.get(3));
     let asynchronous = args.get(4).is_true();
     let in_document = args.get(5).is_true();
+    let username = Some(args.get(6)).filter(|u| u.is_string()).map(|u| crate::dom::utf16_arg(scope, u));
+    let password = Some(args.get(7)).filter(|p| p.is_string()).map(|p| crate::dom::utf16_arg(scope, p));
     let Some(s) = state(scope, args.get(0)) else { return rv.set_int32(0) };
     let mut s = s.borrow_mut();
     if !asynchronous && in_document && (s.response_type != 0 || s.timeout != 0) {
@@ -234,6 +270,8 @@ fn open_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     s.method = method;
     s.url = url;
     s.fragment = fragment;
+    s.username = username;
+    s.password = password;
     s.synchronous = !asynchronous;
     s.aborted = false;
     s.send = false;
