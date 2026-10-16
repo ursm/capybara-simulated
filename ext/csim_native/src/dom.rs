@@ -1127,6 +1127,7 @@ impl RealmArena {
             self.has_shadow_hosts = false;
             self.direction_sources = false;
             self.inert_sources = false;
+            self.foreign_observed.set(0);
         }
     }
     pub(crate) fn is_dropped(&self, cid: i32) -> bool {
