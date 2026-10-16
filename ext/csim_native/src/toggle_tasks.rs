@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use crate::dom::{nid_arg, NodeId, RealmArena};
 
 #[derive(Default)]
-pub(crate) struct ToggleTasks(HashMap<NodeId, (f64, bool)>);
+pub(crate) struct ToggleTasks(HashMap<NodeId, (i64, bool)>);
 
 impl ToggleTasks {
     pub(crate) fn is_empty(&self) -> bool {
@@ -38,7 +38,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 fn toggle_task(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(el) = nid_arg(scope, &args, 0) else { return rv.set_null() };
     let Some(&(key, open)) = crate::dom::dom(scope).arena.toggle_tasks.0.get(&el) else { return rv.set_null() };
-    let key = v8::Number::new(scope, key);
+    let key = v8::Number::new(scope, key as f64);
     let open = v8::Boolean::new(scope, open);
     rv.set(v8::Array::new_with_elements(scope, &[key.into(), open.into()]).into());
 }
@@ -47,7 +47,7 @@ fn toggle_task(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 // with no key (`null`), none queued any more.
 fn set_toggle_task(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(el) = nid_arg(scope, &args, 0) else { return };
-    let key = args.get(1).number_value(scope).filter(|_| args.get(1).is_number());
+    let key = args.get(1).integer_value(scope).filter(|_| args.get(1).is_number());
     let open = args.get(2).is_true();
     let tasks = &mut crate::dom::dom(scope).arena.toggle_tasks.0;
     match key {

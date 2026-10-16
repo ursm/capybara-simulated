@@ -27,10 +27,20 @@ pub(crate) fn is_sheet_owner(n: &NodeData) -> bool {
 impl RealmArena {
     // The owner obtains a new sheet. (Quietly: which sheet it has is no input to a layout, nor to the memos `mutations`
     // keys — the style sheet sets', which it is, move on `sheet_epoch`.)
+    // A `<style>`'s new sheet owes its `load` (HTML "update a style block": the critical subresources obtained, a load
+    // task queued — for every update that makes one): a connected one is listed for the bindings to queue it.
     pub(crate) fn renew_sheet(&mut self, id: NodeId) -> bool {
         let Some(n) = self.get_mut_quietly(id).filter(|n| is_sheet_owner(n)) else { return false };
         n.sheet_gen = n.sheet_gen.wrapping_add(1);
+        let style = &*n.local_name == "style";
+        if style {
+            n.element_flags &= !crate::element_flags::STYLE_LOAD_FIRED;
+        }
         self.sheet_epoch += 1;
+        if style && self.is_connected(id) && !self.style_loads_owed.contains(&id) {
+            self.style_loads_owed.push(id);
+            self.observers.note(crate::mutation_observers::STYLE_LOADS);
+        }
         true
     }
 
@@ -58,8 +68,17 @@ impl RealmArena {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "sheetGen", sheet_gen_op, context_id);
+    crate::dom::register(scope, ns, "takeStyleLoads", take_style_loads_op, context_id);
     crate::dom::register(scope, ns, "sheetOwned", sheet_owned_op, context_id);
     crate::dom::register(scope, ns, "sheetSet", sheet_set_op, context_id);
+}
+
+// __dom.takeStyleLoads() -> the `<style>` elements owed a `load` since their sheets were made (`renew_sheet`), as
+// `nodes_value` answers them — none any more.
+fn take_style_loads_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let owed = std::mem::take(&mut crate::dom::dom(scope).arena.style_loads_owed);
+    rv.set(crate::dom::nodes_value(scope, cid, &owed));
 }
 
 // __dom.sheetGen(nid) -> how many sheets the owner has had (`NodeData::sheet_gen`): its sheet is the one of this count.

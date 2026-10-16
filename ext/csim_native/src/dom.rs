@@ -230,8 +230,8 @@ pub(crate) struct NodeData {
     // A script element's flags (HTML §4.12.1.1: "already started", parser-inserted, "force async" — script.rs `SCRIPT_*`).
     pub(crate) script_flags: u8,
     // The flags of an element's own steps that no attribute carries and the bindings set (element_flags.rs): a
-    // select's and a selectedcontent's, a form's.
-    pub(crate) element_flags: u8,
+    // select's and a selectedcontent's, a form's, a style's, a custom element's.
+    pub(crate) element_flags: u16,
     // An HTML or SVG `<style>`'s, an HTML `<link>`'s count of the sheets it has had (sheet_owners.rs).
     pub(crate) sheet_gen: u32,
     // A shadow root's host (None for every other node): the shadow-including ancestor chain `:focus` walks…
@@ -891,6 +891,8 @@ pub(crate) struct RealmArena {
     // How many changes of the tree gave a sheet owner a new sheet (sheet_owners.rs), which a change's record asks of
     // (mutation.rs `record_child_list`)…
     pub(crate) sheet_renewals: u32,
+    // The `<style>` elements owed a `load` since their sheets were made (sheet_owners.rs `renew_sheet`).
+    pub(crate) style_loads_owed: Vec<NodeId>,
     // …how many wrote a tree's edges — a node linked or unlinked, anywhere, by whichever realm's code: what the bindings'
     // collections of a parent's children key on (`edgeGen`)…
     pub(crate) edge_gen: SharedWord,

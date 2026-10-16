@@ -61,7 +61,8 @@ pub(crate) struct Observers {
     // engine signaled a slot for asks the microtask to be queued by, [4] whether a write's own steps changed an element's
     // state (a radio group unchecked by an insertion), which the bindings' generations have to hear of — and what of the
     // bindings' a change the engine made asks for: [5] a rendering update's observations scheduled, [6] the document's
-    // cascade refreshed, [7] the cascade version moved (a shadow tree's sheet).
+    // cascade refreshed, [7] the cascade version moved (a shadow tree's sheet), [8] a `<style>` owed its `load`
+    // (sheet_owners.rs `takeStyleLoads`).
     flags: Option<v8::SharedRef<v8::BackingStore>>,
     // The realm whose microtask queue holds the agent's mutation observer microtask, while one does (`moQueue`).
     queued_in: Option<i32>,
@@ -74,7 +75,8 @@ const STATE_CHANGED: usize = 4;
 pub(crate) const OBSERVATIONS: usize = 5;
 pub(crate) const CASCADE_REFRESH: usize = 6;
 pub(crate) const CASCADE_VERSION: usize = 7;
-const FLAGS: usize = 8;
+pub(crate) const STYLE_LOADS: usize = 8;
+const FLAGS: usize = 9;
 
 impl Observers {
     // Whether any node has a registered observer: a change with none asks no more.
