@@ -185,6 +185,16 @@ RSpec.describe 'Capybara DSL through simulated driver' do
     expect(session.current_path).to eq('/')
   end
 
+  # A node's value is its `value` property, as Selenium's (`native[:value]`) is: an `<output>`'s its descendant text, which
+  # no attribute carries — and what script set it to.
+  it "reads an output's value from its text" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><output id="o">abc</output>']] })
+    s.visit '/'
+    expect(s.find('#o').value).to eq('abc')
+    s.execute_script('document.getElementById("o").value = "set"')
+    expect(s.find('#o').value).to eq('set')
+  end
+
   it 'reset! clears state between examples' do
     session.visit('/')
     session.fill_in('Full name', with: 'Daisy')

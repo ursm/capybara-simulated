@@ -101,8 +101,9 @@ fn plan_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let interactive = args.get(2).is_true();
     let cid = realm_id(scope, &args);
     let navs = &mut crate::dom::realm(scope, cid).frame_navigations;
+    // (…its plan on this same navigable is replaced below, as any other is)
     if interactive {
-        if let Some(&(token, other)) = navs.1.last.get(&form) {
+        if let Some(&(token, other)) = navs.1.last.get(&form).filter(|&&(_, other)| other != container) {
             if let Some(nav) = navs.0.get_mut(&other).filter(|n| n.planned == token) {
                 nav.planned = 0;
                 nav.flags &= !NAV_PENDING;
