@@ -112,7 +112,7 @@ fn set_location_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 // element it indicates.
 fn set_target_hash(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let doc = nid_arg(scope, &args, 0);
-    let hash = (args.length() > 1).then(|| args.get(1).to_rust_string_lossy(scope));
+    let hash = (!args.get(1).is_undefined()).then(|| args.get(1).to_rust_string_lossy(scope));
     let cid = realm_id(scope, &args);
     realm(scope, cid).retarget(doc, hash);
 }

@@ -402,6 +402,18 @@ RSpec.describe 'element state in the native arena' do
       expect(native_ids(':target')).to eq(%w[%62])
     end
 
+    # The fragment decoded is the URL Standard's percent-decode, then UTF-8 decode (HTML "find a potential indicated
+    # element"): a `%` that escapes nothing kept, a byte that is no UTF-8 U+FFFD — none of it a reason to look no further.
+    it 'decodes a fragment that is no URI component' do
+      session.execute_script(<<~JS)
+        document.body.innerHTML = '<p id="\\uFFFD">fffd</p><p id="%zzA">zz</p>';
+        location.hash = '#%FF';
+      JS
+      expect(native_ids(':target')).to eq(["\u{FFFD}"])
+      session.execute_script("location.hash = '#%zz%41'")
+      expect(native_ids(':target')).to eq(%w[%zzA])
+    end
+
     # An element can be the target only if its own id or name is the fragment: the rest answer without a walk (a walk
     # per element per mutation took 14 ms a mutation on 20,000 elements under an SPA-style hash).
     it 'answers :target without walking the tree for elements that cannot be it' do
