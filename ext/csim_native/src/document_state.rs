@@ -18,6 +18,9 @@ struct DocumentState {
     ready: u32,
     flags: u32,
     insertions: u32,
+    // Its ignore-destructive-writes counter (HTML §8.4.3): raised while an external classic script it fetched runs, a
+    // `document.write` that would open it then ignored.
+    destructive_ignored: u32,
     current_script: Option<NodeId>,
 }
 
@@ -25,7 +28,7 @@ impl Default for DocumentState {
     // A document is complete and in no-quirks mode until it says otherwise (DOM "create a document": mode "no-quirks";
     // the parser makes one loading).
     fn default() -> Self {
-        DocumentState { mode: 0, ready: READY_COMPLETE, flags: 0, insertions: 0, current_script: None }
+        DocumentState { mode: 0, ready: READY_COMPLETE, flags: 0, insertions: 0, destructive_ignored: 0, current_script: None }
     }
 }
 
@@ -34,6 +37,7 @@ const MODE: u32 = 0;
 const READY: u32 = 1;
 const FLAGS: u32 = 2;
 const INSERTIONS: u32 = 3;
+const DESTRUCTIVE_IGNORED: u32 = 4;
 const READY_COMPLETE: u32 = 2;
 
 // …its texts, as the bindings number them (`DOC_TEXT_*`): none until set — a document's URL then its realm's, its
@@ -98,7 +102,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // __dom.docState(docNid, field) -> the document's field (0 its mode — 0 no-quirks, 1 limited-quirks, 2 quirks; 1 its
-// readiness — 0 loading, 1 interactive, 2 complete; 2 its flags, the bindings'; 3 its markup insertion counter).
+// readiness — 0 loading, 1 interactive, 2 complete; 2 its flags, the bindings'; 3 its markup insertion counter; 4 its
+// ignore-destructive-writes counter).
 fn doc_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     // (…the state a document starts with for one the engine holds none of, as the fast call answers)
     let doc = nid_arg(scope, &args, 0);
@@ -112,6 +117,7 @@ fn field_of(state: DocumentState, field: u32) -> u32 {
         READY => state.ready,
         FLAGS => state.flags,
         INSERTIONS => state.insertions,
+        DESTRUCTIVE_IGNORED => state.destructive_ignored,
         _ => 0,
     }
 }
@@ -146,6 +152,7 @@ fn set_doc_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         READY => state.ready = value.min(2),
         FLAGS => state.flags = value,
         INSERTIONS => state.insertions = value,
+        DESTRUCTIVE_IGNORED => state.destructive_ignored = value,
         _ => {}
     }
 }

@@ -81,6 +81,9 @@ const TREES = [
                                        // coverage gate only checks member EXISTENCE; this checks behaviour
   'html/webappapis/timers',            // setTimeout/setInterval/clearTimeout/clamp/ordering
   'html/webappapis/microtask-queuing', // queueMicrotask + microtask-checkpoint ordering
+  'html/webappapis/dynamic-markup-insertion', // document.open / write / writeln / close and the script-created
+                                       // parser they drive, innerHTML / outerHTML and the *HTMLUnsafe methods —
+                                       // the input stream a page writes into
   'html/webappapis/scripting/events',  // the HTML "event handler" algorithm — IDL/inline on-handler
                                        // reflection, compile-on-first-use + lexical scopes, listener
                                        // registration order, OnErrorEventHandler; validates the

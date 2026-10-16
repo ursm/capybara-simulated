@@ -242,8 +242,9 @@ RSpec.describe 'element state in the native arena' do
     it 'drops focus and hover that document.open took away' do
       fresh('<input id=gone>')
       session.find('#gone').click
-      # …and a script that kept the element and puts it back does not find it focused again.
-      session.execute_script("const g = document.getElementById('gone'); document.open(); document.body.appendChild(g)")
+      # …and a script that kept the element and puts it back — into what it then wrote: an opened document has no
+      # children until it does — does not find it focused again.
+      session.execute_script("const g = document.getElementById('gone'); document.open(); document.write('<p>'); document.body.appendChild(g)")
       expect(native_ids(':focus, :focus-within')).to eq([])
     end
 

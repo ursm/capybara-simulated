@@ -1542,8 +1542,6 @@ css/css-transitions/disconnected-element-001.html:
 - Transitions are canceled when an element is re-parented to the same node
 - Transitions are canceled when an element is removed from the document
 - "[harness] TIMEOUT"
-css/css-transitions/dynamic-root-element.html:
-- Transitions don't incorrectly start on dynamic document element insertion
 css/css-transitions/idlharness-2.html:
 - 'Partial dictionary TransitionEventInit: original dictionary defined'
 - 'Partial interface TransitionEvent: original interface defined'
@@ -1609,13 +1607,10 @@ css/cssom/CSSStyleSheet-template-adoption.html:
 - adoptedStyleSheets won't be cleared when adopting into/from <template>s
 css/cssom/HTMLLinkElement-load-event-002.html:
 - "[harness] ERROR"
-css/cssom/computed-style-002.html:
-- Check that a percent width in an iframe is resolved against iframe width for getComputedStyle.
 css/cssom/computed-style-003.html:
 - Check that a percent width in an iframe is the resolved width when the iframe is
   displayed.
 css/cssom/computed-style-004.html:
-- Check that the initial width is 100px.
 - Check that the resolved width of the inner div is affected by changing the width
   of outer iframe.
 css/cssom/css-style-attr-decl-block.html:
@@ -1858,8 +1853,6 @@ custom-elements/reactions/Animation.html:
 custom-elements/reactions/Document.html:
 - execCommand on Document must enqueue a disconnected reaction when deleting a custom
   element from a contenteditable element
-- write on Document must enqueue disconnectedCallback when removing a custom element
-- writeln on Document must enqueue disconnectedCallback when removing a custom element
 custom-elements/registries/Element-innerHTML.html:
 - createContextualFragment on a range inside a template should use null registry even
   when the template has a scoped registry
@@ -4763,8 +4756,8 @@ html/semantics/interactive-elements/the-dialog-element/focus-after-close.html:
 - Focus should not scroll if the previously focused element is outside the viewport
 - "[harness] TIMEOUT"
 html/semantics/interactive-elements/the-dialog-element/inert-focus-in-frames.html:
-- "[harness] ERROR"
-- "[harness] no subtests"
+- Tests inert node focusing across frames and iframes.
+- "[harness] TIMEOUT"
 html/semantics/interactive-elements/the-dialog-element/inert-node-is-unselectable.html:
 - Test that inert nodes cannot be selected. The test passes if the only text you can
   select is inside the dialog.
@@ -4844,6 +4837,144 @@ html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-correc
 - "== html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-correct-order-remove-readd-ref.html"
 html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-dynamic.html:
 - "== html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-dynamic-ref.html"
+html/webappapis/dynamic-markup-insertion/closing-the-input-stream/document-close-with-pending-script.html:
+- "[harness] TIMEOUT"
+- document.close called while a script is pending
+html/webappapis/dynamic-markup-insertion/closing-the-input-stream/load-event-after-location-set-during-write.window.js:
+- Setting location from document.write() call should not trigger load event until
+  that load completes
+html/webappapis/dynamic-markup-insertion/document-write/047.html:
+- "[harness] TIMEOUT"
+- document.write
+html/webappapis/dynamic-markup-insertion/document-write/iframe_005.html:
+- document.write external script into iframe write back into parent
+html/webappapis/dynamic-markup-insertion/document-write/module-dynamic-import.html:
+- document.write in an imported module
+html/webappapis/dynamic-markup-insertion/document-write/module-tla-import.html:
+- document.write in an imported module
+html/webappapis/dynamic-markup-insertion/document-write/mutation-observer.html:
+- Mutation observer for async script element
+- Mutation observer for classic script element
+- Mutation observer for defer script element
+- Mutation observer for module script element
+html/webappapis/dynamic-markup-insertion/document-write/write-active-document.html:
+- document.write only writes to active documents
+html/webappapis/dynamic-markup-insertion/html-unsafe-methods/setHTMLUnsafe-runScripts.html:
+- 'Element: runScripts is ignored when not "Unsafe" (setHTML).'
+- 'Element: runScripts order of operations with custom element callbacks'
+- 'Element: setHTMLUnsafe script can remove subsequent scripts and prevent them from
+  running.'
+- 'Element: setHTMLUnsafe script cannot observe intermediate state.'
+- 'Element: setHTMLUnsafe script cannot observe intermediate style.'
+- 'Element: setHTMLUnsafe with external async script.'
+- 'Element: setHTMLUnsafe with external defer script.'
+- 'Element: setHTMLUnsafe with external script.'
+- 'Element: setHTMLUnsafe with runScripts & no shadowdom.'
+- 'Element: setHTMLUnsafe with script inside declarative shadow DOM.'
+- 'ShadowRoot: runScripts is ignored when not "Unsafe" (setHTML).'
+- 'ShadowRoot: runScripts order of operations with custom element callbacks'
+- 'ShadowRoot: setHTMLUnsafe script can remove subsequent scripts and prevent them
+  from running.'
+- 'ShadowRoot: setHTMLUnsafe script cannot observe intermediate state.'
+- 'ShadowRoot: setHTMLUnsafe script cannot observe intermediate style.'
+- 'ShadowRoot: setHTMLUnsafe with external async script.'
+- 'ShadowRoot: setHTMLUnsafe with external defer script.'
+- 'ShadowRoot: setHTMLUnsafe with external script.'
+- 'ShadowRoot: setHTMLUnsafe with runScripts & no shadowdom.'
+- 'ShadowRoot: setHTMLUnsafe with script inside declarative shadow DOM.'
+- "[harness] TIMEOUT"
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/abort-refresh-immediate.window.js:
+- "[harness] TIMEOUT"
+- document.open() aborts documents that are queued for navigation through <meta> refresh
+  with timeout 0 (XMLHttpRequest)
+- document.open() aborts documents that are queued for navigation through <meta> refresh
+  with timeout 0 (fetch())
+- document.open() aborts documents that are queued for navigation through <meta> refresh
+  with timeout 0 (image loading)
+- document.open() aborts documents that are queued for navigation through Refresh
+  header with timeout 0 (XMLHttpRequest)
+- document.open() aborts documents that are queued for navigation through Refresh
+  header with timeout 0 (fetch())
+- document.open() aborts documents that are queued for navigation through Refresh
+  header with timeout 0 (image loading)
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/abort-while-navigating.window.js:
+- "[harness] TIMEOUT"
+- document.open() aborts documents that are navigating through Location (XMLHttpRequest)
+- document.open() aborts documents that are navigating through Location (fetch())
+- document.open() aborts documents that are navigating through iframe loading (XMLHttpRequest)
+- document.open() aborts documents that are navigating through iframe loading (fetch())
+- document.open() aborts documents that are navigating through iframe loading (image
+  loading)
+- document.open() aborts documents that are queued for navigation through .click()
+  (XMLHttpRequest)
+- document.open() aborts documents that are queued for navigation through .click()
+  (fetch())
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/aborted-parser.window.js:
+- async document.open() after parser is aborted
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/active.window.js:
+- document.open() removes the document's children (non-active document with an associated
+  Window object; frame is removed)
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/bailout-exception-vs-return-origin.sub.window.js:
+- "[harness] TIMEOUT"
+- document.open should throw a SecurityError with cross-origin document even when
+  the ignore-opens-during-unload counter is greater than 0 (during beforeunload event)
+- document.open should throw a SecurityError with cross-origin document even when
+  the ignore-opens-during-unload counter is greater than 0 (during pagehide event)
+- document.open should throw a SecurityError with cross-origin document even when
+  the ignore-opens-during-unload counter is greater than 0 (during unload event)
+- document.open should throw a SecurityError with cross-origin document even when
+  there is an active parser executing script
+- document.open should throw an InvalidStateError when the throw-on-dynamic-markup-insertion
+  counter is incremented even if the document is cross-origin
+- document.open should throw an InvalidStateError with XML document even if it is
+  cross-origin
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/bailout-side-effects-same-origin-domain.sub.window.js:
+- document.open bailout should not have any side effects (same origin-domain (but
+  not same origin) document)
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/document.open-02.html:
+- document.open should redirect to window.open when called with three arguments
+- document.open should throw when it has no window and is called with three arguments
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/event-listeners.window.js:
+- Custom event listeners are to be removed from Window for a non-active document that
+  is the associated Document of a Window (frame is removed)
+- Custom event listeners are to be removed from Window for an active but not fully
+  active document
+- Standard event listeners are to be removed from Window
+- Standard event listeners are to be removed from Window for a non-active document
+  that is the associated Document of a Window (frame is removed)
+- Standard event listeners are to be removed from Window for an active but not fully
+  active document
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/form-control-state.html:
+- "[harness] TIMEOUT"
+- input state
+- textarea state
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/ignore-opens-during-unload.window.js: HARNESS_ERROR
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/origin-check-in-document-open-same-origin-domain.sub.html:
+- It should not be possible to implicitly open same origin-domain (but not same origin)
+  documents.
+- It should not be possible to open same origin-domain (but not same origin) documents.
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/quirks.window.js:
+- document.open() sets document to no-quirks mode (write no doctype)
+- document.open() sets document to no-quirks mode (write old doctype)
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/reload.window.js:
+- Reloading a document.open()'d page should reload the URL of the entry realm's responsible
+  document
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/url-entry-document-sync-call.window.js:
+- document.open() changes document's URL to the entry global object's associate document's
+  (sync call)
+- document.write() changes document's URL to the entry global object's associate document's
+  (sync call)
+- document.writeln() changes document's URL to the entry global object's associate
+  document's (sync call)
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/url-entry-document.window.js:
+- document.open() changes document's URL to the entry settings object's responsible
+  document's (through timeouts)
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/url-fragment.window.js:
+- document.open() and document's URL containing a fragment (entry is not relevant)
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/url.window.js:
+- document.open() changes document's URL (fully active document)
+html/webappapis/dynamic-markup-insertion/the-innerhtml-property/annotation-xml-fragment-parsing.html:
+- HTML parsing does apply in <annotation-xml encoding="application/xhtml+xml">
 html/webappapis/scripting/events/compile-event-handler-settings-objects.html:
 - The entry settings object while executing the compiled callback via Web IDL's invoke
   must be that of the node document
@@ -5825,7 +5956,8 @@ web-animations/responsive/fontSize.html:
 web-animations/responsive/shapeOutside.html:
 - Neutral path() keyframes invalidate when the underlying <shape-box> changes
 web-animations/responsive/toggle-animated-iframe-visibility.html:
-- "== web-animations/responsive/toggle-animated-iframe-visibility-ref.html (a frame the painter never enters)"
+- "== web-animations/responsive/toggle-animated-iframe-visibility-ref.html (a frame
+  the painter never enters)"
 web-animations/timing-model/animations/invalidating-animation-before-start-time-synced.html:
 - Animation invalidated before startTime is set doesn't affect startTime
 web-animations/timing-model/animations/reversing-an-animation.html:

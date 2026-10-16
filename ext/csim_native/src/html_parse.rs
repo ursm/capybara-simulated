@@ -354,6 +354,9 @@ struct Parse {
     set_aside: Vec<Vec<StrTendril>>,
     standins: StandIns,
     ended: bool,
+    // A script-created parser's (`document.open()`, HTML "document open steps"): its input stream has no end until
+    // `document.close()` inserts one (`htmlClose`) — the input running out is where its insertion point is.
+    script_created: bool,
     // The nodes by handle — those the engine built (`htmlRunBuilt`) and those the bindings made replaying the steps
     // it left them (`htmlSetHandles`) — and what holds those the engine built while the parse goes on: one a script
     // took out of the tree is the parser's still (an open element, the form element pointer), as the bindings' array
@@ -379,7 +382,7 @@ impl Parse {
                 TokenizerResult::EncodingIndicator(_) => continue,
             }
         }
-        if self.set_aside.is_empty() {
+        if self.set_aside.is_empty() && !self.script_created {
             self.ended = true;
             self.tokenizer.end();
         }
@@ -410,6 +413,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "htmlScriptEnd", html_script_end, context_id);
     register(scope, ns, "htmlWrite", html_write, context_id);
     register(scope, ns, "htmlDone", html_done, context_id);
+    register(scope, ns, "htmlClose", html_close, context_id);
     register(scope, ns, "htmlParseFragment", html_parse_fragment, context_id);
     register(scope, ns, "htmlParseDocument", html_parse_document, context_id);
 }
@@ -461,7 +465,8 @@ fn steps<'s>(scope: &mut v8::PinScope<'s, '_>, id: u32, status: i32, with_id: bo
 }
 
 // __dom.htmlParse(html, wellFormed, scripting, contextNs, contextLocalName, withForm, quirks, srcdoc, declarative,
-// deferred) -> [id, steps…, status], or — `deferred`, a live document's, whose batches `htmlRunBuilt` takes — [id]. A document parse — of an iframe srcdoc document with `srcdoc`, which no missing or legacy
+// deferred, scriptCreated) -> [id, steps…, status], or — `deferred`, a live document's, whose batches `htmlRunBuilt`
+// takes — [id]; `scriptCreated`, a parse whose input has no end until `htmlClose` (`Parse::script_created`). A document parse — of an iframe srcdoc document with `srcdoc`, which no missing or legacy
 // doctype puts in quirks mode — or, given the namespace (as `ns_code` numbers it) and local name of the element whose
 // content it is, a fragment parse in that context (handle 1; handle 2 its form element pointer, `withForm`), in its
 // document's mode (`quirks` 0 no-quirks, 1 limited-quirks, 2 quirks); with `declarative`, one that attaches declarative
@@ -500,7 +505,8 @@ fn html_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let all = parses(scope);
         all.next += 1;
         let id = all.next;
-        all.live.insert(id, Parse { tokenizer, input, set_aside: Vec::new(), standins, ended: false, handles: Vec::new(), held: Vec::new(), pending: None });
+        let script_created = args.get(10).is_true();
+        all.live.insert(id, Parse { tokenizer, input, set_aside: Vec::new(), standins, ended: false, script_created, handles: Vec::new(), held: Vec::new(), pending: None });
         if args.get(9).is_true() {
             return rv.set(v8::Array::new_with_elements(scope, &[v8::Integer::new_from_unsigned(scope, id).into()]).into());
         }
@@ -772,6 +778,15 @@ fn html_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         }
         rv.set_bool(true);
     });
+}
+
+// __dom.htmlClose(id): a script-created parse's input stream has its end (`document.close()`): it ends where the input
+// runs out from now on.
+fn html_close(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = parse_id(scope, &args);
+    if let Some(p) = parses(scope).live.get_mut(&id) {
+        p.script_created = false;
+    }
 }
 
 // __dom.htmlDone(id): the parse is over (or abandoned); its state goes.
@@ -1107,6 +1122,10 @@ impl<'s> Build<'s> {
         match from.registry() {
             crate::ce_reactions::TRACKING => to.set_registry_state(crate::ce_reactions::TRACKING),
             crate::ce_reactions::NULL if to.registry() == 0 || stamped => to.set_registry_state(crate::ce_reactions::NULL),
+            code if code >= crate::ce_reactions::FIRST_REGISTRY && to.registry() == 0 && !d.arena.ce_reactions.is_window_registry(code) => {
+                let object = from.registry_object(scope);
+                to.set_registry(scope, code, object);
+            }
             _ => {}
         }
     }
