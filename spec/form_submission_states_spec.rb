@@ -108,4 +108,19 @@ RSpec.describe 'Form submission states' do
     s.execute_script('document.getElementById("l").click(); document.getElementById("a").submit()')
     expect(s.current_path).to eq('/g')
   end
+
+  # The page's hyperlink resolves against the page whichever frame the driver entered (Chrome: `/dir/rel`), and one a
+  # timer a click started follows is taken as the click's drain ends.
+  it "resolves the page's hyperlink against the page, and follows one a click's timer activates" do
+    s = simulated_session(lambda {|env|
+      body = env['PATH_INFO'] == '/dir/page' ? '<a id=l href="rel">l</a><button onclick="setTimeout(() => l.click(), 10)">go</button><iframe name=f src="/sub/fr"></iframe>' : '<p>x'
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8>#{body}"]]
+    })
+    s.visit '/dir/page'
+    s.within_frame('f') { s.execute_script("parent.document.getElementById('l').click()") }
+    expect(s.current_path).to eq('/dir/rel')
+    s.visit '/dir/page'
+    s.click_on 'go'
+    expect(s).to have_current_path('/dir/rel', wait: 1)
+  end
 end

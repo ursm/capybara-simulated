@@ -1329,15 +1329,10 @@ module Capybara
             @runtime.drain_microtasks
             break if @runtime.drain_timers(50).to_i.zero?
           end
-          consume_pending_download
-          # Discourse's `lib/click-track.js` preventDefaults link
-          # clicks and routes navigation through `DiscourseURL
-          # .redirectTo → window.location = href`, which our setter
-          # parks on `@pending_location`. Drain it here so attachment
-          # downloads from `click_link` complete inside the click
-          # action.
-          consume_pending_location
-          consume_pending_frame_nav
+          # …and what those left to do, inside the click action: Discourse's `lib/click-track.js` preventDefaults link
+          # clicks and routes navigation through `DiscourseURL.redirectTo → window.location = href` (an attachment's
+          # download), and a timer may follow a link or submit a form.
+          drain_task_intents
           return
         end
         case action['kind']
@@ -1917,6 +1912,8 @@ module Capybara
         # yet. Drain one 600 ms window so input → debounce → parent
         # state propagation completes before the next Capybara call.
         @runtime.drain_timers(USER_ACTION_DRAIN_MS) if @timers_active
+        # (…and what the tasks that drain ran left to do: a timer's `link.click()` / `form.submit()`)
+        drain_task_intents
       end
 
       # Yield on the first observable change. Each iter (a) drains
@@ -2024,6 +2021,10 @@ module Capybara
       def consume_pending_navigation
         pending = @runtime.call('__csimTakePendingNavigation')
         return unless pending.is_a?(Hash) && pending['url']
+        # (…the main document's slot: its hyperlink's href resolved against it, whichever frame `within_frame` entered)
+        in_top_context { follow_pending_hyperlink(pending) }
+      end
+      def follow_pending_hyperlink(pending)
         url    = pending['url'].to_s
         target = pending['target'].to_s
         if new_window_target?(target)
@@ -10831,8 +10832,8 @@ module Capybara
       def consume_pending_aux_window
         pending = @runtime.call('__csimTakePendingAuxWindow')
         return unless pending.is_a?(Hash) && pending['url'] && @driver.respond_to?(:open_aux_window)
-        @driver.open_aux_window(resolve_against_current(pending['url'].to_s, use_base: true),
-                                source: self, blob_snapshot: pending['blob'])
+        url = in_top_context { resolve_against_current(pending['url'].to_s, use_base: true) }
+        @driver.open_aux_window(url, source: self, blob_snapshot: pending['blob'])
       rescue StandardError => e
         log_console('warn', "aux-window open failed: #{e.message}")
       end
