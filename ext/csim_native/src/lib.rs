@@ -94,6 +94,7 @@ mod mime;
 mod multipart;
 mod mutation;
 mod mutation_observers;
+mod foreign_observations;
 mod frame_navigation;
 mod navigables;
 mod observation_list;

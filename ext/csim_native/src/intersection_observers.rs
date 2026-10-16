@@ -83,7 +83,7 @@ fn io_observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
     let held = v8::Global::new(scope, node);
     let arena = crate::dom::realm(scope, cid);
-    arena.note_observed(cid, target);
+    arena.note_observed(cid, crate::foreign_observations::INTERSECTION, target);
     let observers = &mut arena.intersection_observers;
     if observers.observer(id).is_none() {
         let at = observers.observing.partition_point(|o| o.id < id);
@@ -158,6 +158,10 @@ fn io_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
         }
     }
     observers.skipped = skipped;
+    // (…and whether any target is another realm's node, whose changes its realm's then ask this one's update for)
+    let arena = crate::dom::realm(scope, cid);
+    let foreign = arena.intersection_observers.observing.iter().any(|o| o.targets.iter().any(|(_, t, _)| arena.get(t).is_some_and(|n| n.realm != cid)));
+    arena.note_foreign(cid, crate::foreign_observations::INTERSECTION, foreign);
     let rows: Vec<v8::Local<v8::Value>> = due
         .iter()
         .map(|(id, targets)| {

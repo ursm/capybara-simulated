@@ -873,10 +873,11 @@ pub(crate) struct RealmArena {
     pub(crate) observers: crate::mutation_observers::Observers,
     // Each frame container's child navigable, each top-level one's target name, each realm's document (navigables.rs).
     pub(crate) navigables: crate::navigables::Navigables,
-    // Whether some realm's observer has ever observed another realm's node — a page's ResizeObserver or
-    // IntersectionObserver a frame's element — read with no call by every realm's bindings (`__dom.foreignObserved`):
-    // a frame's change then asks the realms above it for their observations too (observers.js).
+    // Whether some realm's observer observes another realm's node, read with no call by every realm's bindings
+    // (`__dom.foreignObserved`): a change in any realm then asks those realms for their observations too.
     pub(crate) foreign_observed: SharedWord,
+    // …and which realms they are (foreign_observations.rs).
+    pub(crate) foreign_observations: crate::foreign_observations::ForeignObservations,
     // Each frame container's navigation as it goes (frame_navigation.rs).
     pub(crate) frame_navigations: crate::frame_navigation::FrameNavigations,
     // Each document's pending scroll and scrollend event targets (scroll_events.rs).
@@ -1133,7 +1134,7 @@ impl RealmArena {
             self.has_shadow_hosts = false;
             self.direction_sources = false;
             self.inert_sources = false;
-            self.foreign_observed.set(0);
+            self.forget_foreign_observations(None);
         }
     }
     pub(crate) fn is_dropped(&self, cid: i32) -> bool {
@@ -1155,6 +1156,7 @@ impl RealmArena {
         self.discard_timers(cid);
         self.discard_resize_observers(cid);
         self.discard_intersection_observers(cid);
+        self.forget_foreign_observations(Some(cid));
         self.forget_reactions_of(cid);
     }
     // The custom element reactions owed to realm `cid`'s elements — or to a node already freed — let go of
@@ -1188,6 +1190,7 @@ impl RealmArena {
         self.forget_navigables_of(cid, true);
         self.forget_freed_scroll_events();
         self.forget_freed_frame_navigations();
+        self.forget_foreign_observations(Some(cid));
         self.forget_dead_focus_records();
     }
     // How many nodes the realm an op works in has made and not freed.
@@ -2540,6 +2543,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::frame_navigation::install(scope, ns, context_id);
     crate::resize_observers::install(scope, ns, context_id);
     crate::element_flags::install(scope, ns, context_id);
+    crate::foreign_observations::install(scope, ns, context_id);
     crate::intersection_observers::install(scope, ns, context_id);
     crate::scroll_events::install(scope, ns, context_id);
     crate::timers::install(scope, ns, context_id);

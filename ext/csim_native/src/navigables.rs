@@ -331,7 +331,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setPrompting", set_prompting, context_id);
     crate::dom::register(scope, ns, "unloading", unloading, context_id);
     crate::dom::register(scope, ns, "ancestorUnloading", ancestor_unloading, context_id);
-    crate::dom::register(scope, ns, "parentRealm", parent_realm, context_id);
     let linked = crate::dom::dom(scope).arena.navigables.linked.store();
     crate::dom::view_word(scope, ns, "childFrames", linked);
 }
@@ -487,14 +486,6 @@ fn unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let cid = realm_id(scope, &args);
     let nav = &crate::dom::realm(scope, cid).navigables;
     rv.set_bool(nav.unloading.contains(&realm) || nav.prompting.contains(&realm));
-}
-// __dom.parentRealm() -> the realm the container of this realm's navigable is in — its parent's — or -1 for a top-level
-// navigable's, or a discarded one's.
-fn parent_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let parent = arena.live_container(cid).and_then(|c| arena.get(c)).map_or(-1, |n| n.realm);
-    rv.set_int32(parent);
 }
 // __dom.ancestorUnloading(realm) -> whether an ancestor navigable's document is being unloaded now
 // (`RealmArena::ancestor_unloading`).

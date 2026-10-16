@@ -445,6 +445,29 @@ RSpec.describe 'Observer bindings' do
     expect(poll_until { session.evaluate_script('window.got.length >= 2 && window.got') }).to eq([30, 40])
   end
 
+  # …and the other way round: a frame's ResizeObserver of the page's element hears the page's change, and an
+  # IntersectionObserver of the page's a frame's element moving out of the frame and back (Chrome: child 30, 40; true,
+  # false, true).
+  it "reports across realms whichever realm the observer and the target are in" do
+    session.execute_script(<<~JS)
+      document.body.innerHTML = '<div id=p style="width: 30px; height: 30px"></div><iframe id=f style="width: 100px; height: 100px" srcdoc="<div id=x style=&quot;width: 30px; height: 30px&quot;></div>"></iframe>';
+      window.got = [];
+    JS
+    poll_until { session.evaluate_script('!!(document.getElementById("f").contentDocument && document.getElementById("f").contentDocument.getElementById("x"))') }
+    session.execute_script(<<~JS)
+      const f = document.getElementById('f'), x = f.contentDocument.getElementById('x');
+      new f.contentWindow.ResizeObserver((entries) => window.got.push('child:' + entries[0].contentRect.width)).observe(document.getElementById('p'));
+      new IntersectionObserver((entries) => window.got.push('io:' + entries[0].isIntersecting)).observe(x);
+    JS
+    poll_until { session.evaluate_script('window.got.length >= 2') }
+    session.execute_script('document.getElementById("p").style.width = "40px"')
+    poll_until { session.evaluate_script('window.got.includes("child:40")') }
+    session.execute_script('document.getElementById("f").contentDocument.getElementById("x").style.marginTop = "500px"')
+    poll_until { session.evaluate_script('window.got.includes("io:false")') }
+    session.execute_script('document.getElementById("f").contentDocument.getElementById("x").style.marginTop = "0px"')
+    expect(poll_until { session.evaluate_script('window.got.length >= 5 && window.got') }).to contain_exactly('child:30', 'io:true', 'child:40', 'io:false', 'io:true')
+  end
+
   # The loop (HTML "update the rendering"): a callback that resizes what it observes is called again in the same update
   # only for observations deeper than the shallowest it was given — the child the parent's width carries — and the
   # parent's, skipped, is reported as an ErrorEvent with no error, at the document's 0:0 (Chrome).
