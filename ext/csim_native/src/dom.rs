@@ -2624,6 +2624,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "directionality", directionality, context_id);
     register(scope, ns, "setTemplateContent", set_template_content, context_id);
     register(scope, ns, "setDoctype", set_doctype, context_id);
+    register(scope, ns, "doctypeField", doctype_field, context_id);
     register(scope, ns, "setIsValue", set_is_value, context_id);
     register(scope, ns, "isValue", is_value, context_id);
     register(scope, ns, "setContainerMargins", set_container_margins, context_id);
@@ -3388,6 +3389,23 @@ fn set_doctype(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         node.data = name;
         node.doctype_ids = Some(ids);
     }
+}
+
+// __dom.doctypeField(nid, field) -> a doctype's name (0), public identifier (1) or system identifier (2), exactly as
+// the DOM holds them — '' for a node that is no doctype.
+fn doctype_field(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let field = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
+    let cid = realm_id(scope, &args);
+    let units = nid_arg(scope, &args, 0).and_then(|id| realm(scope, cid).get(id)).and_then(|n| {
+        let (public, system) = n.doctype_ids.as_deref()?;
+        Some(match field {
+            0 => n.data.clone(),
+            1 => public.clone(),
+            2 => system.clone(),
+            _ => Vec::new(),
+        })
+    });
+    rv.set(utf16_value(scope, &units.unwrap_or_default()));
 }
 
 // __dom.setTemplateContent(nid, contentNid): a `<template>`'s contents, the fragment `contentNid` (-1 for none).
