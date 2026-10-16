@@ -12,6 +12,9 @@ use crate::dom::{nid_arg, NodeId, NodeKind, RealmArena};
 pub(crate) struct Autofocus {
     // By top-level document: its candidates, and whether its autofocus is processed.
     docs: HashMap<NodeId, (Vec<NodeId>, bool)>,
+    // …and those owed a flush since their candidates last changed — a rendering update to come for them, which a page
+    // with nothing else pending runs.
+    pending: std::collections::HashSet<NodeId>,
     // Whether any element has ever carried `autofocus` — no insertion need ask before one has, in whichever realm — and
     // the buffer every realm's bindings read that from without a call (`autofocusSeen`, a view each).
     seen: bool,
@@ -52,12 +55,17 @@ impl RealmArena {
                 list.push(id);
             }
         }
-        !list.is_empty()
+        let any = !list.is_empty();
+        if any {
+            self.autofocus.pending.insert(top);
+        }
+        any
     }
 
     // `top`'s autofocus is processed: its candidates emptied, and none taken after.
     pub(crate) fn autofocus_processed(&mut self, top: NodeId) {
         self.autofocus.docs.insert(top, (Vec::new(), true));
+        self.autofocus.pending.remove(&top);
     }
 
     // HTML "flush autofocus candidates" for `top`, up to what the bindings decide: where an element is `focused` there,
@@ -96,6 +104,9 @@ impl RealmArena {
         let mut docs = std::mem::take(&mut self.autofocus.docs);
         docs.retain(|&top, _| self.get(top).is_some());
         self.autofocus.docs = docs;
+        let mut pending = std::mem::take(&mut self.autofocus.pending);
+        pending.retain(|&top| self.get(top).is_some());
+        self.autofocus.pending = pending;
         let mut previous = std::mem::take(&mut self.previously_focused);
         previous.retain(|&dialog, &mut p| self.get(dialog).is_some() && self.get(p).is_some());
         self.previously_focused = previous;
@@ -107,6 +118,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "autofocusProcessed", processed_op, context_id);
     crate::dom::register(scope, ns, "autofocusNext", next_op, context_id);
     crate::dom::register(scope, ns, "atFragment", at_fragment_op, context_id);
+    crate::dom::register(scope, ns, "autofocusPending", pending_op, context_id);
     // (…and the flag, a view on the isolate's one buffer)
     let store = {
         let autofocus = &mut crate::dom::dom(scope).arena.autofocus;
@@ -142,6 +154,14 @@ fn next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let arena = crate::dom::realm(scope, cid);
     let Some(next) = arena.autofocus_next(top, focused) else { return };
     rv.set(crate::dom::nodes_value(scope, cid, &[next]));
+}
+
+// __dom.autofocusPending(topNid, take) -> whether the top-level document is owed a flush of its candidates — no longer,
+// where `take` (the flush beginning).
+fn pending_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(top) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let pending = &mut crate::dom::dom(scope).arena.autofocus.pending;
+    rv.set_bool(if args.get(1).is_true() { pending.remove(&top) } else { pending.contains(&top) });
 }
 
 // __dom.atFragment(docNid, …) -> whether any of the documents is at a fragment (`at_fragment`).
