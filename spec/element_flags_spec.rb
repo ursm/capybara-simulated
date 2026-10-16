@@ -24,6 +24,21 @@ RSpec.describe 'element flags' do
     expect(poll_until { s.evaluate_script('L.length >= 3 && L') }).to eq(['p{}', 'p{color:red}', 'p{color:red}'])
   end
 
+  # …each a task of the style's own realm — its node document's — whichever realm's code changed it.
+  it "fires a style's load in its own realm when another realm changes it" do
+    s = session
+    s.execute_script(<<~JS)
+      window.L = [];
+      const f = document.createElement('iframe');
+      document.body.append(f);
+      const st = document.createElement('style');
+      st.onload = (e) => L.push(e.constructor === f.contentWindow.Event ? 'frame' : 'main');
+      f.contentDocument.head.append(st);
+      st.textContent = 'p{}';
+    JS
+    expect(poll_until { s.evaluate_script('L.length >= 2 && L') }).to eq(%w[frame frame])
+  end
+
   # A frame removed has no browsing context; inserted again it gets one at its own post-insertion step, so a script
   # inserted before it in the same batch reads none — as it did the first time.
   it "gives a frame inserted again no browsing context before its post-insertion step" do
