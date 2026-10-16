@@ -62,6 +62,31 @@ RSpec.describe 'Form submission states' do
       s.visit '/'
       s.evaluate_script("(#{js}, 1)")
       expect(s.current_path).to eq('/g')
+      s.visit '/'
+      s.evaluate_async_script("#{js}; arguments[0](1)")
+      expect(s.current_path).to eq('/g')
     end
+  end
+
+  # …the page's own document's form, whichever frame the driver has entered.
+  it "navigates the page for its own form a frame's script submits" do
+    received = []
+    s = simulated_session(app(received, '<form id=a action=/g><input name=q value=1></form><iframe name=f srcdoc="<p>f"></iframe>'))
+    s.visit '/'
+    s.within_frame('f') { s.execute_script('parent.document.getElementById("a").submit()') }
+    expect([received.first, s.current_path]).to eq([['GET', '/g', nil, 'q=1'], '/g'])
+  end
+
+  # A form submission and a location navigation planned in one task: the later is the one taken (Chrome: `/g?q=1` for
+  # the location first, `/b` for the form first).
+  it 'takes the later of a location navigation and a form submission' do
+    received = []
+    s = simulated_session(app(received, '<form id=a action=/g><input name=q value=1></form>'))
+    s.visit '/'
+    s.execute_script('location.href = "/b"; document.getElementById("a").submit()')
+    expect(s.current_path).to eq('/g')
+    s.visit '/'
+    s.execute_script('document.getElementById("a").submit(); location.href = "/b"')
+    expect(s.current_path).to eq('/b')
   end
 end

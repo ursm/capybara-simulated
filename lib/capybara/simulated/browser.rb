@@ -305,6 +305,7 @@ module Capybara
         # this realm. nil is the steady state, so the routing is one nil-check.
         @current_realm_id             = nil
         @frame_stack                  = []
+        @frame_scope_resets           = 0
         @last_tick_ts                 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         # The first find of a navigation observes the current DOM without a pre-tick (see
         # timer_wait_elapsed?); armed by the first find, disarmed by reset_timer_state.
@@ -894,6 +895,25 @@ module Capybara
       def reset_frame_scope
         @current_realm_id = nil
         @frame_stack.clear
+        @frame_scope_resets += 1
+      end
+
+      # `yield`ed as the main document's, whichever frame a `within_frame` has entered — a step of its own that the
+      # scope would route to the frame (the top document's form serialized in its realm, its target resolved from the
+      # top) — and the scope back as it was, unless a full page build dropped it meanwhile.
+      def in_top_context
+        return yield if @current_realm_id.nil? && @frame_stack.empty?
+
+        realm, stack, resets = @current_realm_id, @frame_stack.dup, @frame_scope_resets
+        reset_frame_scope
+        begin
+          yield
+        ensure
+          if @frame_scope_resets == resets + 1
+            @current_realm_id = realm
+            @frame_stack.replace(stack)
+          end
+        end
       end
 
       # The active browsing context's own URL: the frame document's URL inside
@@ -1845,7 +1865,8 @@ module Capybara
       def consume_pending_form_submit
         pending = @runtime.call('__csimTakePendingFormSubmit')
         return unless pending.is_a?(Hash) && pending['formHandle']
-        submit_form_handle(pending['formHandle'].to_i, pending['submitterHandle'], pending['entryList'])
+        # (…the main document's slot, which a frame's submission is routed past: its form submitted as that document's)
+        in_top_context { submit_form_handle(pending['formHandle'].to_i, pending['submitterHandle'], pending['entryList']) }
       end
 
       # Pin the URL the page is at as a user action BEGINS — the FIRST line of
@@ -2604,6 +2625,9 @@ module Capybara
           tick_real_time
         end
         nil
+      ensure
+        # (…and what the script left to do, once its result is read: a navigation would take the result with the page)
+        drain_task_intents
       end
 
       def current_path
@@ -10062,6 +10086,11 @@ module Capybara
       def location_assign(url, replace: false)
         @pending_location         = resolve_against_current(url.to_s)
         @pending_location_replace = replace
+      end
+      # …and none: a form the page submitted since planned the navigation that replaces it (HTML "plan to navigate":
+      # the later of the two is the one taken).
+      def cancel_pending_location
+        @pending_location = nil
       end
       def consume_pending_location
         return unless (url = @pending_location)

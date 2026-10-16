@@ -48,6 +48,7 @@ module Capybara
         '__csim_swScriptFetch'       => ->(b, *a) { b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], a[4] || 'script', a[5] || 'no-cors', a[6] || 'include', binary: a[7] == true, integrity: a[8] || '') },
         '__locationAssign'           => ->(b, *a) { b.location_assign(a[0], replace: a[1] == true); nil },
         '__locationReload'           => ->(b, *_) { b.location_reload; nil },
+        '__csimCancelPendingLocation' => ->(b, *_) { b.cancel_pending_location; nil },
         # A nested browsing context navigated (a[1] = the frame's realm id) — its OWN
         # location, or (a[3] = the initiating realm id) a link whose target names it,
         # under the policy (a[4]) its `rel` / `referrerpolicy` sets.

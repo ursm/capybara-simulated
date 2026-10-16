@@ -264,7 +264,7 @@ fn timer_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 // __dom.clockNow() -> the time the calling realm's clock reads.
 fn clock_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    rv.set_double(dom(scope).arena.enter(cid).clock);
+    rv.set_double(dom(scope).arena.realm_state(cid).map_or(0.0, |s| s.clock));
 }
 
 // __dom.clockTo(time) — the calling realm's clock reads `time`: its event loop has reached it.
