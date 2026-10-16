@@ -30,6 +30,14 @@ fn retarget(arena: &RealmArena, a: Related, b: NodeId) -> Related {
     }
 }
 
+// …a node against a node.
+pub(crate) fn retarget_node(arena: &RealmArena, a: NodeId, b: NodeId) -> NodeId {
+    match retarget(arena, Related::Node(a), b) {
+        Related::Node(n) => n,
+        _ => a,
+    }
+}
+
 // The slot `id` is assigned to — a slottable (an element or text) whose parent is a shadow host.
 fn assigned_slot(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
     let n = arena.get(id)?;

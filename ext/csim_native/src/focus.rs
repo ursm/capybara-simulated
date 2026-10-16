@@ -460,6 +460,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "dialogFocusingSteps", dialog_focusing_steps_op, context_id);
     crate::dom::register(scope, ns, "dialogFocusRestore", dialog_focus_restore_op, context_id);
     crate::dom::register(scope, ns, "documentFocus", document_focus_op, context_id);
+    crate::dom::register(scope, ns, "activeElement", active_element_op, context_id);
     crate::dom::register(scope, ns, "pointerModality", pointer_modality_op, context_id);
     crate::dom::register(scope, ns, "setPointerModality", set_pointer_modality_op, context_id);
 }
@@ -477,6 +478,30 @@ fn document_focus_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         .filter(|d| d.kind == NodeKind::Document)
         .and_then(|d| arena.realm_state(d.realm))
         .and_then(|st| if hover { st.hover } else { st.focus });
+    rv.set(crate::dom::node_value(scope, found));
+}
+
+// DocumentOrShadowRoot's `activeElement` (HTML §6.6.4) of `root`, a document or a shadow root whose node document is
+// `doc`: the DOM anchor of that document's focused area — the element its realm has focused where it is in the document,
+// else the document itself (its viewport: nothing focused, or a document no window shows, which focuses nothing) —
+// retargeted against the root; none where that is in another tree; for the document, its body element, else its
+// document element, else none.
+fn active_element(arena: &RealmArena, root: NodeId, doc: NodeId) -> Option<NodeId> {
+    let d = arena.get(doc).filter(|d| d.kind == NodeKind::Document)?;
+    let focused = arena.realm_state(d.realm)?.focus.filter(|&f| arena.get(f).is_some() && arena.shadow_including_root(f) == doc);
+    let candidate = crate::event_path::retarget_node(arena, focused.unwrap_or(doc), root);
+    if arena.root_of(candidate) != root {
+        return None;
+    }
+    if candidate != doc {
+        return Some(candidate);
+    }
+    arena.relative(doc, crate::dom::RELATIVE_BODY).or_else(|| arena.first_element_child(doc))
+}
+// __dom.activeElement(rootNid, docNid) -> `active_element`, as `node_value` answers it, or null.
+fn active_element_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(root), Some(doc)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return rv.set_null() };
+    let found = active_element(&crate::dom::dom(scope).arena, root, doc);
     rv.set(crate::dom::node_value(scope, found));
 }
 

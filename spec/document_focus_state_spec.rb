@@ -47,4 +47,34 @@ RSpec.describe 'document focus state' do
     JS
     expect(got).to eq(%w[innerHTML textContent replaceChildren outerHTML replaceWith remove].map {|how| "#{how}:true/false" } + ['shadow:false/false'])
   end
+
+  # DocumentOrShadowRoot's activeElement (HTML §6.6.4): the focused element retargeted against the root, none where that
+  # is in another tree, and — nothing focused — a document's body element, else its document element (the spec's step
+  # 6: a document with no body answers its root, where the body alone answered null).
+  it 'retargets the focus against the root, and falls back to the body, then the document element' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const outer = document.body.appendChild(document.createElement('div'));
+        const outerRoot = outer.attachShadow({mode: 'open'});
+        const inner = outerRoot.appendChild(document.createElement('div'));
+        const innerRoot = inner.attachShadow({mode: 'open'});
+        const input = innerRoot.appendChild(document.createElement('input'));
+        const other = document.body.appendChild(document.createElement('div')).attachShadow({mode: 'open'});
+        input.focus();
+        const out = [document.activeElement === outer, outerRoot.activeElement === inner, innerRoot.activeElement === input,
+                     other.activeElement];
+        input.blur();
+        out.push(document.activeElement === document.body, outerRoot.activeElement);
+        document.body.remove();
+        out.push(document.activeElement === document.documentElement);
+        const parsed = new DOMParser().parseFromString('<p>', 'text/html');
+        out.push(parsed.activeElement === parsed.body);
+        return out;
+      })()
+    JS
+    expect(got).to eq([true, true, true, nil, true, nil, true, true])
+  end
+
 end
