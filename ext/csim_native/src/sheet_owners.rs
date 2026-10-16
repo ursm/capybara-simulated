@@ -66,10 +66,49 @@ impl RealmArena {
     }
 }
 
+// The sheet the bindings made an owner (`ownerSheet`, dom.rs), in the store of the realm that made it: its `id`, `rev`,
+// which moves each time it is made again, whether a CSSStyleSheet shows it (`shown`, which makes the next one anew
+// under another id: the object a script holds keeps the rules it had), and what it was made of — its text given (by
+// its hash and length: a page's sheets are kept once, by the page side; none for a `<style>`'s block, whose every
+// change is a new count), base URL, media list and the document's mode, at the owner's count of sheets
+// (`NodeData::sheet_gen`).
+#[derive(Clone)]
+pub(crate) struct MadeSheet {
+    pub(crate) id: u32,
+    pub(crate) rev: u32,
+    pub(crate) shown: bool,
+    pub(crate) text: Option<(u64, usize)>,
+    pub(crate) base: String,
+    pub(crate) media: String,
+    pub(crate) quirks: bool,
+    pub(crate) count: u32,
+}
+// …the key `text` is kept by.
+pub(crate) fn text_key(css: &str) -> (u64, usize) {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    css.hash(&mut hasher);
+    (hasher.finish(), css.len())
+}
+
+impl RealmArena {
+    // The owner `id` is freed: the sheet its realm made it goes with it, unless a CSSStyleSheet still shows it — then
+    // with that (cssom.js `SHEET_DROPS`).
+    pub(crate) fn forget_made_sheet(&mut self, id: NodeId) {
+        let Some(realm) = self.get(id).map(|n| n.realm) else { return };
+        let Some(state) = self.realm_state_mut(realm) else { return };
+        if let Some(made) = state.made_sheets.remove(&id) {
+            if !made.shown {
+                state.sheets.drop_sheet(made.id);
+            }
+        }
+    }
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "sheetGen", sheet_gen_op, context_id);
     crate::dom::register(scope, ns, "takeStyleLoads", take_style_loads_op, context_id);
-    crate::dom::register(scope, ns, "sheetOwned", sheet_owned_op, context_id);
+    crate::dom::register(scope, ns, "ownerSheetShown", owner_sheet_shown_op, context_id);
     crate::dom::register(scope, ns, "sheetSet", sheet_set_op, context_id);
 }
 
@@ -87,15 +126,13 @@ fn sheet_gen_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set_uint32(crate::dom::dom(scope).arena.get(id).map_or(0, |n| n.sheet_gen));
 }
 
-// __dom.sheetOwned(nid, sheetId): the bindings made the owner's sheet (cascade.js `engineSheetOf`) — its sheet while the
-// owner's count of sheets is the one it has now.
-fn sheet_owned_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(id), Some(sheet)) = (nid_arg(scope, &args, 0), args.get(1).uint32_value(scope)) else { return };
+// __dom.ownerSheetShown(nid): a CSSStyleSheet shows the owner's sheet (`MadeSheet::shown`).
+fn owner_sheet_shown_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let Some(count) = arena.get(id).map(|n| n.sheet_gen) else { return };
-    arena.owner_sheets.insert(id, (sheet, count));
-    arena.sheet_epoch += 1;
+    if let Some(made) = crate::dom::realm(scope, cid).made_sheets.get_mut(&id) {
+        made.shown = true;
+    }
 }
 
 // HTML's style sheet sets, for a document's `<style>` / `<link>` sheets: a sheet with a `title` belongs to the set of

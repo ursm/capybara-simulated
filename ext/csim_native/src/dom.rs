@@ -1012,6 +1012,8 @@ pub(crate) struct RealmState {
     pub(crate) location: crate::realm_location::RealmLocation,
     // The font files its faces' sources gave (font_files.rs).
     pub(crate) font_files: crate::font_files::FontFiles,
+    // The sheet it made each sheet owner (sheet_owners.rs `MadeSheet`, `ownerSheet`).
+    pub(crate) made_sheets: std::collections::HashMap<NodeId, crate::sheet_owners::MadeSheet>,
     // The realm's style sheets, parsed under the arena's lock (sheets.rs): what its engine cascades and CSSOM reads.
     pub(crate) sheets: crate::sheets::SheetStore,
     // The generations its bindings key their memos on (`Generations`).
@@ -1443,6 +1445,7 @@ impl RealmArena {
         if !self.selected_coordinates.is_empty() {
             self.selected_coordinates.forget(id);
         }
+        self.forget_made_sheet(id);
         if !self.change_baselines.is_empty() {
             self.change_baselines.remove(&id);
         }
@@ -1858,6 +1861,9 @@ impl RealmArena {
     // Realm `cid`'s state, whichever realm the arena is in.
     pub(crate) fn realm_state(&self, cid: i32) -> Option<&RealmState> {
         if cid == self.cur { Some(&self.state) } else { self.parked.get(&cid) }
+    }
+    pub(crate) fn realm_state_mut(&mut self, cid: i32) -> Option<&mut RealmState> {
+        if cid == self.cur { Some(&mut self.state) } else { self.parked.get_mut(&cid) }
     }
     // The root of `id`'s tree, shadow-including: a shadow root's host is its parent here (not a template's contents':
     // they are a tree of their own). (`root_of`, element_state.rs, is the plain one.)
@@ -2679,6 +2685,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleShadowSheets", style_shadow_sheets, context_id);
     // …the realm's sheets they are made of (sheets.rs).
     register(scope, ns, "sheetMake", sheet_make, context_id);
+    register(scope, ns, "ownerSheet", owner_sheet, context_id);
     register(scope, ns, "sheetReplace", sheet_replace, context_id);
     register(scope, ns, "sheetDrop", sheet_drop, context_id);
     // …and CSSOM's rules over them (cssom_rule.rs).
@@ -4803,6 +4810,60 @@ fn sheet_make(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let (id, pending) = arena.sheets.make(&lock, &source, quirks);
     let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, id).into()];
     items.extend(pending.iter().filter_map(|u| v8::String::new(scope, u)).map(Into::<v8::Local<v8::Value>>::into));
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.ownerSheet(ownerNid, css, baseUrl, media, docNid) -> [sheetId, rev, …the URLs its `@import`s wait for]: the
+// style engine's sheet of a `<style>` / `<link>` / `<?xml-stylesheet?>`, made of `css` — a `<style>`'s, null: its block,
+// the data of its child Text nodes — at `baseUrl` under `media` in the document. ONE per owner
+// (`RealmState::made_sheets`): made again of other text, of the same text once the owner obtained another sheet (its
+// count of them, sheet_owners.rs — HTML's "update a style block", which any change to a block's text is), at another
+// base or in another mode — in place where no CSSStyleSheet shows it, else anew under another id (`MadeSheet::shown`),
+// `rev` moving either way — and given another media list in place, its rules kept. Its sheet while the owner's count
+// holds (`owner_sheets`).
+fn owner_sheet(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(owner) = nid_arg(scope, &args, 0) else { return };
+    let text = |scope: &mut v8::PinScope<'_, '_>, k: i32| {
+        let v = args.get(k);
+        if v.is_string() { v.to_rust_string_lossy(scope) } else { String::new() }
+    };
+    let css = args.get(1).is_string().then(|| args.get(1).to_rust_string_lossy(scope));
+    let (base, media) = (text(scope, 2), text(scope, 3));
+    let quirks = quirks_arg(scope, &args, 4);
+    let key = css.as_deref().map(crate::sheet_owners::text_key);
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let Some(count) = arena.get(owner).map(|n| n.sheet_gen) else { return };
+    let made = arena.made_sheets.get(&owner).cloned();
+    let same = made.as_ref().filter(|m| m.text == key && m.base == base && m.quirks == quirks && m.count == count);
+    let media_moved = same.is_some_and(|m| m.media != media);
+    let (id, rev, shown, waiting) = match (same, made.as_ref()) {
+        (Some(m), _) => (m.id, m.rev, m.shown, Vec::new()),
+        (None, old) => {
+            let css = css.unwrap_or_else(|| String::from_utf16_lossy(&arena.child_text(owner)));
+            let source = crate::sheets::SheetSource { css, base: base.clone(), media: media.clone(), constructed: false };
+            let lock = arena.style_lock.0.clone();
+            match old {
+                Some(m) if !m.shown => (m.id, m.rev + 1, false, arena.sheets.replace(&lock, m.id, &source, quirks)),
+                _ => {
+                    let (id, waiting) = arena.sheets.make(&lock, &source, quirks);
+                    (id, old.map_or(0, |m| m.rev + 1), false, waiting)
+                }
+            }
+        }
+    };
+    let fresh = same.is_none();
+    arena.made_sheets.insert(owner, crate::sheet_owners::MadeSheet { id, rev, shown, text: key, base, media: media.clone(), quirks, count });
+    if fresh {
+        arena.owner_sheets.insert(owner, (id, count));
+        arena.sheet_epoch += 1;
+    }
+    if media_moved {
+        own_sheet(scope, &args, id);
+        with_sheets(scope, &args, |store, lock| store.set_media(lock, id, &media, quirks));
+        rules_moved(scope, &args, Some(id));
+    }
+    let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, id).into(), v8::Integer::new_from_unsigned(scope, rev).into()];
+    items.extend(waiting.iter().filter_map(|u| v8::String::new(scope, u)).map(Into::<v8::Local<v8::Value>>::into));
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.sheetReplace(sheetId, css, baseUrl, media, constructed, docNid) -> the URLs its `@import`s wait for: the sheet
