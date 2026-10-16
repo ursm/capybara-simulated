@@ -254,7 +254,7 @@ const INVALID_NAME: i32 = 7;
 // namespace (`n`) — but the first, which an image's namespaced `xlink:href` asks too.
 const STEP_IMAGE: u32 = 1; // an image's source changed: "update the image data"
 const STEP_SCRIPT: u32 = 1 << 1; // a script's `src` added: prepare it
-const STEP_SHEET: u32 = 1 << 2; // a `<link>`'s or `<style>`'s: its sheet follows
+const STEP_SHEET: u32 = 1 << 2; // a `<link>`'s or `<style>`'s that selects or obtains its sheet: it follows
 const STEP_DISABLED: u32 = 1 << 3; // `disabled` set: the focused element unfocused where it no longer can be
 const STEP_NAMED: u32 = 1 << 4; // an `id` or a `name` set: a named property
 const STEP_CANVAS: u32 = 1 << 5; // a canvas's `width` / `height`: its bitmap reset
@@ -273,6 +273,7 @@ const STEP_FILES: u32 = 1 << 17; // an input become a file input: its files empt
 const STEP_BACKUP: u32 = 1 << 18; // a reaction enqueued: the backup element queue's microtask
 const STEP_REMOVED: u32 = 1 << 19; // the attribute removed: its Attr node detached
 const STEP_POPOVER: u32 = 1 << 20; // a `popover` changed: a showing popover of another state now hidden
+const STEP_LINK_RESOURCE: u32 = 1 << 21; // a `<link>`'s resource may be another: fetched again, its `load` fired
 
 // __dom.attrWrite(element, how, a, b, c, d) -> `[steps, key, oldValue, localName]` of the change made (`how`, above):
 // what the bindings do for it (`STEP_*`), the key of the attribute, the value it had (null for none) and its local
@@ -514,7 +515,17 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     let script = is_script(n);
     let flag = |on: bool, step: u32| if on { step } else { 0 };
     steps |= flag(script && local == "src" && old.is_none(), STEP_SCRIPT);
-    steps |= flag(matches!(tag, "link" | "style"), STEP_SHEET);
+    // (…a `<link>`'s `rel`, `href`, `type`, `media`, `title` or `disabled`, a `<style>`'s `media`, `title` or `type` — but
+    // an `href` or a `rel` set to the value it had, which changes nothing: the same resource, Chrome 155 keeps the sheet —
+    // and of those a `<link>`'s that may name another resource: its `rel`, its `href`, its `disabled` removed)
+    let link_sheet = tag == "link"
+        && match local {
+            "rel" | "href" => changed,
+            "type" | "media" | "title" | "disabled" => true,
+            _ => false,
+        };
+    steps |= flag(link_sheet || (tag == "style" && matches!(local, "media" | "title" | "type")), STEP_SHEET);
+    steps |= flag(link_sheet && (matches!(local, "rel" | "href") || (local == "disabled" && !set)), STEP_LINK_RESOURCE);
     steps |= flag(local == "disabled" && set, STEP_DISABLED);
     steps |= flag(matches!(local, "id" | "name") && value.is_some_and(|v| !v.is_empty()), STEP_NAMED);
     steps |= flag(html && tag == "canvas" && matches!(local, "width" | "height"), STEP_CANVAS);
