@@ -59,7 +59,7 @@ pub(crate) enum Took {
     Atom,
 }
 
-// __dom.editDelete(anchorNode, anchorOffset, focusNode, focusOffset, forward, word, now, steps) -> [caretNode,
+// __dom.editDelete(anchorNode, anchorOffset, focusNode, focusOffset, forward, word, steps) -> [caretNode,
 // caretOffset, changes…], or undefined where nothing is deleted: the deletion in the editing host the selection from
 // the anchor to the focus edits (editing.rs `selection_host`: its anchor's, the focus kept to it and out of its
 // non-editable islands) — of the selection's range, or, collapsed, of a step back (forward) from it, a character's
@@ -71,13 +71,13 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let (Some(sc), Some(ec)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 2)) else { return };
     let (so, eo) = (args.get(1).uint32_value(scope).unwrap_or(0), args.get(3).uint32_value(scope).unwrap_or(0));
     let (forward, word) = (args.get(4).is_true(), args.get(5).is_true());
-    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(7)) else { return };
+    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(6)) else { return };
     let collapsed = sc == ec && so == eo;
     let Some((host, ((sc, so), (ec, eo)))) = selection_host(&crate::dom::dom(scope).arena, (sc, so), (ec, eo)) else { return };
     let caller = crate::dom::realm_id(scope, &args);
     // (…the range: the selection's, or the caret's to where a step takes it — none past the host's edge)
     let range = if collapsed {
-        crate::rendered::with_engine(scope, &args, 6, |engine, arena, now| {
+        crate::rendered::with_engine(scope, &args, |engine, arena, now| {
             let mut to = if word { arena.caret_word_step(engine, now, sc, so, forward) } else { arena.caret_step(engine, now, sc, so, forward) }?;
             let mut took = Took::Step;
             // (…a step into an island, or past a block atom, to its far edge: it whole)

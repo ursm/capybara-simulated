@@ -4824,7 +4824,7 @@ fn sheet_drop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
 }
 
-// __dom.styleValue(nid, property, pseudo, now) — `now` the page's animation clock (ms) — the element's (or, with `pseudo` — `before`, `placeholder`, … — its
+// __dom.styleValue(nid, property, pseudo) — at the realm's clock, where its animations are — the element's (or, with `pseudo` — `before`, `placeholder`, … — its
 // pseudo-element's) computed value of that longhand, or undefined (a shorthand, an unknown property, an element the
 // style engine did not style).
 fn style_value(
@@ -4844,7 +4844,7 @@ fn style_value_unguarded(
     let name = args.get(1).to_rust_string_lossy(scope);
     let pseudo = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
     let cid = realm_id(scope, &args);
-    let now = clock_arg(scope, &args, 3);
+    let now = realm_clock(scope, &args);
     let d = dom(scope);
     let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
     let value = engine.value(arena, id, &name, pseudo.as_deref(), now);
@@ -5121,9 +5121,11 @@ fn style_restyled(
     rv.set_uint32(arena.restyled.take());
 }
 
-// The page's clock (ms) an op is given at `index`: 0 when it is not a finite number (an undefined argument reads NaN).
-pub(crate) fn clock_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, index: i32) -> f64 {
-    args.get(index).number_value(scope).filter(|n| n.is_finite()).unwrap_or(0.0)
+// The calling realm's clock (ms, `RealmState::clock`): the time its style engine answers an op's question at — where
+// its animations are sampled.
+pub(crate) fn realm_clock(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> f64 {
+    let cid = realm_id(scope, args);
+    dom(scope).arena.realm_state(cid).map_or(0.0, |s| s.clock)
 }
 
 // Under CSIM_STYLE_VERIFY, what the engine's last restyles disagreed with a full one about (`failures`), thrown as the
@@ -5140,7 +5142,7 @@ pub(crate) fn threw_verify_failures(scope: &mut v8::PinScope<'_, '_>, failures: 
     true
 }
 
-// __dom.styleFlush(now) -> [nid, …] | undefined: a style flush at `now` (the page's clock, ms) — what a forced
+// __dom.styleFlush() -> [nid, …] | undefined: a style flush at the realm's clock — what a forced
 // `getComputedStyle` or layout read is in a browser: the style engine's animations move to it and the document is
 // styled, starting the animations and transitions a change since the last one owes. The events wait for `styleTick`;
 // what comes back is the elements whose animations' properties changed since the JS side was last told, if any.
@@ -5151,7 +5153,7 @@ fn style_flush(
 ) {
     let cid = realm_id(scope, &args);
     style_op(scope, cid, |scope| {
-        let now = clock_arg(scope, &args, 0);
+        let now = realm_clock(scope, &args);
         let d = dom(scope);
         let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
         engine.flush(arena, now);
@@ -5165,8 +5167,8 @@ fn style_flush(
     });
 }
 
-// __dom.styleTick(now) -> [retargeted count, nid…, then type, nid, pseudo, name, elapsedTime, animation, scheduled, …]:
-// a rendering update at `now` (the page's clock, ms): a style flush — the elements whose animations' properties
+// __dom.styleTick() -> [retargeted count, nid…, then type, nid, pseudo, name, elapsedTime, animation, scheduled, …]:
+// a rendering update at the realm's clock: a style flush — the elements whose animations' properties
 // changed first, as `styleFlush` gives them — and the animation / transition events the state changes since the last
 // update owe, handed back in order (`pseudo` null for an element's own; `animation` the engine's id of the CSS
 // animation or transition it is about; `scheduled` its scheduled event time on the timeline).
@@ -5183,7 +5185,7 @@ fn style_tick_unguarded(
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let now = clock_arg(scope, &args, 0);
+    let now = realm_clock(scope, &args);
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };

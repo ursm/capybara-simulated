@@ -688,15 +688,15 @@ fn clipped_away_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set(v8::Boolean::new(scope, away).into());
 }
 
-// One painting question asked with the realm's arena and its style engine's animations at the page's clock `now`.
-pub(crate) fn painting<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, now_at: i32, ask: impl FnOnce(&mut Painting<'_>) -> R) -> Option<R> {
+// One painting question asked with the realm's arena and its style engine's animations at the realm's clock.
+pub(crate) fn painting<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, ask: impl FnOnce(&mut Painting<'_>) -> R) -> Option<R> {
     let cid = crate::dom::realm_id(scope, args);
-    let now = args.get(now_at).number_value(scope).filter(|n| n.is_finite());
+    let now = crate::dom::realm_clock(scope, args);
     let d = crate::dom::dom(scope);
     let arena = d.arena.enter_known(cid)?;
     let engine = d.styles.get_mut(&cid);
     let engine = engine.map(|engine| {
-        if let Some(now) = now.filter(|&n| engine.web_animations.timeline_time != Some(n)) {
+        if engine.web_animations.timeline_time != Some(now) {
             engine.web_animations_op(|model| model.set_timeline_time(now));
         }
         &*engine
@@ -704,23 +704,23 @@ pub(crate) fn painting<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionC
     Some(ask(&mut Painting::new(arena, engine)))
 }
 
-// __dom.hitTest(x, y, all, now) -> the elements a hit at the viewport point lands on, topmost first (only
+// __dom.hitTest(x, y, all) -> the elements a hit at the viewport point lands on, topmost first (only
 // the topmost unless `all`), as `nodes_value` answers them (`Painting::hit`).
 fn hit_test_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let x = args.get(0).number_value(scope).unwrap_or(f64::NAN);
     let y = args.get(1).number_value(scope).unwrap_or(f64::NAN);
     let all = args.get(2).is_true();
     let cid = crate::dom::realm_id(scope, &args);
-    let Some(hits) = painting(scope, &args, 3, |p| p.hit(x, y, all)) else { return };
+    let Some(hits) = painting(scope, &args, |p| p.hit(x, y, all)) else { return };
     rv.set(crate::dom::nodes_value(scope, cid, &hits));
 }
 
-// __dom.observedVisible(nids, now) -> Float64Array: for each element `nids` names, 1 where an intersection observer
+// __dom.observedVisible(nids) -> Float64Array: for each element `nids` names, 1 where an intersection observer
 // tracking visibility sees it visible, else 0 (`Painting::visible`) — one painting for all of them.
 fn observed_visible_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let nids = crate::dom::f64_arg(args.get(0)).to_vec();
     let ids: Vec<Option<NodeId>> = nids.iter().map(|&n| NodeId::from_i64(n as i64).filter(|_| n >= 0.0)).collect();
-    let answers = painting(scope, &args, 1, |p| ids.iter().map(|id| f64::from(u8::from(id.is_some_and(|id| p.visible(id))))).collect::<Vec<f64>>())
+    let answers = painting(scope, &args, |p| ids.iter().map(|id| f64::from(u8::from(id.is_some_and(|id| p.visible(id))))).collect::<Vec<f64>>())
         .unwrap_or_else(|| vec![0.0; ids.len()]);
     rv.set(crate::dom::f64_array(scope, &answers).into());
 }

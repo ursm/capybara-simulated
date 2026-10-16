@@ -678,19 +678,19 @@ pub(crate) fn transparent(engine: &mut StyleEngine, arena: &RealmArena, id: Node
         .take_while(|&n| arena.is_element(n))
         .any(|n| engine.computed_style(arena, n, None, now).is_some_and(|s| s.get_effects().opacity == 0.0))
 }
-// __dom.transparent(nid, now) -> `transparent`; undefined where the realm has no style engine.
+// __dom.transparent(nid) -> `transparent`; undefined where the realm has no style engine.
 fn transparent_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    if let Some(answer) = with_engine(scope, &args, 1, |engine, arena, now| transparent(engine, arena, id, now)) {
+    if let Some(answer) = with_engine(scope, &args, |engine, arena, now| transparent(engine, arena, id, now)) {
         rv.set_bool(answer);
     }
 }
 
-// One question asked of the realm's arena and its style engine at the page's clock `now`: what it answers, or nothing
+// One question asked of the realm's arena and its style engine at the realm's clock `now`: what it answers, or nothing
 // where the realm has no engine or the engine failed a verification (thrown here).
-pub(crate) fn with_engine<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, now_at: i32, ask: impl FnOnce(&mut StyleEngine, &RealmArena, f64) -> R) -> Option<R> {
+pub(crate) fn with_engine<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, ask: impl FnOnce(&mut StyleEngine, &RealmArena, f64) -> R) -> Option<R> {
     let cid = crate::dom::realm_id(scope, args);
-    let now = crate::dom::clock_arg(scope, args, now_at);
+    let now = crate::dom::realm_clock(scope, args);
     let mut answer = None;
     crate::dom::style_op(scope, cid, |scope| {
         let d = crate::dom::dom(scope);
@@ -704,30 +704,30 @@ pub(crate) fn with_engine<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::Functi
     answer
 }
 
-// __dom.rendered(nid, ignoreVisibility, honourSkips, now) -> whether the element is rendered (`rendered`); undefined
+// __dom.rendered(nid, ignoreVisibility, honourSkips) -> whether the element is rendered (`rendered`); undefined
 // where the realm has no engine.
 fn rendered_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let [ignore_visibility, honour_skips] = [args.get(1).is_true(), args.get(2).is_true()];
-    if let Some(r) = with_engine(scope, &args, 3, |engine, arena, now| rendered(engine, arena, id, ignore_visibility, honour_skips, None, now)) {
+    if let Some(r) = with_engine(scope, &args, |engine, arena, now| rendered(engine, arena, id, ignore_visibility, honour_skips, None, now)) {
         rv.set_bool(r);
     }
 }
 
-// __dom.visibleText(nid, now) -> the node's visible text (`visible_text`); undefined where the realm has no engine.
+// __dom.visibleText(nid) -> the node's visible text (`visible_text`); undefined where the realm has no engine.
 fn visible_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    if let Some(text) = with_engine(scope, &args, 1, |engine, arena, now| visible_text(engine, arena, id, now)) {
+    if let Some(text) = with_engine(scope, &args, |engine, arena, now| visible_text(engine, arena, id, now)) {
         let s = v8::String::new_from_two_byte(scope, &text, v8::NewStringType::Normal).unwrap();
         rv.set(s.into());
     }
 }
 
-// __dom.boxKind(nid, now) -> what box the element generates by its own style (`box_kind`); undefined where the realm has
+// __dom.boxKind(nid) -> what box the element generates by its own style (`box_kind`); undefined where the realm has
 // no engine.
 fn box_kind_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    if let Some(kind) = with_engine(scope, &args, 1, |engine, arena, now| {
+    if let Some(kind) = with_engine(scope, &args, |engine, arena, now| {
         engine.flush(arena, now);
         box_kind(arena, id)
     }) {
@@ -735,11 +735,11 @@ fn box_kind_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
 }
 
-// __dom.cssImageUrls(rootNid, now) -> `[initiator, url, …]`: the images the rendered page uses (`css_image_urls`);
+// __dom.cssImageUrls(rootNid) -> `[initiator, url, …]`: the images the rendered page uses (`css_image_urls`);
 // undefined where the realm has no engine.
 fn css_image_urls_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let Some(urls) = with_engine(scope, &args, 1, |engine, arena, now| {
+    let Some(urls) = with_engine(scope, &args, |engine, arena, now| {
         engine.flush(arena, now);
         css_image_urls(arena, id)
     }) else { return };

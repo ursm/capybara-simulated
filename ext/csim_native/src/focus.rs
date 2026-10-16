@@ -512,13 +512,13 @@ pub(crate) fn dialog_focus_restore(arena: &mut RealmArena, dialog: NodeId, was_m
     (in_document && (was_modal || holds)).then_some(previous)
 }
 
-// __dom.dialogFocusingSteps(dialogNid, now) -> [the control to focus] (`dialog_focus_control`), as `nodes_value`
+// __dom.dialogFocusingSteps(dialogNid) -> [the control to focus] (`dialog_focus_control`), as `nodes_value`
 // answers, the focused element kept for the dialog's closing.
 fn dialog_focusing_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(dialog) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);
     dialog_opening(crate::dom::realm(scope, cid), dialog);
-    let control = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| dialog_focus_control(engine, arena, dialog, now)).unwrap_or(dialog);
+    let control = crate::rendered::with_engine(scope, &args, |engine, arena, now| dialog_focus_control(engine, arena, dialog, now)).unwrap_or(dialog);
     rv.set(crate::dom::nodes_value(scope, cid, &[control]));
 }
 
@@ -532,49 +532,49 @@ fn dialog_focus_restore_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     rv.set(crate::dom::nodes_value(scope, cid, previous.as_slice()));
 }
 
-// __dom.focusableArea(hostNid, now) -> [what focusing the delegating host focuses] or [] (`focusable_area`), as
+// __dom.focusableArea(hostNid) -> [what focusing the delegating host focuses] or [] (`focusable_area`), as
 // `nodes_value` answers.
 fn focusable_area_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(host) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let found = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| focusable_area(engine, arena, host, now)).flatten();
+    let found = crate::rendered::with_engine(scope, &args, |engine, arena, now| focusable_area(engine, arena, host, now)).flatten();
     let cid = crate::dom::realm_id(scope, &args);
     rv.set(crate::dom::nodes_value(scope, cid, found.as_slice()));
 }
 
-// __dom.pressFocusTarget(nid, now) -> [what a press on the element focuses] or [] (`press_target`), as `nodes_value`
+// __dom.pressFocusTarget(nid) -> [what a press on the element focuses] or [] (`press_target`), as `nodes_value`
 // answers.
 fn press_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let found = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| press_target(engine, arena, id, now)).flatten();
+    let found = crate::rendered::with_engine(scope, &args, |engine, arena, now| press_target(engine, arena, id, now)).flatten();
     let cid = crate::dom::realm_id(scope, &args);
     rv.set(crate::dom::nodes_value(scope, cid, found.as_slice()));
 }
 
-// __dom.focusTarget(nid, now) -> [what focusing the element focuses] or [] (`focus_target`), as `nodes_value` answers.
+// __dom.focusTarget(nid) -> [what focusing the element focuses] or [] (`focus_target`), as `nodes_value` answers.
 fn focus_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let found = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| focus_target(engine, arena, id, now)).flatten();
+    let found = crate::rendered::with_engine(scope, &args, |engine, arena, now| focus_target(engine, arena, id, now)).flatten();
     let cid = crate::dom::realm_id(scope, &args);
     rv.set(crate::dom::nodes_value(scope, cid, found.as_slice()));
 }
 
-// __dom.focusable(nid, now) -> whether the element is a focusable area (`focusable`); undefined where the realm has no
+// __dom.focusable(nid) -> whether the element is a focusable area (`focusable`); undefined where the realm has no
 // style engine.
 fn focusable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    if let Some(f) = crate::rendered::with_engine(scope, &args, 1, |engine, arena, now| focusable(engine, arena, id, now)) {
+    if let Some(f) = crate::rendered::with_engine(scope, &args, |engine, arena, now| focusable(engine, arena, id, now)) {
         rv.set_bool(f);
     }
 }
 
-// __dom.nextFocus(docNid, currentNid, reverse, now) -> the element Tab (Shift-Tab, with `reverse`) moves focus to from
+// __dom.nextFocus(docNid, currentNid, reverse) -> the element Tab (Shift-Tab, with `reverse`) moves focus to from
 // `currentNid` (-1: nothing focused, the document's sequential focus navigation starting point), as `node_value`
 // answers it — null where nothing is focusable.
 fn next_focus_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_null() };
     let current = crate::dom::nid_arg(scope, &args, 1);
     let reverse = args.get(2).is_true();
-    let found = crate::rendered::with_engine(scope, &args, 3, |engine, arena, now| {
+    let found = crate::rendered::with_engine(scope, &args, |engine, arena, now| {
         // (…nothing focused: on from the starting point, where it is in the document yet — else from its start)
         let current = current.or(arena.focus_start.filter(|&s| arena.shadow_including_root(s) == doc));
         next(engine, arena, doc, current, reverse, now)

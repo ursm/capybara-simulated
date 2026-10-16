@@ -36,12 +36,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "animEventOrder", anim_event_order, context_id);
 }
 
-// The document timeline at the page's clock `now` (an op's last argument), before an op reads or moves an animation.
-fn at_time(engine: &mut StyleEngine, now: Option<f64>) {
-    if let Some(now) = now.filter(|n| n.is_finite()) {
-        if engine.web_animations.timeline_time != Some(now) {
-            engine.web_animations_op(|model| model.set_timeline_time(now));
-        }
+// The document timeline at the realm's clock (`RealmState::clock`), before an op reads or moves an animation.
+fn at_time(engine: &mut StyleEngine, arena: &RealmArena) {
+    let now = arena.clock;
+    if engine.web_animations.timeline_time != Some(now) {
+        engine.web_animations_op(|model| model.set_timeline_time(now));
     }
 }
 
@@ -327,15 +326,14 @@ fn anim_new(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     });
 }
 
-// __dom.animCall(animation, method, arg, now) -> undefined, or the name of the error the method throws
+// __dom.animCall(animation, method, arg) -> undefined, or the name of the error the method throws
 // (`InvalidStateError`, `TypeError`).
 fn anim_call(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    with_engine(scope, &args, |scope, engine, _arena| {
+    with_engine(scope, &args, |scope, engine, arena| {
         let Some(id) = number_arg(scope, args.get(0)).map(|n| n as AnimationId) else { return };
         let method = string_arg(scope, args.get(1)).unwrap_or_default();
         let arg = number_arg(scope, args.get(2));
-        let now = number_arg(scope, args.get(3));
-        at_time(engine, now);
+        at_time(engine, arena);
         let result = engine.web_animations_op(|model| {
             if !model.animations.contains_key(&id) {
                 return Ok(());
@@ -417,14 +415,14 @@ fn anim_drop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     });
 }
 
-// __dom.animCommitValues(animation, now[, width, height]) -> [property, value, …]: what `commitStyles()` writes
+// __dom.animCommitValues(animation[, width, height]) -> [property, value, …]: what `commitStyles()` writes
 // (§4.4.19). A transform interpolated as a MATRIX between two mismatched lists is no value a declaration can hold — it
 // is resolved against the reference box `width` × `height` where one is given, and comes back as written otherwise.
 fn anim_commit_values(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, arena| {
         let Some(id) = number_arg(scope, args.get(0)).map(|n| n as AnimationId) else { return };
-        at_time(engine, number_arg(scope, args.get(1)));
-        let reference = number_arg(scope, args.get(2)).zip(number_arg(scope, args.get(3)));
+        at_time(engine, arena);
+        let reference = number_arg(scope, args.get(1)).zip(number_arg(scope, args.get(2)));
         let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
         for value in engine.committed_values(arena, id) {
             let declaration = value.uncompute();
@@ -461,11 +459,11 @@ fn resolved_matrix_css(transform: &style::values::computed::Transform, width: f3
     Some(style::values::generics::transform::Transform(vec![op].into()).to_css_string())
 }
 
-// __dom.animNextFrameDelay(now) -> ms until an animation next needs a frame, or -1 (none runs).
+// __dom.animNextFrameDelay() -> ms until an animation next needs a frame, or -1 (none runs).
 fn anim_next_frame_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set(v8::Number::new(scope, -1.0).into());
-    with_engine(scope, &args, |scope, engine, _arena| {
-        at_time(engine, number_arg(scope, args.get(0)));
+    with_engine(scope, &args, |scope, engine, arena| {
+        at_time(engine, arena);
         let delay = engine.web_animations.next_frame_delay().unwrap_or(-1.0);
         rv.set(v8::Number::new(scope, delay).into());
     });
@@ -482,13 +480,12 @@ fn string_value<'s>(scope: &mut v8::PinScope<'s, '_>, text: &str) -> v8::Local<'
     v8::String::new(scope, text).map_or_else(|| v8::undefined(scope).into(), Into::into)
 }
 
-// __dom.animState(animation, now) -> [playState, currentTime | null, startTime | null, playbackRate, pending,
+// __dom.animState(animation) -> [playState, currentTime | null, startTime | null, playbackRate, pending,
 // readyGeneration, readySettled, finishedGeneration, finishedSettled, replaceState, finishNotificationQueued].
 fn anim_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    with_engine(scope, &args, |scope, engine, _arena| {
+    with_engine(scope, &args, |scope, engine, arena| {
         let Some(id) = number_arg(scope, args.get(0)).map(|n| n as AnimationId) else { return };
-        let now = number_arg(scope, args.get(1));
-        at_time(engine, now);
+        at_time(engine, arena);
         let model = &engine.web_animations;
         let Some(a) = model.animations.get(&id) else { return };
         let play_state = match model.play_state(id) {
@@ -519,13 +516,12 @@ fn anim_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     });
 }
 
-// __dom.animTiming(effect, now) -> [localTime | null, progress | null, currentIteration | null, activeDuration, endTime,
+// __dom.animTiming(effect) -> [localTime | null, progress | null, currentIteration | null, activeDuration, endTime,
 // phase] — what `getComputedTiming()` adds to the timing.
 fn anim_timing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    with_engine(scope, &args, |scope, engine, _arena| {
+    with_engine(scope, &args, |scope, engine, arena| {
         let Some(id) = number_arg(scope, args.get(0)).map(|n| n as EffectId) else { return };
-        let now = number_arg(scope, args.get(1));
-        at_time(engine, now);
+        at_time(engine, arena);
         let Some(timing) = engine.web_animations.computed_timing(id) else { return };
         let phase = match timing.phase {
             Phase::Before => "before",
@@ -578,13 +574,13 @@ fn anim_signals(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     });
 }
 
-// __dom.animList(nid | -1, now, subtree) -> [animation, …]: what `element.getAnimations({subtree})` (an element) or
+// __dom.animList(nid | -1, subtree) -> [animation, …]: what `element.getAnimations({subtree})` (an element) or
 // `document.getAnimations()` (-1) reports — the relevant animations, in composite order.
 fn anim_list(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, arena| {
         let element = nid_arg(scope, &args, 0);
-        at_time(engine, number_arg(scope, args.get(1)));
-        let subtree = args.get(2).boolean_value(scope);
+        at_time(engine, arena);
+        let subtree = args.get(1).boolean_value(scope);
         let ids = engine.relevant_animations(arena, element, subtree);
         let items: Vec<v8::Local<v8::Value>> = ids.iter().map(|&id| v8::Number::new(scope, id as f64).into()).collect();
         rv.set(v8::Array::new_with_elements(scope, &items).into());
@@ -713,14 +709,14 @@ fn anim_properties(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     });
 }
 
-// __dom.animActivity(nid, [property, …], now) -> bits: 1 where an animation on the element itself that sets one of
+// __dom.animActivity(nid, [property, …]) -> bits: 1 where an animation on the element itself that sets one of
 // the properties is relevant (current, or in effect), 2 where one is in effect.
 fn anim_activity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set(v8::Integer::new(scope, 0).into());
-    with_engine(scope, &args, |scope, engine, _arena| {
+    with_engine(scope, &args, |scope, engine, arena| {
         let Some(element) = nid_arg(scope, &args, 0) else { return };
         let properties: Vec<String> = array_arg(scope, args.get(1)).iter().filter_map(|i| i.text().map(str::to_owned)).collect();
-        at_time(engine, number_arg(scope, args.get(2)));
+        at_time(engine, arena);
         let (relevant, in_effect) = engine.animation_activity(element, &properties);
         rv.set(v8::Integer::new(scope, relevant as i32 | (in_effect as i32) << 1).into());
     });

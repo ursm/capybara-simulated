@@ -667,12 +667,11 @@ RSpec.describe 'style engine animations' do
       (() => {
         const a = document.getElementById('a');
         getComputedStyle(a).marginLeft;
-        const now = __virtualNow();
-        const before = __dom.styleFlush(now);
+        const before = __dom.styleFlush();
         a.style.color = 'red';
-        const color = __dom.styleFlush(now);
+        const color = __dom.styleFlush();
         a.style.animationName = 'widen';
-        const renamed = __dom.styleFlush(now);
+        const renamed = __dom.styleFlush();
         return [before ?? null, color ?? null, (renamed || []).length];
       })()
     JS

@@ -559,7 +559,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "paintRuns", paint_runs, context_id);
 }
 
-// __dom.paintList(root, body, width, height, dx, dy, now) -> [commands, strings, nodes]: the display list of the page
+// __dom.paintList(root, body, width, height, dx, dy) -> [commands, strings, nodes]: the display list of the page
 // whose root element is `root` (-1 for none), with the text the last pass that paints placed, which it takes
 // (`display_list`) — its commands a Float64Array, the strings and the nodes they name by index.
 fn paint_list(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
@@ -572,7 +572,7 @@ fn paint_list_unguarded(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCal
     let body = crate::dom::nid_arg(scope, args, 1);
     let number = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).number_value(scope).unwrap_or(0.0);
     let frame = [number(scope, 2), number(scope, 3), number(scope, 4), number(scope, 5)];
-    let now = args.get(6).number_value(scope).filter(|n| n.is_finite()).unwrap_or(f64::NAN);
+    let now = crate::dom::realm_clock(scope, args);
     let d = crate::dom::dom(scope);
     let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
     // (…what the paint's own recording pass placed, taken: none where it laid nothing out)

@@ -538,12 +538,12 @@ fn points<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, nodes: &[NodeId], offs
     v8::Array::new_with_elements(scope, &values).into()
 }
 
-// __dom.caretStep(nid, offset, forward, now) -> [[node], offset] (`caret_step`), or undefined where the caret stays (or
+// __dom.caretStep(nid, offset, forward) -> [[node], offset] (`caret_step`), or undefined where the caret stays (or
 // the realm has no style engine).
 fn caret_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     step_op(scope, args, rv, RealmArena::caret_step);
 }
-// __dom.caretWordStep(nid, offset, forward, now) -> …by a word (`caret_word_step`).
+// __dom.caretWordStep(nid, offset, forward) -> …by a word (`caret_word_step`).
 fn caret_word_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     step_op(scope, args, rv, RealmArena::caret_word_step);
 }
@@ -553,7 +553,7 @@ fn step_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let offset = args.get(1).uint32_value(scope).unwrap_or(0);
     let forward = args.get(2).is_true();
     let cid = crate::dom::realm_id(scope, &args);
-    if let Some((to, at)) = crate::rendered::with_engine(scope, &args, 3, |engine, arena, now| step(arena, engine, now, node, offset, forward)).flatten() {
+    if let Some((to, at)) = crate::rendered::with_engine(scope, &args, |engine, arena, now| step(arena, engine, now, node, offset, forward)).flatten() {
         rv.set(points(scope, cid, &[to], &[at]));
     }
 }
@@ -568,12 +568,12 @@ fn caret_word(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
 }
 
-// __dom.caretEdge(nid, end, now) -> [[node], offset] (`caret_edge`), or undefined where the realm has no style engine.
+// __dom.caretEdge(nid, end) -> [[node], offset] (`caret_edge`), or undefined where the realm has no style engine.
 fn caret_edge(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let end = args.get(1).is_true();
     let cid = crate::dom::realm_id(scope, &args);
-    if let Some((to, at)) = crate::rendered::with_engine(scope, &args, 2, |engine, arena, now| arena.caret_edge(engine, now, root, end)) {
+    if let Some((to, at)) = crate::rendered::with_engine(scope, &args, |engine, arena, now| arena.caret_edge(engine, now, root, end)) {
         rv.set(points(scope, cid, &[to], &[at]));
     }
 }

@@ -849,15 +849,15 @@ pub(crate) fn with_text<R>(scope: &mut v8::PinScope<'_, '_>, cid: i32, ask: impl
     arena.with_text(prior, |g| ask(arena, g))
 }
 
-// __dom.caretFromPoint(x, y, now, root) -> [[node], offset]: the caret position at the viewport point (`caret_from_point`),
+// __dom.caretFromPoint(x, y, root) -> [[node], offset]: the caret position at the viewport point (`caret_from_point`),
 // in the element a hit there lands on — undefined where it lands on none — or, given `root`, in `root`, wherever the point
 // is: a line a scroller clipped away is no hit, and a caret moving a line in an editor goes to it all the same.
 fn caret_from_point(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let x = args.get(0).number_value(scope).unwrap_or(f64::NAN);
     let y = args.get(1).number_value(scope).unwrap_or(f64::NAN);
     let cid = crate::dom::realm_id(scope, &args);
-    let within = crate::dom::nid_arg(scope, &args, 3);
-    let Some(hit) = within.or_else(|| crate::hit_test::painting(scope, &args, 2, |p| p.hit(x, y, false).first().copied()).flatten()) else { return };
+    let within = crate::dom::nid_arg(scope, &args, 2);
+    let Some(hit) = within.or_else(|| crate::hit_test::painting(scope, &args, |p| p.hit(x, y, false).first().copied()).flatten()) else { return };
     let (node, offset) = with_text(scope, cid, |arena, g| arena.caret_from_point(g, x, y, hit)).unwrap_or((hit, 0));
     let mut values = vec![crate::dom::nodes_value(scope, cid, &[node])];
     values.push(v8::Integer::new_from_unsigned(scope, offset).into());
@@ -1070,7 +1070,7 @@ fn modify_target(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackAr
         arena.relative(top, crate::dom::RELATIVE_BODY).filter(|_| arena.is_document(top)).unwrap_or(top)
     });
     let step = |scope: &mut v8::PinScope<'_, '_>, word: bool| {
-        crate::rendered::with_engine(scope, args, 4, |engine, arena, now| {
+        crate::rendered::with_engine(scope, args, |engine, arena, now| {
             if word { arena.caret_word_step(engine, now, node, offset, forward) } else { arena.caret_step(engine, now, node, offset, forward) }
         })
         .flatten()
@@ -1107,7 +1107,7 @@ fn modify_target(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackAr
 // …a line's: up or down a line, past the first or last to the host's first or last caret position.
 #[allow(clippy::type_complexity)]
 fn line_step(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, cid: i32, root: NodeId, node: NodeId, offset: u32, forward: bool) -> Option<((NodeId, u32), Option<f64>, bool)> {
-    let edge = crate::rendered::with_engine(scope, args, 4, |engine, arena, now| arena.caret_edge(engine, now, root, forward))?;
+    let edge = crate::rendered::with_engine(scope, args, |engine, arena, now| arena.caret_edge(engine, now, root, forward))?;
     line_over(scope, cid, root, node, offset, !forward, Some(edge)).map(|(at, x)| (at, Some(x), false))
 }
 // …and whether 'left' and 'right' at (`node`, `offset`) go by right-to-left: the strong direction of the text there by a
@@ -1125,9 +1125,9 @@ fn visual_rtl(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgum
     }
     let element = if arena.is_element(node) { Some(node) } else { arena.parent_of(node).filter(|&p| arena.is_element(p)) };
     let Some(element) = element else { return false };
-    crate::rendered::with_engine(scope, args, 4, |engine, arena, now| engine.value(arena, element, "direction", None, now)).flatten().as_deref() == Some("rtl")
+    crate::rendered::with_engine(scope, args, |engine, arena, now| engine.value(arena, element, "direction", None, now)).flatten().as_deref() == Some("rtl")
 }
-// __dom.selectionModifyTarget(focusNode, focusOffset, direction, granularity, now) -> `[forward, node, offset, x,
+// __dom.selectionModifyTarget(focusNode, focusOffset, direction, granularity) -> `[forward, node, offset, x,
 // upstream]` where `modify` moves the focus (`modify_target`, `direction` and `granularity` ASCII-lowercased), `[forward]`
 // where it moves it nowhere; undefined for a direction or a granularity it does not know.
 fn selection_modify_target(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
