@@ -284,7 +284,7 @@ impl RealmArena {
     // against the base epoch, which moves with a `<base>` linked, unlinked or freed or its `href` written — the parser's
     // included — and with no other write a page makes; and against the fallback, which a navigation can change with
     // the epoch where it was (the live document is reused across visits).
-    fn document_base_url(&mut self, doc: NodeId) -> String {
+    pub(crate) fn document_base_url(&mut self, doc: NodeId) -> String {
         let fallback = self.document_url(doc, true);
         let epoch = self.base_epoch;
         let texts = self.document_states.1.get(&doc);

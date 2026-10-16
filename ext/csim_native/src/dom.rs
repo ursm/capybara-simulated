@@ -769,7 +769,8 @@ pub(crate) struct Generations {
 }
 // …the sequence of the last change a layout has to see; how many subtree-wide layout marks there were (a diagnostic);
 // the settle generation (every observable change); the tree's (that and every parser change); the nodes' (that but a
-// text's data); the structure's (an insertion or removal, nothing else); the style state's (a state no other moves).
+// text's data); the structure's (an insertion or removal, nothing else); the style state's (a state no other moves); the
+// rule set's (the cascade made of other sheets — the bindings' `cascadeVersion`, cascade.js).
 pub(crate) const GEN_DIRTY: usize = 0;
 pub(crate) const GEN_SUBTREE_MARKS: usize = 1;
 pub(crate) const GEN_SETTLE: usize = 2;
@@ -777,7 +778,8 @@ pub(crate) const GEN_TREE: usize = 3;
 pub(crate) const GEN_NODES: usize = 4;
 pub(crate) const GEN_STRUCTURE: usize = 5;
 pub(crate) const GEN_STYLE_STATE: usize = 6;
-const GENERATIONS: usize = 7;
+pub(crate) const GEN_CASCADE: usize = 7;
+const GENERATIONS: usize = 8;
 
 impl Generations {
     pub(crate) fn bump(&self, which: usize) {
@@ -986,6 +988,8 @@ pub(crate) struct RealmArena {
 // A realm's own state (`RealmArena`): its document's.
 #[derive(Default)]
 pub(crate) struct RealmState {
+    // What its document's cascade was made of when last handed to its style engine (sheet_owners.rs `cascadeRekey`).
+    pub(crate) cascade_key: Option<crate::sheet_owners::CascadeKey>,
     // Moves with every write to the realm's nodes that can change an element's STATE (`:checked`, `:focus`, `:valid`, `:default`, …): a
     // state write, a value, a tree change (form owners, radio groups, fieldsets), an attribute a state reads.
     pub(crate) state_epoch: u64,
