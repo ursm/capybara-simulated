@@ -138,6 +138,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "documentNamed", document_named, context_id);
     crate::dom::register(scope, ns, "documentNames", document_names, context_id);
     crate::dom::register(scope, ns, "windowNamed", window_named, context_id);
+    crate::dom::register(scope, ns, "namedIn", named_in, context_id);
+    crate::dom::register(scope, ns, "namesIn", names_in, context_id);
 }
 
 // __dom.elementById(rootNid, id) -> `getElementById`: the first element in tree order, the root itself included, whose id
@@ -183,6 +185,55 @@ fn window_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let cid = realm_id(scope, &args);
     let found = crate::dom::realm(scope, cid).window_named(doc, &name, kind);
     rv.set(crate::dom::nodes_value(scope, cid, &found));
+}
+
+// The nodes of `list`, an array a live collection holds its elements in, by index (none for an entry that is no node).
+fn list_nodes(scope: &mut v8::PinScope<'_, '_>, list: v8::Local<'_, v8::Value>) -> Vec<Option<NodeId>> {
+    let Ok(list) = v8::Local::<v8::Array>::try_from(list) else { return Vec::new() };
+    (0..list.length()).map(|i| list.get_index(scope, i).and_then(|v| crate::node_handle::nid_of(scope, v))).collect()
+}
+// Whether `n` is one an HTMLCollection's named property `name` names (DOM §4.2.10.1): an element whose id is it, or an
+// HTML element whose `name` attribute is (exactly, as UTF-16).
+fn names(n: &NodeData, name: &[u16]) -> bool {
+    n.kind == NodeKind::Element && (n.plain_attr_is("id", name) || (n.is_html() && n.plain_attr_is("name", name)))
+}
+
+// __dom.namedIn(list, name, all) -> the named lookup of a collection of `list`'s elements (DOM §4.2.10.1): the index of
+// the first that `name` names, -1 for none — none for ''; with `all`, the indices of every one (HTMLFormControlsCollection's
+// RadioNodeList's members).
+fn named_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let name = utf16_arg(scope, args.get(1));
+    let all = args.get(2).is_true();
+    let nodes = if name.is_empty() { Vec::new() } else { list_nodes(scope, args.get(0)) };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let mut found = nodes.iter().enumerate().filter(|(_, id)| id.and_then(|id| arena.get(id)).is_some_and(|n| names(n, &name))).map(|(i, _)| i as f64);
+    if !all {
+        return rv.set_double(found.next().unwrap_or(-1.0));
+    }
+    let found: Vec<f64> = found.collect();
+    rv.set(f64_array(scope, &found).into());
+}
+
+// __dom.namesIn(list) -> [name] — the supported property names of a collection of `list`'s elements (DOM §4.2.10.1):
+// each one's id and, an HTML element's, its `name`, in order, neither empty, each once.
+fn names_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let nodes = list_nodes(scope, args.get(0));
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let mut out: Vec<Vec<u16>> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for n in nodes.into_iter().flatten().filter_map(|id| arena.get(id)).filter(|n| n.kind == NodeKind::Element) {
+        let name = if n.is_html() { n.plain_attr_units("name") } else { None };
+        for units in [n.plain_attr_units("id"), name].into_iter().flatten().filter(|u| !u.is_empty()) {
+            if seen.insert(units.clone()) {
+                out.push(units);
+            }
+        }
+    }
+    let strings: Vec<v8::Local<'_, v8::Value>> =
+        out.iter().filter_map(|u| v8::String::new_from_two_byte(scope, u, v8::NewStringType::Normal).map(Into::into)).collect();
+    rv.set(v8::Array::new_with_elements(scope, &strings).into());
 }
 
 // The ids of each tree asked for them since the last change that can move one (`id_epoch`: a node linked, unlinked or
