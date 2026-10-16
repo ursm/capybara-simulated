@@ -20,10 +20,9 @@ use cssparser::{Parser, ParserInput, SourceLocation};
 use style::context::QuirksMode;
 use style::font_face::{parse_font_face_block, DescriptorId, Descriptors};
 use style::parser::ParserContext;
-use style::properties::style_structs::Font;
 use style::properties::{
-    parse_one_declaration_into, parse_style_attribute, ComputedValues, Importance, NonCustomPropertyId, PropertyDeclaration,
-    PropertyDeclarationBlock, PropertyDeclarationId, PropertyId, SourcePropertyDeclaration, SourcePropertyDeclarationUpdate,
+    parse_one_declaration_into, parse_style_attribute, Importance, NonCustomPropertyId, PropertyDeclaration,
+    PropertyDeclarationBlock, PropertyId, SourcePropertyDeclaration, SourcePropertyDeclarationUpdate,
 };
 use style::stylesheets::supports_rule::parse_condition_or_declaration;
 use style::stylesheets::{CssRuleType, Origin, UrlExtraData};
@@ -240,15 +239,12 @@ pub(crate) struct Property {
     // The property it names: an alias's, or its own name.
     pub(crate) property: &'static str,
     pub(crate) animatable: bool,
-    // A shorthand's longhands, in the engine's order; none for a longhand.
-    pub(crate) longhands: Vec<&'static str>,
-    // A longhand's initial value, computed and serialized as a computed style reads it.
-    pub(crate) initial: Option<String>,
+    // Whether it is a longhand, not a shorthand.
+    pub(crate) longhand: bool,
 }
 
 pub(crate) fn properties() -> Vec<Property> {
     crate::style::enable_properties();
-    let initial = ComputedValues::initial_values_with_font_override(Font::initial_values());
     let page_sees = |id: NonCustomPropertyId| exposed(id.name()) && id.to_property_id().enabled_for_all_content();
     NonCustomPropertyId::iter()
         .filter(|&id| page_sees(id))
@@ -258,10 +254,7 @@ pub(crate) fn properties() -> Vec<Property> {
                 name: id.name(),
                 property: own.name(),
                 animatable: own.is_animatable(),
-                longhands: own.as_shorthand().map_or_else(Vec::new, |shorthand| {
-                    shorthand.longhands().filter(|&l| page_sees(l.into())).map(|l| l.name()).collect()
-                }),
-                initial: own.as_longhand().map(|l| initial.computed_value_to_string(PropertyDeclarationId::Longhand(l))),
+                longhand: own.as_longhand().is_some(),
             }
         })
         .collect()

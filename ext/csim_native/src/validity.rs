@@ -740,17 +740,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "labeledControl", labeled_control, context_id);
     crate::dom::register(scope, ns, "labelsOf", labels_of, context_id);
     crate::dom::register(scope, ns, "isEditable", is_editable, context_id);
-    crate::dom::register(scope, ns, "isDetailsSummary", is_details_summary, context_id);
     crate::dom::register(scope, ns, "activationTarget", activation_target, context_id);
 }
 
-// __dom.isEditable / isDetailsSummary(nid) -> what `element_state` answers of the node: whether it is in an editing host,
-// whether it is the summary of its details.
+// __dom.isEditable(nid) -> what `element_state` answers of the node: whether it is in an editing host.
 fn is_editable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     node_test(scope, &args, rv, RealmArena::is_editable);
-}
-fn is_details_summary(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    node_test(scope, &args, rv, RealmArena::is_details_summary);
 }
 fn node_test(
     scope: &mut v8::PinScope<'_, '_>,

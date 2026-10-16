@@ -31,7 +31,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "animEffectTiming", anim_effect_timing, context_id);
     register(scope, ns, "animKeyframes", anim_keyframes, context_id);
     register(scope, ns, "animProperties", anim_properties, context_id);
-    register(scope, ns, "animActivity", anim_activity, context_id);
     register(scope, ns, "animCompositeOrder", anim_composite_order, context_id);
     register(scope, ns, "animEventOrder", anim_event_order, context_id);
 }
@@ -706,19 +705,6 @@ fn anim_properties(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         let names = engine.animated_properties(element);
         let items: Vec<v8::Local<v8::Value>> = names.iter().map(|n| string_value(scope, n)).collect();
         rv.set(v8::Array::new_with_elements(scope, &items).into());
-    });
-}
-
-// __dom.animActivity(nid, [property, …]) -> bits: 1 where an animation on the element itself that sets one of
-// the properties is relevant (current, or in effect), 2 where one is in effect.
-fn anim_activity(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set(v8::Integer::new(scope, 0).into());
-    with_engine(scope, &args, |scope, engine, arena| {
-        let Some(element) = nid_arg(scope, &args, 0) else { return };
-        let properties: Vec<String> = array_arg(scope, args.get(1)).iter().filter_map(|i| i.text().map(str::to_owned)).collect();
-        at_time(engine, arena);
-        let (relevant, in_effect) = engine.animation_activity(element, &properties);
-        rv.set(v8::Integer::new(scope, relevant as i32 | (in_effect as i32) << 1).into());
     });
 }
 
