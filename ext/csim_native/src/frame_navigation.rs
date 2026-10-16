@@ -31,18 +31,33 @@ struct FrameNavigation {
     // nested-timer clamp, so a frame its load handler navigates again on every load is paced, as a network's response
     // paces it (Chrome: ~100 loads a second), rather than running without the clock moving.
     loaded_at: Option<f64>,
+    // The form submission the container's navigable plans to navigate to (HTML "plan to navigate": one pending
+    // navigation per navigable, a later one replacing it), by the number `planFrameNavigation` gave it — 0 for none.
+    planned: u32,
 }
 
+// A scripted navigation's response awaited (frame-nav.js `FN_NAV_PENDING`): what a plan superseded clears.
+const NAV_PENDING: u32 = 1 << 1;
+
 #[derive(Default)]
-pub(crate) struct FrameNavigations(HashMap<NodeId, FrameNavigation>);
+pub(crate) struct FrameNavigations(HashMap<NodeId, FrameNavigation>, Plans);
+
+// The plans' numbers, and each form's last one with the container it plans for: an interactive submission supersedes
+// its form's last plan on whichever navigable it was for.
+#[derive(Default)]
+struct Plans {
+    next: u32,
+    last: HashMap<NodeId, (u32, NodeId)>,
+}
 
 impl FrameNavigations {
     pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.0.is_empty() && self.1.last.is_empty()
     }
-    // The container freed: its navigation let go of with it.
+    // The container — or a form — freed: its navigation let go of with it.
     pub(crate) fn forget(&mut self, container: NodeId) {
         self.0.remove(&container);
+        self.1.last.remove(&container);
     }
 }
 
@@ -56,6 +71,10 @@ impl RealmArena {
         for container in freed {
             self.frame_navigations.0.remove(&container);
         }
+        let freed: Vec<NodeId> = self.frame_navigations.1.last.keys().copied().filter(|&f| self.get(f).is_none()).collect();
+        for form in freed {
+            self.frame_navigations.1.last.remove(&form);
+        }
     }
 }
 
@@ -68,6 +87,58 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setFrameNavUrl", set_frame_nav_url, context_id);
     crate::dom::register(scope, ns, "frameLoadedAt", frame_loaded_at, context_id);
     crate::dom::register(scope, ns, "setFrameLoadedAt", set_frame_loaded_at, context_id);
+    crate::dom::register(scope, ns, "planFrameNavigation", plan_frame_navigation, context_id);
+    crate::dom::register(scope, ns, "landFrameNavigation", land_frame_navigation, context_id);
+    crate::dom::register(scope, ns, "cancelFrameNavigation", cancel_frame_navigation, context_id);
+}
+
+// __dom.planFrameNavigation(containerNid, formNid, interactive) -> the number of the navigation the form's submission
+// plans for the container's navigable, replacing the one it had planned — and, for an interactive submission (a submit
+// button's, an implicit one — not `form.submit()`), the form's last plan on whichever navigable it was for, whose
+// awaited response it awaits no more (form-double-submit; form.submit() to several frames navigates them all).
+fn plan_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(container), Some(form)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return rv.set_uint32(0) };
+    let interactive = args.get(2).is_true();
+    let cid = realm_id(scope, &args);
+    let navs = &mut crate::dom::realm(scope, cid).frame_navigations;
+    if interactive {
+        if let Some(&(token, other)) = navs.1.last.get(&form) {
+            if let Some(nav) = navs.0.get_mut(&other).filter(|n| n.planned == token) {
+                nav.planned = 0;
+                nav.flags &= !NAV_PENDING;
+            }
+        }
+    }
+    navs.1.next = navs.1.next.wrapping_add(1).max(1);
+    let token = navs.1.next;
+    navs.0.entry(container).or_default().planned = token;
+    navs.1.last.insert(form, (token, container));
+    rv.set_uint32(token);
+}
+
+// __dom.landFrameNavigation(containerNid, formNid, token) -> whether the planned navigation is still the container's
+// navigable's — its response then the one to load, the plan done.
+fn land_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(container), Some(form)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return rv.set_bool(false) };
+    let token = args.get(2).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let navs = &mut crate::dom::realm(scope, cid).frame_navigations;
+    let Some(nav) = navs.0.get_mut(&container).filter(|n| token != 0 && n.planned == token) else { return rv.set_bool(false) };
+    nav.planned = 0;
+    if navs.1.last.get(&form).is_some_and(|&(t, _)| t == token) {
+        navs.1.last.remove(&form);
+    }
+    rv.set_bool(true);
+}
+
+// __dom.cancelFrameNavigation(containerNid) — another navigation of the container's navigable replaces the one a form
+// planned (its `location` set): the form's response, when it comes, loads into nothing.
+fn cancel_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    if let Some(nav) = crate::dom::realm(scope, cid).frame_navigations.0.get_mut(&container) {
+        nav.planned = 0;
+    }
 }
 
 // __dom.frameLoadedAt(containerNid) -> when the element's last `load` fired, on the virtual clock: -Infinity for none.
