@@ -115,7 +115,38 @@ impl RealmArena {
     }
 }
 
+// Whether a script element blocks the parser (HTML "prepare the script element" step 31): a classic script, inline or
+// neither `defer` nor `async` — which take effect on an external one alone; a module is deferred always, and an import
+// map or a data block runs nothing.
+fn blocks_parser(n: &crate::dom::NodeData) -> bool {
+    let deferred = n.plain_attr("src").is_some() && (n.plain_attr("defer").is_some() || n.plain_attr("async").is_some());
+    script_type(n) == CLASSIC && !deferred
+}
+
+impl RealmArena {
+    // The scripts of `root`'s tree (not a shadow tree's, nor a template's contents) its parser inserted and no pass has
+    // run yet, in tree order, each with whether it blocks the parser (`blocks_parser`) or is an import map — which "the
+    // end" of a parse that ran none of them at its end tags (the XML parser's) runs first, before the document is
+    // interactive (HTML §13.2.7).
+    pub(crate) fn parser_scripts(&self, root: NodeId) -> Vec<(NodeId, bool)> {
+        let mut found = Vec::new();
+        let mut stack: Vec<NodeId> = self.get(root).map_or_else(Vec::new, |n| n.children.iter().rev().copied().collect());
+        while let Some(id) = stack.pop() {
+            let Some(n) = self.get(id) else { continue };
+            if n.kind == NodeKind::Element && &*n.local_name == "script"
+                && n.script_flags & (SCRIPT_PARSER_INSERTED | SCRIPT_RUN) == SCRIPT_PARSER_INSERTED
+            {
+                found.push((id, blocks_parser(n) || script_type(n) == IMPORT_MAP));
+            }
+            stack.extend(n.children.iter().rev());
+        }
+        found
+    }
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "parserScripts", parser_scripts_op, context_id);
+    crate::dom::register(scope, ns, "scriptBlocksParser", script_blocks_parser_op, context_id);
     crate::dom::register(scope, ns, "scriptType", script_type_op, context_id);
     crate::dom::register(scope, ns, "javaScriptContent", javascript_content_op, context_id);
     crate::dom::register(scope, ns, "scriptResponseRefused", script_response_refused_op, context_id);
@@ -197,6 +228,28 @@ fn set_script_flags_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     if let Some(n) = dom(scope).arena.get_mut_quietly(id) {
         n.script_flags = (n.script_flags & !mask) | (bits & mask);
     }
+}
+
+// __dom.parserScripts(rootNid) -> [scripts, blocking]: the scripts `parser_scripts` finds, as `nodes_value` answers
+// them, and a Uint8Array of whether each blocks the parser.
+fn parser_scripts_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(root) = nid_arg(scope, &args, 0) else { return };
+    let cid = crate::dom::realm_id(scope, &args);
+    let found = crate::dom::dom(scope).arena.parser_scripts(root);
+    let ids: Vec<NodeId> = found.iter().map(|&(id, _)| id).collect();
+    let blocking: Vec<u8> = found.iter().map(|&(_, b)| u8::from(b)).collect();
+    let nodes = crate::dom::nodes_value(scope, cid, &ids);
+    let len = blocking.len();
+    let store = v8::ArrayBuffer::new_backing_store_from_vec(blocking).make_shared();
+    let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
+    let Some(mask) = v8::Uint8Array::new(scope, buffer, 0, len) else { return };
+    rv.set(v8::Array::new_with_elements(scope, &[nodes, mask.into()]).into());
+}
+
+// __dom.scriptBlocksParser(nid) -> whether the script element blocks the parser (`blocks_parser`).
+fn script_blocks_parser_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = nid_arg(scope, &args, 0);
+    rv.set_bool(id.and_then(|id| crate::dom::dom(scope).arena.get(id)).is_some_and(blocks_parser));
 }
 
 // __dom.prepareScript(nid, scripting, parser) -> what preparing the script element found it is to do (`prepare_script`: `PREPARE_NONE`, …).
