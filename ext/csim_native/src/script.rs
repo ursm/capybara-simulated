@@ -125,10 +125,9 @@ fn blocks_parser(n: &crate::dom::NodeData) -> bool {
 
 impl RealmArena {
     // The scripts of `root`'s tree (not a shadow tree's, nor a template's contents) its parser inserted and no pass has
-    // run yet, in tree order, each with whether it blocks the parser (`blocks_parser`) or is an import map — which "the
-    // end" of a parse that ran none of them at its end tags (the XML parser's) runs first, before the document is
-    // interactive (HTML §13.2.7).
-    pub(crate) fn parser_scripts(&self, root: NodeId) -> Vec<(NodeId, bool)> {
+    // run yet, in tree order: what "the end" of a parse runs (HTML §13.2.7) — first, for a parse that ran none of them at
+    // their end tags (the XML parser's), the ones that block the parser (`blocks_parser`) or are import maps.
+    pub(crate) fn parser_scripts(&self, root: NodeId) -> Vec<NodeId> {
         let mut found = Vec::new();
         let mut stack: Vec<NodeId> = self.get(root).map_or_else(Vec::new, |n| n.children.iter().rev().copied().collect());
         while let Some(id) = stack.pop() {
@@ -136,7 +135,7 @@ impl RealmArena {
             if n.kind == NodeKind::Element && &*n.local_name == "script"
                 && n.script_flags & (SCRIPT_PARSER_INSERTED | SCRIPT_RUN) == SCRIPT_PARSER_INSERTED
             {
-                found.push((id, blocks_parser(n) || script_type(n) == IMPORT_MAP));
+                found.push(id);
             }
             stack.extend(n.children.iter().rev());
         }
@@ -230,20 +229,12 @@ fn set_script_flags_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     }
 }
 
-// __dom.parserScripts(rootNid) -> [scripts, blocking]: the scripts `parser_scripts` finds, as `nodes_value` answers
-// them, and a Uint8Array of whether each blocks the parser.
+// __dom.parserScripts(rootNid) -> the scripts `parser_scripts` finds, as `nodes_value` answers them.
 fn parser_scripts_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);
     let found = crate::dom::dom(scope).arena.parser_scripts(root);
-    let ids: Vec<NodeId> = found.iter().map(|&(id, _)| id).collect();
-    let blocking: Vec<u8> = found.iter().map(|&(_, b)| u8::from(b)).collect();
-    let nodes = crate::dom::nodes_value(scope, cid, &ids);
-    let len = blocking.len();
-    let store = v8::ArrayBuffer::new_backing_store_from_vec(blocking).make_shared();
-    let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
-    let Some(mask) = v8::Uint8Array::new(scope, buffer, 0, len) else { return };
-    rv.set(v8::Array::new_with_elements(scope, &[nodes, mask.into()]).into());
+    rv.set(crate::dom::nodes_value(scope, cid, &found));
 }
 
 // __dom.scriptBlocksParser(nid) -> whether the script element blocks the parser (`blocks_parser`).

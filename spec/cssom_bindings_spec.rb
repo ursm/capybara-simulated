@@ -114,29 +114,34 @@ RSpec.describe 'CSSOM bindings' do
     ])
   end
 
-  # A member of this realm's binding acts on another realm's rule and sheet as that realm's own (an iframe's rules are
-  # its own store's); `replace` makes a sheet of the text a task later, refusing modification until then; a grouping
-  # rule a sheet no longer holds still edits its own list, and lets go of its rules; an `@import`'s media list is its
-  # sheet's, the same object; and an empty initial value is one.
   # A `<style>` moved into a frame's document is a sheet of that document's — its `sheet` and the frame's `styleSheets`
   # show its own rules, a new CSSStyleSheet, where the realm it was made in, whose store numbers sheets of its own, read
-  # another sheet's by the frame's number (Chrome: `div { height: 9px; }` both, same=false).
+  # another sheet's by the frame's number — and a rule inserted through it applies in the frame (Chrome: `div { height:
+  # 9px; }` both, same=false).
   it "shows a style moved into a frame's document its own sheet" do
     session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><iframe id="g" src="about:blank"></iframe>']] })
     session.visit '/'
-    expect(session.evaluate_script(<<~JS)).to eq(['div { height: 9px; }', false, true, ['div { height: 9px; }'], ['p { color: red; }']])
+    expect(session.evaluate_script(<<~JS)).to eq(['div { height: 9px; }', false, true, ['div { height: 9px; }'], ['p { color: red; }'], '33px'])
       (() => {
         const a = document.createElement('style'); a.textContent = 'p{color:red}'; document.head.appendChild(a);
         const n = document.createElement('style'); n.textContent = 'div{height:9px}'; document.head.appendChild(n);
         const f = document.getElementById('g').contentDocument, before = n.sheet;
         f.head.appendChild(n);
         const after = n.sheet;
+        const d = f.body.appendChild(f.createElement('div'));
+        d.id = 'd';
+        after.insertRule('#d { width: 33px }', 1);
         return [after.cssRules[0].cssText, before === after, after.ownerNode === n,
-          [...f.styleSheets].map((s) => s.cssRules[0].cssText), [...document.styleSheets].map((s) => s.cssRules[0].cssText)];
+          [...f.styleSheets].map((s) => s.cssRules[0].cssText), [...document.styleSheets].map((s) => s.cssRules[0].cssText),
+          f.defaultView.getComputedStyle(d).width];
       })()
     JS
   end
 
+  # A member of this realm's binding acts on another realm's rule and sheet as that realm's own (an iframe's rules are
+  # its own store's); `replace` makes a sheet of the text a task later, refusing modification until then; a grouping
+  # rule a sheet no longer holds still edits its own list, and lets go of its rules; an `@import`'s media list is its
+  # sheet's, the same object; and an empty initial value is one.
   it 'acts on each object in its own realm' do
     session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [<<~HTML]] })
       <!doctype html><meta charset="utf-8">
