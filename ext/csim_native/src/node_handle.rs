@@ -520,6 +520,7 @@ impl ListenerTypes {
 pub(crate) fn install_listeners(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "listenerStore", listener_store, context_id);
     crate::dom::register(scope, ns, "listenerStores", listener_stores, context_id);
+    crate::dom::register(scope, ns, "listenedIn", listened_in, context_id);
     crate::dom::register(scope, ns, "dispatchPath", dispatch_path, context_id);
     crate::dom::register(scope, ns, "noteListenerType", note_listener_type, context_id);
     crate::dom::register(scope, ns, "listenerTypeKnown", listener_type_known, context_id);
@@ -575,6 +576,28 @@ fn listener_stores(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         .map(|store| store.unwrap_or(undefined))
         .collect();
     rv.set(v8::Array::new_with_elements(scope, &stores).into());
+}
+
+// `__dom.listenedIn(rootNid)` -> the nodes among `root`'s shadow-including inclusive descendants that have a listener
+// store, as `nodes_value` answers them: those whose listeners — and event handlers, each a listener of its own while it
+// has a value — a `document.open()` erases. A node with no object has none.
+fn listened_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(root) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let cid = crate::dom::realm_id(scope, &args);
+    let mut held: Vec<(crate::dom::NodeId, *const NodeHandle)> = Vec::new();
+    let arena = &crate::dom::dom(scope).arena;
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        let Some(n) = arena.get(id) else { continue };
+        if let Some(h) = n.link.handle() {
+            held.push((id, h as *const NodeHandle));
+        }
+        stack.extend(n.shadow_root);
+        stack.extend(n.children.iter().rev());
+    }
+    // SAFETY: each handle lives while its node's object does, which nothing between here and the answer lets go of.
+    let listened: Vec<crate::dom::NodeId> = held.into_iter().filter(|&(_, h)| unsafe { (*(*h).listeners.get()).get(scope) }.is_some()).map(|(id, _)| id).collect();
+    rv.set(crate::dom::nodes_value(scope, cid, &listened));
 }
 
 // `__dom.rareData(node[, make])` -> the node's rare data record — made first, with `make`, where it has none; else
