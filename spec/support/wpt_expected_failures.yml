@@ -5999,9 +5999,6 @@ xhr/open-url-multi-window-6.htm:
 - "[harness] TIMEOUT"
 xhr/overridemimetype-blob.html:
 - Loading data…
-xhr/overridemimetype-headers-received-state-force-shiftjis.htm:
-- 'XMLHttpRequest: overrideMimeType() in HEADERS RECEIVED state, enforcing Shift-JIS
-  encoding'
 xhr/progress-events-response-data-gzip.htm:
 - 'XMLHttpRequest: progress events and GZIP encoding'
 xhr/response-body-errors.any.js:
