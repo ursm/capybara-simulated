@@ -43,8 +43,12 @@ pub(crate) struct StoredSheet {
     // An `@import`ed sheet CSSOM reached (`adopt`): one the engine cascades through the sheet importing it.
     pub(crate) imported: bool,
     // Its CSSOM disabled flag (`StyleSheet.disabled`, a constructed sheet's `disabled` option): a disabled sheet takes
-    // no part in the cascade, whatever owns or adopts it. Kept across a `replace` — the same sheet, of other text.
+    // no part in the cascade, whatever owns or adopts it. Kept across a `replace` — the same sheet, of other text — as
+    // its media list's text as CSSOM serializes it (`mediaText`, which the media list's writes set) and its disallow
+    // modification flag (set while a `replace()` is pending: CSSOM §6.1.2).
     pub(crate) disabled: bool,
+    pub(crate) media_text: Vec<u16>,
+    pub(crate) modification_disallowed: bool,
     // The parse is the store's kept one (`parsed`), which other sheets of the same text share: CSSOM takes a copy of
     // its own before it reaches a rule (`own`).
     shared: bool,
@@ -144,7 +148,18 @@ impl SheetStore {
     pub(crate) fn adopt(&mut self, sheet: DocumentStyleSheet) -> u32 {
         let id = self.next_id;
         self.next_id += 1;
-        let stored = StoredSheet { sheet, css_image: false, host_has: false, version: id, constructed: false, imported: true, disabled: false, shared: false };
+        let stored = StoredSheet {
+            sheet,
+            css_image: false,
+            host_has: false,
+            version: id,
+            constructed: false,
+            imported: true,
+            disabled: false,
+            media_text: Vec::new(),
+            modification_disallowed: false,
+            shared: false,
+        };
         self.sheets.insert(id, stored);
         id
     }
@@ -195,7 +210,8 @@ impl SheetStore {
         self.next_id += 1;
         let stored = self.parse(lock, source, quirks, version);
         if let Some(sheet) = self.sheets.get_mut(&id) {
-            *sheet = StoredSheet { disabled: sheet.disabled, ..stored };
+            let (media_text, modification_disallowed) = (std::mem::take(&mut sheet.media_text), sheet.modification_disallowed);
+            *sheet = StoredSheet { disabled: sheet.disabled, media_text, modification_disallowed, ..stored };
         }
         self.waiting_since(before)
     }
@@ -217,6 +233,11 @@ impl SheetStore {
         if let Some(stored) = self.sheets.get_mut(&id) {
             stored.disabled = disabled;
         }
+    }
+
+    // The sheet `id`'s media text and disallow modification flag (`StoredSheet::media_text`)…
+    pub(crate) fn stored_mut(&mut self, id: u32) -> Option<&mut StoredSheet> {
+        self.sheets.get_mut(&id)
     }
 
     // The page has let go of the sheet `id`.
@@ -310,6 +331,8 @@ impl SheetStore {
             constructed: source.constructed,
             imported: false,
             disabled: false,
+            media_text: Vec::new(),
+            modification_disallowed: false,
             shared,
         }
     }

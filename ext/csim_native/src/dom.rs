@@ -2690,6 +2690,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "sheetMedia", sheet_media, context_id);
     register(scope, ns, "sheetDisabled", sheet_disabled, context_id);
     register(scope, ns, "mediaText", media_text, context_id);
+    register(scope, ns, "sheetMediaText", sheet_media_text, context_id);
+    register(scope, ns, "sheetModificationDisallowed", sheet_modification_disallowed, context_id);
     register(scope, ns, "mediaQueries", media_queries, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
     register(scope, ns, "styleProperties", style_properties, context_id);
@@ -4447,6 +4449,34 @@ fn sheet_disabled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
     let disabled = with_sheets(scope, &args, |store, _| store.disabled(sheet));
     rv.set_bool(disabled);
+}
+// __dom.sheetMediaText(handle[, text]) -> the sheet's media list as CSSOM serializes it (sheets.rs `media_text`); with
+// `text`, that set (the media the engine applies it under is `sheetMedia`'s to set).
+fn sheet_media_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(sheet) = handle_arg(scope, &args, 0) else { return };
+    let text = (args.length() > 1).then(|| utf16_arg(scope, args.get(1)));
+    let current = with_sheets(scope, &args, |store, _| {
+        let stored = store.stored_mut(sheet)?;
+        if let Some(text) = text {
+            stored.media_text = text;
+        }
+        Some(stored.media_text.clone())
+    });
+    rv.set(utf16_value(scope, &current.unwrap_or_default()));
+}
+// __dom.sheetModificationDisallowed(handle[, on]) -> whether the sheet's disallow modification flag is set (a
+// `replace()` pending); with `on`, that set.
+fn sheet_modification_disallowed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(sheet) = handle_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let on = (args.length() > 1).then(|| args.get(1).boolean_value(scope));
+    let set = with_sheets(scope, &args, |store, _| {
+        let stored = store.stored_mut(sheet)?;
+        if let Some(on) = on {
+            stored.modification_disallowed = on;
+        }
+        Some(stored.modification_disallowed)
+    });
+    rv.set_bool(set.unwrap_or(false));
 }
 // __dom.mediaText(text) -> `text` as a media list, as the engine serializes one.
 fn media_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
