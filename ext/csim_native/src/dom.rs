@@ -2308,7 +2308,10 @@ pub(crate) struct Dom {
     pub(crate) clone_exception: Option<v8::Global<v8::Value>>,
     // The template a canvas context's state object is made from (canvas_state.rs), once per isolate.
     pub(crate) canvas_state_template: Option<v8::Global<v8::FunctionTemplate>>,
+    // …and a header list's (headers.rs).
     pub(crate) headers_template: Option<v8::Global<v8::FunctionTemplate>>,
+    // …and an XMLHttpRequest's state's (xhr_state.rs).
+    pub(crate) xhr_template: Option<v8::Global<v8::FunctionTemplate>>,
     // …and a selection's (selection.rs).
     pub(crate) selection_template: Option<v8::Global<v8::FunctionTemplate>>,
     // …and a gradient's or a pattern's (canvas_paint.rs).
@@ -2566,6 +2569,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::toggle_tasks::install(scope, ns, context_id);
     crate::resize_observers::install(scope, ns, context_id);
     crate::perf_timeline::install(scope, ns, context_id);
+    crate::xhr_state::install(scope, ns, context_id);
     crate::element_flags::install(scope, ns, context_id);
     crate::foreign_observations::install(scope, ns, context_id);
     crate::intersection_observers::install(scope, ns, context_id);
