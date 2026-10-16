@@ -1093,12 +1093,16 @@ impl<'s> Build<'s> {
     // The parser's registry for an element it inserts under a node of a null one — its intended parent's, which "create
     // an element for the token" looks a definition up in: the tracking null passed on, the null registry given to one
     // that has none set but the build's own (`registry`: a declarative shadow root of the null registry in a scoped
-    // context's fragment holds elements of none, Chrome 155).
+    // context's fragment holds elements of none, Chrome 155) — and a scoped one, a declarative shadow root's that a
+    // script of its own initialized, given to one that has none set.
     fn inherit_registry(&self, scope: &mut v8::PinScope<'s, '_>, parent: crate::dom::NodeId, child: crate::dom::NodeId) {
-        let arena = crate::dom::realm(scope, self.cid);
-        let from = arena.get(parent).and_then(|n| n.link.handle());
-        let to = arena.get(child).filter(|n| n.kind == crate::dom::NodeKind::Element).and_then(|n| n.link.handle());
+        let d = crate::dom::dom(scope);
+        let arena = d.arena.enter(self.cid);
+        let from = arena.get(parent).and_then(|n| n.link.handle()).map(|h| h as *const crate::node_handle::NodeHandle);
+        let to = arena.get(child).filter(|n| n.kind == crate::dom::NodeKind::Element).and_then(|n| n.link.handle()).map(|h| h as *const crate::node_handle::NodeHandle);
         let (Some(from), Some(to)) = (from, to) else { return };
+        // SAFETY: both handles live while the build holds the nodes, which it does every node it made and their parents.
+        let (from, to) = unsafe { (&*from, &*to) };
         let stamped = self.registry.is_some_and(|(code, _)| code == to.registry());
         match from.registry() {
             crate::ce_reactions::TRACKING => to.set_registry_state(crate::ce_reactions::TRACKING),

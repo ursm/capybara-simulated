@@ -114,6 +114,11 @@ impl NodeHandle {
         // SAFETY: the main thread writes the reference, as TracedReference allows between marking steps.
         unsafe { (*self.registry_object.get()).reset(scope, object) };
     }
+    // …the registry its code names, where it is one.
+    pub(crate) fn registry_object<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Object>> {
+        // SAFETY: the main thread reads the reference, as TracedReference allows between marking steps.
+        unsafe { (*self.registry_object.get()).get(scope) }
+    }
     // …a code with no registry of its own (none set, the tracking null), which an insertion moves between.
     pub(crate) fn set_registry_state(&self, code: u32) {
         self.registry.set(code);
