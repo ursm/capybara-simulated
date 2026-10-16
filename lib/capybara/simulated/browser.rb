@@ -8705,7 +8705,7 @@ module Capybara
           elsif url.to_s.start_with?('data:')
             "opaque:worker#{handle}"
           end
-        rt.eval_void("globalThis.__csimOriginKey = #{JSON.generate(worker_origin_key)};") if worker_origin_key
+        rt.eval_void("globalThis.__dom.setOriginKey(#{JSON.generate(worker_origin_key)});") if worker_origin_key
         # A service worker runs in a ServiceWorkerGlobalScope: adjust the worker scope
         # (no blob-URL minting; SW lifecycle stubs) BEFORE its script runs. The
         # registration SCOPE rides in first — `self.registration.scope` must be the

@@ -3,7 +3,10 @@
 // whose URL is opaque reports for it instead (`location.origin` "null" where the document's own origin is its
 // parent's), and its document's target fragment: the fragment a load, a fragment navigation or a traversal scrolled to
 // — not a history API URL change, which keeps it — from which `:target` resolves (HTML "the indicated part of the
-// document"). The realm's for as long as it lives: a page load sets each anew.
+// document"). And its document's origin where that is no origin of its URL's (`documentOrigin`): an opaque-URL frame's
+// (about:blank, srcdoc, javascript:) is its creator's, a document sandboxed without allow-same-origin's an opaque one —
+// and the key its origin is matched by (`originKey`), which for an opaque origin is the realm's own unless it inherited
+// one. The realm's for as long as it lives: a page load sets each anew.
 
 use crate::dom::{nid_arg, realm, realm_id, register, NodeId, RealmArena};
 
@@ -12,6 +15,10 @@ pub(crate) struct RealmLocation {
     origin_override: Option<String>,
     // (…none until something scrolled to one: the URL's own fragment is it until then)
     target_hash: Option<String>,
+    document_origin: Option<String>,
+    origin_key: Option<String>,
+    // Whether its document's origin is a NEW opaque one — sandboxed — which every frame it makes inherits.
+    sandboxed: bool,
 }
 
 const HREF: usize = 0;
@@ -26,7 +33,14 @@ const INITIAL_URL: &str = "http://www.example.com/";
 impl Default for RealmLocation {
     fn default() -> Self {
         let url = ada_url::Url::parse(INITIAL_URL, None).expect("the initial URL parses");
-        RealmLocation { parts: crate::url_ops::texts(&url), origin_override: None, target_hash: None }
+        RealmLocation {
+            parts: crate::url_ops::texts(&url),
+            origin_override: None,
+            target_hash: None,
+            document_origin: None,
+            origin_key: None,
+            sandboxed: false,
+        }
     }
 }
 
@@ -47,6 +61,38 @@ impl RealmLocation {
                 self.parts[HASH].clear();
             }
         }
+    }
+    // The serialization of its document's origin: its own where it was given one, else its location's — "null" for an
+    // opaque one.
+    fn origin(&self) -> &str {
+        self.document_origin.as_deref().or(self.origin_override.as_deref()).unwrap_or(&self.parts[ORIGIN])
+    }
+    // Its document's origin is `text`: an origin's serialization, "null" a new opaque one (sandboxed), `null|<key>` an
+    // opaque one inherited with its key (a sandboxed creator's frame's) — none: its location's.
+    fn set_document_origin(&mut self, text: Option<String>) {
+        match text.as_deref().and_then(|t| t.strip_prefix("null|")) {
+            Some(key) => {
+                self.origin_key = Some(key.to_owned());
+                self.document_origin = Some("null".to_owned());
+            }
+            None => {
+                self.sandboxed |= text.as_deref() == Some("null");
+                self.document_origin = text;
+            }
+        }
+    }
+    // The key its origin is matched by — what a BroadcastChannel is scoped to, a postMessage's target origin matched
+    // against: a tuple origin's serialization, an opaque one's a token of the realm `cid` that has it (its own, made
+    // the first time it is asked, unless it inherited one), so two unrelated opaque origins never match.
+    fn origin_key(&mut self, cid: i32) -> String {
+        if let Some(key) = &self.origin_key {
+            return key.clone();
+        }
+        let origin = self.origin();
+        if origin != "null" {
+            return origin.to_owned();
+        }
+        self.origin_key.insert(format!("opaque:realm{cid}")).clone()
     }
     // The fragments to look for the target element by: the target fragment as it stands, then percent-decoded and UTF-8
     // decoded (the one when they say the same) — none for an empty fragment.
@@ -80,6 +126,45 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "setLocationURL", set_location_url, context_id);
     register(scope, ns, "setLocationOrigin", set_location_origin, context_id);
     register(scope, ns, "setTargetHash", set_target_hash, context_id);
+    register(scope, ns, "documentOrigin", document_origin, context_id);
+    register(scope, ns, "setDocumentOrigin", set_document_origin, context_id);
+    register(scope, ns, "originKey", origin_key, context_id);
+    register(scope, ns, "setOriginKey", set_origin_key, context_id);
+    register(scope, ns, "sandboxedOrigin", sandboxed_origin, context_id);
+}
+
+// __dom.documentOrigin() -> the serialization of the calling realm's document's origin (`RealmLocation::origin`).
+fn document_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let origin = realm(scope, cid).location.origin().to_owned();
+    rv.set(v8::String::new(scope, &origin).unwrap().into());
+}
+
+// __dom.setDocumentOrigin(text) — the calling realm's document's origin (`set_document_origin`; null: its location's).
+fn set_document_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = (!args.get(0).is_null_or_undefined()).then(|| args.get(0).to_rust_string_lossy(scope));
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).location.set_document_origin(text);
+}
+
+// __dom.originKey() -> the key the calling realm's origin is matched by (`RealmLocation::origin_key`).
+fn origin_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let key = realm(scope, cid).location.origin_key(cid);
+    rv.set(v8::String::new(scope, &key).unwrap().into());
+}
+
+// __dom.setOriginKey(key) — the key the calling realm's origin is matched by, inherited: a worker's, its creator's.
+fn set_origin_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let key = (!args.get(0).is_null_or_undefined()).then(|| args.get(0).to_rust_string_lossy(scope));
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).location.origin_key = key;
+}
+
+// __dom.sandboxedOrigin() -> whether the calling realm's document has a new opaque origin, sandboxed (`sandboxed`).
+fn sandboxed_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_bool(realm(scope, cid).location.sandboxed);
 }
 
 // __dom.locationPart(part) -> the realm's URL's part number `part` (url_ops.rs `parts`' order) — its origin the one a
