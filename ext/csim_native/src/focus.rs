@@ -461,7 +461,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "dialogFocusRestore", dialog_focus_restore_op, context_id);
     crate::dom::register(scope, ns, "documentFocus", document_focus_op, context_id);
     crate::dom::register(scope, ns, "activeElement", active_element_op, context_id);
-    crate::dom::register(scope, ns, "pointerModality", pointer_modality_op, context_id);
     crate::dom::register(scope, ns, "setPointerModality", set_pointer_modality_op, context_id);
 }
 
@@ -606,13 +605,6 @@ fn next_focus_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         next(engine, arena, doc, current, reverse, now)
     });
     rv.set(crate::dom::node_value(scope, found.flatten()));
-}
-
-// __dom.pointerModality() -> whether the user's last driven input in the realm was a pointer's
-// (`RealmState::pointer_modality`).
-fn pointer_modality_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    rv.set_bool(crate::dom::realm(scope, cid).pointer_modality);
 }
 
 // __dom.setPointerModality(pointer) — the user's input in the realm driven by a pointer (a press), or by the keyboard.

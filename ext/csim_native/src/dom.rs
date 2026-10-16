@@ -1022,7 +1022,7 @@ pub(crate) struct RealmState {
     // Whether the focus shows NO ring (not `:focus-visible`): only after a pointer focus of a non-text control.
     pub(crate) focus_ring_hidden: bool,
     // Whether the user's last driven input in it was a pointer's (a press) rather than the keyboard's (Tab, keys sent),
-    // which a focus it moves shows no ring for (focus.rs `pointerModality`).
+    // which a focus it moves shows no ring for (dom.rs `latchFocusRing`).
     pub(crate) pointer_modality: bool,
     // The realm document and its target fragments (as it stands, then decoded), when it has any — what `:target`
     // resolves (`is_target`).
@@ -2692,7 +2692,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setCustomStates", set_custom_states, context_id);
     register(scope, ns, "targetElement", target_element, context_id);
     register(scope, ns, "baseElement", base_element, context_id);
-    register(scope, ns, "setFocusRingHidden", set_focus_ring_hidden, context_id);
+    register(scope, ns, "latchFocusRing", latch_focus_ring, context_id);
     register(scope, ns, "setFocusStart", set_focus_start, context_id);
     register(scope, ns, "query", query, context_id);
     register(scope, ns, "matchesId", matches_id, context_id);
@@ -3865,15 +3865,20 @@ fn assigned_nodes_of(
     rv.set(answer);
 }
 
-// __dom.setFocusRingHidden(hidden): whether the realm's focus shows no ring (`:focus-visible` does not match).
-fn set_focus_ring_hidden(
+// __dom.latchFocusRing(focusedNid, textEntry): the focus ring of the realm whose tree the element just focused is in,
+// latched as it is focused — whichever realm's code focused it: one a frame made, adopted here, is matched by this
+// realm's `:focus-visible` — shown (`:focus-visible` matches) unless the user's last driven input there was a pointer's
+// and the element is no text entry (`textEntry`, the bindings' to say).
+fn latch_focus_ring(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let hidden = args.get(0).boolean_value(scope);
-    let cid = realm_id(scope, &args);
-    realm(scope, cid).set_focus_ring_hidden(hidden);
+    let text_entry = args.get(1).is_true();
+    let cid = nid_arg(scope, &args, 0).and_then(|id| dom(scope).arena.get(id).map(|n| n.realm)).unwrap_or_else(|| realm_id(scope, &args));
+    let arena = realm(scope, cid);
+    let hidden = arena.pointer_modality && !text_entry;
+    arena.set_focus_ring_hidden(hidden);
 }
 
 // __dom.setFocusStart(nid): the realm document's sequential focus navigation starting point is that node (`focus_start`).

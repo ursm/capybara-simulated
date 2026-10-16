@@ -99,4 +99,22 @@ RSpec.describe 'document focus state' do
     JS
     expect(got).to eq([true, false, true])
   end
+
+  # The focus ring is the state of the realm whose tree the focused element is in: a button a frame made, adopted into
+  # the page and clicked, matches the page's `:focus-visible` as one the page made does — not at all (a pointer onto a
+  # non-text control shows no ring) — where the click wrote the frame's ring and the page's stayed shown.
+  it 'shows the focus ring of the realm whose tree the focused element is in' do
+    page = '<!DOCTYPE html><meta charset=utf-8><body><iframe srcdoc="<button>f</button>"></iframe>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      const made = document.querySelector('iframe').contentDocument.createElement('button');
+      made.id = 'adopted';
+      made.textContent = 'a';
+      document.body.appendChild(document.adoptNode(made));
+    JS
+    s.find(:css, '#adopted').click
+    expect(s.evaluate_script("[document.activeElement.id, document.activeElement.matches(':focus'), document.activeElement.matches(':focus-visible')]"))
+      .to eq(['adopted', true, false])
+  end
 end
