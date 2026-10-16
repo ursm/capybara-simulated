@@ -66,42 +66,46 @@ impl RealmArena {
     }
 }
 
-// The sheet the bindings made an owner (`ownerSheet`, dom.rs), in the store of the realm that made it: its `id`, `rev`,
-// which moves each time it is made again, whether a CSSStyleSheet shows it (`shown`, which makes the next one anew
-// under another id: the object a script holds keeps the rules it had), and what it was made of — its text given (by
-// its hash and length: a page's sheets are kept once, by the page side; none for a `<style>`'s block, whose every
-// change is a new count), base URL, media list and the document's mode, at the owner's count of sheets
-// (`NodeData::sheet_gen`).
+// The sheet the bindings made an owner (`ownerSheet`, dom.rs), in the store of the realm that made it (`realm`): its `id`,
+// `rev`, which moves each time it is made again, whether a CSSStyleSheet shows it (`shown`, which makes the next one
+// anew under another id: the object a script holds keeps the rules it had), and what it was made of — the string it
+// was given (none for a `<style>`'s block, whose every change is a new count), its base URL, media list and the
+// document's mode, at the owner's count of sheets (`NodeData::sheet_gen`). One per owner, whichever realm last made it;
+// let go of with the owner, or as another realm makes its own.
 #[derive(Clone)]
 pub(crate) struct MadeSheet {
+    pub(crate) realm: i32,
     pub(crate) id: u32,
     pub(crate) rev: u32,
     pub(crate) shown: bool,
-    pub(crate) text: Option<(u64, usize)>,
+    pub(crate) text: Option<v8::Global<v8::String>>,
     pub(crate) base: String,
     pub(crate) media: String,
     pub(crate) quirks: bool,
     pub(crate) count: u32,
 }
-// …the key `text` is kept by.
-pub(crate) fn text_key(css: &str) -> (u64, usize) {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::hash::DefaultHasher::new();
-    css.hash(&mut hasher);
-    (hasher.finish(), css.len())
-}
 
 impl RealmArena {
-    // The owner `id` is freed: the sheet its realm made it goes with it, unless a CSSStyleSheet still shows it — then
-    // with that (cssom.js `SHEET_DROPS`).
+    // The owner `id`'s record let go of — the owner freed, or another realm making its own — and its sheet, in the store
+    // of the realm that made it, unless a CSSStyleSheet still shows it: then with that (cssom.js `SHEET_DROPS`).
     pub(crate) fn forget_made_sheet(&mut self, id: NodeId) {
-        let Some(realm) = self.get(id).map(|n| n.realm) else { return };
-        let Some(state) = self.realm_state_mut(realm) else { return };
-        if let Some(made) = state.made_sheets.remove(&id) {
-            if !made.shown {
+        let Some(made) = self.made_sheets.remove(&id) else { return };
+        if !made.shown {
+            if let Some(state) = self.realm_state_mut(made.realm) {
                 state.sheets.drop_sheet(made.id);
             }
         }
+    }
+    // …those of owners freed with their realm, and those a realm made whose context began anew or went (its store with
+    // it).
+    pub(crate) fn forget_freed_made_sheets(&mut self) {
+        let freed: Vec<NodeId> = self.made_sheets.keys().copied().filter(|&o| self.get(o).is_none()).collect();
+        for owner in freed {
+            self.forget_made_sheet(owner);
+        }
+    }
+    pub(crate) fn forget_made_sheets_of(&mut self, cid: i32) {
+        self.made_sheets.retain(|_, m| m.realm != cid);
     }
 }
 
@@ -130,7 +134,7 @@ fn sheet_gen_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 fn owner_sheet_shown_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);
-    if let Some(made) = crate::dom::realm(scope, cid).made_sheets.get_mut(&id) {
+    if let Some(made) = crate::dom::realm(scope, cid).made_sheets.get_mut(&id).filter(|m| m.realm == cid) {
         made.shown = true;
     }
 }

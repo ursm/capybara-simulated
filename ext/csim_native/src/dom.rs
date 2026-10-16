@@ -853,8 +853,10 @@ pub(crate) struct RealmArena {
     // Each slottable's manual slot assignment (DOM): the slot a script's `assign()` gave it, for the few that have one.
     pub(crate) manual_slots: std::collections::HashMap<NodeId, NodeId>,
     // Each sheet owner's sheet as the bindings last made it — its id in `sheets`, and the owner's count of sheets then
-    // (`NodeData::sheet_gen`): the owner's sheet while that count holds (sheet_owners.rs `sheetOwned`).
+    // (`NodeData::sheet_gen`): the owner's sheet while that count holds (`ownerSheet`).
     pub(crate) owner_sheets: std::collections::HashMap<NodeId, (u32, u32)>,
+    // …and what it was made of, by the realm whose store holds it (sheet_owners.rs `MadeSheet`).
+    pub(crate) made_sheets: std::collections::HashMap<NodeId, crate::sheet_owners::MadeSheet>,
     // …and each tree's style sheet sets (sheet_owners.rs `sheet_set`) — a document's, a shadow root's — as of `mutations`
     // and `sheet_epoch`, which moves with what else they turn on: a sheet disabled or renewed, an owner's sheet made.
     pub(crate) sheet_sets: std::collections::HashMap<NodeId, (u64, u32, std::rc::Rc<crate::sheet_owners::SheetSet>)>,
@@ -1012,8 +1014,6 @@ pub(crate) struct RealmState {
     pub(crate) location: crate::realm_location::RealmLocation,
     // The font files its faces' sources gave (font_files.rs).
     pub(crate) font_files: crate::font_files::FontFiles,
-    // The sheet it made each sheet owner (sheet_owners.rs `MadeSheet`, `ownerSheet`).
-    pub(crate) made_sheets: std::collections::HashMap<NodeId, crate::sheet_owners::MadeSheet>,
     // The realm's style sheets, parsed under the arena's lock (sheets.rs): what its engine cascades and CSSOM reads.
     pub(crate) sheets: crate::sheets::SheetStore,
     // The generations its bindings key their memos on (`Generations`).
@@ -1153,6 +1153,8 @@ impl RealmArena {
         self.forget_freed_document_states();
         self.forget_freed_toggle_tasks();
         self.forget_freed_selected_coordinates();
+        self.forget_made_sheets_of(cid);
+        self.forget_freed_made_sheets();
         self.forget_dead_focus_records();
         // (…and what the isolate latched for any realm's page, where this is the only realm left)
         if self.parked.is_empty() {
@@ -1218,6 +1220,8 @@ impl RealmArena {
         self.forget_freed_document_states();
         self.forget_freed_toggle_tasks();
         self.forget_freed_selected_coordinates();
+        self.forget_made_sheets_of(cid);
+        self.forget_freed_made_sheets();
         self.forget_foreign_observations(Some(cid));
         self.forget_dead_focus_records();
     }
@@ -4815,7 +4819,7 @@ fn sheet_make(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 // __dom.ownerSheet(ownerNid, css, baseUrl, media, docNid) -> [sheetId, rev, …the URLs its `@import`s wait for]: the
 // style engine's sheet of a `<style>` / `<link>` / `<?xml-stylesheet?>`, made of `css` — a `<style>`'s, null: its block,
 // the data of its child Text nodes — at `baseUrl` under `media` in the document. ONE per owner
-// (`RealmState::made_sheets`): made again of other text, of the same text once the owner obtained another sheet (its
+// (`RealmArena::made_sheets`): made again of other text, of the same text once the owner obtained another sheet (its
 // count of them, sheet_owners.rs — HTML's "update a style block", which any change to a block's text is), at another
 // base or in another mode — in place where no CSSStyleSheet shows it, else anew under another id (`MadeSheet::shown`),
 // `rev` moving either way — and given another media list in place, its rules kept. Its sheet while the owner's count
@@ -4826,17 +4830,37 @@ fn owner_sheet(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         let v = args.get(k);
         if v.is_string() { v.to_rust_string_lossy(scope) } else { String::new() }
     };
-    let css = args.get(1).is_string().then(|| args.get(1).to_rust_string_lossy(scope));
+    let css = v8::Local::<v8::String>::try_from(args.get(1)).ok();
     let (base, media) = (text(scope, 2), text(scope, 3));
     let quirks = quirks_arg(scope, &args, 4);
-    let key = css.as_deref().map(crate::sheet_owners::text_key);
     let cid = realm_id(scope, &args);
+    let Some(count) = dom(scope).arena.get(owner).map(|n| n.sheet_gen) else { return };
+    // (…another realm's record — the owner adopted from it — is its own realm's to let go of: this one makes its own)
+    let made = dom(scope).arena.made_sheets.get(&owner).cloned();
+    let made = match made {
+        Some(m) if m.realm != cid => {
+            dom(scope).arena.forget_made_sheet(owner);
+            None
+        }
+        made => made,
+    };
+    // (…its text the same string — the same object, at once — or none, a `<style>`'s block, whose every change is a new
+    // count)
+    let same_text = |scope: &mut v8::PinScope<'_, '_>, m: &crate::sheet_owners::MadeSheet| match (&m.text, css) {
+        (None, None) => true,
+        (Some(had), Some(css)) => v8::Local::new(scope, had).strict_equals(css.into()),
+        _ => false,
+    };
+    let same = made.as_ref().filter(|m| m.base == base && m.quirks == quirks && m.count == count).filter(|m| same_text(scope, m)).cloned();
+    let media_moved = same.as_ref().is_some_and(|m| m.media != media);
+    // (…the text read out only to make the sheet of it)
+    let (kept, css) = match (&same, css) {
+        (Some(m), _) => (m.text.clone(), None),
+        (None, Some(css)) => (Some(v8::Global::new(scope, css)), Some(css.to_rust_string_lossy(scope))),
+        (None, None) => (None, None),
+    };
     let arena = realm(scope, cid);
-    let Some(count) = arena.get(owner).map(|n| n.sheet_gen) else { return };
-    let made = arena.made_sheets.get(&owner).cloned();
-    let same = made.as_ref().filter(|m| m.text == key && m.base == base && m.quirks == quirks && m.count == count);
-    let media_moved = same.is_some_and(|m| m.media != media);
-    let (id, rev, shown, waiting) = match (same, made.as_ref()) {
+    let (id, rev, shown, waiting) = match (&same, made.as_ref()) {
         (Some(m), _) => (m.id, m.rev, m.shown, Vec::new()),
         (None, old) => {
             let css = css.unwrap_or_else(|| String::from_utf16_lossy(&arena.child_text(owner)));
@@ -4851,9 +4875,9 @@ fn owner_sheet(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             }
         }
     };
-    let fresh = same.is_none();
-    arena.made_sheets.insert(owner, crate::sheet_owners::MadeSheet { id, rev, shown, text: key, base, media: media.clone(), quirks, count });
-    if fresh {
+    let record = crate::sheet_owners::MadeSheet { realm: cid, id, rev, shown, text: kept, base, media: media.clone(), quirks, count };
+    arena.made_sheets.insert(owner, record);
+    if same.is_none() {
         arena.owner_sheets.insert(owner, (id, count));
         arena.sheet_epoch += 1;
     }
