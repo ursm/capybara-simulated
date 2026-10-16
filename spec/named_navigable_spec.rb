@@ -456,6 +456,19 @@ RSpec.describe 'choosing a navigable by name' do
     expect(s.evaluate_script('L.length')).to eq(3)
   end
 
+  # …and one its own load handler inserts again on every load navigates again on every load, paced as a response paces
+  # it — the clock moving between two of them — rather than all at one instant, a realm built for every turn until the
+  # isolate ran out of memory (Chrome loops too, ~100 loads a second).
+  it 'paces a frame its load handler inserts again on every load' do
+    s, = session_for(
+      '/p' => '<script>window.N = 0</script><iframe id="c" src="/c"></iframe><script>const f = document.getElementById("c"); f.onload = () => { N++; f.remove(); document.body.appendChild(f) }</script>',
+      '/c' => '<p>c</p>'
+    )
+    first = poll_until { s.evaluate_script('N').then {|n| n if n.positive? } }
+    expect(poll_until { s.evaluate_script('N').then {|n| n if n > first } }).to be > first
+    expect(s.evaluate_script('N')).to be < 10_000
+  end
+
   # A frame an unload handler of its own removed is gone, its navigation with it: the response's document never runs,
   # nor is a realm left for it (Chrome).
   it 'commits no document into a frame a teardown handler removed' do

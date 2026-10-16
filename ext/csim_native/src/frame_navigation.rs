@@ -27,6 +27,10 @@ struct FrameNavigation {
     src: Option<Option<Vec<u16>>>,
     history: Option<Vec<u16>>,
     reload: Option<Vec<u16>>,
+    // When the element's last `load` fired, on the virtual clock: a navigation begun at that same instant waits a
+    // nested-timer clamp, so a frame its load handler navigates again on every load is paced, as a network's response
+    // paces it (Chrome: ~100 loads a second), rather than running without the clock moving.
+    loaded_at: Option<f64>,
 }
 
 #[derive(Default)]
@@ -62,6 +66,24 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "supersedeFrameNav", supersede_frame_nav, context_id);
     crate::dom::register(scope, ns, "frameNavUrl", frame_nav_url, context_id);
     crate::dom::register(scope, ns, "setFrameNavUrl", set_frame_nav_url, context_id);
+    crate::dom::register(scope, ns, "frameLoadedAt", frame_loaded_at, context_id);
+    crate::dom::register(scope, ns, "setFrameLoadedAt", set_frame_loaded_at, context_id);
+}
+
+// __dom.frameLoadedAt(containerNid) -> when the element's last `load` fired, on the virtual clock: -Infinity for none.
+fn frame_loaded_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_double(f64::NEG_INFINITY) };
+    let cid = realm_id(scope, &args);
+    let at = crate::dom::realm(scope, cid).frame_navigations.0.get(&container).and_then(|n| n.loaded_at);
+    rv.set_double(at.unwrap_or(f64::NEG_INFINITY));
+}
+
+// __dom.setFrameLoadedAt(containerNid, time) — the element's `load` fires now.
+fn set_frame_loaded_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let Some(at) = args.get(1).number_value(scope) else { return };
+    let cid = realm_id(scope, &args);
+    crate::dom::realm(scope, cid).frame_navigation(container).loaded_at = Some(at);
 }
 
 // __dom.frameNav(containerNid) -> the container's navigation flags.
