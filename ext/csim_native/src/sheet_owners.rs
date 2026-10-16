@@ -24,6 +24,20 @@ pub(crate) fn is_sheet_owner(n: &NodeData) -> bool {
     }
 }
 
+// Whether `id` is an `<?xml-stylesheet?>` that associates a style sheet with its document: a child of the document —
+// the prolog's (Associating Style Sheets with XML documents §2; Chrome takes none an element holds) — whose data is a
+// list of pseudo-attributes (`pi_attributes`).
+pub(crate) fn associates_sheet(arena: &RealmArena, id: NodeId) -> bool {
+    arena.get(id).is_some_and(|n| {
+        n.kind == NodeKind::ProcessingInstruction && is_sheet_owner(n) && n.parent.and_then(|p| arena.get(p)).is_some_and(|p| p.kind == NodeKind::Document) && pi_attributes(n).is_some()
+    })
+}
+// …its pseudo-attributes, by name.
+fn pi_attributes(n: &NodeData) -> Option<Vec<(String, String)>> {
+    let attrs = crate::character_data::pseudo_attributes(&n.data)?;
+    Some(attrs.into_iter().map(|(k, v)| (String::from_utf16_lossy(&k), String::from_utf16_lossy(&v))).collect())
+}
+
 impl RealmArena {
     // The owner obtains a new sheet. (Quietly: which sheet it has is no input to a layout, nor to the memos `mutations`
     // keys — the style sheet sets', which it is, move on `sheet_epoch`.)
@@ -192,6 +206,9 @@ impl RealmArena {
         while let Some(id) = stack.pop() {
             let Some(n) = self.get(id) else { continue };
             if n.kind != NodeKind::Element {
+                if associates_sheet(self, id) {
+                    owners.push(id);
+                }
                 continue;
             }
             if is_sheet_owner(n) {
@@ -210,7 +227,26 @@ impl RealmArena {
         for owner in owners {
             let Some(n) = self.get(owner) else { continue };
             let link = &*n.local_name == "link";
-            if link {
+            if n.kind == NodeKind::ProcessingInstruction {
+                // (…an `<?xml-stylesheet?>`'s by its pseudo-attributes, as a `<link>`'s by its attributes: a CSS `type`,
+                // an `href`, `alternate="yes"`)
+                let Some(attrs) = pi_attributes(n) else { continue };
+                let get = |name: &str| attrs.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+                if !get("type").is_none_or(|t| t.is_empty() || t.eq_ignore_ascii_case("text/css")) {
+                    continue;
+                }
+                let Some(href) = get("href").filter(|h| !h.is_empty()) else { continue };
+                let (title, media, alternate) = (title(get("title").as_deref()), get("media"), get("alternate").as_deref() == Some("yes"));
+                if self.owner_sheet_disabled(owner) {
+                    continue;
+                }
+                (2u8, owner, n.sheet_gen, &title, &href, &media, alternate).hash(&mut hasher);
+                any_titled_or_alternate |= !title.is_empty() || alternate;
+                if !title.is_empty() && !alternate && preferred.is_none() {
+                    preferred = Some(title.clone());
+                }
+                sheets.push((owner, title, alternate, false));
+            } else if link {
                 let rel = n.plain_attr("rel").unwrap_or("").to_ascii_lowercase();
                 let rel: Vec<&str> = rel.split(|c: char| c.is_ascii_whitespace()).filter(|t| !t.is_empty()).collect();
                 if !rel.contains(&"stylesheet") || n.plain_attr("href").is_none_or(str::is_empty) || n.plain_attr("disabled").is_some() {

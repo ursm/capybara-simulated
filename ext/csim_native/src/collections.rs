@@ -76,9 +76,28 @@ impl Filter {
     }
 }
 
-// The descendant elements of `scope` the filter takes, in tree order.
+// The descendant elements of `scope` the filter takes, in tree order — and, for a document's sheet owners, its
+// `<?xml-stylesheet?>` children among them (sheet_owners.rs `associates_sheet`).
 fn collect(arena: &RealmArena, scope: NodeId, filter: &Filter) -> Vec<NodeId> {
     let mut out = Vec::new();
+    if matches!(filter, Filter::SheetOwners) && arena.get(scope).is_some_and(|n| n.kind == NodeKind::Document) {
+        for &child in arena.get(scope).map_or(&[][..], |n| &n.children[..]) {
+            let Some(n) = arena.get(child) else { continue };
+            if crate::sheet_owners::associates_sheet(arena, child) {
+                out.push(child);
+            } else if n.kind == NodeKind::Element {
+                if filter.takes(n) {
+                    out.push(child);
+                }
+                each_element(arena, child, |id, n| {
+                    if filter.takes(n) {
+                        out.push(id);
+                    }
+                });
+            }
+        }
+        return out;
+    }
     each_element(arena, scope, |id, n| {
         if filter.takes(n) {
             out.push(id);

@@ -209,7 +209,11 @@ pub(crate) fn replace_data(
         crate::dom::dom(scope).arena.observers.note(OBSERVATIONS);
     }
     let arena = realm(scope, cid);
-    arena.renew_sheet(id);
+    // (…an `<?xml-stylesheet?>`'s data its pseudo-attributes: a new sheet, which its document's cascade takes)
+    if arena.renew_sheet(id) && crate::sheet_owners::associates_sheet(arena, id) {
+        crate::dom::dom(scope).arena.observers.note_cascade(cid, false);
+    }
+    let arena = realm(scope, cid);
     // (…a `<style>` parent's block updated — the style elements that own a sheet, sheet_owners.rs)
     let style_element = |n: &crate::dom::NodeData| &*n.local_name == "style" && crate::sheet_owners::is_sheet_owner(n);
     if let Some(style) = parent.filter(|&p| arena.get(p).is_some_and(style_element)) {
