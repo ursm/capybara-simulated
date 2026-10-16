@@ -1568,6 +1568,8 @@ impl RealmArena {
         self.focus_start = None;
         self.hover = None;
         self.target = None;
+        // (…what the old page's parse changed has no pass left to correct: the next page's are kept from its first)
+        self.parsed = Default::default();
         self.form_facts.get_mut().clear();
         self.directionality.get_mut().1.clear();
         self.sheets.reset();

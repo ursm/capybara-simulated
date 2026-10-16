@@ -471,10 +471,6 @@ fn take_records(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set(taken(scope, records).into());
 }
 
-// __dom.moTakeBatch() -> `[observers, slots]`: the calling realm's pending observers, in the order they were made — no
-// longer pending — and its signal slots, in the order signaled, taken: a notification's part in this realm. Each
-// observer's records are taken as its turn comes (`moTakeRecords`): one an earlier callback queued for it is its, and
-// one an earlier callback took, or disconnected, has none.
 // The streaming parser records nothing with nothing observing (its record is the observer path, and a coalesced text run
 // records nothing at all) — which is only right until a layout pass has run. A parser-blocking script that reads
 // geometry lays the PARTIAL tree out, and the boxes it laid out then kept their answers while the parse went on under
@@ -529,6 +525,10 @@ fn take_cascade(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArg
         asked.iter().flat_map(|&(cid, version)| [f64::from(cid), f64::from(u8::from(version))]).map(|n| v8::Number::new(scope, n).into()).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
+// __dom.moTakeBatch() -> `[observers, slots]`: the calling realm's pending observers, in the order they were made — no
+// longer pending — and its signal slots, in the order signaled, taken: a notification's part in this realm. Each
+// observer's records are taken as its turn comes (`moTakeRecords`): one an earlier callback queued for it is its, and
+// one an earlier callback took, or disconnected, has none.
 fn take_batch(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let store = &mut arena(scope, &args).observers;
