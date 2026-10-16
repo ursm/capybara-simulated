@@ -4606,9 +4606,9 @@ fn sheet_source(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArg
     crate::sheets::SheetSource { css, base, media, constructed: args.get(at + 3).is_true() }
 }
 
-// __dom.styleSheets(docNid, baseUrl, quirks, xml, width, height, [sheetId, …]): the realm document's sheets (the
-// realm's, sheetMake), in document order, for its style engine — which is made again only when the document's base
-// URL, mode, kind (`xml`: not an HTML document) or viewport moved.
+// __dom.styleSheets(docNid, baseUrl, width, height, [sheetId, …]): the realm document's sheets (the realm's,
+// sheetMake), in document order, for its style engine — which is made again only when the document's base URL, mode,
+// kind (an HTML document or not: `document_mode`) or viewport moved.
 fn style_sheets(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -4624,18 +4624,17 @@ fn style_sheets_unguarded(
 ) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let base = args.get(1).to_rust_string_lossy(scope);
-    let quirks = args.get(2).is_true();
-    let html_document = !args.get(3).is_true();
     let viewport = (
-        args.get(4).number_value(scope).unwrap_or(0.0) as f32,
-        args.get(5).number_value(scope).unwrap_or(0.0) as f32,
+        args.get(2).number_value(scope).unwrap_or(0.0) as f32,
+        args.get(3).number_value(scope).unwrap_or(0.0) as f32,
     );
-    let ids = sheet_ids(scope, args.get(6));
+    let ids = sheet_ids(scope, args.get(4));
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     if d.arena.is_dropped(cid) {
         return;
     }
+    let (quirks, html_document) = d.arena.document_mode(Some(doc));
     let screen = crate::style::Screen { viewport, touch: d.touch_input };
     let arena = d.arena.enter(cid);
     let mut engine = crate::style::StyleEngine::for_document(d.styles.remove(&cid), arena, &base, quirks, html_document, screen);
