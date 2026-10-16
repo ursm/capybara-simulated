@@ -7,8 +7,54 @@
 use crate::cloning::BindingsSteps;
 use crate::dom::{realm, realm_id, NodeId, RealmArena};
 
+// A select's and a selectedcontent's flags (`NodeData::select_flags`), the bindings' to set and read: the select has a
+// `<selectedcontent>` (custom-elements.js keeps it updated), the element was connected before — a re-insertion
+// re-snapshots — and the select's update is running, which an update it causes waits out.
+const SELECT_FLAGS: u8 = 0b111;
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "updateSelectedContent", update_selected_content, context_id);
+    crate::dom::register(scope, ns, "selectFlags", select_flags, context_id);
+    crate::dom::register(scope, ns, "setSelectFlags", set_select_flags, context_id);
+    crate::dom::register(scope, ns, "queueSelectedContentUpdate", queue_selected_content_update, context_id);
+    crate::dom::register(scope, ns, "takeSelectedContentUpdates", take_selected_content_updates, context_id);
+}
+
+// __dom.selectFlags(nid) -> the element's select flags.
+fn select_flags(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
+    rv.set_uint32(u32::from(crate::dom::dom(scope).arena.get(id).map_or(0, |n| n.select_flags)));
+}
+
+// __dom.setSelectFlags(nid, mask, bits) — the flags in `mask` set to `bits`'.
+fn set_select_flags(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let mask = (args.get(1).uint32_value(scope).unwrap_or(0) as u8) & SELECT_FLAGS;
+    let bits = args.get(2).uint32_value(scope).unwrap_or(0) as u8;
+    // (…no input to any memo of the arena, nor to a layout: a write that moves none)
+    if let Some(n) = crate::dom::dom(scope).arena.get_mut_quietly(id) {
+        n.select_flags = (n.select_flags & !mask) | (bits & mask);
+    }
+}
+
+// __dom.queueSelectedContentUpdate(selectNid) -> whether the realm had none queued: the bindings then queue the task
+// that takes them (`takeSelectedContentUpdates`), one for however many.
+fn queue_selected_content_update(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let cid = realm_id(scope, &args);
+    let pending = &mut realm(scope, cid).pending_selected_content;
+    let first = pending.is_empty();
+    if !pending.contains(&id) {
+        pending.push(id);
+    }
+    rv.set_bool(first);
+}
+
+// __dom.takeSelectedContentUpdates() -> the selects queued, in the order queued — none any more.
+fn take_selected_content_updates(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let pending = std::mem::take(&mut realm(scope, cid).pending_selected_content);
+    rv.set(crate::dom::nodes_value(scope, cid, &pending));
 }
 
 // The `<selectedcontent>` elements of `select`, in tree order.

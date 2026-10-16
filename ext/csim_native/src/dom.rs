@@ -229,6 +229,9 @@ pub(crate) struct NodeData {
     pub(crate) state: u32,
     // A script element's flags (HTML §4.12.1.1: "already started", parser-inserted, "force async" — script.rs `SCRIPT_*`).
     pub(crate) script_flags: u8,
+    // A `<select>`'s and a `<selectedcontent>`'s flags (selected_content.rs `SELECT_*`): whether a select has a
+    // `<selectedcontent>` it updates, whether one was ever connected, whether a select's update is running.
+    pub(crate) select_flags: u8,
     // An HTML or SVG `<style>`'s, an HTML `<link>`'s count of the sheets it has had (sheet_owners.rs).
     pub(crate) sheet_gen: u32,
     // A shadow root's host (None for every other node): the shadow-including ancestor chain `:focus` walks…
@@ -371,6 +374,7 @@ impl NodeData {
             scroll: [0.0; 2],
             state: 0,
             script_flags: 0,
+            select_flags: 0,
             sheet_gen: 0,
             host: None,
             shadow_root: None,
@@ -1004,6 +1008,8 @@ pub(crate) struct RealmState {
     pub(crate) timers: crate::timers::Timers,
     // Its ResizeObservers that observe anything, and their observations (resize_observers.rs).
     pub(crate) resize_observers: crate::resize_observers::ResizeObservers,
+    // The selects whose `<selectedcontent>` waits for an update at the end of the task (selected_content.rs).
+    pub(crate) pending_selected_content: Vec<NodeId>,
     // …and its IntersectionObservers that observe anything, and their registrations (intersection_observers.rs).
     pub(crate) intersection_observers: crate::intersection_observers::IntersectionObservers,
     // The faces its families resolve to, which its walks and its style engine's font metrics read (`SharedFaces`).
