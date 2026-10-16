@@ -45,6 +45,12 @@ pub(crate) struct ResizeObservers {
 }
 
 impl RealmArena {
+    // Whether any of realm `cid`'s observations' targets is another realm's node, as its list now stands — a gather
+    // finds an adoption since, an unobserve or a disconnect may leave none.
+    pub(crate) fn note_resize_foreign(&mut self, cid: i32) {
+        let foreign = self.resize_observers.observing.iter().any(|o| o.observations.iter().any(|(_, t, _)| self.get(t).is_some_and(|n| n.realm != cid)));
+        self.note_foreign(cid, crate::foreign_observations::RESIZE, foreign);
+    }
     // Realm `cid`'s context disposed — a frame removed or navigated: its observations' targets held no more, nor what
     // they reach of its heap (the context with them), as a new context's realm state starts without them.
     pub(crate) fn discard_resize_observers(&mut self, cid: i32) {
@@ -139,6 +145,7 @@ fn ro_unobserve(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     if !held {
         observers.observing.retain(|o| o.id != id);
     }
+    crate::dom::realm(scope, cid).note_resize_foreign(cid);
     rv.set_bool(held);
 }
 
@@ -146,7 +153,9 @@ fn ro_unobserve(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 fn ro_disconnect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = args.get(0).uint32_value(scope) else { return };
     let cid = realm_id(scope, &args);
-    crate::dom::realm(scope, cid).resize_observers.observing.retain(|o| o.id != id);
+    let arena = crate::dom::realm(scope, cid);
+    arena.resize_observers.observing.retain(|o| o.id != id);
+    arena.note_resize_foreign(cid);
 }
 
 // __dom.roObserving() -> whether any of the realm's ResizeObservers observes anything.
@@ -195,9 +204,7 @@ fn ro_gather(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         }
     }
     // (…and whether any target is another realm's node, whose changes its realm's then ask this one's update for)
-    let arena = crate::dom::realm(scope, cid);
-    let foreign = arena.resize_observers.observing.iter().any(|o| o.observations.iter().any(|(_, t, _)| arena.get(t).is_some_and(|n| n.realm != cid)));
-    arena.note_foreign(cid, crate::foreign_observations::RESIZE, foreign);
+    crate::dom::realm(scope, cid).note_resize_foreign(cid);
     let ids: Vec<v8::Local<v8::Value>> = with_active.iter().map(|&id| v8::Integer::new_from_unsigned(scope, id).into()).collect();
     rv.set(v8::Array::new_with_elements(scope, &ids).into());
 }

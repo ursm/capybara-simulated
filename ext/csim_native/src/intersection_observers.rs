@@ -41,6 +41,12 @@ impl IntersectionObservers {
 }
 
 impl RealmArena {
+    // Whether any of realm `cid`'s registrations' targets is another realm's node, as they now stand — an update finds
+    // an adoption since, an unobserve or a disconnect may leave none.
+    pub(crate) fn note_intersection_foreign(&mut self, cid: i32) {
+        let foreign = self.intersection_observers.observing.iter().any(|o| o.targets.iter().any(|(_, t, _)| self.get(t).is_some_and(|n| n.realm != cid)));
+        self.note_foreign(cid, crate::foreign_observations::INTERSECTION, foreign);
+    }
     // Realm `cid`'s context disposed: its registrations' targets held no more, nor what they reach of its heap.
     pub(crate) fn discard_intersection_observers(&mut self, cid: i32) {
         let observers = if cid == self.cur() { Some(&mut self.intersection_observers) } else { self.parked_state(cid).map(|s| &mut s.intersection_observers) };
@@ -118,6 +124,7 @@ fn io_unobserve(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     if !held {
         observers.observing.retain(|o| o.id != id);
     }
+    crate::dom::realm(scope, cid).note_intersection_foreign(cid);
     rv.set_bool(held);
 }
 
@@ -125,7 +132,9 @@ fn io_unobserve(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 fn io_disconnect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = args.get(0).uint32_value(scope) else { return };
     let cid = realm_id(scope, &args);
-    crate::dom::realm(scope, cid).intersection_observers.observing.retain(|o| o.id != id);
+    let arena = crate::dom::realm(scope, cid);
+    arena.intersection_observers.observing.retain(|o| o.id != id);
+    arena.note_intersection_foreign(cid);
 }
 
 // __dom.ioObserving() -> whether any of the realm's IntersectionObservers observes anything.
@@ -159,9 +168,7 @@ fn io_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     }
     observers.skipped = skipped;
     // (…and whether any target is another realm's node, whose changes its realm's then ask this one's update for)
-    let arena = crate::dom::realm(scope, cid);
-    let foreign = arena.intersection_observers.observing.iter().any(|o| o.targets.iter().any(|(_, t, _)| arena.get(t).is_some_and(|n| n.realm != cid)));
-    arena.note_foreign(cid, crate::foreign_observations::INTERSECTION, foreign);
+    crate::dom::realm(scope, cid).note_intersection_foreign(cid);
     let rows: Vec<v8::Local<v8::Value>> = due
         .iter()
         .map(|(id, targets)| {

@@ -2,9 +2,9 @@
 // element, a frame's of the page's, one frame's of a sibling's, a target adopted into another document since it was
 // observed — whose updates a change in ANY realm may owe a report, though it moves none of their own generations. A
 // realm joins as one of its observers observes such a target, or a gather finds one (an adoption since), and leaves as
-// its gathers find none; it is asked once — its pending flag raised — until its update runs. Every realm's bindings
-// read whether there are any with no call (`__dom.foreignObserved`), so a page with none pays a load of the word per
-// change.
+// its gathers, unobserves and disconnects leave none; it is asked once — its pending flag raised — until its update
+// runs. Every realm's bindings read whether there are any with no call (`__dom.foreignObserved`), so a page with none
+// pays a load of the word per change.
 
 use crate::dom::{realm_id, NodeId, RealmArena};
 
