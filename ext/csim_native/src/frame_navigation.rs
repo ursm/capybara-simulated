@@ -2,8 +2,10 @@
 // its load event steps): where each one is — its element's `load` fired for it or owed, a scripted navigation's
 // response awaited, the old document waiting to be unloaded as the new one's response comes in, a build parked on an
 // activating service worker or under way, a reload — which navigation is the container's latest (a load a superseded
-// one queued fires for nothing), and the URLs it carries: the one it started with, the session history entry it
-// pushes as it commits, the document URL a reload keeps. The container's, whatever document it is in or whether it is
+// one queued fires for nothing), the URLs it carries — the one it started with, the session history entry it pushes as
+// it commits, the document URL a reload keeps — and the documents it carries as bytes: a scripted navigation's
+// response the build loads, the one it loaded last (which a reload of a revoked blob: URL loads again), and a blob: URL's
+// a `location` navigation took a reference to before the page could revoke it. The container's, whatever document it is in or whether it is
 // in one: a frame moved keeps its navigation.
 
 use std::collections::HashMap;
@@ -17,6 +19,18 @@ use crate::dom::{nid_arg, realm_id, utf16_arg, utf16_value, NodeId, RealmArena};
 const URL_SRC: i32 = 0;
 const URL_HISTORY: i32 = 1;
 const URL_RELOAD: i32 = 2;
+
+// The documents a navigation carries (`__dom.frameContent`), by slot (frame-nav.js `FC_*`): a scripted navigation's
+// response, the one loaded last, a blob: URL's a `location` navigation took.
+const CONTENT_SLOTS: usize = 3;
+
+// A document as bytes: its URL, its body, its content type.
+#[derive(Clone)]
+struct Content {
+    url: Vec<u16>,
+    bytes: Vec<u8>,
+    content_type: Vec<u16>,
+}
 
 #[derive(Default)]
 struct FrameNavigation {
@@ -34,6 +48,7 @@ struct FrameNavigation {
     // The form submission the container's navigable plans to navigate to (HTML "plan to navigate": one pending
     // navigation per navigable, a later one replacing it), by the number `planFrameNavigation` gave it — 0 for none.
     planned: u32,
+    contents: [Option<Content>; CONTENT_SLOTS],
 }
 
 // A scripted navigation's response awaited (frame-nav.js `FN_NAV_PENDING`): what a plan superseded clears.
@@ -90,6 +105,61 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "planFrameNavigation", plan_frame_navigation, context_id);
     crate::dom::register(scope, ns, "landFrameNavigation", land_frame_navigation, context_id);
     crate::dom::register(scope, ns, "cancelFrameNavigation", cancel_frame_navigation, context_id);
+    crate::dom::register(scope, ns, "frameContent", frame_content, context_id);
+    crate::dom::register(scope, ns, "setFrameContent", set_frame_content, context_id);
+    crate::dom::register(scope, ns, "frameContentHeld", frame_content_held, context_id);
+}
+
+// __dom.frameContentHeld(containerNid, slot) -> whether the navigation carries a document in `slot` (its bytes copied
+// nowhere).
+fn frame_content_held(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let slot = args.get(1).uint32_value(scope).unwrap_or(u32::MAX) as usize;
+    let cid = realm_id(scope, &args);
+    let held = crate::dom::realm(scope, cid).frame_navigations.0.get(&container).and_then(|nav| nav.contents.get(slot)).is_some_and(Option::is_some);
+    rv.set_bool(held);
+}
+
+// __dom.frameContent(containerNid, slot, take) -> the document the navigation carries in `slot` — `[url,
+// bytes, contentType]`, its bytes a Uint8Array — or null for none; taken (`take`): carried no more.
+fn frame_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_null() };
+    let slot = args.get(1).uint32_value(scope).unwrap_or(u32::MAX) as usize;
+    let take = args.get(2).is_true();
+    let cid = realm_id(scope, &args);
+    let content = crate::dom::realm(scope, cid).frame_navigations.0.get_mut(&container).and_then(|nav| nav.contents.get_mut(slot)).and_then(|c| if take { c.take() } else { c.clone() });
+    let Some(content) = content else { return rv.set_null() };
+    let url = utf16_value(scope, &content.url);
+    let bytes = crate::dom::u8_array(scope, content.bytes);
+    let content_type = utf16_value(scope, &content.content_type);
+    rv.set(v8::Array::new_with_elements(scope, &[url, bytes, content_type]).into());
+}
+
+// __dom.setFrameContent(containerNid, slot, url, bytes, contentType) — the document the navigation carries in `slot`:
+// `url`, `bytes` (a Uint8Array) and `contentType`; none where `url` is null.
+fn set_frame_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let slot = args.get(1).uint32_value(scope).unwrap_or(u32::MAX) as usize;
+    if slot >= CONTENT_SLOTS {
+        return;
+    }
+    let content = (!args.get(2).is_null_or_undefined()).then(|| {
+        let url = utf16_arg(scope, args.get(2));
+        let bytes = v8::Local::<v8::ArrayBufferView>::try_from(args.get(3)).map_or_else(|_| Vec::new(), |view| {
+            let mut bytes = vec![0u8; view.byte_length()];
+            view.copy_contents(&mut bytes);
+            bytes
+        });
+        let content_type = utf16_arg(scope, args.get(4));
+        Content { url, bytes, content_type }
+    });
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    // (…none carried by a container with no navigation state: nothing to make for it)
+    if content.is_none() && !arena.frame_navigations.0.contains_key(&container) {
+        return;
+    }
+    arena.frame_navigation(container).contents[slot] = content;
 }
 
 // __dom.planFrameNavigation(containerNid, formNid, interactive) -> the number of the navigation the form's submission
