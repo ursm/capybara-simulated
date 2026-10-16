@@ -4837,9 +4837,6 @@ html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-correc
 - "== html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-correct-order-remove-readd-ref.html"
 html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-dynamic.html:
 - "== html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-dynamic-ref.html"
-html/webappapis/dynamic-markup-insertion/closing-the-input-stream/document-close-with-pending-script.html:
-- "[harness] TIMEOUT"
-- document.close called while a script is pending
 html/webappapis/dynamic-markup-insertion/closing-the-input-stream/load-event-after-location-set-during-write.window.js:
 - Setting location from document.write() call should not trigger load event until
   that load completes
@@ -4944,10 +4941,6 @@ html/webappapis/dynamic-markup-insertion/opening-the-input-stream/event-listener
   that is the associated Document of a Window (frame is removed)
 - Standard event listeners are to be removed from Window for an active but not fully
   active document
-html/webappapis/dynamic-markup-insertion/opening-the-input-stream/form-control-state.html:
-- "[harness] TIMEOUT"
-- input state
-- textarea state
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/ignore-opens-during-unload.window.js: HARNESS_ERROR
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/origin-check-in-document-open-same-origin-domain.sub.html:
 - It should not be possible to implicitly open same origin-domain (but not same origin)
