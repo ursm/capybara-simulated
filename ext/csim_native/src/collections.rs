@@ -187,7 +187,8 @@ fn window_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set(crate::dom::nodes_value(scope, cid, &found));
 }
 
-// The nodes of `list`, an array a live collection holds its elements in, by index (none for an entry that is no node).
+// The nodes of `list`, an array a live collection holds its elements in (each `live()` an op's or `filter`'s array), by
+// index — none for an entry that is no node.
 fn list_nodes(scope: &mut v8::PinScope<'_, '_>, list: v8::Local<'_, v8::Value>) -> Vec<Option<NodeId>> {
     let Ok(list) = v8::Local::<v8::Array>::try_from(list) else { return Vec::new() };
     (0..list.length()).map(|i| list.get_index(scope, i).and_then(|v| crate::node_handle::nid_of(scope, v))).collect()
@@ -200,18 +201,24 @@ fn names(n: &NodeData, name: &[u16]) -> bool {
 
 // __dom.namedIn(list, name, all) -> the named lookup of a collection of `list`'s elements (DOM §4.2.10.1): the index of
 // the first that `name` names, -1 for none — none for ''; with `all`, the indices of every one (HTMLFormControlsCollection's
-// RadioNodeList's members).
+// RadioNodeList's members). The first is looked for an entry at a time: a lookup that finds its element early — a form's
+// first control of thousands — reads no more of the list.
 fn named_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = utf16_arg(scope, args.get(1));
-    let all = args.get(2).is_true();
-    let nodes = if name.is_empty() { Vec::new() } else { list_nodes(scope, args.get(0)) };
     let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let mut found = nodes.iter().enumerate().filter(|(_, id)| id.and_then(|id| arena.get(id)).is_some_and(|n| names(n, &name))).map(|(i, _)| i as f64);
-    if !all {
-        return rv.set_double(found.next().unwrap_or(-1.0));
+    let list = v8::Local::<v8::Array>::try_from(args.get(0)).ok().filter(|_| !name.is_empty());
+    let named = |scope: &mut v8::PinScope<'_, '_>, list: v8::Local<'_, v8::Array>, i: u32| {
+        let id = list.get_index(scope, i).and_then(|v| crate::node_handle::nid_of(scope, v));
+        id.and_then(|id| crate::dom::realm(scope, cid).get(id)).is_some_and(|n| names(n, &name))
+    };
+    if !args.get(2).is_true() {
+        let first = list.and_then(|list| (0..list.length()).find(|&i| named(scope, list, i)));
+        return rv.set_double(first.map_or(-1.0, f64::from));
     }
-    let found: Vec<f64> = found.collect();
+    let found: Vec<f64> = match list {
+        Some(list) => (0..list.length()).filter(|&i| named(scope, list, i)).map(f64::from).collect(),
+        None => Vec::new(),
+    };
     rv.set(f64_array(scope, &found).into());
 }
 
