@@ -4441,12 +4441,28 @@ fn sheet_media(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 fn sheet_disabled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(sheet) = handle_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let value = (args.length() > 1).then(|| args.get(1).boolean_value(scope));
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let owner = arena.owner_of_sheet(sheet);
     if let Some(value) = value {
-        with_sheets(scope, &args, |store, _| store.set_disabled(sheet, value));
-        let cid = realm_id(scope, &args);
-        realm(scope, cid).sheet_epoch += 1;
+        arena.sheets.set_disabled(sheet, value);
+        // (…an owner's sheet enabled takes part whatever its set — an alternate one too — as a `<link>` whose `disabled`
+        // was removed does: its disabled flag unset)
+        if let Some(owner) = owner {
+            if value {
+                arena.explicitly_enabled.remove(&owner);
+            } else {
+                arena.explicitly_enabled.insert(owner);
+            }
+        }
+        arena.sheet_epoch += 1;
     }
-    let disabled = with_sheets(scope, &args, |store, _| store.disabled(sheet));
+    // (…an owner's sheet disabled where its document's sets leave it out — an alternate one, one of a set not selected — or
+    // its flag says so; any other by its flag)
+    let disabled = match owner.and_then(|o| arena.owner_sheet_takes_part(o)) {
+        Some(takes_part) => !takes_part,
+        None => arena.sheets.disabled(sheet),
+    };
     rv.set_bool(disabled);
 }
 // __dom.sheetMediaText(handle[, text]) -> the sheet's media list as CSSOM serializes it (sheets.rs `media_text`); with

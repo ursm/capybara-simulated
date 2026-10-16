@@ -225,6 +225,21 @@ impl RealmArena {
         self.get(owner).is_some_and(|n| n.sheet_gen == count) && self.sheets.disabled(sheet)
     }
 
+    // The owner whose sheet the sheet `id` is, while it is — none for a constructed or an imported one.
+    pub(crate) fn owner_of_sheet(&self, id: u32) -> Option<NodeId> {
+        self.owner_sheets.iter().find(|&(&owner, &(sheet, count))| sheet == id && self.get(owner).is_some_and(|n| n.sheet_gen == count)).map(|(&owner, _)| owner)
+    }
+    // …and whether `owner`'s sheet takes part in its document's style sheet sets (CSSOM's disabled flag, which "add a CSS
+    // style sheet" sets for one outside the selected set and a script's `disabled` writes) — none where it is in no
+    // document's tree (a shadow tree's sheets have no sets).
+    pub(crate) fn owner_sheet_takes_part(&mut self, owner: NodeId) -> Option<bool> {
+        let root = self.root_of(owner);
+        if self.get(root).is_none_or(|r| r.kind != NodeKind::Document) {
+            return None;
+        }
+        Some(self.sheet_set(root).taking_part.contains(&owner))
+    }
+
     // …kept until the tree or what else they turn on changes (the trees asked about bounded: a page's shadow roots).
     fn sheet_set(&mut self, root: NodeId) -> std::rc::Rc<SheetSet> {
         if let Some((mutations, epoch, set)) = self.sheet_sets.get(&root) {
@@ -285,12 +300,13 @@ impl RealmArena {
                 if self.owner_sheet_disabled(owner) {
                     continue;
                 }
-                (2u8, owner, n.sheet_gen, &title, &href, &media, alternate).hash(&mut hasher);
+                let enabled = self.explicitly_enabled.contains(&owner);
+                (2u8, owner, n.sheet_gen, &title, &href, &media, alternate, enabled).hash(&mut hasher);
                 any_titled_or_alternate |= !title.is_empty() || alternate;
                 if !title.is_empty() && !alternate && preferred.is_none() {
                     preferred = Some(title.clone());
                 }
-                sheets.push((owner, title, alternate, false));
+                sheets.push((owner, title, alternate, enabled));
             } else if link {
                 let rel = n.plain_attr("rel").unwrap_or("").to_ascii_lowercase();
                 let rel: Vec<&str> = rel.split(|c: char| c.is_ascii_whitespace()).filter(|t| !t.is_empty()).collect();
@@ -322,12 +338,13 @@ impl RealmArena {
                 if self.owner_sheet_disabled(owner) {
                     continue;
                 }
-                (0u8, owner, count, &title, &media).hash(&mut hasher);
+                let enabled = self.explicitly_enabled.contains(&owner);
+                (0u8, owner, count, &title, &media, enabled).hash(&mut hasher);
                 if !title.is_empty() {
                     any_titled_or_alternate = true;
                     preferred.get_or_insert_with(|| title.clone());
                 }
-                sheets.push((owner, title, false, false));
+                sheets.push((owner, title, false, enabled));
             }
         }
         // (…the selected set only where a titled or alternate sheet makes it matter: none decides nothing)
