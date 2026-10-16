@@ -995,6 +995,8 @@ pub(crate) struct RealmState {
     // Its timers and the tasks the platform queues on their list (timers.rs) — a page's, which a new one's realm state
     // starts without.
     pub(crate) timers: crate::timers::Timers,
+    // Its ResizeObservers that observe anything, and their observations (resize_observers.rs).
+    pub(crate) resize_observers: crate::resize_observers::ResizeObservers,
     // The faces its families resolve to, which its walks and its style engine's font metrics read (`SharedFaces`).
     pub(crate) faces: crate::walk::SharedFaces,
     // How many elements a restyle REPLACED the style of since this side last took them (`note_restyled`,
@@ -2518,6 +2520,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::mutation_observers::install(scope, ns, context_id);
     crate::navigables::install(scope, ns, context_id);
     crate::frame_navigation::install(scope, ns, context_id);
+    crate::resize_observers::install(scope, ns, context_id);
     crate::scroll_events::install(scope, ns, context_id);
     crate::timers::install(scope, ns, context_id);
     crate::ce_reactions::install(scope, ns, context_id);

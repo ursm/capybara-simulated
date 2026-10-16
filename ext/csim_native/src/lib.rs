@@ -105,6 +105,7 @@ mod reflect;
 mod rendered;
 mod script;
 mod resize_observation;
+mod resize_observers;
 mod resource_timing;
 mod resolved;
 mod scroll_boxes;

@@ -383,6 +383,32 @@ RSpec.describe 'Observer bindings' do
     ])
   end
 
+  # A ResizeObserver a callback makes, observing a deeper target, is gathered by the next round of the same update —
+  # "gather active observations at depth" visits the document's observers each round — before the next frame's
+  # callbacks; and one an earlier callback of the round unobserved is broadcast what the round found active of it, the
+  # spec's unobserve leaving [[activeTargets]] as they are (Chrome: E, F, then the frame; it drops the unobserved one).
+  it 'gathers an observer a ResizeObserver callback makes in the same update' do
+    session.execute_script(<<~JS)
+      document.body.innerHTML = '<div id=a style="width: 10px; height: 10px"></div><div id=b style="width: 20px; height: 20px"><div id=c style="width: 5px; height: 5px"></div></div>';
+      window.got = [];
+      let made = false;
+      const e = new ResizeObserver(() => {
+        window.got.push('E');
+        if (made) return;
+        made = true;
+        requestAnimationFrame(() => window.got.push('frame'));
+        new ResizeObserver(() => window.got.push('F')).observe(document.getElementById('c'));
+      });
+      e.observe(document.getElementById('b'));
+      let second;
+      const first = new ResizeObserver(() => { window.got.push('first'); second.unobserve(document.getElementById('a')); });
+      second = new ResizeObserver(() => window.got.push('second'));
+      first.observe(document.getElementById('a'));
+      second.observe(document.getElementById('a'));
+    JS
+    expect(poll_until { session.evaluate_script('window.got.length >= 5 && window.got') }).to eq(%w[E first second F frame])
+  end
+
   # The loop (HTML "update the rendering"): a callback that resizes what it observes is called again in the same update
   # only for observations deeper than the shallowest it was given — the child the parent's width carries — and the
   # parent's, skipped, is reported as an ErrorEvent with no error, at the document's 0:0 (Chrome).
