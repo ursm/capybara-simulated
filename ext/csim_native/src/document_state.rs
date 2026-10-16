@@ -63,9 +63,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // __dom.docState(docNid, field) -> the document's field (0 its mode — 0 no-quirks, 1 limited-quirks, 2 quirks; 1 its
 // readiness — 0 loading, 1 interactive, 2 complete; 2 its flags, the bindings'; 3 its markup insertion counter).
 fn doc_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
+    // (…the state a document starts with for one the engine holds none of, as the fast call answers)
+    let doc = nid_arg(scope, &args, 0);
     let field = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
-    rv.set_uint32(field_of(crate::dom::dom(scope).arena.document_states.0.get(&doc).copied().unwrap_or_default(), field));
+    let state = doc.and_then(|d| crate::dom::dom(scope).arena.document_states.0.get(&d).copied()).unwrap_or_default();
+    rv.set_uint32(field_of(state, field));
 }
 fn field_of(state: DocumentState, field: u32) -> u32 {
     match field {
