@@ -4379,12 +4379,12 @@ fn import_sheet(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         None => rv.set_null(),
     }
 }
-// __dom.sheetMedia(sheetId, media, quirks): the sheet applies under `media` now (its rules kept).
+// __dom.sheetMedia(sheetId, media, docNid): the sheet applies under `media` now (its rules kept).
 fn sheet_media(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(sheet) = handle_arg(scope, &args, 0) else { return };
     own_sheet(scope, &args, sheet);
     let media = args.get(1).to_rust_string_lossy(scope);
-    let quirks = args.get(2).is_true();
+    let quirks = quirks_arg(scope, &args, 2);
     with_sheets(scope, &args, |store, lock| store.set_media(lock, sheet, &media, quirks));
     rules_moved(scope, &args, Some(sheet));
 }
@@ -4697,7 +4697,7 @@ fn style_sheet_facts_unguarded(
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.styleImport(url, css, quirks) -> the URLs the imported sheet's own `@import`s wait for. The sheet at `url`
+// __dom.styleImport(url, css, docNid) -> the URLs the imported sheet's own `@import`s wait for. The sheet at `url`
 // arrived (`css` null: it could not be fetched), for every realm sheet whose `@import` waits for it.
 fn style_import(
     scope: &mut v8::PinScope<'_, '_>,
@@ -4714,7 +4714,7 @@ fn style_import_unguarded(
 ) {
     let url = args.get(0).to_rust_string_lossy(scope);
     let css = args.get(1).is_string().then(|| args.get(1).to_rust_string_lossy(scope));
-    let quirks = args.get(2).is_true();
+    let quirks = quirks_arg(scope, &args, 2);
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let arena = d.arena.enter(cid);
@@ -4727,11 +4727,11 @@ fn style_import_unguarded(
     rv.set(urls);
 }
 
-// __dom.sheetMake(css, baseUrl, media, constructed, quirks) -> [sheetId, …the URLs its `@import`s wait for]: a new sheet
-// of the realm's (sheets.rs), for a `<style>` / `<link>` or a constructed sheet, in a document of `quirks` mode.
+// __dom.sheetMake(css, baseUrl, media, constructed, docNid) -> [sheetId, …the URLs its `@import`s wait for]: a new sheet
+// of the realm's (sheets.rs), for a `<style>` / `<link>` or a constructed sheet, in the document's mode (`quirks_arg`).
 fn sheet_make(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let source = sheet_source(scope, &args, 0);
-    let quirks = args.get(4).is_true();
+    let quirks = quirks_arg(scope, &args, 4);
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
     let lock = arena.style_lock.0.clone();
@@ -4740,12 +4740,12 @@ fn sheet_make(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     items.extend(pending.iter().filter_map(|u| v8::String::new(scope, u)).map(Into::<v8::Local<v8::Value>>::into));
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.sheetReplace(sheetId, css, baseUrl, media, constructed, quirks) -> the URLs its `@import`s wait for: the sheet
+// __dom.sheetReplace(sheetId, css, baseUrl, media, constructed, docNid) -> the URLs its `@import`s wait for: the sheet
 // made of other text (or under another base or media). The engine takes it as the new sheet it is at its next set.
 fn sheet_replace(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = args.get(0).uint32_value(scope) else { return };
     let source = sheet_source(scope, &args, 1);
-    let quirks = args.get(5).is_true();
+    let quirks = quirks_arg(scope, &args, 5);
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
     let lock = arena.style_lock.0.clone();
@@ -4825,14 +4825,21 @@ fn decl_key(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgumen
     let text = args.get(0).to_rust_string_lossy(scope);
     let kind = crate::cssom_decl::Kind::from_u32(args.get(1).uint32_value(scope).unwrap_or(0));
     let base = args.get(3).to_rust_string_lossy(scope);
-    crate::cssom_decl::Key::new(&text, kind, args.get(2).is_true(), &base)
+    let quirks = quirks_arg(scope, args, 2);
+    crate::cssom_decl::Key::new(&text, kind, quirks, &base)
+}
+// …and the quirks mode a declaration or a sheet parses in: that of the document argument `i` names by its nid
+// (`document_mode`; none, -1, an HTML no-quirks one's).
+fn quirks_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, i: i32) -> bool {
+    let doc = nid_arg(scope, args, i);
+    dom(scope).arena.document_mode(doc).0
 }
 fn set_str(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnValue<'_, v8::Value>, s: &str) {
     if let Some(s) = v8::String::new(scope, s) {
         rv.set(s.into());
     }
 }
-// __dom.declValue(text, kind, quirks, base, name, nid) -> `getPropertyValue(name)`.
+// __dom.declValue(text, kind, docNid, base, name, nid) -> `getPropertyValue(name)`.
 fn decl_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
     let made = written_style(scope, &args, &key, 5);
@@ -4840,21 +4847,21 @@ fn decl_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let value = crate::cssom_decl::value(&key, made, &name);
     set_str(scope, &mut rv, &value);
 }
-// __dom.declImportant(text, kind, quirks, base, name, nid) -> whether `getPropertyPriority(name)` is `important`.
+// __dom.declImportant(text, kind, docNid, base, name, nid) -> whether `getPropertyPriority(name)` is `important`.
 fn decl_important(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
     let made = written_style(scope, &args, &key, 5);
     let name = args.get(4).to_rust_string_lossy(scope);
     rv.set_bool(crate::cssom_decl::important(&key, made, &name));
 }
-// __dom.declText(text, kind, quirks, base, nid) -> `cssText`.
+// __dom.declText(text, kind, docNid, base, nid) -> `cssText`.
 fn decl_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
     let made = written_style(scope, &args, &key, 4);
     let css = crate::cssom_decl::css_text(&key, made);
     set_str(scope, &mut rv, &css);
 }
-// __dom.declNames(text, kind, quirks, base, nid) -> the declared longhand and custom property names, in order.
+// __dom.declNames(text, kind, docNid, base, nid) -> the declared longhand and custom property names, in order.
 fn decl_names(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
     let made = written_style(scope, &args, &key, 4);
@@ -4862,7 +4869,7 @@ fn decl_names(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let items: Vec<v8::Local<v8::Value>> = names.iter().filter_map(|n| v8::String::new(scope, n)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.declSet(text, kind, quirks, base, name, value, important, nid) -> the new text, or null where the block did not change.
+// __dom.declSet(text, kind, docNid, base, name, value, important, nid) -> the new text, or null where the block did not change.
 fn decl_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
     let name = args.get(4).to_rust_string_lossy(scope);
@@ -4876,7 +4883,7 @@ fn decl_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         None => rv.set_null(),
     }
 }
-// __dom.declRemove(text, kind, quirks, base, name, nid) -> [the value it had, the new text or null where it set nothing].
+// __dom.declRemove(text, kind, docNid, base, name, nid) -> [the value it had, the new text or null where it set nothing].
 fn decl_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
     let name = args.get(4).to_rust_string_lossy(scope);
@@ -4892,7 +4899,7 @@ fn decl_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         keep_written_style(scope, &args, &key, 5, written);
     }
 }
-// __dom.declReplace(text, kind, quirks, base, nid) -> the block `text` parses to, serialized: `cssText`'s setter.
+// __dom.declReplace(text, kind, docNid, base, nid) -> the block `text` parses to, serialized: `cssText`'s setter.
 fn decl_replace(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = decl_key(scope, &args);
     let written = crate::cssom_decl::replace(&key);
