@@ -34,7 +34,7 @@ class HijackLongPollBus
     @held    = []            # write-ios of connections parked waiting for a publish
   end
 
-  PAGE = <<~HTML
+  LONG_POLL_PAGE = <<~HTML
     <!doctype html>
     <html><body>
       <script>
@@ -87,7 +87,7 @@ class HijackLongPollBus
     req = Rack::Request.new(env)
     case req.path_info
     when '/'
-      [200, {'content-type' => 'text/html'}, [PAGE]]
+      [200, {'content-type' => 'text/html'}, [LONG_POLL_PAGE]]
     when %r{\A/message-bus/[^/]+/poll\z}
       handle_poll(env, req)
     when '/publish'

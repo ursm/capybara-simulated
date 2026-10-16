@@ -10,7 +10,7 @@ require_relative 'support/poll_until'
 RSpec.describe 'choosing a navigable by name' do
   include PollUntil
 
-  PAGES = {
+  NAVIGABLE_PAGES = {
     '/'   => '<a id="l1" href="/x1" target="b">b</a> <a id="l2" href="/x2" target="renamed">renamed</a> ' \
              '<a id="l3" href="/x3" target="s">s</a> <a id="l4" href="/x4" target="B">B</a> ' \
              '<form id="fg" action="/fg" target="b"><input name="q" value="1"><button>get</button></form>' \
@@ -27,7 +27,7 @@ RSpec.describe 'choosing a navigable by name' do
     log = []
     s = simulated_session(->(env) {
       log << [env['REQUEST_METHOD'], env['PATH_INFO'], env['QUERY_STRING'], env['HTTP_REFERER']]
-      body = PAGES[env['PATH_INFO']] || "<p id=\"p\">#{env['PATH_INFO']}</p>"
+      body = NAVIGABLE_PAGES[env['PATH_INFO']] || "<p id=\"p\">#{env['PATH_INFO']}</p>"
       [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{body}"]]
     })
     s.visit '/'

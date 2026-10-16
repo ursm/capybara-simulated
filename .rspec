@@ -1,1 +1,2 @@
 --require ./spec/support/example_persistence
+--require ./spec/support/constant_collisions
