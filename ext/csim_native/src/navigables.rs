@@ -127,6 +127,19 @@ impl RealmArena {
     pub(crate) fn frame_container(&self, parent: i32, realm: i32) -> Option<NodeId> {
         self.live_container(realm).filter(|&c| self.get(c).is_some_and(|n| n.realm == parent))
     }
+    // Whether the document of a navigable ABOVE realm `realm`'s is being unloaded now — its descendants' documents, the
+    // realm's among them, asked whether they may be unloaded with it (HTML "check if unloading is canceled" runs over
+    // the descendants before any is unloaded), or being destroyed with it, which asks none.
+    pub(crate) fn ancestor_unloading(&self, realm: i32) -> bool {
+        let mut at = realm;
+        while let Some(parent) = self.live_container(at).and_then(|c| self.get(c)).map(|n| n.realm) {
+            if self.navigables.unloading.contains(&parent) {
+                return true;
+            }
+            at = parent;
+        }
+        false
+    }
     // …in whichever realm's document: none for a top-level navigable's realm, or a discarded one's.
     fn live_container(&self, realm: i32) -> Option<NodeId> {
         let nav = &self.navigables;
@@ -311,6 +324,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "ownContainer", own_container, context_id);
     crate::dom::register(scope, ns, "setUnloading", set_unloading, context_id);
     crate::dom::register(scope, ns, "unloading", unloading, context_id);
+    crate::dom::register(scope, ns, "ancestorUnloading", ancestor_unloading, context_id);
     let linked = crate::dom::dom(scope).arena.navigables.linked.store();
     crate::dom::view_word(scope, ns, "childFrames", linked);
 }
@@ -451,4 +465,11 @@ fn unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let realm = args.get(0).int32_value(scope).unwrap_or(-1);
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).navigables.unloading.contains(&realm));
+}
+// __dom.ancestorUnloading(realm) -> whether an ancestor navigable's document is being unloaded now
+// (`RealmArena::ancestor_unloading`).
+fn ancestor_unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(-1);
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).ancestor_unloading(realm));
 }

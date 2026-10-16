@@ -292,6 +292,46 @@ RSpec.describe 'choosing a navigable by name' do
     end
   end
 
+  # A frame of the document being unloaded was asked with it: a teardown handler re-navigating that frame asks it no
+  # second time.
+  it "asks a frame of a document being unloaded nothing more when a teardown handler navigates it" do
+    s, = session_for(
+      '/p' => '<script>window.L = []</script><iframe id="c" src="/c"></iframe>',
+      '/c' => unload_logger('c') + '<script>addEventListener("unload", () => { document.getElementById("g").src = "/e" })</script><iframe id="g" src="/g"></iframe>',
+      '/g' => unload_logger('g')
+    )
+    s.evaluate_script('frames[0].frames[0].document.body.textContent')
+    s.execute_script('frames[0].location = "http://www.example.com/d"')
+    expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 6 } }).to eq(%w[
+      c:beforeunload:c
+      g:beforeunload:g
+      c:pagehide:c
+      c:unload:c
+      g:pagehide:g
+      g:unload:g
+    ])
+  end
+
+  # A redirect's Location is parsed against the URL of the response that carries it (Fetch "HTTP-redirect fetch") —
+  # not the document the navigation started from — for a frame's form POST and for the top-level navigation alike.
+  it "resolves a redirect's relative Location against the request URL" do
+    s = simulated_session(->(env) {
+      case env['PATH_INFO']
+      when '/sub/c'    then [200, {'content-type' => 'text/html'}, ['<form method="post" action="post"></form>']]
+      when '/sub/post' then [303, {'location' => 'done'}, []]
+      when '/hop/a'    then [302, {'location' => 'b'}, []]
+      when '/hop/b'    then [302, {'location' => 'c'}, []]
+      else [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><iframe src=\"/sub/c\"></iframe><p>#{env['PATH_INFO']}</p>"]]
+      end
+    })
+    s.visit '/p'
+    s.evaluate_script('frames[0].length')
+    s.execute_script('frames[0].document.forms[0].requestSubmit()')
+    expect(poll_until { s.evaluate_script('frames[0].location.pathname').then {|path| path if path != '/sub/c' } }).to eq('/sub/done')
+    s.visit '/hop/a'
+    expect(s.current_path).to eq('/hop/c')
+  end
+
   # HTML: whether unloading is canceled is asked before the navigation fetches anything, the document unloaded once the
   # response is in — a cookie its beforeunload sets goes with the request, its unload's does not (Chrome).
   it 'fires beforeunload before the request a host navigation of a frame makes, and unload after it' do
