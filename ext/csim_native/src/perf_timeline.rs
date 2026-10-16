@@ -1,15 +1,17 @@
 // A realm's performance timeline (Performance Timeline §5–6, User Timing §2, Resource Timing §4): its entry buffers —
 // the marks and measures in the order they were recorded, the resources in the primary buffer (bounded by its size, 250
 // until the page sets another) and the secondary buffer that catches the overflow until `resourcetimingbufferfull` has
-// fired and the page has made room, or not — its last performance entry id and its document's navigation id, and its
-// registered performance observers, each with the types it observes, the entries queued on it and whether its next
-// callback reports dropped entries, and whether the task that calls them back is queued. The entries and observers
-// themselves, their state in their slots, are the bindings' (performance.js), which hand each entry in with the facts
-// the timeline filters, orders and looks marks up by, and name each observer by the number `poCreate` gave it; a
-// buffered or queued entry and a registered observer are held — roots, which the realm's context going lets go of
-// (`discard_perf_timeline`) — and the realm's state, begun anew with each page, holds none.
+// fired and the page has made room, or not, with the count of those it dropped — its last performance entry id and its
+// document's navigation id, and its registered performance observers, each with the types it observes and whether its
+// next callback reports dropped entries, and whether the task that calls them back is queued.
+//
+// It holds no object: the entries and observers are the bindings' (performance.js), which hand each entry in with the
+// facts the timeline filters, orders and looks marks up by and keep the objects themselves by the serial it answers
+// with — the buffered entries until it lets them go, as its answers say, an observer's queue in the observer's slots —
+// and name each observer by the number `poCreate` gave it. So what holds them is what holds the realm's `performance`,
+// and a frame removed keeps a timeline that works, as Chrome's does, its objects going with the frame's.
 
-use crate::dom::{realm_id, utf16_arg, RealmArena};
+use crate::dom::{realm_id, utf16_arg};
 
 // The entry types the timeline buffers and observers observe, as the bindings name them — a bit each, as an observer's
 // types are kept.
@@ -32,7 +34,8 @@ impl Kind {
 }
 
 struct Entry {
-    held: v8::Global<v8::Value>,
+    // The number the bindings keep its object by.
+    serial: u32,
     kind: Kind,
     // (…as the page wrote it, a lone surrogate and all: two names it tells apart are two marks)
     name: Vec<u16>,
@@ -42,10 +45,8 @@ struct Entry {
 // A registered performance observer, in the order it registered.
 struct Observer {
     id: u32,
-    held: v8::Global<v8::Value>,
     // The types it observes, a `Kind` bit each.
     types: u8,
-    queue: Vec<v8::Global<v8::Value>>,
     requires_dropped_entries: bool,
 }
 
@@ -57,6 +58,9 @@ pub(crate) struct PerfTimeline {
     size: u32,
     // Whether a buffer-full task is queued: an entry meanwhile goes to the secondary buffer.
     full_pending: bool,
+    // How many resources the secondary buffer dropped (the resource tuple's "dropped entries count").
+    dropped_resources: u32,
+    next_serial: u32,
     last_entry_id: Option<u64>,
     navigation_id: Option<u64>,
     observers: Vec<Observer>,
@@ -73,6 +77,8 @@ impl Default for PerfTimeline {
             secondary: Vec::new(),
             size: 250,
             full_pending: false,
+            dropped_resources: 0,
+            next_serial: 0,
             last_entry_id: None,
             navigation_id: None,
             observers: Vec::new(),
@@ -103,13 +109,14 @@ impl PerfTimeline {
         let room = (self.size as usize).saturating_sub(self.primary.len()).min(self.secondary.len());
         self.primary.extend(self.secondary.drain(..room));
     }
-    // "Filter buffer map by name and type" (§2.1): the buffered entries of the type, named the name, in start time
-    // order — those that start together as they were recorded, the marks and measures before the resources.
-    fn filtered(&self, kind: Option<Kind>, name: Option<&[u16]>) -> Vec<v8::Global<v8::Value>> {
+    // "Filter buffer map by name and type" (§2.1): the serials of the buffered entries of the type, named the name, in
+    // start time order — those that start together as they were recorded, the marks and measures before the resources.
+    fn filtered(&self, kind: Option<Kind>, name: Option<&[u16]>) -> Vec<u32> {
         let mut found: Vec<&Entry> =
             self.entries.iter().chain(&self.primary).filter(|e| kind.is_none_or(|k| e.kind == k) && name.is_none_or(|n| e.name == n)).collect();
+        // (…no start is NaN — `perf_record` makes one 0 — so this is a total order, and `-0` starts with `0`)
         found.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
-        found.into_iter().map(|e| e.held.clone()).collect()
+        found.into_iter().map(|e| e.serial).collect()
     }
     // The task calling the observers back queued, unless it is: what the bindings are left to queue.
     fn queue_observer_task(&mut self) -> u32 {
@@ -117,17 +124,6 @@ impl PerfTimeline {
     }
     fn observer(&mut self, id: u32) -> Option<&mut Observer> {
         self.observers.iter_mut().find(|o| o.id == id)
-    }
-}
-
-impl RealmArena {
-    // Realm `cid`'s context disposed — a frame removed or navigated: its entries and observers held no more, nor what
-    // they reach of its heap (the context with them).
-    pub(crate) fn discard_perf_timeline(&mut self, cid: i32) {
-        let timeline = if cid == self.cur() { Some(&mut self.perf_timeline) } else { self.parked_state(cid).map(|s| &mut s.perf_timeline) };
-        if let Some(timeline) = timeline {
-            *timeline = PerfTimeline::default();
-        }
     }
 }
 
@@ -142,8 +138,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "poCreate", po_create, context_id);
     crate::dom::register(scope, ns, "poObserve", po_observe, context_id);
     crate::dom::register(scope, ns, "poDisconnect", po_disconnect, context_id);
-    crate::dom::register(scope, ns, "poTakeRecords", po_take_records, context_id);
     crate::dom::register(scope, ns, "poTask", po_task, context_id);
+    crate::dom::register(scope, ns, "poDroppedEntries", po_dropped_entries, context_id);
 }
 
 fn timeline<'s>(scope: &'s mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> &'s mut PerfTimeline {
@@ -151,30 +147,29 @@ fn timeline<'s>(scope: &'s mut v8::PinScope<'_, '_>, args: &v8::FunctionCallback
     &mut crate::dom::realm(scope, cid).perf_timeline
 }
 
-fn values<'s>(scope: &mut v8::PinScope<'s, '_>, held: &[v8::Global<v8::Value>]) -> v8::Local<'s, v8::Value> {
-    let locals: Vec<v8::Local<v8::Value>> = held.iter().map(|g| v8::Local::new(scope, g)).collect();
+fn numbers<'s>(scope: &mut v8::PinScope<'s, '_>, values: impl IntoIterator<Item = f64>) -> v8::Local<'s, v8::Value> {
+    let locals: Vec<v8::Local<v8::Value>> = values.into_iter().map(|v| v8::Number::new(scope, v).into()).collect();
     v8::Array::new_with_elements(scope, &locals).into()
 }
+fn serials<'s>(scope: &mut v8::PinScope<'s, '_>, entries: impl IntoIterator<Item = u32>) -> v8::Local<'s, v8::Value> {
+    numbers(scope, entries.into_iter().map(f64::from))
+}
 
-// __dom.perfRecord(entry, type, name, startTime, withNavigation) -> `[navigationId, id, tasks]`: the entry queued ("queue
-// a PerformanceEntry") and buffered. Queued, its id is generated — after its document's most recent navigation's, drawn
-// first, so it is the smaller, where it has a document (`withNavigation`), else 0 (a worker's: the spec's null, which the
-// attribute's `unsigned long long` makes 0, as Chrome reports) — and it is queued on every registered observer of its
-// type. Buffered, a mark or a measure is the last recorded; a resource goes in the primary buffer while it has room and
-// no buffer-full task is queued, else in the secondary one ("add a PerformanceResourceTiming entry"). `tasks` says what
-// the bindings are to queue: the buffer-full task (1) — for the first in the secondary buffer — and the observers' (2).
+// __dom.perfRecord(type, name, startTime, withNavigation) -> `[navigationId, id, tasks, serial, observer…]`: an entry
+// queued ("queue a PerformanceEntry") and buffered. Queued, its id is generated — after its document's most recent
+// navigation's, drawn first, so it is the smaller, where it has a document (`withNavigation`), else 0 (a worker's: the
+// spec's null, which the attribute's `unsigned long long` makes 0, as Chrome reports) — and the registered observers of
+// its type named, for the bindings to queue it on. Buffered — under `serial`, which the bindings keep its object by — a
+// mark or a measure is the last recorded; a resource goes in the primary buffer while it has room and no buffer-full
+// task is queued, else in the secondary one ("add a PerformanceResourceTiming entry"). `tasks` says what the bindings
+// are to queue: the buffer-full task (1) — for the first in the secondary buffer — and the observers' (2).
 fn perf_record(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let entry = args.get(0);
-    let kind = Kind::of(&args.get(1).to_rust_string_lossy(scope));
-    let name = utf16_arg(scope, args.get(2));
-    let start = args.get(3).number_value(scope).unwrap_or(0.0);
-    let with_navigation = args.get(4).is_true();
-    let cid = realm_id(scope, &args);
-    let held = v8::Global::new(scope, entry);
-    // (…buffered and queued by no realm whose context is gone: the entry would root the context it is in, which nothing
-    // lets go of again before the next visit)
-    let keep = entry.is_object() && !crate::dom::realm(scope, cid).context_gone(cid);
-    let t = &mut crate::dom::realm(scope, cid).perf_timeline;
+    let kind = Kind::of(&args.get(0).to_rust_string_lossy(scope));
+    let name = utf16_arg(scope, args.get(1));
+    // (…a NaN start, which no IDL `double` lets through, ordered as JS's comparator orders one: as 0)
+    let start = args.get(2).number_value(scope).filter(|s| !s.is_nan()).unwrap_or(0.0);
+    let with_navigation = args.get(3).is_true();
+    let t = timeline(scope, &args);
     let navigation = match (with_navigation, t.navigation_id) {
         (false, _) => 0,
         (true, Some(id)) => id,
@@ -185,16 +180,16 @@ fn perf_record(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     };
     let id = t.generate_id();
     let mut tasks = 0;
-    if let Some(kind) = kind.filter(|_| keep) {
-        let mut observed = false;
-        for o in t.observers.iter_mut().filter(|o| o.types & kind as u8 != 0) {
-            o.queue.push(held.clone());
-            observed = true;
-        }
-        if observed {
+    let mut serial = 0;
+    let mut observers = Vec::new();
+    if let Some(kind) = kind {
+        observers.extend(t.observers.iter().filter(|o| o.types & kind as u8 != 0).map(|o| o.id));
+        if !observers.is_empty() {
             tasks |= t.queue_observer_task();
         }
-        let entry = Entry { held, kind, name, start };
+        t.next_serial += 1;
+        serial = t.next_serial;
+        let entry = Entry { serial, kind, name, start };
         if kind != Kind::Resource {
             t.entries.push(entry);
         } else if t.can_add_resource() && !t.full_pending {
@@ -207,14 +202,12 @@ fn perf_record(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             t.secondary.push(entry);
         }
     }
-    let navigation = v8::Number::new(scope, navigation as f64);
-    let id = v8::Number::new(scope, id as f64);
-    let tasks = v8::Integer::new_from_unsigned(scope, tasks);
-    rv.set(v8::Array::new_with_elements(scope, &[navigation.into(), id.into(), tasks.into()]).into());
+    let head = [navigation as f64, id as f64, f64::from(tasks), f64::from(serial)];
+    rv.set(numbers(scope, head.into_iter().chain(observers.into_iter().map(f64::from))));
 }
 
-// __dom.perfEntries(type, name) -> the buffered entries (`filtered`) of `type` where it is a string, named `name`
-// where it is one.
+// __dom.perfEntries(type, name) -> the serials of the buffered entries (`filtered`) of `type` where it is a string,
+// named `name` where it is one.
 fn perf_entries(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     // (…a type the timeline buffers none of: none)
     let kind = match args.get(0) {
@@ -226,7 +219,7 @@ fn perf_entries(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     };
     let name = Some(args.get(1)).filter(|n| n.is_string()).map(|n| utf16_arg(scope, n));
     let found = timeline(scope, &args).filtered(kind, name.as_deref());
-    rv.set(values(scope, &found));
+    rv.set(serials(scope, found));
 }
 
 // __dom.perfMarkTime(name) -> the start time of the most recent mark named `name`, or null for none (User Timing §3.1
@@ -240,17 +233,25 @@ fn perf_mark_time(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
 }
 
-// __dom.perfClear(type, name) — the buffered marks or measures (`type`) named `name`, or all of them where it is no
-// string, let go of; the resources' primary buffer emptied (clearResourceTimings).
-fn perf_clear(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(kind) = Kind::of(&args.get(0).to_rust_string_lossy(scope)) else { return };
+// __dom.perfClear(type, name) -> the serials of the entries let go of: the buffered marks or measures (`type`) named
+// `name`, or all of them where it is no string; the resources' primary buffer (clearResourceTimings).
+fn perf_clear(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(kind) = Kind::of(&args.get(0).to_rust_string_lossy(scope)) else { return rv.set(v8::Array::new(scope, 0).into()) };
     let name = Some(args.get(1)).filter(|n| n.is_string()).map(|n| utf16_arg(scope, n));
     let t = timeline(scope, &args);
+    let mut gone = Vec::new();
     if kind == Kind::Resource {
-        t.primary.clear();
+        gone.extend(t.primary.drain(..).map(|e| e.serial));
     } else {
-        t.entries.retain(|e| e.kind != kind || name.as_ref().is_some_and(|n| e.name != *n));
+        t.entries.retain(|e| {
+            let clear = e.kind == kind && name.as_ref().is_none_or(|n| e.name == *n);
+            if clear {
+                gone.push(e.serial);
+            }
+            !clear
+        });
     }
+    rv.set(serials(scope, gone));
 }
 
 // __dom.perfSetResourceBufferSize(maxSize) — the primary buffer's size, which takes effect at once (a raise during the
@@ -275,19 +276,20 @@ fn perf_overflow(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set(v8::Array::new_with_elements(scope, &[count.into(), room.into()]).into());
 }
 
-// __dom.perfCopyOverflow(before) -> whether the steps go round again: the secondary buffer copied to the primary while
-// it has room, and — where that left it no smaller than the `before` it held as this round began (the page made no
-// room) — the rest dropped, and the task done.
+// __dom.perfCopyOverflow(before) -> the serials of the resources dropped — none while the steps go round again: the
+// secondary buffer copied to the primary while it has room, and — where that left it no smaller than the `before` it
+// held as this round began (the page made no room) — the rest dropped, counted, and the task done.
 fn perf_copy_overflow(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let before = args.get(0).uint32_value(scope).unwrap_or(0) as usize;
     let t = timeline(scope, &args);
     t.copy_secondary();
+    let mut dropped = Vec::new();
     if before <= t.secondary.len() {
-        t.secondary.clear();
+        dropped.extend(t.secondary.drain(..).map(|e| e.serial));
+        t.dropped_resources = t.dropped_resources.saturating_add(dropped.len() as u32);
         t.full_pending = false;
-        return rv.set_bool(false);
     }
-    rv.set_bool(true);
+    rv.set(serials(scope, dropped));
 }
 
 // __dom.poCreate() -> the number naming a new PerformanceObserver.
@@ -297,80 +299,59 @@ fn po_create(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     rv.set_uint32(t.next_observer);
 }
 
-// __dom.poObserve(id, observer, types, replace, bufferedType) -> the tasks the bindings are to queue (`perfRecord`'s):
-// observer `id` (`observer`) observing `types` — its types replaced by them (observe({entryTypes})) or they added
-// (observe({type})) — its next callback reporting dropped entries, and registered where it is not; with a
-// `bufferedType`, the entries already buffered of it queued on it. With no types, it stays as it was, but for the
-// dropped entries.
+// __dom.poObserve(id, types, replace, bufferedType) -> `[tasks, serial…]`: observer `id` observing `types` — its types
+// replaced by them (observe({entryTypes})) or they added (observe({type})) — its next callback reporting dropped
+// entries, and registered where it is not; with a `bufferedType`, the serials of the entries already buffered of it,
+// for the bindings to queue on it, and the observers' task (`perfRecord`'s 2) where that queues any. With no types, it
+// stays as it was, but for the dropped entries.
 fn po_observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = args.get(0).uint32_value(scope) else { return rv.set_uint32(0) };
-    let observer = args.get(1);
-    let types = u8::try_from(args.get(2).uint32_value(scope).unwrap_or(0) & 7).unwrap_or(0);
-    let replace = args.get(3).is_true();
-    let buffered = Some(args.get(4)).filter(|b| b.is_string()).and_then(|b| Kind::of(&b.to_rust_string_lossy(scope)));
-    let cid = realm_id(scope, &args);
-    // (…none by a realm whose context is gone: the observer would root the context it is in)
-    if !observer.is_object() || crate::dom::realm(scope, cid).context_gone(cid) {
-        return rv.set_uint32(0);
-    }
-    let held = v8::Global::new(scope, observer);
-    let t = &mut crate::dom::realm(scope, cid).perf_timeline;
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let types = u8::try_from(args.get(1).uint32_value(scope).unwrap_or(0) & 7).unwrap_or(0);
+    let replace = args.get(2).is_true();
+    let buffered = Some(args.get(3)).filter(|b| b.is_string()).and_then(|b| Kind::of(&b.to_rust_string_lossy(scope)));
+    let t = timeline(scope, &args);
     if let Some(o) = t.observer(id) {
         o.requires_dropped_entries = true;
     }
     if types == 0 {
-        return rv.set_uint32(0);
+        return rv.set(serials(scope, [0]));
     }
     if t.observer(id).is_none() {
-        t.observers.push(Observer { id, held, types: 0, queue: Vec::new(), requires_dropped_entries: true });
+        t.observers.push(Observer { id, types: 0, requires_dropped_entries: true });
     }
-    let entries = buffered.map(|kind| t.filtered(Some(kind), None)).unwrap_or_default();
     let o = t.observer(id).expect("registered above");
     o.types = if replace { types } else { o.types | types };
-    let queued = !entries.is_empty();
-    o.queue.extend(entries);
-    rv.set_uint32(if queued { t.queue_observer_task() } else { 0 });
+    let entries = buffered.map(|kind| t.filtered(Some(kind), None)).unwrap_or_default();
+    let tasks = if entries.is_empty() { 0 } else { t.queue_observer_task() };
+    rv.set(serials(scope, std::iter::once(tasks).chain(entries)));
 }
 
-// __dom.poDisconnect(id) — observer `id` registered no more, its queue and types let go of.
+// __dom.poDisconnect(id) — observer `id` registered no more, its types let go of.
 fn po_disconnect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = args.get(0).uint32_value(scope) else { return };
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
     timeline(scope, &args).observers.retain(|o| o.id != id);
 }
 
-// __dom.poTakeRecords(id, forCallback) -> the entries queued on observer `id`, its queue emptied; for its callback
-// (`forCallback`), `[entries, droppedEntriesCount]` — the count, none (ours never fill), the first time since an
-// observe(), else undefined — or null with none queued.
-fn po_take_records(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let id = args.get(0).uint32_value(scope).unwrap_or(0);
-    let for_callback = args.get(1).is_true();
-    let t = timeline(scope, &args);
-    let Some(o) = t.observer(id) else {
-        return if for_callback { rv.set_null() } else { rv.set(v8::Array::new(scope, 0).into()) };
-    };
-    if for_callback && o.queue.is_empty() {
-        return rv.set_null();
-    }
-    let queue = std::mem::take(&mut o.queue);
-    let dropped = for_callback && std::mem::replace(&mut o.requires_dropped_entries, false);
-    let entries = values(scope, &queue);
-    if !for_callback {
-        return rv.set(entries);
-    }
-    let dropped: v8::Local<v8::Value> = if dropped { v8::Integer::new(scope, 0).into() } else { v8::undefined(scope).into() };
-    rv.set(v8::Array::new_with_elements(scope, &[entries, dropped]).into());
-}
-
 // __dom.poTask() -> the registered observers, in the order they registered, as the PerformanceObserver task begins (a
-// copy: one registered by a callback waits for the next) — `[id, observer, …]` — the task queued no more.
+// copy: one registered by a callback waits for the next) — the task queued no more.
 fn po_task(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let t = timeline(scope, &args);
     t.observer_task_queued = false;
-    let observers: Vec<(u32, v8::Global<v8::Value>)> = t.observers.iter().map(|o| (o.id, o.held.clone())).collect();
-    let mut flat: Vec<v8::Local<v8::Value>> = Vec::with_capacity(observers.len() * 2);
-    for (id, held) in &observers {
-        flat.push(v8::Integer::new_from_unsigned(scope, *id).into());
-        flat.push(v8::Local::new(scope, held));
+    let ids: Vec<u32> = t.observers.iter().map(|o| o.id).collect();
+    rv.set(serials(scope, ids));
+}
+
+// __dom.poDroppedEntries(id) -> the count of entries dropped from full buffers of the types observer `id` observes, the
+// first time its callback asks since an observe() — null after (the callback's options carry none).
+fn po_dropped_entries(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let t = timeline(scope, &args);
+    let dropped_resources = t.dropped_resources;
+    match t.observer(id).filter(|o| o.requires_dropped_entries) {
+        Some(o) => {
+            o.requires_dropped_entries = false;
+            rv.set_uint32(if o.types & Kind::Resource as u8 != 0 { dropped_resources } else { 0 });
+        }
+        None => rv.set_null(),
     }
-    rv.set(v8::Array::new_with_elements(scope, &flat).into());
 }

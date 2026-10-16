@@ -3,8 +3,8 @@
 // interface's brand — no content type's XML-ness, the node's `STATE_XML_DOCUMENT`), whether a scoped custom element
 // registry initialized it, its throw-on-dynamic-markup-insertion counter (HTML §8.4.1), and its currently executing
 // script (`currentScript`, HTML §3.1.5: the script element running, null in a shadow tree or a module) — kept by the
-// document's node, let go of with it. The bindings read and write each (`docState`, the Document's `_quirks`, `_readyState`, …
-// accessors: dom-nodes.js), and the parser sets the mode it finds.
+// document's node, let go of with it. The bindings read and write each (`docState`, the Document's `_quirks`,
+// `_readyState`, … accessors: dom-nodes.js), and the parser sets the mode it finds.
 
 use std::collections::HashMap;
 
@@ -135,7 +135,7 @@ fn current_script(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set(crate::dom::node_value(scope, script));
 }
 
-// __dom.setCurrentScript(docNid, scriptNid) — the document's currently executing script, none for no node (`-1`).
+// __dom.setCurrentScript(docNid, scriptNid) — the document's currently executing script, none for null.
 fn set_current_script(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let script = nid_arg(scope, &args, 1);
