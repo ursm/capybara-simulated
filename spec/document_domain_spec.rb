@@ -33,10 +33,10 @@ RSpec.describe 'document.domain' do
   it "is an inherited origin's, and set only to the domain or one it is a subdomain of" do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><iframe></iframe>']] })
     s.visit '/'
-    expect(s.evaluate_script(<<~JS)).to eq(['www.example.com', 'www.example.com', 'SecurityError', 'SecurityError', 'example.com', 'SecurityError'])
+    expect(s.evaluate_script(<<~JS)).to eq(['www.example.com', 'www.example.com', 'SecurityError', 'SecurityError', 'SecurityError', 'example.com', 'SecurityError'])
       (() => {
         const tried = (value) => { try { document.domain = value; return document.domain; } catch (e) { return e.name; } };
-        return [frames[0].document.domain, tried('WWW.Example.COM'), tried('example.org'), tried(''), tried('example.com'), tried('www.example.com')];
+        return [frames[0].document.domain, tried('WWW.Example.COM'), tried('example.org'), tried('www.example.com:80'), tried(''), tried('example.com'), tried('www.example.com')];
       })()
     JS
   end
