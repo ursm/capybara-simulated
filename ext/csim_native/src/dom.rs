@@ -884,6 +884,8 @@ pub(crate) struct RealmArena {
     pub(crate) document_states: crate::document_state::DocumentStates,
     // Each element's toggle task tracker (toggle_tasks.rs).
     pub(crate) toggle_tasks: crate::toggle_tasks::ToggleTasks,
+    // Each image button's selected coordinate (selected_coordinates.rs).
+    pub(crate) selected_coordinates: crate::selected_coordinates::SelectedCoordinates,
     // Each document's pending scroll and scrollend event targets (scroll_events.rs).
     pub(crate) pending_scroll_events: crate::scroll_events::PendingScrollEvents,
     // Each top-level document's autofocus candidates (autofocus.rs).
@@ -1141,6 +1143,7 @@ impl RealmArena {
         self.forget_freed_frame_navigations();
         self.forget_freed_document_states();
         self.forget_freed_toggle_tasks();
+        self.forget_freed_selected_coordinates();
         self.forget_dead_focus_records();
         // (…and what the isolate latched for any realm's page, where this is the only realm left)
         if self.parked.is_empty() {
@@ -1205,6 +1208,7 @@ impl RealmArena {
         self.forget_freed_frame_navigations();
         self.forget_freed_document_states();
         self.forget_freed_toggle_tasks();
+        self.forget_freed_selected_coordinates();
         self.forget_foreign_observations(Some(cid));
         self.forget_dead_focus_records();
     }
@@ -1428,6 +1432,9 @@ impl RealmArena {
         }
         if !self.toggle_tasks.is_empty() {
             self.toggle_tasks.forget(id);
+        }
+        if !self.selected_coordinates.is_empty() {
+            self.selected_coordinates.forget(id);
         }
         if !self.change_baselines.is_empty() {
             self.change_baselines.remove(&id);
@@ -2567,6 +2574,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::frame_navigation::install(scope, ns, context_id);
     crate::document_state::install(scope, ns, context_id);
     crate::toggle_tasks::install(scope, ns, context_id);
+    crate::selected_coordinates::install(scope, ns, context_id);
     crate::resize_observers::install(scope, ns, context_id);
     crate::perf_timeline::install(scope, ns, context_id);
     crate::xhr_state::install(scope, ns, context_id);
