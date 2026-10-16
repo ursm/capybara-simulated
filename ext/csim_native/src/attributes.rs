@@ -14,6 +14,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "attrKey", attr_key, context_id);
     crate::dom::register(scope, ns, "attrGet", attr_get, context_id);
     crate::dom::register(scope, ns, "attrNames", attr_names, context_id);
+    crate::dom::register(scope, ns, "datasetAttr", dataset_attr_op, context_id);
+    crate::dom::register(scope, ns, "datasetNames", dataset_names_op, context_id);
     crate::dom::register(scope, ns, "attrName", attr_name, context_id);
     crate::dom::register(scope, ns, "attrWrite", attr_write, context_id);
 }
@@ -139,6 +141,85 @@ fn attr_names(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     });
     let values: Vec<v8::Local<'_, v8::Value>> = names.iter().filter_map(|s| v8::String::new(scope, s)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+
+// HTML's DOMStringMap name conversions (§3.2.6.6 `dataset`): a property name's attribute — `data-` and the name, each
+// ASCII upper alpha a U+002D HYPHEN-MINUS and its lowercase — or none where it is no supported property name: a hyphen
+// before an ASCII lower alpha, which no attribute's name converts to (the named setter's SyntaxError, a getter's miss).
+const HYPHEN: u16 = b'-' as u16;
+fn dataset_attr(prop: &[u16]) -> Option<Vec<u16>> {
+    if prop.windows(2).any(|w| w[0] == HYPHEN && (u16::from(b'a')..=u16::from(b'z')).contains(&w[1])) {
+        return None;
+    }
+    let mut attr: Vec<u16> = "data-".encode_utf16().collect();
+    for &u in prop {
+        if (u16::from(b'A')..=u16::from(b'Z')).contains(&u) {
+            attr.extend([HYPHEN, u + 0x20]);
+        } else {
+            attr.push(u);
+        }
+    }
+    Some(attr)
+}
+// …and the supported property names of an element's: those of its no-namespace attributes named `data-` and no ASCII
+// upper alpha after (a `data-Foo` is unreachable through the mapping), each hyphen before an ASCII lower alpha dropped
+// and that alpha uppercased — in the attributes' order.
+fn dataset_names(n: &NodeData) -> Vec<Vec<u16>> {
+    n.attributes
+        .iter()
+        .filter_map(|(k, _)| match n.attribute_name(k) {
+            ("", local) => local.strip_prefix("data-").filter(|rest| !rest.bytes().any(|b| b.is_ascii_uppercase())),
+            _ => None,
+        })
+        .map(|rest| {
+            let units: Vec<u16> = rest.encode_utf16().collect();
+            let mut name = Vec::with_capacity(units.len());
+            let mut i = 0;
+            while i < units.len() {
+                match units.get(i + 1) {
+                    Some(&next) if units[i] == HYPHEN && (u16::from(b'a')..=u16::from(b'z')).contains(&next) => {
+                        name.push(next - 0x20);
+                        i += 2;
+                    }
+                    _ => {
+                        name.push(units[i]);
+                        i += 1;
+                    }
+                }
+            }
+            name
+        })
+        .collect()
+}
+// __dom.datasetAttr(prop) -> the attribute the `dataset` property name `prop` maps to (`dataset_attr`), or null.
+fn dataset_attr_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let prop = crate::dom::utf16_arg(scope, args.get(0));
+    match dataset_attr(&prop) {
+        Some(attr) => rv.set(crate::dom::utf16_value(scope, &attr)),
+        None => rv.set_null(),
+    }
+}
+// __dom.datasetNames(element) -> the element's `dataset` supported property names (`dataset_names`).
+fn dataset_names_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let names = node_of(scope, id).map_or_else(Vec::new, dataset_names);
+    let values: Vec<v8::Local<'_, v8::Value>> = names.iter().map(|n| crate::dom::utf16_value(scope, n)).collect();
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+
+#[cfg(test)]
+mod dataset_tests {
+    use super::*;
+    fn u(s: &str) -> Vec<u16> {
+        s.encode_utf16().collect()
+    }
+    #[test]
+    fn a_property_name_maps_to_its_attribute() {
+        assert_eq!(dataset_attr(&u("fooBar")), Some(u("data-foo-bar")));
+        assert_eq!(dataset_attr(&u("a-1")), Some(u("data-a-1")));
+        assert_eq!(dataset_attr(&u("-foo")), None);
+        assert_eq!(dataset_attr(&u("Foo")), Some(u("data--foo")));
+    }
 }
 
 // __dom.attrName(element, key) -> `[namespace, prefix, localName]` of the attribute stored under `key` (null for none of
