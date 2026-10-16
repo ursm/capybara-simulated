@@ -4458,7 +4458,7 @@ fn xpath_prefixes(
     }
 }
 
-// __dom.xpathEvaluate(expression, contextNid, attrKey, html, namespaces, resultType) -> a number, string or boolean,
+// __dom.xpathEvaluate(expression, contextNid, attrKey, docNid, namespaces, resultType) -> a number, string or boolean,
 // or for a node-set [keys, nodes] in document order (the nodes as `nodes_value` answers them; each key an attribute's
 // store key, null for the node itself). The context is the node
 // `contextNid`, or its attribute stored under `attrKey` (a string); `namespaces` a flat [prefix, uri, …] array.
@@ -4473,7 +4473,9 @@ fn xpath_evaluate(
     };
     let text = utf16_arg(scope, args.get(0));
     let attr_key = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
-    let html = args.get(3).is_true();
+    // (…in the context node's document, arg 3 its nid: an HTML document's name tests fold case — none for no document)
+    let doc = nid_arg(scope, &args, 3);
+    let html = doc.is_some() && dom(scope).arena.document_mode(doc).1;
     let mut namespaces = std::collections::HashMap::new();
     if let Ok(flat) = v8::Local::<v8::Array>::try_from(args.get(4)) {
         let mut i = 0;
