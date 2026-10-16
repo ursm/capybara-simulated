@@ -24,13 +24,19 @@ pub(crate) fn is_sheet_owner(n: &NodeData) -> bool {
     }
 }
 
-// Whether `id` is an `<?xml-stylesheet?>` that associates a style sheet with its document: a child of the document —
-// the prolog's (Associating Style Sheets with XML documents §2; Chrome takes none an element holds) — whose data is a
-// list of pseudo-attributes (`pi_attributes`).
+// Whether `id` is an `<?xml-stylesheet?>` that associates a style sheet with its document (CSSOM §6.3.2, the
+// xml-stylesheet processing instruction): one in the document's PROLOG — a child of it before its document element
+// (Firefox; Chrome takes one after it too) — whose data is a list of pseudo-attributes (`pi_attributes`) with an `href`,
+// no `type` or a CSS one, and a `title` where it says `alternate="yes"`.
 pub(crate) fn associates_sheet(arena: &RealmArena, id: NodeId) -> bool {
-    arena.get(id).is_some_and(|n| {
-        n.kind == NodeKind::ProcessingInstruction && is_sheet_owner(n) && n.parent.and_then(|p| arena.get(p)).is_some_and(|p| p.kind == NodeKind::Document) && pi_attributes(n).is_some()
-    })
+    let Some(n) = arena.get(id).filter(|n| n.kind == NodeKind::ProcessingInstruction && is_sheet_owner(n)) else { return false };
+    let Some(doc) = n.parent.and_then(|p| arena.get(p)).filter(|p| p.kind == NodeKind::Document) else { return false };
+    let in_prolog = doc.children.iter().take_while(|&&c| arena.get(c).is_none_or(|c| c.kind != NodeKind::Element)).any(|&c| c == id);
+    let Some(attrs) = pi_attributes(n).filter(|_| in_prolog) else { return false };
+    let get = |name: &str| attrs.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
+    get("type").is_none_or(|t| t.is_empty() || t.eq_ignore_ascii_case("text/css"))
+        && get("href").is_some_and(|h| !h.is_empty())
+        && (get("alternate") != Some("yes") || get("title").is_some_and(|t| !t.is_empty()))
 }
 // …its pseudo-attributes, by name.
 fn pi_attributes(n: &NodeData) -> Option<Vec<(String, String)>> {
@@ -124,6 +130,7 @@ impl RealmArena {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "associatesSheet", associates_sheet_op, context_id);
     crate::dom::register(scope, ns, "sheetGen", sheet_gen_op, context_id);
     crate::dom::register(scope, ns, "takeStyleLoads", take_style_loads_op, context_id);
     crate::dom::register(scope, ns, "ownerSheetShown", owner_sheet_shown_op, context_id);
@@ -142,6 +149,13 @@ fn take_style_loads_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 fn sheet_gen_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
     rv.set_uint32(crate::dom::dom(scope).arena.get(id).map_or(0, |n| n.sheet_gen));
+}
+
+// __dom.associatesSheet(nid) -> whether the `<?xml-stylesheet?>` associates a style sheet with its document
+// (`associates_sheet`).
+fn associates_sheet_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(associates_sheet(&crate::dom::dom(scope).arena, id));
 }
 
 // __dom.ownerSheetShown(nid): a CSSStyleSheet shows the owner's sheet (`MadeSheet::shown`).
@@ -232,10 +246,7 @@ impl RealmArena {
                 // an `href`, `alternate="yes"`)
                 let Some(attrs) = pi_attributes(n) else { continue };
                 let get = |name: &str| attrs.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
-                if !get("type").is_none_or(|t| t.is_empty() || t.eq_ignore_ascii_case("text/css")) {
-                    continue;
-                }
-                let Some(href) = get("href").filter(|h| !h.is_empty()) else { continue };
+                let Some(href) = get("href") else { continue };
                 let (title, media, alternate) = (title(get("title").as_deref()), get("media"), get("alternate").as_deref() == Some("yes"));
                 if self.owner_sheet_disabled(owner) {
                     continue;

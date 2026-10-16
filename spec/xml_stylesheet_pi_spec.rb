@@ -34,4 +34,26 @@ RSpec.describe 'an xml-stylesheet processing instruction' do
       })()
     JS
   end
+
+  # …none once its data is no list of pseudo-attributes, nor after the document element (the prolog's only: CSSOM, Firefox
+  # — Chrome takes it there too), nor an alternate with no title; and its sheet's title is its pseudo-attribute's.
+  it 'styles nothing outside the prolog, or once its data says no sheet' do
+    s = session
+    expect(s.evaluate_script(<<~JS)).to eq(['rgb(0, 0, 0)', 0, 'rgb(0, 0, 0)', false, 'rgb(5, 5, 5)', 'main'])
+      (() => {
+        const pi = document.firstChild, t = document.getElementById('t'), color = () => getComputedStyle(t).color;
+        pi.data = 'href=/a.css';
+        const out = [color(), document.styleSheets.length];
+        pi.data = 'href="/a.css"';
+        document.appendChild(pi);
+        out.push(color(), pi.sheet !== null);
+        pi.data = 'href="/a.css" title="main"';
+        document.insertBefore(pi, document.documentElement);
+        const alt = document.createProcessingInstruction('xml-stylesheet', 'href="/b.css" alternate="yes"');
+        document.insertBefore(alt, document.documentElement);
+        out.push(color(), [...document.styleSheets].map((sheet) => sheet.title).join());
+        return out;
+      })()
+    JS
+  end
 end

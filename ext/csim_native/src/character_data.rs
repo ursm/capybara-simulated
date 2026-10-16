@@ -154,6 +154,8 @@ pub(crate) fn replace_data(
     data: v8::Local<'_, v8::String>,
 ) -> Result<(), u32> {
     let Some((cid, length)) = crate::dom::dom(scope).arena.get(id).map(|n| (n.realm, n.data.len())) else { return Ok(()) };
+    // (…whether an `<?xml-stylesheet?>` styled its document before its data changed: one that stops does too)
+    let associated = crate::sheet_owners::associates_sheet(&crate::dom::dom(scope).arena, id);
     if offset > length {
         return Err(OFFSET_PAST_DATA);
     }
@@ -209,8 +211,8 @@ pub(crate) fn replace_data(
         crate::dom::dom(scope).arena.observers.note(OBSERVATIONS);
     }
     let arena = realm(scope, cid);
-    // (…an `<?xml-stylesheet?>`'s data its pseudo-attributes: a new sheet, which its document's cascade takes)
-    if arena.renew_sheet(id) && crate::sheet_owners::associates_sheet(arena, id) {
+    // (…an `<?xml-stylesheet?>`'s data its pseudo-attributes: a new sheet, or none, which its document's cascade takes)
+    if arena.renew_sheet(id) && (associated || crate::sheet_owners::associates_sheet(arena, id)) {
         crate::dom::dom(scope).arena.observers.note_cascade(cid, false);
     }
     let arena = realm(scope, cid);
