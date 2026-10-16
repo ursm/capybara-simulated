@@ -57,11 +57,45 @@ impl RealmArena {
             n.element_flags &= !crate::element_flags::STYLE_LOAD_FIRED;
         }
         self.sheet_epoch += 1;
+        self.note_sheet_added(id);
         if style && self.is_connected(id) && !self.style_loads_owed.contains(&id) {
             self.style_loads_owed.push(id);
             self.observers.note(crate::mutation_observers::STYLE_LOADS);
         }
         true
+    }
+
+    // The owner `id`'s new sheet is added to its document's (CSSOM "add a CSS style sheet"): one with a title that is no
+    // alternate names the document's preferred set where it has none yet — the first such added, whatever its place.
+    fn note_sheet_added(&mut self, id: NodeId) {
+        let doc = self.root_of(id);
+        if !self.is_connected(id) || self.get(doc).is_none_or(|d| d.kind != NodeKind::Document) || self.preferred_set(doc).is_some() {
+            return;
+        }
+        if let Some((title, false)) = self.set_member(id).filter(|(title, _)| !title.is_empty()) {
+            self.prefer_set(doc, &title);
+        }
+    }
+    // The title and alternate flag the owner `id`'s sheet has where it is one a style sheet set can take: a `<style>` of
+    // a CSS type, a `<link>` to a style sheet, an `<?xml-stylesheet?>` that associates one (by its pseudo-attributes).
+    fn set_member(&self, id: NodeId) -> Option<(String, bool)> {
+        let n = self.get(id)?;
+        if n.kind == NodeKind::ProcessingInstruction {
+            if !associates_sheet(self, id) {
+                return None;
+            }
+            let attrs = pi_attributes(n)?;
+            let get = |name: &str| attrs.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+            return Some((get("title").unwrap_or_default(), get("alternate").as_deref() == Some("yes")));
+        }
+        let title = n.plain_attr("title").unwrap_or("").to_string();
+        if &*n.local_name == "link" {
+            let rel = n.plain_attr("rel").unwrap_or("").to_ascii_lowercase();
+            let rel: Vec<&str> = rel.split(|c: char| c.is_ascii_whitespace()).filter(|t| !t.is_empty()).collect();
+            let sheet = rel.contains(&"stylesheet") && n.plain_attr("href").is_some_and(|h| !h.is_empty()) && n.plain_attr("disabled").is_none();
+            return sheet.then(|| (title, rel.contains(&"alternate")));
+        }
+        n.plain_attr("type").is_none_or(|t| t.is_empty() || t.eq_ignore_ascii_case("text/css")).then_some((title, false))
     }
 
     // `nodes` were inserted into `parent` or removed from it: every owner among their shadow-including inclusive
@@ -297,6 +331,9 @@ impl RealmArena {
             }
         }
         // (…the selected set only where a titled or alternate sheet makes it matter: none decides nothing)
+        // (…the preferred set the document's sheets named as they were added, before the first titled one in tree order: a
+        // set inserted ahead of another is still the one preferred)
+        let preferred = self.preferred_set(doc).map(str::to_owned).or(preferred);
         let selected = (any_titled_or_alternate && !shadow).then(|| default_style.or(preferred).unwrap_or_default());
         selected.hash(&mut hasher);
         let set = selected.as_deref().unwrap_or("");

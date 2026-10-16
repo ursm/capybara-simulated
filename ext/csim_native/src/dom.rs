@@ -1556,6 +1556,8 @@ impl RealmArena {
     // the engine starts the page afresh (`StyleEngine::reset`). The nodes stay: a node the old page's script still
     // holds, or that the new page reuses, is a node yet; the rest go as V8 collects them (node_handle.rs).
     fn reset(&mut self) {
+        let cur = self.cur;
+        self.forget_preferred_sets(cur);
         self.focus = None;
         self.focus_start = None;
         self.hover = None;

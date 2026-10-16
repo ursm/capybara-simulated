@@ -42,6 +42,9 @@ const READY_COMPLETE: u32 = 2;
 struct DocumentTexts {
     texts: [Option<String>; TEXTS],
     last_modified: Option<f64>,
+    // Its preferred CSS style sheet set name (CSSOM §6.2.1): the title of the first sheet with one that was added to it
+    // and is no alternate (`note_sheet_added`), none until one was — added, not first in tree order.
+    preferred_set: Option<String>,
 }
 const TEXTS: usize = 5;
 const TEXT_URL: usize = 0;
@@ -225,6 +228,24 @@ const DOC_IS_HTML_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::
 )];
 
 impl RealmArena {
+    // The document `doc`'s preferred style sheet set name (`DocumentTexts::preferred_set`).
+    pub(crate) fn preferred_set(&self, doc: NodeId) -> Option<&str> {
+        self.document_states.1.get(&doc).and_then(|t| t.preferred_set.as_deref())
+    }
+    // …that of `doc`, where it has none yet: the title of a sheet added to it (CSSOM "add a CSS style sheet" step 2).
+    pub(crate) fn prefer_set(&mut self, doc: NodeId, title: &str) {
+        let texts = self.document_states.1.entry(doc).or_default();
+        texts.preferred_set.get_or_insert_with(|| title.to_owned());
+    }
+    // …and the documents of realm `cid` with none again: a page load begins its document anew.
+    pub(crate) fn forget_preferred_sets(&mut self, cid: i32) {
+        let docs: Vec<NodeId> = self.document_states.1.keys().copied().filter(|&d| self.get(d).is_some_and(|n| n.realm == cid)).collect();
+        for doc in docs {
+            if let Some(texts) = self.document_states.1.get_mut(&doc) {
+                texts.preferred_set = None;
+            }
+        }
+    }
     // The document `doc`'s URL — its own, where a load or its creation gave it one, else its realm's (a window's live
     // document keeps none: it is the realm's `location`) — or, with `fallback_base`, HTML's "fallback base URL": that
     // URL, but for an about:blank / about:srcdoc document the base URL it inherited from its creator, where it has one

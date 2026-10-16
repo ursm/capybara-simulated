@@ -1771,8 +1771,6 @@ css/cssom/idlharness.html:
 - 'SVGStyleElement interface: attribute sheet'
 css/cssom/page-descriptors.html:
 - CSSPageDescriptors properties tests
-css/cssom/preferred-stylesheet-reversed-order.html:
-- Preferred stylesheet where insertion order is tree order
 css/cssom/serialize-values.html:
 - 'font-family: ''Lucida Grande'''
 - 'orphans: 101'
