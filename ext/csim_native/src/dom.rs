@@ -997,6 +997,8 @@ pub(crate) struct RealmState {
     pub(crate) timers: crate::timers::Timers,
     // Its ResizeObservers that observe anything, and their observations (resize_observers.rs).
     pub(crate) resize_observers: crate::resize_observers::ResizeObservers,
+    // …and its IntersectionObservers that observe anything, and their registrations (intersection_observers.rs).
+    pub(crate) intersection_observers: crate::intersection_observers::IntersectionObservers,
     // The faces its families resolve to, which its walks and its style engine's font metrics read (`SharedFaces`).
     pub(crate) faces: crate::walk::SharedFaces,
     // How many elements a restyle REPLACED the style of since this side last took them (`note_restyled`,
@@ -1138,6 +1140,7 @@ impl RealmArena {
         self.forget_navigables_of(cid, false);
         self.discard_timers(cid);
         self.discard_resize_observers(cid);
+        self.discard_intersection_observers(cid);
         self.forget_reactions_of(cid);
     }
     // The custom element reactions owed to realm `cid`'s elements — or to a node already freed — let go of
@@ -2522,6 +2525,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::navigables::install(scope, ns, context_id);
     crate::frame_navigation::install(scope, ns, context_id);
     crate::resize_observers::install(scope, ns, context_id);
+    crate::intersection_observers::install(scope, ns, context_id);
     crate::scroll_events::install(scope, ns, context_id);
     crate::timers::install(scope, ns, context_id);
     crate::ce_reactions::install(scope, ns, context_id);

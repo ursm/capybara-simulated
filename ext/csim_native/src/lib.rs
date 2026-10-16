@@ -61,6 +61,7 @@ mod hit_test;
 mod input_value;
 mod input_types;
 mod intersection;
+mod intersection_observers;
 mod html_parse;
 mod data_url;
 mod event_stream;
