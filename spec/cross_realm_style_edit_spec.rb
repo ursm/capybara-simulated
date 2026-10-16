@@ -39,6 +39,45 @@ RSpec.describe 'a cross-realm edit of a style sheet owner' do
     JS
   end
 
+  # …and a frame's style in a shadow root of the page (whose sheets the version hands the engine), and a frame's style's
+  # `media` switched by its own setter.
+  it "restyles the page's shadow tree for a frame's style edited in it" do
+    s = session
+    expect(s.evaluate_script(<<~JS)).to eq(['rgb(4, 4, 4)', 'rgb(5, 5, 5)'])
+      (() => {
+        const fd = document.getElementById('f').contentDocument;
+        const host = document.body.appendChild(document.createElement('div'));
+        const root = host.attachShadow({ mode: 'open' });
+        const t = root.appendChild(document.createElement('p'));
+        const st = fd.createElement('style');
+        st.textContent = 'p { color: rgb(4, 4, 4) }';
+        root.append(st);
+        const out = [getComputedStyle(t).color];
+        st.firstChild.data = 'p { color: rgb(5, 5, 5) }';
+        out.push(getComputedStyle(t).color);
+        return out;
+      })()
+    JS
+  end
+
+  it "re-selects a frame's style in the page as its media changes" do
+    s = session
+    expect(s.evaluate_script(<<~JS)).to eq(%w[none block none])
+      (() => {
+        const fd = document.getElementById('f').contentDocument, t = document.getElementById('t');
+        const st = fd.createElement('style');
+        st.textContent = '#t { display: none }';
+        document.head.append(st);
+        const out = [getComputedStyle(t).display];
+        st.media = 'print';
+        out.push(getComputedStyle(t).display);
+        st.media = 'all';
+        out.push(getComputedStyle(t).display);
+        return out;
+      })()
+    JS
+  end
+
   it "restyles a frame for the page's style moved into it and edited there" do
     s = session
     expect(s.evaluate_script(<<~JS)).to eq(['rgb(5, 5, 5)', 'rgb(6, 6, 6)'])
