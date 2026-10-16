@@ -866,6 +866,8 @@ pub(crate) struct RealmArena {
     pub(crate) observers: crate::mutation_observers::Observers,
     // Each frame container's child navigable, each top-level one's target name, each realm's document (navigables.rs).
     pub(crate) navigables: crate::navigables::Navigables,
+    // Each frame container's navigation as it goes (frame_navigation.rs).
+    pub(crate) frame_navigations: crate::frame_navigation::FrameNavigations,
     // Each document's pending scroll and scrollend event targets (scroll_events.rs).
     pub(crate) pending_scroll_events: crate::scroll_events::PendingScrollEvents,
     // Each top-level document's autofocus candidates (autofocus.rs).
@@ -1107,6 +1109,7 @@ impl RealmArena {
         self.free_realm_nodes(cid);
         self.forget_navigables_of(cid, true);
         self.forget_freed_scroll_events();
+        self.forget_freed_frame_navigations();
         self.forget_dead_focus_records();
         // (…and what the isolate latched for any realm's page, where this is the only realm left)
         if self.parked.is_empty() {
@@ -2510,6 +2513,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::collections::install(scope, ns, context_id);
     crate::mutation_observers::install(scope, ns, context_id);
     crate::navigables::install(scope, ns, context_id);
+    crate::frame_navigation::install(scope, ns, context_id);
     crate::scroll_events::install(scope, ns, context_id);
     crate::timers::install(scope, ns, context_id);
     crate::ce_reactions::install(scope, ns, context_id);

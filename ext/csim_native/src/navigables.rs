@@ -209,6 +209,7 @@ impl RealmArena {
         } else {
             nav.discarded.remove(&cid);
             nav.unloading.remove(&cid);
+            nav.prompting.remove(&cid);
             nav.windows.retain(|&w| w != cid);
             if let Some(container) = nav.containers.remove(&cid) {
                 if let Some(child) = nav.children.get_mut(&container).filter(|c| c.realm == Some(cid)) {
