@@ -32,11 +32,21 @@ struct FrameNavigation {
 #[derive(Default)]
 pub(crate) struct FrameNavigations(HashMap<NodeId, FrameNavigation>);
 
+impl FrameNavigations {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    // The container freed: its navigation let go of with it.
+    pub(crate) fn forget(&mut self, container: NodeId) {
+        self.0.remove(&container);
+    }
+}
+
 impl RealmArena {
     fn frame_navigation(&mut self, container: NodeId) -> &mut FrameNavigation {
         self.frame_navigations.0.entry(container).or_default()
     }
-    // …and those of containers freed with their realm let go of.
+    // …and those of containers freed with their realm let go of (a realm's nodes are freed together, past `free_node`).
     pub(crate) fn forget_freed_frame_navigations(&mut self) {
         let freed: Vec<NodeId> = self.frame_navigations.0.keys().copied().filter(|&c| self.get(c).is_none()).collect();
         for container in freed {
@@ -65,12 +75,12 @@ fn frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 fn set_frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let flags = args.get(1).uint32_value(scope).unwrap_or(0);
-    let on = args.get(2).is_true();
+    let on = args.get(2).boolean_value(scope);
     let cid = realm_id(scope, &args);
-    let nav = crate::dom::realm(scope, cid).frame_navigation(container);
+    let arena = crate::dom::realm(scope, cid);
     if on {
-        nav.flags |= flags;
-    } else {
+        arena.frame_navigation(container).flags |= flags;
+    } else if let Some(nav) = arena.frame_navigations.0.get_mut(&container) {
         nav.flags &= !flags;
     }
 }
@@ -124,7 +134,12 @@ fn set_frame_nav_url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let v = args.get(2);
     let url = if v.is_undefined() { None } else if v.is_null() { Some(None) } else { Some(Some(utf16_arg(scope, v))) };
     let cid = realm_id(scope, &args);
-    let nav = crate::dom::realm(scope, cid).frame_navigation(container);
+    let arena = crate::dom::realm(scope, cid);
+    // (…none carried by a container with no navigation state: nothing to make for it)
+    if url.is_none() && !arena.frame_navigations.0.contains_key(&container) {
+        return;
+    }
+    let nav = arena.frame_navigation(container);
     match slot {
         URL_SRC => nav.src = url,
         URL_HISTORY => nav.history = url.flatten(),

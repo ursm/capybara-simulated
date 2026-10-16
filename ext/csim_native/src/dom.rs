@@ -1167,6 +1167,7 @@ impl RealmArena {
         self.free_realm_nodes(cid);
         self.forget_navigables_of(cid, true);
         self.forget_freed_scroll_events();
+        self.forget_freed_frame_navigations();
         self.forget_dead_focus_records();
     }
     // How many nodes the realm an op works in has made and not freed.
@@ -1381,6 +1382,9 @@ impl RealmArena {
         self.id_index.get_mut().forget(id);
         self.ce_reactions.forget_node(id);
         // (…and what a focused text control armed for its blur)
+        if !self.frame_navigations.is_empty() {
+            self.frame_navigations.forget(id);
+        }
         if !self.change_baselines.is_empty() {
             self.change_baselines.remove(&id);
         }

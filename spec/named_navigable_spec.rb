@@ -432,6 +432,30 @@ RSpec.describe 'choosing a navigable by name' do
     expect(log.map(&:first)).not_to include('/d', '/x')
   end
 
+  # A container removed and inserted again gets a new navigable, navigated afresh — its document fetched again and its
+  # `load` fired — while one moved before its first load fires that load once (HTML: insertion creates a child navigable
+  # and processes the iframe attributes; Chrome: `load` again on re-insertion, one for a frame moved before it loaded).
+  it 'navigates a frame inserted again afresh' do
+    s, log = session_for(
+      '/p' => '<script>window.L = []</script><iframe id="c" src="/c" onload="L.push(this.contentDocument.body.textContent)"></iframe>',
+      '/c' => '<p>c</p>'
+    )
+    poll_until { s.evaluate_script('L.length').then {|n| n if n == 1 } }
+    s.execute_script('const f = document.getElementById("c"); f.remove(); document.body.appendChild(f)')
+    expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 2 } }).to eq(%w[c c])
+    expect(log.map(&:first).count('/c')).to eq(2)
+    s.execute_script(<<~JS)
+      const f = document.createElement('iframe');
+      f.src = '/d';
+      f.onload = () => L.push('moved:' + f.contentDocument.body.textContent);
+      document.body.appendChild(f);
+      document.body.appendChild(document.createElement('div')).appendChild(f);
+    JS
+    expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 3 } }).to eq(%w[c c moved:/d])
+    s.evaluate_script('1')
+    expect(s.evaluate_script('L.length')).to eq(3)
+  end
+
   # A frame an unload handler of its own removed is gone, its navigation with it: the response's document never runs,
   # nor is a realm left for it (Chrome).
   it 'commits no document into a frame a teardown handler removed' do
