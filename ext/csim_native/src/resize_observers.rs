@@ -5,11 +5,14 @@
 // which name each by the number `roCreate` gave it, and which measure the targets (`resizeObservations`: the layout's
 // sizes, resize_observation.rs) for the gather to compare.
 
-use crate::dom::{nid_arg, realm_id, NodeId};
+use crate::dom::{nid_arg, realm_id, NodeId, RealmArena};
 
 struct Observation {
+    // Which observation it is: a target observed again is observed by a new one (§3.1 `observe`), which a broadcast of
+    // the old one's active entry leaves owing its first report.
+    serial: u32,
     target: NodeId,
-    // The target, held: an observation keeps its target, as its list of them does in the bindings it replaced.
+    // The target, held — a root, which the realm's context going lets go of (`discard_resize_observers`).
     held: v8::Global<v8::Value>,
     // Where the observed box's `[inline, block]` sits among the sizes (resize_observation.rs `Sizes`): 0 the border
     // box, 2 the content box, 4 the device-pixel content box.
@@ -22,7 +25,7 @@ struct Observation {
 // One the gather found active: its target, its sizes and depth as the gather measured them, for the entry its
 // broadcast makes.
 struct Active {
-    target: NodeId,
+    serial: u32,
     held: v8::Global<v8::Value>,
     sizes: [f64; 10],
     depth: f64,
@@ -40,6 +43,18 @@ pub(crate) struct ResizeObservers {
     // In creation order: ids only grow, and an observer joins as it first observes something, so it is kept sorted.
     observing: Vec<Observer>,
     next: u32,
+    next_serial: u32,
+}
+
+impl RealmArena {
+    // Realm `cid`'s context disposed — a frame removed or navigated: its observations' targets held no more, nor what
+    // they reach of its heap (the context with them), as a new context's realm state starts without them.
+    pub(crate) fn discard_resize_observers(&mut self, cid: i32) {
+        let observers = if cid == self.cur() { Some(&mut self.resize_observers) } else { self.parked_state(cid).map(|s| &mut s.resize_observers) };
+        if let Some(observers) = observers {
+            observers.observing.clear();
+        }
+    }
 }
 
 impl ResizeObservers {
@@ -95,13 +110,15 @@ fn ro_observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let held = v8::Global::new(scope, node);
     let cid = realm_id(scope, &args);
     let observers = &mut crate::dom::realm(scope, cid).resize_observers;
+    let serial = observers.next_serial;
+    observers.next_serial = serial.wrapping_add(1);
     if observers.observer(id).is_none() {
         let at = observers.observing.partition_point(|o| o.id < id);
         observers.observing.insert(at, Observer { id, observations: Vec::new(), active: Vec::new(), skipped: false });
     }
     let observer = observers.observer(id).expect("inserted above");
     observer.observations.retain(|o| o.target != target);
-    observer.observations.push(Observation { target, held, box_at, last: [-1.0, -1.0] });
+    observer.observations.push(Observation { serial, target, held, box_at, last: [-1.0, -1.0] });
 }
 
 // __dom.roUnobserve(id, target) -> whether the realm still holds the observer: one left observing nothing is no longer
@@ -164,7 +181,7 @@ fn ro_gather(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
                 continue;
             }
             if m[10] > depth {
-                observer.active.push(Active { target: ob.target, held: ob.held.clone(), sizes, depth: m[10] });
+                observer.active.push(Active { serial: ob.serial, held: ob.held.clone(), sizes, depth: m[10] });
             } else {
                 observer.skipped = true;
             }
@@ -192,7 +209,7 @@ fn ro_take_active(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
     let mut shallowest = f64::INFINITY;
     for a in &active {
-        if let Some(ob) = observer.observations.iter_mut().find(|o| o.target == a.target) {
+        if let Some(ob) = observer.observations.iter_mut().find(|o| o.serial == a.serial) {
             ob.last = [a.sizes[ob.box_at], a.sizes[ob.box_at + 1]];
         }
         shallowest = shallowest.min(a.depth);

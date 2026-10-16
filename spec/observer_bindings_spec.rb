@@ -409,6 +409,25 @@ RSpec.describe 'Observer bindings' do
     expect(poll_until { session.evaluate_script('window.got.length >= 5 && window.got') }).to eq(%w[E first second F frame])
   end
 
+  # A target observed again is observed by a new observation (§3.1 `observe`), whose first report the broadcast of the
+  # old one's active entry leaves owed — the old one's size it reports, the new one none yet — so it comes at the next
+  # update (spec; Blink keeps a same-box re-observation as it was and reports once).
+  it "owes a ResizeObserver's new observation of an active target its first report" do
+    session.execute_script(<<~JS)
+      document.body.innerHTML = '<div id=a style="width: 10px; height: 10px"></div>';
+      window.got = [];
+      let second, once = false;
+      const first = new ResizeObserver(() => {
+        window.got.push('first');
+        if (!once) { once = true; second.observe(document.getElementById('a'), {box: 'border-box'}); }
+      });
+      second = new ResizeObserver((entries) => window.got.push('second:' + entries.length));
+      first.observe(document.getElementById('a'));
+      second.observe(document.getElementById('a'));
+    JS
+    expect(poll_until { session.evaluate_script('window.got.length >= 3 && window.got') }).to eq(%w[first second:1 second:1])
+  end
+
   # The loop (HTML "update the rendering"): a callback that resizes what it observes is called again in the same update
   # only for observations deeper than the shallowest it was given — the child the parent's width carries — and the
   # parent's, skipped, is reported as an ErrorEvent with no error, at the document's 0:0 (Chrome).

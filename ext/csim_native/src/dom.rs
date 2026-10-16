@@ -1137,6 +1137,7 @@ impl RealmArena {
         self.observers.drop_realm(cid);
         self.forget_navigables_of(cid, false);
         self.discard_timers(cid);
+        self.discard_resize_observers(cid);
         self.forget_reactions_of(cid);
     }
     // The custom element reactions owed to realm `cid`'s elements — or to a node already freed — let go of
