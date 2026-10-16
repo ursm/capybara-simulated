@@ -1,12 +1,13 @@
 // The flags of an element's own steps that no attribute carries (`NodeData::element_flags`), which the bindings set
 // and read (element-flags.js names them): a `<select>`'s "has a `<selectedcontent>`" it keeps mirroring its
 // selection; a select's and a selectedcontent's "connected before" (a re-insertion re-snapshots); a select's "update
-// running", which an update it causes waits out; and a `<form>`'s "constructing entry list", "firing submission
-// events" and "locked for reset" (HTML §4.10.21.3, §4.10.21.4, §4.10.22). A clone starts without any.
+// running", which an update it causes waits out; a `<form>`'s "constructing entry list", "firing submission events"
+// and "locked for reset" (HTML §4.10.21.3, §4.10.21.4, §4.10.22); and a `<style>`'s queued `load`. A clone starts
+// without any.
 
 use crate::dom::nid_arg;
 
-const ELEMENT_FLAGS: u8 = 0b11_1111;
+const ELEMENT_FLAGS: u8 = 0b111_1111;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "elementFlags", element_flags, context_id);
