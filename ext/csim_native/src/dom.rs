@@ -782,6 +782,14 @@ pub(crate) const GEN_CASCADE: usize = 7;
 const GENERATIONS: usize = 8;
 
 impl Generations {
+    pub(crate) fn get(&self, which: usize) -> u32 {
+        let Some(buffer) = &self.buffer else { return 0 };
+        let mut bytes = [0u8; 4];
+        for (byte, cell) in bytes.iter_mut().zip(&buffer[which * 4..which * 4 + 4]) {
+            *byte = cell.get();
+        }
+        u32::from_ne_bytes(bytes)
+    }
     pub(crate) fn bump(&self, which: usize) {
         let Some(buffer) = &self.buffer else { return };
         let cells = &buffer[which * 4..which * 4 + 4];
@@ -992,6 +1000,9 @@ pub(crate) struct RealmState {
     pub(crate) cascade_key: Option<crate::sheet_owners::CascadeKey>,
     // The parents its document's parse changed since its last layout pass began (mutation_observers.rs `noteParsed`).
     pub(crate) parsed: crate::mutation_observers::ParsedMarks,
+    // What its reads of its elements' rendered-ness and text answered since its generations were last as they are now
+    // (rendered.rs `Answered`).
+    pub(crate) answered: crate::rendered::Answered,
     // Moves with every write to the realm's nodes that can change an element's STATE (`:checked`, `:focus`, `:valid`, `:default`, …): a
     // state write, a value, a tree change (form owners, radio groups, fieldsets), an attribute a state reads.
     pub(crate) state_epoch: u64,
@@ -1807,6 +1818,8 @@ impl RealmArena {
             self.mutations += 1;
             self.state_epoch += 1;
             self.focus_ring_hidden = hidden;
+            // (…a state no other generation moves: `:focus-visible` against `:focus` on the same focused element)
+            self.generations.bump(GEN_STYLE_STATE);
         }
     }
 

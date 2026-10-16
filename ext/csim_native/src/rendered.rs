@@ -2,6 +2,8 @@
 // filter, geometry read and `checkVisibility()` asks), and HTML's rendered text collection — `innerText`, and the visible
 // text a driver reads off a node. Both read the style engine's values over the arena; neither lays anything out.
 
+use std::collections::HashMap;
+
 use crate::dom::{NodeData, NodeId, NodeKind, RealmArena};
 use crate::style::{primary_style, StyleEngine};
 use crate::walk::WalkDisplay;
@@ -584,6 +586,7 @@ pub(crate) fn visible_text(engine: &mut StyleEngine, arena: &RealmArena, id: Nod
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "rendered", rendered_op, context_id);
     crate::dom::register(scope, ns, "visibleText", visible_text_op, context_id);
+    crate::dom::register(scope, ns, "innerText", inner_text_op, context_id);
     crate::dom::register(scope, ns, "boxKind", box_kind_op, context_id);
     crate::dom::register(scope, ns, "cssImageUrls", css_image_urls_op, context_id);
     crate::dom::register(scope, ns, "transparent", transparent_op, context_id);
@@ -704,20 +707,95 @@ pub(crate) fn with_engine<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::Functi
     answer
 }
 
-// __dom.rendered(nid, ignoreVisibility, honourSkips) -> whether the element is rendered (`rendered`); undefined
-// where the realm has no engine.
+// What a realm's reads asked of its own nodes answered — whether each element is rendered, by the four ways of asking,
+// and each node's visible text and `innerText` — for as long as nothing they read can have moved: the realm's
+// generations (the settle generation, the rule set's, the style state's, the tree's — the parser's changes too — and
+// the layout dirty sequence), which a change to any of empties. Every used-value `getComputedStyle` read and every
+// geometry read asks whether an element is rendered, and Capybara's `has_text?` polls an unchanged node's text. A
+// node another realm's tree holds is not kept: its realm's generations, not these, say when its answer moves.
+#[derive(Default)]
+pub(crate) struct Answered {
+    key: Option<[u32; 5]>,
+    rendered: HashMap<NodeId, [Option<bool>; 4]>,
+    texts: HashMap<(NodeId, bool), std::rc::Rc<[u16]>>,
+}
+impl Answered {
+    // The answers of realm `cid` — the one `arena` holds the state of — as its generations stand, where `id` is its own.
+    fn of(arena: &mut RealmArena, cid: i32, id: NodeId) -> Option<&mut Answered> {
+        if arena.get(id)?.realm != cid {
+            return None;
+        }
+        let g = &arena.generations;
+        let key = [crate::dom::GEN_SETTLE, crate::dom::GEN_CASCADE, crate::dom::GEN_STYLE_STATE, crate::dom::GEN_TREE, crate::dom::GEN_DIRTY].map(|w| g.get(w));
+        let answered = &mut arena.answered;
+        if answered.key != Some(key) {
+            answered.key = Some(key);
+            answered.rendered.clear();
+            answered.texts.clear();
+        }
+        Some(answered)
+    }
+}
+
+// __dom.rendered(nid, ignoreVisibility, honourSkips) -> whether the element is rendered (`rendered`), kept
+// (`Answered`); undefined where the realm has no engine.
 fn rendered_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let [ignore_visibility, honour_skips] = [args.get(1).is_true(), args.get(2).is_true()];
+    let way = usize::from(ignore_visibility) | usize::from(honour_skips) << 1;
+    let cid = crate::dom::realm_id(scope, &args);
+    if let Some(r) = Answered::of(crate::dom::realm(scope, cid), cid, id).and_then(|a| a.rendered.get(&id)?[way]) {
+        return rv.set_bool(r);
+    }
     if let Some(r) = with_engine(scope, &args, |engine, arena, now| rendered(engine, arena, id, ignore_visibility, honour_skips, None, now)) {
+        if let Some(a) = Answered::of(crate::dom::realm(scope, cid), cid, id) {
+            a.rendered.entry(id).or_default()[way] = Some(r);
+        }
         rv.set_bool(r);
     }
 }
 
-// __dom.visibleText(nid) -> the node's visible text (`visible_text`); undefined where the realm has no engine.
+// A node's text as a read asks it (`inner` its `innerText`, else its visible text), kept (`Answered`) — but a
+// `<textarea>`'s, its value, which changes with no generation moving (cheap: no subtree walk).
+fn kept_text(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, id: NodeId, inner: bool) -> Option<std::rc::Rc<[u16]>> {
+    let cid = crate::dom::realm_id(scope, args);
+    let arena = crate::dom::realm(scope, cid);
+    let textarea = arena.get(id).is_some_and(|n| n.kind == NodeKind::Element && tag(n) == "textarea");
+    if !textarea {
+        if let Some(text) = Answered::of(arena, cid, id).and_then(|a| a.texts.get(&(id, inner)).cloned()) {
+            return Some(text);
+        }
+    }
+    let text: std::rc::Rc<[u16]> = with_engine(scope, args, |engine, arena, now| {
+        // HTML "innerText getter" step 1: an element NOT being rendered — DISPLAY-side hiding (display:none, `hidden`, an
+        // unrendered ancestor), not `visibility: hidden`, which generates boxes — answers its textContent, not the
+        // (empty) rendered text (Avo's date_field_controller reads one inside an inactive tab), up the FLAT tree: a
+        // light child no rendered slot takes is not rendered (Chrome and Firefox: its textContent, "ab", where a
+        // node-tree walk gave the rendered "a").
+        let not_rendered = inner && !textarea && !rendered(engine, arena, id, true, false, None, now);
+        if not_rendered { arena.text_content(id) } else { visible_text(engine, arena, id, now) }.into()
+    })?;
+    if !textarea {
+        if let Some(a) = Answered::of(crate::dom::realm(scope, cid), cid, id) {
+            a.texts.insert((id, inner), text.clone());
+        }
+    }
+    Some(text)
+}
+
+// __dom.visibleText(nid) -> the node's visible text (`visible_text`), kept; undefined where the realm has no engine.
 fn visible_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    if let Some(text) = with_engine(scope, &args, |engine, arena, now| visible_text(engine, arena, id, now)) {
+    if let Some(text) = kept_text(scope, &args, id, false) {
+        let s = v8::String::new_from_two_byte(scope, &text, v8::NewStringType::Normal).unwrap();
+        rv.set(s.into());
+    }
+}
+// __dom.innerText(nid) -> the element's `innerText` getter: its textContent where it is not being rendered, else its
+// rendered text — kept; undefined where the realm has no engine.
+fn inner_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    if let Some(text) = kept_text(scope, &args, id, true) {
         let s = v8::String::new_from_two_byte(scope, &text, v8::NewStringType::Normal).unwrap();
         rv.set(s.into());
     }
