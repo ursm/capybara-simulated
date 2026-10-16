@@ -49,9 +49,13 @@ struct DocumentTexts {
     // Its preferred CSS style sheet set name (CSSOM §6.2.1): the title of the first sheet with one that was added to it
     // and is no alternate (`note_sheet_added`), none until one was — added, not first in tree order.
     preferred_set: Option<String>,
+    // …and its base URL as last computed (`document_base_url`), with the base epoch and the fallback base URL it was
+    // computed against — none once a text is set.
+    base_url: Option<(u64, String, String)>,
 }
 const TEXTS: usize = 5;
 const TEXT_URL: usize = 0;
+const TEXT_ENCODING: usize = 1;
 const TEXT_ABOUT_BASE: usize = 4;
 
 #[derive(Default)]
@@ -94,6 +98,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     // (…and one: a node's name and an element's serialization ask whether its document is an HTML one)
     crate::dom::register_fast(scope, ns, "docIsHtml", doc_is_html, DOC_IS_HTML_FAST, context_id);
     crate::dom::register(scope, ns, "docUrl", doc_url, context_id);
+    crate::dom::register(scope, ns, "docBaseUrl", doc_base_url, context_id);
     crate::dom::register(scope, ns, "docText", doc_text, context_id);
     crate::dom::register(scope, ns, "setDocText", set_doc_text, context_id);
     crate::dom::register(scope, ns, "docLastModified", doc_last_modified, context_id);
@@ -191,7 +196,10 @@ fn set_doc_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let Some(field) = args.get(1).uint32_value(scope).map(|f| f as usize).filter(|&f| f < TEXTS) else { return };
     let text = (!args.get(2).is_null_or_undefined()).then(|| args.get(2).to_rust_string_lossy(scope));
-    crate::dom::dom(scope).arena.document_states.1.entry(doc).or_default().texts[field] = text;
+    let texts = crate::dom::dom(scope).arena.document_states.1.entry(doc).or_default();
+    texts.texts[field] = text;
+    // (…its URL, encoding or inherited base each one the base URL is computed from)
+    texts.base_url = None;
 }
 
 // __dom.docLastModified(docNid[, time]) -> when the document was last modified (ms since the epoch), or null for none
@@ -272,6 +280,22 @@ impl RealmArena {
             _ => url.to_owned(),
         }
     }
+    // HTML "document base URL" (url_ops.rs `document_base_url`): against its fallback base URL, in its encoding. Kept
+    // against the base epoch, which moves with a `<base>` linked, unlinked or freed or its `href` written — the parser's
+    // included — and with no other write a page makes; and against the fallback, which a navigation can change with
+    // the epoch where it was (the live document is reused across visits).
+    fn document_base_url(&mut self, doc: NodeId) -> String {
+        let fallback = self.document_url(doc, true);
+        let epoch = self.base_epoch;
+        let texts = self.document_states.1.get(&doc);
+        if let Some((_, _, href)) = texts.and_then(|t| t.base_url.as_ref()).filter(|(e, f, _)| *e == epoch && *f == fallback) {
+            return href.clone();
+        }
+        let encoding = texts.and_then(|t| t.texts[TEXT_ENCODING].as_deref()).filter(|e| !e.is_empty()).unwrap_or("UTF-8");
+        let href = crate::url_ops::document_base_url(self, doc, &fallback, Some(encoding));
+        self.document_states.1.entry(doc).or_default().base_url = Some((epoch, fallback, href.clone()));
+        href
+    }
 }
 
 // __dom.docUrl(docNid[, fallbackBase]) -> the document's URL (`document_url`), or with `fallbackBase` its fallback base
@@ -280,6 +304,15 @@ fn doc_url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let fallback_base = args.get(1).is_true();
     let url = match nid_arg(scope, &args, 0) {
         Some(doc) => crate::dom::dom(scope).arena.document_url(doc, fallback_base),
+        None => String::new(),
+    };
+    rv.set(v8::String::new(scope, &url).unwrap().into());
+}
+
+// __dom.docBaseUrl(docNid) -> the document's base URL (`document_base_url`).
+fn doc_base_url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let url = match nid_arg(scope, &args, 0) {
+        Some(doc) => crate::dom::dom(scope).arena.document_base_url(doc),
         None => String::new(),
     };
     rv.set(v8::String::new(scope, &url).unwrap().into());

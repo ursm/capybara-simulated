@@ -20,7 +20,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "urlencodedParse", urlencoded_parse, context_id);
     register(scope, ns, "urlencodedSerialize", urlencoded_serialize, context_id);
     register(scope, ns, "javascriptUrlSource", javascript_url_source_op, context_id);
-    register(scope, ns, "documentBaseUrl", document_base_url_op, context_id);
     register(scope, ns, "metaReferrerPolicy", meta_referrer_policy_op, context_id);
     register(scope, ns, "hyperlinkReferrerPolicy", hyperlink_referrer_policy_op, context_id);
 }
@@ -155,19 +154,6 @@ pub(crate) fn document_base_url(arena: &crate::dom::RealmArena, doc: crate::dom:
     href.and_then(|href| encoding_parse(&href, Some(fallback), encoding))
         .filter(|url| !matches!(url.protocol(), "data:" | "javascript:"))
         .map_or_else(|| fallback.to_owned(), |url| url.href().to_owned())
-}
-// __dom.documentBaseUrl(docNid, fallback, encoding) -> the document's base URL (`document_base_url`).
-fn document_base_url_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let fallback = usv(scope, args.get(1));
-    let encoding = (!args.get(2).is_null_or_undefined()).then(|| usv(scope, args.get(2)));
-    let cid = crate::dom::realm_id(scope, &args);
-    let href = match crate::dom::nid_arg(scope, &args, 0) {
-        Some(doc) => document_base_url(crate::dom::realm(scope, cid), doc, &fallback, encoding.as_deref()),
-        None => fallback,
-    };
-    if let Some(s) = v8::String::new(scope, &href) {
-        rv.set(s.into());
-    }
 }
 
 // The URL's query as the input wrote it, percent-encoded in `encoding` (the parser did it in UTF-8). A query is what

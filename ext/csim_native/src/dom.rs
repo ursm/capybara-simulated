@@ -2671,7 +2671,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setCustomStates", set_custom_states, context_id);
     register(scope, ns, "targetElement", target_element, context_id);
     register(scope, ns, "baseElement", base_element, context_id);
-    register(scope, ns, "baseEpoch", base_epoch, context_id);
     register(scope, ns, "setFocusRingHidden", set_focus_ring_hidden, context_id);
     register(scope, ns, "setFocusStart", set_focus_start, context_id);
     register(scope, ns, "query", query, context_id);
@@ -3659,11 +3658,6 @@ fn shadow_adopted_sheets(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
         Some(v) => rv.set(utf16_value(scope, &v)),
         None => rv.set_null(),
     }
-}
-
-// __dom.baseEpoch() -> `RealmArena::base_epoch`: what a document's base URL is kept against.
-fn base_epoch(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_double(dom(scope).arena.base_epoch as f64);
 }
 
 // __dom.setShadowHost(rootNid, hostNid, init): the shadow root `rootNid` is attached to `hostNid`, with the init
