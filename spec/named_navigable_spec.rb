@@ -412,6 +412,26 @@ RSpec.describe 'choosing a navigable by name' do
     expect(cookies).not_to have_key('/x')
   end
 
+  # A navigation superseded before it commits is none: the frame's element fires one `load` for two `src` writes, its
+  # session history one entry, the document left the one a traversal back reaches — and a `src` removed navigates it to
+  # about:blank, the URL it no longer has fetched by nothing (HTML "process the iframe attributes"; Chrome: one `load`
+  # each, about:blank).
+  it 'commits one navigation for writes superseded before the response is in' do
+    s, log = session_for(
+      '/p' => '<script>window.L = []</script><iframe id="c" src="/c" onload="L.push(this.contentDocument.body.textContent)"></iframe>',
+      '/c' => '<p>c</p>'
+    )
+    poll_until { s.evaluate_script('L.length').then {|n| n if n == 1 } }
+    s.execute_script('const f = document.getElementById("c"); f.src = "/d"; f.src = "/e"')
+    expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 2 } }).to eq(%w[c /e])
+    s.execute_script('frames[0].history.back()')
+    expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 3 } }).to eq(%w[c /e c])
+    s.execute_script('const f = document.getElementById("c"); f.src = "/x"; f.removeAttribute("src")')
+    expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 4 } }).to eq(['c', '/e', 'c', ''])
+    expect(s.evaluate_script('frames[0].location.href')).to eq('about:blank')
+    expect(log.map(&:first)).not_to include('/d', '/x')
+  end
+
   # A frame an unload handler of its own removed is gone, its navigation with it: the response's document never runs,
   # nor is a realm left for it (Chrome).
   it 'commits no document into a frame a teardown handler removed' do
