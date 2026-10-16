@@ -488,7 +488,8 @@ fn document_focus_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 // document element, else none.
 fn active_element(arena: &RealmArena, root: NodeId, doc: NodeId) -> Option<NodeId> {
     let d = arena.get(doc).filter(|d| d.kind == NodeKind::Document)?;
-    let focused = arena.realm_state(d.realm)?.focus.filter(|&f| arena.get(f).is_some() && arena.shadow_including_root(f) == doc);
+    let focus = arena.realm_state(d.realm).and_then(|st| st.focus);
+    let focused = focus.filter(|&f| arena.get(f).is_some() && arena.shadow_including_root(f) == doc);
     let candidate = crate::event_path::retarget_node(arena, focused.unwrap_or(doc), root);
     if arena.root_of(candidate) != root {
         return None;

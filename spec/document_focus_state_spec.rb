@@ -50,7 +50,9 @@ RSpec.describe 'document focus state' do
 
   # DocumentOrShadowRoot's activeElement (HTML §6.6.4): the focused element retargeted against the root, none where that
   # is in another tree, and — nothing focused — a document's body element, else its document element (the spec's step
-  # 6: a document with no body answers its root, where the body alone answered null).
+  # 6: a document with no body answers its root). Measured otherwise: Chrome 155 and Firefox 158 both answer null for
+  # `document.body.remove(); document.activeElement` (Firefox the root of an SVG document, Chrome null) — the spec's
+  # explicit step wins over both.
   it 'retargets the focus against the root, and falls back to the body, then the document element' do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] })
     s.visit '/'
@@ -77,4 +79,24 @@ RSpec.describe 'document focus state' do
     expect(got).to eq([true, true, true, nil, true, nil, true, true])
   end
 
+  # blur() on a delegatesFocus host unfocuses what it delegated to — one nested in another such host's shadow tree too,
+  # whose own tree sees it focused (Chrome 155: `afterInnerBlur:false`); asked of the document, which sees the OUTER
+  # host, it kept the focus.
+  it 'blurs through a delegatesFocus host nested in another' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const outer = document.body.appendChild(document.createElement('div'));
+        const outerRoot = outer.attachShadow({mode: 'open', delegatesFocus: true});
+        const inner = outerRoot.appendChild(document.createElement('div'));
+        const input = inner.attachShadow({mode: 'open', delegatesFocus: true}).appendChild(document.createElement('input'));
+        input.focus();
+        const before = input.matches(':focus');
+        inner.blur();
+        return [before, input.matches(':focus'), document.activeElement === document.body];
+      })()
+    JS
+    expect(got).to eq([true, false, true])
+  end
 end

@@ -18,23 +18,21 @@ fn host_of(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
     arena.get(id)?.host
 }
 
-// DOM "retarget" `a` against `b`: up out of every shadow tree whose root is no shadow-including ancestor of `b`.
+// DOM "retarget" `a` against `b`: up out of every shadow tree whose root is no shadow-including ancestor of `b` — what
+// is no node (a Window) as it is.
 fn retarget(arena: &RealmArena, a: Related, b: NodeId) -> Related {
-    let Related::Node(mut a) = a else { return a };
+    match a {
+        Related::Node(a) => Related::Node(retarget_node(arena, a, b)),
+        other => other,
+    }
+}
+pub(crate) fn retarget_node(arena: &RealmArena, mut a: NodeId, b: NodeId) -> NodeId {
     loop {
         let root = arena.root_of(a);
         match host_of(arena, root) {
             Some(host) if !arena.shadow_including_ancestor(root, b) => a = host,
-            _ => return Related::Node(a),
+            _ => return a,
         }
-    }
-}
-
-// …a node against a node.
-pub(crate) fn retarget_node(arena: &RealmArena, a: NodeId, b: NodeId) -> NodeId {
-    match retarget(arena, Related::Node(a), b) {
-        Related::Node(n) => n,
-        _ => a,
     }
 }
 
