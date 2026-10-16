@@ -11,8 +11,8 @@ use std::cell::RefCell;
 
 use v8::cppgc::{GarbageCollected, Visitor};
 
-// The wrapper tag `Object::wrap` / `unwrap` file the handle under (a node's is 1, … a selection's 6).
-const TAG: u16 = 7;
+// The wrapper tag `Object::wrap` / `unwrap` file the handle under (a node's is 1, … a selection's 6, a header list's 7).
+const TAG: u16 = 8;
 // What marks an object as a drag data store's (its internal field 0).
 static BRAND: u8 = 0;
 
