@@ -2509,7 +2509,7 @@ module Capybara
         # parity: `evaluate_script` runs in the current browsing context).
         result = dom_call('__csimEvalScript', code.to_s, marshal_args(args || []))
         settle_idle_style
-        drain_pending_navigation
+        drain_task_intents
         result
       end
 
@@ -2523,7 +2523,7 @@ module Capybara
         invalidate_find_cache
         dom_call('__csimExecScript', code.to_s, marshal_args(args || []))
         settle_idle_style
-        drain_pending_navigation
+        drain_task_intents
         nil
       end
 
@@ -2738,23 +2738,20 @@ module Capybara
         ensure
           @ticking = false
         end
-        # Drain navigation intents queued by JS-side handlers that fired
-        # during the drain (e.g. `setTimeout(() => location.pathname = X)`).
-        # Outside the @ticking guard so the navigate's rebuild_ctx is
-        # well-clear of the V8 call we just made.
+        # What the handlers that fired during the drain left to do (e.g. `setTimeout(() => location.pathname = X)`).
+        # Outside the @ticking guard so the navigate's rebuild_ctx is well-clear of the V8 call we just made.
+        drain_task_intents
+      end
+
+      # What a task the page ran left the browser to do, done: a navigation it planned (`drain_pending_navigation`), a
+      # form it submitted, a download it started. Whichever task — a timer's (Forem's comment-edit form `preventDefault`s
+      # its submit, polls for the CSRF meta tag inside `setInterval(…, 1)` and calls `form.submit()` once it is there,
+      # long after the click returned), a script the driver ran (`execute_script('form.submit()')` on an idle page, where
+      # no step follows to take it), or a synthetic click on an `<a download>` (Avo's action download: file-saver's
+      # `saveAs` dispatches one on a fresh anchor with a blob URL). Otherwise the intent sits on its slot forever.
+      def drain_task_intents
         drain_pending_navigation
-        # Same shape for `form.submit()` queued by a timer callback —
-        # Forem's comment-edit form has an `onsubmit` handler that
-        # `preventDefault`s, polls for the CSRF meta tag inside
-        # `setInterval(…, 1)`, then calls `form.submit()` once the
-        # meta is present. The click that originally fired the submit
-        # event has already returned by the time the interval triggers,
-        # so without this drain the intent sits on the slot forever
-        # and the form never posts.
         consume_pending_form_submit
-        # And for `<a download>` clicks (Avo's action-download chain
-        # goes via file-saver's `saveAs` → synthetic dispatchEvent
-        # on a freshly-created anchor with `download` + blob URL).
         consume_pending_download
       end
 
@@ -2993,9 +2990,7 @@ module Capybara
         pulled = drain_async_channels
         invalidate_find_cache
         drained_nav = pending_nav_intent?
-        drain_pending_navigation
-        consume_pending_form_submit
-        consume_pending_download
+        drain_task_intents
         # `r['dirtied']` already covers settleGen changes DURING the step; compare
         # the post-drain gen against the step's post-step gen (`r['gen']`, free —
         # no extra crossing) to also catch a main-realm change the drains caused.

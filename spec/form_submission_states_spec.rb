@@ -49,4 +49,19 @@ RSpec.describe 'Form submission states' do
     s.within_frame('f') { expect(s).to have_text('ok') }
     expect([received.first&.first(2), s.current_path]).to eq([%w[GET /e], '/'])
   end
+
+  # A script the driver runs is a task like any other: the navigation a form it submits plans is taken as it ends, on a
+  # page with nothing else pending as on one with a timer to step.
+  {'submit()' => 'document.forms[0].submit()', 'requestSubmit()' => 'document.forms[0].requestSubmit()'}.each do |what, js|
+    it "navigates for a #{what} in a script the driver runs" do
+      received = []
+      s = simulated_session(app(received, '<form action=/g><input name=q value=1></form>'))
+      s.visit '/'
+      s.execute_script(js)
+      expect([received.first, s.current_path]).to eq([['GET', '/g', nil, 'q=1'], '/g'])
+      s.visit '/'
+      s.evaluate_script("(#{js}, 1)")
+      expect(s.current_path).to eq('/g')
+    end
+  end
 end
