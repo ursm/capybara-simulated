@@ -55,7 +55,8 @@ impl RealmArena {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "docState", doc_state, context_id);
+    // (…a fast call: `_quirks` is read by every `matches`, `closest` and class collection)
+    crate::dom::register_fast(scope, ns, "docState", doc_state, DOC_STATE_FAST, context_id);
     crate::dom::register(scope, ns, "setDocState", set_doc_state, context_id);
 }
 
@@ -64,21 +65,42 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 fn doc_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
     let field = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
-    let state = crate::dom::dom(scope).arena.document_states.0.get(&doc).copied().unwrap_or_default();
-    rv.set_uint32(match field {
+    rv.set_uint32(field_of(crate::dom::dom(scope).arena.document_states.0.get(&doc).copied().unwrap_or_default(), field));
+}
+fn field_of(state: DocumentState, field: u32) -> u32 {
+    match field {
         MODE => state.mode,
         READY => state.ready,
         FLAGS => state.flags,
         INSERTIONS => state.insertions,
         _ => 0,
-    });
+    }
 }
+fn doc_state_fast(_receiver: v8::Local<v8::Value>, nid: f64, field: i32, options: *mut v8::fast_api::FastApiCallbackOptions) -> i32 {
+    let doc = if nid >= 0.0 { NodeId::from_i64(nid as i64) } else { None };
+    let state = crate::dom::fast_dom(options).and_then(|d| d.arena.document_states.0.get(&doc?).copied()).unwrap_or_default();
+    i32::try_from(field_of(state, u32::try_from(field).unwrap_or(u32::MAX))).unwrap_or(0)
+}
+const DOC_STATE_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new(
+    doc_state_fast as _,
+    &v8::fast_api::CFunctionInfo::new(
+        v8::fast_api::Type::Int32.as_info(),
+        &[
+            v8::fast_api::Type::V8Value.as_info(),
+            v8::fast_api::Type::Float64.as_info(),
+            v8::fast_api::Type::Int32.as_info(),
+            v8::fast_api::Type::CallbackOptions.as_info(),
+        ],
+        v8::fast_api::Int64Representation::Number,
+    ),
+)];
 
 // __dom.setDocState(docNid, field, value) — the document's field set.
 fn set_doc_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let field = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
-    let value = args.get(2).uint32_value(scope).unwrap_or(0);
+    // (…none below 0: the counter's unbalanced decrement stays 0, where a wrapped one would throw at every write)
+    let value = u32::try_from(args.get(2).int32_value(scope).unwrap_or(0)).unwrap_or(0);
     let state = crate::dom::dom(scope).arena.document_states.0.entry(doc).or_default();
     match field {
         MODE => state.mode = value.min(2),

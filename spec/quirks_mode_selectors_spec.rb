@@ -14,6 +14,17 @@ RSpec.describe 'quirks mode selectors' do
     s
   end
 
+  # DOM "clone a node": a document's copy takes its mode, so a quirks page's clone matches as the page does.
+  it "keeps a quirks-mode document's mode in its clone" do
+    s = session('<html><body><div class="foo">x</div></body></html>')
+    expect(s.evaluate_script(<<~JS)).to eq(%w[BackCompat BackCompat 1])
+      (() => {
+        const copy = document.cloneNode(true);
+        return [document.compatMode, copy.compatMode, String(copy.querySelectorAll('.FOO').length)];
+      })()
+    JS
+  end
+
   it 'matches classes and ids case-insensitively in a quirks-mode document' do
     s = session(<<~HTML)
       <html><head><style>.Foo { margin-left: 5px } #ID { margin-top: 3px } [class~=Foo] { padding-left: 2px } .Wrap .kid { padding-top: 4px }</style></head>
