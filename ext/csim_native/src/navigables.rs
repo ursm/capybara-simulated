@@ -37,6 +37,10 @@ pub(crate) struct Navigables {
     // "unload counter" above 0): a navigation of their navigable is ignored meanwhile ("navigate" step 13), so a
     // teardown handler re-navigating its own frame neither tears it down again nor wins over the navigation unloading it.
     unloading: std::collections::HashSet<i32>,
+    // …and those whose documents are being asked whether they may be unloaded — their beforeunload firing, the unload
+    // counter raised as well ("check if unloading is canceled"), a navigation ignored as above — but not unloaded yet:
+    // a frame of one re-navigated from it is asked itself, where a frame of one being unloaded was asked with it.
+    prompting: std::collections::HashSet<i32>,
     // How many realms some realm's event loop steps with its own — child navigables with a realm their active document
     // is in, and those windows — read with no call by every realm's bindings (`__dom.childFrames`): none, the common
     // page's, keeps the event loop's step of its child realms and a dispatch's multi-realm path a load of a word.
@@ -127,9 +131,9 @@ impl RealmArena {
     pub(crate) fn frame_container(&self, parent: i32, realm: i32) -> Option<NodeId> {
         self.live_container(realm).filter(|&c| self.get(c).is_some_and(|n| n.realm == parent))
     }
-    // Whether the document of a navigable ABOVE realm `realm`'s is being unloaded now — its descendants' documents, the
-    // realm's among them, asked whether they may be unloaded with it (HTML "check if unloading is canceled" runs over
-    // the descendants before any is unloaded), or being destroyed with it, which asks none.
+    // Whether the document of a navigable ABOVE realm `realm`'s is being unloaded now — past being asked, its
+    // descendants' documents, the realm's among them, asked with it (HTML "check if unloading is canceled" runs over the
+    // descendants before any is unloaded), or being destroyed with it, which asks none.
     pub(crate) fn ancestor_unloading(&self, realm: i32) -> bool {
         let mut at = realm;
         while let Some(parent) = self.live_container(at).and_then(|c| self.get(c)).map(|n| n.realm) {
@@ -323,6 +327,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setSteppedWindow", set_stepped_window, context_id);
     crate::dom::register(scope, ns, "ownContainer", own_container, context_id);
     crate::dom::register(scope, ns, "setUnloading", set_unloading, context_id);
+    crate::dom::register(scope, ns, "setPrompting", set_prompting, context_id);
     crate::dom::register(scope, ns, "unloading", unloading, context_id);
     crate::dom::register(scope, ns, "ancestorUnloading", ancestor_unloading, context_id);
     let linked = crate::dom::dom(scope).arena.navigables.linked.store();
@@ -460,11 +465,26 @@ fn set_unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         unloading.remove(&realm);
     }
 }
-// __dom.unloading(realm) -> whether the realm's document is being unloaded now — a navigation of its navigable ignored.
+// __dom.setPrompting(realm, on) — the realm's document begins (`on`) or ends being asked whether it may be unloaded
+// (`Navigables::prompting`).
+fn set_prompting(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(realm) = args.get(0).int32_value(scope) else { return };
+    let on = args.get(1).is_true();
+    let cid = realm_id(scope, &args);
+    let prompting = &mut crate::dom::realm(scope, cid).navigables.prompting;
+    if on {
+        prompting.insert(realm);
+    } else {
+        prompting.remove(&realm);
+    }
+}
+// __dom.unloading(realm) -> whether the realm's document is being unloaded or asked whether it may be now — its unload
+// counter above 0, a navigation of its navigable ignored.
 fn unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = args.get(0).int32_value(scope).unwrap_or(-1);
     let cid = realm_id(scope, &args);
-    rv.set_bool(crate::dom::realm(scope, cid).navigables.unloading.contains(&realm));
+    let nav = &crate::dom::realm(scope, cid).navigables;
+    rv.set_bool(nav.unloading.contains(&realm) || nav.prompting.contains(&realm));
 }
 // __dom.ancestorUnloading(realm) -> whether an ancestor navigable's document is being unloaded now
 // (`RealmArena::ancestor_unloading`).

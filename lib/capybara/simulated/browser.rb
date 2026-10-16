@@ -695,6 +695,11 @@ module Capybara
 
       URL_PARTS = %i[href protocol username password host hostname port pathname search hash origin].freeze
       # The parts of the URL `input` parses to, by the page's parser (url_ops.rs) — or nil where it does not parse.
+      # A redirect's `Location` parsed against the URL of the response that carries it (Fetch "HTTP-redirect fetch":
+      # "location URL" — relative or not, the URL parser's), or the header as it is where it parses as none.
+      def resolve_location(loc, url)
+        parse_url(loc, url.to_s)&.fetch(:href) || loc
+      end
       def parse_url(input, base = nil)
         parts = Native.url_parts(url_text(input), base && url_text(base))
         parts && URL_PARTS.zip(parts).to_h
@@ -3322,7 +3327,7 @@ module Capybara
           end
           sw_headers = sw['headers'] || {}
           if (loc = redirect_location(sw['status'].to_i, sw_headers))
-            next_url = carry_fragment(url, resolve_against(loc, url.to_s))
+            next_url = carry_fragment(url, resolve_location(loc, url))
             if [307, 308].include?(sw['status'].to_i)
               return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
             end
@@ -3351,7 +3356,7 @@ module Capybara
         status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
-          next_url = resolve_against(loc, url.to_s)
+          next_url = resolve_location(loc, url)
           resp_body.close if resp_body.respond_to?(:close)
           # Fetch "HTTP-redirect fetch": a 301 / 302 / 303 of a POST makes it a GET; a 307 / 308 keeps the method and
           # the body.
@@ -10636,7 +10641,7 @@ module Capybara
           # SW-served redirect: 307/308 re-POST, everything else GETs — the same split
           # as the network branch below, re-entering interception at the new URL.
           if (loc = redirect_location(sw['status'].to_i, sw['headers'] || {}))
-            next_url = carry_fragment(url, resolve_against(loc, url.to_s))
+            next_url = carry_fragment(url, resolve_location(loc, url))
             site     = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url.to_s))
             taint    = redirect_taints_origin?(origin_null, initiator, url.to_s, next_url)
             next_rid = url_origin(next_url) == url_origin(url.to_s) ? rid : nil
@@ -10670,7 +10675,7 @@ module Capybara
         )
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
-          next_url = carry_fragment(url, resolve_against(loc, url.to_s))
+          next_url = carry_fragment(url, resolve_location(loc, url))
           resp_body.close if resp_body.respond_to?(:close)
           # 307/308 preserve method + body; 301/302/303 → GET the frame — the same split as the SW branch above, the
           # navigation going on (its document prompted to unload once, at its start). Latch the redirect chain's
@@ -11184,7 +11189,7 @@ module Capybara
         status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
-          next_url = carry_fragment(url, resolve_against(loc, url.to_s))
+          next_url = carry_fragment(url, resolve_location(loc, url))
           body.close if body.respond_to?(:close)
           return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer)
         end
@@ -11207,7 +11212,7 @@ module Capybara
         status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
-          next_url = carry_fragment(url, resolve_against(loc, url.to_s))
+          next_url = carry_fragment(url, resolve_location(loc, url))
           resp_body.close if resp_body.respond_to?(:close)
           # 301/302/303 → GET; 307/308 preserve method + body (same as navigate_post).
           if Native.redirect_to_get(status.to_i, 'POST')
@@ -11351,7 +11356,7 @@ module Capybara
             # an attachment downloads — never booted as the document.
             sw_headers = sw['headers'] || {}
             if (loc = redirect_location(sw['status'].to_i, sw_headers))
-              return navigate(carry_fragment(url, resolve_against(loc, url.to_s)), depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
+              return navigate(carry_fragment(url, resolve_location(loc, url)), depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
             end
             @current_url = url
             if download_response?(sw_headers)
@@ -11374,7 +11379,7 @@ module Capybara
           status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
           merge_set_cookie(headers, url)
           if (loc = redirect_location(status, headers))
-            next_url = resolve_against(loc, url.to_s)
+            next_url = resolve_location(loc, url)
             # Per RFC 7231: if the original request URL had a fragment
             # and the redirect target doesn't specify one, preserve
             # the original fragment in the final URL.

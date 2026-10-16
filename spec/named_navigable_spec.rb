@@ -312,6 +312,23 @@ RSpec.describe 'choosing a navigable by name' do
     ])
   end
 
+  # …and one a beforeunload handler re-navigates — the document above it asked, not yet unloaded — is asked itself.
+  it "asks a frame a beforeunload handler navigates" do
+    s, = session_for(
+      '/p' => '<script>window.L = []</script><iframe id="c" src="/c"></iframe>',
+      '/c' => unload_logger('c') + '<script>addEventListener("beforeunload", () => { document.getElementById("g").src = "/e" })</script><iframe id="g" src="/g"></iframe>',
+      '/g' => unload_logger('g')
+    )
+    s.evaluate_script('frames[0].frames[0].document.body.textContent')
+    s.execute_script('frames[0].location = "http://www.example.com/d"')
+    expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 6 } }.first(4)).to eq(%w[
+      c:beforeunload:c
+      g:beforeunload:g
+      g:pagehide:g
+      g:unload:g
+    ])
+  end
+
   # A redirect's Location is parsed against the URL of the response that carries it (Fetch "HTTP-redirect fetch") —
   # not the document the navigation started from — for a frame's form POST and for the top-level navigation alike.
   it "resolves a redirect's relative Location against the request URL" do
@@ -330,6 +347,22 @@ RSpec.describe 'choosing a navigable by name' do
     expect(poll_until { s.evaluate_script('frames[0].location.pathname').then {|path| path if path != '/sub/c' } }).to eq('/sub/done')
     s.visit '/hop/a'
     expect(s.current_path).to eq('/hop/c')
+  end
+
+  # …an absolute one by the URL parser as well: its host lowercased, its path's dot segments removed and the rest
+  # percent-encoded — the request the app is handed, and the URL the session reports, the page's own `location`.
+  it "parses a redirect's absolute Location" do
+    paths = []
+    s = simulated_session(->(env) {
+      paths << env['PATH_INFO']
+      next [302, {'location' => 'HTTP://WWW.EXAMPLE.COM/a/../caf%C3%A9 x'}, []] if env['PATH_INFO'] == '/start'
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><p>ok</p>']]
+    })
+    s.visit '/start'
+    expect(s.current_url).to eq('http://www.example.com/caf%C3%A9%20x')
+    expect(s.evaluate_script('location.href')).to eq(s.current_url)
+    expect(paths.last).to eq('/caf%C3%A9%20x')
   end
 
   # HTML: whether unloading is canceled is asked before the navigation fetches anything, the document unloaded once the
