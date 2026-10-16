@@ -460,10 +460,8 @@ module Capybara
         # DESCENDANT frame realms too — not just old_id. The JS src-reassignment path gets this for
         # free (the old document's iframe elements go away → DOM-unregister disposes their realms);
         # the Ruby reload path (navigate_realm_self_get/_post) rebuilds without that DOM teardown, so
-        # a descendant frame's realm would otherwise linger and its contentWindow stay live.
-        # The old document is unloaded first, in the parent realm, as a navigation the page made unloads it — its
-        # beforeunload, pagehide and unload, its frames' after it (Chrome fires all three) — then what is left disposed.
-        realm_call(parent_id.to_i, '__csimTearDownFrameDocument', old_id) rescue nil
+        # a descendant frame's realm would otherwise linger and its contentWindow stay live. (The old document the
+        # Browser has unloaded already, as a navigation the page made unloads it: Browser#unload_frame_document.)
         dispose_frame_realm_tree(old_id)
         seed ||= {}
         create_frame_realm(ctx, url, body, content_type, parent_id, seed['container'], nil, nil, nil, nil, seed['viewport'], client_id, seed['margins'])

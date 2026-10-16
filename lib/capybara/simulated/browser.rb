@@ -10293,7 +10293,7 @@ module Capybara
         return if target.negative? || target >= h[:entries].size
         # Snapshot the entry we're leaving so a later forward traversal restores it (keeping how it
         # was reached, so a POST entry re-POSTs when traversed back to).
-        h[:entries][h[:idx]] = snapshot_outgoing_entry(realm_id, h[:entries][h[:idx]]) if h[:idx] >= 0
+        leave_frame_entry(realm_id, h) if h[:idx] >= 0
         reload_frame_to_entry(realm_id, h[:entries][target])
         h[:idx] = target   # advance only after the rebuild succeeds
       end
@@ -10311,12 +10311,8 @@ module Capybara
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
         h = (@frame_histories ||= {})[[parent, handle]] ||= {entries: [], idx: -1}
-        if h[:idx] >= 0
-          h[:entries][h[:idx]] = snapshot_outgoing_entry(realm_id, h[:entries][h[:idx]])
-        else
-          h[:entries] << frame_history_entry(realm_id)
-          h[:idx] = 0
-        end
+        h[:idx] = 0 if h[:idx].negative?
+        leave_frame_entry(realm_id, h)
         h[:entries] = h[:entries][0..h[:idx]]
         entry = {url: new_url.to_s, form_state: nil}
         entry.merge!(method: 'POST', body: post[:body], content_type: post[:content_type]) if post
@@ -10343,6 +10339,19 @@ module Capybara
       def snapshot_outgoing_entry(realm_id, prev)
         snap = frame_history_entry(realm_id)
         prev ? prev.merge(snap) : snap
+      end
+      # The frame history `h` leaving its current entry for the document in `realm_id`: snapshotted now, and its form
+      # state again as the document is unloaded (`frame_document_unloaded`) — what its pagehide / unload handlers left
+      # is what a traversal back restores (Chrome). The snapshot taken now stands when the navigation never commits.
+      def leave_frame_entry(realm_id, h)
+        entry = h[:entries][h[:idx]] = snapshot_outgoing_entry(realm_id, h[:entries][h[:idx]])
+        (@frame_leaving_entries ||= {})[realm_id] = entry
+      end
+      # A frame's document unloaded (its pagehide and unload fired, its realm still alive): the history entry its
+      # navigation is leaving takes its form state as its handlers left it.
+      def frame_document_unloaded(realm_id)
+        entry = @frame_leaving_entries&.delete(realm_id)
+        entry[:form_state] = capture_frame_form_state(realm_id) if entry
       end
       def frame_realm_url(realm_id)
         return nil unless @runtime.frame_realm_alive?(realm_id)
@@ -10401,6 +10410,8 @@ module Capybara
         # client id, adopted by the rebuilt realm (same model as a fresh navigation).
         rid = mint_resulting_client_id
         referrer_source, referrer_policy = realm_referrer_initiator(realm_id)
+        return unless prompt_to_unload_frame(realm_id)
+
         if (!url.to_s.start_with?('https://') || secure_frame_ancestors?(realm_id)) &&
            (sw = any_window_sw_navigation_fetch(url, is_reload: is_reload, is_history: is_history,
                                                       referrer_source: referrer_source, referrer_policy: referrer_policy,
@@ -10530,6 +10541,8 @@ module Capybara
         # network fetch whose response (reload_frame_realm_by_id) would find no container and be thrown
         # away — the fetch's cookie / server side effects would fire for a navigation that never commits.
         return unless @runtime.frame_realm_alive?(realm_id)
+        return if depth.zero? && !prompt_to_unload_frame(realm_id, parent)
+
         invalidate_find_cache
         # The frame's ancestor-chain cookie verdict (see frame_ancestor_cross_site?) —
         # a property of the frame the document commits into, so it rides the SW fetch
@@ -10601,6 +10614,8 @@ module Capybara
         record_frame_nav(realm_id, url) if depth.zero? && !is_reload && !is_history
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         return navigate_frame_post(url, body, content_type, entry: entry, referrer: referrer) if entry
+        return if depth.zero? && !prompt_to_unload_frame(realm_id)
+
         invalidate_find_cache
         # The navigation's reserved client id — same threading as navigate_realm_self_get.
         rid = resulting_client_id || mint_resulting_client_id
@@ -10657,16 +10672,18 @@ module Capybara
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(url, resolve_against_current(loc))
           resp_body.close if resp_body.respond_to?(:close)
-          # 307/308 preserve method + body; 301/302/303 → GET the frame (routed
-          # through the realm that OWNS the iframe, as in navigate_realm_self_get). Latch the
-          # redirect chain's Sec-Fetch-Site (widened) + Origin taint (redirect_taints_origin?).
+          # 307/308 preserve method + body; 301/302/303 → GET the frame — the same split as the SW branch above, the
+          # navigation going on (its document prompted to unload once, at its start). Latch the redirect chain's
+          # Sec-Fetch-Site (widened) + Origin taint (redirect_taints_origin?).
+          taint    = redirect_taints_origin?(origin_null, initiator, url.to_s, next_url)
+          next_rid = url_origin(next_url) == url_origin(url.to_s) ? rid : nil
           unless Native.redirect_to_get(status.to_i, 'POST')
             return navigate_realm_self_post(realm_id, next_url, body, content_type, depth: depth + 1, referrer: referrer, is_reload: is_reload, is_history: is_history,
-                                                       site_seed: site, origin_null: redirect_taints_origin?(origin_null, initiator, url.to_s, next_url),
-                                                       resulting_client_id: url_origin(next_url) == url_origin(url.to_s) ? rid : nil)
+                                                       site_seed: site, origin_null: taint, resulting_client_id: next_rid)
           end
-          parent = @runtime.frame_realm_parent(realm_id)
-          return frame_realm_host_call(parent, '__csimNavigateFrameByRealm', realm_id, next_url)
+
+          return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, referrer: referrer, is_reload: is_reload, is_history: is_history, record: false,
+                                                   site_seed: site, origin_null: taint, resulting_client_id: next_rid)
         end
         if download_response?(headers)
           save_downloaded_response(url, headers, resp_body)
@@ -10690,6 +10707,8 @@ module Capybara
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
         seed = frame_realm_host_call(parent, '__csimFrameSeed', handle)
+        return unless unload_frame_document(parent, realm_id)
+
         new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed).to_i
         return if new_id.zero?
         begin
@@ -10715,6 +10734,21 @@ module Capybara
         frame_realm_host_call(parent, '__csimGetFrameHandle', realm_id).to_i
       end
       # Call a host fn in the realm that OWNS an iframe (main realm for 0/nil).
+      # A frame's navigation asks its document whether it may be unloaded before it fetches anything (HTML "check if
+      # unloading is canceled": its `beforeunload`, and its frames' — `__csimPromptToUnloadFrame`): false when a handler
+      # removed the frame, the navigation then going no further.
+      def prompt_to_unload_frame(realm_id, parent = @runtime.frame_realm_parent(realm_id))
+        frame_realm_host_call(parent, '__csimPromptToUnloadFrame', realm_id) != false
+      end
+      # …and, its response in, its document unloaded (pagehide and unload, its frames' after it) while still the frame's
+      # — false when a handler of them removed the frame, the response then having nowhere to go: what is left of the old
+      # realm disposed.
+      def unload_frame_document(parent, realm_id)
+        return true if frame_realm_host_call(parent, '__csimTearDownFrameDocument', realm_id) != false
+
+        @runtime.dispose_frame_realm_tree(realm_id)
+        false
+      end
       def frame_realm_host_call(parent_realm_id, fn, *args)
         if parent_realm_id.nil? || parent_realm_id.zero?
           @runtime.call(fn, *args)
@@ -11137,6 +11171,8 @@ module Capybara
       # shape) under that document's policy, determined anew at each redirect hop.
       def navigate_frame(url, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator)
         raise 'too many redirects' if depth > 10
+        return if depth.zero? && !prompt_to_unload_frame(entry[:realm_id], entry[:parent_realm_id])
+
         invalidate_find_cache
         if url.to_s.match?(%r{\Aabout:blank(?:[?#]|\z)}i)
           reload_current_frame_realm('about:blank', '', 'text/html', entry: entry)
@@ -11161,6 +11197,8 @@ module Capybara
 
       def navigate_frame_post(url, body, content_type, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator)
         raise 'too many redirects' if depth > 10
+        return if depth.zero? && !prompt_to_unload_frame(entry[:realm_id], entry[:parent_realm_id])
+
         invalidate_find_cache
         env = rack_env_for(url, method: 'POST', input: body)
         env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
@@ -11208,6 +11246,8 @@ module Capybara
         old_id = entry[:realm_id]
         parent = entry[:parent_realm_id]
         seed = frame_realm_host_call(parent, '__csimFrameSeed', entry[:iframe_handle])
+        return unless unload_frame_document(parent, old_id)
+
         new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, nil, seed).to_i
         return if new_id.zero?
         rebind_frame_realm(parent, entry[:iframe_handle], old_id, new_id)
@@ -11421,7 +11461,8 @@ module Capybara
         # `within_frame` scope is now stale — fall back to the main document.
         # Per-frame session histories are scoped to this document tree; drop them.
         reset_frame_scope
-        @frame_histories = nil
+        @frame_histories       = nil
+        @frame_leaving_entries = nil
         reset_timer_state
         # The response content type drives both the parser choice (XML vs HTML —
         # XHTML/XML/SVG parse case-sensitively, no html/head/body skeleton,

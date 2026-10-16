@@ -71,6 +71,9 @@ module Capybara
         # document) so history.go(-1) can traverse back — and a controlling SW sees
         # isHistoryNavigation. Must run while the outgoing realm (a[0]) is still alive.
         '__csim_recordFrameNav'      => ->(b, *a) { b.record_frame_nav(a[0].to_i, a[1]); nil },
+        # …and the outgoing document unloaded (a[0] its realm, alive still): the entry takes its form state as its
+        # pagehide / unload handlers left it.
+        '__csim_frameUnloaded'       => ->(b, *a) { b.frame_document_unloaded(a[0].to_i); nil },
         '__setTimersActive'          => ->(b, *a) { b.timers_active = !!a[0]; nil },
         # a[2] is the realm that navigated: a nested browsing context keeps its OWN session
         # history, so a frame's pushState must not be mirrored onto the top document's.

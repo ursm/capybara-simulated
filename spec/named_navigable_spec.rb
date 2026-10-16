@@ -263,12 +263,80 @@ RSpec.describe 'choosing a navigable by name' do
   end
 
   # A frame the host navigates — its `location` set, which the host fetches and rebuilds the realm for — unloads its old
-  # document as any navigation does: beforeunload, pagehide, unload, its frameElement the container (Chrome).
-  it "unloads a frame's document the host navigates" do
-    child = '<script>for (const t of ["beforeunload", "pagehide", "unload"]) addEventListener(t, () => parent.L.push(t + ":" + (frameElement && frameElement.id)));</script>'
-    s, = session_for('/p' => '<script>window.L = []</script><iframe id="c" src="/c"></iframe>', '/c' => child)
+  # document as any navigation does: beforeunload, pagehide, unload, its frameElement the container; and every
+  # beforeunload of its frames' documents before any is unloaded — the same order a `src` change has (Chrome, both).
+  def unload_logger(name)
+    %(<script>for (const t of ["beforeunload", "pagehide", "unload"]) addEventListener(t, () => top.L.push("#{name}:" + t + ":" + (frameElement && frameElement.id)));</script>)
+  end
+
+  {
+    'the host navigates' => 'frames[0].location = "http://www.example.com/d"',
+    'its src changed'    => 'document.getElementById("c").src = "/d"'
+  }.each do |how, script|
+    it "unloads a frame's document and its frames' when #{how}" do
+      s, = session_for(
+        '/p' => '<script>window.L = []</script><iframe id="c" src="/c"></iframe>',
+        '/c' => unload_logger('c') + '<iframe id="g" src="/g"></iframe>',
+        '/g' => unload_logger('g')
+      )
+      s.evaluate_script('frames[0].frames[0].document.body.textContent')
+      s.execute_script(script)
+      expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 6 } }).to eq(%w[
+        c:beforeunload:c
+        g:beforeunload:g
+        c:pagehide:c
+        c:unload:c
+        g:pagehide:g
+        g:unload:g
+      ])
+    end
+  end
+
+  # HTML: whether unloading is canceled is asked before the navigation fetches anything, the document unloaded once the
+  # response is in — a cookie its beforeunload sets goes with the request, its unload's does not (Chrome).
+  it 'fires beforeunload before the request a host navigation of a frame makes, and unload after it' do
+    cookies = {}
+    s = simulated_session(->(env) {
+      cookies[env['PATH_INFO']] = env['HTTP_COOKIE']
+      body = {
+        '/p' => '<iframe id="c" src="/c"></iframe>',
+        '/c' => '<script>addEventListener("beforeunload", () => { document.cookie = "bu=1; path=/" }); addEventListener("unload", () => { document.cookie = "un=1; path=/" })</script>'
+      }[env['PATH_INFO']] || '<p>d</p>'
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{body}"]]
+    })
+    s.visit '/p'
     s.evaluate_script('frames[0].length')
     s.execute_script('frames[0].location = "http://www.example.com/d"')
-    expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 3 } }).to eq(%w[beforeunload:c pagehide:c unload:c])
+    expect(poll_until { s.evaluate_script('1') && cookies['/d'] }).to eq('bu=1')
+  end
+
+  # A frame an unload handler of its own removed is gone, its navigation with it: the response's document never runs,
+  # nor is a realm left for it (Chrome).
+  it 'commits no document into a frame a teardown handler removed' do
+    s, = session_for(
+      '/p' => '<script>window.L = []</script><iframe id="c" src="/c"></iframe>',
+      '/c' => '<script>addEventListener("unload", () => { frameElement.remove() })</script>',
+      '/d' => '<script>parent.L.push("ran")</script>'
+    )
+    s.evaluate_script('frames[0].length')
+    s.execute_script('frames[0].location = "http://www.example.com/d"')
+    expect(poll_until { s.evaluate_script('document.querySelectorAll("iframe").length').then {|n| n if n.zero? } }).to eq(0)
+    s.evaluate_script('1')
+    expect(s.evaluate_script('[L, frames.length]')).to eq([[], 0])
+    expect(s.driver.browser.instance_variable_get(:@runtime).frame_realm_ids).to be_empty
+  end
+
+  # A frame's session history entry keeps its form state as the document's pagehide handler left it — what a traversal
+  # back restores (Chrome).
+  it 'restores the form state a pagehide handler left' do
+    s, = session_for(
+      '/p' => '<iframe id="c" src="/c"></iframe>',
+      '/c' => '<script>addEventListener("pagehide", () => { document.querySelector("input").value = "left" })</script><form action="/d"><input id="i" name="i"></form>'
+    )
+    s.evaluate_script('frames[0].document.body.textContent')
+    s.execute_script('frames[0].document.getElementById("i").value = "typed"; frames[0].document.forms[0].requestSubmit()')
+    poll_until { s.evaluate_script('frames[0].location.pathname').then {|path| path if path == '/d' } }
+    s.execute_script('frames[0].history.back()')
+    expect(poll_until { s.evaluate_script('frames[0].document.getElementById("i") && frames[0].document.getElementById("i").value') }).to eq('left')
   end
 end
