@@ -261,4 +261,14 @@ RSpec.describe 'choosing a navigable by name' do
     s.execute_script('document.getElementById("x").src = "/e"')
     expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 3 } }).to eq(%w[beforeunload pagehide unload])
   end
+
+  # A frame the host navigates — its `location` set, which the host fetches and rebuilds the realm for — unloads its old
+  # document as any navigation does: beforeunload, pagehide, unload, its frameElement the container (Chrome).
+  it "unloads a frame's document the host navigates" do
+    child = '<script>for (const t of ["beforeunload", "pagehide", "unload"]) addEventListener(t, () => parent.L.push(t + ":" + (frameElement && frameElement.id)));</script>'
+    s, = session_for('/p' => '<script>window.L = []</script><iframe id="c" src="/c"></iframe>', '/c' => child)
+    s.evaluate_script('frames[0].length')
+    s.execute_script('frames[0].location = "http://www.example.com/d"')
+    expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 3 } }).to eq(%w[beforeunload:c pagehide:c unload:c])
+  end
 end
