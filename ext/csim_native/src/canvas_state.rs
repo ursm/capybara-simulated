@@ -219,8 +219,9 @@ pub(crate) struct CanvasStateHandle {
     saved: UnsafeCell<v8::TracedReference<v8::Object>>,
     // The bitmap's origin-clean flag: false once a source that is not origin-clean — a cross-origin image whose bytes
     // are not CORS-approved, a tainted canvas or bitmap, a pattern made of one — was drawn or set as a paint, which
-    // getImageData / toDataURL / toBlob then refuse with a SecurityError. Not drawing state: `restore()` keeps it, a
-    // fresh bitmap (`reset()`, a resize) has it true again.
+    // getImageData / toDataURL / toBlob then refuse with a SecurityError. Not drawing state, and nothing sets it true
+    // again (HTML §4.12.5.1.2): `restore()`, `reset()` and a resize keep it — a resize as the spec and Firefox, where
+    // Chrome cleans the bitmap (measured).
     origin_clean: Cell<bool>,
 }
 
@@ -305,7 +306,6 @@ impl CanvasStateHandle {
         }
         // SAFETY: the main thread writes the reference.
         unsafe { (*self.saved.get()).reset(scope, None) };
-        self.origin_clean.set(true);
     }
 }
 

@@ -293,7 +293,10 @@ impl RealmArena {
         }
         let encoding = texts.and_then(|t| t.texts[TEXT_ENCODING].as_deref()).filter(|e| !e.is_empty()).unwrap_or("UTF-8");
         let href = crate::url_ops::document_base_url(self, doc, &fallback, Some(encoding));
-        self.document_states.1.entry(doc).or_default().base_url = Some((epoch, fallback, href.clone()));
+        // (…none kept for a document freed, which a page can still hold: nothing would let go of it)
+        if self.get(doc).is_some() {
+            self.document_states.1.entry(doc).or_default().base_url = Some((epoch, fallback, href.clone()));
+        }
         href
     }
 }

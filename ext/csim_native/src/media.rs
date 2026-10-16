@@ -352,9 +352,10 @@ const AUDIO_USABLE: u32 = 2;
 
 // __dom.mediaResource(media, outcome, width, height, duration, tainted): the resource's outcome — a failure the dedicated
 // media source failure steps (MEDIA_ERR_SRC_NOT_SUPPORTED, no media data, NO_SOURCE: an earlier resource no longer
-// there, its frame's taint with it); a decoded video all its data (HAVE_ENOUGH_DATA), its size, duration and taint, IDLE — a seek to the default playback start
-// position where that is past 0 (within the duration), which then is 0 whatever it was; a usable audio IDLE. -> the
-// events the media data processing steps owe, in order (`resource_events`): none for a failure.
+// there, its frame's taint with it); a decoded video all its data (HAVE_ENOUGH_DATA), its size, duration and taint,
+// IDLE — a seek to the default playback start position where that is past 0 (within the duration), which then is 0
+// whatever it was; a usable audio IDLE. -> the events the media data processing steps owe, in order
+// (`resource_events`): none for a failure.
 fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
     let outcome = args.get(1).uint32_value(scope).unwrap_or(RESOURCE_FAILED);
