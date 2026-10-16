@@ -1000,6 +1000,9 @@ pub(crate) struct RealmState {
     pub(crate) shadow_hosts: bool,
     // Whether the focus shows NO ring (not `:focus-visible`): only after a pointer focus of a non-text control.
     pub(crate) focus_ring_hidden: bool,
+    // Whether the user's last driven input in it was a pointer's (a press) rather than the keyboard's (Tab, keys sent),
+    // which a focus it moves shows no ring for (focus.rs `pointerModality`).
+    pub(crate) pointer_modality: bool,
     // The realm document and its target fragments (as it stands, then decoded), when it has any — what `:target`
     // resolves (`is_target`).
     pub(crate) target: Option<(NodeId, Vec<String>)>,

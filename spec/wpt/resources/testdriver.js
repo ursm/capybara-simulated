@@ -383,7 +383,7 @@
       if (mType === 'mousedown' && !ev.defaultPrevented && typeof target.focus === 'function') {
         var doc = D();
         var prevActive = doc && doc._activeElement;
-        try { W.__csimFocusModality = 'pointer'; } catch (e) {}   // pointer-driven focus → not :focus-visible
+        try { W.__dom.setPointerModality(true); } catch (e) {}   // pointer-driven focus → not :focus-visible
         try { target.focus(); } catch (e) {}
         if (doc && doc.activeElement !== target && doc._activeElement === prevActive &&
             prevActive && typeof prevActive.blur === 'function') {
@@ -572,7 +572,7 @@
       return settled();
     },
     send_keys: function (element, keys) {
-      try { W.__csimFocusModality = 'keyboard'; } catch (e) {}   // keyboard-driven → :focus-visible applies
+      try { W.__dom.setPointerModality(false); } catch (e) {}   // keyboard-driven → :focus-visible applies
       try { if (element && typeof element.focus === 'function') element.focus(); } catch (e) {}
       var str = String(keys == null ? '' : keys);
       __shiftHeld = __ctrlHeld = __metaHeld = __altHeld = false;   // start fresh; a modifier in
