@@ -145,45 +145,43 @@ fn attr_names(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     rv.set(v8::Array::new_with_elements(scope, &values).into());
 }
 
-// A NamedNodeMap's supported property names (DOM §4.9.1) of element `id`'s attributes, whose document is `doc`: their
-// qualified names in order, each once — but for an HTML element in an HTML document, those with an ASCII upper alpha,
-// which no named access reaches (`dropped`).
-fn map_names(arena: &crate::dom::RealmArena, id: NodeId, doc: Option<NodeId>) -> (Vec<&str>, bool) {
-    let Some(n) = arena.get(id) else { return (Vec::new(), false) };
-    let drops = n.is_html() && arena.document_mode(doc).1;
-    let mut names: Vec<&str> = Vec::new();
-    for (k, _) in &n.attributes {
-        let name = qualified(k);
-        if !names.contains(&name) && !(drops && name.bytes().any(|b| b.is_ascii_uppercase())) {
-            names.push(name);
-        }
-    }
-    (names, drops)
+// Whether a NamedNodeMap's named access reaches the attribute named `name` of `n`, whose document is `doc` (DOM §4.9.1):
+// any but one with an ASCII upper alpha of an HTML element in an HTML document.
+fn map_reaches(arena: &crate::dom::RealmArena, n: &crate::dom::NodeData, doc: Option<NodeId>, name: &str) -> bool {
+    !(n.is_html() && name.bytes().any(|b| b.is_ascii_uppercase()) && arena.document_mode(doc).1)
 }
-// __dom.attrMapNames(element, docNid) -> [name, …]: those names (`map_names`).
+// __dom.attrMapNames(element, docNid) -> [name, …]: its NamedNodeMap's supported property names — its attributes'
+// qualified names in order, each once, those named access reaches (`map_reaches`).
 fn attr_map_names(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
     let doc = crate::dom::nid_arg(scope, &args, 1);
-    let names: Vec<String> = map_names(&crate::dom::dom(scope).arena, id, doc).0.into_iter().map(str::to_owned).collect();
+    let arena = &crate::dom::dom(scope).arena;
+    let mut names: Vec<String> = Vec::new();
+    if let Some(n) = arena.get(id) {
+        for (k, _) in &n.attributes {
+            let name = qualified(k);
+            if !names.iter().any(|s| s == name) && map_reaches(arena, n, doc, name) {
+                names.push(name.to_owned());
+            }
+        }
+    }
     let values: Vec<v8::Local<'_, v8::Value>> = names.iter().filter_map(|s| v8::String::new(scope, s)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &values).into());
 }
-// __dom.attrMapNamed(element, docNid, name) -> the index among its attributes of the first whose qualified name `name` is,
-// where it is a supported name (`map_names`), else -1.
+// __dom.attrMapNamed(element, docNid, name) -> the key of the first of its attributes whose qualified name `name` is,
+// where named access reaches it (`map_reaches`), else null.
 fn attr_map_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_int32(-1);
+    rv.set_null();
     let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
     let doc = crate::dom::nid_arg(scope, &args, 1);
     let name = args.get(2).to_rust_string_lossy(scope);
     let arena = &crate::dom::dom(scope).arena;
     let Some(n) = arena.get(id) else { return };
-    let drops = n.is_html() && arena.document_mode(doc).1;
-    if drops && name.bytes().any(|b| b.is_ascii_uppercase()) {
+    if !map_reaches(arena, n, doc, &name) {
         return;
     }
-    if let Some(i) = n.attributes.iter().position(|(k, _)| qualified(k) == name) {
-        rv.set_int32(i as i32);
-    }
+    let Some(key) = n.attributes.iter().find(|(k, _)| qualified(k) == name).map(|(k, _)| k.clone()) else { return };
+    rv.set(v8::String::new(scope, &key).unwrap().into());
 }
 
 // HTML's DOMStringMap name conversions (§3.2.6.6 `dataset`): a property name's attribute — `data-` and the name, each

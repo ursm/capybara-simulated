@@ -45,6 +45,16 @@ impl FaceRecord {
     }
     // How far it is from what a style asks for (CSS Fonts 4 §5.2): the nearest stretch first, then the same slant, then
     // the nearest weight.
+    // The weight / style its `local()` names are looked up under: `bold` where the low end of its weight is 600 or more,
+    // `italic` where it is slanted, in the colon form `fc_match` expects — '' for neither.
+    fn local_style(&self) -> &'static str {
+        match (self.weight.0 >= 600.0, self.slanted) {
+            (true, true) => "bold:italic",
+            (true, false) => "bold",
+            (false, true) => "italic",
+            (false, false) => "",
+        }
+    }
     fn distance(&self, stretch: f64, weight: f64, slanted: bool) -> Distance {
         Distance([stretch_distance(stretch, self.stretch), f64::from(u8::from(self.slanted != slanted)), weight_distance(weight, self.weight)])
     }
@@ -396,21 +406,16 @@ fn font_face_pick(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // '' for neither.
 fn font_local_style(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let [weight, style] = [0, 1].map(|k| args.get(k).to_rust_string_lossy(scope));
-    let face = parse(&format!("font-family: a; font-weight: {weight}; font-style: {style}"), "about:blank");
-    let (bold, slanted) = face.map_or((false, false), |f| (f.weight.0 >= 600.0, f.slanted));
-    let ws = match (bold, slanted) {
-        (true, true) => "bold:italic",
-        (true, false) => "bold",
-        (false, true) => "italic",
-        (false, false) => "",
-    };
-    rv.set(v8::String::new(scope, ws).unwrap().into());
+    rv.set(v8::String::new(scope, local_style_of(&weight, &style)).unwrap().into());
+}
+fn local_style_of(weight: &str, style: &str) -> &'static str {
+    parse(&format!("font-family: a; font-weight: {weight}; font-style: {style}"), "about:blank").map_or("", |f| f.local_style())
 }
 
-// __dom.fontFaceInfo(index) -> `[sources, sizeAdjust, ascentOverride, descentOverride, lineGapOverride, ranges, weight,
-// slanted]` of a face: its sources in order, flat `[kind, value, …]` (`url` / `local`), its overrides NaN where it has
-// none, its ranges a flat `[lo, hi, …]` or null for every code point, the low end of its weight range and whether it is
-// slanted.
+// __dom.fontFaceInfo(index) -> `[sources, sizeAdjust, ascentOverride, descentOverride, lineGapOverride, ranges,
+// localStyle]` of a face: its sources in order, flat `[kind, value, …]` (`url` / `local`), its overrides NaN where it has
+// none, its ranges a flat `[lo, hi, …]` or null for every code point, and the weight / style its `local()` names are
+// looked up under (`FaceRecord::local_style`).
 fn font_face_info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let index = args.get(0).int32_value(scope).unwrap_or(-1);
     let Some(face) = usize::try_from(index).ok().and_then(|i| faces_of(scope, &args).get(i).cloned()) else { return rv.set_null() };
@@ -424,8 +429,7 @@ fn font_face_info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         Some(r) => crate::dom::f64_array(scope, &r.iter().flat_map(|&(lo, hi)| [f64::from(lo), f64::from(hi)]).collect::<Vec<_>>()).into(),
         None => v8::null(scope).into(),
     });
-    items.push(v8::Number::new(scope, face.weight.0).into());
-    items.push(v8::Boolean::new(scope, face.slanted).into());
+    items.push(v8::String::new(scope, face.local_style()).unwrap().into());
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 fn sources_array<'s>(scope: &mut v8::PinScope<'s, '_>, list: &[FaceSource]) -> v8::Local<'s, v8::Array> {
@@ -454,6 +458,16 @@ fn font_face_sources(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn local_style_reads_the_descriptors() {
+        assert_eq!(super::local_style_of("bold", "normal"), "bold");
+        assert_eq!(super::local_style_of("700 400", "normal"), "");
+        assert_eq!(super::local_style_of("650.5", "italic"), "bold:italic");
+        assert_eq!(super::local_style_of("normal", "oblique 0deg"), "");
+        assert_eq!(super::local_style_of("normal", "oblique -10deg"), "italic");
+        assert_eq!(super::local_style_of("auto", "auto"), "");
+    }
+
     use super::*;
 
     #[test]

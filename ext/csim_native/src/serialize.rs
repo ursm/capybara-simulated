@@ -9,7 +9,7 @@ use web_atoms::ns;
 
 // The void elements (and the obsolete ones the serializer still treats as void): an HTML element of these has no end
 // tag and no content.
-const VOID: [&str; 18] = [
+pub(crate) const VOID: [&str; 18] = [
     "area", "base", "basefont", "bgsound", "br", "col", "embed", "frame", "hr", "img", "input", "keygen", "link", "meta",
     "param", "source", "track", "wbr",
 ];

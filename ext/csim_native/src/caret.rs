@@ -526,15 +526,13 @@ fn word_unit(u: u16) -> bool {
 
 // __dom.editingLeaf(nid) -> where typing goes on in an editing host whose selection's node was taken out of the tree
 // (a commit handler — Tagify's on `,`, Trix's on Enter — replaced the text the caret was in): its deepest element down
-// its first children that are no void element (`<br>`, `<img>`, `<hr>`, `<input>`, `<wbr>`, `<meta>`, `<link>`), the host
-// itself where it has none — as `node_value` answers it.
+// its first children that are no HTML void element (serialize.rs `VOID`: `<br>`, `<img>`, `<input>`, `<source>` …), the
+// host itself where it has none — as `node_value` answers it.
 fn editing_leaf(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(mut leaf) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_null() };
     let arena = &crate::dom::dom(scope).arena;
-    const VOID: [&str; 7] = ["br", "img", "hr", "input", "wbr", "meta", "link"];
-    while let Some(next) = arena.get(leaf).and_then(|n| {
-        n.children.iter().copied().find(|&c| arena.get(c).is_some_and(|c| c.kind == NodeKind::Element && !VOID.contains(&&*c.local_name)))
-    }) {
+    let void = |c: &NodeData| c.is_html() && crate::serialize::VOID.contains(&&*c.local_name);
+    while let Some(next) = arena.get(leaf).and_then(|n| n.children.iter().copied().find(|&c| arena.get(c).is_some_and(|c| c.kind == NodeKind::Element && !void(c)))) {
         leaf = next;
     }
     rv.set(crate::dom::node_value(scope, Some(leaf)));
