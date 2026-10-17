@@ -5,6 +5,7 @@
 // fill in.
 
 use crate::dom::{nid_arg, NodeData, NodeId, RealmArena, Text, STATE_FORM_ASSOCIATED, STATE_SELECTED};
+use crate::reflect_keywords::{FORM_ENCTYPE, FORM_METHOD, TABLES};
 
 pub(crate) enum Entry {
     // A name and a string value.
@@ -138,10 +139,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // An enumerated attribute's state: its value ASCII-lowercased where it is one of `keywords`, else `invalid`.
-fn keyword(value: &str, keywords: &[&'static str], invalid: &'static str) -> &'static str {
-    keywords.iter().copied().find(|k| value.eq_ignore_ascii_case(k)).unwrap_or(invalid)
-}
-
 // __dom.formSubmission(formNid, submitterNid, documentEncoding) -> `[action, method, enctype, target, rel, encoding]`:
 // how a form submits (HTML §4.10.21.3) — the submitter's `formaction`, `formmethod`, `formenctype` and `formtarget`
 // where it has them, else the form's own; the action as written (null for none: the bindings resolve it against the
@@ -158,9 +155,9 @@ fn form_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let own = |submitter_attr: &str, form_attr: &str| s.and_then(|s| s.plain_attr_units(submitter_attr)).or_else(|| f.plain_attr_units(form_attr));
     let text = |units: Vec<u16>| String::from_utf16_lossy(&units);
     let action = own("formaction", "action");
-    let method = keyword(&own("formmethod", "method").map(text).unwrap_or_default(), &["get", "post", "dialog"], "get");
-    let enctype_value = own("formenctype", "enctype").map(text).unwrap_or_default();
-    let enctype = keyword(&enctype_value, &["application/x-www-form-urlencoded", "multipart/form-data", "text/plain"], "application/x-www-form-urlencoded");
+    let state = |table: usize, value: Option<Vec<u16>>| TABLES[table].state(value.map(text).as_deref()).unwrap_or_default();
+    let method = state(FORM_METHOD, own("formmethod", "method"));
+    let enctype = state(FORM_ENCTYPE, own("formenctype", "enctype"));
     let target = s.and_then(|s| s.plain_attr_units("formtarget")).or_else(|| f.plain_attr_units("target")).or_else(|| {
         let root = arena.root_of(form);
         let mut stack = vec![root];

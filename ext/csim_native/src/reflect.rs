@@ -9,10 +9,35 @@ use crate::validity::{parse_html_integer, parse_non_negative};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "reflectNumber", reflect_number, context_id);
+    register(scope, ns, "reflectEnum", reflect_enum, context_id);
     register(scope, ns, "meterValue", meter_value, context_id);
     register(scope, ns, "progressValue", progress_value, context_id);
     register(scope, ns, "autofill", autofill_op, context_id);
     register(scope, ns, "elementReflection", element_reflection_op, context_id);
+}
+
+impl crate::reflect_keywords::KeywordTable {
+    // The canonical keyword of the state an enumerated attribute of `value` is in — its missing value default's for
+    // none, its invalid value default's for a value no keyword is, ASCII case-insensitively — or None for a state with
+    // no keyword.
+    pub(crate) fn state(&self, value: Option<&str>) -> Option<&'static str> {
+        let Some(value) = value else { return self.missing };
+        self.keywords.iter().find(|(k, _)| k.eq_ignore_ascii_case(value)).map(|&(_, v)| v).or(self.invalid)
+    }
+}
+// __dom.reflectEnum(element, name, table) -> the IDL attribute that reflects the enumerated attribute `name` (its
+// qualified name) by keyword table `table` (reflect_keywords.rs), limited to only known values: the canonical keyword of
+// the state the attribute is in, ASCII case-insensitively, else its missing or invalid value default's — null for a
+// state with no keyword.
+fn reflect_enum(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let Some(table) = args.get(2).uint32_value(scope).and_then(|t| crate::reflect_keywords::TABLES.get(t as usize)) else { return };
+    let name = args.get(1).to_rust_string_lossy(scope);
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let state = crate::dom::dom(scope).arena.get(id).map_or(table.missing, |n| table.state(n.get_attr(&name)));
+    if let Some(state) = state.and_then(|s| v8::String::new(scope, s)) {
+        rv.set(state.into());
+    }
 }
 
 // HTMLElement's reflected members whose answers are more than an attribute's value (HTML §6.6.3, §3.2.6.6, §6.7.2,
