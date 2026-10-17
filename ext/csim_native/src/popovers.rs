@@ -19,17 +19,27 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "lightDismissPress", light_dismiss_press, context_id);
 }
 
-// A `popover` attribute's state, of those the lists hold: auto (an empty value, `auto`) or hint; manual (`manual`, an
-// invalid value) and none are neither.
+// A `popover` attribute's state, of its value (none: no attribute): none, auto (empty, `auto`), hint, or manual (any other
+// value, `manual` an invalid one too) — ASCII case-insensitively.
+pub(crate) const NONE: u32 = 0;
 pub(crate) const AUTO: u32 = 1;
 pub(crate) const HINT: u32 = 2;
+pub(crate) const MANUAL: u32 = 3;
+pub(crate) fn popover_state(value: Option<&str>) -> u32 {
+    match value {
+        None => NONE,
+        Some(v) if v.is_empty() || v.eq_ignore_ascii_case("auto") => AUTO,
+        Some(v) if v.eq_ignore_ascii_case("hint") => HINT,
+        Some(_) => MANUAL,
+    }
+}
+// …an element's, of those the lists hold — auto or hint; manual and none are neither (0).
 pub(crate) fn popover_kind(n: &NodeData) -> u32 {
     if !n.is_html() {
         return 0;
     }
-    match n.plain_attr("popover") {
-        Some(v) if v.is_empty() || v.eq_ignore_ascii_case("auto") => AUTO,
-        Some(v) if v.eq_ignore_ascii_case("hint") => HINT,
+    match popover_state(n.plain_attr("popover")) {
+        kind @ (AUTO | HINT) => kind,
         _ => 0,
     }
 }

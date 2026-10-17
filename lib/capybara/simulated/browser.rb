@@ -8384,7 +8384,8 @@ module Capybara
         # bytes must be registered in this window's @blob_registry FIRST. No partition
         # entry — the blob keeps its original storage partition; this only makes it
         # first-party-fetchable in the window it was navigated into.
-        @blob_registry_lock.synchronize { @blob_registry[url.to_s] = bytes }
+        # (…no copy to let go of as the boot begins this page: a window sent to the same blob document again keeps it)
+        @blob_registry_lock.synchronize { @blob_copies.delete(url.to_s); @blob_registry[url.to_s] = bytes }
         boot_response_into_ctx(bytes)
         # (…its document's copy, which the next page to begin here lets go of — noted after the boot, which begins this one)
         @blob_registry_lock.synchronize { @blob_copies << url.to_s }

@@ -479,20 +479,6 @@ fn change(
     Some((steps, old, local))
 }
 
-// A `popover` attribute's state, of its value (`None`: no attribute): none, auto (empty, `auto`), hint, or manual (any
-// other value, `manual` an invalid one too) — ASCII case-insensitively.
-fn popover_state(value: Option<&[u16]>) -> u8 {
-    let Some(v) = value else { return 0 };
-    let is = |word: &str| v.len() == word.len() && v.iter().zip(word.bytes()).all(|(&c, w)| c < 128 && (c as u8).eq_ignore_ascii_case(&w));
-    if v.is_empty() || is("auto") {
-        1
-    } else if is("hint") {
-        2
-    } else {
-        3
-    }
-}
-
 // A script element: an HTML or SVG `<script>`.
 pub(crate) fn is_script(n: &NodeData) -> bool {
     &*n.local_name == "script" && (n.is_html() || n.ns == web_atoms::ns!(svg))
@@ -555,7 +541,8 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     steps |= flag(local.starts_with("on"), STEP_HANDLER);
     steps |= flag(changed && matches!(local, "form" | "id" | "disabled"), STEP_FORM_OWNER);
     // (…its state — auto, hint, manual (any other value), none — not its value: HTML's `popover` attribute change steps)
-    let popover_moved = popover_state(old) != popover_state(value);
+    let state = |v: Option<&[u16]>| crate::popovers::popover_state(v.map(String::from_utf16_lossy).as_deref());
+    let popover_moved = state(old) != state(value);
     steps |= flag(html && local == "popover" && popover_moved && n.state & crate::dom::STATE_POPOVER_OPEN != 0, STEP_POPOVER);
     steps
 }
