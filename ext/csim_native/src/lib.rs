@@ -28,6 +28,7 @@ mod element_references;
 mod clone;
 mod connection_steps;
 mod collections;
+mod combobox;
 mod css;
 mod css_animations;
 mod css_transitions;

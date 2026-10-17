@@ -653,7 +653,6 @@ impl NodeData {
         }
         self.plain_attr_units(local) == other.plain_attr_units(other_local)
     }
-    // The value of the attribute `local` in no namespace as the page wrote it: UTF-16, a lone surrogate included.
     // The attribute stored under `key`'s value as its text (`Text`): the lossless UTF-16 override where it carried a lone
     // surrogate, else its UTF-8.
     pub(crate) fn attr_text(&self, key: &str) -> Option<Text> {
@@ -666,6 +665,7 @@ impl NodeData {
     pub(crate) fn plain_attr_text(&self, local: &str) -> Option<Text> {
         self.plain_attr(local).and_then(|_| self.attr_text(local))
     }
+    // …as the page wrote it: UTF-16, a lone surrogate included.
     pub(crate) fn plain_attr_units(&self, local: &str) -> Option<Vec<u16>> {
         self.plain_attr_text(local).map(Text::into_units)
     }
@@ -2849,6 +2849,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::dom_matrix::install(scope, ns, context_id);
     crate::validity::install(scope, ns, context_id);
     crate::form_state::install(scope, ns, context_id);
+    crate::combobox::install(scope, ns, context_id);
     crate::input_types::install(scope, ns, context_id);
     crate::data_url::install(scope, ns, context_id);
     crate::event_stream::install(scope, ns, context_id);
