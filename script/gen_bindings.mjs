@@ -400,6 +400,7 @@ const INTERFACES = [
   ['geometry', 'DOMMatrix', { install: true }],
   ['url', 'URL', { install: true }],
   ['url', 'URLSearchParams', { install: true }],
+  ['urlpattern', 'URLPattern', { install: true }],
   ['fetch', 'Headers', { install: true }],
   ['xhr', 'FormData', { install: true }],
   ['html', 'Storage', { install: true, namedProperties: 'the Proxy each storage area is (storage.js)' }],

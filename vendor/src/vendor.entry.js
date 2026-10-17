@@ -18,10 +18,4 @@
 // globalThis (and layers TextDecoderStream / TextEncoderStream over
 // TransformStream + our existing TextDecoder/TextEncoder).
 import * as streams from 'web-streams-polyfill';
-
-// URLPattern (the URL Pattern spec) — the reference polyfill, imported via its
-// pure subpath (the package root's index.js side-effect-installs a global; the
-// bridge decides where and whether to expose it, like every other vendor piece).
-// First consumer: the ServiceWorker Static Routing API's `urlPattern` conditions.
-import { URLPattern } from 'urlpattern-polyfill/urlpattern';
-export { streams, URLPattern };
+export { streams };

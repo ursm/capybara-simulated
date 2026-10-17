@@ -15,7 +15,6 @@
     "vendor:wpt": "node script/vendor_wpt.mjs"
   },
   "dependencies": {
-    "urlpattern-polyfill": "^10.1.0",
     "web-streams-polyfill": "^4.3.0"
   },
   "devDependencies": {

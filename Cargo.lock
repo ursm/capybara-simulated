@@ -446,6 +446,7 @@ dependencies = [
  "typed-arena",
  "unicode-bidi",
  "url",
+ "urlpattern",
  "v8",
  "web_atoms 0.2.6",
  "wuff",
@@ -3105,6 +3106,18 @@ dependencies = [
  "percent-encoding",
  "serde",
  "serde_derive",
+]
+
+[[package]]
+name = "urlpattern"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df16f50ef4cc145211879a3867ba757076b25dfee812040dcb0658bd9ae7904b"
+dependencies = [
+ "icu_properties",
+ "regex",
+ "serde",
+ "url",
 ]
 
 [[package]]

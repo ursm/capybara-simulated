@@ -82,6 +82,8 @@ mod paint;
 mod perf_timeline;
 mod request_state;
 mod search_params;
+mod sw_router;
+mod url_pattern;
 mod storage_areas;
 mod xhr_state;
 mod keys;
