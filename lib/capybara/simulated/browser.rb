@@ -569,6 +569,9 @@ module Capybara
         # worker's blob URL store dies with it, so terminating the worker revokes
         # them (url-lifetime "Terminating worker revokes its URLs").
         @blob_owners = {}
+        # …and the URLs whose bytes a blob: document booted into this window holds a copy of (`boot_blob_document`): its
+        # document's, gone with it as the next page begins (`forget_blob_copies`) — the creator's URL itself left alone.
+        @blob_copies = []
         # Postmessage transferable-buffer store. Large Uint8Array /
         # ArrayBuffer payloads cross isolates as a Ruby-side byte ID
         # rather than a JSON base64 string, so peak JS heap stays flat.
@@ -3536,7 +3539,7 @@ module Capybara
         # Free any zero-copy transfer backing stores that went unimported
         # (worker killed before draining its inbox, etc.) before the rebuild.
         drop_pending_transfers
-        @blob_registry_lock.synchronize { @blob_registry.clear; @blob_owners.clear }
+        @blob_registry_lock.synchronize { @blob_registry.clear; @blob_owners.clear; @blob_copies.clear }
         # Drop volatile entries from the class-level HTTP asset cache
         # so test-local DB state (TranslationOverride, etc.) reaches
         # the app on subsequent visits. Fingerprinted assets
@@ -8383,6 +8386,8 @@ module Capybara
         # first-party-fetchable in the window it was navigated into.
         @blob_registry_lock.synchronize { @blob_registry[url.to_s] = bytes }
         boot_response_into_ctx(bytes)
+        # (…its document's copy, which the next page to begin here lets go of — noted after the boot, which begins this one)
+        @blob_registry_lock.synchronize { @blob_copies << url.to_s }
         # Adopt into the in-VM store too, so a LATER resolve keeps the correct content
         # type (a bytes-only @blob_registry entry resolves as application/octet-stream).
         @runtime.call('__csimAdoptBlobBytes', url.to_s, bytes, content_type.to_s) rescue nil
@@ -8436,6 +8441,14 @@ module Capybara
       # "r:#{owner_realm.to_i}") so a marshalled Float/String id still matches.
       def revoke_worker_blobs(handle) = revoke_owned_blobs("w:#{handle.to_i}")
       def revoke_realm_blobs(realm_id) = revoke_owned_blobs("r:#{realm_id.to_i}")
+      # The copies the last blob: document booted here held (`@blob_copies`) let go of — but a URL a realm of this window
+      # has since made its own, which its owner's revocation governs.
+      def forget_blob_copies
+        @blob_registry_lock.synchronize do
+          @blob_copies.each {|url| @blob_registry.delete(url) unless @blob_owners.key?(url) }
+          @blob_copies.clear
+        end
+      end
 
       # ── postMessage transferable-buffer registry ───────────────────
       #
