@@ -1372,6 +1372,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "laidOutBox", laid_out_box_op, context_id);
     register(scope, ns, "renderedBox", rendered_box_op, context_id);
     register(scope, ns, "scrollSize", scroll_size_op, context_id);
+    register(scope, ns, "contentSize", content_size_op, context_id);
     register(scope, ns, "scrollRange", scroll_range_op, context_id);
     register(scope, ns, "clientBox", client_box_op, context_id);
     register(scope, ns, "frameViewport", frame_viewport_op, context_id);
@@ -1394,6 +1395,11 @@ fn rendered_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 }
 fn scroll_size_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, |arena, id| scroll_size(arena, id).map(|[w, h, ..]| [w, h]));
+}
+// __dom.contentSize(nid, out) -> whether `nid` has a box it measures: its content area's `[width, height]` as the layout
+// sized it (`observed_sizes`) — what an image being rendered answers for `width` / `height`.
+fn content_size_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, |arena, id| observed_sizes(arena, id).map(|[_, _, w, h, ..]| [w, h]));
 }
 // __dom.scrollRange(nid, out) -> whether `nid` has a box, and the range its offsets may take written to `out` as `[min x,
 // max x, min y, max y]` (`scroll_range`): what a scroll offset written to it is clamped to.
