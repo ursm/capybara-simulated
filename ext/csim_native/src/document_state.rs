@@ -38,6 +38,8 @@ const READY: u32 = 1;
 const FLAGS: u32 = 2;
 const INSERTIONS: u32 = 3;
 const DESTRUCTIVE_IGNORED: u32 = 4;
+// …and the flag that says a document has no browsing context (`FLAGS`'s first).
+const NO_BROWSING_CONTEXT: u32 = 1;
 const READY_COMPLETE: u32 = 2;
 
 // …its texts, as the bindings number them (`DOC_TEXT_*`): none until set — a document's URL then its realm's, its
@@ -76,6 +78,11 @@ impl DocumentStates {
     }
     pub(crate) fn set_domain(&mut self, doc: NodeId, domain: String) {
         self.1.entry(doc).or_default().texts[TEXT_DOMAIN] = Some(domain);
+    }
+    // Whether `doc` has a browsing context — the realm's document and a frame's, not a `createHTMLDocument` /
+    // DOMParser / XHR one (the bindings' flag, dom-nodes.js `DOC_NO_BROWSING_CONTEXT`).
+    pub(crate) fn has_browsing_context(&self, doc: NodeId) -> bool {
+        self.0.get(&doc).is_none_or(|s| s.flags & NO_BROWSING_CONTEXT == 0)
     }
     // The document freed: its state let go of with it.
     pub(crate) fn forget(&mut self, doc: NodeId) {

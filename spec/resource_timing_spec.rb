@@ -554,6 +554,32 @@ RSpec.describe 'resource timing' do
     )
   end
 
+  it 'fetches no media data a src attribute or preload rules out, nor anything in a document with no browsing context' do
+    # Media resource selection: a `src` attribute, even an empty one (a failure, no fetch), wins over the `<source>`
+    # children; `preload` is an enumerated attribute, `NONE` is `none`; a `createHTMLDocument` document loads nothing.
+    doc = <<~HTML
+      <!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+        <video src=""><source src="/m.mp4?id=after-empty-src"></video>
+        <video preload="NONE" src="/m.mp4?id=preload-none"></video>
+        <audio src="/m.aud?id=shown"></audio>
+        <script>
+          const inert = document.implementation.createHTMLDocument('');
+          const video = inert.createElement('video');
+          video.src = '/m.mp4?id=inert';
+          inert.body.appendChild(video);
+        </script>
+      </body></html>
+    HTML
+    a = ->(env) { env['PATH_INFO'].start_with?('/m.') ? [200, {'content-type' => 'application/octet-stream'}, ['x']] : [200, {'content-type' => 'text/html'}, [doc]] }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    got = poll_until do
+      m = s.evaluate_script("performance.getEntriesByType('resource').map(function (e) { return e.name.split('/').pop(); })")
+      m.include?('m.aud?id=shown') ? m : nil
+    end
+    expect(got.grep(/^m\./)).to eq(['m.aud?id=shown'])
+  end
+
   it 'records an <input type=image> as \'input\' and an EventSource as \'other\'' do
     # Both record on connection (the image-button load path and the EventSource constructor),
     # without waiting on the rendering update. `<body background>` ('body') records at the

@@ -9,7 +9,7 @@ use web_atoms::ns;
 
 use crate::dom::{nid_arg, NodeId, NodeKind, RealmArena};
 
-// The resources `timed_resources` handed out for the page, by initiator and URL.
+// The resources `timed_resources` (and `useReference`) handed out for the page, by initiator and URL.
 pub(crate) type TimedResources = HashSet<(&'static str, String)>;
 
 // What a resource's request carries of its element's `crossorigin`: none (a no-cors request), `anonymous` (cors, the
@@ -25,8 +25,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 
 // The URL an SVG `<use>` element `id` references in another document — its `href`, else its XLink one, trimmed and
 // parsed against `doc`'s base URL, the fragment (which names the piece, not the resource) dropped — or None for a
-// same-document reference (`#id`), none, or no URL.
+// same-document reference (`#id`), none, or no URL, and in a document with no browsing context, which loads nothing.
 pub(crate) fn use_reference(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Option<String> {
+    if !arena.document_states.has_browsing_context(doc) {
+        return None;
+    }
     let n = arena.get(id).filter(|n| n.kind == NodeKind::Element && n.ns == ns!(svg) && &*n.local_name == "use")?;
     let raw = n.plain_attr("href").or_else(|| n.ns_attr("http://www.w3.org/1999/xlink", "href"))?;
     let s = raw.trim().to_owned();
@@ -39,14 +42,18 @@ pub(crate) fn use_reference(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> 
 }
 
 // The resources connecting element `id` (of document `doc`) fetches for no consumer, those the page has not fetched
-// yet, each `(initiator, url, cors)`:
+// yet, each `(initiator, url, cors)` — none in a document with no browsing context, which loads nothing:
 //   a `<video>`'s `poster` ('video');
-//   a `<video>` / `<audio>`'s media data — its `src`, else its first `<source src>` — unless `preload="none"` opts it out
-//     until it plays ('video' / 'audio'); and each `<track default src>` child ('track'). (Chrome picks the first
-//     PLAYABLE source and loads a track only when its mode shows: the first source and the `default` tracks stand in.)
+//   a `<video>` / `<audio>`'s media data — its `src` attribute's where it has one (an empty one is a failure, no fetch),
+//     else its first `<source src>` — unless `preload` says `none` (ASCII case-insensitively) and opts it out until it
+//     plays ('video' / 'audio'); and each `<track default src>` child ('track'). (Chrome picks the first PLAYABLE
+//     source and loads a track only when its mode shows: the first source and the `default` tracks stand in.)
 //   an `<embed src>` ('embed'), an `<object data>` ('object');
 //   an SVG `<use>`'s external document (`use_reference`), 'other' (resource-timing/initiator-type/svg).
 fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'static str, String, u32)> {
+    if !arena.document_states.has_browsing_context(doc) {
+        return Vec::new();
+    }
     let Some(n) = arena.get(id).filter(|n| n.kind == NodeKind::Element) else { return Vec::new() };
     let mut wanted: Vec<(&'static str, NodeId, String)> = Vec::new();
     if n.ns == ns!(html) {
@@ -63,10 +70,12 @@ fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'st
                         c.plain_attr("src").filter(|v| !v.is_empty()).map(str::to_owned)
                     })
                 };
-                if n.plain_attr("preload") != Some("none") {
-                    if let Some(src) = attr("src").or_else(first_source) {
-                        wanted.push((initiator, id, src));
-                    }
+                if !n.plain_attr("preload").is_some_and(|p| p.eq_ignore_ascii_case("none")) {
+                    let src = match n.plain_attr("src") {
+                        Some(src) => Some(src.to_owned()).filter(|s| !s.is_empty()),
+                        None => first_source(),
+                    };
+                    wanted.extend(src.map(|src| (initiator, id, src)));
                 }
                 for &c in &n.children {
                     let Some(track) = arena.get(c).filter(|c| c.is_html_named("track") && c.plain_attr("default").is_some()) else { continue };
@@ -103,10 +112,13 @@ fn cors_of(arena: &RealmArena, id: NodeId) -> u32 {
 }
 
 // __dom.timedResources(el, docNid) -> `[initiator, url, cors, …]`: the resources connecting `el` fetches for no consumer
-// (`timed_resources`), `cors` NO_CORS / CORS / CORS_CREDENTIALS.
+// (`timed_resources`), `cors` NO_CORS / CORS / CORS_CREDENTIALS; undefined for none.
 fn timed_resources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(id), Some(doc)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
     let found = timed_resources(&mut crate::dom::dom(scope).arena, id, doc);
+    if found.is_empty() {
+        return;
+    }
     let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(found.len() * 3);
     for (initiator, url, cors) in &found {
         let (Some(i), Some(u)) = (v8::String::new(scope, initiator), v8::String::new(scope, url)) else { continue };
@@ -117,10 +129,13 @@ fn timed_resources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.useReference(el, docNid) -> the external document an SVG `<use>` references (`use_reference`), or undefined.
+// __dom.useReference(el, docNid) -> the external document an SVG `<use>` references (`use_reference`), which a
+// controlled document fetches through its service worker (destination `image`) — once for the page, undefined after.
 fn use_reference_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(id), Some(doc)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
-    if let Some(url) = use_reference(&mut crate::dom::dom(scope).arena, id, doc).and_then(|u| v8::String::new(scope, &u)) {
+    let arena = &mut crate::dom::dom(scope).arena;
+    let Some(url) = use_reference(arena, id, doc).filter(|u| arena.timed_resources.insert(("image", u.clone()))) else { return };
+    if let Some(url) = v8::String::new(scope, &url) {
         rv.set(url.into());
     }
 }
