@@ -295,6 +295,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "fontFaceDescriptor", font_face_descriptor, context_id);
     crate::dom::register(scope, ns, "fontLocalStyle", font_local_style, context_id);
     crate::dom::register(scope, ns, "fontFamilyList", font_family_list_op, context_id);
+    crate::dom::register(scope, ns, "fontFamilyName", font_family_name_op, context_id);
+    crate::dom::register(scope, ns, "fontFamilyString", font_family_string_op, context_id);
     crate::dom::register(scope, ns, "fontFacesMatching", font_faces_matching, context_id);
 }
 // __dom.fontFamilyList(stack) -> the families of a `font-family` value, each as a stack of that one family
@@ -303,6 +305,29 @@ fn font_family_list_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let stack = args.get(0).to_rust_string_lossy(scope);
     let items: Vec<v8::Local<v8::Value>> = serialized_family_list(&stack).iter().filter_map(|f| v8::String::new(scope, f)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// __dom.fontFamilyName(value) -> the family a `font-family` descriptor's value names, unquoted and unescaped (its one
+// `<family-name>`: a string, or identifiers joined by a space) — null for a value that is no one family.
+fn font_family_name_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let value = args.get(0).to_rust_string_lossy(scope);
+    let mut families = family_list(&value);
+    match (families.pop(), families.is_empty()) {
+        (Some((name, _)), true) => match v8::String::new(scope, &name) {
+            Some(name) => rv.set(name.into()),
+            None => rv.set_null(),
+        },
+        _ => rv.set_null(),
+    }
+}
+// __dom.fontFamilyString(name) -> `name` as a CSS string, quoted and escaped (CSSOM "serialize a string").
+fn font_family_string_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let name = args.get(0).to_rust_string_lossy(scope);
+    let mut out = String::new();
+    let _ = cssparser::serialize_string(&name, &mut out);
+    if let Some(out) = v8::String::new(scope, &out) {
+        rv.set(out.into());
+    }
 }
 
 // A `@font-face` descriptor's value as the engine parses and serializes it (CSS Fonts 4 §4, CSS Font Loading's FontFace
