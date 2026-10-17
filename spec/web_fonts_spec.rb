@@ -478,11 +478,6 @@ RSpec.describe 'web fonts' do
     expect(got).to eq(['Imp,Ins,Outer', true, true])
   end
 
-  # CSS Font Loading §2.2: a CSS-connected face's attributes are its rule's descriptors. A CSSOM edit of the rule is read
-  # by the same FontFace; a `<style>` given new text is a new sheet, whose rule is a face of its own — even given its
-  # old text back, unread in between (Chrome makes a new one for the CSSOM edit too, and keeps the old one for the same
-  # text: Blink quirks the spec does not have); and a value a script set on the face stays until the rule says
-  # something new.
   # A controlled document fetches a face's source through its service worker (destination `font`) — a face its sheets
   # declared before the page was controlled included, once it is.
   it 'fetches a face listed before the page was controlled through the service worker once it is' do
@@ -527,6 +522,11 @@ RSpec.describe 'web fonts' do
     end
   end
 
+  # CSS Font Loading §2.2: a CSS-connected face's attributes are its rule's descriptors. A CSSOM edit of the rule is read
+  # by the same FontFace; a `<style>` given new text is a new sheet, whose rule is a face of its own — even given its
+  # old text back, unread in between (Chrome makes a new one for the CSSOM edit too, and keeps the old one for the same
+  # text: Blink quirks the spec does not have); and a value a script set on the face stays until the rule says
+  # something new.
   it 'reflects its rule\'s descriptors on a CSS-connected FontFace' do
     s = session('/held.html')
     got = s.evaluate_script(<<~JS)
