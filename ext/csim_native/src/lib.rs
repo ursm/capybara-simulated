@@ -84,6 +84,7 @@ mod request_state;
 mod response_state;
 mod search_params;
 mod sw_router;
+mod ws_state;
 mod url_pattern;
 mod storage_areas;
 mod xhr_state;
