@@ -101,12 +101,9 @@ module Capybara
         # The system clipboard: one for the session, like a desktop's — what a page copies another window, frame or the
         # next visit pastes (clipboard.js reads and writes it through the host).
         @clipboard       = {}
-        # Cache Storage (caches/Cache) is origin-shared like localStorage — owned at the
-        # Driver level and injected, so a service worker and every same-origin window see
-        # the same caches (partitioned by origin key within the store).
-        @cache_storage   = {}
-        # …and IndexedDB, the session's partition of the engine's registry.
-        @idb_partition   = Native.idb_partition_new
+        # …and IndexedDB and Cache Storage, the session's partition of the engine's registries, which a service worker
+        # and every same-origin window share (idb_databases.rs, cache_storage.rs).
+        @session_partition = Native.session_partition_new
         # Capture the universal-server flag ONCE, at session construction — the WPT
         # runner sets CSIM_LOCAL_ALL_HOSTS only while building the session, then
         # restores it. Every window (incl. aux windows opened later) inherits this so
@@ -148,8 +145,7 @@ module Capybara
                     auth_cache:      @auth_cache,
                     local_storage:   @local_storage,
                     clipboard:       @clipboard,
-                    cache_storage:   @cache_storage,
-                    idb_partition:   @idb_partition,
+                    session_partition: @session_partition,
                     all_hosts_local: @all_hosts_local).tap do |b|
           b.touch_input        = @touch
           b.default_viewport   = @viewport   if @viewport
@@ -407,8 +403,8 @@ module Capybara
         }
         reset_windows!
         @browser.dispose rescue nil
-        # …and the session's IndexedDB databases and localStorage, which outlive every window but not the session.
-        Native.idb_clear(@idb_partition)
+        # …and the session's IndexedDB databases, caches and localStorage, which outlive every window but not the session.
+        Native.session_partition_clear(@session_partition)
         Native.storage_clear(@local_storage)
       end
 

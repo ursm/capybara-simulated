@@ -88,18 +88,6 @@ module Capybara
         '__getDocumentReferrer'      => ->(b, *_) { b.current_referer },
         '__csimStoragePartitions'    => ->(b, *_a) { b.storage_partitions },
         '__csimStorageChanged'       => ->(b, *a) { b.storage_changed(*a[0, 7]); nil },
-        # Cache Storage — origin-partitioned (a[0] = origin key), Ruby-backed so it
-        # survives the per-visit VM rebuild and is shared between a service worker and
-        # the client it controls. The JS side (cache-storage.js) owns the spec matching;
-        # Ruby is a dumb ordered store keyed by (origin, cache name).
-        '__csim_cacheStorageOpen'    => ->(b, *a) { b.cache_storage_open(a[0], a[1]) },
-        '__csim_cacheStorageHas'     => ->(b, *a) { b.cache_storage_has(a[0], a[1]) },
-        '__csim_cacheStorageDelete'  => ->(b, *a) { b.cache_storage_delete(a[0], a[1]) },
-        '__csim_cacheStorageKeys'    => ->(b, *a) { b.cache_storage_keys(a[0]) },
-        '__csim_cacheEntries'        => ->(b, *a) { b.cache_entries(a[0], a[1]) },
-        '__csim_cacheEntryResponse'  => ->(b, *a) { b.cache_entry_response(a[0], a[1], a[2]) },
-        '__csim_cachePut'            => ->(b, *a) { b.cache_put(a[0], a[1], a[2], a[3], a[4]); nil },
-        '__csim_cacheDeleteEntries'  => ->(b, *a) { b.cache_delete_entries(a[0], a[1], a[2]) },
         '__csimGeolocationState'     => ->(b, *_) { b.geolocation_state_json },
         '__modalDialog'              => ->(b, *a) { b.handle_modal(a[0], a[1], a[2]) },
         '__csim_pushImportmap'       => ->(b, *a) { b.set_importmap(a[0], a[1]); nil },
@@ -135,7 +123,7 @@ module Capybara
         '__csimBcPost'               => ->(b, *a) { b.bc_post(a[0], a[1], a[2], a[3], a[4], a[5]); nil },
         '__csimBcSiblingsExist'      => ->(b, *_a) { b.bc_siblings_exist? },
         # The session's IndexedDB partition, which every realm and worker of it is an agent of (idb_databases.rs).
-        '__csimIdbPartition'         => ->(b, *_a) { b.idb_partition },
+        '__csimSessionPartition'     => ->(b, *_a) { b.session_partition },
         '__csimWindowGet'            => ->(b, *a) { b.window_get(a[0], a[1]) },
         '__csimWindowDocGet'         => ->(b, *a) { b.window_doc_get(a[0], a[1]) },
         # Cross-window remote-ref RPC: route an opener's node/object proxy op to

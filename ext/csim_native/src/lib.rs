@@ -90,6 +90,7 @@ mod storage_areas;
 mod xhr_state;
 mod keys;
 mod cache_matching;
+mod cache_storage;
 mod sandbox;
 mod service_worker;
 mod sw_registry;
@@ -275,12 +276,19 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("content_type_essence", magnus::function!(mime::content_type_essence_for_ruby, 1))?;
     native.define_module_function("javascript_content", magnus::function!(script::javascript_content_for_ruby, 1))?;
     native.define_module_function("module_content", magnus::function!(script::module_content_for_ruby, 2))?;
-    // A driver session's IndexedDB storage: a new partition of the one registry, cleared as the session resets, and
-    // whether an agent of it has notices to take — its event loop has work (idb_databases.rs).
-    native.define_module_function("idb_partition_new", magnus::function!(idb_databases::partition_new, 0))?;
+    // A driver session's IndexedDB and Cache Storage: a new partition of their registries, cleared as the session
+    // resets, and whether an agent of it has notices to take — its event loop has work (idb_databases.rs,
+    // cache_storage.rs).
+    native.define_module_function("session_partition_new", magnus::function!(idb_databases::partition_new, 0))?;
+    native.define_module_function("session_partition_clear", magnus::function!(session_partition_clear, 1))?;
+    native.define_module_function("idb_pending", magnus::function!(idb_databases::pending, 1))?;
     native.define_module_function("storage_partition_new", magnus::function!(storage_areas::partition_new, 0))?;
     native.define_module_function("storage_clear", magnus::function!(storage_areas::clear, 1))?;
-    native.define_module_function("idb_clear", magnus::function!(idb_databases::clear, 1))?;
-    native.define_module_function("idb_pending", magnus::function!(idb_databases::pending, 1))?;
     Ok(())
+}
+
+// …a session's IndexedDB databases and caches deleted.
+fn session_partition_clear(partition: u64) {
+    idb_databases::clear(partition);
+    cache_storage::clear(partition);
 }

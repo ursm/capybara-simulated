@@ -208,7 +208,7 @@ module Capybara
         Rack::Mime.mime_type(File.extname(path.to_s), '')
       end
 
-      def initialize(app, driver: nil, cookies: nil, cookie_flags: nil, auth_cache: nil, local_storage: nil, clipboard: nil, cache_storage: nil, idb_partition: nil, all_hosts_local: nil)
+      def initialize(app, driver: nil, cookies: nil, cookie_flags: nil, auth_cache: nil, local_storage: nil, clipboard: nil, session_partition: nil, all_hosts_local: nil)
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
@@ -263,13 +263,10 @@ module Capybara
         # The system clipboard, the Driver's (one for the session, every window's): `entries` — [type, byte string] each —
         # and the change count a ClipboardItem read from it checks.
         @clipboard                    = clipboard || {}
-        # Cache Storage is origin-shared like localStorage (the Driver owns the store
-        # and injects it into every window Browser), origin-partitioned within.
-        @cache_storage                = cache_storage || {}
-        # IndexedDB is origin-shared too: the session's partition of the engine's one registry (idb_databases.rs), every
-        # window's and worker's.
-        @idb_partition                = idb_partition || Native.idb_partition_new
-        @idb_partition_owned          = idb_partition.nil?
+        # IndexedDB and Cache Storage are origin-shared too: the session's partition of the engine's registries
+        # (idb_databases.rs, cache_storage.rs), every window's and worker's.
+        @session_partition            = session_partition || Native.session_partition_new
+        @session_partition_owned      = session_partition.nil?
         @session_storage              = Native.storage_partition_new
         @sticky_headers               = {}
         @timers_active                = false
@@ -1134,7 +1131,7 @@ module Capybara
       # for the session's other windows: an auxiliary window's event loop runs only as the active window's does, and a
       # `versionchange` it never fires would hold every other window's upgrade.
       def deliver_idb_notices
-        return 0 unless Native.idb_pending(@idb_partition)
+        return 0 unless Native.idb_pending(@session_partition)
 
         idb_windows.sum(&:deliver_own_idb_notices)
       end
@@ -1149,7 +1146,7 @@ module Capybara
 
       # Whether IndexedDB owes a realm of one of the session's windows a notice another realm's or a worker's call caused
       # (idb.js `deliver`). The session's check first, which costs no V8 call.
-      def idb_pending? = Native.idb_pending(@idb_partition) && idb_windows.any? {|b| b.runtime_idb_pending? }
+      def idb_pending? = Native.idb_pending(@session_partition) && idb_windows.any? {|b| b.runtime_idb_pending? }
 
       def runtime_idb_pending? = @runtime.call('__csimIdbPending') == true
 
@@ -2193,7 +2190,7 @@ module Capybara
       # default. The user-agent also flows into `navigator.userAgent`
       # on every VM rebuild so JS-side UA branches (Discourse's
       # `viewport_based_mobile_mode = false` path) resolve correctly.
-      attr_reader :default_viewport, :default_user_agent, :idb_partition
+      attr_reader :default_viewport, :default_user_agent, :session_partition
       # Whether the session's pointer is a touchscreen (the driver's `touch:`), told every document as it boots.
       attr_accessor :touch_input
 
@@ -3509,8 +3506,7 @@ module Capybara
         Native.storage_clear(@local_storage)
         # (…emptied as a write would — its change count moved on, so no realm's cache keyed on it is the next session's)
         clipboard_write([])
-        @cache_storage.clear
-        Native.idb_clear(@idb_partition)
+        Native.session_partition_clear(@session_partition)
         Native.storage_clear(@session_storage)
         @sticky_headers.clear
         # The driver-side resize buffer has to clear too — without
@@ -3624,8 +3620,8 @@ module Capybara
         Native.storage_clear(@session_storage)
         Native.storage_clear(@local_storage) if @local_storage_owned
         @runtime.dispose
-        # …and the IndexedDB databases of a partition this window alone had (one a driver gave it is the driver's).
-        Native.idb_clear(@idb_partition) if @idb_partition_owned
+        # …and the IndexedDB databases and caches of a partition this window alone had (one a driver gave it is the driver's).
+        Native.session_partition_clear(@session_partition) if @session_partition_owned
       rescue StandardError
         nil
       end
@@ -8618,7 +8614,7 @@ module Capybara
         # the two, the window is a few instructions wide.
         run_worker_timers = lambda do |floor|
           step = worker_clock_step.call(floor)
-          next if stopping.call || (rt.call('__nextTimerDelay').to_f < 0 && !(Native.idb_pending(@idb_partition) && rt.call('__csimIdbPending')))
+          next if stopping.call || (rt.call('__nextTimerDelay').to_f < 0 && !(Native.idb_pending(@session_partition) && rt.call('__csimIdbPending')))
 
           rt.drain_microtasks
           rt.drain_timers(step)
@@ -11102,63 +11098,6 @@ module Capybara
       # one page for the next).
       def storage_partitions = [@local_storage, @session_storage]
 
-      # Cache Storage backing — origin-partitioned dumb store; the JS side owns the spec
-      # matching (cache-storage.js). `@cache_storage` is
-      #   origin => {seq:, names: {name => cache_id}, caches: {cache_id => {seq:, entries:}}}
-      # A name is the JSON string of the cache's DOMString name (cache-storage.js `storedName`), which keeps a lone
-      # surrogate as an escape; the JS side parses what `cache_storage_keys` returns.
-      # The name→id indirection models the spec's "dooms, but does not delete immediately":
-      # `caches.delete(name)` unmaps the name, but a Cache handle already bound to the id
-      # keeps operating on its own storage (a fresh `open(name)` gets a new id / empty cache).
-      # Each entry is `{id:, meta:, response:}` — `meta` the parsed request metadata the
-      # matcher needs ({url, method, headers, vary}), `response` an opaque serialized-Response
-      # JSON blob. Each host fn runs a single read-modify-write under the GVL, so concurrent
-      # access from a service-worker thread stays atomic without a lock (localStorage
-      # precedent). A doomed cache's storage lingers until `reset!` (per-test) frees it — a
-      # bounded leak we accept rather than refcount handles across the JS boundary.
-      def cache_storage_open(origin, name)
-        store = (@cache_storage[origin.to_s] ||= {seq: 0, names: {}, caches: {}})
-        id    = (store[:names][name.to_s] ||= (store[:seq] += 1))
-        store[:caches][id] ||= {seq: 0, entries: []}
-        id
-      end
-      def cache_storage_has(origin, name)
-        @cache_storage.dig(origin.to_s, :names)&.key?(name.to_s) || false
-      end
-      def cache_storage_delete(origin, name)
-        names = @cache_storage.dig(origin.to_s, :names) or return false
-        !names.delete(name.to_s).nil?
-      end
-      def cache_storage_keys(origin)
-        (@cache_storage.dig(origin.to_s, :names) || {}).keys
-      end
-      def cache_entries(origin, cache_id)
-        cache = cache_for(origin, cache_id) or return nil
-        JSON.generate(cache[:entries].map {|e| {id: e[:id]}.merge(e[:meta]) })
-      end
-      def cache_entry_response(origin, cache_id, entry_id)
-        cache = cache_for(origin, cache_id) or return nil
-        entry = cache[:entries].find {|e| e[:id] == entry_id.to_i } or return nil
-        entry[:response]
-      end
-      def cache_put(origin, cache_id, delete_ids_json, meta_json, response_json)
-        cache = cache_for(origin, cache_id) or return nil
-        ids   = JSON.parse(delete_ids_json).map(&:to_i)
-        cache[:entries].reject! {|e| ids.include?(e[:id]) } unless ids.empty?
-        cache[:entries] << {id: (cache[:seq] += 1), meta: JSON.parse(meta_json), response: response_json.to_s}
-        nil
-      end
-      def cache_delete_entries(origin, cache_id, ids_json)
-        cache  = cache_for(origin, cache_id) or return 0
-        ids    = JSON.parse(ids_json).map(&:to_i)
-        before = cache[:entries].size
-        cache[:entries].reject! {|e| ids.include?(e[:id]) }
-        before - cache[:entries].size
-      end
-      # The cache hash ({seq:, entries:}) bound to a Cache handle's id, or nil if it's gone.
-      private def cache_for(origin, cache_id)
-        @cache_storage.dig(origin.to_s, :caches, cache_id.to_i)
-      end
       # Push a one-shot handler onto the modal-dialog stack — the next
       # modal that fires consumes the topmost handler. Block exit pops
       # in case the dialog never fired.

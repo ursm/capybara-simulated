@@ -1,7 +1,7 @@
 // The Cache API's request matching (Service Workers §5.4 "Request Matching", "Query Cache", "Batch Cache Operations"):
 // a request matches a cached one by URL — its fragment dropped, its query too where `ignoreSearch` — and, unless
-// `ignoreVary`, by every header the cached response's `Vary` names agreeing (`Vary: *` none). The store is the host's
-// (each entry's metadata); the bindings (cache-storage.js) hand the metadata over and take back which entries match.
+// `ignoreVary`, by every header the cached response's `Vary` names agreeing (`Vary: *` none) — over the entries
+// cache_storage.rs stores, and the batch the bindings (cache-storage.js) are about to store.
 
 use std::collections::HashMap;
 
@@ -31,13 +31,23 @@ pub(crate) struct Entry {
     headers: HashMap<String, String>,
     vary: String,
 }
+impl Entry {
+    pub(crate) fn new(url: String, headers: HashMap<String, String>, vary: String) -> Self {
+        Entry { url, headers, vary }
+    }
+}
+impl AsRef<Entry> for Entry {
+    fn as_ref(&self) -> &Entry {
+        self
+    }
+}
 
 // "Query Cache": the indices of `entries` a request of `url` and `headers` matches, in stored order.
-pub(crate) fn query(url: &str, headers: &HashMap<String, String>, ignore_search: bool, ignore_vary: bool, entries: &[Entry]) -> Vec<usize> {
+pub(crate) fn query<E: AsRef<Entry>>(url: &str, headers: &HashMap<String, String>, ignore_search: bool, ignore_vary: bool, entries: &[E]) -> Vec<usize> {
     let Some(key) = key_url(url, ignore_search) else { return Vec::new() };
     (0..entries.len())
         .filter(|&i| {
-            let e = &entries[i];
+            let e = entries[i].as_ref();
             key_url(&e.url, ignore_search).as_deref() == Some(key.as_str()) && (ignore_vary || e.vary.is_empty() || vary_matches(&e.vary, headers, &e.headers))
         })
         .collect()
@@ -62,7 +72,6 @@ pub(crate) fn vary_has_star(vary: &str) -> bool {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "cacheQuery", query_op, context_id);
     crate::dom::register(scope, ns, "cacheBatchDuplicate", duplicate_op, context_id);
     crate::dom::register(scope, ns, "varyHasStar", vary_star_op, context_id);
 }
@@ -70,7 +79,7 @@ fn text(scope: &mut v8::PinScope<'_, '_>, value: Option<v8::Local<'_, v8::Value>
     value.filter(|v| !v.is_null_or_undefined()).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default()
 }
 // Headers from a flat `[name, value, …]` array.
-fn headers(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> HashMap<String, String> {
+pub(crate) fn headers(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> HashMap<String, String> {
     let Ok(list) = v8::Local::<v8::Array>::try_from(value) else { return HashMap::new() };
     let mut out = HashMap::new();
     let mut k = 0;
@@ -96,16 +105,6 @@ fn entries(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) ->
             Entry { url, headers: h, vary }
         })
         .collect()
-}
-// __dom.cacheQuery(url, headers, ignoreSearch, ignoreVary, entries) -> the indices of the entries the request matches
-// (`query`): `headers` a flat `[name, value, …]` array, names lowercased; each entry `[url, headers, vary]`.
-fn query_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let url = args.get(0).to_rust_string_lossy(scope);
-    let h = headers(scope, args.get(1));
-    let (ignore_search, ignore_vary) = (args.get(2).is_true(), args.get(3).is_true());
-    let list = entries(scope, args.get(4));
-    let found: Vec<f64> = query(&url, &h, ignore_search, ignore_vary, &list).into_iter().map(|i| i as f64).collect();
-    rv.set(crate::dom::f64_array(scope, &found).into());
 }
 // __dom.cacheBatchDuplicate(entries) -> `has_duplicate`.
 fn duplicate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
