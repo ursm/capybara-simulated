@@ -86,4 +86,19 @@ RSpec.describe 'Fetch Request semantics' do
     expect(r['base']).to end_with('/sub/')
     expect(r['rel']).to eq("#{r['base']}url")
   end
+
+  # A referrer is kept only where it is of the CALLING realm's document's origin: a sandboxed frame's is opaque, the same
+  # as no URL's, so its `/y` collapses to `about:client` where the top page's own stays `/y` (Fetch "new Request" step
+  # on init's referrer; Chrome).
+  it 'processes a referrer against the calling realm’s own origin' do
+    pages = {
+      '/' => '<!DOCTYPE html><body><iframe id=sb sandbox="allow-scripts" src="/f"></iframe>' \
+             "<script>window.got = {}; onmessage = (e) => { got.sb = e.data; }; got.top = new Request('/x', {referrer: '/y'}).referrer;</script>",
+      '/f' => "<!DOCTYPE html><script>parent.postMessage(new Request('/x', {referrer: '/y'}).referrer, '*')</script>"
+    }
+    session = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [pages.fetch(env['PATH_INFO'], '')]] })
+    session.visit '/'
+    session.document.synchronize { raise Capybara::ExpectationNotMet unless session.evaluate_script('window.got.sb') }
+    expect(session.evaluate_script('window.got')).to eq('top' => 'http://www.example.com/y', 'sb' => 'about:client')
+  end
 end

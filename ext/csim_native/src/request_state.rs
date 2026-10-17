@@ -210,8 +210,9 @@ fn construct_request(
 }
 
 // The constructor a Request object's request is made with — `new __dom.RequestStateBase(source, input, init,
-// navigation, base, prefix)`, the constructor's steps (`construct_request`): a TypeError, its message after `prefix`,
-// where they refuse. With no `init` at all, a copy of `source`'s request (Fetch "clone a request").
+// navigation, base, origin, prefix)`, the constructor's steps (`construct_request`) against the calling realm's API base
+// URL and document origin (the template is the isolate's, which knows no realm): a TypeError, its message after
+// `prefix`, where they refuse. With no `init` at all, a copy of `source`'s request (Fetch "clone a request").
 fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     if args.new_target().is_undefined() {
         return;
@@ -223,15 +224,14 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
             let input = args.get(1).to_rust_string_lossy(scope);
             let navigation = args.get(3).boolean_value(scope);
             let base = args.get(4).to_rust_string_lossy(scope);
-            let cid = crate::dom::realm_id(scope, &args);
-            let origin = crate::dom::realm(scope, cid).location.origin().to_owned();
+            let origin = args.get(5).to_rust_string_lossy(scope);
             construct_request(scope, source, &input, init, navigation, &base, &origin)
         }
     };
     let request = match made {
         Ok(request) => request,
         Err(message) => {
-            let prefix = args.get(5).to_rust_string_lossy(scope);
+            let prefix = args.get(6).to_rust_string_lossy(scope);
             return throw_type_error(scope, &format!("{prefix}{message}"));
         }
     };
