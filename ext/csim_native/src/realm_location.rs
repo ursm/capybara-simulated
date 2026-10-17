@@ -129,6 +129,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "documentOrigin", document_origin, context_id);
     register(scope, ns, "setDocumentOrigin", set_document_origin, context_id);
     register(scope, ns, "originKey", origin_key, context_id);
+    register(scope, ns, "realmOrigin", realm_origin, context_id);
+    register(scope, ns, "realmOriginKey", realm_origin_key, context_id);
+    register(scope, ns, "sameOriginRealm", same_origin_realm, context_id);
     register(scope, ns, "setOriginKey", set_origin_key, context_id);
     register(scope, ns, "sandboxedOrigin", sandboxed_origin, context_id);
 }
@@ -152,6 +155,32 @@ fn origin_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let cid = realm_id(scope, &args);
     let key = realm(scope, cid).location.origin_key(cid);
     rv.set(v8::String::new(scope, &key).unwrap().into());
+}
+
+// …and realm `realm`'s, whichever realm asks — what a WindowProxy of another realm's window and a postMessage across
+// realms compare: its origin's serialization, and its key (`origin_key`) — '' for a realm gone (a dropped one's).
+fn other_realm<R>(scope: &mut v8::PinScope<'_, '_>, realm_arg: v8::Local<'_, v8::Value>, read: impl FnOnce(&mut RealmLocation, i32) -> R) -> Option<R> {
+    let realm = realm_arg.int32_value(scope)?;
+    crate::dom::dom(scope).arena.realm_state_mut(realm).map(|st| read(&mut st.location, realm))
+}
+// __dom.realmOrigin(realm) -> realm `realm`'s document's origin, serialized ('' for none).
+fn realm_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let origin = other_realm(scope, args.get(0), |l, _| l.origin().to_owned()).unwrap_or_default();
+    rv.set(v8::String::new(scope, &origin).unwrap().into());
+}
+// __dom.realmOriginKey(realm) -> the key realm `realm`'s origin is matched by ('' for none).
+fn realm_origin_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let key = other_realm(scope, args.get(0), |l, realm| l.origin_key(realm)).unwrap_or_default();
+    rv.set(v8::String::new(scope, &key).unwrap().into());
+}
+// __dom.sameOriginRealm(realm) -> whether realm `realm`'s origin is the calling realm's — by their keys: an opaque
+// origin is the same with the realms that share it alone (one that inherited it), never with another opaque one; false
+// for a realm gone (fail CLOSED).
+fn same_origin_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let theirs = other_realm(scope, args.get(0), |l, realm| l.origin_key(realm));
+    let cid = realm_id(scope, &args);
+    let ours = realm(scope, cid).location.origin_key(cid);
+    rv.set_bool(theirs.is_some_and(|k| k == ours));
 }
 
 // __dom.setOriginKey(key) — the key the calling realm's origin is matched by, inherited: a worker's, its creator's.
