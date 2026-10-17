@@ -464,6 +464,7 @@ const SHADOW_HOSTS: u32 = 11;
 const STATE: u32 = 12;
 const CUSTOM_CANDIDATES: u32 = 13;
 const SHADOW_INCLUDING_ELEMENTS: u32 = 14;
+const CHILD_ELEMENTS: u32 = 15;
 
 // A string argument, or None for "*" (any).
 fn name_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Option<String> {
@@ -478,7 +479,8 @@ fn name_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Op
 // (9: `a`), the stylesheets' owners (10) — or the shadow hosts among its shadow-including descendants (11:
 // shadow-including tree order, a host before its shadow tree's own), those with a state bit of a mask (12: `a`), those
 // a custom element definition could be for (13), or every element of its shadow-including inclusive descendants (14: in
-// the shadow hosts' order, the scope itself first where it is one).
+// the shadow hosts' order, the scope itself first where it is one) — or its children that are elements (15: what its
+// `children` holds).
 fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let kind = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
@@ -525,6 +527,14 @@ fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             let cid = realm_id(scope, &args);
             let hosts = kind == SHADOW_HOSTS;
             let ids = crate::dom::realm(scope, cid).shadow_including_elements(root, |n| !hosts || n.shadow_root.is_some());
+            return rv.set(crate::dom::nodes_value(scope, cid, &ids));
+        }
+        CHILD_ELEMENTS => {
+            let cid = realm_id(scope, &args);
+            let arena = crate::dom::realm(scope, cid);
+            let ids: Vec<NodeId> = arena.get(root).map_or_else(Vec::new, |n| {
+                n.children.iter().copied().filter(|&c| arena.get(c).is_some_and(|c| c.kind == NodeKind::Element)).collect()
+            });
             return rv.set(crate::dom::nodes_value(scope, cid, &ids));
         }
         _ => return,

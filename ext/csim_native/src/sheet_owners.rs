@@ -95,7 +95,7 @@ impl RealmArena {
             let sheet = rel.contains(&"stylesheet") && n.plain_attr("href").is_some_and(|h| !h.is_empty()) && n.plain_attr("disabled").is_none();
             return sheet.then(|| (title, rel.contains(&"alternate")));
         }
-        n.plain_attr("type").is_none_or(|t| t.is_empty() || t.eq_ignore_ascii_case("text/css")).then_some((title, false))
+        style_is_css(n).then_some((title, false))
     }
 
     // `nodes` were inserted into `parent` or removed from it: every owner among their shadow-including inclusive
@@ -174,8 +174,15 @@ pub(crate) fn sheet_response_accepted(content_type: &str, quirks: bool, same_ori
     matches!(essence.as_str(), "" | "text/css" | "application/x-unknown-content-type") || (quirks && same_origin())
 }
 
+// Whether a `<style>` holds a style sheet at all (HTML "update a style block"): its `type` absent, empty or an ASCII
+// case-insensitive `text/css` — Chrome and Firefox both drop the sheet's rules on a switch to `text/plain`.
+pub(crate) fn style_is_css(n: &NodeData) -> bool {
+    n.plain_attr("type").is_none_or(|t| t.is_empty() || t.eq_ignore_ascii_case("text/css"))
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "associatesSheet", associates_sheet_op, context_id);
+    crate::dom::register(scope, ns, "styleIsCss", style_is_css_op, context_id);
     crate::dom::register(scope, ns, "sheetResponseAccepted", sheet_response_accepted_op, context_id);
     crate::dom::register(scope, ns, "sheetGen", sheet_gen_op, context_id);
     crate::dom::register(scope, ns, "takeStyleLoads", take_style_loads_op, context_id);
@@ -252,6 +259,12 @@ fn sheet_gen_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 fn associates_sheet_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     rv.set_bool(associates_sheet(&crate::dom::dom(scope).arena, id));
+}
+
+// __dom.styleIsCss(nid) -> `style_is_css` of the `<style>`.
+fn style_is_css_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(crate::dom::dom(scope).arena.get(id).is_some_and(style_is_css));
 }
 
 // __dom.ownerSheetShown(nid): a CSSStyleSheet shows the owner's sheet (`MadeSheet::shown`).
@@ -415,8 +428,7 @@ impl RealmArena {
                 }
                 sheets.push((owner, title, alternate, enabled));
             } else {
-                let css = n.plain_attr("type").is_none_or(|t| t.is_empty() || t.eq_ignore_ascii_case("text/css"));
-                if !css {
+                if !style_is_css(n) {
                     continue;
                 }
                 let (title, media, count) = (title(n.plain_attr("title")), n.plain_attr("media").map(str::to_string), n.sheet_gen);
