@@ -3237,8 +3237,7 @@ module Capybara
           # HTML "mutate action URL" for GET: SET the query to the entry list
           # unconditionally — an empty list clears any query the action already
           # carried (browsers navigate to `action?`), it isn't preserved.
-          base, fragment = split_fragment(parse_url(action_url.to_s)&.fetch(:href) || action_url.to_s)
-          target = "#{base.split('?', 2).first}?#{query}#{"##{fragment}" if fragment}"
+          target = Native.form_action_url(parse_url(action_url.to_s)&.fetch(:href) || action_url.to_s, query)
           if new_window
             @driver.open_aux_window(target, name: window_name, source: self,
                                     opener: keep_opener, referrer: referrer)
@@ -10558,7 +10557,7 @@ module Capybara
         encoding = spec['encoding'] || 'UTF-8'
         # GET → urlencoded query (enctype ignored); POST → enctype-encoded body.
         get_query, = encode_entry_list(entries, 'application/x-www-form-urlencoded', encoding)
-        get_url = form_get_url(action, get_query)
+        get_url = Native.form_action_url(action, get_query)
         if frame_self_target?(target)
           if method == 'GET'
             navigate_realm_self_get(realm_id, get_url)
@@ -10598,18 +10597,6 @@ module Capybara
         [TARGET_NAME, TARGET_BLANK].include?(target_keyword(target)) && @driver.respond_to?(:open_aux_window)
       end
 
-      # HTML form-submission "mutate action URL" for GET: REPLACE the action
-      # URL's query with the serialized entry list (dropping any pre-existing
-      # query), preserving a trailing #fragment. String-based so it works on the
-      # raw (possibly relative) action attribute without URI.parse fragility;
-      # the absolute equivalent of submit_form_handle's `uri.query = body`. An
-      # EMPTY entry list still clears the query (→ `action?`), matching browsers.
-      def form_get_url(action, body)
-        base, _hash, frag = action.partition('#')
-        path = base.split('?', 2).first
-        url  = "#{path}?#{body}"
-        frag.empty? ? url : "#{url}##{frag}"
-      end
       # A self-targeted GET form submit in the initiating frame realm: navigate
       # that frame to the action URL (query already mutated in).
       # `record: false` for a `location.href=` / link-click self-nav — those frame navigations are

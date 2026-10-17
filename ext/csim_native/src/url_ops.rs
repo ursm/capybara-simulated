@@ -22,6 +22,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "metaReferrerPolicy", meta_referrer_policy_op, context_id);
     register(scope, ns, "hyperlinkReferrerPolicy", hyperlink_referrer_policy_op, context_id);
     register(scope, ns, "elementTarget", element_target_op, context_id);
+    register(scope, ns, "formActionUrl", form_action_url, context_id);
 }
 
 // A URL's parts, in `parts`' order.
@@ -82,6 +83,29 @@ pub(crate) fn encoding_parse(input: &str, base: Option<&str>, label: Option<&str
         }
     }
     Some(url)
+}
+
+// HTML "mutate action URL" of a GET form submission: `action` with its query the entry list's serialization `query` —
+// set whatever query it had, so an empty list leaves a bare `?` (browsers navigate to `action?`) — and its fragment kept.
+// On the text, which is an action's serialization (or, the host's, the attribute as written): the first `#` ends the
+// part the query is set in, and the first `?` before it begins the query.
+pub(crate) fn mutated_action_url(action: &str, query: &str) -> String {
+    let (base, fragment) = action.split_once('#').map_or((action, None), |(b, f)| (b, Some(f)));
+    let path = base.split_once('?').map_or(base, |(p, _)| p);
+    match fragment {
+        Some(fragment) => format!("{path}?{query}#{fragment}"),
+        None => format!("{path}?{query}"),
+    }
+}
+pub(crate) fn mutated_action_url_for_ruby(action: String, query: String) -> String {
+    mutated_action_url(&action, &query)
+}
+// __dom.formActionUrl(action, query) -> `mutated_action_url`.
+fn form_action_url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (action, query) = (usv(scope, args.get(0)), usv(scope, args.get(1)));
+    if let Some(s) = v8::String::new(scope, &mutated_action_url(&action, &query)) {
+        rv.set(s.into());
+    }
 }
 
 // The referrer policy tokens (Referrer Policy §3).

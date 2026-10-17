@@ -210,6 +210,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("url_fragment_navigation", magnus::function!(url_ops::is_fragment_navigation_for_ruby, 2))?;
     // A `data:` URL's MIME type and body, by Fetch's data: URL processor, the page's too (data_url.rs).
     native.define_module_function("data_url", magnus::function!(data_url::process_for_ruby, 1))?;
+    // A GET form submission's URL: the action's query the entry list (url_ops.rs `mutated_action_url`), the page's too.
+    native.define_module_function("form_action_url", magnus::function!(url_ops::mutated_action_url_for_ruby, 2))?;
     // A live `text/event-stream`'s chunks read into events by a parser kept between them, as the page reads a whole one
     // (event_stream.rs).
     native.define_module_function("event_stream_open", magnus::function!(event_stream::open_for_ruby, 0))?;
