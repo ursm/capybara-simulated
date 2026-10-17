@@ -241,6 +241,10 @@ impl Reactions {
         }
         false
     }
+    // Whether `code` is a SCOPED registry — one a page constructed, not a window's.
+    pub(crate) fn is_scoped_registry(&self, code: u32) -> bool {
+        self.registry(code).is_some_and(|r| r.scoped)
+    }
     // Whether `code` is a registry that is not scoped — a window's, which an insertion into template contents takes away.
     pub(crate) fn is_window_registry(&self, code: u32) -> bool {
         self.registry(code).is_some_and(|r| !r.scoped)
@@ -708,7 +712,7 @@ fn registry_value<'s>(scope: &mut v8::PinScope<'s, '_>, code: u32) -> v8::Local<
 // The registry of the node `value` is the object of, as HTML resolves it (an element's, a shadow root's, a document's):
 // its own where one is set — none for the null registry or the template contents' null — else its node document's window
 // registry (a document's own), or, for a node with no document, the calling realm's window registry.
-fn registry_for(scope: &mut v8::PinScope<'_, '_>, cid: i32, value: v8::Local<'_, v8::Value>) -> Option<u32> {
+pub(crate) fn registry_for(scope: &mut v8::PinScope<'_, '_>, cid: i32, value: v8::Local<'_, v8::Value>) -> Option<u32> {
     let handle = crate::node_handle::handle_of(scope, value)?;
     // SAFETY: the handle lives while its object, an argument, does.
     let handle = unsafe { handle.as_ref() };

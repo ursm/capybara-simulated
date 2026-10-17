@@ -565,22 +565,87 @@ fn serialize_xml(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     }
 }
 
-// __dom.serializeHtml(nid, outer, shadows) -> the node's (an element's, a fragment's, a document's) children as HTML — or, `outer`, the element itself (`html`);
-// `shadows` (or undefined) a flat `[hostNid, openingTag, …]` of the shadow roots to write.
+// `getHTML()`'s shadow roots (HTML "serializing a shadow root"): every host the serialization of `id` reaches — through a
+// `<template>`'s contents, and through each root it writes — whose root is `serializable` where `serializable` asks for
+// those, or that `roots` lists; each with the opening `<template>` tag its root is written as, its attributes in HTML's
+// order: mode, delegatesfocus, serializable, slotassignment (`manual` only), clonable, the `shadowrootadoptedstylesheets`
+// it was declared with, and customelementregistry — a scoped root's, or a null root's whose host's is not null.
+fn serializable_shadows(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, serializable: bool, roots: &[NodeId]) -> Vec<(NodeId, Vec<u16>)> {
+    use crate::dom::{SHADOW_CLONABLE, SHADOW_CLOSED, SHADOW_DELEGATES_FOCUS, SHADOW_MANUAL_SLOTS, SHADOW_SERIALIZABLE};
+    let mut found: Vec<(NodeId, NodeId, u8, Option<Vec<u16>>)> = Vec::new();
+    {
+        let arena = crate::dom::realm(scope, cid);
+        let mut stack = vec![id];
+        while let Some(at) = stack.pop() {
+            let Some(n) = arena.get(at) else { continue };
+            if let Some(root) = n.shadow_root.filter(|_| n.kind == NodeKind::Element).and_then(|r| arena.get(r).map(|rn| (r, rn))) {
+                let (root, rn) = root;
+                if (serializable && rn.shadow_init & SHADOW_SERIALIZABLE != 0) || roots.contains(&root) {
+                    found.push((at, root, rn.shadow_init, rn.adopted_sheets_attr.as_deref().map(<[u16]>::to_vec)));
+                    stack.push(root);
+                }
+            }
+            let parent = if n.kind == NodeKind::Element && n.is_html_named("template") { n.template_content } else { Some(at) };
+            if let Some(p) = parent.and_then(|p| arena.get(p)) {
+                stack.extend(p.children.iter().rev());
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(found.len());
+    for (host, root, init, adopted) in found {
+        let mut tag: Vec<u16> = Vec::new();
+        let mut push = |s: &str| tag.extend(s.encode_utf16());
+        push(if init & SHADOW_CLOSED != 0 { "<template shadowrootmode=\"closed\"" } else { "<template shadowrootmode=\"open\"" });
+        for (bit, attr) in [(SHADOW_DELEGATES_FOCUS, " shadowrootdelegatesfocus=\"\""), (SHADOW_SERIALIZABLE, " shadowrootserializable=\"\"")] {
+            if init & bit != 0 {
+                push(attr);
+            }
+        }
+        if init & SHADOW_MANUAL_SLOTS != 0 {
+            push(" shadowrootslotassignment=\"manual\"");
+        }
+        if init & SHADOW_CLONABLE != 0 {
+            push(" shadowrootclonable=\"\"");
+        }
+        if let Some(value) = adopted {
+            push(" shadowrootadoptedstylesheets=\"");
+            let mut w = Writer { arena: crate::dom::realm(scope, cid), shadows: &[], out: Vec::new() };
+            w.escaped(&value, true);
+            tag.extend(w.out);
+            tag.extend("\"".encode_utf16());
+        }
+        let (root_value, host_value) = (crate::dom::node_value(scope, Some(root)), crate::dom::node_value(scope, Some(host)));
+        let root_code = crate::ce_reactions::registry_for(scope, cid, root_value);
+        let host_code = crate::ce_reactions::registry_for(scope, cid, host_value);
+        let scoped = root_code.is_some_and(|c| crate::dom::dom(scope).arena.ce_reactions.is_scoped_registry(c));
+        // (…a code below the first registry's none: unset, the tracking null, the null registry)
+        let null_root = root_code.is_none_or(|c| c < crate::ce_reactions::FIRST_REGISTRY);
+        if scoped || (null_root && host_code.is_some_and(|c| c >= crate::ce_reactions::FIRST_REGISTRY)) {
+            tag.extend(" shadowrootcustomelementregistry=\"\"".encode_utf16());
+        }
+        tag.push(u16::from(b'>'));
+        out.push((host, tag));
+    }
+    out
+}
+
+// __dom.serializeHtml(nid, outer, serializableShadowRoots, shadowRoots) -> the node's (an element's, a fragment's, a
+// document's) children as HTML — or, `outer`, the element itself (`html`) — with the shadow roots `getHTML()`'s options
+// ask for (`serializable_shadows`): none for no options.
 fn serialize_html(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let outer = args.get(1).is_true();
-    let mut shadows = Vec::new();
-    if let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(2)) {
-        for k in (0..list.length()).step_by(2) {
-            let host = list.get_index(scope, k).and_then(|v| v.integer_value(scope)).and_then(NodeId::from_i64);
-            let open = list.get_index(scope, k + 1).map(|v| crate::dom::utf16_arg(scope, v));
-            if let (Some(host), Some(open)) = (host, open) {
-                shadows.push((host, open));
+    let serializable = args.get(2).is_true();
+    let mut roots = Vec::new();
+    if let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(3)) {
+        for k in 0..list.length() {
+            if let Some(root) = list.get_index(scope, k).and_then(|v| crate::node_handle::nid_of(scope, v)) {
+                roots.push(root);
             }
         }
     }
+    let shadows = if serializable || !roots.is_empty() { serializable_shadows(scope, cid, id, serializable, &roots) } else { Vec::new() };
     let out = html(crate::dom::realm(scope, cid), id, outer, &shadows);
     let out = crate::dom::utf16_value(scope, &out);
     rv.set(out);
