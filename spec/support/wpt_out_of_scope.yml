@@ -59273,6 +59273,50 @@ shadow-dom/wheel-event-related-target.html:
   reason: Drives test_driver.Actions().scroll over an overflow:scroll container; depends
     on the test_driver wheel input driver, which the runner does not drive (the scroll
     geometry beside it IS modelled).
+urlpattern/urlpattern-generate.tentative.any.js:
+- name: 'Pattern: "https://example.com/:foo" Component: pathname Groups: {"foo":"
+    "}'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Pattern: "original-scheme://example.com/:foo" Component: pathname Groups:
+    {"foo":" "}'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "Pattern: {\"hostname\":\"{:foo}.example.com\"} Component: hostname Groups:
+    {\"foo\":\"\U0001F345\"}"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Pattern: {"pathname":"/:foo"} Component: pathname Groups: {"foo":"bar"}'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "Pattern: {\"pathname\":\"/:foo\"} Component: pathname Groups: {\"foo\":\"\U0001F345\"}"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Pattern: {"pathname":"/:foo/:bar"} Component: pathname Groups: {"foo":"baz","bar":"qux"}'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Pattern: {"pathname":"/foo"} Component: pathname Groups: {}'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Pattern: {"pathname":"/foo/:bar"} Component: pathname Groups: {"bar":"baz"}'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Pattern: {"pathname":"/foo:bar"} Component: pathname Groups: {"bar":"baz"}'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Pattern: {"port":"([^\\:]+?)"} Component: port Groups: {}'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 web-animations/animation-trigger/event-trigger-before-handlers.tentative.html:
 - name: Animation triggers are handled before registered event listeners
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

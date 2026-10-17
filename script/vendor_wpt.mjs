@@ -111,6 +111,9 @@ const TREES = [
                                        // xhr (rack_fetch / CORS / body serialization / URL / redirects), so
                                        // the foundations hardened for xhr should pay off here for free
   'fetch/data-urls',                   // data: URL parsing (on the URL parser)
+  'urlpattern',                        // URLPattern — its parser, canonicalization and matching; the patterns a
+                                       // service worker's static router (`InstallEvent.addRoutes`) matches
+                                       // requests by, so the objective bar for the engine behind both
   'fetch/h1-parsing',                  // HTTP/1 response-line / header parsing edge cases
   'html/webappapis/atob',              // base64 btoa/atob (binary-string round-trip)
   'html/webappapis/structured-clone',  // structuredClone — deep-clone of platform objects, no layout
