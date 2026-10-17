@@ -456,6 +456,9 @@ struct GeneratedState<'a> {
     // The boxes that render with no slot made for them yet — none to name the record by — each its element and which
     // (0 before, 1 after).
     unlinked: Vec<(NodeId, usize)>,
+    // Each `<img>` resolved so far that renders its alt text (`img_alt_text`), with that text's node (none for an empty
+    // one) — the image's one child, as no tree says.
+    alts: HashMap<NodeId, Option<NodeId>>,
 }
 const GENERATED_TEXT: u32 = u32::MAX;
 pub(crate) const PSEUDOS: [style::selector_parser::PseudoElement; 2] =
@@ -494,6 +497,24 @@ impl<'a> Generated<'a> {
         }
         self.state.borrow_mut().of.insert(id, boxes);
         boxes
+    }
+    // An `<img>`'s alt text node, where it renders its alt text and that is not empty — made the first time it is asked.
+    fn alt_text(&self, id: NodeId, node: &crate::dom::NodeData) -> Option<NodeId> {
+        if node.rendering_tag() != "img" {
+            return None;
+        }
+        if let Some(&text) = self.state.borrow().alts.get(&id) {
+            return text;
+        }
+        let alt = img_alt_text(self.arena, id, node).filter(|t| !t.is_empty());
+        let mut st = self.state.borrow_mut();
+        let text = alt.map(|t| {
+            let tid = NodeId { idx: st.texts.len() as u32, generation: GENERATED_TEXT };
+            st.texts.push(self.texts.alloc(crate::dom::NodeData { parent: Some(id), ..crate::dom::NodeData::of_kind(NodeKind::Text, t) }));
+            tid
+        });
+        st.alts.insert(id, text);
+        text
     }
     // A generated box's element, which of the two it is and its text — None for any other node. (A box is only ever
     // met through its element's children, by when its element is resolved.)
@@ -1553,11 +1574,40 @@ const OWN_CONTEXT_TAGS: &[&str] = &[
 pub(crate) fn replaced_or_control(arena: &RealmArena, id: NodeId, node: &crate::dom::NodeData) -> bool {
     match node.rendering_tag() {
         "object" => !renders_object_fallback(arena, id, node),
+        "img" => img_alt_text(arena, id, node).is_none(),
         tag => matches!(
             tag,
             "input" | "select" | "textarea" | "meter" | "progress" | "img" | "canvas" | "video" | "audio" | "embed" | "iframe"
                 | "frame" | "svg"
         ),
+    }
+}
+// What an `<img>` that does not represent an image renders instead (HTML §15.4.4 "Images"): a NON-REPLACED phrasing
+// element whose content is its alt text — that text, empty where it has none — or None where it is a replaced element:
+// one that represents an image, or whose two dimensions are both given (its attributes' or its style's) and whose image
+// is coming, or which has no `alt`, or whose document is in quirks mode. Chrome and Firefox both: `<img alt="hello"
+// width=100 height=50 style="width:30px">` broken is a run of "hello" (Chrome 48x18 with its icon, Firefox 38x22), and
+// `alt=""` — or no `alt` and no `src` — with not both dimensions is nothing (0x0). Where they part it stays replaced: a
+// broken `src` with no `alt` and not both dimensions (Chrome a 16x16 icon, Firefox a square box), which the steps make
+// a phrasing element too.
+pub(crate) fn img_alt_text(arena: &RealmArena, id: NodeId, node: &crate::dom::NodeData) -> Option<Vec<u16>> {
+    if node.rendering_tag() != "img" || node.natural_size.is_some() {
+        return None;
+    }
+    use style::values::generics::length::GenericSize as Size;
+    let sized = || {
+        crate::style::primary_style(arena, id).is_some_and(|s| {
+            let p = s.get_position();
+            !matches!(p.width, Size::Auto) && !matches!(p.height, Size::Auto)
+        })
+    };
+    match node.plain_attr_units("alt") {
+        Some(alt) if !alt.is_empty() => {
+            let held = || arena.image_pending(id) || arena.document_mode(Some(arena.shadow_including_root(id))).0;
+            (!(sized() && held())).then_some(alt)
+        }
+        Some(_) => (!sized()).then(Vec::new),
+        None => (!sized() && node.get_attr("src").is_none_or(str::is_empty)).then(Vec::new),
     }
 }
 // An `<object>` that renders its FALLBACK content — its children, as the box its own style makes it — rather than a
@@ -1680,10 +1730,14 @@ impl<'a> Walk<'a> {
     fn push_children(&self, id: NodeId, out: &mut Vec<NodeId>) {
         let (first, kids, last) = match self.generated.box_info(id) {
             Some((.., text)) => (text, &[][..], None),
-            None => {
-                let [before, after] = self.generated.boxes_of(id);
-                (before, flat_children(self.arena, self.node(id)), after)
-            }
+            None => match self.generated.alt_text(id, self.node(id)) {
+                // (…an image's alt text, its content where it renders it)
+                Some(text) => (Some(text), &[][..], None),
+                None => {
+                    let [before, after] = self.generated.boxes_of(id);
+                    (before, flat_children(self.arena, self.node(id)), after)
+                }
+            },
         };
         for c in first.into_iter().chain(kids.iter().copied().filter(|&c| self.arena.get(c).is_some())).chain(last) {
             if self.not_rendered(c) {
@@ -2357,6 +2411,8 @@ impl<'a> Walk<'a> {
                 let dim = |name: &str, default: f64| node.get_attr(name).and_then(crate::validity::parse_non_negative).map_or(default, |n| n as f64);
                 Intrinsic { ratio: true, ..sized(dim("width", 300.0), dim("height", 150.0)) }
             }
+            // (…none where it renders its alt text, and is no replaced element)
+            "img" if img_alt_text(self.arena, id, node).is_some() => return Ok(None),
             "img" => match node.natural_size {
                 Some(natural) => Intrinsic::of(natural),
                 None => sized(16.0, 16.0),
@@ -4488,7 +4544,7 @@ impl<'a> Walk<'a> {
         if !parent_is_element {
             return true;
         }
-        if OWN_CONTEXT_TAGS.contains(&node.rendering_tag()) {
+        if OWN_CONTEXT_TAGS.contains(&node.rendering_tag()) && (node.rendering_tag() != "img" || replaced_or_control(self.arena, id, node)) {
             return true;
         }
         let b = style.get_box();

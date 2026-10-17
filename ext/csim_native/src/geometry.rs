@@ -1396,10 +1396,18 @@ fn rendered_box_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 fn scroll_size_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, |arena, id| scroll_size(arena, id).map(|[w, h, ..]| [w, h]));
 }
-// __dom.contentSize(nid, out) -> whether `nid` has a box it measures: its content area's `[width, height]` as the layout
-// sized it (`observed_sizes`) — what an image being rendered answers for `width` / `height`.
+// __dom.contentSize(nid, out) -> whether `nid` has a box: its content area's `[width, height]` as the layout sized it
+// (`observed_sizes`) — a non-replaced inline's, an image rendering its alt text, its fragments' bounding box less its
+// borders and padding (Chrome: `<img alt="hi there" style="padding:3px; border:1px solid">` reads 64 where its box is
+// 72.4 wide) — what an image being rendered answers for `width` / `height`.
 fn content_size_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    answer_into(scope, &args, rv, |arena, id| observed_sizes(arena, id).map(|[_, _, w, h, ..]| [w, h]));
+    answer_into(scope, &args, rv, |arena, id| {
+        observed_sizes(arena, id).map(|[_, _, w, h, ..]| [w, h]).or_else(|| {
+            let [_, _, w, h] = laid_out_box(arena, id)?;
+            let e = edges(arena, id).unwrap_or([0.0; 12]);
+            Some([(w - e[1] - e[3] - e[5] - e[7]).max(0.0), (h - e[0] - e[2] - e[4] - e[6]).max(0.0)])
+        })
+    });
 }
 // __dom.scrollRange(nid, out) -> whether `nid` has a box, and the range its offsets may take written to `out` as `[min x,
 // max x, min y, max y]` (`scroll_range`): what a scroll offset written to it is clamped to.

@@ -36,6 +36,11 @@ impl RealmArena {
     fn image_mut(&mut self, id: NodeId) -> &mut ImageRequest {
         self.images.entry(id).or_default()
     }
+    // Whether `id`'s image is coming: a request for a source made, and not complete — what keeps a sized `<img>` replaced
+    // while it loads (walk.rs `img_alt_text`).
+    pub(crate) fn image_pending(&self, id: NodeId) -> bool {
+        self.image(id).is_some_and(|r| r.url.is_some() && !r.complete)
+    }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
