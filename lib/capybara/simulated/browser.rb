@@ -937,12 +937,13 @@ module Capybara
         resolve_against_current(url, use_base: true)
       end
 
+      # The keywords a navigable target name is (navigables.rs `target_keyword`, ASCII case-insensitive).
+      TARGET_NAME, TARGET_SELF, TARGET_TOP, TARGET_PARENT, TARGET_BLANK = 0, 1, 2, 3, 4
+      def target_keyword(target) = Native.target_keyword(target.to_s)
+
       # Does a link/form `target` load into the CURRENT frame? Empty or `_self`
       # do; `_top` / `_blank` / `_parent` / a named context do not.
-      def frame_self_target?(target)
-        t = target.to_s.downcase
-        t.empty? || t == '_self'
-      end
+      def frame_self_target?(target) = target_keyword(target) == TARGET_SELF
 
       # Resolve a link/form `target` to the frame stack entry its navigation
       # should rebuild, or nil when it targets the top page / a new context
@@ -955,7 +956,7 @@ module Capybara
       def frame_nav_target_entry(target)
         return nil unless @current_realm_id
         return @frame_stack.last if frame_self_target?(target)
-        return @frame_stack[-2] if target.to_s.downcase == '_parent' && @frame_stack.size >= 2
+        return @frame_stack[-2] if target_keyword(target) == TARGET_PARENT && @frame_stack.size >= 2
         nil
       end
 
@@ -2039,7 +2040,7 @@ module Capybara
         referrer, document_policy = realm_referrer_initiator(realm_id)
         @driver.open_aux_window(
           url,
-          name:            target.to_s.casecmp?('_blank') ? nil : target.to_s,
+          name:            target_keyword(target) == TARGET_BLANK ? nil : target.to_s,
           source:          self,
           opener:          !!opener,
           blob_snapshot:   blob,
@@ -3195,10 +3196,9 @@ module Capybara
         # A form submitted inside a frame whose target is that frame (self, or a
         # `_parent` of a ≥2-deep frame) navigates the FRAME, not the top page.
         frame_entry = frame_nav_target_entry(spec['target'])
-        target = spec['target'].to_s
-        # (…the keywords ASCII case-insensitive)
-        keyword = target.downcase(:ascii)
-        named   = frame_entry.nil? && !target.empty? && !%w[_self _top _parent _blank].include?(keyword)
+        target  = spec['target'].to_s
+        keyword = target_keyword(target)
+        named   = frame_entry.nil? && keyword == TARGET_NAME
         # A name chooses the navigable it is the target name of (`choose_named_navigable`): a frame's anywhere in the page
         # — navigated as the frame's own navigation is, this browsing context its initiator — or this window's (navigated
         # in place), or one a sandbox keeps this document from navigating (nothing is); a name no navigable has, and
@@ -3208,12 +3208,12 @@ module Capybara
         return if chosen == :blocked
         named_frame = chosen if chosen.is_a?(Integer)
         new_window  = frame_entry.nil? && chosen.nil? && new_window_target?(target)
-        window_name = keyword == '_blank' ? '' : target
+        window_name = keyword == TARGET_BLANK ? '' : target
         # Opener exposure for a `<form target>` new context: HTML "get an element's noopener", the engine's
         # (token_list.rs `noopener`) — `noopener` / `noreferrer` drop it, `_blank` without `opener` too, a named target
         # keeps it. `noreferrer` also empties the referrer.
         no_referrer = Native.link_noreferrer(spec['rel'].to_s)
-        keep_opener = !Native.link_noopener(spec['rel'].to_s, keyword)
+        keep_opener = !Native.link_noopener(spec['rel'].to_s, target)
         referrer    = no_referrer ? '' : (@current_url || '')
         # (…and a frame it navigates is told its initiator under the policy `noreferrer` sets)
         if named_frame
@@ -10539,7 +10539,7 @@ module Capybara
             body, content_type = encode_entry_list(entries, enctype, encoding)
             navigate_realm_self_post(realm_id, resolve_against_current(action), body, content_type)
           end
-        elsif %w[_parent _top _blank].include?(target.downcase(:ascii)) || (chosen = choose_named_navigable(realm_id, target)) == :top
+        elsif target_keyword(target) != TARGET_NAME || (chosen = choose_named_navigable(realm_id, target)) == :top
           log_console('warn', "nested-context form submit (target=#{target.inspect}) is not modeled")
         elsif chosen.is_a?(Integer)
           # (…its Referer the submitting document's, under the policy `noreferrer` sets)
@@ -10568,7 +10568,7 @@ module Capybara
       # Whether a link's or a form's target opens a new browsing context — `_blank`, or a name no navigable has (the page
       # chose the one that has it first: `choose_named_navigable`).
       def new_window_target?(target)
-        !target.empty? && !%w[_self _top _parent].include?(target.downcase(:ascii)) && @driver.respond_to?(:open_aux_window)
+        [TARGET_NAME, TARGET_BLANK].include?(target_keyword(target)) && @driver.respond_to?(:open_aux_window)
       end
 
       # HTML form-submission "mutate action URL" for GET: REPLACE the action

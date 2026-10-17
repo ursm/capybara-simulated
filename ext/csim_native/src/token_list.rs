@@ -84,7 +84,7 @@ pub(crate) fn link_types(rel: &str) -> u32 {
 // by `target` opens it with no opener — where its link types include `noopener` or `noreferrer`, or where they do not
 // include `opener` and the target is `_blank` (a named target keeps its opener).
 pub(crate) fn noopener(types: u32, target: &str) -> bool {
-    types & (LINK_NOOPENER | LINK_NOREFERRER) != 0 || (types & LINK_OPENER == 0 && target.eq_ignore_ascii_case("_blank"))
+    types & (LINK_NOOPENER | LINK_NOREFERRER) != 0 || (types & LINK_OPENER == 0 && crate::navigables::target_keyword(target) == crate::navigables::TARGET_BLANK)
 }
 // …for the host: a `rel` value's, and whether it has `noreferrer` (a referrer, a Referer, none).
 pub(crate) fn noopener_for_ruby(rel: String, target: String) -> bool {

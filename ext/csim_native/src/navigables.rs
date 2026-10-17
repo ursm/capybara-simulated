@@ -313,7 +313,36 @@ fn allows_top_navigation(tokens: &str) -> bool {
         .any(|t| t.eq_ignore_ascii_case("allow-top-navigation") || t.eq_ignore_ascii_case("allow-top-navigation-by-user-activation"))
 }
 
+// The keyword a navigable target name is, ASCII case-insensitively (HTML "valid navigable target name or keyword"): the
+// current navigable for '' and `_self`, its top-level traversable, its parent, a new one for `_blank` — and a name, any
+// other, which "the rules for choosing a navigable" find one by.
+pub(crate) const TARGET_NAME: u32 = 0;
+pub(crate) const TARGET_SELF: u32 = 1;
+pub(crate) const TARGET_TOP: u32 = 2;
+pub(crate) const TARGET_PARENT: u32 = 3;
+pub(crate) const TARGET_BLANK: u32 = 4;
+pub(crate) fn target_keyword(target: &str) -> u32 {
+    match target {
+        "" => TARGET_SELF,
+        t if t.eq_ignore_ascii_case("_self") => TARGET_SELF,
+        t if t.eq_ignore_ascii_case("_top") => TARGET_TOP,
+        t if t.eq_ignore_ascii_case("_parent") => TARGET_PARENT,
+        t if t.eq_ignore_ascii_case("_blank") => TARGET_BLANK,
+        _ => TARGET_NAME,
+    }
+}
+// …for the host.
+pub(crate) fn target_keyword_for_ruby(target: String) -> u32 {
+    target_keyword(&target)
+}
+// __dom.targetKeyword(target) -> `target_keyword`.
+fn target_keyword_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let target = args.get(0).to_rust_string_lossy(scope);
+    rv.set_uint32(target_keyword(&target));
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "targetKeyword", target_keyword_op, context_id);
     crate::dom::register(scope, ns, "windowName", window_name, context_id);
     crate::dom::register(scope, ns, "setWindowName", set_window_name, context_id);
     crate::dom::register(scope, ns, "setFrameRealm", set_frame_realm, context_id);
@@ -493,4 +522,22 @@ fn ancestor_unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let realm = args.get(0).int32_value(scope).unwrap_or(-1);
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).ancestor_unloading(realm));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_target_keyword_is_matched_ascii_case_insensitively() {
+        assert_eq!(target_keyword(""), TARGET_SELF);
+        assert_eq!(target_keyword("_SELF"), TARGET_SELF);
+        assert_eq!(target_keyword("_Top"), TARGET_TOP);
+        assert_eq!(target_keyword("_parent"), TARGET_PARENT);
+        assert_eq!(target_keyword("_BLANK"), TARGET_BLANK);
+        // (…a name, any other — one a Unicode case folding would make a keyword too)
+        assert_eq!(target_keyword("_ſelf"), TARGET_NAME);
+        assert_eq!(target_keyword("_blank "), TARGET_NAME);
+        assert_eq!(target_keyword("frame"), TARGET_NAME);
+    }
 }
