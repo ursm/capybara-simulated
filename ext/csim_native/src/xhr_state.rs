@@ -130,6 +130,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "xhrGet", get_op, context_id);
     crate::dom::register(scope, ns, "xhrSet", set_op, context_id);
     crate::dom::register(scope, ns, "xhrOpen", open_op, context_id);
+    crate::dom::register(scope, ns, "xhrCredentials", credentials_op, context_id);
+    crate::dom::register(scope, ns, "xhrFinal", final_op, context_id);
     crate::dom::register(scope, ns, "xhrSend", send_op, context_id);
     crate::dom::register(scope, ns, "xhrCurrent", current_op, context_id);
     crate::dom::register(scope, ns, "xhrInFlight", in_flight_op, context_id);
@@ -157,10 +159,6 @@ const UPLOAD_ACTIVE: u32 = 10;
 const METHOD: u32 = 11;
 const URL: u32 = 12;
 const FRAGMENT: u32 = 13;
-const OVERRIDE_MIME: u32 = 14;
-const OVERRIDE_CHARSET: u32 = 15;
-const USERNAME: u32 = 16;
-const PASSWORD: u32 = 17;
 const SEND_START: u32 = 18;
 const UPLOAD_TOTAL: u32 = 19;
 const TIMING_START: u32 = 20;
@@ -170,8 +168,8 @@ fn units<'s>(scope: &mut v8::PinScope<'s, '_>, units: &[u16]) -> v8::Local<'s, v
 }
 
 // __dom.xhrGet(state, field) -> the field (`X_*`): a number, a boolean or a string — the response type its index in
-// `RESPONSE_TYPES` (xhr.js names them alike), the override MIME type's essence and charset, the username, the password
-// and when it was sent null for none.
+// `RESPONSE_TYPES` (xhr.js names them alike), when it was sent null for none. (14–17 were the override MIME type's essence
+// and charset and open()'s username and password, which `xhrFinal` and `xhrCredentials` answer.)
 fn get_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let field = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
     let Some(s) = state(scope, args.get(0)) else { return rv.set_undefined() };
@@ -192,23 +190,11 @@ fn get_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
             Some(at) => rv.set_double(at),
             None => rv.set_null(),
         },
-        USERNAME | PASSWORD => match if field == USERNAME { &s.username } else { &s.password } {
-            Some(text) => rv.set(units(scope, text)),
-            None => rv.set_null(),
-        },
         STATUS_TEXT => rv.set(units(scope, &s.status_text)),
         RESPONSE_URL => rv.set(units(scope, &s.response_url)),
         METHOD => rv.set(units(scope, &s.method)),
         URL => rv.set(units(scope, &s.url)),
         FRAGMENT => rv.set(units(scope, &s.fragment)),
-        OVERRIDE_MIME => match &s.override_mime {
-            Some((essence, _)) => rv.set(units(scope, essence)),
-            None => rv.set_null(),
-        },
-        OVERRIDE_CHARSET => match s.override_mime.as_ref().and_then(|(_, charset)| charset.as_ref()) {
-            Some(charset) => rv.set(units(scope, charset)),
-            None => rv.set_null(),
-        },
         _ => rv.set_undefined(),
     }
 }
@@ -247,20 +233,72 @@ fn set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     }
 }
 
-// __dom.xhrOpen(state, method, url, fragment, async, inDocument, username, password) -> -1 where a synchronous request
-// from a document set a response type or a timeout (InvalidAccessError), else whether its readystatechange fires —
-// none where it was OPENED already (open-open-send / open-send-open): the open() steps past the method's and the URL's
-// checks, the bindings'. The request is the one opened, its method normalized (the bindings'), its fragment apart from
-// its URL, its username and password (null for none given); the response reset, the send flag unset, the fetch
-// terminated — what is still queued for it made stale, as the count moves on.
+// XHR "open()"'s checks of its method and URL, in order, each before any state changes (a bad open() leaves the object
+// as it was): a method that is no token a SyntaxError, a forbidden one a SecurityError — then the method normalized
+// (uppercased only where it case-insensitively is one of the six: `patCH` keeps its case); a URL that parses neither
+// against `base` nor against any http(s) base a SyntaxError (a malformed URL never reaches the network — url/failure). The
+// request URL is resolved against the API base URL `api_base` AT OPEN TIME — a `<base>` inserted later does not apply —
+// its query in the document's encoding `encoding` (`?ß` is `%DF` under windows-1252), its fragment kept apart: never
+// sent, and no part of `responseURL`, but a document response's URL has it. Only an http(s) base resolves it: an
+// about:blank or srcdoc frame's is opaque, its path left RELATIVE for the fetch to resolve, the query alone re-encoded
+// (a `?` kept for an empty one). The method, the URL and its fragment; or the DOMException's message and name.
+fn opened(method: &str, bytes: &[u8], url: &str, base: Option<&str>, api_base: &str, encoding: Option<&str>) -> Result<(String, String, String), (String, &'static str)> {
+    if !crate::fetch_rules::is_token(bytes) {
+        return Err((format!("'{method}' is not a valid HTTP method."), "SyntaxError"));
+    }
+    if crate::fetch_rules::forbidden_method(bytes) {
+        return Err((format!("'{method}' HTTP method is unsupported."), "SecurityError"));
+    }
+    let method = crate::fetch_rules::normalized_method(bytes).map_or_else(|| method.to_owned(), str::to_owned);
+    let parse = |b: Option<&str>, e: Option<&str>| crate::url_ops::encoding_parse(url, b, e);
+    if parse(base, None).is_none() && parse(Some("http://csim-fallback.invalid/"), None).is_none() {
+        return Err(("Invalid URL".into(), "SyntaxError"));
+    }
+    let special = api_base.get(..5).is_some_and(|p| p.eq_ignore_ascii_case("http:")) || api_base.get(..6).is_some_and(|p| p.eq_ignore_ascii_case("https:"));
+    if let Some(parsed) = parse(Some(api_base), encoding).filter(|_| special) {
+        let href = parsed.href();
+        return Ok(match href.split_once('#') {
+            Some((url, fragment)) => (method, url.to_owned(), format!("#{fragment}")),
+            None => (method, href.to_owned(), String::new()),
+        });
+    }
+    let request = match (url.find('?'), parse(base, encoding)) {
+        (Some(q), Some(parsed)) => {
+            let search = parsed.search();
+            format!("{}{}", &url[..q], if search.is_empty() { "?" } else { search })
+        }
+        _ => url.to_owned(),
+    };
+    Ok((method, request, String::new()))
+}
+
+// __dom.xhrOpen(state, method, url, async, inDocument, username, password, base, apiBase, encoding) -> -1 where a
+// synchronous request from a document set a response type or a timeout (InvalidAccessError), else whether its
+// readystatechange fires — none where it was OPENED already (open-open-send / open-send-open): the open() steps
+// (`opened`'s checks a DOMException thrown). The request is the one opened, its username and password (null for none
+// given); the response reset, the send flag unset, the fetch terminated — what is still queued for it made stale, as
+// the count moves on.
 fn open_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let method = crate::dom::utf16_arg(scope, args.get(1));
-    let url = crate::dom::utf16_arg(scope, args.get(2));
-    let fragment = crate::dom::utf16_arg(scope, args.get(3));
-    let asynchronous = args.get(4).is_true();
-    let in_document = args.get(5).is_true();
-    let username = Some(args.get(6)).filter(|u| u.is_string()).map(|u| crate::dom::utf16_arg(scope, u));
-    let password = Some(args.get(7)).filter(|p| p.is_string()).map(|p| crate::dom::utf16_arg(scope, p));
+    let text = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).to_rust_string_lossy(scope);
+    let (method, url) = (text(scope, 1), text(scope, 2));
+    let bytes = crate::fetch_rules::byte_string(scope, args.get(1));
+    let base = (!args.get(7).is_null_or_undefined()).then(|| text(scope, 7));
+    let api_base = text(scope, 8);
+    let encoding = (!args.get(9).is_null_or_undefined()).then(|| text(scope, 9));
+    let (method, url, fragment) = match opened(&method, &bytes, &url, base.as_deref(), &api_base, encoding.as_deref()) {
+        Ok(opened) => opened,
+        Err((message, name)) => {
+            if let Some(message) = v8::String::new(scope, &format!("Failed to execute 'open' on 'XMLHttpRequest': {message}")) {
+                crate::clone::throw_dom_exception(scope, message, name);
+            }
+            return;
+        }
+    };
+    let (method, url, fragment) = (method.encode_utf16().collect(), url.encode_utf16().collect(), fragment.encode_utf16().collect());
+    let asynchronous = args.get(3).is_true();
+    let in_document = args.get(4).is_true();
+    let username = Some(args.get(5)).filter(|u| u.is_string()).map(|u| crate::dom::utf16_arg(scope, u));
+    let password = Some(args.get(6)).filter(|p| p.is_string()).map(|p| crate::dom::utf16_arg(scope, p));
     let Some(s) = state(scope, args.get(0)) else { return rv.set_int32(0) };
     let mut s = s.borrow_mut();
     if !asynchronous && in_document && (s.response_type != 0 || s.timeout != 0) {
@@ -280,6 +318,76 @@ fn open_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let was_opened = s.ready == OPENED;
     s.ready = OPENED;
     rv.set_int32(i32::from(!was_opened));
+}
+
+// __dom.xhrCredentials(state, base) -> `[username, password]` the request answers a server's "Basic" challenge with
+// (each null for none): open()'s, which override the URL's userinfo, else the URL's, percent-decoded (a malformed escape
+// kept as it is) — the URL's stripped from it either way, as the URL setters set them empty, so the request never sends
+// them in its URL (transparent HTTP auth, send-authentication).
+fn credentials_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let base = (!args.get(1).is_null_or_undefined()).then(|| args.get(1).to_rust_string_lossy(scope));
+    let Some(s) = state(scope, args.get(0)) else { return };
+    let mut s = s.borrow_mut();
+    let url = String::from_utf16_lossy(&s.url);
+    let decode = |text: &str| -> Vec<u16> {
+        let units: Vec<u16> = match percent_encoding::percent_decode_str(text).decode_utf8() {
+            Ok(decoded) => decoded.encode_utf16().collect(),
+            Err(_) => text.encode_utf16().collect(),
+        };
+        units
+    };
+    let (mut user, mut pass) = (None, None);
+    if let Some(mut parsed) = crate::url_ops::encoding_parse(&url, base.as_deref(), None) {
+        if !parsed.username().is_empty() {
+            user = Some(decode(parsed.username()));
+        }
+        if !parsed.password().is_empty() {
+            pass = Some(decode(parsed.password()));
+        }
+        if user.is_some() || pass.is_some() {
+            let _ = parsed.set_username(Some(""));
+            let _ = parsed.set_password(Some(""));
+            s.url = parsed.href().encode_utf16().collect();
+        }
+    }
+    let user = s.username.clone().or(user);
+    let pass = s.password.clone().or(pass);
+    drop(s);
+    let mut items: Vec<v8::Local<'_, v8::Value>> = Vec::with_capacity(2);
+    for value in [user, pass] {
+        items.push(match value {
+            Some(units) => crate::dom::utf16_value(scope, &units),
+            None => v8::null(scope).into(),
+        });
+    }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// __dom.xhrFinal(state, contentType) -> `[mime, isXml, label]`: XHR "get a final MIME type" and "get a final encoding",
+// as the body is first read (from LOADING, when overrideMimeType() can no longer change them) — the override's type
+// over the one the response's `Content-Type` gives (Fetch "extract a MIME type"), `text/xml` where it gives none (an
+// empty one, `bogus`, `application`), so it parses as XML (responsexml-media-type); whether that is an XML MIME type;
+// and the final encoding's label, the override's charset over the response's — null for none.
+fn final_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let content_type = args.get(1).to_rust_string_lossy(scope);
+    let Some(s) = state(scope, args.get(0)) else { return };
+    let response = crate::mime::extract(&content_type);
+    let (overridden, override_charset) = match &s.borrow().override_mime {
+        Some((essence, charset)) => (Some(String::from_utf16_lossy(essence)), charset.as_ref().map(|c| String::from_utf16_lossy(c))),
+        None => (None, None),
+    };
+    let mime = overridden.or_else(|| response.as_ref().map(|r| r.essence.clone())).unwrap_or_else(|| "text/xml".into());
+    let is_xml = crate::mime::is_xml(&mime);
+    let label = override_charset
+        .filter(|c| !c.is_empty())
+        .or_else(|| response.as_ref().and_then(|r| r.parameters.iter().find(|(n, _)| n == "charset").map(|(_, v)| v.clone())));
+    let mime_value = v8::String::new(scope, &mime).map_or_else(|| v8::undefined(scope).into(), Into::into);
+    let label_value: v8::Local<'_, v8::Value> = match label.and_then(|l| v8::String::new(scope, &l)) {
+        Some(l) => l.into(),
+        None => v8::null(scope).into(),
+    };
+    let is_xml = v8::Boolean::new(scope, is_xml).into();
+    rv.set(v8::Array::new_with_elements(scope, &[mime_value, is_xml, label_value]).into());
 }
 
 // __dom.xhrSend(state) -> the open() this send is of (its count, which `xhrCurrent` checks against), or -1 where the
