@@ -256,7 +256,10 @@ module Capybara
         # reset) and Driver-injected like the cookie jar, so target=_blank aux windows share one
         # session's auth state (a real browser shares the HTTP auth cache across a session's tabs).
         @auth_cache                   = auth_cache     || {}
-        @local_storage                = local_storage || {}
+        # localStorage and sessionStorage: storage sheds in the engine (storage_areas.rs), an area per origin — the
+        # session's (the Driver's, every window's) and this top-level browsing context's own.
+        @local_storage                = local_storage || Native.storage_partition_new
+        @local_storage_owned          = local_storage.nil?
         # The system clipboard, the Driver's (one for the session, every window's): `entries` — [type, byte string] each —
         # and the change count a ClipboardItem read from it checks.
         @clipboard                    = clipboard || {}
@@ -267,7 +270,7 @@ module Capybara
         # window's and worker's.
         @idb_partition                = idb_partition || Native.idb_partition_new
         @idb_partition_owned          = idb_partition.nil?
-        @session_storage              = {}
+        @session_storage              = Native.storage_partition_new
         @sticky_headers               = {}
         @timers_active                = false
         # Capybara config is set once per suite; cache the derived
@@ -3498,12 +3501,12 @@ module Capybara
         @cookies.clear
         @cookie_flags.clear
         @auth_cache.clear
-        @local_storage.clear
+        Native.storage_clear(@local_storage)
         # (…emptied as a write would — its change count moved on, so no realm's cache keyed on it is the next session's)
         clipboard_write([])
         @cache_storage.clear
         Native.idb_clear(@idb_partition)
-        @session_storage.clear
+        Native.storage_clear(@session_storage)
         @sticky_headers.clear
         # The driver-side resize buffer has to clear too — without
         # this the previous test's `driver.resize(425, …)` leaks into
@@ -3613,8 +3616,11 @@ module Capybara
         # (…its service worker registrations first — they are this window's alone, and nothing below may skip them)
         Native.sw_clear(@sw_partition)
         @runtime.dispose
-        # …and the IndexedDB databases of a partition this window alone had (one a driver gave it is the driver's).
+        # …and the IndexedDB databases of a partition this window alone had (one a driver gave it is the driver's), and its
+        # storage sheds likewise.
         Native.idb_clear(@idb_partition) if @idb_partition_owned
+        Native.storage_clear(@session_storage)
+        Native.storage_clear(@local_storage) if @local_storage_owned
       rescue StandardError
         nil
       end
@@ -7557,17 +7563,18 @@ module Capybara
       # (main + frames — a window's documents share both storage areas); localStorage ALSO spans
       # separate same-origin windows (the Driver shares its jar), so fan the change out to them —
       # sessionStorage is per-browsing-context and never crosses windows.
-      def storage_changed(kind, key, old, new, url, source_realm_id)
-        enqueue_storage_event(kind, key, old, new, url, source_realm_id)
-        @driver.storage_broadcast(self, kind, key, old, new, url) if kind == 'local' && @driver.respond_to?(:storage_broadcast)
+      # (…`origin` the area's: a document of another origin lets the event go)
+      def storage_changed(kind, key, old, new, url, source_realm_id, origin)
+        enqueue_storage_event(kind, key, old, new, url, origin, source_realm_id)
+        @driver.storage_broadcast(self, kind, key, old, new, url, origin) if kind == 'local' && @driver.respond_to?(:storage_broadcast)
         nil
       end
 
       # Queue a storage event for THIS window's documents. `source_realm_id` is the changing realm
       # within this isolate (skipped at delivery); nil (a cross-window fan-out) matches no realm, so
       # it reaches every one.
-      def enqueue_storage_event(kind, key, old, new, url, source_realm_id = nil)
-        @storage_inbox << {'kind' => kind.to_s, 'key' => key, 'old' => old, 'new' => new, 'url' => url.to_s, 'source' => source_realm_id}
+      def enqueue_storage_event(kind, key, old, new, url, origin, source_realm_id = nil)
+        @storage_inbox << {'kind' => kind.to_s, 'key' => key, 'old' => old, 'new' => new, 'url' => url.to_s, 'origin' => origin.to_s, 'source' => source_realm_id}
       end
 
       # Fire queued cross-window messages (postMessage, BroadcastChannel, `storage`) — each a task of its own: one per
@@ -11077,54 +11084,10 @@ module Capybara
         flags
       end
 
-      # Web Storage host-fn shims. The Ruby-side hashes survive
-      # `rebuild_ctx` between visits, so apps that cache user data in
-      # `localStorage` on page A (Forem's `browserStoreCache('set')`
-      # inside fetchBaseData) see it on page B — without this, every
-      # visit boots into a JS-side Map that starts empty and the
-      # first-call branches that hinge on cached user data (the
-      # onboarding task-card render, `initializeLocalStorageRender`,
-      # etc.) silently skip.
-      def storage_get(kind, key)
-        store(kind)[key.to_s]
-      end
-      # Per-area storage quota (Chrome / Firefox both cap a localStorage / sessionStorage area at
-      # ~5 MiB per origin). Without it, the WPT quota tests — which `setItem` in a `while (true)` loop
-      # until QuotaExceededError — write unbounded gigabytes and OOM the process.
-      STORAGE_QUOTA_BYTES = 5 * 1024 * 1024
-
-      # Returns true when stored, false when the (key, value) would exceed the area's quota — the JS
-      # shim turns a false into a QuotaExceededError and does NOT store (WHATWG "setItem" step). The
-      # size is summed from the store each call (localStorage is shared across same-origin windows, so
-      # a per-Browser running total would drift); replacing a key frees its old bytes first.
-      def storage_set(kind, key, value)
-        st    = store(kind)
-        key   = key.to_s
-        value = value.to_s
-        used  = st.sum {|k, v| k.bytesize + v.bytesize }
-        used -= key.bytesize + st[key].bytesize if st.key?(key)
-        return false if used + key.bytesize + value.bytesize > STORAGE_QUOTA_BYTES
-
-        st[key] = value
-        true
-      end
-      def storage_remove(kind, key)
-        store(kind).delete(key.to_s)
-        nil
-      end
-      def storage_clear(kind)
-        store(kind).clear
-        nil
-      end
-      def storage_key(kind, index)
-        store(kind).keys[index.to_i]
-      end
-      def storage_length(kind)
-        store(kind).size
-      end
-      private def store(kind)
-        kind.to_s == 'session' ? @session_storage : @local_storage
-      end
+      # Web Storage's sheds for the bindings (storage.js): [localStorage's, sessionStorage's] — the engine keeps their
+      # areas (storage_areas.rs), which outlive the per-visit `rebuild_ctx` (Forem caches user data in `localStorage` on
+      # one page for the next).
+      def storage_partitions = [@local_storage, @session_storage]
 
       # Cache Storage backing — origin-partitioned dumb store; the JS side owns the spec
       # matching (cache-storage.js). `@cache_storage` is

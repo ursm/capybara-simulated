@@ -86,13 +86,8 @@ module Capybara
         '__getDocumentCookie'        => ->(b, *_) { b.document_cookie },
         '__setDocumentCookie'        => ->(b, *a) { b.write_document_cookie(a[0].to_s); nil },
         '__getDocumentReferrer'      => ->(b, *_) { b.current_referer },
-        '__csim_storageGet'          => ->(b, *a) { b.storage_get(a[0], a[1]) },
-        '__csim_storageSet'          => ->(b, *a) { b.storage_set(a[0], a[1], a[2]) },
-        '__csim_storageRemove'       => ->(b, *a) { b.storage_remove(a[0], a[1]); nil },
-        '__csim_storageClear'        => ->(b, *a) { b.storage_clear(a[0]); nil },
-        '__csim_storageKey'          => ->(b, *a) { b.storage_key(a[0], a[1]) },
-        '__csim_storageLength'       => ->(b, *a) { b.storage_length(a[0]) },
-        '__csimStorageChanged'       => ->(b, *a) { b.storage_changed(a[0], a[1], a[2], a[3], a[4], a[5]); nil },
+        '__csimStoragePartitions'    => ->(b, *_a) { b.storage_partitions },
+        '__csimStorageChanged'       => ->(b, *a) { b.storage_changed(*a[0, 7]); nil },
         # Cache Storage — origin-partitioned (a[0] = origin key), Ruby-backed so it
         # survives the per-visit VM rebuild and is shared between a service worker and
         # the client it controls. The JS side (cache-storage.js) owns the spec matching;

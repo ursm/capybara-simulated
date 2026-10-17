@@ -96,7 +96,8 @@ module Capybara
         @cookies         = {}
         @cookie_flags    = {}   # (host \0 name) => {secure: true} — attribute sidecar for the shared jar
         @auth_cache      = {}
-        @local_storage   = {}
+        # localStorage: the session's storage shed in the engine (storage_areas.rs), an area per origin, every window's.
+        @local_storage   = Native.storage_partition_new
         # The system clipboard: one for the session, like a desktop's — what a page copies another window, frame or the
         # next visit pastes (clipboard.js reads and writes it through the host).
         @clipboard       = {}
@@ -406,8 +407,9 @@ module Capybara
         }
         reset_windows!
         @browser.dispose rescue nil
-        # …and the session's IndexedDB databases, which outlive every window but not the session.
+        # …and the session's IndexedDB databases and localStorage, which outlive every window but not the session.
         Native.idb_clear(@idb_partition)
+        Native.storage_clear(@local_storage)
       end
 
       # The session's windows' browsers: the primary's, then each auxiliary window's.
@@ -669,14 +671,13 @@ module Capybara
       end
 
       # A localStorage change fans out to every OTHER window (localStorage spans same-origin
-      # browsing contexts). Every window shares the Driver's one `@local_storage` jar, so all
-      # windows are same-origin peers here (cross-origin storage partitioning is a separate
-      # backlog item); a nil source realm reaches each target's every realm. sessionStorage is
-      # per-context and never reaches this path.
-      def storage_broadcast(source_browser, kind, key, old, new, url)
+      # browsing contexts — the Driver's one shed, an area per origin); a nil source realm reaches
+      # each target's every realm, whose documents of another origin let it go (storage.js).
+      # sessionStorage is per-context and never reaches this path.
+      def storage_broadcast(source_browser, kind, key, old, new, url, origin)
         window_entries.each do |w|
           next if w[:browser].equal?(source_browser)
-          w[:browser].enqueue_storage_event(kind, key, old, new, url, nil)
+          w[:browser].enqueue_storage_event(kind, key, old, new, url, origin, nil)
         end
       end
 

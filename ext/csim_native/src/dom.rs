@@ -2844,6 +2844,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::image_requests::install(scope, ns, context_id);
     crate::drag_data_store::install(scope, ns, context_id);
     crate::search_params::install(scope, ns, context_id);
+    crate::storage_areas::install(scope, ns, context_id);
     crate::paint::install(scope, ns, context_id);
     crate::keys::install(scope, ns, context_id);
     crate::cache_matching::install(scope, ns, context_id);

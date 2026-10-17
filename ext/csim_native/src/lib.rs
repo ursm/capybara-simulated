@@ -81,6 +81,7 @@ mod drag_data_store;
 mod paint;
 mod perf_timeline;
 mod search_params;
+mod storage_areas;
 mod xhr_state;
 mod keys;
 mod cache_matching;
@@ -268,6 +269,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // A driver session's IndexedDB storage: a new partition of the one registry, cleared as the session resets, and
     // whether an agent of it has notices to take — its event loop has work (idb_databases.rs).
     native.define_module_function("idb_partition_new", magnus::function!(idb_databases::partition_new, 0))?;
+    native.define_module_function("storage_partition_new", magnus::function!(storage_areas::partition_new, 0))?;
+    native.define_module_function("storage_clear", magnus::function!(storage_areas::clear, 1))?;
     native.define_module_function("idb_clear", magnus::function!(idb_databases::clear, 1))?;
     native.define_module_function("idb_pending", magnus::function!(idb_databases::pending, 1))?;
     Ok(())
