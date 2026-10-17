@@ -291,6 +291,26 @@ pub(crate) fn blob_range(value: &[u8], total: u64) -> Option<(u64, u64)> {
         _ => None,
     }
 }
+// Fetch's "scheme fetch" (§4.2) of a `blob:` URL whose blob (the bindings' to resolve: its type and its size) a request
+// of `method` and `range` (its `Range` header's value) fetches — the response, or None for a network error: a GET
+// alone; its Content-Type the blob's type where that parses as a MIME type (fetch/api/basic/scheme-blob
+// "invalid_type_blob"), else empty; a single satisfiable byte range a 206 of that slice, with its Content-Range, and a
+// malformed or unsatisfiable one a network error (a blob URL answers no 416) — as `(status, content type, first byte,
+// end, content range)`.
+pub(crate) fn blob_response(method: &str, range: Option<&[u8]>, blob_type: &str, size: u64) -> Option<(u32, String, u64, u64, Option<String>)> {
+    if method != "GET" {
+        return None;
+    }
+    let content_type = if crate::mime::parse(blob_type).is_some() { blob_type.to_owned() } else { String::new() };
+    match range {
+        None => Some((200, content_type, 0, size, None)),
+        Some(value) => {
+            let (first, last) = blob_range(value, size)?;
+            Some((206, content_type, first, last + 1, Some(format!("bytes {first}-{last}/{size}"))))
+        }
+    }
+}
+
 // "CORS-safelisted response-header name" (with no `Access-Control-Expose-Headers` naming more).
 pub(crate) fn cors_safelisted_response_header(name: &[u8]) -> bool {
     ["cache-control", "content-language", "content-length", "content-type", "expires", "last-modified", "pragma"]
@@ -301,7 +321,7 @@ pub(crate) fn cors_safelisted_response_header(name: &[u8]) -> bool {
 // ── For the bindings ──
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "badPort", bad_port_op, context_id);
-    crate::dom::register(scope, ns, "blobRange", blob_range_op, context_id);
+    crate::dom::register(scope, ns, "blobResponse", blob_response_op, context_id);
     crate::dom::register(scope, ns, "corsSafelistedMethod", cors_safelisted_method_op, context_id);
     crate::dom::register(scope, ns, "interceptedHop", intercepted_hop_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
@@ -366,14 +386,24 @@ fn request_body_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let name = byte_string(scope, args.get(0));
     rv.set_bool(request_body_header(&name));
 }
-// __dom.blobRange(value, total) -> [first, last] of `blob_range`, or null.
-fn blob_range_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let value = byte_string(scope, args.get(0));
-    let total = args.get(1).number_value(scope).unwrap_or(0.0) as u64;
-    match blob_range(&value, total) {
-        Some((first, last)) => rv.set(crate::dom::f64_array(scope, &[first as f64, last as f64]).into()),
-        None => rv.set_null(),
-    }
+// __dom.blobResponse(method, range, type, size) -> [status, content type, first byte, end, content range] of
+// `blob_response` (`range` null for none; the content range null for a whole blob), or null for a network error.
+fn blob_response_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let method = args.get(0).to_rust_string_lossy(scope);
+    let range = (!args.get(1).is_null_or_undefined()).then(|| byte_string(scope, args.get(1)));
+    let blob_type = args.get(2).to_rust_string_lossy(scope);
+    let size = args.get(3).number_value(scope).unwrap_or(0.0) as u64;
+    let Some((status, content_type, first, end, content_range)) = blob_response(&method, range.as_deref(), &blob_type, size) else { return rv.set_null() };
+    let content_type = v8::String::new(scope, &content_type).map_or_else(|| v8::undefined(scope).into(), Into::into);
+    let content_range = content_range.and_then(|r| v8::String::new(scope, &r)).map_or_else(|| v8::null(scope).into(), Into::into);
+    let items = [
+        v8::Integer::new_from_unsigned(scope, status).into(),
+        content_type,
+        v8::Number::new(scope, first as f64).into(),
+        v8::Number::new(scope, end as f64).into(),
+        content_range,
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.forbiddenMethod(method) -> whether it is a forbidden method.
 fn forbidden_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
