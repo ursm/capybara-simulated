@@ -477,7 +477,10 @@ impl Jwk {
     }
     // A member the algorithm requires (a DataError where it is missing), base64url-decoded.
     fn bytes(member: &Option<String>) -> Outcome<Vec<u8>> {
-        member.as_deref().map_or_else(|| data_error("a required JWK member is missing"), base64url_decode)
+        member.as_deref().map_or_else(
+            || data_error("a required JWK member is missing"),
+            |m| base64url_decode(m.trim_end_matches('=')).map_or_else(|| data_error("a JWK member is not base64url"), Ok)
+        )
     }
 }
 
@@ -518,8 +521,9 @@ fn base64url_encode(bytes: &[u8]) -> String {
     }
     out
 }
-fn base64url_decode(text: &str) -> Outcome<Vec<u8>> {
-    let text = text.trim_end_matches('=');
+// …and back — None for text that is no unpadded base64url: a character outside its alphabet (`=` among them), or a
+// length that leaves six bits over, a byte short.
+fn base64url_decode(text: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(text.len() * 3 / 4);
     let (mut acc, mut bits) = (0u32, 0);
     for c in text.bytes() {
@@ -529,7 +533,7 @@ fn base64url_decode(text: &str) -> Outcome<Vec<u8>> {
             b'0'..=b'9' => c - b'0' + 52,
             b'-' => 62,
             b'_' => 63,
-            _ => return data_error("a JWK member is not base64url"),
+            _ => return None,
         };
         acc = acc << 6 | v as u32;
         bits += 6;
@@ -538,7 +542,7 @@ fn base64url_decode(text: &str) -> Outcome<Vec<u8>> {
             out.push((acc >> bits) as u8);
         }
     }
-    if bits >= 6 { data_error("a JWK member is not base64url") } else { Ok(out) }
+    (bits < 6).then_some(out)
 }
 
 fn random_bytes(n: usize) -> Vec<u8> {
@@ -1806,6 +1810,24 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "cryptoUnwrapBytes", unwrap_op, context_id);
     crate::dom::register(scope, ns, "cryptoRandomFill", random_fill_op, context_id);
     crate::dom::register(scope, ns, "cryptoRandomUUID", random_uuid_op, context_id);
+    crate::dom::register(scope, ns, "base64UrlEncode", base64url_encode_op, context_id);
+    crate::dom::register(scope, ns, "base64UrlDecode", base64url_decode_op, context_id);
+}
+// __dom.base64UrlEncode(source) -> a BufferSource's bytes as unpadded base64url — WebAuthn's wire form and a JSON
+// serialization's.
+fn base64url_encode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let bytes = buffer_bytes(args.get(0)).unwrap_or_default();
+    let out = string(scope, &base64url_encode(&bytes));
+    rv.set(out);
+}
+// __dom.base64UrlDecode(text) -> its bytes in a fresh ArrayBuffer, or null for text that is no unpadded base64url
+// (`base64url_decode`).
+fn base64url_decode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = args.get(0).to_rust_string_lossy(scope);
+    match base64url_decode(&text) {
+        Some(bytes) => rv.set(array_buffer(scope, bytes)),
+        None => rv.set_null(),
+    }
 }
 
 fn get<'s>(scope: &mut v8::PinScope<'s, '_>, object: v8::Local<'_, v8::Object>, name: &str) -> Option<v8::Local<'s, v8::Value>> {
@@ -2147,7 +2169,8 @@ mod tests {
             assert_eq!(base64url_decode(&base64url_encode(&bytes)).unwrap(), bytes);
         }
         assert_eq!(base64url_encode(b"\xfb\xff"), "-_8");
-        assert!(base64url_decode("a").is_err());
+        assert!(base64url_decode("a").is_none());
+        assert!(base64url_decode("-_8=").is_none());
     }
 
     #[test]

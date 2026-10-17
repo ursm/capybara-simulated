@@ -27,6 +27,23 @@ pub(crate) fn forbidden_method(method: &[u8]) -> bool {
 pub(crate) fn is_token(t: &[u8]) -> bool {
     !t.is_empty() && t.iter().all(|&b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
 }
+// A Fetch "header value": no leading or trailing tab or space, and no NUL, CR or LF — what a value already normalized
+// is (a `NavigationPreloadManager`'s `setHeaderValue` refuses any other, where a `Headers` write normalizes it).
+pub(crate) fn is_header_value(v: &[u8]) -> bool {
+    crate::headers::normalized_value(v).is_some_and(|n| n.len() == v.len())
+}
+// A response's status text: an RFC 9112 `reason-phrase` — HTAB, SP, VCHAR, obs-text.
+pub(crate) fn is_reason_phrase(v: &[u8]) -> bool {
+    v.iter().all(|&b| b == b'\t' || (0x20..=0x7E).contains(&b) || b >= 0x80)
+}
+// "Redirect status": the only codes `Response.redirect()` takes, and the hops a fetch follows.
+pub(crate) fn redirect_status(status: u32) -> bool {
+    matches!(status, 301 | 302 | 303 | 307 | 308)
+}
+// "Null body status": a response of one has no body.
+pub(crate) fn null_body_status(status: u32) -> bool {
+    matches!(status, 101 | 103 | 204 | 205 | 304)
+}
 // "Normalize a method": one of DELETE, GET, HEAD, OPTIONS, POST, PUT matched ASCII case-insensitively, byte-uppercased;
 // None for any other, which keeps its case (`patch` stays `patch`).
 pub(crate) fn normalized_method(method: &[u8]) -> Option<&'static str> {
@@ -126,7 +143,7 @@ pub(crate) fn intercepted_hop(hop: &InterceptedHop<'_>, response: &WorkerRespons
             hop.mode, hop.redirect_mode
         ));
     }
-    if !matches!(response.status, 301 | 302 | 303 | 307 | 308) || t == "opaqueredirect" {
+    if !redirect_status(response.status) || t == "opaqueredirect" {
         return HopOutcome::Answer;
     }
     match hop.redirect_mode {
@@ -289,8 +306,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "interceptedHop", intercepted_hop_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
     crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
+    crate::dom::register(scope, ns, "headerValue", header_value_op, context_id);
     crate::dom::register(scope, ns, "httpToken", http_token_op, context_id);
     crate::dom::register(scope, ns, "normalizedMethod", normalized_method_op, context_id);
+    crate::dom::register(scope, ns, "nullBodyStatus", null_body_status_op, context_id);
+    crate::dom::register(scope, ns, "reasonPhrase", reason_phrase_op, context_id);
+    crate::dom::register(scope, ns, "redirectStatus", redirect_status_op, context_id);
 }
 fn units(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<u8> {
     let Some(s) = value.to_string(scope) else { return Vec::new() };
@@ -360,6 +381,23 @@ fn blob_range_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 fn forbidden_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let method = units(scope, args.get(0));
     rv.set_bool(forbidden_method(&method));
+}
+// __dom.headerValue(s) -> whether `s` is a header value (`is_header_value`).
+fn header_value_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let s = units(scope, args.get(0));
+    rv.set_bool(is_header_value(&s));
+}
+// __dom.reasonPhrase(s) -> whether `s` is a reason-phrase (`is_reason_phrase`).
+fn reason_phrase_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let s = units(scope, args.get(0));
+    rv.set_bool(is_reason_phrase(&s));
+}
+// __dom.redirectStatus(status) / __dom.nullBodyStatus(status) -> whether it is one (`redirect_status` / `null_body_status`).
+fn redirect_status_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(args.get(0).uint32_value(scope).is_some_and(redirect_status));
+}
+fn null_body_status_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(args.get(0).uint32_value(scope).is_some_and(null_body_status));
 }
 // __dom.httpToken(s) -> whether `s` is an HTTP token (`is_token`).
 fn http_token_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

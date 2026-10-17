@@ -31,7 +31,7 @@ fn decode_document_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 }
 
 // An XML MIME type (MIME Sniffing §4.6): `text/xml`, `application/xml`, or any `+xml` subtype.
-fn is_xml(content_type: &str) -> bool {
+pub(crate) fn is_xml(content_type: &str) -> bool {
     let essence = content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
     essence.ends_with("+xml") || essence == "text/xml" || essence == "application/xml"
 }

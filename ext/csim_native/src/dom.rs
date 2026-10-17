@@ -2766,6 +2766,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "easingText", easing_text, context_id);
     register(scope, ns, "mediaMatches", media_matches, context_id);
     register(scope, ns, "cssColor", css_color, context_id);
+    register(scope, ns, "cssEscape", css_escape, context_id);
     register(scope, ns, "canvasFont", canvas_font, context_id);
     register(scope, ns, "canvasSpacing", canvas_spacing, context_id);
     register(scope, ns, "setTouchInput", set_touch_input, context_id);
@@ -5174,6 +5175,36 @@ fn media_matches(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
     let Some(arena) = d.arena.enter_known(cid) else { return rv.set_bool(false) };
     rv.set_bool(crate::style::media_matches(d.styles.get(&cid), arena, screen, &text));
+}
+
+// CSSOM's "serialize an identifier" (§2.1), over UTF-16 units — a lone surrogate kept as it is, as any unit past U+007F:
+// NUL a U+FFFD; a control, or a digit first (or second after a hyphen), escaped as code point; a lone hyphen escaped; a
+// hyphen, an underscore, an ASCII alphanumeric or one past U+007F as it is; anything else escaped as itself.
+fn serialize_identifier(s: &[u16]) -> Vec<u16> {
+    let mut out = Vec::with_capacity(s.len());
+    let first = s.first().copied();
+    if s.len() == 1 && first == Some(0x2d) {
+        return "\\-".encode_utf16().collect();
+    }
+    for (i, &c) in s.iter().enumerate() {
+        let digit = (0x30..=0x39).contains(&c);
+        if c == 0 {
+            out.push(0xfffd);
+        } else if (0x01..=0x1f).contains(&c) || c == 0x7f || (i == 0 && digit) || (i == 1 && digit && first == Some(0x2d)) {
+            out.extend(format!("\\{c:x} ").encode_utf16());
+        } else if c >= 0x80 || c == 0x2d || c == 0x5f || digit || matches!(c, 0x41..=0x5a | 0x61..=0x7a) {
+            out.push(c);
+        } else {
+            out.push(0x5c);
+            out.push(c);
+        }
+    }
+    out
+}
+// __dom.cssEscape(value) -> `CSS.escape(value)`: its identifier serialization (`serialize_identifier`).
+fn css_escape(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let units = utf16_arg(scope, args.get(0));
+    rv.set(utf16_value(scope, &serialize_identifier(&units)));
 }
 
 // __dom.cssColor(text, currentColor) -> `[r, g, b, alpha, legacy, css]` — the colour `text` is (`style::parse_color`):

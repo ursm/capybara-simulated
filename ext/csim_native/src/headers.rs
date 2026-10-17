@@ -49,7 +49,7 @@ const SET_COOKIE: &[u8] = b"set-cookie";
 
 // "Normalize" a header value: its leading and trailing HTTP whitespace (tab, LF, CR, space) gone — None where what is
 // left has a NUL, CR or LF in it, which no header value may (a mid-value newline is a smuggling vector).
-fn normalized_value(value: &[u8]) -> Option<&[u8]> {
+pub(crate) fn normalized_value(value: &[u8]) -> Option<&[u8]> {
     let ws = |b: &u8| matches!(b, b'\t' | b'\n' | b'\r' | b' ');
     let start = value.iter().position(|b| !ws(b)).unwrap_or(value.len());
     let end = value.iter().rposition(|b| !ws(b)).map_or(start, |e| e + 1);

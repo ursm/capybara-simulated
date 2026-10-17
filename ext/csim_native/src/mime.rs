@@ -177,6 +177,30 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "mimeParse", mime_parse, context_id);
     crate::dom::register(scope, ns, "mimeSerialize", mime_serialize, context_id);
     crate::dom::register(scope, ns, "mimeExtract", mime_extract, context_id);
+    crate::dom::register(scope, ns, "mimeIsXml", mime_is_xml, context_id);
+    crate::dom::register(scope, ns, "mimeCharsetUtf8", mime_charset_utf8, context_id);
+}
+
+// __dom.mimeIsXml(contentType) -> whether it is an XML MIME type (document_encoding.rs `is_xml`).
+fn mime_is_xml(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let ct = args.get(0).to_rust_string_lossy(scope);
+    rv.set_bool(crate::document_encoding::is_xml(&ct));
+}
+
+// __dom.mimeCharsetUtf8(value) -> a request's `Content-Type` re-serialized with its `charset` UTF-8 (XHR's send(): a
+// body encoded as UTF-8 says so) — null where it stays as it is: no MIME type, no `charset`, a UTF-8 one already.
+fn mime_charset_utf8(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let text = args.get(0).to_rust_string_lossy(scope);
+    let Some(mut mime) = parse(&text) else { return };
+    let Some(charset) = mime.parameters.iter_mut().find(|(n, _)| n == "charset") else { return };
+    if charset.1.eq_ignore_ascii_case("utf-8") {
+        return;
+    }
+    charset.1 = "UTF-8".to_owned();
+    if let Some(s) = v8::String::new(scope, &serialize(&mime)) {
+        rv.set(s.into());
+    }
 }
 
 // __dom.mimeExtract(headerValue) -> the MIME type a `Content-Type` value gives (`extract`), serialized — or null.
