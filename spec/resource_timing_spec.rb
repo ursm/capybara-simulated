@@ -408,14 +408,17 @@ RSpec.describe 'resource timing' do
 
   it 'fetches the images a ::before / ::after box and a content url() use' do
     # A generated box is rendered, so its images are fetched (Chrome: `::before` and `content` both, measured); a
-    # pseudo-element with no `content` generates no box, and fetches none.
+    # pseudo-element with no `content` generates no box, and fetches none — nor does one of a `display: none` element
+    # (Chrome).
     png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
     doc = <<~HTML
       <!DOCTYPE html><html><head><meta charset="utf-8"><style>
         #a::before { content: ''; background-image: url("/css.png?id=before") }
         #a::after { background-image: url("/css.png?id=nobox") }
         #b::after { content: url("/css.png?id=content") }
-      </style></head><body><div id="a">a</div><div id="b">b</div></body></html>
+        #h { display: none }
+        #h::before { content: 'x'; background-image: url("/css.png?id=hidden-host") }
+      </style></head><body><div id="a">a</div><div id="b">b</div><div id="h">h</div></body></html>
     HTML
     a = ->(env) { env['PATH_INFO'].start_with?('/css.png') ? [200, {'content-type' => 'image/png'}, [png]] : [200, {'content-type' => 'text/html'}, [doc]] }
     s = simulated_session(a)
@@ -446,14 +449,19 @@ RSpec.describe 'resource timing' do
     expect(names).to include('css.png?id=raf')
   end
 
-  it 'fetches a CSS image from the network, with its entry, when the controlling service worker does not answer' do
-    # Handle Fetch: a `fetch` event no `respondWith` answered falls back to the network.
+  it 'fetches a CSS image through the controlling service worker, from the network where it does not answer' do
+    # Handle Fetch: a `fetch` event no `respondWith` answered falls back to the network; either way the image has its
+    # Resource Timing entry, an answered one with the answer's status and size.
     png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
     worker = <<~JS
       self.addEventListener('install', () => self.skipWaiting());
       self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
       const seen = [];
-      self.addEventListener('fetch', (e) => { if (e.request.destination === 'image') seen.push(new URL(e.request.url).search); });
+      self.addEventListener('fetch', (e) => {
+        if (e.request.destination !== 'image') return;
+        seen.push(new URL(e.request.url).search);
+        if (e.request.url.endsWith('?answered')) e.respondWith(new Response('abcd', { headers: { 'content-type': 'image/png' } }));
+      });
       self.onmessage = (e) => e.source.postMessage(seen.slice());
     JS
     doc = <<~HTML
@@ -479,15 +487,19 @@ RSpec.describe 'resource timing' do
       s.visit '/'
       expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
       s.execute_script(<<~JS)
-        document.head.appendChild(document.createElement('style')).textContent = '.t { background-image: url("/css.png?late") }';
+        document.head.appendChild(document.createElement('style')).textContent =
+          '.t { background-image: url("/css.png?late") } .u { background-image: url("/css.png?answered") }';
         document.body.appendChild(document.createElement('div')).className = 't';
+        document.body.appendChild(document.createElement('div')).className = 'u';
       JS
       entries = poll_until do
-        ns = s.evaluate_script("performance.getEntriesByType('resource').filter((e) => e.initiatorType === 'css').map((e) => e.name.split('/').pop())")
-        ns.empty? ? nil : ns
+        ns = s.evaluate_script("performance.getEntriesByType('resource').filter((e) => e.initiatorType === 'css').map((e) => [e.name.split('/').pop(), e.responseStatus, e.encodedBodySize > 0])")
+        ns.length >= 2 ? ns.sort : nil
       end
       s.execute_script("navigator.serviceWorker.controller.postMessage('seen')")
-      expect([poll_until { s.evaluate_script('window.seen') }, served, entries]).to eq([['?late'], ['late'], ['css.png?late']])
+      expect([poll_until { s.evaluate_script('window.seen') }.sort, served, entries]).to eq([
+        ['?answered', '?late'], ['late'], [['css.png?answered', 200, true], ['css.png?late', 200, true]]
+      ])
     ensure
       ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
     end

@@ -5056,16 +5056,22 @@ module Capybara
         # but a service worker's response is taken as the sheet it answers — a
         # `new Response(text)` respondWith (text/plain) serving a stylesheet is
         # load-bearing for green static-router subtests.
-        type = r['type'].to_s
+        type   = r['type'].to_s
+        status = type == 'opaque' ? 0 : (r['status'] || 200).to_i
         return {'blocked' => true} unless sw_response_allowed?(r, mode)
-        return {'blocked' => true} unless type == 'opaque' || (200..299).cover?((r['status'] || 200).to_i)
+        # (…a non-ok answer is still a response, whose status a Resource Timing entry reports)
+        return {'blocked' => true, 'status' => status} unless type == 'opaque' || (200..299).cover?(status)
 
         body_b64 = r['body_b64'].to_s
         body_b64 = r['render_b64'].to_s if body_b64.empty? && r['render_b64']
         bytes    = Base64.decode64(body_b64)
-        # A binary consumer (video / font bytes) takes the bytes as they are — the
-        # utf8 text funnel would mangle non-UTF-8 byte sequences.
-        return {'bytes' => bytes, 'type' => type} if binary
+        # A binary consumer (video / font / image bytes) takes the bytes as they are — the
+        # utf8 text funnel would mangle non-UTF-8 byte sequences — with the status and
+        # content type its Resource Timing entry reports.
+        if binary
+          content_type = (r['headers'] || {}).find {|k, _| k.to_s.casecmp('content-type').zero? }&.last.to_s
+          return {'bytes' => bytes, 'type' => type, 'status' => status, 'contentType' => content_type}
+        end
         {'body' => RuntimeShared.utf8_text(bytes)}
       end
 

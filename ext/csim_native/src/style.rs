@@ -2517,10 +2517,13 @@ impl<'dom> DomTraversal<StyleNode<'dom>> for Recalc<'_> {
             if styles_of(&data) != before {
                 el.arena().note_restyled(el.id);
                 // (…and the images its values use are owed a fetch at the rendering update)
-                let styles = [data.styles.get_primary(), data.styles.pseudos.get(&PSEUDOS_GENERATED[0]), data.styles.pseudos.get(&PSEUDOS_GENERATED[1])];
-                for (i, style) in styles.into_iter().enumerate() {
-                    if let Some(style) = style {
-                        crate::rendered::note_css_images(el.arena(), el.id, style, i > 0);
+                // (…a `display: none` element's pseudo-elements generate no box either, though their values are computed)
+                if let Some(style) = data.styles.get_primary().filter(|s| !s.get_box().clone_display().is_none()) {
+                    crate::rendered::note_css_images(el.arena(), el.id, style, false);
+                    for pseudo in &PSEUDOS_GENERATED {
+                        if let Some(style) = data.styles.pseudos.get(pseudo) {
+                            crate::rendered::note_css_images(el.arena(), el.id, style, true);
+                        }
                     }
                 }
             }
