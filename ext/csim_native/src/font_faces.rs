@@ -441,8 +441,8 @@ fn font_faces_matching(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         .iter()
         .zip(&blocks)
         .map(|(family, block)| {
-            // (…a face's `family` its descriptor serialized, a string where it was constructed with no family: the name it
-            // names)
+            // (…a face's `family` its descriptor serialized — the quoted literal a constructor made of an invalid family
+            // too: the name it names)
             let family = family_descriptor(family).map_or_else(|| family.clone(), |(name, _)| name).to_ascii_lowercase();
             let face = parse(&format!("font-family: x; {block}"), "about:blank").unwrap_or_else(|| FaceRecord::of(String::new()));
             FaceRecord { family, ..face }
