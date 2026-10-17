@@ -32,7 +32,8 @@ RSpec.describe 'text-transform in layout' do
   end
 
   # A word starts at a line break, a block, a cell and an atomic inline — an inline-block's text starts one, and the text
-  # after it goes on with that (Chrome's innerText, each); in the layout a line break or an atomic inline before a run.
+  # after it goes on with that (Chrome's innerText, each); in the layout a line break or a replaced
+  # atomic inline before a run (an inline-block's text goes on with the words around it: Chrome's "bar" after one).
   it 'starts a word where the rendered text breaks' do
     page = <<~HTML
       <!doctype html><meta charset="utf-8"><body style="margin:0;font:16px serif;text-transform:capitalize">
@@ -41,15 +42,15 @@ RSpec.describe 'text-transform in layout' do
       <div id=br><span>foo<br>bar</span></div>
       <div id=p><p>foo</p><p>bar</p></div>
       <div id=img><span>foo</span><img alt="" style="width:5px"><span id=after>bar</span></div>
-      <div id=ib>foo<span style="display:inline-block">x</span><span>bar</span></div>
-      <div style="text-transform:none"><span id=bar>Bar</span></div>
+      <div id=ib>foo<span style="display:inline-block">x</span><span id=goes-on>bar</span></div>
+      <div style="text-transform:none"><span id=bar>Bar</span><span id=lower>bar</span></div>
     HTML
     session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
     session.visit '/'
     texts = session.evaluate_script("['ul', 't', 'br', 'p', 'img', 'ib'].map((id) => document.getElementById(id).innerText)")
     expect(texts).to eq(["Foo\nBar", "Foo\tBar", "Foo\nBar", "Foo\n\nBar", 'FooBar', 'FooXbar'])
-    widths = session.evaluate_script("['after', 'bar'].map((id) => document.getElementById(id).getBoundingClientRect().width)")
-    expect(widths[0]).to eq(widths[1])
+    widths = session.evaluate_script("['after', 'bar', 'goes-on', 'lower'].map((id) => document.getElementById(id).getBoundingClientRect().width)")
+    expect([widths[0], widths[2]]).to eq([widths[1], widths[3]])
   end
 end
 

@@ -1462,7 +1462,9 @@ enum Pending {
     Float { ws: u8, rec: i32 },
     // An atomic inline, hung by its `vertical-align`: a baseline shift, an alignment against the parent's font (its
     // code and the parent-font figure it reads), or a line-relative mode (1 top, 2 bottom).
-    Atomic { ws: u8, rec: i32, shift: f64, code: u8, figure: f64, line_mode: u8 },
+    // (…`replaced`: a replaced element's or a control's, an object in the line's text that ends a word — an inline-block's
+    // text goes on with the words around it)
+    Atomic { ws: u8, rec: i32, shift: f64, code: u8, figure: f64, line_mode: u8, replaced: bool },
 }
 
 // An inline box's edges as its entry and its runs carry them (`Walk::entry`): the margins, the border + padding
@@ -3984,7 +3986,7 @@ impl<'a> Walk<'a> {
                     self.run_texts.push(None);
                     edge_run(RUN_FLOAT, rec as usize, 0.0, ws)
                 }
-                Pending::Atomic { ws, rec, shift, code, figure, line_mode } => {
+                Pending::Atomic { ws, rec, shift, code, figure, line_mode, .. } => {
                     self.run_texts.push(None);
                     Run { asc: shift, line_height: code as f64, metric: figure, line_mode, ..edge_run(RUN_ATOMIC, rec as usize, 0.0, ws) }
                 }
@@ -4052,12 +4054,13 @@ impl<'a> Walk<'a> {
                         continue;
                     }
                     // (…in the case its `text-transform` lays it out in — a word going on from the text before it, across
-                    // an inline box's edge, not capitalized again; a line break or an atomic inline before it, an object
-                    // in the line's text, ends one)
+                    // an inline box's edge, not capitalized again; a line break or a replaced atomic inline before it,
+                    // an object in the line's text, ends one — an inline-block's does not: Chrome's `x` in
+                    // `foo<span style="display:inline-block">x</span>bar` capitalized is "X", its `bar` "bar")
                     let starts_word = || {
                         g.runs.iter().rev().find_map(|r| match r {
                             Pending::Text { text, .. } => Some(text.last().copied()),
-                            Pending::Br { .. } | Pending::Atomic { .. } => Some(None),
+                            Pending::Br { .. } | Pending::Atomic { replaced: true, .. } => Some(None),
                             _ => None,
                         }).flatten().is_none_or(|u| char::from_u32(u32::from(u)).is_none_or(|c| !crate::rendered::continues_word(c)))
                     };
@@ -4176,7 +4179,8 @@ impl<'a> Walk<'a> {
             let rec = self.inputs.len() as i32;
             self.record(c, g.idx)?;
             self.add_chain_rel(rec, g.rel.as_ref());
-            g.runs.push(Pending::Atomic { ws: ws_mode, rec, shift, code, figure, line_mode });
+            let replaced = replaced_or_control(self.arena, c, node);
+            g.runs.push(Pending::Atomic { ws: ws_mode, rec, shift, code, figure, line_mode, replaced });
             g.makes_line = true;
             return Ok(());
         }
