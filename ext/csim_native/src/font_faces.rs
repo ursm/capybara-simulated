@@ -224,6 +224,44 @@ pub(crate) fn family_list(stack: &str) -> Vec<(String, bool)> {
         }
     }
 }
+// A `@font-face` rule's `font-family` descriptor — what a FontFace's `family` is parsed as (CSS Font Loading §2.1, CSS
+// Fonts 4 §4.1): its one `<family-name>`, a string or identifiers (no generic family nor CSS-wide keyword among them
+// unquoted, nothing more), as (the name, unquoted and unescaped; its serialization: a string quoted, identifiers as
+// identifiers) — None for a value that is none.
+pub(crate) fn family_descriptor(value: &str) -> Option<(String, String)> {
+    let mut input = cssparser::ParserInput::new(value);
+    let mut parser = cssparser::Parser::new(&mut input);
+    let parsed: Result<(String, String), cssparser::ParseError<'_, ()>> = parser.parse_entirely(|p| {
+        if let Ok(s) = p.try_parse(|p| p.expect_string().map(|s| s.as_ref().to_owned())) {
+            let mut out = String::new();
+            let _ = cssparser::serialize_string(&s, &mut out);
+            return Ok((s, out));
+        }
+        let mut words = vec![p.expect_ident()?.as_ref().to_owned()];
+        while let Ok(w) = p.try_parse(|p| p.expect_ident().map(|w| w.as_ref().to_owned())) {
+            words.push(w);
+        }
+        const RESERVED: [&str; 6] = ["initial", "inherit", "unset", "revert", "revert-layer", "default"];
+        const GENERIC: [&str; 13] = [
+            "serif", "sans-serif", "cursive", "fantasy", "monospace", "system-ui", "emoji", "math", "fangsong", "ui-serif",
+            "ui-sans-serif", "ui-monospace", "ui-rounded",
+        ];
+        let keyword = |w: &String| RESERVED.iter().chain(GENERIC.iter()).any(|k| w.eq_ignore_ascii_case(k));
+        if words.iter().any(|w| RESERVED.iter().any(|k| w.eq_ignore_ascii_case(k))) || (words.len() == 1 && keyword(&words[0])) {
+            return Err(p.new_custom_error(()));
+        }
+        let mut out = String::new();
+        for (k, word) in words.iter().enumerate() {
+            if k > 0 {
+                out.push(' ');
+            }
+            let _ = cssparser::serialize_identifier(word, &mut out);
+        }
+        Ok((words.join(" "), out))
+    });
+    parsed.ok().filter(|(name, _)| !name.is_empty())
+}
+
 // …each written back as a stack of that one family: a string quoted (its escapes kept), identifiers as identifiers — so
 // a family handed on as a stack is the family it was (`"x, A"` stays one; `serif` stays the generic).
 pub(crate) fn serialized_family_list(stack: &str) -> Vec<String> {
@@ -295,8 +333,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "fontFaceDescriptor", font_face_descriptor, context_id);
     crate::dom::register(scope, ns, "fontLocalStyle", font_local_style, context_id);
     crate::dom::register(scope, ns, "fontFamilyList", font_family_list_op, context_id);
-    crate::dom::register(scope, ns, "fontFamilyName", font_family_name_op, context_id);
-    crate::dom::register(scope, ns, "fontFamilyString", font_family_string_op, context_id);
+    crate::dom::register(scope, ns, "fontFamilyDescriptor", font_family_descriptor_op, context_id);
     crate::dom::register(scope, ns, "fontFacesMatching", font_faces_matching, context_id);
 }
 // __dom.fontFamilyList(stack) -> the families of a `font-family` value, each as a stack of that one family
@@ -307,27 +344,13 @@ fn font_family_list_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.fontFamilyName(value) -> the family a `font-family` descriptor's value names, unquoted and unescaped (its one
-// `<family-name>`: a string, or identifiers joined by a space) — null for a value that is no one family.
-fn font_family_name_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.fontFamilyDescriptor(value) -> [name, serialization] of a `font-family` descriptor (`family_descriptor`), or
+// null for a value that is none.
+fn font_family_descriptor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let value = args.get(0).to_rust_string_lossy(scope);
-    let mut families = family_list(&value);
-    match (families.pop(), families.is_empty()) {
-        (Some((name, _)), true) => match v8::String::new(scope, &name) {
-            Some(name) => rv.set(name.into()),
-            None => rv.set_null(),
-        },
-        _ => rv.set_null(),
-    }
-}
-// __dom.fontFamilyString(name) -> `name` as a CSS string, quoted and escaped (CSSOM "serialize a string").
-fn font_family_string_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let name = args.get(0).to_rust_string_lossy(scope);
-    let mut out = String::new();
-    let _ = cssparser::serialize_string(&name, &mut out);
-    if let Some(out) = v8::String::new(scope, &out) {
-        rv.set(out.into());
-    }
+    let Some((name, serialized)) = family_descriptor(&value) else { return rv.set_null() };
+    let items: Vec<v8::Local<v8::Value>> = [name, serialized].iter().filter_map(|s| v8::String::new(scope, s)).map(Into::into).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // A `@font-face` descriptor's value as the engine parses and serializes it (CSS Fonts 4 §4, CSS Font Loading's FontFace
@@ -405,7 +428,8 @@ fn font_faces_matching(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         .iter()
         .zip(&blocks)
         .map(|(family, block)| {
-            let family = family.trim_matches(|c| c == '"' || c == '\'').to_ascii_lowercase();
+            // (…a face's `family` its descriptor serialized: the name it names)
+            let family = family_descriptor(family).map_or_else(|| family.clone(), |(name, _)| name).to_ascii_lowercase();
             let face = parse(&format!("font-family: x; {block}"), "about:blank").unwrap_or_else(|| FaceRecord::of(String::new()));
             FaceRecord { family, ..face }
         })
