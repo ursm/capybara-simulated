@@ -164,7 +164,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "insertionRefusal", insertion_refusal, context_id);
     crate::dom::register(scope, ns, "changeChildren", change_children_op, context_id);
     crate::dom::register(scope, ns, "moveChild", move_child_op, context_id);
-    crate::dom::register(scope, ns, "recordChildList", record_child_list_op, context_id);
 }
 
 // __dom.insertionRefusal(nodeNid, nodeType, parentNid, parentType, childNid, replace) -> 0 where the insertion of the
@@ -579,25 +578,3 @@ pub(crate) fn record_child_list(
     true
 }
 
-// __dom.recordChildList(targetNid, added, removed, previousSibling, nextSibling) — a change of the target's children
-// made outside the DOM's mutation algorithms (the parser's, with an observer to hear of it): `record_child_list`, its
-// siblings undefined for an insertion's own, and no sheet renewal of its own to ask about.
-fn record_child_list_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(target) = nid_arg(scope, &args, 0) else { return };
-    let ids = |scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>| -> Vec<NodeId> {
-        let Ok(list) = v8::Local::<v8::Array>::try_from(v) else { return Vec::new() };
-        let mut ids = Vec::with_capacity(list.length() as usize);
-        for i in 0..list.length() {
-            if let Some(nid) = list.get_index(scope, i).and_then(|n| crate::node_handle::nid_of(scope, n)) {
-                ids.push(nid);
-            }
-        }
-        ids
-    };
-    let (added, removed) = (ids(scope, args.get(1)), ids(scope, args.get(2)));
-    let siblings = (!args.get(3).is_undefined() || !args.get(4).is_undefined()).then(|| {
-        (crate::node_handle::nid_of(scope, args.get(3)), crate::node_handle::nid_of(scope, args.get(4)))
-    });
-    let caller = realm_id(scope, &args);
-    record_child_list(scope, caller, target, &added, &removed, siblings, None);
-}

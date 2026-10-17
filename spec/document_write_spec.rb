@@ -153,6 +153,23 @@ RSpec.describe 'document.write during parsing' do
     expect(got).to eq([1, 3, 'x', true, 'BackCompat'])
   end
 
+  # …but an iframe srcdoc document — its URL `about:srcdoc`, which `open` keeps — stays no-quirks with no doctype written,
+  # whichever realm opens it (Chrome: `CSS1Compat` both ways; the spec's "iframe srcdoc document").
+  it 'keeps an iframe srcdoc document no-quirks through document.open' do
+    s = session_for('<iframe id=f srcdoc="<!DOCTYPE html><p>a"></iframe>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const w = document.getElementById('f').contentWindow, d = w.document;
+        d.open();
+        d.write('<p>y');
+        d.close();
+        const inner = w.eval("document.open(); document.write('<p>z'); document.close(); document.compatMode");
+        return [d.compatMode, d.URL, inner];
+      })()
+    JS
+    expect(got).to eq(['CSS1Compat', 'about:srcdoc', 'CSS1Compat'])
+  end
+
   # A declarative shadow root's script that writes once the input has run out: no insertion point is left to write at,
   # and nothing the parser does on the write may bring the process down (it did: a panic, aborting).
   it 'survives a write from a declarative shadow root left open at the end of the input' do

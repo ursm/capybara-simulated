@@ -428,7 +428,7 @@ fn weak_global(scope: &mut v8::PinScope<'_, '_>, weak: Option<*const v8::Weak<v8
 
 // A custom element name as a definition is keyed by: its code units, a lone surrogate among them kept apart from the
 // U+FFFD a string makes of it (no valid custom element name has either, but one compares as the other).
-fn name_key(units: &[u16]) -> String {
+pub(crate) fn name_key(units: &[u16]) -> String {
     let mut key = String::with_capacity(units.len());
     for unit in char::decode_utf16(units.iter().copied()) {
         match unit {

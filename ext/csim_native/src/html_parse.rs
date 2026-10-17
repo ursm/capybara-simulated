@@ -646,8 +646,8 @@ fn html_script_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 }
 
 // __dom.htmlWrite(id, html, wellFormed) -> whether it went in: `document.write(html)` from a script with an insertion
-// point puts its text there — at the end of the input the parse has not taken, before what is set aside. (`htmlRun`
-// parses it, but for a pending parsing-blocking script.) Nothing goes into a parse that has ended.
+// point puts its text there — at the end of the input the parse has not taken, before what is set aside.
+// (`htmlRunBuilt` parses it, but for a pending parsing-blocking script.) Nothing goes into a parse that has ended.
 fn html_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = parse_id(scope, &args);
     parser_op(scope, Some(id), &mut rv, &[], |scope, rv| {
@@ -854,10 +854,12 @@ impl<'s> Build<'s> {
     // into template contents, or under a node of the null registry. The element, and whether it is custom (a constructor
     // that failed leaves an HTMLUnknownElement); None where no constructor runs. `rest` the steps after the token's.
     fn construct(&mut self, scope: &mut v8::PinScope<'s, '_>, ns: i32, local: &str, handle: i32, rest: &[Operand]) -> Option<(crate::dom::NodeId, bool)> {
-        if !self.live.as_ref().is_some_and(|l| l.ce_defined) || namespace_of(ns) != html5ever::ns!(html) || !local.contains('-') || self.standins.in_text(local) {
+        if !self.live.as_ref().is_some_and(|l| l.ce_defined) || namespace_of(ns) != html5ever::ns!(html) || !local.contains('-') {
             return None;
         }
-        if !crate::dom::dom(scope).arena.ce_reactions.defines(self.cid, local) {
+        // (…a name holding a stand-in of a lone surrogate looked up exactly, as the registry keys it)
+        let exact = self.standins.in_text(local).then(|| crate::ce_reactions::name_key(&self.standins.units(local)));
+        if !crate::dom::dom(scope).arena.ce_reactions.defines(self.cid, exact.as_deref().unwrap_or(local)) {
             return None;
         }
         let (parent, based) = insertion_parent(rest, handle)?;
@@ -877,7 +879,7 @@ impl<'s> Build<'s> {
         let hook = v8::String::new(scope, "__csimConstructParsedElement")?;
         let global = scope.get_current_context().global(scope);
         let hook = v8::Local::<v8::Function>::try_from(global.get(scope, hook.into())?).ok()?;
-        let name = v8::String::new(scope, local)?;
+        let name = page_string(scope, local, &self.standins)?;
         let doc: v8::Local<'_, v8::Value> = self.doc.map_or_else(|| v8::null(scope).into(), Into::into);
         let made = hook.call(scope, global.into(), &[name.into(), doc])?;
         let made = v8::Local::<v8::Array>::try_from(made).ok()?;
@@ -1271,11 +1273,30 @@ impl<'s> Build<'s> {
                         }
                     }
                 }
+                // (…a second `<html>` or `<body>` start tag: the attributes its element does not have yet added to it, an
+                // observer's record of each in the token's order, as DOM "append an attribute" queues them — Chrome)
                 OP_ADD_ATTRS => {
                     let id = self.node(int(ops.next())?)?;
                     let list = attrs(&mut ops)?;
                     let existing = crate::dom::realm(scope, self.cid).get(id).map_or_else(Vec::new, |n| n.attributes.clone());
+                    let observed = self.live.as_ref().is_some_and(|l| l.observed) && !self.in_template_contents(scope, id);
+                    let mut added: Vec<String> = Vec::new();
+                    if observed {
+                        for (prefix, _, local, _) in &list {
+                            let name = if prefix.is_empty() { local.clone() } else { format!("{prefix}:{local}") };
+                            if !existing.iter().any(|(k, _)| *k == name) && !added.contains(&name) {
+                                added.push(name);
+                            }
+                        }
+                    }
                     self.attributes(scope, id, list, existing);
+                    for name in added {
+                        let target = crate::dom::node_value(scope, Some(id));
+                        let null: v8::Local<'_, v8::Value> = v8::null(scope).into();
+                        let name = page_string(scope, &name, &self.standins).map_or(null, Into::into);
+                        let kind = v8::Integer::new(scope, 1).into();
+                        crate::mutation_observers::queue_record(scope, self.cid, id, &[kind, target, null, null, null, null, name, null, null]);
+                    }
                 }
                 OP_REMOVE => {
                     let id = self.node(int(ops.next())?)?;

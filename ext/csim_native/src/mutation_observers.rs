@@ -475,39 +475,37 @@ fn take_records(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 // records nothing at all) — which is only right until a layout pass has run. A parser-blocking script that reads
 // geometry lays the PARTIAL tree out, and the boxes it laid out then kept their answers while the parse went on under
 // them: `#c`, parsed after such a read, had no box at all (Chrome: y 68, and the body 86 tall). So from the first pass
-// on, the parents the parse touches are kept — with whether their CHILDREN changed or only text was appended to the last
-// one — and marked as the next pass starts, as a childList record would have marked them: the element's subtree either
-// way (`li:last-of-type` stayed on the old last `<li>`, and a parsed `.flag` never reached `.c:has(.flag)`).
+// on, the nodes whose subtree a batch of the parse changed — its document's element — are kept and marked as the next
+// pass starts, as a childList record would have marked them: the element's subtree (`li:last-of-type` stayed on the
+// old last `<li>`, and a parsed `.flag` never reached `.c:has(.flag)`).
 #[derive(Default)]
 pub(crate) struct ParsedMarks {
     layout_ran: bool,
-    parents: HashMap<NodeId, bool>,
+    parents: std::collections::HashSet<NodeId>,
 }
 
-// __dom.noteParsed(parentNid, children): the live document's parse changed `parent` — its children, or (`children`
-// false) the text of its last one — kept where a layout pass ran already (`ParsedMarks`).
+// __dom.noteParsed(nid): the live document's parse changed what is under `nid` — kept where a layout pass ran already
+// (`ParsedMarks`).
 fn note_parsed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(parent) = nid_arg(scope, &args, 0) else { return };
-    let children = args.get(1).is_true();
     let cid = realm_id(scope, &args);
     let parsed = &mut crate::dom::realm(scope, cid).parsed;
     if parsed.layout_ran {
-        *parsed.parents.entry(parent).or_default() |= children;
+        parsed.parents.insert(parent);
     }
 }
 
-// __dom.flushParsedMarks() -> whether the parse changed anything since the last pass: a layout pass begins — the parents
-// it changed marked, in the realm whose tree each is in, each with its subtree where it is an element whose children
-// changed or whose last child is the text appended to (`GEN_DIRTY`, `GEN_SUBTREE_MARKS`) — and kept from now on.
+// __dom.flushParsedMarks() -> whether the parse changed anything since the last pass: a layout pass begins — the nodes
+// it changed under marked, in the realm whose tree each is in, each with its subtree where it is an element
+// (`GEN_DIRTY`, `GEN_SUBTREE_MARKS`) — and kept from now on.
 fn flush_parsed_marks(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     arena.parsed.layout_ran = true;
     let parents = std::mem::take(&mut arena.parsed.parents);
-    for (&parent, &children) in &parents {
+    for &parent in &parents {
         let Some(n) = arena.get(parent) else { continue };
-        let subtree = n.kind == NodeKind::Element
-            && (children || n.children.iter().rev().find_map(|&c| arena.get(c)).is_some_and(|c| c.kind == NodeKind::Text));
+        let subtree = n.kind == NodeKind::Element;
         let Some(state) = arena.realm_state(n.realm) else { continue };
         if subtree {
             state.generations.bump(crate::dom::GEN_SUBTREE_MARKS);

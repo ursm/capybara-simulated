@@ -61,4 +61,32 @@ RSpec.describe 'a page parse the engine builds' do
       ]
     ])
   end
+
+  # A second `<body>` or `<html>` start tag adds the attributes its element has not got, each queuing an attribute record
+  # in the token's order (DOM "append an attribute"); Chrome: `BODY.id BODY.class HTML.lang`.
+  it 'records the attributes a second body or html tag adds' do
+    page = <<~HTML
+      <!DOCTYPE html><meta charset="utf-8"><script>
+      window.seen = [];
+      new MutationObserver((rs) => { for (const r of rs) if (r.type === 'attributes') seen.push(r.target.nodeName + '.' + r.attributeName); })
+        .observe(document, {attributes: true, subtree: true});
+      </script><body><p>x</p><body id=b2 class=c><html lang=en>
+    HTML
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] }).tap {|s| s.visit '/' }
+    expect(session.evaluate_script('[window.seen, document.body.id, document.documentElement.lang]')).to eq([%w[BODY.id BODY.class HTML.lang], 'b2', 'en'])
+  end
+
+  # A custom element whose name holds a lone surrogate is constructed at its start tag, as any other — empty, its
+  # attributes and children still to come (Firefox `ctor:0:0`; Chrome crashes on the page).
+  it 'constructs a custom element named with a lone surrogate at its start tag' do
+    page = <<~HTML
+      <!DOCTYPE html><meta charset="utf-8"><body><script>
+      window.log = [];
+      customElements.define('x-\\uD800', class extends HTMLElement { constructor() { super(); log.push(this.childNodes.length + ':' + this.attributes.length); } });
+      document.write('<x-\\uD800 id=q a=1>kid</x-\\uD800>');
+      </script>
+    HTML
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] }).tap {|s| s.visit '/' }
+    expect(session.evaluate_script("[window.log, document.getElementById('q').constructor === customElements.get('x-\\uD800')]")).to eq([['0:0'], true])
+  end
 end
