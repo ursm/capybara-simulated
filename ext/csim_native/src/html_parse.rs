@@ -554,10 +554,11 @@ fn names_null_registry(attrs: &[(String, i32, String, String)]) -> bool {
     attrs.iter().any(|(prefix, ns, local, _)| prefix.is_empty() && *ns == 0 && local == "customelementregistry")
 }
 
-// Whether the engine leaves a live document's batch of `ops` to the bindings: one where the parser runs page code or
-// steps of the bindings' own as it makes or inserts a node — a customized built-in's (`ce_defined`: an `is`), which the
-// bindings upgrade as they connect it, a `<selectedcontent>` — or one that gives a document a second doctype.
-fn declines(ops: &[Operand], ce_defined: bool, has_doctype: bool) -> bool {
+// Whether the engine leaves a live document's batch of `ops` to the bindings: one where the parser runs steps of the
+// bindings' own as it makes or inserts a node — a `<selectedcontent>`, mirrored as its select's options go in. (A
+// customized built-in is built: its `is` value fixed as the engine makes it,
+// it is upgraded as it connects, a connection step of its own — as the bindings' replay left it to.)
+fn declines(ops: &[Operand]) -> bool {
     let int = |k: usize| match ops.get(k) {
         Some(Operand::Int(v)) => Some(*v),
         _ => None,
@@ -566,23 +567,16 @@ fn declines(ops: &[Operand], ce_defined: bool, has_doctype: bool) -> bool {
         Some(Operand::Str(v)) => Some(v.as_str()),
         _ => None,
     };
-    // (…an attribute list of `n` from `at` holding an `is` where custom elements are defined, a customized built-in the
-    // bindings upgrade)
-    let refused = |at: usize, n: usize| {
-        ce_defined && (0..n).any(|k| string(at + 4 * k).is_some_and(str::is_empty) && string(at + 4 * k + 2) == Some("is"))
-    };
     let mut i = 0;
     while i < ops.len() {
         let Some(op) = int(i) else { return true };
         match op {
             OP_ELEMENT => {
-                let (ns, local, n) = (int(i + 2).unwrap_or(0), string(i + 3).unwrap_or(""), int(i + 4).unwrap_or(0).max(0) as usize);
-                if (namespace_of(ns) == html5ever::ns!(html) && local == "selectedcontent") || refused(i + 5, n) {
+                let (ns, local) = (int(i + 2).unwrap_or(0), string(i + 3).unwrap_or(""));
+                if namespace_of(ns) == html5ever::ns!(html) && local == "selectedcontent" {
                     return true;
                 }
             }
-            OP_ADD_ATTRS if refused(i + 3, int(i + 2).unwrap_or(0).max(0) as usize) => return true,
-            OP_DOCTYPE if has_doctype => return true,
             _ => {}
         }
         let Some(next) = op_end(ops, i) else { return true };
@@ -678,13 +672,12 @@ fn html_run_built(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         let doc = v8::Local::<v8::Object>::try_from(args.get(2)).ok().map(|d| v8::Local::new(scope, d));
         let document = doc.and_then(|d| crate::node_handle::nid_of(scope, d.into()));
         let skeleton: [Option<crate::dom::NodeId>; 3] = [4, 5, 6].map(|k| crate::node_handle::nid_of(scope, args.get(k)));
-        let has_doctype = document.is_some_and(|d| crate::dom::dom(scope).arena.relative(d, crate::dom::RELATIVE_DOCTYPE).is_some());
         let builds = flags & MAY_BUILD != 0
             && document.is_some()
             && (resumed.is_some()
                 || parses(scope).live.get(&id).is_some_and(|p| {
                     let ops = p.tokenizer.sink.sink.ops.borrow();
-                    !names_stand_in(&ops, &p.standins) && !declines(&ops, flags & CE_DEFINED != 0, has_doctype)
+                    !names_stand_in(&ops, &p.standins) && !declines(&ops)
                 }));
         let (Some(document), true) = (document, builds) else {
             // (…a paused build's steps the bindings take after all, back where the parse's are)
@@ -1428,12 +1421,25 @@ impl<'s> Build<'s> {
                     }
                 }
                 // (…a document's doctype and mode — none in a fragment parse — and no declarative shadow root)
+                // (…a document that has one already keeps it, its name and identifiers the new token's: a doctype a
+                // `document.write` puts after the first, as the bindings' replay did)
                 OP_DOCTYPE => {
                     let (name, public, system) = (string(ops.next())?, string(ops.next())?, string(ops.next())?);
                     let ids = Some(Box::new((self.standins.units(&public), self.standins.units(&system))));
-                    let dt = self.make(scope, crate::dom::NodeData { doctype_ids: ids, ..crate::dom::NodeData::of_kind(crate::dom::NodeKind::Other, self.standins.units(&name)) });
                     let doc = self.node(0)?;
-                    self.insert(scope, doc, dt, None);
+                    let arena = crate::dom::realm(scope, self.cid);
+                    match arena.relative(doc, crate::dom::RELATIVE_DOCTYPE) {
+                        Some(existing) => {
+                            if let Some(n) = arena.get_mut_quietly(existing) {
+                                n.data = self.standins.units(&name);
+                                n.doctype_ids = ids;
+                            }
+                        }
+                        None => {
+                            let dt = self.make(scope, crate::dom::NodeData { doctype_ids: ids, ..crate::dom::NodeData::of_kind(crate::dom::NodeKind::Other, self.standins.units(&name)) });
+                            self.insert(scope, doc, dt, None);
+                        }
+                    }
                 }
                 OP_QUIRKS => self.quirks = Some(int(ops.next())?),
                 // (…a declarative shadow root attached to its host — the template not inserted, the root what its
