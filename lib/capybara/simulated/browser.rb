@@ -1366,7 +1366,8 @@ module Capybara
           # noopener anyway for a cross-partition blob. Matches the scripted
           # click / dispatchEvent activation paths.
           elsif new_window_target?(target)
-            @driver.open_aux_window(resolve_against_current(url, use_base: true), source: self, opener: !!action['opener'], blob_snapshot: action['blob'])
+            @driver.open_aux_window(resolve_against_current(url, use_base: true), source: self, opener: !!action['opener'], blob_snapshot: action['blob'],
+                                    **hyperlink_referrer(action['referrerPolicy']))
           # In-page anchor links (`#frag` / current-page + `#frag`) move
           # the hash but don't fetch a new document. Pure-fragment also
           # short-circuits the `<a>`s test fixtures use as click sinks.
@@ -2027,13 +2028,21 @@ module Capybara
         # (…the main document's slot: its hyperlink's href resolved against it, whichever frame `within_frame` entered)
         in_top_context { follow_pending_hyperlink(pending) }
       end
+      # The referrer a hyperlink's new window loads with (HTML "follow the hyperlink" steps 8-9), under the policy its
+      # `rel` / `referrerpolicy` set (`policy`: '' for its document's): none for `no-referrer`, else this document's URL.
+      def hyperlink_referrer(policy)
+        policy = policy.to_s
+        {referrer: policy == 'no-referrer' ? '' : (@current_url || ''), referrer_policy: policy.empty? ? nil : policy}
+      end
+
       def follow_pending_hyperlink(pending)
         url    = pending['url'].to_s
         target = pending['target'].to_s
         if new_window_target?(target)
           # `opener` reflects rel=opener (a bare target=_blank link is noopener);
           # open_aux_window forces noopener anyway for a cross-partition blob.
-          @driver.open_aux_window(resolve_against_current(url, use_base: true), source: self, opener: !!pending['opener'], blob_snapshot: pending['blob'])
+          @driver.open_aux_window(resolve_against_current(url, use_base: true), source: self, opener: !!pending['opener'], blob_snapshot: pending['blob'],
+                                  **hyperlink_referrer(pending['referrerPolicy']))
         elsif pure_fragment_navigation?(url, use_base: true)
           update_current_hash(resolve_against_current(url, use_base: true))
         else
@@ -3170,7 +3179,7 @@ module Capybara
         # `_parent` of a ≥2-deep frame) navigates the FRAME, not the top page.
         frame_entry = frame_nav_target_entry(spec['target'])
         target = spec['target'].to_s
-        # (…the keywords, and the `rel` tokens below, ASCII case-insensitive, the tokens split on ASCII whitespace)
+        # (…the keywords ASCII case-insensitive)
         keyword = target.downcase(:ascii)
         named   = frame_entry.nil? && !target.empty? && !%w[_self _top _parent _blank].include?(keyword)
         # A name chooses the navigable it is the target name of (`choose_named_navigable`): a frame's anywhere in the page
@@ -3183,14 +3192,11 @@ module Capybara
         named_frame = chosen if chosen.is_a?(Integer)
         new_window  = frame_entry.nil? && chosen.nil? && new_window_target?(target)
         window_name = keyword == '_blank' ? '' : target
-        # Opener exposure for a `<form target>` new context, per the link-relation
-        # model: `noopener`/`noreferrer` always drop the opener; `target=_blank`
-        # ALSO defaults to noopener unless `rel=opener` opts back in (a named target
-        # keeps its opener by default). `noreferrer` additionally empties the referrer.
-        rel_tokens  = spec['rel'].to_s.downcase(:ascii).split(/[\t\n\f\r ]+/)
-        no_referrer = rel_tokens.include?('noreferrer')
-        keep_opener = !no_referrer && !rel_tokens.include?('noopener') &&
-                      (keyword != '_blank' || rel_tokens.include?('opener'))
+        # Opener exposure for a `<form target>` new context: HTML "get an element's noopener", the engine's
+        # (token_list.rs `noopener`) — `noopener` / `noreferrer` drop it, `_blank` without `opener` too, a named target
+        # keeps it. `noreferrer` also empties the referrer.
+        no_referrer = Native.link_noreferrer(spec['rel'].to_s)
+        keep_opener = !Native.link_noopener(spec['rel'].to_s, keyword.to_s)
         referrer    = no_referrer ? '' : (@current_url || '')
         # (…and a frame it navigates is told its initiator under the policy `noreferrer` sets)
         if named_frame
@@ -10516,7 +10522,7 @@ module Capybara
         elsif chosen.is_a?(Integer)
           # (…its Referer the submitting document's, under the policy `noreferrer` sets)
           initiator = realm_referrer_initiator(realm_id)
-          initiator = [initiator[0], 'no-referrer'] if spec['rel'].to_s.split(/[\t\n\f\r ]+/).any? {|t| t.casecmp?('noreferrer') }
+          initiator = [initiator[0], 'no-referrer'] if Native.link_noreferrer(spec['rel'].to_s)
           if method == 'GET'
             navigate_realm_self_get(chosen, get_url, referrer: initiator)
           else

@@ -481,8 +481,10 @@ module Capybara
       # in place first (platform-globals' `fireAuxLoadSoon`). ONLY the JS `window.open`
       # path does that — a `target=_blank` click or `open_new_window` hands nobody a
       # reference to hook, so their window announces its own load like any other.
-      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, defer_load: false)
+      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, defer_load: false)
         name = name.to_s
+        # (…the policy the opening hyperlink sets, else its document's)
+        referrer_policy = source&.main_document_referrer_policy if referrer_policy.to_s.empty?
         # A blob: URL opened from a different storage partition is forced noopener
         # (cross-partition-navigation), overriding an explicit rel=opener — the new
         # top-level window is the blob's own partition (so the blob still loads), but
@@ -493,7 +495,7 @@ module Capybara
         opener_handle ||= handle_for(source) if opener && source
         if !name.empty? && (existing = @aux_windows.find {|w| w[:name] == name })
           if post
-            existing[:browser].navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: source&.main_document_referrer_policy, initiator: source&.raw_current_url)
+            existing[:browser].navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: referrer_policy, initiator: source&.raw_current_url)
           else
             navigate_window(existing[:browser], url, source: source)
           end
@@ -514,7 +516,7 @@ module Capybara
           if post
             # A `<form target=_blank method=post>` loads the new window via POST,
             # carrying the opener's URL as referrer (unless rel=noreferrer → '').
-            aux.navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: source&.main_document_referrer_policy, initiator: source&.raw_current_url)
+            aux.navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: referrer_policy, initiator: source&.raw_current_url)
           # A blob: URL isn't rack-navigable and its bytes live in the OPENER's
           # isolate — load the document directly from a click-time snapshot (a
           # deferred target=_blank nav may revoke the URL first) or, failing that,
@@ -527,7 +529,7 @@ module Capybara
             # The OPENER's document is the navigation initiator — it seeds the popup
             # load's Sec-Fetch-Site (the SameSite cookie gate reads it). raw_current_url:
             # the ticking `current_url` must not run re-entrantly inside window.open.
-            aux.visit(url, referer: referrer, referrer_policy: source&.main_document_referrer_policy, initiator: source&.raw_current_url)
+            aux.visit(url, referer: referrer, referrer_policy: referrer_policy, initiator: source&.raw_current_url)
           end
         end
         handle

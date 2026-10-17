@@ -49,6 +49,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "tokenListEdit", token_list_edit, context_id);
     register(scope, ns, "tokenListSupports", token_list_supports, context_id);
     register(scope, ns, "linkTypes", link_types_op, context_id);
+    register(scope, ns, "linkNoopener", link_noopener_op, context_id);
 }
 
 // The link types a `rel` value names (HTML §4.6.7), ASCII case-insensitively, as `LINK_*` bits: what a `<link>`
@@ -79,10 +80,29 @@ pub(crate) fn link_types(rel: &str) -> u32 {
         .filter_map(|t| LINK_TYPES.iter().find(|(name, _)| name.eq_ignore_ascii_case(t)))
         .fold(0, |types, &(_, bit)| types | bit)
 }
+// HTML "get an element's noopener": whether a hyperlink or a form of link types `types` opening a browsing context named
+// by `target` opens it with no opener — where its link types include `noopener` or `noreferrer`, or where they do not
+// include `opener` and the target is `_blank` (a named target keeps its opener).
+pub(crate) fn noopener(types: u32, target: &str) -> bool {
+    types & (LINK_NOOPENER | LINK_NOREFERRER) != 0 || (types & LINK_OPENER == 0 && target.eq_ignore_ascii_case("_blank"))
+}
+// …for the host: a `rel` value's, and whether it has `noreferrer` (a referrer, a Referer, none).
+pub(crate) fn noopener_for_ruby(rel: String, target: String) -> bool {
+    noopener(link_types(&rel), &target)
+}
+pub(crate) fn noreferrer_for_ruby(rel: String) -> bool {
+    link_types(&rel) & LINK_NOREFERRER != 0
+}
 // __dom.linkTypes(rel) -> `link_types` of a `rel` value.
 fn link_types_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let rel = args.get(0).to_rust_string_lossy(scope);
     rv.set_uint32(link_types(&rel));
+}
+
+// __dom.linkNoopener(rel, target) -> `noopener` of a `rel` value and a target.
+fn link_noopener_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (rel, target) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
+    rv.set_bool(noopener(link_types(&rel), &target));
 }
 
 // HTML's "supported tokens" of an element's attribute's DOMTokenList, by the element's local name: the keywords the
