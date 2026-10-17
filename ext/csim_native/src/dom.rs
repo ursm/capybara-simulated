@@ -5294,6 +5294,10 @@ fn style_flush(
         engine.flush(arena, now);
         let failures = engine.take_verify_failures();
         let retargeted = engine.web_animations.take_retargeted();
+        // (…what the retargeted elements' animations set looked at again, here: the engine keeps it)
+        if engine.reconcile_animated(arena, &retargeted) {
+            arena.generations.bump(GEN_CASCADE);
+        }
         if threw_verify_failures(scope, failures) || retargeted.is_empty() {
             return;
         }
@@ -5333,6 +5337,9 @@ fn style_tick_unguarded(
     let failures = engine.take_verify_failures();
     let events = engine.take_animation_events(arena);
     let retargeted = engine.web_animations.take_retargeted();
+    if engine.reconcile_animated(arena, &retargeted) {
+        arena.generations.bump(GEN_CASCADE);
+    }
     if threw_verify_failures(scope, failures) {
         return;
     }

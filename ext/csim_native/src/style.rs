@@ -183,9 +183,10 @@ pub(crate) struct StyleEngine {
     html_document: bool,
     screen: Screen,
     doc: Option<NodeId>,
-    // The properties the animations on each element set as of the last look (animation_ops.rs `animReconcile`) — an
-    // element whose animations set none has no entry.
-    pub(crate) animated: std::collections::HashMap<NodeId, Vec<String>>,
+    // The properties the animations on each element set as of the last look (`reconcile_animated`) — an element whose
+    // animations set none has no entry — and how many entries there were when the freed ones were last let go of.
+    animated: std::collections::HashMap<NodeId, Vec<String>>,
+    animated_pruned: usize,
     // The page's sheets as last set (the realm's `SheetStore` holds them; a set that keeps one keeps its parse).
     author: Vec<AuthorSheet>,
     // The arena's `mutations` when it was last styled; None while it has to be styled again whatever they are.
@@ -402,6 +403,7 @@ impl StyleEngine {
             screen,
             doc: None,
             animated: std::collections::HashMap::new(),
+            animated_pruned: 0,
             author: Vec::new(),
             styled: None,
             snapshots: SnapshotMap::new(),
@@ -1278,8 +1280,8 @@ impl StyleEngine {
     }
 
     // The properties the animations on `element` itself set, as their keyframes declare them (a shorthand expanded)
-    // and under the names of the shorthands those are part of — what the JS side asks of an animated element
-    // (`__dom.animProperties`), whose longhand can be the engine's shorthand: `white-space`, `vertical-align`.
+    // and under the names of the shorthands those are part of — what `reconcile_animated` keeps of an animated element,
+    // whose longhand can be the engine's shorthand: `white-space`, `vertical-align`.
     pub(crate) fn animated_properties(&self, element: NodeId) -> Vec<String> {
         let guard = self.lock.read();
         let mut out: Vec<String> = Vec::new();
@@ -1295,6 +1297,30 @@ impl StyleEngine {
             }
         }
         out
+    }
+    // What the animations on each element of `ids` set, looked at again — after an animation made, sought, paused, let go,
+    // its effect, keyframes or target changed, a CSS animation or transition — and whether one of them newly animates a
+    // custom property, `display` or `visibility`: what reaches what is keyed on the whole rule set (a `var()` a
+    // descendant reads; the rendered text). (…the entries of elements freed since let go of as they double, not at every
+    // look: a page animating its elements one by one would pay for all of them each time)
+    pub(crate) fn reconcile_animated(&mut self, arena: &RealmArena, ids: &[NodeId]) -> bool {
+        let rekeys = |p: &String| p.starts_with("--") || p == "display" || p == "visibility";
+        let mut moved = false;
+        for &id in ids {
+            let now = self.animated_properties(id);
+            let was = self.animated.get(&id);
+            moved |= now.iter().any(|p| rekeys(p) && !was.is_some_and(|w| w.contains(p)));
+            if now.is_empty() {
+                self.animated.remove(&id);
+            } else {
+                self.animated.insert(id, now);
+            }
+        }
+        if self.animated.len() > 2 * self.animated_pruned.max(8) {
+            self.animated.retain(|&id, _| arena.get(id).is_some());
+            self.animated_pruned = self.animated.len();
+        }
+        moved
     }
 
     // Whether an animation on `element` itself that sets one of `properties` is relevant (current, or in effect), and

@@ -416,8 +416,8 @@ pub(crate) struct Animations {
     pub(crate) signals: Vec<Signal>,
     // The events the CSS animations owe since the last rendering update took them.
     pub(crate) css_events: Vec<CssEvent>,
-    // The elements whose animations' properties changed — an effect came or went, or its keyframes changed — since
-    // the JS side, which caches what it asks of an animated element, was last told (`take_retargeted`).
+    // The elements whose animations' properties changed — an effect came or went, or its keyframes changed — since a
+    // flush last took them (`take_retargeted`) to look again at what they set (`StyleEngine::reconcile_animated`).
     retargeted: Vec<NodeId>,
     // The CSS animations each element owns (its pseudo-elements' included), which style asks about every restyle.
     pub(crate) css_by_owner: HashMap<NodeId, Vec<AnimationId>>,
