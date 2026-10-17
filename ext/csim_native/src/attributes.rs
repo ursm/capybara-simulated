@@ -14,6 +14,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "attrKey", attr_key, context_id);
     crate::dom::register(scope, ns, "attrGet", attr_get, context_id);
     crate::dom::register(scope, ns, "attrNames", attr_names, context_id);
+    crate::dom::register(scope, ns, "attrMapNames", attr_map_names, context_id);
+    crate::dom::register(scope, ns, "attrMapNamed", attr_map_named, context_id);
     crate::dom::register(scope, ns, "datasetAttr", dataset_attr_op, context_id);
     crate::dom::register(scope, ns, "datasetNames", dataset_names_op, context_id);
     crate::dom::register(scope, ns, "attrName", attr_name, context_id);
@@ -141,6 +143,47 @@ fn attr_names(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     });
     let values: Vec<v8::Local<'_, v8::Value>> = names.iter().filter_map(|s| v8::String::new(scope, s)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+
+// A NamedNodeMap's supported property names (DOM §4.9.1) of element `id`'s attributes, whose document is `doc`: their
+// qualified names in order, each once — but for an HTML element in an HTML document, those with an ASCII upper alpha,
+// which no named access reaches (`dropped`).
+fn map_names(arena: &crate::dom::RealmArena, id: NodeId, doc: Option<NodeId>) -> (Vec<&str>, bool) {
+    let Some(n) = arena.get(id) else { return (Vec::new(), false) };
+    let drops = n.is_html() && arena.document_mode(doc).1;
+    let mut names: Vec<&str> = Vec::new();
+    for (k, _) in &n.attributes {
+        let name = qualified(k);
+        if !names.contains(&name) && !(drops && name.bytes().any(|b| b.is_ascii_uppercase())) {
+            names.push(name);
+        }
+    }
+    (names, drops)
+}
+// __dom.attrMapNames(element, docNid) -> [name, …]: those names (`map_names`).
+fn attr_map_names(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let doc = crate::dom::nid_arg(scope, &args, 1);
+    let names: Vec<String> = map_names(&crate::dom::dom(scope).arena, id, doc).0.into_iter().map(str::to_owned).collect();
+    let values: Vec<v8::Local<'_, v8::Value>> = names.iter().filter_map(|s| v8::String::new(scope, s)).map(Into::into).collect();
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+// __dom.attrMapNamed(element, docNid, name) -> the index among its attributes of the first whose qualified name `name` is,
+// where it is a supported name (`map_names`), else -1.
+fn attr_map_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_int32(-1);
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let doc = crate::dom::nid_arg(scope, &args, 1);
+    let name = args.get(2).to_rust_string_lossy(scope);
+    let arena = &crate::dom::dom(scope).arena;
+    let Some(n) = arena.get(id) else { return };
+    let drops = n.is_html() && arena.document_mode(doc).1;
+    if drops && name.bytes().any(|b| b.is_ascii_uppercase()) {
+        return;
+    }
+    if let Some(i) = n.attributes.iter().position(|(k, _)| qualified(k) == name) {
+        rv.set_int32(i as i32);
+    }
 }
 
 // HTML's DOMStringMap name conversions (§3.2.6.6 `dataset`): a property name's attribute — `data-` and the name, each
