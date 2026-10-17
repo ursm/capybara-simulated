@@ -262,9 +262,8 @@ pub(crate) struct Input {
     pub(crate) ws_mode: u8,
     // The box is measured for its CONTENT height, its declared height set aside — set here, never by the walk:
     // `with_imposed_height(MEASURE_AUTO_HEIGHT)`, as a flex column asks for an item's content height. Such a box
-    // takes the AUTO-height path wherever one is asked: a flex row recomputes its cross from its content and
-    // two-phases the min/max-height clamp (the items align in the pre-clamp content, the box floors/caps around
-    // them), and `definite_content_h` reports none.
+    // takes the AUTO-height path wherever one is asked: a flex row recomputes its cross from its content clamped by
+    // its min/max-height (the line its items align in, §9.4 step 15), and `definite_content_h` reports none.
     pub(crate) item_auto_height: bool,
     // A grid container's offset into the parallel `grids` buffer (see measure_grid). Read only when
     // `display == DISPLAY_GRID`; 0 (unused) for every other node.
@@ -847,7 +846,16 @@ impl Input {
         n.item_auto_height = false;
         let content = n.aspect_content || !n.border_box;
         let h = if content { n.content_w(w) / n.aspect } else { w / n.aspect };
-        n.height = if content == !n.border_box { h } else if n.border_box { h + n.edges_y() } else { (h - n.edges_y()).max(0.0) };
+        let h = if content == !n.border_box { h } else if n.border_box { h + n.edges_y() } else { (h - n.edges_y()).max(0.0) };
+        // (…a single-line flex COLUMN's a MIN-HEIGHT its content grows past, as the automatic minimum is — its auto height
+        // laid out as one, so it flexes its items into its content, not into the ratio: Chrome's `aspect-ratio: 2`
+        // column of a 300px item is 300 tall — where a wrapping one breaks its lines at the ratio's, a definite main
+        // size, flex-aspect-ratio-008)
+        if n.display == DISPLAY_FLEX && !n.flex_main_is_x && !n.flex_wrap && n.clip == 0 && is_auto(n.min_h) {
+            n.min_h = h;
+            return n;
+        }
+        n.height = h;
         // (…the automatic minimum only where `min-height` is `auto`: a `min-height: 0` box keeps its ratio)
         n.height_is_floor = n.clip == 0 && is_auto(n.min_h);
         n
@@ -5123,8 +5131,7 @@ fn measure_uncached(
 // `measure_flex` SIZES the items (`flex_row_sizes` / `flex_column_sizes`: flex base, clamps, line breaking,
 // grow / shrink), DISTRIBUTES them on the MAIN axis (justify-content + gap + main-axis auto margins) and ALIGNS
 // them on the CROSS axis (align-items/self + cross-axis auto margins), then sizes the container's own box
-// (clamping a ROW's box height by min/max-height — two-phase, so an auto-height row's items stay
-// content-aligned). Each item's subtree is laid out by the ordinary `measure` at its resolved border box, in a
+// (a ROW's auto height its content's clamped by min/max-height, the line its items align in — §9.4 step 15). Each item's subtree is laid out by the ordinary `measure` at its resolved border box, in a
 // fresh float context (an item is its own formatting context).
 // CSS Flexbox §9.7, "resolve the flexible lengths": the line's free
 // space goes to (or comes from) the items in proportion to their factors, each result clamped by that item's
@@ -5822,24 +5829,20 @@ fn measure_flex(
     let lines_cross_sum: f64 = line_cross.iter().sum::<f64>() + cross_gap * nlines.saturating_sub(1) as f64;
     let mut clamped = false;
     let (box_w, box_h, container_cross, definite_cross) = if main_is_x {
-        // A ROW's cross is its HEIGHT, clamped by min/max-height — but the clamp is TWO-PHASE and hinges on
-        // whether the height is DEFINITE. A DECLARED height is clamped BEFORE layout, so the items align in
-        // the clamped cross (definite). An AUTO height is NOT: the items align in the CONTENT cross (the
-        // stacked lines), and min/max-height then grows/shrinks the FINAL box around them WITHOUT moving
-        // them — so container_cross stays the unclamped content (a min-height:100 app-shell row of a 30px
-        // item keeps the item at the top and grows the box to 100; align-content sees free = 0). A row
-        // measured for its content height (`item_auto_height`, `MEASURE_AUTO_HEIGHT`) takes this SAME auto
-        // path whatever it declares — the box from its content and the clamp two-phased (a min-height FLOOR
-        // aligns its items in the pre-floor content, a max-height CAP its taller content overflows — the Avo
-        // `field-wrapper` row). A genuinely DEFINITE height (declared, or imposed by a stretch or an inset
-        // box) takes the else branch below.
-        // (…and a height its preferred aspect ratio gave it, a FLOOR the content grows past: `height_is_floor`)
+        // A ROW's cross is its HEIGHT, clamped by min/max-height. A DECLARED height is clamped BEFORE layout, so the
+        // items align in the clamped cross (definite). An AUTO one is the lines' content height CLAMPED by the
+        // container's min/max cross size (§9.4 step 15), which the lines then align and stretch in: a `min-height:
+        // 100px` row centres a 18px item at 41 and stretches one to 100, its `align-content` has the room left to place
+        // its lines in, and a max-height CAP its taller content overflows (Chrome and Firefox). A row measured for its
+        // content height (`item_auto_height`, `MEASURE_AUTO_HEIGHT`) takes this SAME auto path whatever it declares, and
+        // so does a height its preferred aspect ratio gave it, a FLOOR the content grows past (`height_is_floor`). A
+        // genuinely DEFINITE height (declared, or imposed by a stretch or an inset box) takes the else branch below.
         if is_auto(n.height) || n.item_auto_height || n.height_is_floor {
             let floor = if n.height_is_floor { to_border_y(n.height) } else { 0.0 };
             let flowed = (lines_cross_sum + edges_y).max(floor);
             let bh = clamp_min_max(flowed, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
             clamped = bh != flowed;
-            (w, bh, lines_cross_sum, false)
+            (w, bh, (bh - edges_y).max(0.0), false)
         } else {
             // A declared height is never smaller than the box's own border+padding (the border-box floor).
             let bh = clamp_min_max(to_border_y(n.height), to_border_y(n.min_h), to_border_y(n.max_h)).max(edges_y).max(0.0);
@@ -5877,7 +5880,9 @@ fn measure_flex(
     let mut line_lc = vec![0.0f64; nlines];
     let mut line_cs = vec![0.0f64; nlines];
     if !n.flex_wrap {
-        line_lc[0] = if definite_cross { container_cross } else { line_cross[0].max(container_cross) };
+        // (…a single line's cross size is the container's inner cross size — an auto one's content clamped by its min/max
+        // cross size, §9.4 step 15 — whatever its items come to: a `max-height: 20px` row centres a 30px item at -5)
+        line_lc[0] = if main_is_x { container_cross } else if definite_cross { container_cross } else { line_cross[0].max(container_cross) };
         line_cs[0] = cross_start_base;
     } else {
         // free is measured from the FINAL line crosses: for align-content:stretch a line whose
@@ -8703,17 +8708,26 @@ fn place_out_of_flow(
             }
         }
     };
-    let w = ratio_floor(c, used_width(&n, auto_w), inputs, runs, run_texts, grids, children);
     // A stretched AUTO height is imposed as the box's height where it is non-zero — a zero one is taken as no
     // stretch, and the height back-fills from the content.
     // (…an intrinsic-size KEYWORD height is no `auto`: it is the content's, between the insets or not, and the auto
     // margins centre it in what is left.)
     let auto_h = if stretched_v && !n.height_kw { (avail_h - mt - mb).max(0.0) } else { 0.0 };
+    // A box with a preferred aspect ratio takes its height through it from a width it has — declared, or between its
+    // insets — whatever its block insets say (Chrome and Firefox: `top: 0; bottom: 0; width: 40px; aspect-ratio: 2` is
+    // 40 x 20); with neither, its width through it from the height its block insets stretch it to (`top: 0; bottom: 0;
+    // aspect-ratio: 1` in a 300px box is 300 x 300).
+    let ratio_sets_height = n.aspect > 0.0 && (!is_auto(n.width) || stretched);
+    let w = if n.aspect > 0.0 && !ratio_sets_height && is_auto(n.height) && auto_h > 0.0 {
+        let stretched_h = if n.border_box { auto_h } else { (auto_h - n.edges_y()).max(0.0) };
+        ratio_floor(c, used_width(&Input { height: stretched_h, ..n }, auto_w), inputs, runs, run_texts, grids, children)
+    } else {
+        ratio_floor(c, used_width(&n, auto_w), inputs, runs, run_texts, grids, children)
+    };
     // …a REPLACED box excepted: its height is its own intrinsic size, which §10.6.5 keeps whatever the insets say
     // (an inset `<input>` / list box keeps its own height rather than stretching to the inset one).
-    // …and a box with a preferred aspect ratio, whose height goes through it from its width whatever the insets say
-    // (Chrome and Firefox: `top: 0; bottom: 0; width: 40px; aspect-ratio: 2` is 40 x 20).
-    let imposed = if is_auto(n.height) && auto_h > 0.0 && !n.replaced && !(n.aspect > 0.0) { auto_h } else { f64::NAN };
+    // …and one whose ratio gives it its height from its width (above).
+    let imposed = if is_auto(n.height) && auto_h > 0.0 && !n.replaced && !ratio_sets_height { auto_h } else { f64::NAN };
     measure(c, w, imposed, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     let h = boxes[c].h;
     let am = n.auto_margins;
@@ -9586,10 +9600,9 @@ mod tests {
     }
 
     #[test]
-    fn flex_row_min_height_grows_the_box_below_content_aligned_items() {
-        // Auto-height row of a 30px + a 50px item: the content cross is 50, so align-items:center centres
-        // each item in 50 (the 30px one at y=10, the 50px one at y=0). min-height:100 then grows the BOX to
-        // 100 WITHOUT repositioning the items (two-phase — the clamp lands after flex layout).
+    fn flex_row_min_height_grows_the_line_the_items_align_in() {
+        // Auto-height row of a 30px + a 50px item: the content cross is 50, clamped by min-height:100 to 100 — the
+        // line's cross size (§9.4 step 15) — and align-items:center centres each item in it (Chrome: 35 and 25).
         let mut f = flex(0.0, -1, 600.0);
         f.min_h = 100.0;
         let mut a = item(1.0, 0, 80.0, 30.0);
@@ -9599,22 +9612,22 @@ mod tests {
         let inputs = vec![f, a, b];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!(bx[0].h, 100.0); // box grown by min-height
-        assert_eq!(bx[1].y, 10.0);  // 30px item centred in the 50px content line
-        assert_eq!(bx[2].y, 0.0);   // 50px item fills the content line
+        assert_eq!(bx[1].y, 35.0);  // 30px item centred in the 100px line
+        assert_eq!(bx[2].y, 25.0);  // 50px item too
     }
 
     #[test]
-    fn flex_row_max_height_shrinks_the_box_but_the_content_line_overflows() {
-        // max-height:20 caps the container box at 20, but a 30px item's line is taller than the cap, so the
-        // line stays 30 (the item overflows downward) and a centred item sits at y=0 — the box is 20 tall.
+    fn flex_row_max_height_caps_the_line_its_taller_item_overflows() {
+        // max-height:20 caps the container box AND its line at 20 (§9.4 step 15), so a centred 30px item overflows
+        // both ways, at y=-5 (Chrome) — the box is 20 tall.
         let mut f = flex(0.0, -1, 600.0);
         f.max_h = 20.0;
         let mut a = item(1.0, 0, 100.0, 30.0);
-        a.flex_cross_align = 1; // center, but the line equals the item so there is no slack
+        a.flex_cross_align = 1; // center
         let inputs = vec![f, a];
         let bx = boxes(layout_block(&inputs, &[], &[], &[], &[], &[], 0.0, 0.0, 800.0, false));
         assert_eq!(bx[0].h, 20.0);
-        assert_eq!(bx[1].y, 0.0);
+        assert_eq!(bx[1].y, -5.0);
     }
 
     #[test]

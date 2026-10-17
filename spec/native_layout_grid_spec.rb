@@ -127,10 +127,10 @@ RSpec.describe 'native layout grid' do
     expect_layout('<div style="display:flex;gap:10px;width:420px"><div style="display:grid;grid-template-columns:80px 80px;gap:6px;width:180px"><div style="height:20px">a</div><div style="height:30px">b</div></div><div style="width:100px;height:40px">z</div></div>')
   end
 
-  # A GRID ITEM that is itself an auto-height flex container with min/max-height two-phases its OWN clamp: the
-  # grid item keeps its min/max-height and its auto height, so native recomputes the box from the container's
-  # content and aligns its items in the pre-clamp content, box floors/caps to the track — NOT in the track-fitted box (which would be a silent-wrong: the child centres one place too low).
-  it 'matches a grid-item flex row whose min-height floors it, items centred in the pre-floor content' do
+  # A GRID ITEM that is itself an auto-height flex container with min/max-height: the grid item keeps its min/max-height
+  # and its auto height, its line the container's content clamped by them (§9.4 step 15) and its items aligned in that
+  # line — NOT in the track-fitted box.
+  it 'matches a grid-item flex row whose min-height floors it, items centred in the floored line' do
     expect_layout('<div style="display:grid;grid-template-columns:100px;width:100px"><div style="display:flex;align-items:center;min-height:30px"><div style="width:30px;height:20px"></div></div></div>')
   end
   it 'matches a grid-item flex row whose max-height caps it while its taller content overflows' do

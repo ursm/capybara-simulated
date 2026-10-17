@@ -832,13 +832,9 @@ css/css-shadow/part/pseudo-elements-after-part.html:
 - computed style for ::part()::selection
 - computed style for ::part()::spelling-error
 - computed style for ::part()::target-text
-css/css-sizing/aspect-ratio/abspos-004.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/abspos-008.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/abspos-014.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
-css/css-sizing/aspect-ratio/abspos-015.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/abspos-021.html:
 - "== css/reference/ref-filled-green-100px-square.xht"

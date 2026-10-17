@@ -197,15 +197,13 @@ RSpec.describe 'native layout flex' do
     expect_layout('<div style="display:flex;height:90px;width:400px"><div style="width:100px;height:30px;margin:auto"></div></div>')
   end
 
-  # SHARED with Chrome: native aligns an AUTO-height row's items in its CONTENT cross and lets the min-height
-  # grow the box around them; Chrome clamps the container's cross size first (css-flexbox §9.4 step 15) and
-  # centres them in the 100 (35 and 25, where native says 10 and 0).
+  # An AUTO-height row's lines are its content's cross size clamped by its min/max-height (css-flexbox §9.4 step 15),
+  # and its items align in that: centred in the 100 at 35 and 25 (Chrome and Firefox).
   it 'matches a row whose min-height grows the cross the items align in (the app-shell min-height)' do
     body = '<div style="display:flex;align-items:center;min-height:100px;width:400px"><div style="width:80px;height:30px"></div><div style="width:80px;height:50px"></div></div>'
     expect_layout(body)
     a, b = item_boxes(body)
-    expect_shared_gap(a[1], shared: 10, chrome: 35, what: "#{body}: the first item's y")
-    expect_shared_gap(b[1], shared: 0, chrome: 25, what: "#{body}: the second item's y")
+    expect([a[1], b[1]]).to eq([35, 25])
   end
 
   # A DEFINITE height is clamped before the content is laid out in it — a column item handed back its AUTO layout
@@ -286,13 +284,13 @@ RSpec.describe 'native layout flex' do
     expect_layout('<div style="display:flex;flex-direction:column;flex-wrap:wrap;min-height:200px;width:100px"><div style="width:40px;height:30px"></div><div style="width:40px;height:30px"></div></div>')
   end
 
-  # A flex ITEM that is itself a flex container with an AUTO height + min/max-height: its box comes from the
-  # container's own content — a min-height FLOOR aligns the items in the pre-floor content (the Avo
+  # A flex ITEM that is itself a flex container with an AUTO height + min/max-height: its line is its content's cross
+  # size clamped by them (§9.4 step 15) — a min-height FLOOR aligns the items in the floored line (the Avo
   # `field-wrapper` row), a max-height CAP lets a taller row overflow.
-  it 'matches a flex-item row whose min-height floors its content, items centered in the pre-floor content' do
+  it 'matches a flex-item row whose min-height floors its content, items centered in the floored line' do
     expect_layout('<div style="display:flex;width:400px"><div style="display:flex;align-items:center;min-height:80px;flex:1"><div style="width:50px;height:30px"></div></div></div>')
   end
-  it 'matches a flex-item row whose min-height floors its content, items at flex-end of the pre-floor content' do
+  it 'matches a flex-item row whose min-height floors its content, items at flex-end of the floored line' do
     expect_layout('<div style="display:flex;width:400px"><div style="display:flex;align-items:flex-end;min-height:80px;flex:1"><div style="width:50px;height:30px"></div></div></div>')
   end
   it 'matches a flex-item row whose max-height caps the box while its taller content overflows' do
@@ -400,14 +398,13 @@ RSpec.describe 'native layout flex' do
   it 'matches a sticky flex container' do
     expect_layout('<div style="width:300px;height:400px"><div style="position:sticky;top:0;display:flex"><div style="width:30px;height:30px"></div></div></div>')
   end
-  # An abspos flex container is SELF-SIZED, and its binding min-height is the auto-height case: native aligns
-  # its items in the CONTENT cross and grows the box around them (0), where Chrome clamps first and centres them in
-  # the 80 (25) — the same shared gap as an in-flow auto-height row.
-  it 'aligns an abspos flex row whose min-height binds as an auto-height row (shared)' do
+  # An abspos flex container is SELF-SIZED, and its binding min-height is the auto-height case: its line clamped to
+  # the 80, the item centred in it at 25 (Chrome).
+  it 'aligns an abspos flex row whose min-height binds as an auto-height row' do
     body = '<div style="position:relative;width:300px;height:200px"><div id="c" style="position:absolute;top:0;left:0;display:flex;align-items:center;min-height:80px">' \
            '<div style="width:40px;height:30px"></div></div></div>'
     expect_layout(body)
-    expect_shared_gap(first_item_box(body)[1], shared: 0, chrome: 25, what: "#{body}: the item's y")
+    expect(first_item_box(body)[1]).to eq(25)
   end
   # …but BETWEEN two insets its height is definite — the span — and the clamp comes before anything is laid out in it
   # or an auto margin splits what it leaves (CSS 2.1 §10.6.4 / §10.7). Aligning the items in the unclamped span and
@@ -713,10 +710,9 @@ RSpec.describe 'native layout flex' do
     expect_layout(body)
     expect(item_boxes(body)).to eq([[0, 0, 100, 20], [0, 40, 100, 30]])   # Chrome
   end
-  # A flex-ITEM flex ROW whose min-height floors its own (auto) content lays out natively: native computes the
-  # cross from content and two-phases the clamp —
-  # the child aligns in the PRE-floor content (align-items:center in a 30px content → 0), box grows to min-height.
-  it('matches an auto-height min-height ROW that is itself a flex item (two-phase floor, align in pre-floor content)') { expect_layout('<div style="display:flex;flex-direction:column;width:300px"><div style="display:flex;align-items:center;min-height:120px;width:200px"><div style="width:50px;height:30px"></div></div></div>') }
+  # A flex-ITEM flex ROW whose min-height floors its own (auto) content lays out natively: its line is the content's
+  # cross clamped by min-height (§9.4 step 15), the child centred in the 120 at 45 (Chrome).
+  it('matches an auto-height min-height ROW that is itself a flex item (its line floored, the items aligned in it)') { expect_layout('<div style="display:flex;flex-direction:column;width:300px"><div style="display:flex;align-items:center;min-height:120px;width:200px"><div style="width:50px;height:30px"></div></div></div>') }
   # An inline-flex container is an ATOMIC inline in its parent's line, and native lays it out ITSELF now -- at
   # the line's shrink-to-fit, which is its intrinsic width.
   it('matches an inline-flex container as an atomic inline') { expect_layout('<div style="display:inline-flex;width:400px"><div style="width:80px;height:30px"></div></div>') }

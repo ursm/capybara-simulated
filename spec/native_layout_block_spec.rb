@@ -1471,7 +1471,7 @@ x</div>))
       session.visit '/'
       expect(session.evaluate_script("document.getElementById('t').getBoundingClientRect().height")).to eq(25)
     end
-    # A flex item keeps its min/max-height — the floor a flex container item two-phases its auto height against —
+    # A flex item keeps its min/max-height — the floor a flex container item clamps its auto height (and line) by —
     # with an atomic inside it too: a percentage one once went over as a fraction that was then cleared, and the
     # item took its height from content with no floor (40 instead of 128).
     it 'keeps a flex item\'s percentage min-height around a positioned atomic' do
