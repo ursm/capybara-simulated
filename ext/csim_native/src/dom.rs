@@ -2400,6 +2400,8 @@ pub(crate) struct Dom {
     pub(crate) search_params_template: Option<v8::Global<v8::FunctionTemplate>>,
     // …and a Request object's request's (request_state.rs).
     pub(crate) request_state_template: Option<v8::Global<v8::FunctionTemplate>>,
+    // …and a Response object's response's (response_state.rs).
+    pub(crate) response_state_template: Option<v8::Global<v8::FunctionTemplate>>,
     // …and a URLPattern's (url_pattern.rs).
     pub(crate) url_pattern_template: Option<v8::Global<v8::FunctionTemplate>>,
     // A service worker realm's static router rules (sw_router.rs), by realm.
@@ -2849,6 +2851,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::drag_data_store::install(scope, ns, context_id);
     crate::search_params::install(scope, ns, context_id);
     crate::request_state::install(scope, ns, context_id);
+    crate::response_state::install(scope, ns, context_id);
     crate::url_pattern::install(scope, ns, context_id);
     crate::sw_router::install(scope, ns, context_id);
     crate::storage_areas::install(scope, ns, context_id);
