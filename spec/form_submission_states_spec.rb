@@ -50,6 +50,18 @@ RSpec.describe 'Form submission states' do
     expect([received.first&.first(2), s.current_path]).to eq([%w[GET /e], '/'])
   end
 
+  # …keeping the action URL's fragment across: the response's URL has none to give (Fetch serializes it without), and
+  # the navigation is to the action URL — its query the entry list (HTML "mutate action URL"), its fragment its own — as
+  # a top-level submission's is.
+  it 'keeps the action’s fragment in the frame it submits into' do
+    received = []
+    s = simulated_session(app(received, '<form action="/e#x?y" target=f><input name=q value=1><button>go</button></form><iframe name=f></iframe>'))
+    s.visit '/'
+    s.click_on 'go'
+    s.within_frame('f') { expect(s).to have_text('ok') }
+    expect(s.within_frame('f') { s.evaluate_script('location.href') }).to eq('http://www.example.com/e?q=1#x?y')
+  end
+
   # A script the driver runs is a task like any other: the navigation a form it submits plans is taken as it ends, on a
   # page with nothing else pending as on one with a timer to step.
   {'submit()' => 'document.forms[0].submit()', 'requestSubmit()' => 'document.forms[0].requestSubmit()'}.each do |what, js|
