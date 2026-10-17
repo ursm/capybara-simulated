@@ -92,6 +92,9 @@ pub(crate) struct SheetStore {
     // (`own`): an edit is its owner's alone. (Not one with an `@import`, whose imports are fetched for the parse that
     // asked for them.)
     parsed: std::collections::HashMap<ParseKey, DocumentStyleSheet>,
+    // The last identity a page's `@font-face` rule was given (style.rs `FaceIds`) — the realm's, so one never names
+    // two rules, whatever style engine the realm has made since.
+    pub(crate) last_face: std::cell::Cell<u32>,
 }
 
 #[derive(PartialEq, Eq, Hash)]
@@ -351,12 +354,13 @@ impl SheetStore {
     }
 
     // CSSOM is about to reach the sheet `id`'s rules: a sheet sharing a kept parse takes a copy of its own first — the
-    // one it had and the one it has now, for the engine to cascade the copy where it cascaded the other.
-    pub(crate) fn own(&mut self, id: u32) -> Option<(DocumentStyleSheet, DocumentStyleSheet)> {
+    // one it had and the one it has now, and its version, for the engine to cascade the copy where it cascaded the
+    // other as that sheet (the others sharing the parse keep it).
+    pub(crate) fn own(&mut self, id: u32) -> Option<(DocumentStyleSheet, DocumentStyleSheet, u32)> {
         let stored = self.sheets.get_mut(&id).filter(|s| s.shared)?;
         let copy = DocumentStyleSheet(Arc::new((*stored.sheet.0).clone()));
         stored.shared = false;
-        Some((std::mem::replace(&mut stored.sheet, copy.clone()), copy))
+        Some((std::mem::replace(&mut stored.sheet, copy.clone()), copy, stored.version))
     }
 
     fn waiting_since(&self, before: usize) -> Vec<String> {

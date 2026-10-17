@@ -408,12 +408,57 @@ RSpec.describe 'web fonts' do
         document.querySelector('link').sheet.cssRules;
         document.head.appendChild(document.createElement('style')).textContent = 'p { color: red }';
         const built = faces()[2] === linked;
-        document.querySelector('style').sheet.insertRule('p { color: blue }', 0);
-        const after = faces();
-        return [before.map((f) => f.family).join(','), new Set(before).size === before.length, built, before.every((f, i) => after[i] === f)];
+        const [first, second] = document.querySelectorAll('style');
+        second.sheet.insertRule('p { color: blue }', 0);
+        const once = faces();
+        first.sheet.insertRule('p { color: green }', 0);
+        const twice = faces();
+        return [
+          before.map((f) => f.family).join(','), new Set(before).size === before.length, built,
+          before.every((f, i) => once[i] === f), before.every((f, i) => twice[i] === f)
+        ];
       })()
     JS
-    expect(got).to eq(['Dup,Dup,CycB,CycA', true, true, true])
+    expect(got).to eq(['Dup,Dup,CycB,CycA', true, true, true, true])
+  end
+
+  # …and a sheet of the same text elsewhere — a shadow root's, a constructed one in no tree — edited, leaves the
+  # document's face alone.
+  it 'keeps a face\'s FontFace when another sheet of its text is edited' do
+    s = session('/dup.html')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const text = '@font-face { font-family: Dup; src: url("/ahem.ttf"); }';
+        const before = Array.from(document.fonts);
+        const host = document.body.appendChild(document.createElement('div'));
+        const root = host.attachShadow({ mode: 'open' });
+        root.appendChild(document.createElement('style')).textContent = text;
+        getComputedStyle(host).color;
+        root.querySelector('style').sheet.insertRule('p { color: blue }', 0);
+        const loose = new CSSStyleSheet();
+        loose.replaceSync(text);
+        loose.insertRule('p { color: blue }', 0);
+        const after = Array.from(document.fonts);
+        return [after.length, before.every((f, i) => after[i] === f)];
+      })()
+    JS
+    expect(got).to eq([4, true])
+  end
+
+  # A document of the realm's no browsing context renders — `createHTMLDocument`'s, a DOMParser's — is styled by no
+  # engine, so its sheets connect no face, and the realm document's are not its own (Firefox: 0; Chrome lists the
+  # realm document's faces there).
+  it 'connects no face to a document no engine styles' do
+    s = session('/dup.html')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const inert = document.implementation.createHTMLDocument('');
+        inert.head.appendChild(inert.createElement('style')).textContent = '@font-face { font-family: Own; src: url("/ahem.ttf"); }';
+        const parsed = new DOMParser().parseFromString('<style>@font-face { font-family: P; src: url("/ahem.ttf"); }</style>', 'text/html');
+        return [document.fonts.size, inert.fonts.size, parsed.fonts.size];
+      })()
+    JS
+    expect(got).to eq([4, 0, 0])
   end
 
   # …and a face keeps its FontFace while rules are inserted and deleted around it, as a browser keys it by its rule.
@@ -438,6 +483,50 @@ RSpec.describe 'web fonts' do
   # old text back, unread in between (Chrome makes a new one for the CSSOM edit too, and keeps the old one for the same
   # text: Blink quirks the spec does not have); and a value a script set on the face stays until the rule says
   # something new.
+  # A controlled document fetches a face's source through its service worker (destination `font`) — a face its sheets
+  # declared before the page was controlled included, once it is.
+  it 'fetches a face listed before the page was controlled through the service worker once it is' do
+    worker = <<~JS
+      self.addEventListener('install', () => self.skipWaiting());
+      self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+      const seen = [];
+      self.addEventListener('fetch', (e) => { if (e.request.destination === 'font') seen.push(new URL(e.request.url).pathname); });
+      self.onmessage = (e) => e.source.postMessage(seen.slice());
+    JS
+    page = <<~HTML
+      <!DOCTYPE html><meta charset="utf-8">
+      <style>@font-face { font-family: Late; src: url("/ahem.ttf"); }</style><p>x</p>
+      <script>
+        navigator.serviceWorker.addEventListener('message', (e) => { window.seen = e.data; });
+        document.fonts.size;
+        navigator.serviceWorker.register('/sw.js');
+      </script>
+    HTML
+    a = lambda { |env|
+      case env['PATH_INFO']
+      when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [worker]]
+      when '/ahem.ttf' then [200, {'content-type' => 'font/ttf'}, [AHEM]]
+      else [200, {'content-type' => 'text/html'}, [page]]
+      end
+    }
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
+    begin
+      s = simulated_session(a)
+      s.visit '/'
+      expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
+      s.execute_script(<<~JS)
+        document.head.appendChild(document.createElement('style')).textContent = 'p { color: red }';
+        document.querySelector('p').style.fontFamily = 'Late';
+        document.body.getBoundingClientRect();
+        navigator.serviceWorker.controller.postMessage('seen');
+      JS
+      expect(poll_until { s.evaluate_script('window.seen') }).to eq(['/ahem.ttf'])
+    ensure
+      ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+    end
+  end
+
   it 'reflects its rule\'s descriptors on a CSS-connected FontFace' do
     s = session('/held.html')
     got = s.evaluate_script(<<~JS)

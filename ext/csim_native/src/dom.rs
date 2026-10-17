@@ -4288,10 +4288,10 @@ fn with_sheets<R>(
 // CSSOM is about to reach the sheet `id`'s rules: one sharing a kept parse takes a copy of its own (sheets.rs `own`),
 // which the engine cascades in its place.
 fn own_sheet(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, id: u32) {
-    let Some((old, new)) = with_sheets(scope, args, |store, _| store.own(id)) else { return };
+    let Some((old, new, version)) = with_sheets(scope, args, |store, _| store.own(id)) else { return };
     let cid = realm_id(scope, args);
     if let Some(engine) = dom(scope).styles.get_mut(&cid) {
-        engine.swap_sheet(&old, &new);
+        engine.swap_sheet(&old, &new, version);
     }
 }
 // The sheet an insertion or a removal is in: the one given — or, for a rule a sheet no longer holds (a grouping rule

@@ -247,16 +247,15 @@ pub(crate) struct SheetFace {
 }
 
 // The identities the page's `@font-face` rules have (`sheet_facts`): each rule's by the version of the sheet it is in
-// and the rule itself — its address, the rule kept so that no other one takes it — one for each time that sheet holds
-// it (an `@import`ed twice: twice). A rule keeps its identity while its sheet's parse is the one it was — a rule
-// inserted before it, a descriptor CSSOM rewrote, its `@media` that stopped and started holding — and a copy CSSOM
-// took of the sheet hands each its own (`swap_sheet`); a sheet whose text is set again is another one's rules, new
-// faces even where the text is the same (CSS Font Loading §2.2: a rule removed is no longer connected, and one added
-// makes a face of its own).
+// and the rule itself — its address, the rule kept so that no other one takes it — numbered by the realm
+// (`SheetStore::last_face`). A rule keeps its identity while its sheet's parse is the one it was — a rule inserted
+// before it, a descriptor CSSOM rewrote, its `@media` that stopped and started holding — and a copy CSSOM took of the
+// sheet hands each its own (`swap_sheet`); a sheet whose text is set again is another one's rules, new faces even where
+// the text is the same (CSS Font Loading §2.2: a rule removed is no longer connected, and one added makes a face of its
+// own).
 #[derive(Default)]
 struct FaceIds {
-    last: u32,
-    by_rule: std::collections::HashMap<(u32, usize), (Arc<Locked<style::stylesheets::FontFaceRule>>, Vec<u32>)>,
+    by_rule: std::collections::HashMap<(u32, usize), (Arc<Locked<style::stylesheets::FontFaceRule>>, u32)>,
 }
 
 // …a rule's address, which its `FaceIds` entry keeps it at.
@@ -264,21 +263,22 @@ fn face_address(rule: &Arc<Locked<style::stylesheets::FontFaceRule>>) -> usize {
     &**rule as *const Locked<style::stylesheets::FontFaceRule> as usize
 }
 
-// The `@font-face` rules of `sheet` that apply, in the order a CSSOM walk finds them — inside an `@media` /
-// `@supports` that holds and an `@import` that does.
-fn face_rules(
+// Every `@font-face` rule of `sheet`, in the order a CSSOM walk finds them — inside every grouping rule and `@import`,
+// whether it holds or not.
+fn all_face_rules(
     sheet: &DocumentStyleSheet,
     device: &Device,
     guard: &style::shared_lock::SharedRwLockReadGuard,
 ) -> Vec<Arc<Locked<style::stylesheets::FontFaceRule>>> {
-    use style::stylesheets::{CssRule, StylesheetInDocument};
-    let rules = sheet.contents(guard).effective_rules(device, &*NO_CUSTOM_MEDIA, guard);
+    use style::stylesheets::{AllRules, CssRule, StylesheetInDocument};
+    let rules = sheet.contents(guard).iter_rules::<AllRules, _>(device, &*NO_CUSTOM_MEDIA, guard);
     rules.filter_map(|rule| if let CssRule::FontFace(face) = rule { Some(face.clone()) } else { None }).collect()
 }
 
 // One shadow root's sheets, as the page last gave them, and the cascade data stylo built of them.
 struct ShadowStyles {
-    sheets: Vec<DocumentStyleSheet>,
+    // (…each with its parse's version, as `AuthorSheet`)
+    sheets: Vec<(DocumentStyleSheet, u32)>,
     styles: AuthorStyles<DocumentStyleSheet>,
     dirty: bool,
     // Whether a sheet reads the host's light DESCENDANTS through `:host(:has(…))` (`host_reads_descendants`), which the
@@ -644,9 +644,12 @@ impl StyleEngine {
             self.styled = None;
             self.restyle_all = true;
         }
-        // The same sheets again (a rebuild the rule set did not need) change nothing.
-        let same = |s: &&crate::sheets::StoredSheet, a: &AuthorSheet| Arc::ptr_eq(&s.sheet.0, &a.sheet.0) && s.version == a.version;
-        if sheets.len() == self.author.len() && sheets.iter().zip(&self.author).all(|(s, a)| same(s, a)) {
+        // The same sheets again (a rebuild the rule set did not need) change nothing — but the sheets they are of, a
+        // `<style>` given its text again (the same parse, another version), whose faces are new ones (`FaceIds`).
+        if sheets.len() == self.author.len() && sheets.iter().zip(&self.author).all(|(s, a)| Arc::ptr_eq(&s.sheet.0, &a.sheet.0)) {
+            for (s, a) in sheets.iter().zip(&mut self.author) {
+                a.version = s.version;
+            }
             return;
         }
         let guard = self.lock.read();
@@ -661,47 +664,54 @@ impl StyleEngine {
         self.sheets_changed();
     }
 
-    // The engine cascades `new` wherever it cascaded `old` (a sheet CSSOM took a copy of, sheets.rs `own`), in its place.
-    pub(crate) fn swap_sheet(&mut self, old: &DocumentStyleSheet, new: &DocumentStyleSheet) {
-        let swap = |s: &DocumentStyleSheet| if Arc::ptr_eq(&s.0, &old.0) { new.clone() } else { s.clone() };
-        if let Some(version) = self.author.iter().find(|a| Arc::ptr_eq(&a.sheet.0, &old.0)).map(|a| a.version) {
-            let guard = self.lock.read();
-            // (…its faces are the copy's, in the same places)
+    // The engine cascades `new` where it cascaded `old` as the sheet of `version` (one CSSOM took a copy of its parse
+    // for, sheets.rs `own`), in its place — the other sheets sharing that parse keep it — and the faces it held are the
+    // copy's, in the same places.
+    pub(crate) fn swap_sheet(&mut self, old: &DocumentStyleSheet, new: &DocumentStyleSheet, version: u32) {
+        let owned = |s: &DocumentStyleSheet, v: u32| v == version && Arc::ptr_eq(&s.0, &old.0);
+        let guard = self.lock.read();
+        {
             let device = self.stylist.device();
-            for (was, is) in face_rules(old, device, &guard).into_iter().zip(face_rules(new, device, &guard)) {
-                if let Some((_, ids)) = self.face_ids.by_rule.remove(&(version, face_address(&was))) {
-                    self.face_ids.by_rule.insert((version, face_address(&is)), (is, ids));
+            for (was, is) in all_face_rules(old, device, &guard).into_iter().zip(all_face_rules(new, device, &guard)) {
+                if let Some((_, id)) = self.face_ids.by_rule.remove(&(version, face_address(&was))) {
+                    self.face_ids.by_rule.insert((version, face_address(&is)), (is, id));
                 }
             }
+        }
+        let in_document = self.author.iter().any(|a| owned(&a.sheet, a.version));
+        if in_document {
             for a in &self.author {
                 self.stylist.remove_stylesheet(a.sheet.clone(), &guard);
             }
             for a in &mut self.author {
-                a.sheet = swap(&a.sheet);
+                if owned(&a.sheet, a.version) {
+                    a.sheet = new.clone();
+                }
                 self.stylist.append_stylesheet(a.sheet.clone(), &guard);
             }
-            drop(guard);
-            self.sheets_changed();
         }
         let device = self.stylist.device().clone();
-        for shadow in self.shadow_styles.values_mut().filter(|sh| sh.sheets.iter().any(|s| Arc::ptr_eq(&s.0, &old.0))) {
-            let guard = self.lock.read();
-            for sheet in std::mem::take(&mut shadow.sheets) {
+        for shadow in self.shadow_styles.values_mut().filter(|sh| sh.sheets.iter().any(|(s, v)| owned(s, *v))) {
+            for (sheet, v) in std::mem::take(&mut shadow.sheets) {
                 shadow.styles.stylesheets.remove_stylesheet(Some(&device), &NO_CUSTOM_MEDIA, sheet.clone(), &guard);
-                let sheet = swap(&sheet);
+                let sheet = if owned(&sheet, v) { new.clone() } else { sheet };
                 shadow.styles.stylesheets.append_stylesheet(Some(&device), &NO_CUSTOM_MEDIA, sheet.clone(), &guard);
-                shadow.sheets.push(sheet);
+                shadow.sheets.push((sheet, v));
             }
             shadow.dirty = true;
             self.styled = None;
             self.rules_changed = true;
+        }
+        drop(guard);
+        if in_document {
+            self.sheets_changed();
         }
     }
 
     // Whether `sheet` is one the engine cascades — the document's, or a shadow root's.
     pub(crate) fn uses_sheet(&self, sheet: &DocumentStyleSheet) -> bool {
         self.author.iter().any(|a| Arc::ptr_eq(&a.sheet.0, &sheet.0))
-            || self.shadow_styles.values().any(|shadow| shadow.sheets.iter().any(|s| Arc::ptr_eq(&s.0, &sheet.0)))
+            || self.shadow_styles.values().any(|shadow| shadow.sheets.iter().any(|(s, _)| Arc::ptr_eq(&s.0, &sheet.0)))
     }
 
     // A sheet's rules moved under the engine — an `@import`ed one arrived, CSSOM edited one — so everything is styled
@@ -719,7 +729,7 @@ impl StyleEngine {
     // What the document's sheets declare that the page side asks of them without styling anything: whether one could
     // paint an image (`css_image`), and its `@font-face` rules that apply (`face_rules`), in the order of their sheets —
     // a sheet adopted twice once, two of one text (one parse) twice — each its identity (`FaceIds`), the declarations
-    // it holds, its sources' URLs resolved, and the first of those URLs for a face not listed before.
+    // it holds, its sources' URLs resolved, and the first of those URLs.
     pub(crate) fn sheet_facts(&mut self, store: &crate::sheets::SheetStore) -> (bool, Vec<SheetFace>) {
         use style::font_face::DescriptorId;
         use style::stylesheets::{CssRule, StylesheetInDocument};
@@ -737,7 +747,6 @@ impl StyleEngine {
         let mut faces = Vec::new();
         let mut image = false;
         let mut seen = Vec::new();
-        let mut held = std::collections::HashMap::new();
         for a in &self.author {
             image |= a.css_image;
             if seen.contains(&a.version) || !a.sheet.is_effective_for_device(device, &NO_CUSTOM_MEDIA, &guard) {
@@ -751,15 +760,10 @@ impl StyleEngine {
                     continue;
                 }
                 let CssRule::FontFace(rule) = rule else { continue };
-                let key = (a.version, face_address(rule));
-                let nth = held.entry(key).and_modify(|n| *n += 1).or_insert(0usize);
-                let (_, known) = ids.by_rule.entry(key).or_insert_with(|| (rule.clone(), Vec::new()));
-                let fresh = known.len() <= *nth;
-                if fresh {
-                    ids.last += 1;
-                    known.push(ids.last);
-                }
-                let id = known[*nth];
+                let (_, id) = *ids.by_rule.entry((a.version, face_address(rule))).or_insert_with(|| {
+                    store.last_face.set(store.last_face.get() + 1);
+                    (rule.clone(), store.last_face.get())
+                });
                 let face = rule.read_with(&guard);
                 let d = &face.descriptors;
                 let mut text = String::new();
@@ -772,7 +776,7 @@ impl StyleEngine {
                 if let Some(src) = &d.src {
                     text.push_str(&format!("src: {}; ", font_face_src(src)));
                 }
-                let first_url = d.src.as_ref().filter(|_| fresh).and_then(|src| {
+                let first_url = d.src.as_ref().and_then(|src| {
                     src.0.iter().find_map(|source| match source {
                         style::font_face::Source::Url(u) => u.url.url().map(|url| url.as_str().to_owned()),
                         style::font_face::Source::Local(_) => None,
@@ -789,13 +793,13 @@ impl StyleEngine {
     pub(crate) fn set_shadow_sheets(&mut self, arena: &RealmArena, root: NodeId, sheets: &[&crate::sheets::StoredSheet]) {
         let mut shadow = self.shadow_styles.remove(&root).unwrap_or_default();
         let guard = self.lock.read();
-        for sheet in std::mem::take(&mut shadow.sheets) {
+        for (sheet, _) in std::mem::take(&mut shadow.sheets) {
             shadow.styles.stylesheets.remove_stylesheet(Some(self.stylist.device()), &NO_CUSTOM_MEDIA, sheet, &guard);
         }
         shadow.host_has = sheets.iter().any(|s| s.host_has);
         for s in sheets {
             shadow.styles.stylesheets.append_stylesheet(Some(self.stylist.device()), &NO_CUSTOM_MEDIA, s.sheet.clone(), &guard);
-            shadow.sheets.push(s.sheet.clone());
+            shadow.sheets.push((s.sheet.clone(), s.version));
         }
         drop(guard);
         shadow.dirty = true;
