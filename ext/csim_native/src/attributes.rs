@@ -458,17 +458,12 @@ fn change(
     if plain && local == "nonce" {
         arena.set_nonce(id, value.map(<[u16]>::to_vec).unwrap_or_default());
     }
-    // (…a sheet owner's attribute that obtains it a new sheet: a `<style>`'s `type` ("update a style block"); a `<link>`'s
-    // `type` or `disabled`, its `rel` or `href` set to another value (the same one is the same resource: Chrome keeps
-    // the sheet) — `disabled` removed making it explicitly enabled)
-    if plain && steps & STEP_SHEET != 0 {
+    // (…a sheet owner's attribute that obtains it a new sheet, of those that select it (`steps_of`): a `<style>`'s `type`
+    // ("update a style block"); a `<link>`'s `type` or `disabled`, its `rel` or `href` — `disabled` removed making it
+    // explicitly enabled)
+    if steps & STEP_SHEET != 0 {
         let link = arena.get(id).is_some_and(|n| &*n.local_name == "link");
-        let renews = match local.as_str() {
-            "type" => true,
-            "disabled" => link,
-            "rel" | "href" => link && old.as_deref() != value,
-            _ => false,
-        };
+        let renews = local == "type" || (link && matches!(local.as_str(), "disabled" | "rel" | "href"));
         if renews && arena.renew_sheet(id) && link && local == "disabled" && value.is_none() {
             arena.explicitly_enabled.insert(id);
         }
@@ -518,13 +513,16 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     // (…a `<link>`'s `rel`, `href`, `type`, `media`, `title` or `disabled`, a `<style>`'s `media`, `title` or `type` — but
     // an `href` or a `rel` set to the value it had, which changes nothing: the same resource, Chrome 155 keeps the sheet —
     // and of those a `<link>`'s that may name another resource: its `rel`, its `href`, its `disabled` removed)
-    let link_sheet = tag == "link"
+    // (…a sheet owner's: an HTML or SVG `<style>`, an HTML `<link>`)
+    let owner = crate::sheet_owners::is_sheet_owner(n);
+    let link_sheet = owner
+        && tag == "link"
         && match local {
             "rel" | "href" => changed,
             "type" | "media" | "title" | "disabled" => true,
             _ => false,
         };
-    steps |= flag(link_sheet || (tag == "style" && matches!(local, "media" | "title" | "type")), STEP_SHEET);
+    steps |= flag(link_sheet || (owner && tag == "style" && matches!(local, "media" | "title" | "type")), STEP_SHEET);
     steps |= flag(link_sheet && (matches!(local, "rel" | "href") || (local == "disabled" && !set)), STEP_LINK_RESOURCE);
     steps |= flag(local == "disabled" && set, STEP_DISABLED);
     steps |= flag(matches!(local, "id" | "name") && value.is_some_and(|v| !v.is_empty()), STEP_NAMED);
