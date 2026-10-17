@@ -2495,9 +2495,6 @@ struct Recalc<'a> {
 
 // The generated boxes a layout walk lays out, whose values a restyle replacing is a change to it.
 const PSEUDOS_GENERATED: [PseudoElement; 2] = [PseudoElement::Before, PseudoElement::After];
-fn pseudo_ptr(data: &style::data::ElementData, pseudo: &PseudoElement) -> Option<std::ptr::NonNull<()>> {
-    data.styles.pseudos.get(pseudo).map(Arc::raw_ptr)
-}
 
 impl<'dom> DomTraversal<StyleNode<'dom>> for Recalc<'_> {
     fn process_preorder<F: FnMut(StyleNode<'dom>)>(
@@ -2512,15 +2509,19 @@ impl<'dom> DomTraversal<StyleNode<'dom>> for Recalc<'_> {
             // (…an element whose values the restyle REPLACED — its own, or its `::before` / `::after` box's — is a change a
             // layout walk reads, stamped as a DOM write is, and one the JS side's memos hear of: `note_restyled`)
             let styles_of = |data: &style::data::ElementData| {
-                [data.styles.get_primary().map(Arc::raw_ptr), pseudo_ptr(data, &PSEUDOS_GENERATED[0]), pseudo_ptr(data, &PSEUDOS_GENERATED[1])]
+                [data.styles.get_primary(), data.styles.pseudos.get(&PSEUDOS_GENERATED[0]), data.styles.pseudos.get(&PSEUDOS_GENERATED[1])]
+                    .map(|v| v.map(Arc::raw_ptr))
             };
             let before = styles_of(&data);
             recalc_style_at(self, traversal_data, context, el, &mut data, note_child);
             if styles_of(&data) != before {
                 el.arena().note_restyled(el.id);
                 // (…and the images its values use are owed a fetch at the rendering update)
-                if let Some(style) = data.styles.get_primary() {
-                    crate::rendered::note_css_images(el.arena(), el.id, style);
+                let styles = [data.styles.get_primary(), data.styles.pseudos.get(&PSEUDOS_GENERATED[0]), data.styles.pseudos.get(&PSEUDOS_GENERATED[1])];
+                for (i, style) in styles.into_iter().enumerate() {
+                    if let Some(style) = style {
+                        crate::rendered::note_css_images(el.arena(), el.id, style, i > 0);
+                    }
                 }
             }
             if self.context.traversal_flags.for_animation_only() {

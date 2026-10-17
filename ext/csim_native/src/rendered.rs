@@ -740,24 +740,31 @@ fn box_kind(arena: &RealmArena, id: NodeId) -> i32 {
 }
 
 // The images restyled content uses that no rendering update has fetched yet, each by the element that uses it
-// (`note_css_images`) — every URL once for the page (`seen`), as a browser's memory cache makes it one fetch.
+// (`note_css_images`) — every URL once for the page (`seen`), as a browser's memory cache makes it one fetch — in the
+// order the restyles reached them (the style traversal's, breadth first).
+// (…and the computed URLs it saw last, by identity — every element one declaration styles shares its — kept so no other
+// takes the address: a restyle of many elements under one rule finds them there without hashing the URL)
 #[derive(Default)]
 pub(crate) struct CssImages {
     owed: Vec<(NodeId, String)>,
     seen: std::collections::HashSet<String>,
+    recent: [Option<style::servo_arc::Arc<url::Url>>; 8],
+    next_recent: usize,
 }
 
-// A restyle gave element `id` the values `style`: the images it uses, which a browser fetches at the rendering update
-// that renders it — every `url()` image of its computed `background-image`, `cursor` and `list-style-image` (a
-// `cross-fade()`'s inputs, an `image-set()`'s selected candidate, no `data:` URL), where it generates a box (no restyle
-// reaches a `display: none` element's subtree) — are owed a fetch, those the page has not fetched yet.
-pub(crate) fn note_css_images(arena: &RealmArena, id: NodeId, style: &ComputedValues) {
+// A restyle gave element `id` the values `style` — its own, or (`pseudo`) a `::before` / `::after` box's: the images
+// they use, which a browser fetches at the rendering update that renders them — every `url()` image of the computed
+// `background-image`, `cursor`, `list-style-image` and `content` (a `cross-fade()`'s inputs, an `image-set()`'s
+// selected candidate, no `data:` URL), where it generates a box (no restyle reaches a `display: none` element's
+// subtree; a pseudo-element's box is its `content`) — are owed a fetch, those the page has not fetched yet.
+pub(crate) fn note_css_images(arena: &RealmArena, id: NodeId, style: &ComputedValues, pseudo: bool) {
     use style::values::computed::Image;
-    fn image_urls(image: &Image, out: &mut Vec<String>) {
+    use style::values::generics::counters::{GenericContent, GenericContentItem};
+    fn image_urls<'a>(image: &'a Image, out: &mut Vec<&'a style::servo_arc::Arc<url::Url>>) {
         match image {
             Image::Url(u) => {
                 if let Some(url) = u.url().filter(|u| u.scheme() != "data") {
-                    out.push(url.as_str().to_owned());
+                    out.push(url);
                 }
             }
             Image::CrossFade(fade) => {
@@ -775,7 +782,8 @@ pub(crate) fn note_css_images(arena: &RealmArena, id: NodeId, style: &ComputedVa
             _ => {}
         }
     }
-    if style.get_box().clone_display().is_none() {
+    let content = &style.get_counters().content;
+    if style.get_box().clone_display().is_none() || (pseudo && !matches!(content, GenericContent::Items(_))) {
         return;
     }
     let mut urls = Vec::new();
@@ -786,21 +794,35 @@ pub(crate) fn note_css_images(arena: &RealmArena, id: NodeId, style: &ComputedVa
         image_urls(&cursor.image, &mut urls);
     }
     image_urls(&style.get_list().list_style_image, &mut urls);
+    if let GenericContent::Items(items) = content {
+        for item in items.items.iter() {
+            if let GenericContentItem::Image(image) = item {
+                image_urls(image, &mut urls);
+            }
+        }
+    }
     if urls.is_empty() {
         return;
     }
     let mut images = arena.css_images.borrow_mut();
     for url in urls {
-        if images.seen.insert(url.clone()) {
-            images.owed.push((id, url));
+        if images.recent.iter().flatten().any(|r| style::servo_arc::Arc::ptr_eq(r, url)) {
+            continue;
+        }
+        let at = images.next_recent;
+        images.recent[at] = Some(url.clone());
+        images.next_recent = (at + 1) % images.recent.len();
+        if !images.seen.contains(url.as_str()) {
+            images.seen.insert(url.as_str().to_owned());
+            images.owed.push((id, url.as_str().to_owned()));
         }
     }
 }
 
 // __dom.cssImagesOwed() -> `[initiator, url, …]`: the images the rendering update fetches — the page styled as it stands,
-// what its restyles left owed (`note_css_images`), in the order they were — each its Resource Timing initiator: `body`
-// for a `<body background>` attribute's (which the style engine folds into `background-image` as a presentational hint),
-// `css` for every other. Undefined where the realm has no engine.
+// what its restyles left owed (`note_css_images`), in the order the restyles reached them — each its Resource Timing
+// initiator: `body` for a `<body background>` attribute's (which the style engine folds into `background-image` as a
+// presentational hint), `css` for every other. Undefined where the realm has no engine.
 fn css_images_owed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(owed) = with_engine(scope, &args, |engine, arena, now| {
         engine.flush(arena, now);

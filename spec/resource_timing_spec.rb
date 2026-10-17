@@ -406,6 +406,93 @@ RSpec.describe 'resource timing' do
     expect(names).to eq(['css.png?id=inserted', 'css.png?id=rewritten', 'css.png?id=shown'])
   end
 
+  it 'fetches the images a ::before / ::after box and a content url() use' do
+    # A generated box is rendered, so its images are fetched (Chrome: `::before` and `content` both, measured); a
+    # pseudo-element with no `content` generates no box, and fetches none.
+    png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
+    doc = <<~HTML
+      <!DOCTYPE html><html><head><meta charset="utf-8"><style>
+        #a::before { content: ''; background-image: url("/css.png?id=before") }
+        #a::after { background-image: url("/css.png?id=nobox") }
+        #b::after { content: url("/css.png?id=content") }
+      </style></head><body><div id="a">a</div><div id="b">b</div></body></html>
+    HTML
+    a = ->(env) { env['PATH_INFO'].start_with?('/css.png') ? [200, {'content-type' => 'image/png'}, [png]] : [200, {'content-type' => 'text/html'}, [doc]] }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    names = poll_until do
+      ns = s.evaluate_script("performance.getEntriesByType('resource').filter(function (e) { return e.initiatorType === 'css'; }).map(function (e) { return e.name.split('/').pop(); }).sort()")
+      ns.length >= 2 ? ns : nil
+    end
+    expect(names).to eq(['css.png?id=before', 'css.png?id=content'])
+  end
+
+  it 'fetches an image an animation frame callback gave an element in that frame' do
+    # The rendering update styles the page after its animation frame callbacks (HTML "update the rendering"), and the
+    # images that styling uses are fetched there — on a page with nothing else to run, no later frame would.
+    png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
+    doc = <<~HTML
+      <!DOCTYPE html><html><head><meta charset="utf-8"></head><body><div id="d">d</div>
+      <script>requestAnimationFrame(() => { document.getElementById('d').style.backgroundImage = 'url("/css.png?id=raf")'; });</script>
+      </body></html>
+    HTML
+    a = ->(env) { env['PATH_INFO'].start_with?('/css.png') ? [200, {'content-type' => 'image/png'}, [png]] : [200, {'content-type' => 'text/html'}, [doc]] }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    names = poll_until do
+      ns = s.evaluate_script("performance.getEntriesByType('resource').map(function (e) { return e.name.split('/').pop(); })")
+      ns.include?('css.png?id=raf') ? ns : nil
+    end
+    expect(names).to include('css.png?id=raf')
+  end
+
+  it 'fetches a CSS image from the network, with its entry, when the controlling service worker does not answer' do
+    # Handle Fetch: a `fetch` event no `respondWith` answered falls back to the network.
+    png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
+    worker = <<~JS
+      self.addEventListener('install', () => self.skipWaiting());
+      self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+      const seen = [];
+      self.addEventListener('fetch', (e) => { if (e.request.destination === 'image') seen.push(new URL(e.request.url).search); });
+      self.onmessage = (e) => e.source.postMessage(seen.slice());
+    JS
+    doc = <<~HTML
+      <!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+      <script>
+        navigator.serviceWorker.addEventListener('message', (e) => { window.seen = e.data; });
+        navigator.serviceWorker.register('/sw.js');
+        setInterval(() => {}, 50);
+      </script></body></html>
+    HTML
+    served = []
+    a = lambda { |env|
+      case env['PATH_INFO']
+      when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [worker]]
+      when '/css.png' then served << env['QUERY_STRING']; [200, {'content-type' => 'image/png'}, [png]]
+      else [200, {'content-type' => 'text/html'}, [doc]]
+      end
+    }
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
+    begin
+      s = simulated_session(a)
+      s.visit '/'
+      expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
+      s.execute_script(<<~JS)
+        document.head.appendChild(document.createElement('style')).textContent = '.t { background-image: url("/css.png?late") }';
+        document.body.appendChild(document.createElement('div')).className = 't';
+      JS
+      entries = poll_until do
+        ns = s.evaluate_script("performance.getEntriesByType('resource').filter((e) => e.initiatorType === 'css').map((e) => e.name.split('/').pop())")
+        ns.empty? ? nil : ns
+      end
+      s.execute_script("navigator.serviceWorker.controller.postMessage('seen')")
+      expect([poll_until { s.evaluate_script('window.seen') }, served, entries]).to eq([['?late'], ['late'], ['css.png?late']])
+    ensure
+      ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+    end
+  end
+
   it 'fetches an image an @import-ed sheet declares on every page that links it' do
     # The second page keeps the first one's parse of the linked sheet, @import included — the
     # imported sheet never arrives again, and its image is the page's all the same.
