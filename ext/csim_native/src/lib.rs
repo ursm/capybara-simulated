@@ -213,6 +213,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // Fetch's fixed header, method and port rules, the page's too (fetch_rules.rs).
     native.define_module_function("bad_port", magnus::function!(fetch_rules::bad_port_for_ruby, 1))?;
     native.define_module_function("link_noopener", magnus::function!(token_list::noopener_for_ruby, 2))?;
+    native.define_module_function("site", magnus::function!(realm_location::site_for_ruby, 1))?;
     native.define_module_function("target_keyword", magnus::function!(navigables::target_keyword_for_ruby, 1))?;
     native.define_module_function("link_noreferrer", magnus::function!(token_list::noreferrer_for_ruby, 1))?;
     native.define_module_function("cors_safelisted_method", magnus::function!(fetch_rules::cors_safelisted_method_for_ruby, 1))?;

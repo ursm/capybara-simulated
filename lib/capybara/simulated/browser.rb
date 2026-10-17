@@ -256,8 +256,8 @@ module Capybara
         # reset) and Driver-injected like the cookie jar, so target=_blank aux windows share one
         # session's auth state (a real browser shares the HTTP auth cache across a session's tabs).
         @auth_cache                   = auth_cache     || {}
-        # localStorage and sessionStorage: storage sheds in the engine (storage_areas.rs), an area per origin — the
-        # session's (the Driver's, every window's) and this top-level browsing context's own.
+        # localStorage and sessionStorage: storage sheds in the engine (storage_areas.rs), an area per storage key
+        # (origin and top-level site) — the session's (the Driver's, every window's) and this top-level browsing context's own.
         @local_storage                = local_storage || Native.storage_partition_new
         @local_storage_owned          = local_storage.nil?
         # The system clipboard, the Driver's (one for the session, every window's): `entries` — [type, byte string] each —
@@ -604,9 +604,9 @@ module Capybara
         # Cross-window BroadcastChannel messages from OTHER windows, delivered to
         # this window's matching channels on settle. [{name, data}] (same thread).
         @broadcast_inbox      = []
-        # Storage `storage` events queued for the OTHER same-origin documents (a change
-        # fires at every same-origin document EXCEPT the one that made it), delivered on
-        # settle. [{kind, key, old, new, url, source}] (same thread).
+        # Storage `storage` events queued for the OTHER documents of the area's storage key (a
+        # change fires at every one EXCEPT the one that made it), delivered on settle.
+        # [{kind, key, old, new, url, area, targets}] (same thread).
         @storage_inbox        = []
         # BroadcastChannel isolate-wide registry + global ordered delivery queue (the multi-realm
         # path — see broadcast_to_windows / bc_post). `@bc_registry` is keyed by [realm_id, local_id]
@@ -7373,9 +7373,22 @@ module Capybara
       # `window.open(url, name)` from JS — returns the new (or reused, by name)
       # window's handle, or nil. The URL is resolved against THIS document so a
       # relative `window.open('/x')` targets the right origin/path.
-      def open_child_window(url, name, opener_realm_id = 0, about_base = nil, about_origin = nil)
+      # Its navigation's referrer the calling document — none for `noreferrer` (the features'), which implies `noopener`:
+      # a window with no opener.
+      def open_child_window(url, name, opener_realm_id = 0, about_base = nil, about_origin = nil, noopener = false, noreferrer = false)
         return nil unless @driver.respond_to?(:open_window_from_js)
-        @driver.open_window_from_js(self, url.to_s, name.to_s, opener_realm_id.to_i, about_base.to_s, about_origin.to_s)
+        referrer, policy = noreferrer == true ? ['', 'no-referrer'] : realm_referrer_initiator(opener_realm_id.to_i)
+        @driver.open_window_from_js(
+          self,
+          url.to_s,
+          name.to_s,
+          opener_realm_id.to_i,
+          about_base.to_s,
+          about_origin.to_s,
+          noopener:        noopener == true || noreferrer == true,
+          referrer:        referrer || '',
+          referrer_policy: policy
+        )
       end
 
       # A `target=_blank`/named link/area activation from frame or window realm `realm_id` in THIS browser opens a new
@@ -7565,14 +7578,15 @@ module Capybara
       end
 
       # A Storage change (setItem/removeItem/clear) in realm `source_realm_id`: fire a `storage`
-      # event at every OTHER same-origin document. Within this isolate that's the other realms
-      # (main + frames — each lets one of another origin's area go); localStorage ALSO spans
-      # separate same-origin windows (the Driver's one shed), so fan the change out to them —
-      # sessionStorage is per-browsing-context and never crosses windows.
-      # (…`origin` the area's: a document of another origin lets the event go)
-      def storage_changed(kind, key, old, new, url, source_realm_id, origin)
-        enqueue_storage_event(kind, key, old, new, url, origin, source_realm_id)
-        @driver.storage_broadcast(self, kind, key, old, new, url, origin) if kind == 'local' && @driver.respond_to?(:storage_broadcast)
+      # event at every OTHER document of its storage key. Within this isolate that's the other realms
+      # (main + frames — each lets another key's area go); localStorage ALSO spans separate
+      # windows (the Driver's one shed), so fan the change out to them — sessionStorage is
+      # per-browsing-context and never crosses windows.
+      # (…`area` the area's storage key, as storage_areas.rs `storageAreaKey` writes it: a document of another lets the
+      # event go)
+      def storage_changed(kind, key, old, new, url, source_realm_id, area)
+        enqueue_storage_event(kind, key, old, new, url, area, source_realm_id)
+        @driver.storage_broadcast(self, kind, key, old, new, url, area) if kind == 'local' && @driver.respond_to?(:storage_broadcast)
         nil
       end
 
@@ -7581,9 +7595,9 @@ module Capybara
       # it reaches every one.
       # (…its targets the documents there are NOW, the source's skipped: a frame made after the change fires none for it —
       # HTML "broadcast": each Document whose storage area is the changed one, as the change is made)
-      def enqueue_storage_event(kind, key, old, new, url, origin, source_realm_id = nil)
+      def enqueue_storage_event(kind, key, old, new, url, area, source_realm_id = nil)
         targets = [0, *@runtime.frame_realm_ids].reject {|id| id == source_realm_id }
-        @storage_inbox << {'kind' => kind.to_s, 'key' => key, 'old' => old, 'new' => new, 'url' => url.to_s, 'origin' => origin.to_s, 'targets' => targets}
+        @storage_inbox << {'kind' => kind.to_s, 'key' => key, 'old' => old, 'new' => new, 'url' => url.to_s, 'area' => area.to_s, 'targets' => targets}
       end
 
       # Fire queued cross-window messages (postMessage, BroadcastChannel, `storage`) — each a task of its own: one per
@@ -7609,7 +7623,7 @@ module Capybara
         end
         unless @storage_inbox.empty?
           events = @storage_inbox.slice!(0, @storage_inbox.length)
-          # The `storage` event fires at every same-origin document EXCEPT the one that changed the area: the realms there
+          # The `storage` event fires at every document of the area's EXCEPT the one that changed it: the realms there
           # were as the change was made (`targets`), the source's skipped, those still alive.
           events.each do |event|
             event.delete('targets').each do |target_id|
@@ -12030,18 +12044,10 @@ module Capybara
           (url_origin(current_url) != url_origin(location_url) && url_origin(initiator_url) != url_origin(current_url))
       end
 
-      # scheme + registrable domain (approx eTLD+1) of a URL — the "site" a Sec-Fetch-Site /
-      # same-site comparison uses. Last-two-labels approximation (no Public Suffix List — correct
-      # for the single-label TLDs our hosts use); an IP literal / ≤2-label host is its own site.
-      # A `blob:` URL derives from its inner origin. nil for a hostless / non-http(s) URL.
-      def registrable_site(url)
-        u = parse_url(url.to_s.sub(/\Ablob:/, ''))
-        return nil unless u && %w[http: https:].include?(u[:protocol]) && !u[:hostname].empty?
-        host   = u[:hostname]
-        labels = host.split('.')
-        regd = host.start_with?('[') || host.match?(/\A\d+(\.\d+){3}\z/) || labels.length <= 2 ? host : labels.last(2).join('.')
-        "#{u[:protocol]}//#{regd}"
-      end
+      # The site of a URL — scheme and registrable domain — that a Sec-Fetch-Site / same-site comparison and a blob
+      # URL's partition use, as storage's areas do: the engine's (realm_location.rs `site`). nil for a hostless or
+      # non-http(s) URL.
+      def registrable_site(url) = Native.site(url.to_s)
 
       # Cross-host hop (e.g. Discourse's `discourse_connect` flow
       # redirecting to a real WEBrick on `localhost:9100`) must cross

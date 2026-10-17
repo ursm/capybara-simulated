@@ -554,16 +554,20 @@ module Capybara
 
       # `window.open(url, name)` from the `opener` window's JS. Resolves the URL
       # against the opener's document and records the opener relationship.
-      def open_window_from_js(opener_browser, url, name, opener_realm_id = 0, about_base = nil, about_origin = nil)
+      # (…`noopener` one with none — `window.open` returning null, its about:blank document a new opaque origin, not the
+      # opener's — and `referrer` / `referrer_policy` its navigation's, the calling document's)
+      def open_window_from_js(opener_browser, url, name, opener_realm_id = 0, about_base = nil, about_origin = nil, noopener: false, referrer: nil, referrer_policy: nil)
         resolved = url.to_s.empty? ? nil : opener_browser.resolve_document_url(url)
         # Opening a blob: URL whose storage partition differs from the opener's
         # top-level site is forced NOOPENER (cross-partition-navigation): the new
         # auxiliary window is its own top-level context in the blob's partition, so the
         # blob still loads — but there is no opener relationship and `window.open`
         # returns null. Same-partition keeps the normal opener.
-        if resolved.to_s.start_with?('blob:') && cross_partition_blob?(resolved, opener_browser)
-          open_aux_window(resolved, name: name, source: opener_browser)   # no opener_handle ⇒ window.opener null
-          return nil                                                      # window.open(...) === null
+        noopener ||= resolved.to_s.start_with?('blob:') && cross_partition_blob?(resolved, opener_browser)
+        if noopener
+          # (…no opener_handle ⇒ window.opener null; loaded now, as no WindowProxy is handed back to fire its load)
+          open_aux_window(resolved, name: name, source: opener_browser, referrer: referrer, referrer_policy: referrer_policy)
+          return nil
         end
         # Same-origin window → a realm in the opener's isolate (shared heap); the
         # returned realm-id context becomes a native WindowProxy on the JS side, so
@@ -575,11 +579,13 @@ module Capybara
         end
         open_aux_window(
           resolved,
-          name:          name,
-          opener_handle: handle_for(opener_browser),
-          source:        opener_browser,
-          defer_load:    true,
-          creator:       {origin: about_origin, base: about_base}
+          name:            name,
+          opener_handle:   handle_for(opener_browser),
+          source:          opener_browser,
+          referrer:        referrer,
+          referrer_policy: referrer_policy,
+          defer_load:      true,
+          creator:         {origin: about_origin, base: about_base}
         )
       end
 
@@ -680,14 +686,14 @@ module Capybara
         end
       end
 
-      # A localStorage change fans out to every OTHER window (localStorage spans same-origin
-      # browsing contexts — the Driver's one shed, an area per origin); a nil source realm reaches
-      # each target's every realm, whose documents of another origin let it go (storage.js).
+      # A localStorage change fans out to every OTHER window (localStorage spans browsing
+      # contexts — the Driver's one shed, an area per storage key); a nil source realm reaches
+      # each target's every realm, whose documents of another key let it go (storage.js).
       # sessionStorage is per-context and never reaches this path.
-      def storage_broadcast(source_browser, kind, key, old, new, url, origin)
+      def storage_broadcast(source_browser, kind, key, old, new, url, area)
         window_entries.each do |w|
           next if w[:browser].equal?(source_browser)
-          w[:browser].enqueue_storage_event(kind, key, old, new, url, origin, nil)
+          w[:browser].enqueue_storage_event(kind, key, old, new, url, area, nil)
         end
       end
 

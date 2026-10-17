@@ -256,6 +256,23 @@ pub(crate) fn effective_domain(origin: &str, domain: Option<&str>) -> Option<Str
 pub(crate) fn ip_host(host: &str) -> bool {
     host.starts_with('[') || host.parse::<std::net::Ipv4Addr>().is_ok()
 }
+// The site of `url`'s origin (HTML "obtain a site"), a `blob:` URL's its inner URL's: its scheme and its host's
+// registrable domain — the last two labels, no public suffix list being kept (right for the single-label TLDs a suite's
+// hosts have); an IP address, or a host of two labels or fewer, its own. None for a URL that is no http(s) one with a
+// host. One rule for every partition keyed on a site: storage, blob URLs, `Sec-Fetch-Site`.
+pub(crate) fn site(url: &str) -> Option<String> {
+    let url = ada_url::Url::parse(url.strip_prefix("blob:").unwrap_or(url), None).ok()?;
+    let host = url.hostname();
+    if !matches!(url.protocol(), "http:" | "https:") || host.is_empty() {
+        return None;
+    }
+    let labels: Vec<&str> = host.split('.').collect();
+    let domain = if ip_host(host) || labels.len() <= 2 { host.to_owned() } else { labels[labels.len() - 2..].join(".") };
+    Some(format!("{}//{domain}", url.protocol()))
+}
+pub(crate) fn site_for_ruby(url: String) -> Option<String> {
+    site(&url)
+}
 // `value` host-parsed (URL "host parsing"), or None where it is no host — nothing but a host, as a URL's authority would
 // take it, with no port (`:` a forbidden host code point outside an IPv6 address's brackets).
 fn domain_host(value: &str) -> Option<String> {

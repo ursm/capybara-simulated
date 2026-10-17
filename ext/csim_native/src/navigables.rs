@@ -24,6 +24,9 @@ pub(crate) struct Navigables {
     // Each nested realm's container — kept once the container's navigable is gone (its container left its document): a
     // window whose browsing context is discarded is no top-level one, its name '' and not to be set.
     containers: HashMap<i32, NodeId>,
+    // Each nested realm's top-level realm, as it was when the realm became its container's navigable's: its document's
+    // environment's top-level origin is that one's, whatever becomes of its container after (HTML "top-level origin").
+    tops: HashMap<i32, i32>,
     top_names: HashMap<i32, Vec<u16>>,
     documents: HashMap<i32, NodeId>,
     // The windows `window.open` made in this isolate (auxiliary browsing contexts, top-level ones), which the page's
@@ -114,6 +117,8 @@ impl RealmArena {
         child.realm = realm;
         if let Some(realm) = realm {
             nav.containers.insert(realm, container);
+            let top = self.get(container).map(|n| n.realm).filter(|&p| p != realm).map(|p| self.top_level_realm(p));
+            self.navigables.tops.insert(realm, top.unwrap_or(realm));
         }
         self.note_linked();
     }
@@ -149,13 +154,10 @@ impl RealmArena {
         let nav = &self.navigables;
         nav.containers.get(&realm).copied().filter(|c| nav.children.contains_key(c))
     }
-    // The realm of the top-level traversable realm `realm`'s document is in: its own for a window's, else its container's
-    // document's, up (a removed frame's own, as its container is gone).
-    pub(crate) fn top_level_realm(&self, mut realm: i32) -> i32 {
-        while let Some(parent) = self.live_container(realm).and_then(|c| self.get(c)).map(|n| n.realm).filter(|&p| p != realm) {
-            realm = parent;
-        }
-        realm
+    // The realm of the top-level traversable realm `realm`'s document was made in: its own for a window's, else its
+    // container's document's, up — kept for a removed frame, whose container is in no document now.
+    pub(crate) fn top_level_realm(&self, realm: i32) -> i32 {
+        self.navigables.tops.get(&realm).copied().unwrap_or(realm)
     }
     // `container`'s navigable destroyed — its container left its document.
     pub(crate) fn discard_navigable(&mut self, container: NodeId) {
@@ -225,6 +227,7 @@ impl RealmArena {
                 }
             }
             nav.top_names.remove(&cid);
+            nav.tops.remove(&cid);
             let dead: Vec<NodeId> = self.navigables.children.keys().copied().filter(|&c| self.get(c).is_none()).collect();
             for container in dead {
                 self.navigables.children.remove(&container);
@@ -343,6 +346,60 @@ pub(crate) fn target_keyword(target: &str) -> u32 {
 pub(crate) fn target_keyword_for_ruby(target: String) -> u32 {
     target_keyword(&target)
 }
+// The window open steps' features (HTML §7.2.2.1): `features` tokenized ("tokenize the features") — a name and a value
+// each, ASCII-lowercased, between feature separators (ASCII whitespace, `=` and `,`), a later one of a name replacing
+// the earlier — and what it sets: OPEN_NOOPENER where `noopener` is set or `noreferrer` is, which implies it,
+// OPEN_NOREFERRER where `noreferrer` is ("check if a window feature is set": its value parsed as a boolean feature).
+pub(crate) const OPEN_NOOPENER: u32 = 1;
+pub(crate) const OPEN_NOREFERRER: u32 = 2;
+fn tokenize_features(features: &str) -> HashMap<String, String> {
+    let separator = |c: char| c.is_ascii_whitespace() || c == '=' || c == ',';
+    let mut tokens = HashMap::new();
+    let mut rest = features;
+    while !rest.is_empty() {
+        rest = rest.trim_start_matches(separator);
+        let end = rest.find(separator).unwrap_or(rest.len());
+        let name = rest[..end].to_ascii_lowercase();
+        rest = &rest[end..];
+        // (…the separators up to its `=`, one that is no separator or a `,` ending its name's: a name with no value)
+        let to_eq = rest.find(|c: char| c == '=' || c == ',' || !separator(c)).unwrap_or(rest.len());
+        rest = &rest[to_eq..];
+        let mut value = String::new();
+        if rest.starts_with('=') {
+            let skip = rest.find(|c: char| c == ',' || !separator(c)).unwrap_or(rest.len());
+            rest = &rest[skip..];
+            if !rest.starts_with(',') {
+                let end = rest.find(separator).unwrap_or(rest.len());
+                value = rest[..end].to_ascii_lowercase();
+                rest = &rest[end..];
+            }
+        }
+        if !name.is_empty() {
+            tokens.insert(name, value);
+        }
+    }
+    tokens
+}
+// ("parse a boolean feature": an empty value, `yes` or `true` set, else an integer's other than 0 — none that is no integer)
+fn feature_set(tokens: &HashMap<String, String>, name: &str) -> bool {
+    tokens.get(name).is_some_and(|v| v.is_empty() || v == "yes" || v == "true" || crate::validity::parse_html_integer(v).is_some_and(|n| n != 0))
+}
+pub(crate) fn open_features(features: &str) -> u32 {
+    let tokens = tokenize_features(features);
+    let noreferrer = feature_set(&tokens, "noreferrer");
+    if noreferrer {
+        OPEN_NOOPENER | OPEN_NOREFERRER
+    } else if feature_set(&tokens, "noopener") {
+        OPEN_NOOPENER
+    } else {
+        0
+    }
+}
+// __dom.openFeatures(features) -> `open_features`.
+fn open_features_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let features = args.get(0).to_rust_string_lossy(scope);
+    rv.set_uint32(open_features(&features));
+}
 // __dom.targetKeyword(target) -> `target_keyword`.
 fn target_keyword_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let target = args.get(0).to_rust_string_lossy(scope);
@@ -351,6 +408,7 @@ fn target_keyword_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "targetKeyword", target_keyword_op, context_id);
+    crate::dom::register(scope, ns, "openFeatures", open_features_op, context_id);
     crate::dom::register(scope, ns, "windowName", window_name, context_id);
     crate::dom::register(scope, ns, "setWindowName", set_window_name, context_id);
     crate::dom::register(scope, ns, "setFrameRealm", set_frame_realm, context_id);
@@ -547,5 +605,25 @@ mod tests {
         assert_eq!(target_keyword("_ſelf"), TARGET_NAME);
         assert_eq!(target_keyword("_blank "), TARGET_NAME);
         assert_eq!(target_keyword("frame"), TARGET_NAME);
+    }
+
+    #[test]
+    fn the_open_features_are_tokenized_and_their_booleans_parsed() {
+        assert_eq!(open_features(""), 0);
+        assert_eq!(open_features("noopener"), OPEN_NOOPENER);
+        assert_eq!(open_features(" NoOpener = YES "), OPEN_NOOPENER);
+        assert_eq!(open_features("width=100,noopener"), OPEN_NOOPENER);
+        assert_eq!(open_features("noopener=1px"), OPEN_NOOPENER);
+        assert_eq!(open_features("noreferrer"), OPEN_NOOPENER | OPEN_NOREFERRER);
+        // (…a value that is no boolean nor an integer, or 0, unset; a later one of a name the one it has)
+        assert_eq!(open_features("noopener=no"), 0);
+        assert_eq!(open_features("noopener=0"), 0);
+        assert_eq!(open_features("noopener,noopener=0"), 0);
+        // (…`=`, `,` and whitespace all separate: a name with no value after its `,` is set)
+        assert_eq!(open_features("noopener,width=0"), OPEN_NOOPENER);
+        assert_eq!(open_features("noopener=,x"), OPEN_NOOPENER);
+        assert_eq!(open_features("noopener x"), OPEN_NOOPENER);
+        assert_eq!(open_features("=noopener=no"), 0);
+        assert_eq!(open_features("noopenerx"), 0);
     }
 }

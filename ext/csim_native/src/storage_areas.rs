@@ -67,22 +67,35 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "storageClear", clear_op, context_id);
     register(scope, ns, "storageKey", key_op, context_id);
     register(scope, ns, "storageLength", length_op, context_id);
+    register(scope, ns, "storageAreaKey", area_key_op, context_id);
 }
 
-// The area an op names: its shed (arg 0) and the storage key of realm arg 1's document — the realm whose global's area
-// it is, whichever realm's method runs: its origin, and the site of its top-level document's (scheme and host: no
-// public suffix list is kept). None for an opaque origin, which has no storage key (HTML "obtain a storage key": the
-// bindings' getters throw before any op runs), and for no shed.
-fn area_key(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> Option<(u64, String, String)> {
-    let partition = args.get(0).number_value(scope).filter(|p| *p >= 1.0)? as u64;
-    let realm = args.get(1);
+// The storage key of realm `realm`'s document (HTML "obtain a storage key"), the realm whose global's area it is,
+// whichever realm's method runs: the site of its top-level document's origin (realm_location.rs `site`; the origin itself
+// where it has none), and its own origin. None for an opaque origin, which has none: the bindings' getters throw before
+// any op runs.
+fn storage_key(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, realm: v8::Local<'_, v8::Value>) -> Option<(String, String)> {
     let realm = if realm.is_int32() { realm.int32_value(scope)? } else { realm_id(scope, args) };
     let arena = &crate::dom::dom(scope).arena;
     let origin_of = |r: i32| arena.realm_state(r).map(|st| st.location.origin().to_owned());
     let origin = origin_of(realm).filter(|o| !o.is_empty() && o != "null")?;
     let top = origin_of(arena.top_level_realm(realm)).unwrap_or_default();
-    let site = ada_url::Url::parse(&top, None).ok().map_or(top.clone(), |u| format!("{}//{}", u.protocol(), u.hostname()));
+    Some((crate::realm_location::site(&top).unwrap_or(top), origin))
+}
+// The area an op names: its shed (arg 0) and realm arg 1's storage key — None for none, or no shed.
+fn area_key(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> Option<(u64, String, String)> {
+    let partition = args.get(0).number_value(scope).filter(|p| *p >= 1.0)? as u64;
+    let (site, origin) = storage_key(scope, args, args.get(1))?;
     Some((partition, site, origin))
+}
+
+// __dom.storageAreaKey(realm) -> realm `realm`'s storage key (this realm's for none) as one string — what a `storage`
+// event names its area by, so a document of another key lets it go — or null for none.
+fn area_key_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    match storage_key(scope, &args, args.get(0)).and_then(|(site, origin)| v8::String::new(scope, &format!("{site} {origin}"))) {
+        Some(key) => rv.set(key.into()),
+        None => rv.set_null(),
+    }
 }
 
 // __dom.storageGet(partition, realm, key) -> the item's value, or null.
@@ -99,10 +112,10 @@ fn get_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     }
 }
 // __dom.storageSet(partition, realm, key, value) -> [stored, old]: false where the area's quota leaves no room (nothing
-// stored), or there is no area; the item's value before (null for none).
+// stored); the item's value before (null for none). With no area — no shed — nothing is stored, and nothing refused.
 fn set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (key, value) = (utf16_arg(scope, args.get(2)), utf16_arg(scope, args.get(3)));
-    let (stored, old) = area_key(scope, &args).map_or((false, None), |k| {
+    let (stored, old) = area_key(scope, &args).map_or((true, None), |k| {
         let mut reg = lock();
         let area = reg.areas.entry(k).or_default();
         let had = area.position(&key);
