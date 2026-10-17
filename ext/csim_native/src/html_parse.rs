@@ -1421,25 +1421,14 @@ impl<'s> Build<'s> {
                     }
                 }
                 // (…a document's doctype and mode — none in a fragment parse — and no declarative shadow root)
-                // (…a document that has one already keeps it, its name and identifiers the new token's: a doctype a
-                // `document.write` puts after the first, as the bindings' replay did)
+                // (…appended whatever the document holds already — a doctype a script appended before a `document.write` of
+                // another: HTML §13.2.6.4.1 "append a DocumentType node", with no check, as Firefox does; Chrome keeps one)
                 OP_DOCTYPE => {
                     let (name, public, system) = (string(ops.next())?, string(ops.next())?, string(ops.next())?);
-                    let ids = Some(Box::new((self.standins.units(&public), self.standins.units(&system))));
                     let doc = self.node(0)?;
-                    let arena = crate::dom::realm(scope, self.cid);
-                    match arena.relative(doc, crate::dom::RELATIVE_DOCTYPE) {
-                        Some(existing) => {
-                            if let Some(n) = arena.get_mut_quietly(existing) {
-                                n.data = self.standins.units(&name);
-                                n.doctype_ids = ids;
-                            }
-                        }
-                        None => {
-                            let dt = self.make(scope, crate::dom::NodeData { doctype_ids: ids, ..crate::dom::NodeData::of_kind(crate::dom::NodeKind::Other, self.standins.units(&name)) });
-                            self.insert(scope, doc, dt, None);
-                        }
-                    }
+                    let ids = Some(Box::new((self.standins.units(&public), self.standins.units(&system))));
+                    let dt = self.make(scope, crate::dom::NodeData { doctype_ids: ids, ..crate::dom::NodeData::of_kind(crate::dom::NodeKind::Other, self.standins.units(&name)) });
+                    self.insert(scope, doc, dt, None);
                 }
                 OP_QUIRKS => self.quirks = Some(int(ops.next())?),
                 // (…a declarative shadow root attached to its host — the template not inserted, the root what its

@@ -2705,7 +2705,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "pseudoBox", pseudo_box, context_id);
     register(scope, ns, "directionality", directionality, context_id);
     register(scope, ns, "setTemplateContent", set_template_content, context_id);
-    register(scope, ns, "setDoctype", set_doctype, context_id);
     register(scope, ns, "doctypeField", doctype_field, context_id);
     register(scope, ns, "setIsValue", set_is_value, context_id);
     register(scope, ns, "isValue", is_value, context_id);
@@ -3450,19 +3449,6 @@ const STATE_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new(
         v8::fast_api::Int64Representation::Number,
     ),
 )];
-
-// __dom.setDoctype(nid, name, publicId, systemId): a doctype's name and identifiers, as a reused document's next parse
-// gives them.
-fn set_doctype(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
-    let name = utf16_arg(scope, args.get(1));
-    let ids = Box::new((utf16_arg(scope, args.get(2)), utf16_arg(scope, args.get(3))));
-    let cid = realm_id(scope, &args);
-    if let Some(node) = realm(scope, cid).get_mut_quietly(id) {
-        node.data = name;
-        node.doctype_ids = Some(ids);
-    }
-}
 
 // __dom.doctypeField(nid, field) -> a doctype's name (0), public identifier (1) or system identifier (2), exactly as
 // the DOM holds them — '' for a node that is no doctype.

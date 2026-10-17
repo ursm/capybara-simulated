@@ -113,6 +113,26 @@ RSpec.describe 'document.write during parsing' do
     expect(s.evaluate_script('L')).to eq(%w[dsd e1: next])
   end
 
+  # A doctype token in the "initial" insertion mode is APPENDED to the document (HTML §13.2.6.4.1), whatever the document
+  # holds already: a doctype a script appended after `document.open()` stays first, the written one follows it, and the
+  # written one sets the mode. Firefox: `a,html,HTML`, `a`, `CSS1Compat` (Chrome keeps one: `a,HTML`).
+  it 'appends a written doctype after one the document already has' do
+    s = session_for('<p>x</p>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const f = document.createElement('iframe');
+        document.body.append(f);
+        const d = f.contentDocument;
+        d.open();
+        d.appendChild(d.implementation.createDocumentType('a', '', ''));
+        d.write('<!doctype html><p>x');
+        d.close();
+        return [[...d.childNodes].map((n) => n.nodeName), d.doctype.name, d.compatMode];
+      })()
+    JS
+    expect(got).to eq([%w[a html HTML], 'a', 'CSS1Compat'])
+  end
+
   # A declarative shadow root's script that writes once the input has run out: no insertion point is left to write at,
   # and nothing the parser does on the write may bring the process down (it did: a panic, aborting).
   it 'survives a write from a declarative shadow root left open at the end of the input' do
