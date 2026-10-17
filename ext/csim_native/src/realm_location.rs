@@ -134,6 +134,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "sameOriginRealm", same_origin_realm, context_id);
     register(scope, ns, "setOriginKey", set_origin_key, context_id);
     register(scope, ns, "sandboxedOrigin", sandboxed_origin, context_id);
+    register(scope, ns, "effectiveDomain", effective_domain_op, context_id);
+    register(scope, ns, "setDomain", set_domain_op, context_id);
+    register(scope, ns, "ipHost", ip_host_op, context_id);
 }
 
 // __dom.documentOrigin() -> the serialization of the calling realm's document's origin (`RealmLocation::origin`).
@@ -241,9 +244,110 @@ fn set_target_hash(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     realm(scope, cid).retarget(doc, hash);
 }
 
+// An origin's effective domain (HTML §7.5.2): `domain`, the one a `document.domain` write set, else its host — None
+// for an opaque origin (serialized "null", or none at all).
+pub(crate) fn effective_domain(origin: &str, domain: Option<&str>) -> Option<String> {
+    if origin.is_empty() || origin == "null" {
+        return None;
+    }
+    domain.map(str::to_owned).or_else(|| ada_url::Url::parse(origin, None).ok().map(|u| u.hostname().to_owned()))
+}
+// Whether `host` is an IP address — an IPv6 one in its brackets, as a URL's host serializes it.
+pub(crate) fn ip_host(host: &str) -> bool {
+    host.starts_with('[') || host.parse::<std::net::Ipv4Addr>().is_ok()
+}
+// `value` host-parsed (URL "host parsing"), or None where it is no host — nothing but a host, as a URL's authority would
+// take it, with no port (`:` a forbidden host code point outside an IPv6 address's brackets).
+fn domain_host(value: &str) -> Option<String> {
+    if !value.starts_with('[') && value.contains(':') {
+        return None;
+    }
+    let url = ada_url::Url::parse(format!("http://{value}/"), None).ok()?;
+    let bare = url.host() == url.hostname() && url.pathname() == "/" && url.search().is_empty() && url.hash().is_empty();
+    (bare && url.href() == format!("http://{}/", url.host())).then(|| url.hostname().to_owned())
+}
+// `document.domain`'s setter steps past "has a browsing context" (HTML §7.5.2): what a write of `value` sets, or why it
+// may not (dom-nodes.js `DOMAIN_*`) — an opaque origin, no host, or one the effective domain is neither nor a subdomain
+// of, where neither is an IP address. A public suffix is no domain it may set, which
+// this does not know: no list of them is kept.
+const DOMAIN_OPAQUE: u32 = 1;
+const DOMAIN_UNPARSED: u32 = 2;
+const DOMAIN_NOT_SUFFIX: u32 = 3;
+fn domain_to_set(effective: Option<&str>, value: &str) -> Result<String, u32> {
+    let effective = effective.ok_or(DOMAIN_OPAQUE)?;
+    let host = domain_host(value).ok_or(DOMAIN_UNPARSED)?;
+    let suffix = || !ip_host(&host) && !ip_host(effective) && effective.strip_suffix(host.as_str()).is_some_and(|sub| sub.ends_with('.'));
+    if host == effective || suffix() {
+        Ok(host)
+    } else {
+        Err(DOMAIN_NOT_SUFFIX)
+    }
+}
+// …a document's: realm `realm`'s origin (its creator's, for a document with none of its own), with what a write set on
+// `doc` — None for a realm gone.
+fn document_effective_domain(scope: &mut v8::PinScope<'_, '_>, doc: Option<NodeId>, realm: v8::Local<'_, v8::Value>) -> Option<String> {
+    let origin = other_realm(scope, realm, |l, _| l.origin().to_owned())?;
+    let states = &crate::dom::dom(scope).arena.document_states;
+    effective_domain(&origin, doc.and_then(|d| states.domain(d)))
+}
+// __dom.effectiveDomain(doc, realm) -> `doc`'s effective domain (`effective_domain`) — `doc` null for the origin's own —
+// or null for an opaque origin.
+fn effective_domain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let doc = crate::node_handle::nid_of(scope, args.get(0));
+    match document_effective_domain(scope, doc, args.get(1)).and_then(|d| v8::String::new(scope, &d)) {
+        Some(d) => rv.set(d.into()),
+        None => rv.set_null(),
+    }
+}
+// __dom.setDomain(doc, realm, value) -> null with `doc`'s domain set to `value` host-parsed, else `[why, host]`: why not
+// (`domain_to_set`), and that host ('' for none).
+fn set_domain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let value = args.get(2).to_rust_string_lossy(scope);
+    let why = match crate::node_handle::nid_of(scope, args.get(0)) {
+        Some(doc) => {
+            let effective = document_effective_domain(scope, Some(doc), args.get(1));
+            match domain_to_set(effective.as_deref(), &value) {
+                Ok(host) => {
+                    crate::dom::dom(scope).arena.document_states.set_domain(doc, host);
+                    return rv.set_null();
+                }
+                Err(why) => why,
+            }
+        }
+        None => DOMAIN_OPAQUE,
+    };
+    let why = v8::Integer::new_from_unsigned(scope, why).into();
+    let host = v8::String::new(scope, &domain_host(&value).unwrap_or_default()).map_or_else(|| v8::undefined(scope).into(), Into::into);
+    rv.set(v8::Array::new_with_elements(scope, &[why, host]).into());
+}
+// __dom.ipHost(host) -> whether it is an IP address (`ip_host`).
+fn ip_host_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let host = args.get(0).to_rust_string_lossy(scope);
+    rv.set_bool(ip_host(&host));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_domain_is_set_to_the_effective_one_or_a_superdomain_of_it() {
+        assert_eq!(effective_domain("http://a.b.test:8080", None).as_deref(), Some("a.b.test"));
+        assert_eq!(effective_domain("http://a.b.test", Some("b.test")).as_deref(), Some("b.test"));
+        assert_eq!(effective_domain("null", None), None);
+        assert_eq!(domain_to_set(Some("a.b.test"), "B.Test"), Ok("b.test".to_owned()));
+        assert_eq!(domain_to_set(Some("a.b.test"), "a.b.test"), Ok("a.b.test".to_owned()));
+        assert_eq!(domain_to_set(Some("a.b.test"), "c.test"), Err(DOMAIN_NOT_SUFFIX));
+        assert_eq!(domain_to_set(Some("ab.test"), "b.test"), Err(DOMAIN_NOT_SUFFIX));
+        assert_eq!(domain_to_set(Some("a.b.test"), "b.test:80"), Err(DOMAIN_UNPARSED));
+        assert_eq!(domain_to_set(Some("a.b.test"), "b.test/x"), Err(DOMAIN_UNPARSED));
+        assert_eq!(domain_to_set(Some("a.b.test"), ""), Err(DOMAIN_UNPARSED));
+        assert_eq!(domain_to_set(None, "b.test"), Err(DOMAIN_OPAQUE));
+        // (…an IP address only ever itself, however it was written)
+        assert_eq!(domain_to_set(Some("127.0.0.1"), "0x7f.0.0.1"), Ok("127.0.0.1".to_owned()));
+        assert_eq!(domain_to_set(Some("1.0.0.1"), "0.1"), Err(DOMAIN_NOT_SUFFIX));
+        assert!(ip_host("[::1]") && ip_host("10.0.0.1") && !ip_host("a.test"));
+    }
 
     fn at(href: &str) -> RealmLocation {
         let mut location = RealmLocation::default();

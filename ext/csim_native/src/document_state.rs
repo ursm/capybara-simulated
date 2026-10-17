@@ -56,6 +56,7 @@ struct DocumentTexts {
 const TEXTS: usize = 5;
 const TEXT_URL: usize = 0;
 const TEXT_ENCODING: usize = 1;
+const TEXT_DOMAIN: usize = 3;
 const TEXT_ABOUT_BASE: usize = 4;
 
 #[derive(Default)]
@@ -64,6 +65,13 @@ pub(crate) struct DocumentStates(HashMap<NodeId, DocumentState>, HashMap<NodeId,
 impl DocumentStates {
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty() && self.1.is_empty()
+    }
+    // The domain a `document.domain` write set on `doc`, none until one did.
+    pub(crate) fn domain(&self, doc: NodeId) -> Option<&str> {
+        self.1.get(&doc).and_then(|t| t.texts[TEXT_DOMAIN].as_deref())
+    }
+    pub(crate) fn set_domain(&mut self, doc: NodeId, domain: String) {
+        self.1.entry(doc).or_default().texts[TEXT_DOMAIN] = Some(domain);
     }
     // The document freed: its state let go of with it.
     pub(crate) fn forget(&mut self, doc: NodeId) {
