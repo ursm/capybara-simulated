@@ -43,8 +43,6 @@ impl FaceRecord {
     fn of(family: String) -> FaceRecord {
         FaceRecord { family, sources: Vec::new(), weight: (400.0, 400.0), stretch: (100.0, 100.0), slanted: false, ranges: None, size_adjust: 1.0, overrides: [None; 3] }
     }
-    // How far it is from what a style asks for (CSS Fonts 4 §5.2): the nearest stretch first, then the same slant, then
-    // the nearest weight.
     // The weight / style its `local()` names are looked up under: `bold` where the low end of its weight is 600 or more,
     // `italic` where it is slanted, in the colon form `fc_match` expects — '' for neither.
     fn local_style(&self) -> &'static str {
@@ -55,6 +53,8 @@ impl FaceRecord {
             (false, false) => "",
         }
     }
+    // How far it is from what a style asks for (CSS Fonts 4 §5.2): the nearest stretch first, then the same slant, then
+    // the nearest weight.
     fn distance(&self, stretch: f64, weight: f64, slanted: bool) -> Distance {
         Distance([stretch_distance(stretch, self.stretch), f64::from(u8::from(self.slanted != slanted)), weight_distance(weight, self.weight)])
     }
@@ -458,17 +458,17 @@ fn font_face_sources(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn local_style_reads_the_descriptors() {
-        assert_eq!(super::local_style_of("bold", "normal"), "bold");
-        assert_eq!(super::local_style_of("700 400", "normal"), "");
-        assert_eq!(super::local_style_of("650.5", "italic"), "bold:italic");
-        assert_eq!(super::local_style_of("normal", "oblique 0deg"), "");
-        assert_eq!(super::local_style_of("normal", "oblique -10deg"), "italic");
-        assert_eq!(super::local_style_of("auto", "auto"), "");
+        assert_eq!(local_style_of("bold", "normal"), "bold");
+        assert_eq!(local_style_of("700 400", "normal"), "");
+        assert_eq!(local_style_of("650.5", "italic"), "bold:italic");
+        assert_eq!(local_style_of("normal", "oblique 0deg"), "");
+        assert_eq!(local_style_of("normal", "oblique -10deg"), "italic");
+        assert_eq!(local_style_of("auto", "auto"), "");
     }
-
-    use super::*;
 
     #[test]
     fn a_font_face_set_matches_by_style_before_unicode_range() {
