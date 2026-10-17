@@ -1824,10 +1824,12 @@ impl<'a> Walk<'a> {
             return [GRID_STRETCH; 2];
         }
         // (…a REPLACED element's, not a form control's, which stretches as any box does — Chrome's list box fills its row
-        // — but for a `<progress>`, a `<meter>` and a colour well, which the UA style sizes as a replaced one is sized)
+        // — but for a `<progress>`, a `<meter>` and a colour well, which the UA style sizes as a replaced one is sized,
+        // and an image button, which IS an image: Chrome's keeps its 50x30 at the start of a 200px area)
         let node = self.node(id);
         let tag = node.rendering_tag();
-        let sized_control = matches!(tag, "progress" | "meter") || (tag == "input" && node.get_attr("type").is_some_and(|t| t.eq_ignore_ascii_case("color")));
+        let typed = |t: &str| tag == "input" && node.get_attr("type").is_some_and(|v| v.eq_ignore_ascii_case(t));
+        let sized_control = matches!(tag, "progress" | "meter") || typed("color") || typed("image");
         let replaced = replaced_or_control(self.arena, id, node) && (!widget_tag(tag) || sized_control);
         let ratio = preferred_ratio(style).is_some();
         let (pos, ppos) = (style.get_position(), ps.get_position());
@@ -2916,7 +2918,8 @@ impl<'a> Walk<'a> {
         let grid_start = self.grids.len() as i32;
         // (…its `justify-content` and `align-content`: `normal` / `stretch` stretches its auto tracks, any other
         // distributes them in what they leave; its rows at the start where a row template, which no row sizing here
-        // models, sizes them — one that is a single `auto` track is the implicit rows' own, and stretches)
+        // models, sizes them — but one of `auto` tracks alone is sized as the implicit rows are, its tracks rows there
+        // whether or not an item fills them: Chrome's `repeat(2, auto)` in 200px with three items is three rows of 100)
         let content = |kw: Kw| {
             use crate::layout::{GRID_CENTER, GRID_END, GRID_SPACE_AROUND, GRID_SPACE_BETWEEN, GRID_SPACE_EVENLY, GRID_START, GRID_STRETCH};
             match kw {
@@ -2929,9 +2932,13 @@ impl<'a> Walk<'a> {
                 _ => GRID_START,
             }
         };
-        let rows_templated = !GridTemplate::of(&pos.grid_template_rows).is_ok_and(|t| matches!(&t.tracks[..], [GridTrack { auto: true, px: None, frac: None, fr: None, fit: None, floor: None, .. }]) && t.repeat_len == 0.0);
+        let plain_auto = |t: &GridTrack| matches!(t, GridTrack { auto: true, px: None, frac: None, fr: None, fit: None, floor: None, .. });
+        let auto_rows = match &pos.grid_template_rows {
+            style::values::generics::grid::GenericGridTemplateComponent::None => Some(0),
+            rows => GridTemplate::of(rows).ok().filter(|t| t.repeat_len == 0.0 && t.tracks.iter().all(plain_auto)).map(|t| t.tracks.len()),
+        };
         self.inputs[idx as usize].grid_justify = content(align_kw(pos.justify_content.primary()));
-        self.inputs[idx as usize].grid_align = if rows_templated { crate::layout::GRID_START } else { content(align_kw(pos.align_content.primary())) };
+        self.inputs[idx as usize].grid_align = if auto_rows.is_none() { crate::layout::GRID_START } else { content(align_kw(pos.align_content.primary())) };
         self.grids.extend([
             template.tracks.len() as f64,
             col_gap.px,
@@ -2945,6 +2952,7 @@ impl<'a> Walk<'a> {
             col_gap_math,
             row_gap_math,
             row_floor.unwrap_or(f64::NAN),
+            auto_rows.unwrap_or(0) as f64,
         ]);
         for t in &template.tracks {
             let mut math = |p: &[f64]| self.math(Some(p));

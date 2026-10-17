@@ -919,4 +919,23 @@ RSpec.describe 'native layout grid' do
       expect(laid_out_rect(body)[index]).to be_within(0.01).of(chrome), "#{body}: #m rect[#{index}]"
     end
   end
+
+  # A row imposed on an item is its AREA less the item's margins — a `<p>` in a `minmax(40px, auto)` row beside a 52px
+  # item is 20 tall, in a 40px row 8 — and auto rows share a definite height, or a `min-height` where the height is auto
+  # (§12.8: two rows of 100 in 200), the rows of a template of `auto` tracks alone among them whether an item is in them
+  # or not: three rows of 66.67 from `repeat(2, auto)` and three items, one item 113.33 tall in three tracks of 300. An
+  # image button is an image, at the start of its area, not stretched across it (Chrome, each).
+  it 'stretches rows and the items in them as far as their margins leave' do
+    [
+      [3, 20, '<div style="font:16px/20px sans-serif;display:grid;grid-auto-rows:minmax(40px,auto);grid-template-columns:200px 200px;width:400px"><p id="m">p</p><div>x</div></div>'],
+      [3, 8, '<div style="font:16px/20px sans-serif;display:grid;grid-auto-rows:40px;grid-template-columns:200px;width:400px"><p id="m">p</p></div>'],
+      [1, 100, '<div style="font:16px/20px sans-serif;display:grid;grid-template-columns:100px;min-height:200px;width:400px"><div>a</div><div id="m">b</div></div>'],
+      [1, 133.33, '<div style="font:16px/20px sans-serif;display:grid;grid-template-rows:repeat(2,auto);height:200px;width:400px"><div>a</div><div>b</div><div id="m">c</div></div>'],
+      [3, 113.33, '<div style="font:16px/20px sans-serif;display:grid;grid-template-rows:auto auto auto;height:300px;width:400px"><div id="m">a</div></div>'],
+      [2, 0, '<div style="font:16px/20px sans-serif;display:grid;grid-template-columns:200px 200px;width:400px"><input type="image" id="m" alt="x"><div style="height:60px"></div></div>']
+    ].each do |index, chrome, body|
+      expect_layout(body)
+      expect(laid_out_rect(body)[index]).to be_within(0.01).of(chrome), "#{body}: #m rect[#{index}]"
+    end
+  end
 end

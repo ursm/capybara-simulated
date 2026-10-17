@@ -7094,8 +7094,9 @@ const GRID_TRACK_STRIDE: usize = 9;
 // …then each gap's PROGRAM where it is a comparison function (an offset into the pass's math table, NaN = none: its
 // `px + frac` pair is the gap), so a `gap: min(10%, 20px)` is a figure this computes rather than one it has to be
 // handed resolved — and the FLOOR a content row
-// keeps (`minmax(<length>, auto)`: at least that tall, taller round a taller item; NaN = none).
-const GRID_HEADER: usize = 12;
+// keeps (`minmax(<length>, auto)`: at least that tall, taller round a taller item; NaN = none) — and the rows a row
+// template of `auto` tracks alone makes, which share a definite height whether an item is in them or not (0 = none).
+const GRID_HEADER: usize = 13;
 impl GridTrack {
     fn decode(grids: &[f64], o: usize) -> GridTrack {
         GridTrack {
@@ -8388,13 +8389,13 @@ fn measure_grid(
         // it covers plus the gaps between them, which `track_w` already is.)
         let mut item = inputs[c].get().on_basis(track_w, pct_h);
         inputs[c].set(item);
-        // …and an auto-height item under a declared row is that row's height, imposed as its border box on the
-        // edges just resolved and floored at them — a row shorter than the item's own padding and border leaves the
+        // …and an auto-height item under a declared row is that row's height less its margins (its AREA's: Chrome's `<p>`
+        // in a 40px row is 8 tall), imposed as its border box on the edges just resolved and floored at them — a row shorter than the item's own padding and border leaves the
         // box at those (Chrome), and the box IS that figure, a border-box one included: a table's caption resolves
         // its percentage offset against it. Derived from the row, never from the height it wrote, so it too is
         // idempotent.
         if item.row_imposed && !is_auto(decl_row_h) {
-            item = item.with_imposed_height(decl_row_h.max(item.edges_y()));
+            item = item.with_imposed_height((decl_row_h - Input::m(item.mt) - Input::m(item.mb)).max(item.edges_y()));
             inputs[c].set(item);
         }
         // …and an intrinsic-size KEYWORD width is the item's own content measured against that AREA: `fit-content`
@@ -8431,11 +8432,12 @@ fn measure_grid(
         };
         measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
         let mut ih = boxes[c].h;
-        // …and one under a row that is only a FLOOR is at least that tall: an item shorter than it stretches to it, laid
-        // out again at that height as a declared row's would be (Chrome: a one-line item in a `minmax(100px, auto)` row
-        // is 100).
-        if item.row_imposed && is_auto(decl_row_h) && ih < row_floor {
-            item = item.with_imposed_height(row_floor.max(item.edges_y()));
+        // …and one under a row that is only a FLOOR is at least that tall: an item shorter than it stretches to it less
+        // its margins, laid out again at that height as a declared row's would be (Chrome: a one-line item in a
+        // `minmax(100px, auto)` row is 100, a `<p>` in a `minmax(40px, auto)` one beside a taller item 20).
+        let floor_room = row_floor - Input::m(item.mt) - Input::m(item.mb);
+        if item.row_imposed && is_auto(decl_row_h) && ih < floor_room {
+            item = item.with_imposed_height(floor_room.max(item.edges_y()));
             inputs[c].set(item);
             measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             ih = boxes[c].h;
@@ -8469,12 +8471,14 @@ fn measure_grid(
     // …and rows of their own sizes are distributed in the height left as `align-content` says (§10.5). An auto height
     // with a `min-height` is that floor here (§12.8: "use that size to calculate the free space" — Chrome's two rows of
     // a `min-height: 200px` grid are 100 each).
+    // (…the rows a template of `auto` tracks makes are rows here whether an item is in them or not: the header's last figure)
     if !rows.is_empty() {
         let h = n.content_h_or_floor();
         if !h.is_nan() {
-            let used: f64 = rows.iter().map(|(rh, _)| rh).sum::<f64>() + row_gap * (rows.len() - 1) as f64;
+            let tracks = rows.len().max(grids[gs + 12] as usize);
+            let used: f64 = rows.iter().map(|(rh, _)| rh).sum::<f64>() + row_gap * (tracks - 1) as f64;
             if n.grid_align == GRID_STRETCH && is_auto(decl_row_h) {
-                let extra = ((h - used) / rows.len() as f64).max(0.0);
+                let extra = ((h - used) / tracks as f64).max(0.0);
                 if extra > 0.0 {
                     for (k, (rh, items)) in rows.iter_mut().enumerate() {
                         *rh += extra;
@@ -8485,7 +8489,7 @@ fn measure_grid(
                     bottom = bottom.max(h);
                 }
             } else {
-                let (lead, between) = grid_distribute(n.grid_align, h - used, rows.len());
+                let (lead, between) = grid_distribute(n.grid_align, h - used, tracks);
                 for (k, (_, items)) in rows.iter().enumerate() {
                     for &(c, _) in items.iter() {
                         boxes[c].y += lead + between * k as f64;
@@ -10353,11 +10357,12 @@ mod tests {
     // is_auto, base px, limit px) and `places` item placements (start line, end line, span) — the shape the walk's `grid`
     // writes.
     fn grid_buffer(literal: usize, repeat: (f64, usize, u8), specs: &[[f64; 9]], places: &[[f64; 3]]) -> Vec<f64> {
-        // …GRID_HEADER wide, and the tail is the two gaps' PROGRAMS (none) and the row floor (none). Built by hand here,
+        // …GRID_HEADER wide, and the tail is the two gaps' PROGRAMS (none), the row floor (none) and the template's rows
+        // (none). Built by hand here,
         // so the header's length is one of the three places a stride change has to be made — this test file is the
         // third, and it is the one that catches it.
         let mut g = vec![literal as f64, 0.0, 0.0, 0.0, 0.0, f64::NAN, repeat.0, repeat.1 as f64, repeat.2 as f64,
-                         f64::NAN, f64::NAN, f64::NAN];
+                         f64::NAN, f64::NAN, f64::NAN, 0.0];
         for spec in specs {
             g.extend_from_slice(spec);
         }
