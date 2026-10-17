@@ -142,6 +142,10 @@ impl RealmArena {
         let node = self.get(id)?;
         node.parent.or(node.host).filter(|&p| self.get(p).is_some())
     }
+    // Whether `ancestor` is `id` or a shadow-including ancestor of it.
+    pub(crate) fn shadow_including_inclusive_ancestor(&self, ancestor: NodeId, id: NodeId) -> bool {
+        std::iter::successors(Some(id), |&c| self.shadow_including_parent(c)).any(|c| c == ancestor)
+    }
     // Is `id` in a document (shadow-including)?
     pub(crate) fn is_connected(&self, id: NodeId) -> bool {
         let mut cur = Some(id);

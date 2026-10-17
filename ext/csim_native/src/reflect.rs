@@ -14,6 +14,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "progressValue", progress_value, context_id);
     register(scope, ns, "autofill", autofill_op, context_id);
     register(scope, ns, "elementReflection", element_reflection_op, context_id);
+    register(scope, ns, "draggableAncestor", draggable_ancestor_op, context_id);
+    register(scope, ns, "shadowIncludingInclusiveAncestor", shadow_including_inclusive_ancestor_op, context_id);
 }
 
 impl crate::reflect_keywords::KeywordTable {
@@ -127,6 +129,23 @@ fn draggable(arena: &crate::dom::RealmArena, id: crate::dom::NodeId) -> bool {
         Some("false") => false,
         _ => &*n.local_name == "img" || (&*n.local_name == "a" && n.plain_attr("href").is_some()),
     }
+}
+// …and the element a drag from `id` drags: its nearest inclusive ancestor element that is `draggable` (an `<a href>`
+// drags itself).
+fn draggable_ancestor(arena: &crate::dom::RealmArena, id: crate::dom::NodeId) -> Option<crate::dom::NodeId> {
+    std::iter::successors(Some(id), |&c| arena.parent_of(c))
+        .take_while(|&c| arena.get(c).is_some_and(|n| n.kind == crate::dom::NodeKind::Element))
+        .find(|&c| draggable(arena, c))
+}
+// __dom.draggableAncestor(el) -> `draggable_ancestor`, as `node_value` answers it.
+fn draggable_ancestor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let found = crate::node_handle::nid_of(scope, args.get(0)).and_then(|id| draggable_ancestor(&crate::dom::dom(scope).arena, id));
+    rv.set(crate::dom::node_value(scope, found));
+}
+// __dom.shadowIncludingInclusiveAncestor(ancestor, node) -> `shadow_including_inclusive_ancestor`.
+fn shadow_including_inclusive_ancestor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (a, n) = (crate::node_handle::nid_of(scope, args.get(0)), crate::node_handle::nid_of(scope, args.get(1)));
+    rv.set_bool(matches!((a, n), (Some(a), Some(n)) if crate::dom::dom(scope).arena.shadow_including_inclusive_ancestor(a, n)));
 }
 // __dom.elementReflection(el, which) -> `tabIndex` (its attribute's long, else its default), `translate` (inherited:
 // yes or ''; no), `writingSuggestions` ('true' / 'false', inherited), `hidden` (0 none, 1 hidden, 2 until-found),

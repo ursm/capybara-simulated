@@ -409,12 +409,16 @@ impl RealmArena {
         }
         None
     }
-    // `id` (`inclusive`) or its nearest ancestor that is an HTML element named `name` — none out of the elements.
+    // `id` (`inclusive`) or its nearest ancestor that is an HTML element named `name` — none out of the elements…
     pub(crate) fn html_ancestor(&self, id: NodeId, name: &str, inclusive: bool) -> Option<NodeId> {
+        self.element_ancestor(id, &web_atoms::ns!(html), name, inclusive)
+    }
+    // …or one of namespace `ns`.
+    pub(crate) fn element_ancestor(&self, id: NodeId, ns: &web_atoms::Namespace, name: &str, inclusive: bool) -> Option<NodeId> {
         let mut cur = if inclusive { Some(id) } else { self.parent_of(id) };
         while let Some(c) = cur {
             let n = self.get(c).filter(|n| n.kind == NodeKind::Element)?;
-            if n.is_html_named(name) {
+            if n.ns == *ns && &*n.local_name == name {
                 return Some(c);
             }
             cur = n.parent;
@@ -1093,13 +1097,14 @@ fn option_select(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set(crate::dom::node_value(scope, found));
 }
 
-// __dom.htmlAncestor(nid, name, inclusive) -> the node (`inclusive`) or its nearest ancestor that is an HTML element
-// named `name` (`html_ancestor`), as `node_value` answers it — null for none.
+// __dom.htmlAncestor(nid, name, inclusive, svg) -> the node (`inclusive`) or its nearest ancestor that is an HTML element
+// named `name` — an SVG one, with `svg` (`element_ancestor`) — as `node_value` answers it: null for none.
 fn html_ancestor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let name = args.get(1).to_rust_string_lossy(scope);
     let inclusive = args.get(2).is_true();
-    let found = crate::dom::nid_arg(scope, &args, 0).and_then(|id| crate::dom::realm(scope, cid).html_ancestor(id, &name, inclusive));
+    let ns = if args.get(3).is_true() { web_atoms::ns!(svg) } else { web_atoms::ns!(html) };
+    let found = crate::dom::nid_arg(scope, &args, 0).and_then(|id| crate::dom::realm(scope, cid).element_ancestor(id, &ns, &name, inclusive));
     rv.set(crate::dom::node_value(scope, found));
 }
 
