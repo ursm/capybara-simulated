@@ -183,6 +183,9 @@ pub(crate) struct StyleEngine {
     html_document: bool,
     screen: Screen,
     doc: Option<NodeId>,
+    // The properties the animations on each element set as of the last look (animation_ops.rs `animReconcile`) — an
+    // element whose animations set none has no entry.
+    pub(crate) animated: std::collections::HashMap<NodeId, Vec<String>>,
     // The page's sheets as last set (the realm's `SheetStore` holds them; a set that keeps one keeps its parse).
     author: Vec<AuthorSheet>,
     // The arena's `mutations` when it was last styled; None while it has to be styled again whatever they are.
@@ -398,6 +401,7 @@ impl StyleEngine {
             html_document,
             screen,
             doc: None,
+            animated: std::collections::HashMap::new(),
             author: Vec::new(),
             styled: None,
             snapshots: SnapshotMap::new(),

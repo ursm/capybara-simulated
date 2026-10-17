@@ -30,7 +30,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "animAdopt", anim_adopt, context_id);
     register(scope, ns, "animEffectTiming", anim_effect_timing, context_id);
     register(scope, ns, "animKeyframes", anim_keyframes, context_id);
-    register(scope, ns, "animProperties", anim_properties, context_id);
+    register(scope, ns, "animReconcile", anim_reconcile, context_id);
     register(scope, ns, "animCompositeOrder", anim_composite_order, context_id);
     register(scope, ns, "animEventOrder", anim_event_order, context_id);
 }
@@ -712,12 +712,29 @@ fn anim_keyframes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 
 // __dom.animProperties(nid) -> [property, …]: every property the animations on the element itself set, as their
 // keyframes declare them (a shorthand expanded) — whether or not one is in effect.
-fn anim_properties(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    with_engine(scope, &args, |scope, engine, _arena| {
-        let Some(element) = nid_arg(scope, &args, 0) else { return };
-        let names = engine.animated_properties(element);
-        let items: Vec<v8::Local<v8::Value>> = names.iter().map(|n| string_value(scope, n)).collect();
-        rv.set(v8::Array::new_with_elements(scope, &items).into());
+// __dom.animReconcile(nids): what the animations on each element `nids` (a Float64Array) names set, looked at again —
+// whatever their state — after an animation made, sought, paused, let go, its effect or keyframes changed. A custom
+// property, `display` or `visibility` one newly animates reaches what is keyed on the whole rule set (a `var()` a
+// descendant reads; the rendered text), which it moves (`GEN_CASCADE`). (…an element freed since looked at no more)
+fn anim_reconcile(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let nids = crate::dom::f64_arg(args.get(0)).to_vec();
+    with_engine(scope, &args, |_scope, engine, arena| {
+        let rekeys = |p: &String| p.starts_with("--") || p == "display" || p == "visibility";
+        let mut moved = false;
+        for id in nids.iter().filter_map(|&n| crate::dom::NodeId::from_i64(n as i64).filter(|_| n >= 0.0)) {
+            let now = engine.animated_properties(id);
+            let was = engine.animated.get(&id);
+            moved |= now.iter().any(|p| rekeys(p) && !was.is_some_and(|w| w.contains(p)));
+            if now.is_empty() {
+                engine.animated.remove(&id);
+            } else {
+                engine.animated.insert(id, now);
+            }
+        }
+        engine.animated.retain(|&id, _| arena.get(id).is_some());
+        if moved {
+            arena.generations.bump(crate::dom::GEN_CASCADE);
+        }
     });
 }
 
