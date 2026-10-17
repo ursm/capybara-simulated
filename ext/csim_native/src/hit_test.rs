@@ -671,6 +671,7 @@ pub(crate) fn box_parent(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "isInert", is_inert_op, context_id);
     crate::dom::register(scope, ns, "hitTest", hit_test_op, context_id);
+    crate::dom::register(scope, ns, "clickObstructor", click_obstructor_op, context_id);
     crate::dom::register(scope, ns, "observedVisible", observed_visible_op, context_id);
     crate::dom::register(scope, ns, "clippedAway", clipped_away_op, context_id);
 }
@@ -713,6 +714,43 @@ fn hit_test_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let cid = crate::dom::realm_id(scope, &args);
     let Some(hits) = painting(scope, &args, |p| p.hit(x, y, all)) else { return };
     rv.set(crate::dom::nodes_value(scope, cid, &hits));
+}
+
+// __dom.clickObstructor(nid, x, y, rect, viewport) -> what receives a real pointer click aimed at the element `nid` at the
+// viewport point instead of it, or null for none (WebDriver's element click intercepted): where the element is inert,
+// what the point hits — or its parent, the hit test passing over it — as Chrome refuses a click on one (a modal dialog's
+// backdrop, an ancestor); else what the point hits where that is unrelated to it in the FLAT tree (neither an ancestor
+// nor a descendant: a slotted light node is painted inside the shadow wrapper its node-tree parents skip) and an
+// overlay — its box covers the element's `rect` (`[x, y, w, h]`) and at least 80% of the `viewport` (`[w, h]`).
+fn click_obstructor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let [x, y] = [1, 2].map(|k| args.get(k).number_value(scope).unwrap_or(f64::NAN));
+    let rect = crate::dom::f64_arg(args.get(3)).to_vec();
+    let viewport = crate::dom::f64_arg(args.get(4)).to_vec();
+    let (Some(&[tx, ty, tw, th]), Some(&[vw, vh])) = (rect.first_chunk::<4>(), viewport.first_chunk::<2>()) else { return };
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(hit) = painting(scope, &args, |p| p.hit(x, y, false)) else { return };
+    let hit = hit.first().copied();
+    let arena = crate::dom::realm(scope, cid);
+    let other = if arena.is_inert(target) {
+        hit.or_else(|| arena.parent_of(target).or_else(|| arena.get(target)?.host))
+    } else {
+        hit.filter(|&other| {
+            if other == target
+                || crate::geometry::flat_inclusive_ancestor(arena, target, other)
+                || crate::geometry::flat_inclusive_ancestor(arena, other, target)
+            {
+                return false;
+            }
+            let [ox, oy, ow, oh] = crate::geometry::rendered_box(arena, other).unwrap_or([0.0; 4]);
+            let covers = ox <= tx && oy <= ty && ox + ow >= tx + tw && oy + oh >= ty + th;
+            let ix = ((ox + ow).min(vw) - ox.max(0.0)).max(0.0);
+            let iy = ((oy + oh).min(vh) - oy.max(0.0)).max(0.0);
+            covers && ix * iy >= 0.8 * vw * vh
+        })
+    };
+    rv.set(crate::dom::node_value(scope, other));
 }
 
 // __dom.observedVisible(nids) -> Float64Array: for each element `nids` names, 1 where an intersection observer
