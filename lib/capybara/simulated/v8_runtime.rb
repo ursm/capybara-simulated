@@ -584,6 +584,9 @@ module Capybara
         # browsing contexts). Explicit — under warm-compile the isolate
         # survives, so nothing else would ever release them.
         dispose_frame_realms
+        # …and the blob URLs the last page made revoked in the host registry too, as the engine's store forgets them as the
+        # realm begins anew (File API's unloading document cleanup steps).
+        @browser.revoke_realm_blobs(0) rescue nil
         # Warm path: per rusty's reset contract the snapshot is REPLAYED —
         # including its precompiled code cache — so re-visited app modules
         # compile at in-memory-hit cost (~3.3× cheaper than a cold

@@ -22,15 +22,18 @@ RSpec.describe 'the blob URL store' do
   # lets go of their blobs, which held the old document's context alive: twenty visits that each made one kept
   # twenty-one contexts.
   it "lets a visit revoke the last page's URLs, and its context go" do
-    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><p>p']] })
-    urls = Array.new(5) do
+    # (…a frame on the page, so each URL's bytes go to the host registry too: another realm may resolve them)
+    page = '<!DOCTYPE html><meta charset=utf-8><iframe srcdoc="<p>f"></iframe>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    urls = Array.new(5) {
       s.visit '/'
       s.evaluate_script("URL.createObjectURL(new Blob(['x']))")
-    end
+    }
     s.visit '/'
-    expect(urls.map {|u| s.evaluate_script("__csimReadBlobBytes(#{u.to_json})") }).to all(be_nil)
+    expect(urls.map {|u| s.evaluate_script("[__csimReadBlobBytes(#{u.to_json}), __csimResolveBlobBytes(#{u.to_json})]") })
+      .to all(eq([nil, nil]))
     ctx = s.driver.browser.instance_variable_get(:@runtime).instance_variable_get(:@ctx)
     ctx.low_memory_notification
-    expect(ctx.heap_statistics[:number_of_native_contexts]).to eq(1)
+    expect(ctx.heap_statistics[:number_of_native_contexts]).to eq(2)   # (…the page's and its frame's)
   end
 end

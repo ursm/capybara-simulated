@@ -8304,18 +8304,17 @@ module Capybara
         # away: a WORKER (separate thread, tagged via Thread.current) when it
         # terminates ("Terminating worker"), or a FRAME REALM (owner_realm passed
         # from JS createObjectURL) when the iframe is removed ("Removing an
-        # iframe"). Namespaced ('w:' / 'r:') so a worker handle and a realm id
-        # never collide. Main-realm blobs (no owner) live until clear_volatile.
+        # iframe"), or the main realm (no owner passed: realm 0) when a new page
+        # begins in it (File API's unloading document cleanup steps — the runtime's
+        # `rebuild_ctx`). Namespaced ('w:' / 'r:') so a worker handle and a realm id
+        # never collide.
         worker = Thread.current[:csim_worker_handle]
-        key = if worker then "w:#{worker}"
-              elsif owner_realm && owner_realm.to_i != 0 then "r:#{owner_realm.to_i}"
-              end
+        key = worker ? "w:#{worker}" : "r:#{owner_realm.to_i}"
         @blob_registry_lock.synchronize do
           @blob_registry[url.to_s] = bytes.to_s.b
-          # Keep ownership in sync both ways: a (re-)registration with no owner
-          # (main thread / main realm) must DROP any prior owner, else revoking
-          # that context would wrongly revoke a now-page-owned URL.
-          if key then @blob_owners[url.to_s] = key else @blob_owners.delete(url.to_s) end
+          # (…a re-registration taking the URL over from any prior owner, else revoking that context would wrongly
+          # revoke a URL another one owns now)
+          @blob_owners[url.to_s] = key
         end
         # Record the blob's STORAGE PARTITION (this window's top-level site) in the
         # Driver-level store so another window can resolve it only from the same
