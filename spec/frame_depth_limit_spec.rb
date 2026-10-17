@@ -12,8 +12,7 @@ RSpec.describe 'a frame past the nesting limit' do
     app = ->(env) {
       depth = Rack::Utils.parse_query(env['QUERY_STRING'])['d'].to_i
       body = if depth < 20
-        "<!DOCTYPE html><meta charset=utf-8><iframe src='/?d=#{depth + 1}'></iframe>" \
-          "<script>window.__depth = #{depth}</script>"
+        "<!DOCTYPE html><meta charset=utf-8><iframe src='/?d=#{depth + 1}'></iframe>"
       else
         '<!DOCTYPE html><meta charset=utf-8><p>leaf</p>'
       end
@@ -23,20 +22,23 @@ RSpec.describe 'a frame past the nesting limit' do
     s.visit '/?d=0'
     got = s.evaluate_script(<<~JS)
       (() => {
+        // (…each frame's document its own: the next one down — whose frame names the depth after it — or, past the
+        // limit, an empty one, which is still no other frame's)
         const seen = [];
-        let w = window;
-        for (let i = 0; i < 25; i++) {
-          const frame = w.document && w.document.querySelector('iframe');
+        let doc = document;
+        for (let depth = 0; depth < 25; depth++) {
+          const frame = doc.querySelector('iframe');
           if (!frame) break;
-          const doc = frame.contentDocument;
-          seen.push(doc !== null);
-          if (!doc) break;
-          w = frame.contentWindow;
+          const inner = frame.contentDocument;
+          if (inner === null) { seen.push('null'); break; }
+          const next = inner.querySelector('iframe');
+          const own = inner !== doc && frame.contentWindow.document === inner;
+          seen.push(!own ? 'shared' : next ? (next.getAttribute('src') === `/?d=${depth + 2}` ? 'built' : 'other') : 'empty');
+          doc = inner;
         }
         return seen;
       })()
     JS
-    expect(got.length).to be > 16
-    expect(got).to all(be(true))
+    expect(got).to eq(['built'] * 16 + ['empty'])
   end
 end
