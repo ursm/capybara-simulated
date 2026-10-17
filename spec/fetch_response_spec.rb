@@ -86,4 +86,26 @@ RSpec.describe 'Fetch Response semantics' do
     JS
     expect(got).to eq([true, true])
   end
+
+  # …but what refuses the method is the calling realm's: Web IDL makes its exception, and the promise its refusal rejects,
+  # in the current realm — the success promise the frame's (Chrome and Firefox).
+  it 'refuses another realm’s used body in the calling realm' do
+    session = simulated_session(app)
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const f = document.body.appendChild(document.createElement('iframe'));
+        const W = f.contentWindow;
+        const used = new W.Response('x');
+        used.body.getReader();
+        let cloneError;
+        try { Response.prototype.clone.call(used); } catch (e) { cloneError = e; }
+        const rejected = Response.prototype.text.call(used);
+        rejected.catch(() => {});
+        const read = Response.prototype.text.call(new W.Response('y'));
+        return [cloneError instanceof TypeError, rejected instanceof Promise, read instanceof W.Promise];
+      })()
+    JS
+    expect(got).to eq([true, true, true])
+  end
 end

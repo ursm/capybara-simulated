@@ -232,7 +232,8 @@ fn set_field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 
 // __dom.wsSend(state, bytes, sent) -> what `send` does: an InvalidStateError while connecting; once closing or closed
 // nothing is sent, and the `bytes` it was given count all the same, as they never leave (WebSockets §3 "must increase
-// the bufferedAmount") — 0; on an open connection 1 for the bindings to send the frame, then called again with `sent`
+// the bufferedAmount") — 0, or 3 where it was given none (-1), for the bindings to measure them and ask again; on an
+// open connection 1 for the bindings to send the frame, then called again with `sent`
 // its size, which counts until the event loop next turns (the transport writes at once: the queue is notional) — 2
 // where that is the first since it last turned, whose microtask `wsDrained` is.
 fn send_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -245,6 +246,10 @@ fn send_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
         return throw(scope, "Failed to execute 'send' on 'WebSocket': Still in CONNECTING state.", "InvalidStateError");
     }
     if s.ready_state != OPEN {
+        // (…its size asked for first, where the bindings had not measured it: -1)
+        if bytes < 0.0 {
+            return rv.set_uint32(3);
+        }
         s.unsent += bytes;
         return rv.set_uint32(0);
     }
