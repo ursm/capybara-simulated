@@ -97,10 +97,10 @@ const POLICIES: [&str; 8] = [
 ];
 
 impl crate::dom::RealmArena {
-    // The `target` of the first `<base>` with one in `id`'s tree, in tree order — what a hyperlink or a form with no
-    // target of its own opens in (HTML "get an element's target").
-    pub(crate) fn base_target(&self, id: crate::dom::NodeId) -> Option<Vec<u16>> {
-        let mut stack = vec![self.root_of(id)];
+    // The `target` of the first `<base>` with one in document `doc`'s tree, in tree order (a shadow tree's none) — what a
+    // hyperlink or a form of that node document with no target of its own opens in (HTML "get an element's target").
+    pub(crate) fn base_target(&self, doc: crate::dom::NodeId) -> Option<Vec<u16>> {
+        let mut stack = vec![doc];
         while let Some(c) = stack.pop() {
             let n = self.get(c)?;
             if n.is_html_named("base") {
@@ -112,14 +112,19 @@ impl crate::dom::RealmArena {
         }
         None
     }
-    // HTML "get an element's target" of a hyperlink: its `target`, else its tree's base target, else ''.
-    pub(crate) fn element_target(&self, id: crate::dom::NodeId) -> Vec<u16> {
-        self.get(id).and_then(|n| n.plain_attr_units("target")).or_else(|| self.base_target(id)).unwrap_or_default()
-    }
 }
-// __dom.elementTarget(nid) -> `element_target`.
+// …of `id`'s node document — a detached element's and a shadow tree's too.
+pub(crate) fn node_base_target(scope: &mut v8::PinScope<'_, '_>, id: crate::dom::NodeId) -> Option<Vec<u16>> {
+    let doc = crate::editing::document_of(scope, id)?;
+    let doc = crate::node_handle::nid_of(scope, doc.into())?;
+    crate::dom::dom(scope).arena.base_target(doc)
+}
+// __dom.elementTarget(nid) -> HTML "get an element's target" of a hyperlink: its `target`, else its node document's base
+// target (`node_base_target`), else ''.
 fn element_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let target = crate::dom::nid_arg(scope, &args, 0).map_or_else(Vec::new, |id| crate::dom::dom(scope).arena.element_target(id));
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set(crate::dom::utf16_value(scope, &[])) };
+    let own = crate::dom::dom(scope).arena.get(id).and_then(|n| n.plain_attr_units("target"));
+    let target = own.or_else(|| node_base_target(scope, id)).unwrap_or_default();
     rv.set(crate::dom::utf16_value(scope, &target));
 }
 

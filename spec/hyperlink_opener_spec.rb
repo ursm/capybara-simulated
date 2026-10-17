@@ -82,6 +82,23 @@ RSpec.describe 'a hyperlink opening a window' do
     expect([session.windows.size, session.current_path]).to eq([2, '/popup'])
   end
 
+  # (…the base target of the link's node document: a link in a shadow tree's, a link in no tree's — not its tree's root's)
+  it "opens a shadow tree's link and a detached link in the node document's `<base target>`" do
+    %w[shadow detached].each do |kind|
+      session = simulated_session(app)
+      session.visit '/based'
+      window = session.window_opened_by do
+        session.execute_script(<<~JS)
+          const a = document.createElement('a');
+          a.href = '/popup';
+          if (#{kind == 'shadow'}) document.body.appendChild(document.createElement('div')).attachShadow({mode: 'open'}).append(a);
+          a.click();
+        JS
+      end
+      expect(session.within_window(window) { session.current_path }).to eq('/popup'), kind
+    end
+  end
+
   it "loads with a frame's link's referrer the frame's document's — a srcdoc one's its container's" do
     session = simulated_session(app)
     session.visit '/framed'

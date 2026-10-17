@@ -142,12 +142,18 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // how a form submits (HTML §4.10.21.3) — the submitter's `formaction`, `formmethod`, `formenctype` and `formtarget`
 // where it has them, else the form's own; the action as written (null for none: the bindings resolve it against the
 // document's base URL); the method and the enctype their states (an invalid or missing one GET, urlencoded); the target
-// the form's `target`, else the first `<base target>` of its tree's; its submission character encoding — the first of
+// the form's `target`, else the first `<base target>` of its node document's; its submission character encoding — the first of
 // its `accept-charset` labels that names an encoding, else the document's, UTF-8 for a UTF-16 one or `replacement`.
 fn form_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(form) = nid_arg(scope, &args, 0) else { return };
     let submitter = nid_arg(scope, &args, 1);
     let document_encoding = args.get(2).to_rust_string_lossy(scope);
+    // (…the submitter's `formtarget`, else the form's `target`, else its node document's base target)
+    let own_target = {
+        let arena = &crate::dom::dom(scope).arena;
+        submitter.and_then(|id| arena.get(id)?.plain_attr_units("formtarget")).or_else(|| arena.get(form)?.plain_attr_units("target"))
+    };
+    let target = own_target.or_else(|| crate::url_ops::node_base_target(scope, form));
     let arena = &crate::dom::dom(scope).arena;
     let Some(f) = arena.get(form) else { return };
     let s = submitter.and_then(|id| arena.get(id));
@@ -157,7 +163,6 @@ fn form_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let state = |table: usize, value: Option<Vec<u16>>| TABLES[table].state(value.map(text).as_deref()).unwrap_or_default();
     let method = state(FORM_METHOD, own("formmethod", "method"));
     let enctype = state(FORM_ENCTYPE, own("formenctype", "enctype"));
-    let target = s.and_then(|s| s.plain_attr_units("formtarget")).or_else(|| f.plain_attr_units("target")).or_else(|| arena.base_target(form));
     let rel = f.plain_attr_units("rel").unwrap_or_default();
     let ascii_ws = |c: char| matches!(c, '\t' | '\n' | '\x0C' | '\r' | ' ' | ',');
     let labelled = f.plain_attr("accept-charset").and_then(|ac| ac.split(ascii_ws).filter(|l| !l.is_empty()).find_map(|l| encoding_rs::Encoding::for_label(l.as_bytes())));
