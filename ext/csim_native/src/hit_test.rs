@@ -48,8 +48,9 @@ pub(crate) struct Painting<'a> {
     chains: HashMap<NodeId, Chain>,
     // …and each box's painted rect, as an occlusion test found it (`painted_rect`).
     painted: HashMap<NodeId, Option<[f64; 4]>>,
-    // What is skipped (`Skipped`): laid out, but hit not at all, and hiding nothing.
-    skipped: std::cell::RefCell<crate::rendered::Skipped>,
+    // …and whether each box is SKIPPED (rendered.rs `Skipped`), by its place in `preorder`: laid out, but hit not at all,
+    // and hiding nothing — found on the walk that orders them, its parent's answer carried down.
+    skipped: Vec<bool>,
 }
 
 impl<'a> Painting<'a> {
@@ -59,10 +60,10 @@ impl<'a> Painting<'a> {
             engine,
             stacking_animated: STACKING_ANIMATED.iter().map(|p| p.to_string()).collect(),
             order: HashMap::new(), preorder: Vec::new(), ends: Vec::new(), chains: HashMap::new(), painted: HashMap::new(),
-            skipped: Default::default()
+            skipped: Vec::new()
         };
         if let Some(root) = arena.layout_root {
-            p.visit(root);
+            p.visit(root, false);
             p.order.insert(root, -1.0);
         }
         p
@@ -76,22 +77,36 @@ impl<'a> Painting<'a> {
     fn has_box(&self, id: NodeId) -> bool {
         self.arena.get(id).is_some_and(|n| laid(self.arena, n).is_some() || laid_frags(self.arena, n).is_some())
     }
-    fn visit(&mut self, id: NodeId) {
+    fn visit(&mut self, id: NodeId, skipped: bool) {
         let at = self.preorder.len();
         self.order.insert(id, at as f64);
         self.preorder.push(id);
         self.ends.push(at + 1);
-        for c in self.box_children(id) {
-            self.visit(c);
+        self.skipped.push(skipped);
+        let style = box_style(self.arena, id);
+        // (…a generated box skips none of its own: its text is no box)
+        let element = self.arena.get(id).is_some_and(|n| n.generated_of.is_none());
+        let skips = match () {
+            _ if skipped => crate::rendered::Skips::All,
+            _ if element => crate::rendered::contents_skipped_in(self.arena, id, style.as_deref()),
+            _ => crate::rendered::Skips::None,
+        };
+        for c in self.box_children_in(id, style.as_deref()) {
+            let skipped = match skips {
+                crate::rendered::Skips::None => false,
+                crate::rendered::Skips::All => true,
+                crate::rendered::Skips::Details => crate::rendered::details_skips(self.arena, c),
+            };
+            self.visit(c, skipped);
         }
         self.ends[at] = self.preorder.len();
     }
     // The boxes an element's box holds, in the order they paint: its `::before`, its flat-tree children — a box-less one
     // replaced by its own — and its `::after`; a flex or grid container's in ORDER-MODIFIED document order (Flexbox §4.3,
     // Grid §9).
-    fn box_children(&self, id: NodeId) -> Vec<NodeId> {
+    fn box_children_in(&self, id: NodeId, style: Option<&ComputedValues>) -> Vec<NodeId> {
         let mut out = crate::geometry::box_children(self.arena, id);
-        let ordered = box_style(self.arena, id).is_some_and(|s| {
+        let ordered = style.is_some_and(|s| {
             let d = s.get_box().clone_display();
             matches!(d.inside(), DisplayInside::Flex | DisplayInside::Grid)
         });
@@ -326,7 +341,7 @@ impl<'a> Painting<'a> {
             if let Some(at) = at {
                 for k in at..self.ends[at] {
                     let id = self.preorder[k];
-                    if !self.hits(id, x, y) {
+                    if self.skipped[k] || !self.hits(id, x, y) {
                         continue;
                     }
                     let layer = (id, self.paints_replaced(id));
@@ -426,7 +441,7 @@ impl<'a> Painting<'a> {
                 continue;
             }
             let Some(s) = self.style(id) else { continue };
-            if s.get_inherited_box().visibility != style::computed_values::visibility::T::Visible || self.transparent(id) || self.skipped(id) {
+            if s.get_inherited_box().visibility != style::computed_values::visibility::T::Visible || self.transparent(id) || self.skipped[k] {
                 continue;
             }
             let key = self.key(id, false);
@@ -476,15 +491,12 @@ impl<'a> Painting<'a> {
     fn paints_replaced(&self, id: NodeId) -> bool {
         self.arena.get(id).is_some_and(|n| matches!(n.rendering_tag(), "img" | "canvas" | "video" | "iframe" | "embed" | "object" | "select"))
     }
-    fn skipped(&self, id: NodeId) -> bool {
-        self.skipped.borrow_mut().node(self.arena, id)
-    }
     fn hits(&self, id: NodeId, x: f64, y: f64) -> bool {
         let Some(s) = self.style(id) else { return false };
         if s.get_inherited_ui().pointer_events == style::computed_values::pointer_events::T::None {
             return false;
         }
-        if s.get_inherited_box().visibility != style::computed_values::visibility::T::Visible || self.skipped(id) {
+        if s.get_inherited_box().visibility != style::computed_values::visibility::T::Visible {
             return false;
         }
         // (…and not inert: as if absent to a hit, HTML §6.6.2 — asked of a box around the point alone)

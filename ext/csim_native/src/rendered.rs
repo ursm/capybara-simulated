@@ -76,7 +76,7 @@ fn ua_not_rendered(n: &NodeData) -> bool {
 // among them), and those of a closed `<details>` but its summary (HTML's `::details-content`, which its UA style
 // skips). Chrome paints none of either and measures both. Each node's answer kept for as long as one pass asks.
 #[derive(Default)]
-pub(crate) struct Skipped(HashMap<NodeId, bool>);
+pub(crate) struct Skipped(HashMap<NodeId, bool>, HashMap<NodeId, bool>);
 
 impl Skipped {
     // Whether `id` — an element, a generated box, a text — is in skipped contents.
@@ -90,19 +90,43 @@ impl Skipped {
     }
     // …and whether what `el` holds of its own — its text, its runs — is: where it skips its contents, or is skipped.
     pub(crate) fn contents_of(&mut self, arena: &RealmArena, el: NodeId) -> bool {
-        skips(arena, el, None) || self.node(arena, el)
+        if let Some(&skipped) = self.1.get(&el) {
+            return skipped;
+        }
+        let skipped = skips(arena, el, None) || self.node(arena, el);
+        self.1.insert(el, skipped);
+        skipped
     }
 }
 // Whether `el` skips `child` among its contents — any of them for none: one whose `content-visibility` is `hidden`, or a
 // closed `<details>`, every child of which but its summary (and its generated boxes, outside `::details-content`).
-fn skips(arena: &RealmArena, el: NodeId, child: Option<NodeId>) -> bool {
-    let Some(n) = arena.get(el).filter(|n| n.kind == NodeKind::Element) else { return false };
-    if primary_style(arena, el).is_some_and(|s| crate::style::skips_contents(&s)) {
-        return true;
+pub(crate) fn skips(arena: &RealmArena, el: NodeId, child: Option<NodeId>) -> bool {
+    match contents_skipped(arena, el) {
+        Skips::None => false,
+        Skips::All => true,
+        Skips::Details => child.is_none_or(|c| details_skips(arena, c)),
     }
-    n.is_html_named("details")
-        && n.plain_attr("open").is_none()
-        && child.is_none_or(|c| arena.get(c).is_some_and(|c| c.generated_of.is_none()) && !arena.is_details_summary(c))
+}
+// …what of its contents `el` skips: none, all, or — a closed `<details>` — all but its summary (`details_skips`), asked
+// once of an element whose children are asked one by one.
+pub(crate) enum Skips {
+    None,
+    All,
+    Details,
+}
+pub(crate) fn contents_skipped(arena: &RealmArena, el: NodeId) -> Skips {
+    contents_skipped_in(arena, el, primary_style(arena, el).as_deref())
+}
+// …its style already read: `style`.
+pub(crate) fn contents_skipped_in(arena: &RealmArena, el: NodeId, style: Option<&ComputedValues>) -> Skips {
+    let Some(n) = arena.get(el).filter(|n| n.kind == NodeKind::Element) else { return Skips::None };
+    if n.is_html_named("details") && n.plain_attr("open").is_none() {
+        return Skips::Details;
+    }
+    if style.is_some_and(crate::style::skips_contents) { Skips::All } else { Skips::None }
+}
+pub(crate) fn details_skips(arena: &RealmArena, child: NodeId) -> bool {
+    arena.get(child).is_some_and(|c| c.generated_of.is_none()) && !arena.is_details_summary(child)
 }
 
 // Is `id` RENDERED — an element of a connected document with a box: no `display: none` up its flat tree (the engine's
@@ -229,7 +253,8 @@ pub(crate) fn hides_by_visibility(arena: &RealmArena, id: NodeId, inherited: boo
 fn text_transform(arena: &RealmArena, id: Option<NodeId>) -> TextTransform {
     id.and_then(|id| primary_style(arena, id)).map_or(TextTransform::none(), |s| s.get_inherited_text().text_transform)
 }
-fn apply_transform(text: Vec<u16>, transform: TextTransform) -> Vec<u16> {
+// (…`at_word`: whether `text` starts a word — none goes on from the text collected before it)
+fn apply_transform(text: Vec<u16>, transform: TextTransform, at_word: bool) -> Vec<u16> {
     let case = transform & TextTransform::CASE_TRANSFORMS;
     if case.is_empty() || text.is_empty() {
         return text;
@@ -240,20 +265,64 @@ fn apply_transform(text: Vec<u16>, transform: TextTransform) -> Vec<u16> {
     } else if case == TextTransform::LOWERCASE {
         s.to_lowercase()
     } else {
-        // (…the first character of each word: after the start and after white space)
+        // (…the first letter of each word, as the layout takes words: `continues_word`)
         let mut out = String::with_capacity(s.len());
-        let mut at_word = true;
+        let mut at_word = at_word;
         for c in s.chars() {
-            if at_word && !c.is_whitespace() {
+            if at_word && c.is_alphanumeric() {
                 out.extend(c.to_uppercase());
             } else {
                 out.push(c);
             }
-            at_word = c.is_whitespace();
+            at_word = !continues_word(c);
         }
         out
     };
     out.encode_utf16().collect()
+}
+
+// `text` as `text-transform` lays it out (CSS Text 3 §2.1): its case changed character by character — each one whose
+// mapping keeps its length in UTF-16 units, so the layout's runs and the DOM's offsets stay one to one (a character
+// whose mapping is longer, `ß` to `SS`, is laid out as it is) — `capitalize` the first letter of each word, a word
+// starting after anything but a letter, a digit, an apostrophe or a low line (`continues_word`; Chrome: `foo-bar` is
+// `Foo-Bar`, `don't` `Don't`, `3rd` `3rd`, `x_y` `X_y`) — `at_word`: whether `text` starts one. None where nothing
+// changes.
+pub(crate) fn case_transformed(text: &[u16], transform: TextTransform, mut at_word: bool) -> Option<Vec<u16>> {
+    let case = transform & TextTransform::CASE_TRANSFORMS;
+    if case.is_empty() || text.is_empty() {
+        return None;
+    }
+    let one = |mut mapped: Box<dyn Iterator<Item = char>>, c: char| match (mapped.next(), mapped.next()) {
+        (Some(m), None) if m.len_utf16() == c.len_utf16() => m,
+        _ => c,
+    };
+    let mut out = Vec::with_capacity(text.len());
+    let mut changed = false;
+    for unit in char::decode_utf16(text.iter().copied()) {
+        let Ok(c) = unit else {
+            out.push(unit.unwrap_err().unpaired_surrogate());
+            at_word = false;
+            continue;
+        };
+        let m = if case == TextTransform::UPPERCASE {
+            one(Box::new(c.to_uppercase()), c)
+        } else if case == TextTransform::LOWERCASE {
+            one(Box::new(c.to_lowercase()), c)
+        } else if at_word && c.is_alphanumeric() {
+            one(Box::new(c.to_uppercase()), c)
+        } else {
+            c
+        };
+        at_word = !continues_word(c);
+        changed |= m != c;
+        let mut pair = [0u16; 2];
+        out.extend_from_slice(m.encode_utf16(&mut pair));
+    }
+    changed.then_some(out)
+}
+
+pub(crate) fn continues_word(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '\'' | '\u{2019}' | '_')
 }
 
 // The rendered text collection's state, which STREAMS across the walk: whether a collapsible space renders depends on
@@ -277,6 +346,8 @@ struct Walk<'a> {
     last_owed: u32,
     // Whether a host's light child renders, and hidden, per slot: 0 not rendered, 1 visible, 2 visibility-hidden.
     slots: std::collections::HashMap<NodeId, u8>,
+    // Whether the text collected last ends inside a word, which `capitalize` goes on with (`continues_word`).
+    in_word: bool,
 }
 
 const SPACE: u16 = 0x20;
@@ -498,7 +569,10 @@ impl Walk<'_> {
                 out
             }
         };
-        let mut text = apply_transform(raw, transform);
+        let mut text = apply_transform(raw, transform, !self.in_word);
+        if let Some(&last) = text.last() {
+            self.in_word = char::from_u32(u32::from(last)).is_some_and(continues_word);
+        }
         // (…the run that CROSSES nodes: a collapsible space renders nothing after one, after a break, or before anything)
         if collapses_spaces && text.first() == Some(&SPACE) && (self.at_start || self.ends_collapsible || self.break_pending) {
             text.remove(0);
@@ -611,6 +685,7 @@ pub(crate) fn visible_text(engine: &mut StyleEngine, arena: &RealmArena, id: Nod
         last_collapsible_only: true,
         last_owed: 0,
         slots: std::collections::HashMap::new(),
+        in_word: false,
     };
     let mut out = walk.collect(id, text_transform(arena, parent), inherited_ws(arena, parent), hidden);
     // (…a collapsible space at the very END renders nothing either)

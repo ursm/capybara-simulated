@@ -2634,6 +2634,8 @@ impl<'a> Walk<'a> {
             style
         };
         let font = self.font_info(owner, style)?;
+        // (…in the case its `text-transform` lays it out in)
+        let text = crate::rendered::case_transformed(&text, owner.get_inherited_text().text_transform, true).unwrap_or(text);
         let textarea = self.node(id).rendering_tag() == "textarea";
         let ws_mode = if textarea { ws_mode_of(owner)? } else { WS_PRE };
         let vmax = self.split_vmax(owner, &font, &text, ws_mode)?;
@@ -4049,6 +4051,20 @@ impl<'a> Walk<'a> {
                     if td.is_empty() {
                         continue;
                     }
+                    // (…in the case its `text-transform` lays it out in — a word going on from the text before it, across
+                    // an inline box's edge, not capitalized again)
+                    let starts_word = || {
+                        g.runs.iter().rev().find_map(|r| match r {
+                            Pending::Text { text, .. } => text.last().copied(),
+                            _ => None,
+                        }).is_none_or(|u| char::from_u32(u32::from(u)).is_none_or(|c| !crate::rendered::continues_word(c)))
+                    };
+                    let transform = owner.get_inherited_text().text_transform;
+                    let cased = transform.intersects(style::values::computed::text::TextTransform::CASE_TRANSFORMS);
+                    let td: Cow<[u16]> = match cased.then(|| crate::rendered::case_transformed(&td, transform, starts_word())).flatten() {
+                        Some(t) => Cow::Owned(t),
+                        None => td,
+                    };
                     if has_content(&td) || white_space_only_is_content(&td, ws_mode) {
                         g.makes_line = true;
                     }
@@ -4896,11 +4912,10 @@ fn content_ascent(style: &ComputedValues, face: &Face) -> f64 {
     js_round(face.asc * font_size(style))
 }
 // The used font size: the computed one, 16 where that is 0.
+// (…0 for `font-size: 0`, whose text takes no room and makes no line taller — Chrome: `<div style="font-size:0">
+// <span>hello</span></div>` is 0 tall, the span 0x0 — where the JS layout's `size || 16` read 16)
 fn font_size(style: &ComputedValues) -> f64 {
-    match f32_exact(style.get_font().font_size.computed_size().px()) {
-        0.0 => 16.0,
-        s => s,
-    }
+    f32_exact(style.get_font().font_size.computed_size().px())
 }
 
 // Why a display this walk has not been taught declines, by what it lays out.
