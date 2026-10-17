@@ -1,7 +1,8 @@
 // Customizable-combobox filtering (open-ui, tentative): an `<input filter=ID>` filters the `<select id=ID>`'s options,
 // an `<input list=ID>` the `<datalist id=ID>`'s, against its value — an option whose `text` (its descendant text but a
-// script's, ASCII whitespace stripped and collapsed) does not start with the value (both lowercased) is `:filtered`, which the UA sheet's `option:filtered { display: none }` hides. The
-// bindings fire the cancelable `beforefilter` between finding the list and filtering it.
+// script's, ASCII whitespace stripped and collapsed) does not start with the value (both lowercased) is `:filtered`,
+// which the UA sheet's `option:filtered { display: none }` hides. The bindings fire the cancelable `beforefilter`
+// between finding the list and filtering it.
 
 use crate::dom::{nid_arg, node_value, realm, realm_id, NodeId, RealmArena, GEN_STYLE_STATE, STATE_FILTERED};
 
