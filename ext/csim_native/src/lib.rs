@@ -80,6 +80,7 @@ mod image_requests;
 mod drag_data_store;
 mod paint;
 mod perf_timeline;
+mod request_state;
 mod search_params;
 mod storage_areas;
 mod xhr_state;

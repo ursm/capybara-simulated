@@ -2398,6 +2398,8 @@ pub(crate) struct Dom {
     pub(crate) drag_data_store_template: Option<v8::Global<v8::FunctionTemplate>>,
     // …and a URLSearchParams object's list's (search_params.rs).
     pub(crate) search_params_template: Option<v8::Global<v8::FunctionTemplate>>,
+    // …and a Request object's request's (request_state.rs).
+    pub(crate) request_state_template: Option<v8::Global<v8::FunctionTemplate>>,
     pub(crate) iterators: crate::node_iterators::Iterators,
     // Each realm's style engine (made by `styleSheets`).
     pub(crate) styles: std::collections::HashMap<i32, crate::style::StyleEngine>,
@@ -2842,6 +2844,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::image_requests::install(scope, ns, context_id);
     crate::drag_data_store::install(scope, ns, context_id);
     crate::search_params::install(scope, ns, context_id);
+    crate::request_state::install(scope, ns, context_id);
     crate::storage_areas::install(scope, ns, context_id);
     crate::paint::install(scope, ns, context_id);
     crate::keys::install(scope, ns, context_id);
