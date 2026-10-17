@@ -146,7 +146,6 @@ struct Agent {
 pub(crate) struct Registry {
     next: u32,
     next_agent: u64,
-    next_partition: u64,
     pub(crate) stores: HashMap<u32, Store>,
     databases: HashMap<DbKey, Database>,
     queues: HashMap<DbKey, VecDeque<Pending>>,
@@ -562,12 +561,6 @@ pub(crate) fn drop_realm(scope: &mut v8::PinScope<'_, '_>, realm: i32) {
 }
 
 // ── For the host ─────────────────────────────────────────────────────────────────────────────────────────────────────
-// A new session's partition.
-pub(crate) fn partition_new() -> u64 {
-    let mut reg = lock();
-    reg.next_partition += 1;
-    reg.next_partition
-}
 // A session's databases deleted (its storage cleared).
 pub(crate) fn clear(partition: u64) {
     lock().clear(partition);

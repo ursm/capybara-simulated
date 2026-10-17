@@ -5,8 +5,8 @@ require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
-# Cache Storage API (`caches` / `Cache`) — the WindowOrWorkerGlobalScope surface backed by
-# the Ruby-side origin-partitioned store. Exercises the CacheStorage lifecycle, put/match
+# Cache Storage API (`caches` / `Cache`) — the WindowOrWorkerGlobalScope surface over the
+# engine's store (cache_storage.rs), by session partition and origin. Exercises the CacheStorage lifecycle, put/match
 # round-trips (including a binary body), request matching (ignoreSearch / Vary), delete,
 # and add/addAll fetching a real Rack resource.
 RSpec.describe 'Cache Storage API' do

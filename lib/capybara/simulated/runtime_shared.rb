@@ -122,7 +122,8 @@ module Capybara
         '__csimBcUnregister'         => ->(b, *a) { b.bc_unregister(a[0], a[1]); nil },
         '__csimBcPost'               => ->(b, *a) { b.bc_post(a[0], a[1], a[2], a[3], a[4], a[5]); nil },
         '__csimBcSiblingsExist'      => ->(b, *_a) { b.bc_siblings_exist? },
-        # The session's IndexedDB partition, which every realm and worker of it is an agent of (idb_databases.rs).
+        # The session's partition of the storage registries — IndexedDB's, which every realm and worker of it is an agent
+        # of, and Cache Storage's (idb_databases.rs, cache_storage.rs).
         '__csimSessionPartition'     => ->(b, *_a) { b.session_partition },
         '__csimWindowGet'            => ->(b, *a) { b.window_get(a[0], a[1]) },
         '__csimWindowDocGet'         => ->(b, *a) { b.window_doc_get(a[0], a[1]) },

@@ -2,16 +2,19 @@
 // bindings name (cache-storage.js `originKey`) — a name-to-cache map in creation order, each cache a list of
 // request-response entries in stored order. One registry for the process, so every window and worker of a session reads
 // the same caches, and a page reloaded finds what the last one stored. A cache outlives its name: a Cache object stays
-// bound to the cache it opened after `delete()` unmaps the name, and the name opened again is a new cache.
+// bound to the cache it opened after `delete()` unmaps the name, and the name opened again is a new cache — so a cache
+// unmapped stays until its session's storage is cleared (no Cache object's lifetime is tracked here: a bounded leak, of
+// one session), and cache numbers are the process's, never one a cache of a session before had.
 //
 // The requests' matching is cache_matching.rs's, over the entries as they are stored. What the bindings keep is the
 // objects: the requests (each stored as the metadata they rebuild one from) and the responses (as their wire form),
 // both opaque here.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
-use crate::cache_matching::{query, Entry};
+use crate::cache_matching::{has_duplicate, query, Entry};
 use crate::dom::{register, utf16_arg, utf16_value};
 
 // A stored entry: its number, the request as the matcher reads it, the request's metadata and the response's wire form
@@ -37,15 +40,15 @@ struct Cache {
 // A storage key's caches: the names mapped (DOMStrings, a lone surrogate kept), in the order each was created, and
 // every cache by its number, mapped or not.
 #[derive(Default)]
-struct Shed {
-    last_cache: u32,
+struct StorageKeyCaches {
     names: Vec<(Vec<u16>, u32)>,
     caches: HashMap<u32, Cache>,
 }
 
-static REGISTRY: LazyLock<Mutex<HashMap<(u64, String), Shed>>> = LazyLock::new(Default::default);
+static REGISTRY: LazyLock<Mutex<HashMap<(u64, String), StorageKeyCaches>>> = LazyLock::new(Default::default);
+static LAST_CACHE: AtomicU32 = AtomicU32::new(0);
 
-fn lock() -> MutexGuard<'static, HashMap<(u64, String), Shed>> {
+fn lock() -> MutexGuard<'static, HashMap<(u64, String), StorageKeyCaches>> {
     REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -61,7 +64,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "cacheNames", names_op, context_id);
     register(scope, ns, "cacheSelect", select_op, context_id);
     register(scope, ns, "cacheResponse", response_op, context_id);
-    register(scope, ns, "cachePut", put_op, context_id);
+    register(scope, ns, "cachePutAll", put_all_op, context_id);
     register(scope, ns, "cacheRemove", remove_op, context_id);
 }
 
@@ -78,14 +81,13 @@ fn open_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let key = key(scope, &args);
     let name = utf16_arg(scope, args.get(2));
     let mut reg = lock();
-    let shed = reg.entry(key).or_default();
-    let id = match shed.names.iter().find(|(n, _)| *n == name) {
+    let caches = reg.entry(key).or_default();
+    let id = match caches.names.iter().find(|(n, _)| *n == name) {
         Some(&(_, id)) => id,
         None => {
-            shed.last_cache += 1;
-            let id = shed.last_cache;
-            shed.names.push((name, id));
-            shed.caches.insert(id, Cache::default());
+            let id = LAST_CACHE.fetch_add(1, Ordering::Relaxed) + 1;
+            caches.names.push((name, id));
+            caches.caches.insert(id, Cache::default());
             id
         }
     };
@@ -105,17 +107,22 @@ fn delete_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let key = key(scope, &args);
     let name = utf16_arg(scope, args.get(2));
     let mut reg = lock();
-    let Some(shed) = reg.get_mut(&key) else { return rv.set_bool(false) };
-    let before = shed.names.len();
-    shed.names.retain(|(n, _)| *n != name);
-    rv.set_bool(shed.names.len() != before);
+    let Some(caches) = reg.get_mut(&key) else { return rv.set_bool(false) };
+    let before = caches.names.len();
+    caches.names.retain(|(n, _)| *n != name);
+    rv.set_bool(caches.names.len() != before);
 }
 
-// __dom.cacheNames(partition, origin) -> the names mapped, in the order each was created.
+// __dom.cacheNames(partition, origin) -> `[name, cache, …]`: the names mapped, in the order each was created, each with
+// the number of the cache it maps.
 fn names_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = key(scope, &args);
-    let names: Vec<Vec<u16>> = lock().get(&key).map(|s| s.names.iter().map(|(n, _)| n.clone()).collect()).unwrap_or_default();
-    let items: Vec<v8::Local<v8::Value>> = names.iter().map(|n| utf16_value(scope, n)).collect();
+    let names: Vec<(Vec<u16>, u32)> = lock().get(&key).map(|c| c.names.clone()).unwrap_or_default();
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(names.len() * 2);
+    for (name, id) in &names {
+        items.push(utf16_value(scope, name));
+        items.push(v8::Integer::new_from_unsigned(scope, *id).into());
+    }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
@@ -168,27 +175,41 @@ fn response_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
 }
 
-// __dom.cachePut(partition, origin, cache, url, headers, vary, meta, response): Batch Cache Operations' "put" of one
-// entry — the request of `url` and `headers` whose response's `Vary` is `vary`, stored as `meta` and `response` — in
-// place of every entry its request matches.
-fn put_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.cachePutAll(partition, origin, cache, items) -> whether the batch was stored: Batch Cache Operations' "put" of
+// every item — each `[url, headers, vary, meta, response]`, the request of `url` and `headers` (a flat list, names
+// lowercased) whose response's `Vary` is `vary`, stored as `meta` and `response` — each in place of every entry its
+// request matches, all at once (no other realm sees half of it); none where two of them are one request
+// (`has_duplicate`: an InvalidStateError, the bindings').
+fn put_all_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = key(scope, &args);
     let id = u32_arg(scope, &args, 2);
-    let url = args.get(3).to_rust_string_lossy(scope);
-    let headers = crate::cache_matching::headers(scope, args.get(4));
-    let vary = args.get(5).to_rust_string_lossy(scope);
-    let (meta, response) = (args.get(6).to_rust_string_lossy(scope), args.get(7).to_rust_string_lossy(scope));
+    let mut batch = Vec::new();
+    if let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(3)) {
+        for i in 0..list.length() {
+            let Some(item) = list.get_index(scope, i).and_then(|v| v8::Local::<v8::Array>::try_from(v).ok()) else { continue };
+            let field = |k: u32| item.get_index(scope, k).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
+            let (url, vary, meta, response) = (field(0), field(2), field(3), field(4));
+            let headers = item.get_index(scope, 1).map(|h| crate::cache_matching::headers(scope, h)).unwrap_or_default();
+            batch.push(Stored { id: 0, request: Entry::new(url, headers, vary), meta, response });
+        }
+    }
+    if has_duplicate(&batch) {
+        return rv.set_bool(false);
+    }
     let mut reg = lock();
-    let Some(cache) = reg.get_mut(&key).and_then(|s| s.caches.get_mut(&id)) else { return };
-    let replaced = query(&url, &headers, false, false, &cache.entries);
-    let mut at = 0;
-    cache.entries.retain(|_| {
-        at += 1;
-        !replaced.contains(&(at - 1))
-    });
-    cache.last_entry += 1;
-    let entry = Stored { id: cache.last_entry, request: Entry::new(url, headers, vary), meta, response };
-    cache.entries.push(entry);
+    let Some(cache) = reg.get_mut(&key).and_then(|c| c.caches.get_mut(&id)) else { return rv.set_bool(true) };
+    for mut stored in batch {
+        let replaced = query(stored.request.url(), stored.request.headers(), false, false, &cache.entries);
+        let mut at = 0;
+        cache.entries.retain(|_| {
+            at += 1;
+            !replaced.contains(&(at - 1))
+        });
+        cache.last_entry += 1;
+        stored.id = cache.last_entry;
+        cache.entries.push(stored);
+    }
+    rv.set_bool(true);
 }
 
 // __dom.cacheRemove(partition, origin, cache, entries) -> how many of `entries` (their numbers) the cache held, which it

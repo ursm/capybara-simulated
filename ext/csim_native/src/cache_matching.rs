@@ -35,6 +35,12 @@ impl Entry {
     pub(crate) fn new(url: String, headers: HashMap<String, String>, vary: String) -> Self {
         Entry { url, headers, vary }
     }
+    pub(crate) fn url(&self) -> &str {
+        &self.url
+    }
+    pub(crate) fn headers(&self) -> &HashMap<String, String> {
+        &self.headers
+    }
 }
 impl AsRef<Entry> for Entry {
     fn as_ref(&self) -> &Entry {
@@ -55,11 +61,11 @@ pub(crate) fn query<E: AsRef<Entry>>(url: &str, headers: &HashMap<String, String
 
 // Batch Cache Operations' duplicate: two entries of one key URL where either one's request satisfies the other's
 // response's `Vary` (each response's decides which headers are compared) — in either order.
-pub(crate) fn has_duplicate(entries: &[Entry]) -> bool {
-    let keys: Vec<Option<String>> = entries.iter().map(|e| key_url(&e.url, false)).collect();
+pub(crate) fn has_duplicate<E: AsRef<Entry>>(entries: &[E]) -> bool {
+    let keys: Vec<Option<String>> = entries.iter().map(|e| key_url(&e.as_ref().url, false)).collect();
     (0..entries.len()).any(|i| {
         (i + 1..entries.len()).any(|j| {
-            let (a, b) = (&entries[i], &entries[j]);
+            let (a, b) = (entries[i].as_ref(), entries[j].as_ref());
             keys[i].is_some() && keys[i] == keys[j]
                 && ((b.vary.is_empty() || vary_matches(&b.vary, &a.headers, &b.headers)) || (a.vary.is_empty() || vary_matches(&a.vary, &b.headers, &a.headers)))
         })
@@ -72,7 +78,6 @@ pub(crate) fn vary_has_star(vary: &str) -> bool {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "cacheBatchDuplicate", duplicate_op, context_id);
     crate::dom::register(scope, ns, "varyHasStar", vary_star_op, context_id);
 }
 fn text(scope: &mut v8::PinScope<'_, '_>, value: Option<v8::Local<'_, v8::Value>>) -> String {
@@ -90,26 +95,6 @@ pub(crate) fn headers(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8:
         k += 2;
     }
     out
-}
-// Entries from an array of `[url, headers, vary]`.
-fn entries(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<Entry> {
-    let Ok(list) = v8::Local::<v8::Array>::try_from(value) else { return Vec::new() };
-    (0..list.length())
-        .filter_map(|i| list.get_index(scope, i).and_then(|e| v8::Local::<v8::Array>::try_from(e).ok()))
-        .collect::<Vec<_>>()
-        .into_iter()
-        .map(|e| {
-            let url = text(scope, e.get_index(scope, 0));
-            let h = e.get_index(scope, 1).map(|h| headers(scope, h)).unwrap_or_default();
-            let vary = text(scope, e.get_index(scope, 2));
-            Entry { url, headers: h, vary }
-        })
-        .collect()
-}
-// __dom.cacheBatchDuplicate(entries) -> `has_duplicate`.
-fn duplicate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let list = entries(scope, args.get(0));
-    rv.set_bool(has_duplicate(&list));
 }
 // __dom.varyHasStar(vary) -> `vary_has_star`.
 fn vary_star_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
