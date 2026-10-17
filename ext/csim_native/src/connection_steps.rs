@@ -23,7 +23,6 @@ pub(crate) const CONNECT_USE: u32 = 1 << 5;
 pub(crate) const CONNECT_SCRIPT: u32 = 1 << 6;
 pub(crate) const CONNECT_LINK: u32 = 1 << 7;
 pub(crate) const CONNECT_STYLE: u32 = 1 << 8;
-pub(crate) const CONNECT_BACKGROUND: u32 = 1 << 9;
 pub(crate) const CONNECT_SOURCE: u32 = 1 << 10;
 pub(crate) const CONNECT_FRAME: u32 = 1 << 11;
 pub(crate) const CONNECT_DEFAULT_STYLE: u32 = 1 << 12;
@@ -54,10 +53,9 @@ pub(crate) fn connection_steps(n: &NodeData) -> u32 {
         "meta" if n.plain_attr("http-equiv").is_some_and(|v| v.eq_ignore_ascii_case("default-style")) => CONNECT_DEFAULT_STYLE,
         _ => 0,
     };
-    let background = n.plain_attr("style").is_some_and(|v| v.contains("url(") && v.to_ascii_lowercase().contains("background"));
     // (…a valid custom element name has a hyphen; a customized built-in an `is` value)
     let custom = name.contains('-') || n.is_value.is_some() || n.state & STATE_UPGRADED != 0 || n.plain_attr("is").is_some();
-    tag | flag(background, CONNECT_BACKGROUND) | flag(crate::nonce::hides_nonce(n), CONNECT_NONCE) | flag(custom, CONNECT_CUSTOM)
+    tag | flag(crate::nonce::hides_nonce(n), CONNECT_NONCE) | flag(custom, CONNECT_CUSTOM)
 }
 // …whether it runs any.
 pub(crate) fn has_connection_step(n: &NodeData) -> bool {

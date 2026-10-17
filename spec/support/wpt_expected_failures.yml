@@ -5537,10 +5537,8 @@ service-workers/service-worker/fetch-mixed-content-to-inscope.https.html:
 service-workers/service-worker/fetch-mixed-content-to-outscope.https.html:
 - Verify Mixed content of fetch() in a Service Worker
 service-workers/service-worker/fetch-request-css-base-url.https.html:
-- "[harness] TIMEOUT"
 - base URL when service worker does respondWith(fetch(responseUrl)).
 - base URL when service worker does respondWith(new Response()).
-- cleanup global state
 service-workers/service-worker/fetch-request-css-cross-origin.https.html:
 - MIME checking of CSS resources fetched via service worker when Content-Type is not
   set.

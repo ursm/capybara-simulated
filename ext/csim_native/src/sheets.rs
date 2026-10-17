@@ -30,12 +30,11 @@ pub(crate) struct SheetSource {
     pub(crate) constructed: bool,
 }
 
-// A sheet of the realm's, and what the engine asks of its text without walking its rules: whether it could paint an
-// image (`css_image`) and whether it reads a shadow host's light descendants (`host_reads_descendants`). Its `version`
+// A sheet of the realm's, and what the engine asks of its text without walking its rules: whether it reads a shadow
+// host's light descendants (`host_reads_descendants`). Its `version`
 // moves when it is made of other text, so a CSSOM rule list of the one before is known for one of another sheet.
 pub(crate) struct StoredSheet {
     pub(crate) sheet: DocumentStyleSheet,
-    pub(crate) css_image: bool,
     pub(crate) host_has: bool,
     pub(crate) version: u32,
     // A constructed sheet (`new CSSStyleSheet()`), which takes no `@import`.
@@ -85,8 +84,6 @@ pub(crate) struct SheetStore {
     rules: std::collections::HashMap<u32, RuleRef>,
     next_rule: u32,
     pending: RefCell<Vec<PendingImport>>,
-    // The URLs of the `@import`ed sheets whose text could paint an image (`css_image`), as each last arrived.
-    image_imports: std::collections::HashSet<String>,
     // Each parse made, by what it was made of — kept across the realm's pages (a suite loads its app's sheets on every
     // page) and SHARED by every sheet of the same text until CSSOM reaches one, which then takes a copy of its own
     // (`own`): an edit is its owner's alone. (Not one with an `@import`, whose imports are fetched for the parse that
@@ -159,7 +156,6 @@ impl SheetStore {
         self.next_id += 1;
         let stored = StoredSheet {
             sheet,
-            css_image: false,
             host_has: false,
             version: id,
             constructed: false,
@@ -263,12 +259,6 @@ impl SheetStore {
         self.sheets.clear();
         self.rules.clear();
         self.pending.get_mut().clear();
-        self.image_imports.clear();
-    }
-
-    // Whether the `@import`ed sheet at `url` could paint an image (`css_image`), as it last arrived.
-    pub(crate) fn image_import(&self, url: &str) -> bool {
-        self.image_imports.contains(url)
     }
 
     // The sheet at `url` arrived as `css` (None: it could not be fetched): every `@import` waiting for it takes it,
@@ -281,11 +271,6 @@ impl SheetStore {
             hit
         };
         let before = self.pending.borrow().len();
-        if css.is_some_and(css_image) {
-            self.image_imports.insert(url.to_owned());
-        } else {
-            self.image_imports.remove(url);
-        }
         for p in waiting {
             let sheet = match (css, url::Url::parse(url)) {
                 (Some(css), Ok(base)) => {
@@ -338,7 +323,6 @@ impl SheetStore {
         };
         StoredSheet {
             sheet,
-            css_image: css_image(&source.css),
             host_has: host_reads_descendants(&source.css),
             version,
             constructed: source.constructed,
@@ -405,25 +389,6 @@ pub(crate) fn media_list(media: &str, url: &UrlExtraData, quirks: QuirksMode) ->
     );
     let mut input = ParserInput::new(media);
     MediaList::parse(&mut context, &mut Parser::new(&mut input))
-}
-
-// Whether a sheet's text could paint an image: a `background` / `cursor` / `list-style` declaration with a `url(` in its
-// value (a declaration is what lies between `;`, `{` and `}`, and the property a keyword with a `:` after it).
-pub(crate) fn css_image(css: &str) -> bool {
-    let lower = css.to_ascii_lowercase();
-    let bytes = lower.as_bytes();
-    let mut from = 0;
-    while let Some(at) = lower[from..].find("url(").map(|i| i + from) {
-        let start = bytes[..at].iter().rposition(|&b| matches!(b, b';' | b'{' | b'}')).map_or(0, |i| i + 1);
-        let decl = &lower[start..at];
-        // (…a keyword with a `:` after it, the regex's `keyword[^:;{}]*:`)
-        let keyword_then_colon = |k: &str| decl.match_indices(k).any(|(i, _)| decl[i + k.len()..].contains(':'));
-        if ["background", "cursor", "list-style"].into_iter().any(keyword_then_colon) {
-            return true;
-        }
-        from = at + 4;
-    }
-    false
 }
 
 // Whether `css` holds a `:has()` inside a `:host()` ARGUMENT — read off the text: between a `:host(` and the

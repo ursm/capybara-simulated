@@ -189,7 +189,7 @@ pub(crate) struct StyleEngine {
     animated_pruned: usize,
     // The page's sheets as last set (the realm's `SheetStore` holds them; a set that keeps one keeps its parse).
     author: Vec<AuthorSheet>,
-    // The identity of each `@font-face` rule they hold, which `document.fonts` connects a face by (`sheet_facts`).
+    // The identity of each `@font-face` rule they hold, which `document.fonts` connects a face by (`font_faces`).
     face_ids: FaceIds,
     // The arena's `mutations` when it was last styled; None while it has to be styled again whatever they are.
     styled: Option<u64>,
@@ -230,23 +230,21 @@ pub(crate) struct StyleEngine {
     poisoned: bool,
 }
 
-// A sheet of the page's, as `set_sheets` keeps it: its parse, the parse's `version` (sheets.rs `StoredSheet`: two
-// sheets of one text share a parse, and a sheet whose text is set again is another parse), and whether its own text
-// could paint an image (`css_image`, read once as it was parsed).
+// A sheet of the page's, as `set_sheets` keeps it: its parse, and the parse's `version` (sheets.rs `StoredSheet`: two
+// sheets of one text share a parse, and a sheet whose text is set again is another parse).
 struct AuthorSheet {
     sheet: DocumentStyleSheet,
     version: u32,
-    css_image: bool,
 }
 
-// An `@font-face` rule of the page's, as `sheet_facts` lists it.
+// An `@font-face` rule of the page's, as `font_faces` lists it.
 pub(crate) struct SheetFace {
     pub(crate) id: u32,
     pub(crate) text: String,
     pub(crate) first_url: Option<String>,
 }
 
-// The identities the page's `@font-face` rules have (`sheet_facts`): each rule's by the version of the sheet it is in
+// The identities the page's `@font-face` rules have (`font_faces`): each rule's by the version of the sheet it is in
 // and the rule itself — its address, the rule kept so that no other one takes it — numbered by the realm
 // (`SheetStore::last_face`). A rule keeps its identity while its sheet's parse is the one it was — a rule inserted
 // before it, a descriptor CSSOM rewrote, its `@media` that stopped and started holding — and a copy CSSOM took of the
@@ -509,6 +507,11 @@ impl StyleEngine {
         engine
     }
 
+    // `url` resolved against the document's base URL, as the engine resolves a presentational hint's.
+    pub(crate) fn resolve_url(&self, url: &str) -> Option<String> {
+        self.url.0.join(url).ok().map(|u| u.as_str().to_owned())
+    }
+
     // Every element's style computed again at the next flush: a font metric (`ex`, `ch`) it was computed with a stand-in
     // for is known now.
     pub(crate) fn restyle_everything(&mut self) {
@@ -658,7 +661,7 @@ impl StyleEngine {
         }
         for s in sheets {
             self.stylist.append_stylesheet(s.sheet.clone(), &guard);
-            self.author.push(AuthorSheet { sheet: s.sheet.clone(), version: s.version, css_image: s.css_image });
+            self.author.push(AuthorSheet { sheet: s.sheet.clone(), version: s.version });
         }
         drop(guard);
         self.sheets_changed();
@@ -690,12 +693,12 @@ impl StyleEngine {
                 self.stylist.append_stylesheet(a.sheet.clone(), &guard);
             }
         }
-        let device = self.stylist.device().clone();
+        let device = self.stylist.device();
         for shadow in self.shadow_styles.values_mut().filter(|sh| sh.sheets.iter().any(|(s, v)| owned(s, *v))) {
             for (sheet, v) in std::mem::take(&mut shadow.sheets) {
-                shadow.styles.stylesheets.remove_stylesheet(Some(&device), &NO_CUSTOM_MEDIA, sheet.clone(), &guard);
+                shadow.styles.stylesheets.remove_stylesheet(Some(device), &NO_CUSTOM_MEDIA, sheet.clone(), &guard);
                 let sheet = if owned(&sheet, v) { new.clone() } else { sheet };
-                shadow.styles.stylesheets.append_stylesheet(Some(&device), &NO_CUSTOM_MEDIA, sheet.clone(), &guard);
+                shadow.styles.stylesheets.append_stylesheet(Some(device), &NO_CUSTOM_MEDIA, sheet.clone(), &guard);
                 shadow.sheets.push((sheet, v));
             }
             shadow.dirty = true;
@@ -726,11 +729,10 @@ impl StyleEngine {
         self.rules_changed = true;
     }
 
-    // What the document's sheets declare that the page side asks of them without styling anything: whether one could
-    // paint an image (`css_image`), and its `@font-face` rules that apply (`face_rules`), in the order of their sheets —
-    // a sheet adopted twice once, two of one text (one parse) twice — each its identity (`FaceIds`), the declarations
-    // it holds, its sources' URLs resolved, and the first of those URLs.
-    pub(crate) fn sheet_facts(&mut self, store: &crate::sheets::SheetStore) -> (bool, Vec<SheetFace>) {
+    // The `@font-face` rules the document's sheets hold that apply — inside an `@media` / `@supports` that holds and an
+    // `@import` that does — in the order of their sheets (a sheet adopted twice once, two of one text, one parse, twice):
+    // each its identity (`FaceIds`), the declarations it holds, its sources' URLs resolved, and the first of those URLs.
+    pub(crate) fn font_faces(&mut self, store: &crate::sheets::SheetStore) -> Vec<SheetFace> {
         use style::font_face::DescriptorId;
         use style::stylesheets::{CssRule, StylesheetInDocument};
         const DESCRIPTORS: [DescriptorId; 13] = [
@@ -745,20 +747,13 @@ impl StyleEngine {
         // (…what a sheet no longer in the document held is no face of its now)
         ids.by_rule.retain(|&(version, _), _| self.author.iter().any(|a| a.version == version));
         let mut faces = Vec::new();
-        let mut image = false;
         let mut seen = Vec::new();
         for a in &self.author {
-            image |= a.css_image;
             if seen.contains(&a.version) || !a.sheet.is_effective_for_device(device, &NO_CUSTOM_MEDIA, &guard) {
                 continue;
             }
             seen.push(a.version);
             for rule in a.sheet.contents(&guard).effective_rules(device, &*NO_CUSTOM_MEDIA, &guard) {
-                if let CssRule::Import(import) = rule {
-                    let import = import.read_with(&guard);
-                    image |= import.url.url().is_some_and(|u| store.image_import(u.as_str()));
-                    continue;
-                }
                 let CssRule::FontFace(rule) = rule else { continue };
                 let (_, id) = *ids.by_rule.entry((a.version, face_address(rule))).or_insert_with(|| {
                     store.last_face.set(store.last_face.get() + 1);
@@ -785,7 +780,7 @@ impl StyleEngine {
                 faces.push(SheetFace { id, text: text.trim_end().to_owned(), first_url });
             }
         }
-        (image, faces)
+        faces
     }
 
     // The shadow root `root`'s sheets become `sheets` (the realm's, as `set_sheets` takes them), in its tree order; its
@@ -2523,6 +2518,10 @@ impl<'dom> DomTraversal<StyleNode<'dom>> for Recalc<'_> {
             recalc_style_at(self, traversal_data, context, el, &mut data, note_child);
             if styles_of(&data) != before {
                 el.arena().note_restyled(el.id);
+                // (…and the images its values use are owed a fetch at the rendering update)
+                if let Some(style) = data.styles.get_primary() {
+                    crate::rendered::note_css_images(el.arena(), el.id, style);
+                }
             }
             if self.context.traversal_flags.for_animation_only() {
                 unsafe { el.unset_animation_only_dirty_descendants() };

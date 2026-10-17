@@ -713,7 +713,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "visibleText", visible_text_op, context_id);
     crate::dom::register(scope, ns, "innerText", inner_text_op, context_id);
     crate::dom::register(scope, ns, "boxKind", box_kind_op, context_id);
-    crate::dom::register(scope, ns, "cssImageUrls", css_image_urls_op, context_id);
+    crate::dom::register(scope, ns, "cssImagesOwed", css_images_owed_op, context_id);
     crate::dom::register(scope, ns, "transparent", transparent_op, context_id);
 }
 
@@ -739,19 +739,25 @@ fn box_kind(arena: &RealmArena, id: NodeId) -> i32 {
     }
 }
 
-// The images a rendered page USES, which a browser fetches at the rendering update: every `url()` image of each element's
-// computed `background-image`, `cursor` and `list-style-image` — a `cross-fade()`'s inputs, an `image-set()`'s selected
-// candidate, no `data:` URL — and, before them, a `<body background>` attribute, its own Resource Timing initiator (the
-// style engine folds it into `background-image` as a presentational hint, which would otherwise file it as `css`).
-// Tree order from `root`, a shadow tree before its host's children; a `display: none` subtree is not rendered.
-// `(initiator, url)` each.
-fn css_image_urls(arena: &RealmArena, root: NodeId) -> Vec<(&'static str, String)> {
+// The images restyled content uses that no rendering update has fetched yet, each by the element that uses it
+// (`note_css_images`) — every URL once for the page (`seen`), as a browser's memory cache makes it one fetch.
+#[derive(Default)]
+pub(crate) struct CssImages {
+    owed: Vec<(NodeId, String)>,
+    seen: std::collections::HashSet<String>,
+}
+
+// A restyle gave element `id` the values `style`: the images it uses, which a browser fetches at the rendering update
+// that renders it — every `url()` image of its computed `background-image`, `cursor` and `list-style-image` (a
+// `cross-fade()`'s inputs, an `image-set()`'s selected candidate, no `data:` URL), where it generates a box (no restyle
+// reaches a `display: none` element's subtree) — are owed a fetch, those the page has not fetched yet.
+pub(crate) fn note_css_images(arena: &RealmArena, id: NodeId, style: &ComputedValues) {
     use style::values::computed::Image;
-    fn image_urls(image: &Image, out: &mut Vec<(&'static str, String)>) {
+    fn image_urls(image: &Image, out: &mut Vec<String>) {
         match image {
             Image::Url(u) => {
                 if let Some(url) = u.url().filter(|u| u.scheme() != "data") {
-                    out.push(("css", url.as_str().to_owned()));
+                    out.push(url.as_str().to_owned());
                 }
             }
             Image::CrossFade(fade) => {
@@ -769,34 +775,51 @@ fn css_image_urls(arena: &RealmArena, root: NodeId) -> Vec<(&'static str, String
             _ => {}
         }
     }
-    let mut out = Vec::new();
-    let mut stack = vec![root];
-    while let Some(id) = stack.pop() {
-        let Some(n) = arena.get(id).filter(|n| n.kind == NodeKind::Element) else { continue };
-        let style = primary_style(arena, id);
-        if style.as_ref().is_some_and(|s| s.get_box().clone_display().is_none()) {
-            continue;
-        }
-        if n.is_html_named("body") {
-            if let Some(bg) = n.plain_attr("background") {
-                out.push(("body", bg.to_owned()));
-            }
-        }
-        if let Some(style) = style {
-            for image in style.get_background().background_image.0.iter() {
-                image_urls(image, &mut out);
-            }
-            for cursor in style.get_inherited_ui().cursor.images.iter() {
-                image_urls(&cursor.image, &mut out);
-            }
-            image_urls(&style.get_list().list_style_image, &mut out);
-        }
-        stack.extend(n.children.iter().rev());
-        if let Some(root) = n.shadow_root.and_then(|r| arena.get(r)) {
-            stack.extend(root.children.iter().rev());
+    if style.get_box().clone_display().is_none() {
+        return;
+    }
+    let mut urls = Vec::new();
+    for image in style.get_background().background_image.0.iter() {
+        image_urls(image, &mut urls);
+    }
+    for cursor in style.get_inherited_ui().cursor.images.iter() {
+        image_urls(&cursor.image, &mut urls);
+    }
+    image_urls(&style.get_list().list_style_image, &mut urls);
+    if urls.is_empty() {
+        return;
+    }
+    let mut images = arena.css_images.borrow_mut();
+    for url in urls {
+        if images.seen.insert(url.clone()) {
+            images.owed.push((id, url));
         }
     }
-    out
+}
+
+// __dom.cssImagesOwed() -> `[initiator, url, …]`: the images the rendering update fetches — the page styled as it stands,
+// what its restyles left owed (`note_css_images`), in the order they were — each its Resource Timing initiator: `body`
+// for a `<body background>` attribute's (which the style engine folds into `background-image` as a presentational hint),
+// `css` for every other. Undefined where the realm has no engine.
+fn css_images_owed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(owed) = with_engine(scope, &args, |engine, arena, now| {
+        engine.flush(arena, now);
+        let owed = std::mem::take(&mut arena.css_images.borrow_mut().owed);
+        owed.into_iter()
+            .map(|(id, url)| {
+                let attr = arena.get(id).filter(|n| n.is_html_named("body")).and_then(|n| n.plain_attr("background"));
+                let body = attr.and_then(|bg| engine.resolve_url(bg.trim())).is_some_and(|bg| bg == url);
+                (if body { "body" } else { "css" }, url)
+            })
+            .collect::<Vec<_>>()
+    }) else { return };
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(owed.len() * 2);
+    for (initiator, url) in &owed {
+        let (Some(i), Some(u)) = (v8::String::new(scope, initiator), v8::String::new(scope, url)) else { continue };
+        items.push(i.into());
+        items.push(u.into());
+    }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // Whether `id` or an element of its flat-tree ancestry has an `opacity` of 0 — what `checkVisibility({opacityProperty})`
@@ -938,19 +961,3 @@ fn box_kind_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
 }
 
-// __dom.cssImageUrls(rootNid) -> `[initiator, url, …]`: the images the rendered page uses (`css_image_urls`);
-// undefined where the realm has no engine.
-fn css_image_urls_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let Some(urls) = with_engine(scope, &args, |engine, arena, now| {
-        engine.flush(arena, now);
-        css_image_urls(arena, id)
-    }) else { return };
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(urls.len() * 2);
-    for (initiator, url) in &urls {
-        let (Some(i), Some(u)) = (v8::String::new(scope, initiator), v8::String::new(scope, url)) else { continue };
-        items.push(i.into());
-        items.push(u.into());
-    }
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
-}

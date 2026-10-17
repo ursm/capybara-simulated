@@ -348,7 +348,7 @@ RSpec.describe 'resource timing' do
   end
 
   it 'fetches the images the RENDERED tree uses: a shadow tree\'s, an image-set\'s chosen candidate, no hidden one' do
-    # What a rendered element USES is fetched (rendered.rs `css_image_urls`): an element in a shadow tree is rendered, a
+    # What a rendered element USES is fetched (rendered.rs `note_css_images`): an element in a shadow tree is rendered, a
     # `display: none` subtree is not, an `image-set()` fetches the candidate it selected (1x here) and nothing else,
     # and a `data:` image has nothing to fetch.
     png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
@@ -376,6 +376,34 @@ RSpec.describe 'resource timing' do
       ns.length >= 2 ? ns : nil
     end
     expect(names.sort).to eq(['css.png?id=set1', 'css.png?id=shadow'])
+  end
+
+  it 'fetches the image an element comes to use after the page settled, no rule set changing' do
+    # The rendering update fetches what the restyles since the last one gave a rendered element — an inline style of an
+    # element inserted later, a `style` attribute rewritten, a hidden element shown — not only what a new sheet declares.
+    # (…on a page whose event loop turns, as an app's does: a settled one has no rendering update to run)
+    png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
+    doc = <<~HTML
+      <!DOCTYPE html><html><head><meta charset="utf-8"><style>#late { background-image: url("/css.png?id=shown") }</style></head>
+      <body><div id="rewritten" style="height: 5px"></div><div id="late" style="display: none"></div>
+      <script>setInterval(() => {}, 50)</script></body></html>
+    HTML
+    a = ->(env) { env['PATH_INFO'].start_with?('/css.png') ? [200, {'content-type' => 'image/png'}, [png]] : [200, {'content-type' => 'text/html'}, [doc]] }
+    s = simulated_session(a)
+    s.visit 'http://www.example.com/'
+    css = "performance.getEntriesByType('resource').filter(function (e) { return e.initiatorType === 'css'; }).map(function (e) { return e.name.split('/').pop(); }).sort()"
+    expect(s.evaluate_script(css)).to eq([])
+    s.execute_script(<<~JS)
+      const div = document.body.appendChild(document.createElement('div'));
+      div.style.backgroundImage = 'url("/css.png?id=inserted")';
+      document.getElementById('rewritten').setAttribute('style', 'height: 5px; cursor: url("/css.png?id=rewritten"), auto');
+      document.getElementById('late').style.display = 'block';
+    JS
+    names = poll_until do
+      ns = s.evaluate_script(css)
+      ns.length >= 3 ? ns : nil
+    end
+    expect(names).to eq(['css.png?id=inserted', 'css.png?id=rewritten', 'css.png?id=shown'])
   end
 
   it 'fetches an image an @import-ed sheet declares on every page that links it' do

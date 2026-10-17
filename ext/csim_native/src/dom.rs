@@ -1078,6 +1078,8 @@ pub(crate) struct RealmState {
     // How many elements a restyle REPLACED the style of since this side last took them (`note_restyled`,
     // `styleRestyled`): what the JS side's layout gate has to hear of, since the engine decides what a change restyles.
     pub(crate) restyled: std::cell::Cell<u32>,
+    // The images restyled content uses that no rendering update has fetched yet (rendered.rs `note_css_images`).
+    pub(crate) css_images: std::cell::RefCell<crate::rendered::CssImages>,
     // The root element the last layout laid out and the viewport it laid it out against, `[width, height]`: what the
     // geometry (geometry.rs) reads every box of that layout in.
     pub(crate) layout_root: Option<NodeId>,
@@ -1613,6 +1615,7 @@ impl RealmArena {
         self.form_facts.get_mut().clear();
         self.directionality.get_mut().1.clear();
         self.sheets.reset();
+        *self.css_images.get_mut() = Default::default();
         // (…in place: the style engine holds the same table, and outlives the page)
         self.faces.with(|faces| *faces = Default::default());
         self.mutations += 1;
@@ -2746,7 +2749,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // value.
     register(scope, ns, "styleSheets", style_sheets, context_id);
     register(scope, ns, "styleImport", style_import, context_id);
-    register(scope, ns, "styleSheetFacts", style_sheet_facts, context_id);
+    register(scope, ns, "styleFontFaces", style_font_faces, context_id);
     register(scope, ns, "styleShadowSheets", style_shadow_sheets, context_id);
     // …the realm's sheets they are made of (sheets.rs).
     register(scope, ns, "sheetMake", sheet_make, context_id);
@@ -4781,19 +4784,18 @@ fn style_shadow_sheets_unguarded(
     engine.set_shadow_sheets(arena, root, &sheets);
 }
 
-// __dom.styleSheetFacts() -> [cssImage, faceId, faceText, firstUrl, …]: what the document's sheets declare that the
-// page side asks of them (`StyleEngine::sheet_facts`) — whether one could paint an image, then each `@font-face` that
-// applies, by its identity, its declarations as text and its first `url()` source resolved (null for none, and for a
-// face listed before). Undefined with no engine yet.
-fn style_sheet_facts(
+// __dom.styleFontFaces() -> [faceId, faceText, firstUrl, …]: the `@font-face` rules the document's sheets hold that
+// apply (`StyleEngine::font_faces`), each by its identity, its declarations as text and its first `url()` source
+// resolved (null for none). Undefined with no engine yet.
+fn style_font_faces(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let cid = realm_id(scope, &args);
-    style_op(scope, cid, |scope| style_sheet_facts_unguarded(scope, args, rv));
+    style_op(scope, cid, |scope| style_font_faces_unguarded(scope, args, rv));
 }
-fn style_sheet_facts_unguarded(
+fn style_font_faces_unguarded(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
@@ -4801,9 +4803,8 @@ fn style_sheet_facts_unguarded(
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
-    let (css_image, faces) = engine.sheet_facts(&arena.sheets);
-    let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Boolean::new(scope, css_image).into()];
-    for face in faces {
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
+    for face in engine.font_faces(&arena.sheets) {
         let (Some(text), url) = (v8::String::new(scope, &face.text), face.first_url.and_then(|u| v8::String::new(scope, &u))) else { continue };
         items.push(v8::Integer::new_from_unsigned(scope, face.id).into());
         items.push(text.into());
