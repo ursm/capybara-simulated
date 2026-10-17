@@ -57,6 +57,18 @@ RSpec.describe 'scheme fetch' do
       const tag = (name, src) => '<script src="' + src + '" onload="events.push(\\'' + name + ' load\\')" onerror="events.push(\\'' + name + ' error\\')"><\\/script>';
       document.write(tag('blob', empty) + tag('data', 'data:text/javascript,') + tag('spaced', ' ' + ran.toUpperCase().slice(0, 4) + ran.slice(4) + ' '));
     JS
-    expect(poll_until { v = session.evaluate_script('window.events'); v.length >= 4 ? v : nil }).to contain_exactly('blob load', 'data load', 'ran', 'spaced load')
+    expect(poll_until { v = session.evaluate_script('window.events'); v.length >= 4 ? v : nil }).to eq(['blob load', 'data load', 'ran', 'spaced load'])
+  end
+
+  # A parser-run script's `load` or `error` fires as the parser runs it (HTML "execute the script element"), before the
+  # parser goes on to what follows it — an empty one's and a failed one's too (Chrome, Firefox).
+  it 'fires a parser-run script\'s load or error before the parser goes on' do
+    session.execute_script(<<~JS)
+      window.order = [];
+      const step = (name) => '<script>order.push("' + name + '")<\\/script>';
+      const tag = (name, src) => '<script src="' + src + '" onload="order.push(\\'' + name + ' load\\')" onerror="order.push(\\'' + name + ' error\\')"><\\/script>';
+      document.write(tag('empty', 'data:text/javascript,') + step('after empty') + tag('bad', 'data:text/javascript;base64,%%%') + step('after bad'));
+    JS
+    expect(poll_until { v = session.evaluate_script('window.order'); v.length >= 4 ? v : nil }).to eq(['empty load', 'after empty', 'bad error', 'after bad'])
   end
 end
