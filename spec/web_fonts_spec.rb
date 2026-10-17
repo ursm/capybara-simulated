@@ -397,7 +397,8 @@ RSpec.describe 'web fonts' do
 
   # Each face is ONE FontFace, however many sheets share its text and however its rules were read: two `<style>`s of
   # one text, and an import cycle, once each (Chrome: `[CycB, CycA]`); and the face a script holds stays the one
-  # `document.fonts` lists after the sheet's CSSOM is built and the cascade moves.
+  # `document.fonts` lists after the sheet's CSSOM is built and the cascade moves — and after a script edits one of the
+  # two `<style>`s, which then holds a copy of their shared parse of its own.
   it 'lists every face once, and the same FontFace whether or not the sheet has been built' do
     s = session('/dup.html')
     got = s.evaluate_script(<<~JS)
@@ -406,10 +407,13 @@ RSpec.describe 'web fonts' do
         const before = faces(), linked = before[2];
         document.querySelector('link').sheet.cssRules;
         document.head.appendChild(document.createElement('style')).textContent = 'p { color: red }';
-        return [before.map((f) => f.family).join(','), new Set(before).size === before.length, faces()[2] === linked];
+        const built = faces()[2] === linked;
+        document.querySelector('style').sheet.insertRule('p { color: blue }', 0);
+        const after = faces();
+        return [before.map((f) => f.family).join(','), new Set(before).size === before.length, built, before.every((f, i) => after[i] === f)];
       })()
     JS
-    expect(got).to eq(['Dup,Dup,CycB,CycA', true, true])
+    expect(got).to eq(['Dup,Dup,CycB,CycA', true, true, true])
   end
 
   # …and a face keeps its FontFace while rules are inserted and deleted around it, as a browser keys it by its rule.

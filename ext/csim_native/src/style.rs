@@ -189,6 +189,8 @@ pub(crate) struct StyleEngine {
     animated_pruned: usize,
     // The page's sheets as last set (the realm's `SheetStore` holds them; a set that keeps one keeps its parse).
     author: Vec<AuthorSheet>,
+    // The identity of each `@font-face` rule they hold, which `document.fonts` connects a face by (`sheet_facts`).
+    face_ids: FaceIds,
     // The arena's `mutations` when it was last styled; None while it has to be styled again whatever they are.
     styled: Option<u64>,
     // Each element changed since then, as it was before the first change: its attributes (and its state, which a
@@ -228,11 +230,50 @@ pub(crate) struct StyleEngine {
     poisoned: bool,
 }
 
-// A sheet of the page's, as `set_sheets` keeps it: its parse, and whether its own text could paint an image
-// (`css_image`, read once as it was parsed).
+// A sheet of the page's, as `set_sheets` keeps it: its parse, the parse's `version` (sheets.rs `StoredSheet`: two
+// sheets of one text share a parse, and a sheet whose text is set again is another parse), and whether its own text
+// could paint an image (`css_image`, read once as it was parsed).
 struct AuthorSheet {
     sheet: DocumentStyleSheet,
+    version: u32,
     css_image: bool,
+}
+
+// An `@font-face` rule of the page's, as `sheet_facts` lists it.
+pub(crate) struct SheetFace {
+    pub(crate) id: u32,
+    pub(crate) text: String,
+    pub(crate) first_url: Option<String>,
+}
+
+// The identities the page's `@font-face` rules have (`sheet_facts`): each rule's by the version of the sheet it is in
+// and the rule itself — its address, the rule kept so that no other one takes it — one for each time that sheet holds
+// it (an `@import`ed twice: twice). A rule keeps its identity while its sheet's parse is the one it was — a rule
+// inserted before it, a descriptor CSSOM rewrote, its `@media` that stopped and started holding — and a copy CSSOM
+// took of the sheet hands each its own (`swap_sheet`); a sheet whose text is set again is another one's rules, new
+// faces even where the text is the same (CSS Font Loading §2.2: a rule removed is no longer connected, and one added
+// makes a face of its own).
+#[derive(Default)]
+struct FaceIds {
+    last: u32,
+    by_rule: std::collections::HashMap<(u32, usize), (Arc<Locked<style::stylesheets::FontFaceRule>>, Vec<u32>)>,
+}
+
+// …a rule's address, which its `FaceIds` entry keeps it at.
+fn face_address(rule: &Arc<Locked<style::stylesheets::FontFaceRule>>) -> usize {
+    &**rule as *const Locked<style::stylesheets::FontFaceRule> as usize
+}
+
+// The `@font-face` rules of `sheet` that apply, in the order a CSSOM walk finds them — inside an `@media` /
+// `@supports` that holds and an `@import` that does.
+fn face_rules(
+    sheet: &DocumentStyleSheet,
+    device: &Device,
+    guard: &style::shared_lock::SharedRwLockReadGuard,
+) -> Vec<Arc<Locked<style::stylesheets::FontFaceRule>>> {
+    use style::stylesheets::{CssRule, StylesheetInDocument};
+    let rules = sheet.contents(guard).effective_rules(device, &*NO_CUSTOM_MEDIA, guard);
+    rules.filter_map(|rule| if let CssRule::FontFace(face) = rule { Some(face.clone()) } else { None }).collect()
 }
 
 // One shadow root's sheets, as the page last gave them, and the cascade data stylo built of them.
@@ -405,6 +446,7 @@ impl StyleEngine {
             animated: std::collections::HashMap::new(),
             animated_pruned: 0,
             author: Vec::new(),
+            face_ids: FaceIds::default(),
             styled: None,
             snapshots: SnapshotMap::new(),
             restyle_all: true,
@@ -603,7 +645,8 @@ impl StyleEngine {
             self.restyle_all = true;
         }
         // The same sheets again (a rebuild the rule set did not need) change nothing.
-        if sheets.len() == self.author.len() && sheets.iter().zip(&self.author).all(|(s, a)| Arc::ptr_eq(&s.sheet.0, &a.sheet.0)) {
+        let same = |s: &&crate::sheets::StoredSheet, a: &AuthorSheet| Arc::ptr_eq(&s.sheet.0, &a.sheet.0) && s.version == a.version;
+        if sheets.len() == self.author.len() && sheets.iter().zip(&self.author).all(|(s, a)| same(s, a)) {
             return;
         }
         let guard = self.lock.read();
@@ -612,7 +655,7 @@ impl StyleEngine {
         }
         for s in sheets {
             self.stylist.append_stylesheet(s.sheet.clone(), &guard);
-            self.author.push(AuthorSheet { sheet: s.sheet.clone(), css_image: s.css_image });
+            self.author.push(AuthorSheet { sheet: s.sheet.clone(), version: s.version, css_image: s.css_image });
         }
         drop(guard);
         self.sheets_changed();
@@ -621,8 +664,15 @@ impl StyleEngine {
     // The engine cascades `new` wherever it cascaded `old` (a sheet CSSOM took a copy of, sheets.rs `own`), in its place.
     pub(crate) fn swap_sheet(&mut self, old: &DocumentStyleSheet, new: &DocumentStyleSheet) {
         let swap = |s: &DocumentStyleSheet| if Arc::ptr_eq(&s.0, &old.0) { new.clone() } else { s.clone() };
-        if self.author.iter().any(|a| Arc::ptr_eq(&a.sheet.0, &old.0)) {
+        if let Some(version) = self.author.iter().find(|a| Arc::ptr_eq(&a.sheet.0, &old.0)).map(|a| a.version) {
             let guard = self.lock.read();
+            // (…its faces are the copy's, in the same places)
+            let device = self.stylist.device();
+            for (was, is) in face_rules(old, device, &guard).into_iter().zip(face_rules(new, device, &guard)) {
+                if let Some((_, ids)) = self.face_ids.by_rule.remove(&(version, face_address(&was))) {
+                    self.face_ids.by_rule.insert((version, face_address(&is)), (is, ids));
+                }
+            }
             for a in &self.author {
                 self.stylist.remove_stylesheet(a.sheet.clone(), &guard);
             }
@@ -667,11 +717,10 @@ impl StyleEngine {
     }
 
     // What the document's sheets declare that the page side asks of them without styling anything: whether one could
-    // paint an image (`css_image`), and its `@font-face` rules — each the index of the sheet it is in (an `@import`ed
-    // one's, its importer's), the declarations it holds, its sources' URLs resolved, and the first of those URLs — the
-    // ones that apply, inside an `@media` / `@supports` that holds and an `@import` that does, in the order a CSSOM walk
-    // finds them.
-    pub(crate) fn sheet_facts(&self, store: &crate::sheets::SheetStore) -> (bool, Vec<(usize, String, Option<String>)>) {
+    // paint an image (`css_image`), and its `@font-face` rules that apply (`face_rules`), in the order of their sheets —
+    // a sheet adopted twice once, two of one text (one parse) twice — each its identity (`FaceIds`), the declarations
+    // it holds, its sources' URLs resolved, and the first of those URLs for a face not listed before.
+    pub(crate) fn sheet_facts(&mut self, store: &crate::sheets::SheetStore) -> (bool, Vec<SheetFace>) {
         use style::font_face::DescriptorId;
         use style::stylesheets::{CssRule, StylesheetInDocument};
         const DESCRIPTORS: [DescriptorId; 13] = [
@@ -682,21 +731,36 @@ impl StyleEngine {
         ];
         let guard = self.lock.read();
         let device = self.stylist.device();
+        let ids = &mut self.face_ids;
+        // (…what a sheet no longer in the document held is no face of its now)
+        ids.by_rule.retain(|&(version, _), _| self.author.iter().any(|a| a.version == version));
         let mut faces = Vec::new();
         let mut image = false;
-        for (i, a) in self.author.iter().enumerate() {
+        let mut seen = Vec::new();
+        let mut held = std::collections::HashMap::new();
+        for a in &self.author {
             image |= a.css_image;
-            if !a.sheet.is_effective_for_device(device, &NO_CUSTOM_MEDIA, &guard) {
+            if seen.contains(&a.version) || !a.sheet.is_effective_for_device(device, &NO_CUSTOM_MEDIA, &guard) {
                 continue;
             }
+            seen.push(a.version);
             for rule in a.sheet.contents(&guard).effective_rules(device, &*NO_CUSTOM_MEDIA, &guard) {
                 if let CssRule::Import(import) = rule {
                     let import = import.read_with(&guard);
                     image |= import.url.url().is_some_and(|u| store.image_import(u.as_str()));
                     continue;
                 }
-                let CssRule::FontFace(face) = rule else { continue };
-                let face = face.read_with(&guard);
+                let CssRule::FontFace(rule) = rule else { continue };
+                let key = (a.version, face_address(rule));
+                let nth = held.entry(key).and_modify(|n| *n += 1).or_insert(0usize);
+                let (_, known) = ids.by_rule.entry(key).or_insert_with(|| (rule.clone(), Vec::new()));
+                let fresh = known.len() <= *nth;
+                if fresh {
+                    ids.last += 1;
+                    known.push(ids.last);
+                }
+                let id = known[*nth];
+                let face = rule.read_with(&guard);
                 let d = &face.descriptors;
                 let mut text = String::new();
                 for id in DESCRIPTORS {
@@ -708,13 +772,13 @@ impl StyleEngine {
                 if let Some(src) = &d.src {
                     text.push_str(&format!("src: {}; ", font_face_src(src)));
                 }
-                let first_url = d.src.as_ref().and_then(|src| {
+                let first_url = d.src.as_ref().filter(|_| fresh).and_then(|src| {
                     src.0.iter().find_map(|source| match source {
                         style::font_face::Source::Url(u) => u.url.url().map(|url| url.as_str().to_owned()),
                         style::font_face::Source::Local(_) => None,
                     })
                 });
-                faces.push((i, text.trim_end().to_owned(), first_url));
+                faces.push(SheetFace { id, text: text.trim_end().to_owned(), first_url });
             }
         }
         (image, faces)
