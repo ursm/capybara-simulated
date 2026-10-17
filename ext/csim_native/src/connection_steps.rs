@@ -9,10 +9,9 @@ use crate::dom::{nid_arg, realm_id, NodeData, NodeId, NodeKind, RealmArena, STAT
 // What connecting an element runs (`connection_steps`), a bit each: an option's selectedness initialised, a select's
 // run once its options are, an open dialog back on its document's open dialogs list (its removing steps took it off), a
 // `<selectedcontent>` filled from its select, a media or plugin element's resource and an SVG `<use>`'s external
-// document fetched, a script prepared, a `<link>`'s resource obtained and a `<style>`'s sheet loaded, an inline style's
-// background image fetched (by a controlled document), a `<source>`'s media element told of it, a frame's browsing
-// context made, a `<meta http-equiv=default-style>`'s stylesheet set chosen, a `nonce` hidden (nonce.rs), a custom
-// element upgraded or called back. Each is an element of its exact local name in its own namespace — HTML's, a `<use>`
+// document fetched, a script prepared, a `<link>`'s resource obtained and a `<style>`'s sheet loaded, a `<source>`'s
+// media element told of it, a frame's browsing context made, a `<meta http-equiv=default-style>`'s stylesheet set
+// chosen, a `nonce` hidden (nonce.rs), a custom element upgraded or called back. Each is an element of its exact local name in its own namespace — HTML's, a `<use>`
 // SVG's, a `<script>` or `<style>` either — as Chrome fires no `load` for a MathML `<style>` or an HTML `STYLE`.
 pub(crate) const CONNECT_OPTION: u32 = 1;
 pub(crate) const CONNECT_SELECT: u32 = 1 << 1;

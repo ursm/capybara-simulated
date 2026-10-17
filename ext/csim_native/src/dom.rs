@@ -1080,6 +1080,8 @@ pub(crate) struct RealmState {
     pub(crate) restyled: std::cell::Cell<u32>,
     // The images restyled content uses that no rendering update has fetched yet (rendered.rs `note_css_images`).
     pub(crate) css_images: std::cell::RefCell<crate::rendered::CssImages>,
+    // …and the resources connecting an element fetched for no consumer, by initiator and URL (subresources.rs).
+    pub(crate) timed_resources: crate::subresources::TimedResources,
     // The root element the last layout laid out and the viewport it laid it out against, `[width, height]`: what the
     // geometry (geometry.rs) reads every box of that layout in.
     pub(crate) layout_root: Option<NodeId>,
@@ -1616,6 +1618,7 @@ impl RealmArena {
         self.directionality.get_mut().1.clear();
         self.sheets.reset();
         *self.css_images.get_mut() = Default::default();
+        self.timed_resources.clear();
         // (…in place: the style engine holds the same table, and outlives the page)
         self.faces.with(|faces| *faces = Default::default());
         self.mutations += 1;
@@ -2852,6 +2855,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::canvas_text::install(scope, ns, context_id);
     crate::canvas_paint::install(scope, ns, context_id);
     crate::media::install(scope, ns, context_id);
+    crate::subresources::install(scope, ns, context_id);
     crate::image_requests::install(scope, ns, context_id);
     crate::drag_data_store::install(scope, ns, context_id);
     crate::search_params::install(scope, ns, context_id);
