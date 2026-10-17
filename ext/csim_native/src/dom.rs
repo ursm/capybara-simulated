@@ -1160,6 +1160,9 @@ impl RealmArena {
     }
     // A new context is realm `cid`: whatever an earlier context of that id made is unreachable, and its state with it.
     pub(crate) fn realm_begins(&mut self, cid: i32) {
+        // (…the blob URLs its last document made revoked: File API's unloading document cleanup steps — and the old
+        // context's objects let go of, which an entry rooted)
+        self.blob_urls.forget_realm(cid);
         if cid != self.cur && !self.parked.contains_key(&cid) {
             return;
         }

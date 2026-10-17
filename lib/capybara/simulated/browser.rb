@@ -561,7 +561,7 @@ module Capybara
         @worker_busy = 0
         @worker_init_lock = Mutex.new
         # Cross-isolate `blob:` store. Worker isolates can't see the
-        # main scope's `__csimBlobs` Map, so we mirror bytes here and
+        # page isolate's blob URL store (blob_urls.rs), so we mirror bytes here and
         # workers resolve them through a host fn.
         @blob_registry = {}
         @blob_registry_lock = Mutex.new
@@ -9160,10 +9160,10 @@ module Capybara
             return data[:bytes]
           end
           bytes = @runtime.call('__csimReadBlobBytes', u)
-          # A blob created INSIDE a frame realm lives in that realm's in-VM store, which the main
-          # runtime's `__csimReadBlobBytes` above can't see. But createObjectURL also registered its
-          # bytes in the cross-realm `@blob_registry` (crossCtx, since a frame realm is multi-realm),
-          # so fall back to it — this is what makes `new Worker(blobURL)` work from a data: iframe.
+          # A blob the isolate's store has none of — one a worker's isolate created — is in the
+          # cross-context `@blob_registry` where its creator registered its bytes, so fall back to it.
+          # (A frame realm's is in the isolate's store, which `__csimReadBlobBytes` reads whichever
+          # realm made it: `new Worker(blobURL)` from a data: iframe.)
           bytes = blob_resolve(u) if bytes.nil? || bytes.empty?
           return nil if bytes.nil? || bytes.empty?
           return bytes

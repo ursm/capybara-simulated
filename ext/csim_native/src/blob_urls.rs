@@ -6,17 +6,15 @@ use std::collections::HashMap;
 
 use crate::dom::{dom, realm_id, register};
 
+// One entry a URL (§8.3: the blob and the environment that made it), whichever realm revokes it.
 #[derive(Default)]
-pub(crate) struct BlobUrls(HashMap<String, Vec<(i32, v8::Global<v8::Object>)>>);
+pub(crate) struct BlobUrls(HashMap<String, (i32, v8::Global<v8::Object>)>);
 
 impl BlobUrls {
-    // …of realm `cid` no more: its document went (a frame removed, its page torn down), and the URLs it made with it
-    // (url-lifetime: "Removing an iframe").
+    // …of realm `cid` no more: its document went (a frame removed or navigated, its page torn down, a new one begun in
+    // its context), and the URLs it made with it (url-lifetime: "Removing an iframe").
     pub(crate) fn forget_realm(&mut self, cid: i32) {
-        self.0.retain(|_, entries| {
-            entries.retain(|(realm, _)| *realm != cid);
-            !entries.is_empty()
-        });
+        self.0.retain(|_, (realm, _)| *realm != cid);
     }
 }
 
@@ -27,46 +25,33 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "blobUrlDelete", blob_url_delete, context_id);
 }
 
-// __dom.blobUrlSet(url, blob): the calling realm's entry for `url` names `blob`.
+// __dom.blobUrlSet(url, blob): `url` names `blob`, made in the calling realm.
 fn blob_url_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(blob) = v8::Local::<v8::Object>::try_from(args.get(1)) else { return };
     let url = args.get(0).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
     let blob = v8::Global::new(scope, blob);
-    let entries = dom(scope).arena.blob_urls.0.entry(url).or_default();
-    entries.retain(|(realm, _)| *realm != cid);
-    entries.push((cid, blob));
+    dom(scope).arena.blob_urls.0.insert(url, (cid, blob));
 }
 
-// __dom.blobUrlGet(url) -> the blob `url` names — the calling realm's entry first, else the first another realm of the
-// isolate made — or undefined for none.
+// __dom.blobUrlGet(url) -> the blob `url` names, whichever realm of the isolate made it, or undefined for none.
 fn blob_url_get(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
-    let cid = realm_id(scope, &args);
-    let Some(entries) = dom(scope).arena.blob_urls.0.get(&url) else { return };
-    let Some((_, blob)) = entries.iter().find(|(realm, _)| *realm == cid).or_else(|| entries.first()) else { return };
+    let Some((_, blob)) = dom(scope).arena.blob_urls.0.get(&url) else { return };
     let blob = blob.clone();
     rv.set(v8::Local::new(scope, blob).into());
 }
 
-// __dom.blobUrlRealm(url) -> whether the calling realm has an entry for `url`.
+// __dom.blobUrlRealm(url) -> whether the calling realm made the blob `url` names.
 fn blob_url_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    let has = dom(scope).arena.blob_urls.0.get(&url).is_some_and(|entries| entries.iter().any(|(realm, _)| *realm == cid));
-    rv.set_bool(has);
+    rv.set_bool(dom(scope).arena.blob_urls.0.get(&url).is_some_and(|(realm, _)| *realm == cid));
 }
 
-// __dom.blobUrlDelete(url): the calling realm's entry for `url` let go of (revoked, or dropped as another window revoked
-// it).
+// __dom.blobUrlDelete(url): `url` names no blob any more — revoked (the origin's check the bindings', before), or
+// dropped as another window revoked it — whichever realm made it.
 fn blob_url_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
-    let cid = realm_id(scope, &args);
-    let urls = &mut dom(scope).arena.blob_urls.0;
-    if let Some(entries) = urls.get_mut(&url) {
-        entries.retain(|(realm, _)| *realm != cid);
-        if entries.is_empty() {
-            urls.remove(&url);
-        }
-    }
+    dom(scope).arena.blob_urls.0.remove(&url);
 }
