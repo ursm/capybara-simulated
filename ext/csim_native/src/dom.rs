@@ -2857,6 +2857,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::url_pattern::install(scope, ns, context_id);
     crate::sw_router::install(scope, ns, context_id);
     crate::ws_state::install(scope, ns, context_id);
+    crate::service_worker::install(scope, ns, context_id);
     crate::storage_areas::install(scope, ns, context_id);
     crate::paint::install(scope, ns, context_id);
     crate::keys::install(scope, ns, context_id);

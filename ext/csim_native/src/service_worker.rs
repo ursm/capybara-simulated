@@ -122,3 +122,30 @@ mod tests {
         assert_eq!(max_scope_for_ruby("https://a.test/".into(), script.into(), None), "scope");
     }
 }
+
+// Whether `clients.claim()` of the registration at `scope` claims a client whose URL is `href` (Service Workers §4.3.4):
+// the client's in that scope — its URL starts with it — and that is its LONGEST matching registration: where a strictly
+// longer one of `scopes`, the origin's registrations, covers it too, a more specific worker controls it, not the claiming
+// one (claim-not-using-registration).
+pub(crate) fn claims(href: &str, scope: &str, scopes: &[String]) -> bool {
+    !scope.is_empty() && href.starts_with(scope) && !scopes.iter().any(|s| s.len() > scope.len() && href.starts_with(s.as_str()))
+}
+
+pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "swClaims", claims_op, context_id);
+}
+
+// __dom.swClaims(href, scope, scopes) -> `claims`.
+fn claims_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let href = args.get(0).to_rust_string_lossy(scope);
+    let claiming = args.get(1).to_rust_string_lossy(scope);
+    let mut scopes = Vec::new();
+    if let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(2)) {
+        for i in 0..list.length() {
+            if let Some(s) = list.get_index(scope, i) {
+                scopes.push(s.to_rust_string_lossy(scope));
+            }
+        }
+    }
+    rv.set_bool(claims(&href, &claiming, &scopes));
+}
