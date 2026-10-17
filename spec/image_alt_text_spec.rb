@@ -55,4 +55,21 @@ RSpec.describe 'an image rendering its alt text' do
     }
     expect(widths).to eq([8, 16])
   end
+
+  # (…a non-replaced element, which its `::before` and `::after` render in — Chrome both, Firefox the `::after`; and
+  # one whose `display: contents` is `none`, as an image's is: CSS Display 3 Appendix B, Chrome and Firefox 0 tall)
+  it 'renders its pseudo-elements beside its alt text, and nothing for display: contents' do
+    page = <<~HTML
+      <!doctype html><meta charset="utf-8"><style>#a::before { content: "BEFORE " } #a::after { content: " AFTER" }</style>
+      <body style="margin:0"><div><img id=a alt="hello world"></div><div><span id=s>BEFORE hello world AFTER</span></div>
+      <div id=c><img alt="hello world" style="display:contents"></div>
+    HTML
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      ['a', 's', 'c'].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return [r.width, r.height]; })
+    JS
+    expect(got[0]).to eq(got[1])
+    expect(got[2][1]).to eq(0)
+  end
 end

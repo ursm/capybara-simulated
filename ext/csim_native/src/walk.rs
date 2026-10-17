@@ -463,6 +463,12 @@ struct GeneratedState<'a> {
 const GENERATED_TEXT: u32 = u32::MAX;
 pub(crate) const PSEUDOS: [style::selector_parser::PseudoElement; 2] =
     [style::selector_parser::PseudoElement::Before, style::selector_parser::PseudoElement::After];
+// The HTML elements whose `display: contents` computes to `none` (CSS Display 3 Appendix B, "Unusual elements"): those
+// a box of their own renders — replaced, a control, a break.
+const CONTENTS_IS_NONE: [&str; 16] = [
+    "br", "wbr", "meter", "progress", "canvas", "embed", "object", "audio", "iframe", "img", "video", "frame", "frameset",
+    "input", "textarea", "select",
+];
 // The elements that generate no content whatever they declare (`NO_GENERATED_CONTENT`): the replaced ones, the
 // controls, and the breaks — and a `<progress>` / `<meter>`, which the walk lays out as a leaf of its own size, so no
 // box it could generate is ever there (Chrome draws none either).
@@ -528,8 +534,10 @@ impl<'a> Generated<'a> {
 }
 // What `id`'s `::before` (0) or `::after` (1) renders as the style engine styled it: its text (empty for a box that
 // holds none), or None where it generates no box.
+// (…an `<img>` rendering its alt text, a non-replaced element, among those that do: Chrome draws both, Firefox `::after`)
 pub(crate) fn generated_text_of(arena: &RealmArena, id: NodeId, which: usize) -> Option<Vec<u16>> {
-    let node = arena.get(id).filter(|n| n.kind == NodeKind::Element && !NO_GENERATED_CONTENT.contains(&n.rendering_tag()))?;
+    let generates = |n: &crate::dom::NodeData| !NO_GENERATED_CONTENT.contains(&n.rendering_tag()) || img_alt_text(arena, id, n).is_some();
+    let node = arena.get(id).filter(|n| n.kind == NodeKind::Element && generates(n))?;
     crate::style::eager_pseudo(arena, id, &PSEUDOS[which]).and_then(|style| generated_text(&style, node))
 }
 // What a generated box's `content` renders, or None for none: its strings, an `attr()` of its element (its fallback
@@ -1582,16 +1590,20 @@ pub(crate) fn replaced_or_control(arena: &RealmArena, id: NodeId, node: &crate::
         ),
     }
 }
-// What an `<img>` that does not represent an image renders instead (HTML §15.4.4 "Images"): a NON-REPLACED phrasing
-// element whose content is its alt text — that text, empty where it has none — or None where it is a replaced element:
-// one that represents an image, or whose two dimensions are both given (its attributes' or its style's) and whose image
-// is coming, or which has no `alt`, or whose document is in quirks mode. Chrome and Firefox both: `<img alt="hello"
-// width=100 height=50 style="width:30px">` broken is a run of "hello" (Chrome 48x18 with its icon, Firefox 38x22), and
-// `alt=""` — or no `alt` and no `src` — with not both dimensions is nothing (0x0). Where they part it stays replaced: a
-// broken `src` with no `alt` and not both dimensions (Chrome a 16x16 icon, Firefox a square box), which the steps make
-// a phrasing element too.
+// What an `<img>` that does not represent an image renders instead (HTML §15.4.4 "Images"): with alt text, a
+// NON-REPLACED phrasing element whose content is that text — its dimension attributes and `width` ignored as an inline's
+// are — or None where it is a replaced element all the same: one that represents an image; one whose image is coming
+// (img-replaced-box-while-loading: a replaced box while it loads, sized or not); one whose two dimensions are both given
+// (its attributes' or its style's) in a document in quirks mode; and one with no alt text, which renders as a replaced
+// box of no natural size where it represents nothing (`img_represents_nothing`) and Chrome's 16x16 where its image is
+// broken. Chrome and Firefox both: `<img alt="hello" width=100 height=50 style="width:30px">` broken is a run of
+// "hello" (Chrome 48x18 with its icon, Firefox 38x22).
 pub(crate) fn img_alt_text(arena: &RealmArena, id: NodeId, node: &crate::dom::NodeData) -> Option<Vec<u16>> {
     if node.rendering_tag() != "img" || node.natural_size.is_some() {
+        return None;
+    }
+    let alt = node.plain_attr_units("alt").filter(|a| !a.is_empty())?;
+    if arena.image_pending(id) {
         return None;
     }
     use style::values::generics::length::GenericSize as Size;
@@ -1601,13 +1613,16 @@ pub(crate) fn img_alt_text(arena: &RealmArena, id: NodeId, node: &crate::dom::No
             !matches!(p.width, Size::Auto) && !matches!(p.height, Size::Auto)
         })
     };
-    match node.plain_attr_units("alt") {
-        Some(alt) if !alt.is_empty() => {
-            let held = || arena.image_pending(id) || arena.document_mode(Some(arena.shadow_including_root(id))).0;
-            (!(sized() && held())).then_some(alt)
-        }
-        Some(_) => (!sized()).then(Vec::new),
-        None => (!sized() && node.get_attr("src").is_none_or(str::is_empty)).then(Vec::new),
+    let quirks = || arena.document_mode(Some(arena.shadow_including_root(id))).0;
+    (!(sized() && quirks())).then_some(alt)
+}
+// Whether an `<img>` with no image REPRESENTS NOTHING (HTML §4.8.4.4): its alt text empty, or none and no source — a
+// replaced box of no natural size, as Chrome lays it out: 0x0 with no sizes given, a declared axis kept and the other 0
+// (Chrome: `width: 100px` 100x0, `height: 40px` 0x40), atomic on its line.
+fn img_represents_nothing(node: &crate::dom::NodeData) -> bool {
+    match node.plain_attr("alt") {
+        Some(alt) => alt.is_empty(),
+        None => node.get_attr("src").is_none_or(str::is_empty),
     }
 }
 // An `<object>` that renders its FALLBACK content — its children, as the box its own style makes it — rather than a
@@ -1730,17 +1745,20 @@ impl<'a> Walk<'a> {
     fn push_children(&self, id: NodeId, out: &mut Vec<NodeId>) {
         let (first, kids, last) = match self.generated.box_info(id) {
             Some((.., text)) => (text, &[][..], None),
-            None => match self.generated.alt_text(id, self.node(id)) {
-                // (…an image's alt text, its content where it renders it)
-                Some(text) => (Some(text), &[][..], None),
-                None => {
-                    let [before, after] = self.generated.boxes_of(id);
-                    (before, flat_children(self.arena, self.node(id)), after)
-                }
-            },
+            None => {
+                let [before, after] = self.generated.boxes_of(id);
+                (before, flat_children(self.arena, self.node(id)), after)
+            }
         };
-        for c in first.into_iter().chain(kids.iter().copied().filter(|&c| self.arena.get(c).is_some())).chain(last) {
+        // (…an image's alt text, its content where it renders it)
+        let alt = self.generated.alt_text(id, self.node(id));
+        for c in first.into_iter().chain(alt).chain(kids.iter().copied().filter(|&c| self.arena.get(c).is_some())).chain(last) {
             if self.not_rendered(c) {
+                continue;
+            }
+            // (…`display: contents` on an element whose contents no box lays out — a replaced one, a control — is `none`:
+            // CSS Display 3 Appendix B; an `<img>`'s alt text, a `<canvas>`'s fallback spliced in by it is no content)
+            if self.boxless(c) && CONTENTS_IS_NONE.contains(&self.node(c).rendering_tag()) {
                 continue;
             }
             if self.boxless(c) {
@@ -2415,6 +2433,8 @@ impl<'a> Walk<'a> {
             "img" if img_alt_text(self.arena, id, node).is_some() => return Ok(None),
             "img" => match node.natural_size {
                 Some(natural) => Intrinsic::of(natural),
+                // (…one that represents nothing, or whose image is coming, of no natural size: Chrome and Firefox)
+                None if img_represents_nothing(node) || self.arena.image_pending(id) => sized(0.0, 0.0),
                 None => sized(16.0, 16.0),
             },
             "input" => {
@@ -4571,6 +4591,12 @@ impl<'a> Walk<'a> {
         }
         use style::values::computed::Contain;
         if b.contain.intersects(Contain::LAYOUT | Contain::PAINT) {
+            return true;
+        }
+        // (…and a block whose `content-visibility` is not `visible`, which turns layout and paint containment on: CSS
+        // Contain 2 §4 — Chrome: a `<p>`'s margin inside a `content-visibility: hidden` block stays inside it)
+        use style::computed_values::content_visibility::T as ContentVisibility;
+        if b.content_visibility != ContentVisibility::Visible && matches!(d.outside(), DisplayOutside::Block) {
             return true;
         }
         let col = style.get_column();

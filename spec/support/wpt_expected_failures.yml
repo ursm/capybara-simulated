@@ -3964,13 +3964,10 @@ html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-aspect-ratio.html:
 - 'Create, append and test immediately: <img> with attributes width=0.8, height=0.2'
 - 'Create, append and test immediately: <img> with attributes width=250, height=100'
-- 'Create, append and test immediately: <img> with attributes width=50% height=25%'
 - 'Create, append and test immediately: <img> with invalid trailing attributes width=50pp
   height=25xx'
 - 'Loaded images test: <img> with width, height and empty src attributes'
 - 'Loaded images test: Error image with width and height attributes'
-html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-empty-alt-replaced.html:
-- Images with an empty alt attribute have an intrinsic size of zero
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-align-right-1.html:
 - "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-align-right-ref.html
   (both renderings blank)"
@@ -3984,7 +3981,6 @@ html/rendering/replaced-elements/attributes-for-embedded-content-and-images/inpu
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/picture-aspect-ratio.html:
 - Computed style for width/height/aspect-ratio
 - Make sure style gets invalidated correctly when the source gets removed.
-- Percentages on source should be ignored for aspect-ratio but used for width/height.
 - Source width/height should take precedence over img attributes.
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/textarea-scrollheight-empty.html:
 - Textarea scrollHeight shouldn't collapse under a line height
@@ -4021,16 +4017,11 @@ html/rendering/replaced-elements/embedded-content/video-controls-vertical-writin
   (both renderings blank)"
 ? html/rendering/replaced-elements/images/abs-pos-transferred-max-width-from-percentage-max-height-in-auto-height-containing-block.html
 : - "== css/support/60x60-green.png"
-html/rendering/replaced-elements/images/image-fallback-respect-max-width.html:
-- "== html/rendering/replaced-elements/images/image-fallback-respect-max-width-ref.html
-  (both renderings blank)"
 html/rendering/replaced-elements/images/img-fallback-baseline-alignment.html:
 - Image fallback baseline alignment
 - "[harness] TIMEOUT"
 html/rendering/replaced-elements/images/img-represents-image-size-before-partially-available.html:
 - "<img> representing image: Natural size before partially available"
-html/rendering/replaced-elements/images/img-represents-nothing-style-mutation.html:
-- "<img> representing nothing and image related style mutation"
 html/rendering/replaced-elements/images/img-sizes-auto.html:
 - <img sizes="AuTo"> - contain
 - <img sizes="AuTo"> - contain-intrinsic-size
@@ -4662,8 +4653,6 @@ html/semantics/forms/the-textarea-element/textarea-placeholder-lineheight.html:
 - Bounding rect height for textarea must be the same as line-height
 html/semantics/interactive-elements/the-details-element/auto-expand-details-element-fragment.html:
 - auto-expand-details-element-fragment
-html/semantics/interactive-elements/the-details-element/details-add-summary.html:
-- "== html/semantics/interactive-elements/the-details-element/details-add-summary-ref.html"
 html/semantics/interactive-elements/the-details-element/details-toggle-source.html:
 - 'ToggleEvent.source on <details> elements: click details.'
 html/semantics/interactive-elements/the-dialog-element/backdrop-descendant-selector.html:

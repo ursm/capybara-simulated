@@ -147,6 +147,8 @@ struct Painter<'a> {
     width: f64,
     height: f64,
     list: List,
+    // What is skipped (`Skipped`): laid out, and painted not at all.
+    skipped: crate::rendered::Skipped,
 }
 
 impl Painter<'_> {
@@ -291,7 +293,7 @@ impl Painter<'_> {
     // One box: its background and its borders — four rectangles, which is what a solid border IS. (A dashed or dotted
     // one is painted solid for now, and a radius is not honoured.)
     fn paint_box(&mut self, el: NodeId) {
-        if !self.visible(el, None) {
+        if !self.visible(el, None) || self.skipped.node(self.arena, el) {
             return;
         }
         let Some((r, m)) = self.box_frame(el) else { return };
@@ -319,7 +321,7 @@ impl Painter<'_> {
     // layout sized it to sit. The bindings hold the bitmap (an image's decoded one, a canvas's backing store), so the
     // command names the element and draws nothing where it has none.
     fn paint_bitmap(&mut self, el: NodeId) {
-        if !self.visible(el, None) {
+        if !self.visible(el, None) || self.skipped.node(self.arena, el) {
             return;
         }
         let Some((r, m)) = self.box_frame(el) else { return };
@@ -338,6 +340,15 @@ impl Painter<'_> {
     // One text piece of `box_owner`'s, in its owner's font and colour, where the flow put it.
     fn paint_run(&mut self, painted: &Painted, row: usize, owner: Owner, box_owner: NodeId) {
         if !self.visible(owner.element, owner.pseudo) {
+            return;
+        }
+        // (…a generated box's text skipped where the box is; an element's own text where it skips its contents too)
+        let skipped = if owner.node != owner.element {
+            self.skipped.node(self.arena, owner.node)
+        } else {
+            self.skipped.contents_of(self.arena, owner.element)
+        };
+        if skipped {
             return;
         }
         let at = row * ROW;
@@ -486,7 +497,7 @@ fn bitmap_element(arena: &RealmArena, id: NodeId) -> bool {
 fn display_list(arena: &RealmArena, engine: &mut StyleEngine, painted: &Painted, root: Option<NodeId>, body: Option<NodeId>, frame: [f64; 4], now: f64) -> List {
     let [width, height, dx, dy] = frame;
     let list = List { cmds: Vec::new(), strings: Vec::new(), string_at: HashMap::new(), nodes: Vec::new() };
-    let mut p = Painter { arena, engine, now, dx, dy, width, height, list };
+    let mut p = Painter { arena, engine, now, dx, dy, width, height, list, skipped: Default::default() };
     // A page with no background of its own is white, as a browser's canvas is.
     let background = root
         .and_then(|r| p.paint_color(r, "background-color"))

@@ -71,9 +71,43 @@ fn ua_not_rendered(n: &NodeData) -> bool {
     }
 }
 
+// What is SKIPPED (CSS Contain 2 §4, "skips its contents"): laid out and measured, but neither painted nor hit nor found —
+// the contents of a box whose `content-visibility` is `hidden` (style.rs `skips_contents`: a `hidden=until-found`'s
+// among them), and those of a closed `<details>` but its summary (HTML's `::details-content`, which its UA style
+// skips). Chrome paints none of either and measures both. Each node's answer kept for as long as one pass asks.
+#[derive(Default)]
+pub(crate) struct Skipped(HashMap<NodeId, bool>);
+
+impl Skipped {
+    // Whether `id` — an element, a generated box, a text — is in skipped contents.
+    pub(crate) fn node(&mut self, arena: &RealmArena, id: NodeId) -> bool {
+        if let Some(&skipped) = self.0.get(&id) {
+            return skipped;
+        }
+        let skipped = crate::geometry::flat_parent(arena, id).is_some_and(|p| skips(arena, p, Some(id)) || self.node(arena, p));
+        self.0.insert(id, skipped);
+        skipped
+    }
+    // …and whether what `el` holds of its own — its text, its runs — is: where it skips its contents, or is skipped.
+    pub(crate) fn contents_of(&mut self, arena: &RealmArena, el: NodeId) -> bool {
+        skips(arena, el, None) || self.node(arena, el)
+    }
+}
+// Whether `el` skips `child` among its contents — any of them for none: one whose `content-visibility` is `hidden`, or a
+// closed `<details>`, every child of which but its summary (and its generated boxes, outside `::details-content`).
+fn skips(arena: &RealmArena, el: NodeId, child: Option<NodeId>) -> bool {
+    let Some(n) = arena.get(el).filter(|n| n.kind == NodeKind::Element) else { return false };
+    if primary_style(arena, el).is_some_and(|s| crate::style::skips_contents(&s)) {
+        return true;
+    }
+    n.is_html_named("details")
+        && n.plain_attr("open").is_none()
+        && child.is_none_or(|c| arena.get(c).is_some_and(|c| c.generated_of.is_none()) && !arena.is_details_summary(c))
+}
+
 // Is `id` RENDERED — an element of a connected document with a box: no `display: none` up its flat tree (the engine's
 // `shown`), no invisible tag, no fallback-content ancestor, no slot that does not take it; with `honour_skips`, not
-// SKIPPED either (a closed `<details>`'s content, laid out but `checkVisibility()` false); and unless
+// SKIPPED either (`Skipped`: laid out, but `checkVisibility()` false); and unless
 // `ignore_visibility`, not hidden by `visibility`. `rendered_at`: a node the caller already reached through rendered
 // ancestors, where the walk stops.
 pub(crate) fn rendered(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, ignore_visibility: bool, honour_skips: bool, rendered_at: Option<NodeId>, now: f64) -> bool {
@@ -99,6 +133,9 @@ pub(crate) fn rendered(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId,
                     return false;
                 }
                 if honour_skips && cur != id && tag(n) == "details" && n.plain_attr("open").is_none() && !summary_seen {
+                    return false;
+                }
+                if honour_skips && cur != id && primary_style(arena, cur).is_some_and(|s| crate::style::skips_contents(&s)) {
                     return false;
                 }
                 summary_seen |= tag(n) == "summary";

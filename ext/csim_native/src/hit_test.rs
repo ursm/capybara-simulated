@@ -48,6 +48,8 @@ pub(crate) struct Painting<'a> {
     chains: HashMap<NodeId, Chain>,
     // …and each box's painted rect, as an occlusion test found it (`painted_rect`).
     painted: HashMap<NodeId, Option<[f64; 4]>>,
+    // What is skipped (`Skipped`): laid out, but hit not at all, and hiding nothing.
+    skipped: std::cell::RefCell<crate::rendered::Skipped>,
 }
 
 impl<'a> Painting<'a> {
@@ -56,7 +58,8 @@ impl<'a> Painting<'a> {
             arena,
             engine,
             stacking_animated: STACKING_ANIMATED.iter().map(|p| p.to_string()).collect(),
-            order: HashMap::new(), preorder: Vec::new(), ends: Vec::new(), chains: HashMap::new(), painted: HashMap::new()
+            order: HashMap::new(), preorder: Vec::new(), ends: Vec::new(), chains: HashMap::new(), painted: HashMap::new(),
+            skipped: Default::default()
         };
         if let Some(root) = arena.layout_root {
             p.visit(root);
@@ -423,7 +426,7 @@ impl<'a> Painting<'a> {
                 continue;
             }
             let Some(s) = self.style(id) else { continue };
-            if s.get_inherited_box().visibility != style::computed_values::visibility::T::Visible || self.transparent(id) {
+            if s.get_inherited_box().visibility != style::computed_values::visibility::T::Visible || self.transparent(id) || self.skipped(id) {
                 continue;
             }
             let key = self.key(id, false);
@@ -473,12 +476,15 @@ impl<'a> Painting<'a> {
     fn paints_replaced(&self, id: NodeId) -> bool {
         self.arena.get(id).is_some_and(|n| matches!(n.rendering_tag(), "img" | "canvas" | "video" | "iframe" | "embed" | "object" | "select"))
     }
+    fn skipped(&self, id: NodeId) -> bool {
+        self.skipped.borrow_mut().node(self.arena, id)
+    }
     fn hits(&self, id: NodeId, x: f64, y: f64) -> bool {
         let Some(s) = self.style(id) else { return false };
         if s.get_inherited_ui().pointer_events == style::computed_values::pointer_events::T::None {
             return false;
         }
-        if s.get_inherited_box().visibility != style::computed_values::visibility::T::Visible {
+        if s.get_inherited_box().visibility != style::computed_values::visibility::T::Visible || self.skipped(id) {
             return false;
         }
         // (…and not inert: as if absent to a hit, HTML §6.6.2 — asked of a box around the point alone)

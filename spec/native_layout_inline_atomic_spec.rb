@@ -859,19 +859,23 @@ RSpec.describe 'native layout inline-atomic' do
     ].each {|body| expect_layout(body) }
   end
 
+  # An `<img>` that represents nothing (no `src`, no `alt`) is an atomic of no size on its line, at its baseline —
+  # Chrome's 0 by 0, which the golden holds (it was a 16x16 box).
+  it 'places an image that represents nothing as an atomic of no size' do
+    expect_layout('<div style="width:400px">text <img id="m"> after</div>')
+  end
+
   # Where an atomic's own box or its place on the line differs from Chrome's, one shape a family, Chrome's figure
   # beside the layout's:
   #   * an inline-flex line is 44 tall where Chrome's is 40 — the flex container's baseline sits lower;
   #   * the marker after an inline-table with a `<thead>` sits at 35, on the second row's baseline, where Chrome's sits
   #     at 17, on the header's;
-  #   * an `<img>` with no `src` is a 16x16 box, Chrome's is 0 by 0;
   #   * a wrapping inline-flex capped at `max-width: 40px` is as wide as its 80px item, Chrome's is 40;
   #   * an inline list box is 35.83 wide, Chrome's 20.83 (its options' rows 15 tall where Chrome's are 17).
   it 'places an atomic where Chrome does not, one family at a time' do
     [
       [3, 44, 40, '<div id="m" style="width:400px">text <span style="display:inline-flex"><div style="width:50px;height:30px"></div><div style="width:80px;height:40px"></div></span> after</div>'],
       [1, 35, 17, '<div style="width:400px">x <table style="display:inline-table"><thead><tr><td>h</td></tr></thead><tbody><tr><td>b</td></tr></tbody></table><span id="m" style="display:inline-block;width:4px;height:4px"></span> y</div>'],
-      [2, 16, 0, '<div style="width:400px">text <img id="m"> after</div>'],
       [2, 80, 40, '<div style="width:400px">text <span id="m" style="display:inline-flex;flex-wrap:wrap;max-width:40px"><div style="width:80px;height:10px;flex-shrink:0"></div></span> after</div>'],
       [2, 35.83, 20.83, '<div style="width:400px">text <select id="m" multiple size="3" style="display:inline"><option>a</option><option>bb</option></select> after</div>']
     ].each do |index, shared, chrome, body|
