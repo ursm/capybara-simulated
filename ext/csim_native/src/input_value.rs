@@ -413,7 +413,7 @@ pub(crate) fn typed_number(raw: &str) -> String {
 // ── the ops ──
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "inputSanitize", input_sanitize, context_id);
-    crate::dom::register(scope, ns, "inputTypedNumber", input_typed_number, context_id);
+    crate::dom::register(scope, ns, "inputValueOf", input_value_of, context_id);
     crate::dom::register(scope, ns, "inputNumber", input_number, context_id);
     crate::dom::register(scope, ns, "inputValue", input_value, context_id);
     crate::dom::register(scope, ns, "inputDate", input_date, context_id);
@@ -452,12 +452,19 @@ fn input_sanitize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set(out);
 }
 
-// __dom.inputTypedNumber(raw) -> a number field's value as the user typed it (`typed_number`).
-fn input_typed_number(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let raw = args.get(0).to_rust_string_lossy(scope);
-    set_string(scope, &mut rv, &typed_number(&raw));
+// __dom.inputValueOf(input) -> what its `value` getter returns (form_entries.rs `input_value`) — null for a file
+// input, whose files the bindings hold.
+fn input_value_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let d = crate::dom::dom(scope);
+    let Some(cid) = d.arena.get(id).map(|n| n.realm) else { return };
+    let arena: &crate::dom::RealmArena = d.arena.enter(cid);
+    let engine = d.styles.get(&cid);
+    let colour = |v: &str| colour_value(engine, arena, v);
+    let Some(units) = arena.get(id).and_then(|n| arena.input_value(n, &colour)) else { return };
+    rv.set(crate::dom::utf16_value(scope, &units));
 }
-
 // __dom.inputNumber(type, value) -> the value as `type`'s number (`number_of`), NaN for none.
 fn input_number(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let ty = args.get(0).to_rust_string_lossy(scope);

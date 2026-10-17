@@ -382,6 +382,8 @@ fn forbidden_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let method = units(scope, args.get(0));
     rv.set_bool(forbidden_method(&method));
 }
+// (…these two take a ByteString the bindings converted already: `units` reads a unit past U+00FF as 0xFF, which is
+// obs-text to them)
 // __dom.headerValue(s) -> whether `s` is a header value (`is_header_value`).
 fn header_value_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let s = units(scope, args.get(0));

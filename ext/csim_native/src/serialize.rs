@@ -72,6 +72,12 @@ impl Writer<'_> {
                             self.out.extend_from_slice(&n.data);
                             self.push(">");
                         }
+                        // (…a document's doctype: its name alone, no public or system id — HTML §13.3)
+                        NodeKind::Other => {
+                            self.push("<!DOCTYPE ");
+                            self.out.extend_from_slice(&n.data);
+                            self.push(">");
+                        }
                         _ => {}
                     }
                 }
@@ -559,7 +565,7 @@ fn serialize_xml(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     }
 }
 
-// __dom.serializeHtml(nid, outer, shadows) -> the node's children as HTML — or, `outer`, the element itself (`html`);
+// __dom.serializeHtml(nid, outer, shadows) -> the node's (an element's, a fragment's, a document's) children as HTML — or, `outer`, the element itself (`html`);
 // `shadows` (or undefined) a flat `[hostNid, openingTag, …]` of the shadow roots to write.
 fn serialize_html(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);

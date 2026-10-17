@@ -181,10 +181,16 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "mimeCharsetUtf8", mime_charset_utf8, context_id);
 }
 
-// __dom.mimeIsXml(contentType) -> whether it is an XML MIME type (document_encoding.rs `is_xml`).
+// An XML MIME type (MIME Sniffing §4.6): `text/xml`, `application/xml`, or any `+xml` subtype — of a type or its
+// essence, parameters and all.
+pub(crate) fn is_xml(content_type: &str) -> bool {
+    let essence = content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    essence.ends_with("+xml") || essence == "text/xml" || essence == "application/xml"
+}
+// __dom.mimeIsXml(contentType) -> whether it is an XML MIME type (`is_xml`).
 fn mime_is_xml(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let ct = args.get(0).to_rust_string_lossy(scope);
-    rv.set_bool(crate::document_encoding::is_xml(&ct));
+    rv.set_bool(is_xml(&ct));
 }
 
 // __dom.mimeCharsetUtf8(value) -> a request's `Content-Type` re-serialized with its `charset` UTF-8 (XHR's send(): a

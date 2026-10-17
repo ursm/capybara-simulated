@@ -30,11 +30,6 @@ fn decode_document_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set(pair.into());
 }
 
-// An XML MIME type (MIME Sniffing §4.6): `text/xml`, `application/xml`, or any `+xml` subtype.
-pub(crate) fn is_xml(content_type: &str) -> bool {
-    let essence = content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
-    essence.ends_with("+xml") || essence == "text/xml" || essence == "application/xml"
-}
 
 // Which document is being read: a navigation's — a frame's with its PARENT's encoding to inherit, if same-origin —
 // or an XHR "document response", which prescans no further than the first 1024 bytes, inherits nothing, and is UTF-8
@@ -54,7 +49,7 @@ fn sniff(bytes: &[u8], content_type: &str, reading: Reading) -> &'static Encodin
         return encoding;
     }
     let head = &bytes[..bytes.len().min(1024)];
-    if is_xml(content_type) {
+    if crate::mime::is_xml(content_type) {
         return xml_declaration(head).unwrap_or(UTF_8);
     }
     let Reading::Navigation(parent) = reading else { return prescan(head, false).unwrap_or(UTF_8) };

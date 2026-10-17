@@ -5,6 +5,7 @@
 // fill in.
 
 use crate::dom::{nid_arg, NodeData, NodeId, RealmArena, STATE_DIRTY_BY_USER, STATE_FORM_ASSOCIATED, STATE_SELECTED};
+use crate::input_types::{MODE_DEFAULT, MODE_DEFAULT_ON, MODE_FILENAME};
 use crate::input_value::{sanitize_units, typed_number, Attrs};
 
 pub(crate) enum Entry {
@@ -67,7 +68,7 @@ impl RealmArena {
                     "hidden" if String::from_utf16_lossy(&name).eq_ignore_ascii_case("_charset_") => {
                         (encoding.to_vec(), true)
                     }
-                    ty => (self.input_value_units(n, ty, colour), crate::input_types::facts(ty) & crate::input_types::DIRNAME != 0),
+                    ty => (self.input_value(n, colour).unwrap_or_default(), crate::input_types::facts(ty) & crate::input_types::DIRNAME != 0),
                 },
                 "textarea" => {
                     let value = self.raw_value_units(n);
@@ -98,18 +99,27 @@ impl RealmArena {
         out
     }
 
-    // An input's value as its `value` getter has it, past the modes that are an attribute's: its live value — its
-    // `value` attribute until dirtied — sanitized for its type, but a number field the user typed into, whose value
-    // reads as it was typed where it converts.
-    fn input_value_units(&self, n: &NodeData, ty: &str, colour: &dyn Fn(&str) -> String) -> Vec<u16> {
-        if matches!(ty, "hidden" | "submit" | "image" | "reset" | "button") {
-            return n.plain_attr_units("value").unwrap_or_default();
-        }
-        let raw = self.raw_value_units(n);
-        if ty == "number" && n.state & STATE_DIRTY_BY_USER != 0 {
-            return units(&typed_number(&String::from_utf16_lossy(&raw)));
-        }
-        sanitize_units(ty, &raw, &Attrs::of(n), colour)
+    // An `<input>`'s value as its `value` getter returns it, by its type's value mode (HTML §4.10.5.4) — None for
+    // "filename", whose files are the bindings': a "default" mode type's `value` attribute, a checkbox's and a radio's
+    // `on` where it has none; a "value" mode type's live value — its attribute until dirtied — sanitized for its type,
+    // but a number field the user typed into, whose value reads as it was typed where it converts ("001.50", "1e2" —
+    // Chrome).
+    pub(crate) fn input_value(&self, n: &NodeData, colour: &dyn Fn(&str) -> String) -> Option<Vec<u16>> {
+        let ty = n.input_type();
+        let attr = |or: &str| n.plain_attr_units("value").unwrap_or_else(|| units(or));
+        Some(match crate::input_types::value_mode(ty) {
+            MODE_FILENAME => return None,
+            MODE_DEFAULT_ON => attr("on"),
+            MODE_DEFAULT => attr(""),
+            _ => {
+                let raw = self.raw_value_units(n);
+                if ty == "number" && n.state & STATE_DIRTY_BY_USER != 0 {
+                    units(&typed_number(&String::from_utf16_lossy(&raw)))
+                } else {
+                    sanitize_units(ty, &raw, &Attrs::of(n), colour)
+                }
+            }
+        })
     }
 
     // A field's `dirname` entry, where it has a non-empty one: its directionality under that name.
