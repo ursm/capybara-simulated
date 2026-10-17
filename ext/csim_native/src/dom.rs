@@ -2746,6 +2746,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "sheetDisabled", sheet_disabled, context_id);
     register(scope, ns, "mediaText", media_text, context_id);
     register(scope, ns, "sheetMediaText", sheet_media_text, context_id);
+    register(scope, ns, "sheetApplies", sheet_applies, context_id);
     register(scope, ns, "sheetModificationDisallowed", sheet_modification_disallowed, context_id);
     register(scope, ns, "mediaQueries", media_queries, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
@@ -4487,6 +4488,21 @@ fn sheet_media_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         Some(stored.media_text.clone())
     });
     rv.set(utf16_value(scope, &current.unwrap_or_default()));
+}
+// __dom.sheetApplies(handle, width, height) -> whether a sheet no owner holds (a constructed one, adopted) contributes rules
+// at the viewport: its disabled flag clear, and its media list empty or matching — what the cascade hands the engine of a
+// document's or a shadow root's `adoptedStyleSheets`.
+fn sheet_applies(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(false);
+    let Some(sheet) = handle_arg(scope, &args, 0) else { return };
+    let viewport = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0) as f32);
+    let cid = realm_id(scope, &args);
+    let d = dom(scope);
+    let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
+    let Some(arena) = d.arena.enter_known(cid) else { return };
+    let Some(stored) = arena.sheets.get(sheet).filter(|s| !s.disabled && !s.set_excluded) else { return };
+    let media = String::from_utf16_lossy(&stored.media_text);
+    rv.set_bool(media.is_empty() || crate::style::media_matches(d.styles.get(&cid), arena, screen, &media));
 }
 // __dom.sheetModificationDisallowed(handle[, on]) -> whether the sheet's disallow modification flag is set (a
 // `replace()` pending); with `on`, that set.
