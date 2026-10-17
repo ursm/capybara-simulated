@@ -916,10 +916,6 @@ css/css-sizing/aspect-ratio/floats-aspect-ratio-001.html:
 - "== css/css-sizing/aspect-ratio/floats-aspect-ratio-001-ref.html"
 css/css-sizing/aspect-ratio/grid-aspect-ratio-005.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
-css/css-sizing/aspect-ratio/grid-aspect-ratio-008.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
-css/css-sizing/aspect-ratio/grid-aspect-ratio-009.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/grid-aspect-ratio-012.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/grid-aspect-ratio-024.html:
@@ -941,8 +937,6 @@ css/css-sizing/aspect-ratio/grid-aspect-ratio-036.html:
 css/css-sizing/aspect-ratio/grid-aspect-ratio-037.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/grid-aspect-ratio-041.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
-css/css-sizing/aspect-ratio/grid-aspect-ratio-align-items-center.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/intrinsic-size-006.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
@@ -3989,8 +3983,6 @@ html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/flex-legen
 - dynamic changes to position
 - inserting a new legend and removing it again
 - no dynamic changes
-html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/grid-template-propagation.html:
-- "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/grid-template-propagation-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-auto-margins.html:
 - "== html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-auto-margins-ref.html"
 html/rendering/non-replaced-elements/the-fieldset-and-legend-elements/legend-block-formatting-context.html:
