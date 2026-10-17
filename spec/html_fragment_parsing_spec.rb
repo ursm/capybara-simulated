@@ -54,4 +54,22 @@ RSpec.describe 'HTML fragment parsing' do
     expect(got).to eq(['body(li("a",svg@svg(title@svg(li("x")))))', 'body(p("q",math@m(annotation-xml@m(div("w")))))',
                        'body(span(math@m(mi@m("q"))))'])
   end
+
+  # The form element pointer a fragment parse starts with is the context's nearest inclusive ancestor `<form>` (HTML
+  # "parsing HTML fragments" step 11, "going straight up the ancestor chain"): a `<form>` in the markup is dropped under
+  # one — and not across a shadow root, whose host's form is no ancestor of its tree's. Chrome, both.
+  it "starts with the context's form, but none across a shadow root" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const outer = document.createElement('form');
+        const div = outer.appendChild(document.createElement('div'));
+        const host = outer.appendChild(document.createElement('span'));
+        const inner = host.attachShadow({mode: 'open'}).appendChild(document.createElement('div'));
+        div.innerHTML = '<form id="a"><input></form>';
+        inner.innerHTML = '<form id="b"><input></form>';
+        return [div.innerHTML, inner.innerHTML];
+      })()
+    JS
+    expect(got).to eq(['<input>', '<form id="b"><input></form>'])
+  end
 end

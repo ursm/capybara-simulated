@@ -641,10 +641,7 @@ fn html_run_built(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         let doc = v8::Local::<v8::Object>::try_from(args.get(2)).ok().map(|d| v8::Local::new(scope, d));
         let document = doc.and_then(|d| crate::node_handle::nid_of(scope, d.into()));
         let skeleton: [Option<crate::dom::NodeId>; 3] = [4, 5, 6].map(|k| crate::node_handle::nid_of(scope, args.get(k)));
-        let has_doctype = document.is_some_and(|d| {
-            let arena = &crate::dom::dom(scope).arena;
-            arena.get(d).is_some_and(|n| n.children.iter().any(|&c| arena.get(c).is_some_and(|c| c.kind == crate::dom::NodeKind::Other)))
-        });
+        let has_doctype = document.is_some_and(|d| crate::dom::dom(scope).arena.relative(d, crate::dom::RELATIVE_DOCTYPE).is_some());
         let builds = flags & MAY_BUILD != 0
             && document.is_some()
             && (resumed.is_some()

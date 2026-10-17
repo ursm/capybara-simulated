@@ -347,7 +347,7 @@ pub(crate) const RELATIVE_BODY: u32 = 14;
 const RELATIVE_SHADOW_ROOT: u32 = 15;
 const RELATIVE_HOST: u32 = 16;
 const RELATIVE_TEMPLATE_CONTENT: u32 = 17;
-const RELATIVE_DOCTYPE: u32 = 18;
+pub(crate) const RELATIVE_DOCTYPE: u32 = 18;
 
 
 impl NodeData {

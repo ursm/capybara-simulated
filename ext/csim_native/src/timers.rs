@@ -166,7 +166,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "timerAdd", timer_add, context_id);
     register(scope, ns, "timerClear", timer_clear, context_id);
     register(scope, ns, "timerNext", timer_next, context_id);
-    register(scope, ns, "timerCount", timer_count, context_id);
     register(scope, ns, "realmPending", realm_pending, context_id);
     register(scope, ns, "timerNextDue", timer_next_due, context_id);
     register(scope, ns, "timerStep", timer_step, context_id);
@@ -388,12 +387,6 @@ fn pending(scope: &mut v8::PinScope<'_, '_>, realm: i32, subtree: bool) -> bool 
         return true;
     }
     subtree && dom(scope).arena.child_realms(realm).into_iter().any(|child| pending(scope, child, true))
-}
-
-// __dom.timerCount() -> how many timers the calling realm has.
-fn timer_count(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    rv.set_uint32(dom(scope).arena.enter(cid).timers.by_key.len() as u32);
 }
 
 // __dom.timerNextDue() -> when the calling realm's next timer falls due, or undefined for none.
