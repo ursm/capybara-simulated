@@ -37,13 +37,15 @@ RSpec.describe 'window.open features' do
     expect(opened('noreferrer')).to eq([true, false, ''])
   end
 
-  it "gives a `noopener` about:blank window a new opaque origin, not the opener's" do
+  it "gives a `noopener` about:blank window — an empty URL's too — a new opaque origin, not the opener's" do
     session = simulated_session(app)
     session.visit '/'
-    window = session.window_opened_by { session.execute_script("window.open('about:blank', '', 'noopener')") }
-    got = session.within_window(window) {
-      session.evaluate_script("[origin, (() => { try { return localStorage.length; } catch (e) { return e.name; } })()]")
+    got = ['about:blank', ''].map {|url|
+      window = session.window_opened_by { session.execute_script("window.open('#{url}', '', 'noopener')") }
+      session.within_window(window) {
+        session.evaluate_script("[location.href, origin, (() => { try { return localStorage.length; } catch (e) { return e.name; } })()]")
+      }
     }
-    expect(got).to eq(%w[null SecurityError])
+    expect(got).to eq([%w[about:blank null SecurityError]] * 2)
   end
 end

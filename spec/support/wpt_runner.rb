@@ -369,7 +369,9 @@ module WptRunner
     # Host header), so they keep the requesting host even when `{{host}}` below is
     # canonicalized to the family root.
     loc_host     = (scheme == 'https' ? https_port == '443' : http_port == '80') ? host : "#{host}:#{cur_port}"
-    alt_host     = sub_family ? SUB_ALT_HOST : "alt.#{host}"
+    # (…`hosts[alt]` another SITE, as wptserve's alt domain is: `not-` before the host's registrable domain — the last
+    # two labels, realm_location.rs `site` — so a NOTSAMESITE origin is cross-site to the page, not a subdomain of it)
+    alt_host     = sub_family ? SUB_ALT_HOST : "not-#{host.split('.').last(2).join('.')}"
     # Real wptserve substitutes `{{host}}` with the CONFIG host (browser_host), never a
     # request subdomain: get-host-info.sub.js fetched FROM www1.web-platform.test must
     # still report ORIGINAL_HOST = web-platform.test — it derives REMOTE_HOST as

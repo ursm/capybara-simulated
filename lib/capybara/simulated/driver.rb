@@ -566,7 +566,8 @@ module Capybara
         noopener ||= resolved.to_s.start_with?('blob:') && cross_partition_blob?(resolved, opener_browser)
         if noopener
           # (…no opener_handle ⇒ window.opener null; loaded now, as no WindowProxy is handed back to fire its load)
-          open_aux_window(resolved, name: name, source: opener_browser, referrer: referrer, referrer_policy: referrer_policy)
+          # (…an empty URL about:blank, as the window open steps make it: the opener path's window realm is that already)
+          open_aux_window(resolved || 'about:blank', name: name, source: opener_browser, referrer: referrer, referrer_policy: referrer_policy)
           return nil
         end
         # Same-origin window → a realm in the opener's isolate (shared heap); the
