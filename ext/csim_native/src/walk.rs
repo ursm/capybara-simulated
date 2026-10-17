@@ -1818,7 +1818,7 @@ impl<'a> Walk<'a> {
     // a preferred aspect ratio, whose height its width gives it (Chrome: an `aspect-ratio: 1` item fills its 100px
     // column and is 100 tall); a baseline coarsely `start`; `left` / `right` the inline start and end.
     fn grid_self(&self, id: NodeId, style: &ComputedValues) -> [u8; 2] {
-        use crate::layout::{GRID_CENTER, GRID_END, GRID_START, GRID_STRETCH};
+        use crate::layout::GRID_STRETCH;
         let Some(ps) = self.layout_parent(id).and_then(|p| self.style(p).ok()) else { return [GRID_STRETCH; 2] };
         if !matches!(ps.get_box().clone_display().inside(), DisplayInside::Grid) {
             return [GRID_STRETCH; 2];

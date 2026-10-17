@@ -133,6 +133,26 @@ RSpec.describe 'document.write during parsing' do
     expect(got).to eq([%w[a html HTML], 'a', 'CSS1Compat'])
   end
 
+  # A script-created parser in a document with no browsing context (`createHTMLDocument`'s) builds what is written as
+  # any parser does: an observer's records queued, a select's options set up as it closes, and the document's mode
+  # set from the doctype written — none, quirks (Chrome: `1 3 x true BackCompat`; Firefox the same).
+  it 'parses what is written into a document with no browsing context' do
+    s = session_for('<p>x</p>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const d = document.implementation.createHTMLDocument('');
+        const mo = new MutationObserver(() => {});
+        mo.observe(d, {childList: true, subtree: true});
+        d.open();
+        d.write('<select id=s><option>a<option selected>b<option>c</select><p id=p>x</p>');
+        d.close();
+        const s = d.getElementById('s');
+        return [s.selectedIndex, s.options.length, d.getElementById('p').textContent, mo.takeRecords().length > 0, d.compatMode];
+      })()
+    JS
+    expect(got).to eq([1, 3, 'x', true, 'BackCompat'])
+  end
+
   # A declarative shadow root's script that writes once the input has run out: no insertion point is left to write at,
   # and nothing the parser does on the write may bring the process down (it did: a panic, aborting).
   it 'survives a write from a declarative shadow root left open at the end of the input' do

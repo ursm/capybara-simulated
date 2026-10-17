@@ -37,6 +37,22 @@ RSpec.describe 'HTML fragment parsing' do
     expect(got).to eq([0xD800, 0xDC00, 5, 0x1F600])
   end
 
+  # …and in an ELEMENT's name, which the engine builds exactly beside its interned name: Chrome and Firefox both give
+  # `<a\uD800>` the local name `a` U+D800, in a fragment and in a document parse alike, the text after it whole.
+  it 'keeps a lone surrogate in an element name' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const units = (t) => [...t].map((c) => c.charCodeAt(0));
+        const d = document.createElement('div');
+        d.innerHTML = '<a\\uD800>x</a\\uD800>';
+        const doc = Document.parseHTMLUnsafe(`<p\\uDC00>\\uD800${'a '.repeat(10000)}</p\\uDC00>`);
+        const p = doc.body.firstChild;
+        return [units(d.firstChild.localName), d.childNodes.length, units(p.localName), p.textContent.length, p.textContent.charCodeAt(0)];
+      })()
+    JS
+    expect(got).to eq([[0x61, 0xD800], 1, [0x70, 0xDC00], 20_001, 0xD800])
+  end
+
   # The foreign elements HTML counts as "special" — MathML mi, mo, mn, ms, mtext, annotation-xml; SVG foreignObject,
   # desc, title — bound every scope: an end tag or a list item inside one does not reach past it. Chrome, all three.
   it 'stops at a foreign element that bounds the scope' do

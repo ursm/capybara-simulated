@@ -5056,9 +5056,6 @@ html/webappapis/dynamic-markup-insertion/opening-the-input-stream/origin-check-i
 - It should not be possible to implicitly open same origin-domain (but not same origin)
   documents.
 - It should not be possible to open same origin-domain (but not same origin) documents.
-html/webappapis/dynamic-markup-insertion/opening-the-input-stream/quirks.window.js:
-- document.open() sets document to no-quirks mode (write no doctype)
-- document.open() sets document to no-quirks mode (write old doctype)
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/reload.window.js:
 - Reloading a document.open()'d page should reload the URL of the entry realm's responsible
   document

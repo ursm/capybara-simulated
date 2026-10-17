@@ -2719,7 +2719,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "slotAssign", slot_assign, context_id);
     register(scope, ns, "assignedSlotOf", assigned_slot_of, context_id);
     register(scope, ns, "assignedNodesOf", assigned_nodes_of, context_id);
-    register(scope, ns, "setParserFormOwner", set_parser_form_owner, context_id);
     register(scope, ns, "setCustomStates", set_custom_states, context_id);
     register(scope, ns, "targetElement", target_element, context_id);
     register(scope, ns, "latchFocusRing", latch_focus_ring, context_id);
@@ -2889,8 +2888,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::document_encoding::install(scope, ns, context_id);
     register(scope, ns, "nowNanos", now_nanos, context_id);
     // A node's attributes written wholesale, and their namespaces.
-    register(scope, ns, "syncAttrs", sync_attrs, context_id);
-    register(scope, ns, "setAttrNamespace", set_attr_namespace, context_id);
     // The store-flip's native-backed `_attrs`: __dom.attrsView(nid) -> an interceptor object over
     // that node's attributes (the Element constructor installs it in place of the JS `{}`).
     register(scope, ns, "attrsView", attrs_view, context_id);
@@ -3598,20 +3595,6 @@ fn pseudo_box(
     }
 }
 
-// __dom.setParserFormOwner(nid, formNid): the form the parser gave this control — or none (`formNid` -1).
-fn set_parser_form_owner(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let form = nid_arg(scope, &args, 1);
-    let cid = realm_id(scope, &args);
-    realm(scope, cid).set_parser_form_owner(id, form);
-}
-
 // __dom.setCustomStates(nid, names): the element's custom states (`ElementInternals.states`) become `names`.
 fn set_custom_states(
     scope: &mut v8::PinScope<'_, '_>,
@@ -4058,22 +4041,6 @@ pub(crate) fn take_all(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeI
     kids
 }
 
-// __dom.syncAttrs(nodeNid, attrsFlat): replace a node's attributes with the flat [name, value, …]
-// list wholesale. The mutation hook mirrors an element's current _attrs on any attribute change —
-// wholesale (attrs per element are few) so it can't drift on attribute-name CASE (the arena keys
-// then match the initial mirror exactly, both taken from the same _attrs iteration).
-fn sync_attrs(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let (attributes, attr_u16) = read_attrs_flat(scope, args.get(1));
-    let cid = realm_id(scope, &args);
-    replace_attributes(scope, cid, id, attributes, attr_u16, None);
-}
 // The namespaced attributes' records (`NodeData::attr_ns`, and those that lost a lone surrogate exactly beside).
 pub(crate) type AttrNamespaces = (Vec<(String, String, String)>, Vec<(String, Vec<u16>, Vec<u16>)>);
 // An element's attributes replaced wholesale — their values, those that lost a lone surrogate exactly beside, and the
@@ -4140,28 +4107,6 @@ pub(crate) fn replace_attributes(
     realm(scope, cid).note_radio(id);
 }
 
-// __dom.setAttrNamespace(nodeNid, key, ns, localName): the attribute stored under `key` is in namespace `ns` with that
-// local name — or, for an empty `ns`, in none (its record is dropped).
-fn set_attr_namespace(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let key = args.get(1).to_rust_string_lossy(scope);
-    let (ns, ns_u16) = read_v8_value(scope, args.get(2));
-    let (local, local_u16) = read_v8_value(scope, args.get(3));
-    let cid = realm_id(scope, &args);
-    let (arena, engine) = arena_and_engine(scope, cid);
-    before_attribute_write(arena, engine, id, &[&key]);
-    if let Some(node) = arena.get_mut(id) {
-        let exact = |lossy: &str, units: Option<Vec<u16>>| units.unwrap_or_else(|| lossy.encode_utf16().collect());
-        let record = (!ns.is_empty()).then(|| (exact(&ns, ns_u16), exact(&local, local_u16)));
-        node.set_attr_record(&key, record.as_ref().map(|(n, l)| (&n[..], &l[..])));
-    }
-}
 // …the attribute stored under `old` of `id` stored under `new` from now on, where it is in the list (one taking its
 // place under another qualified name).
 pub(crate) fn rename_attribute(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, old: &str, new: &str) {

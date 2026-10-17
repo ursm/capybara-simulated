@@ -365,14 +365,12 @@ struct Parse {
     // A script-created parser's (`document.open()`, HTML "document open steps"): its input stream has no end until
     // `document.close()` inserts one (`htmlClose`) — the input running out is where its insertion point is.
     script_created: bool,
-    // The nodes by handle — those the engine built (`htmlRunBuilt`) and those the bindings made replaying the steps
-    // it left them (`htmlSetHandles`) — and what holds those the engine built while the parse goes on: one a script
-    // took out of the tree is the parser's still (an open element, the form element pointer), as the bindings' array
-    // holds theirs.
+    // The nodes by handle the engine built (`htmlRunBuilt`), and what holds them while the parse goes on: one a script
+    // took out of the tree is the parser's still (an open element, the form element pointer).
     handles: Vec<Option<crate::dom::NodeId>>,
     held: Vec<v8::cppgc::Persistent<crate::node_handle::NodeHandle>>,
-    // …and, where a build paused after a custom element it constructed went in, the steps of its batch left and the
-    // status the parse stopped with (`htmlRunBuilt`).
+    // …and, where a build paused (`Pause`), the steps of its batch left and the status the parse stopped with
+    // (`htmlRunBuilt`).
     pending: Option<(std::vec::IntoIter<Operand>, i32)>,
 }
 
@@ -413,10 +411,8 @@ fn parses<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Parses {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "htmlParse", html_parse, context_id);
-    register(scope, ns, "htmlRun", html_run, context_id);
     register(scope, ns, "htmlRunBuilt", html_run_built, context_id);
     register(scope, ns, "htmlHandle", html_handle, context_id);
-    register(scope, ns, "htmlSetHandles", html_set_handles, context_id);
     register(scope, ns, "htmlScriptBegin", html_script_begin, context_id);
     register(scope, ns, "htmlScriptEnd", html_script_end, context_id);
     register(scope, ns, "htmlWrite", html_write, context_id);
@@ -448,79 +444,30 @@ fn parser_op(
     rv.set(answer.into());
 }
 
-// The steps taken since the last call, then the status: -1 the input ran out, else the script handle to run first —
-// after the parse's id, for the call that starts it.
-fn steps<'s>(scope: &mut v8::PinScope<'s, '_>, id: u32, status: i32, with_id: bool) -> v8::Local<'s, v8::Array> {
-    let (ops, standins) = match parses(scope).live.get_mut(&id) {
-        Some(p) => (std::mem::take(&mut *p.tokenizer.sink.sink.ops.borrow_mut()), std::mem::take(&mut p.standins)),
-        None => (Vec::new(), StandIns::default()),
-    };
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(ops.len() + 2);
-    if with_id {
-        items.push(v8::Integer::new_from_unsigned(scope, id).into());
-    }
-    for op in ops {
-        items.push(match op {
-            Operand::Int(i) => v8::Integer::new(scope, i).into(),
-            Operand::Str(s) => page_string(scope, &s, &standins).map_or_else(|| v8::undefined(scope).into(), Into::into),
-        });
-    }
-    if let Some(p) = parses(scope).live.get_mut(&id) {
-        p.standins = standins;
-    }
-    items.push(v8::Integer::new(scope, status).into());
-    v8::Array::new_with_elements(scope, &items)
-}
-
-// __dom.htmlParse(html, wellFormed, scripting, contextNs, contextLocalName, withForm, quirks, srcdoc, declarative,
-// deferred, scriptCreated) -> [id, steps…, status], or — `deferred`, a live document's, whose batches `htmlRunBuilt`
-// takes — [id]; `scriptCreated`, a parse whose input has no end until `htmlClose` (`Parse::script_created`). A document parse — of an iframe srcdoc document with `srcdoc`, which no missing or legacy
-// doctype puts in quirks mode — or, given the namespace (as `ns_code` numbers it) and local name of the element whose
-// content it is, a fragment parse in that context (handle 1; handle 2 its form element pointer, `withForm`), in its
-// document's mode (`quirks` 0 no-quirks, 1 limited-quirks, 2 quirks); with `declarative`, one that attaches declarative
-// shadow roots.
+// __dom.htmlParse(html, wellFormed, scripting, srcdoc, declarative, scriptCreated) -> [id]: a live document's
+// parse, whose batches `htmlRunBuilt` builds — of an iframe srcdoc document with `srcdoc`, which no missing or legacy
+// doctype puts in quirks mode; with `declarative`, one that attaches declarative shadow roots; `scriptCreated`, one whose
+// input has no end until `htmlClose` (`Parse::script_created`).
 fn html_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    // (…a parse that panicked starting is parse 0, which there is none of, its input run out)
-    parser_op(scope, None, &mut rv, &[0, -1], |scope, rv| {
+    // (…a parse that panicked starting is parse 0, which there is none of)
+    parser_op(scope, None, &mut rv, &[0], |scope, rv| {
         let mut standins = StandIns::default();
         let well_formed = args.get(1).boolean_value(scope);
         let html = parser_text(scope, args.get(0), well_formed, &mut standins);
         let scripting = args.get(2).boolean_value(scope);
-        let context = (!args.get(4).is_null_or_undefined())
-            .then(|| (args.get(3).int32_value(scope).unwrap_or(1), args.get(4).to_rust_string_lossy(scope)));
-        let with_form = args.get(5).boolean_value(scope);
-        let quirks_mode = match args.get(6).int32_value(scope) {
-            Some(2) => QuirksMode::Quirks,
-            Some(1) => QuirksMode::LimitedQuirks,
-            _ => QuirksMode::NoQuirks,
-        };
-        let iframe_srcdoc = args.get(7).boolean_value(scope);
-        let declarative = args.get(8).boolean_value(scope);
-        let opts = TreeBuilderOpts { scripting_enabled: scripting, iframe_srcdoc, quirks_mode, ..Default::default() };
+        let iframe_srcdoc = args.get(3).boolean_value(scope);
+        let declarative = args.get(4).boolean_value(scope);
+        let opts = TreeBuilderOpts { scripting_enabled: scripting, iframe_srcdoc, ..Default::default() };
         // (…the text is decoded already, its byte order mark gone with the decoding: a U+FEFF left is text)
-        let tokenizer_opts = TokenizerOpts { discard_bom: false, ..Default::default() };
-        let tokenizer = match &context {
-            None => Tokenizer::new(TreeBuilder::new(Sink::new(None, declarative), opts), tokenizer_opts),
-            Some((ns, local)) => {
-                let name = QualName::new(None, namespace_of(*ns), LocalName::from(local.as_str()));
-                let builder = TreeBuilder::new_for_fragment(Sink::new(Some(name), declarative), 1, with_form.then_some(2), opts);
-                let initial_state = Some(builder.tokenizer_state_for_context_elem(scripting));
-                Tokenizer::new(builder, TokenizerOpts { initial_state, ..tokenizer_opts })
-            }
-        };
+        let tokenizer = Tokenizer::new(TreeBuilder::new(Sink::new(None, declarative), opts), TokenizerOpts { discard_bom: false, ..Default::default() });
         let input = BufferQueue::default();
         input.push_back(StrTendril::from(html));
         let all = parses(scope);
         all.next += 1;
         let id = all.next;
-        let script_created = args.get(10).is_true();
+        let script_created = args.get(5).is_true();
         all.live.insert(id, Parse { tokenizer, input, set_aside: Vec::new(), standins, ended: false, script_created, handles: Vec::new(), held: Vec::new(), pending: None });
-        if args.get(9).is_true() {
-            return rv.set(v8::Array::new_with_elements(scope, &[v8::Integer::new_from_unsigned(scope, id).into()]).into());
-        }
-        let status = all.live.get_mut(&id).map_or(-1, Parse::run);
-        let steps = steps(scope, id, status, true);
-        rv.set(steps.into());
+        rv.set(v8::Array::new_with_elements(scope, &[v8::Integer::new_from_unsigned(scope, id).into()]).into());
     });
 }
 
@@ -528,25 +475,18 @@ fn parse_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgumen
     args.get(0).uint32_value(scope).unwrap_or(0)
 }
 
-// __dom.htmlRun(id) -> [steps…, status]: parse on, from where the parse stopped.
-fn html_run(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let id = parse_id(scope, &args);
-    parser_op(scope, Some(id), &mut rv, &[-1], |scope, rv| {
-        let status = parses(scope).live.get_mut(&id).map_or(-1, Parse::run);
-        let steps = steps(scope, id, status, false);
-        rv.set(steps.into());
-    });
-}
-
-// What the bindings say of a live document's next batch (`htmlRunBuilt`'s `flags`): whether the engine may build it —
-// no customizable select's `<selectedcontent>` to mirror into as it goes — whether custom elements are defined, whose
-// constructors the parser runs, and whether the page observes mutations.
-const MAY_BUILD: u32 = 1;
-// What `htmlRunBuilt` answers for a build that paused after a custom element it constructed went in: the bindings
-// connect what it inserted, then ask for the rest of the batch.
-const CUSTOM_ELEMENT_INSERTED: i32 = -2;
+// What the bindings say of a live document's next batch (`htmlRunBuilt`'s `flags`): whether custom elements are defined,
+// whose constructors the parser runs, whether the page observes mutations, and whether the document has a browsing
+// context (a script-created parser's in `createHTMLDocument`'s has none: its selects' options set up as they close).
 const CE_DEFINED: u32 = 1 << 1;
 const OBSERVED: u32 = 1 << 2;
+const IN_BROWSING_CONTEXT: u32 = 1 << 3;
+// What `htmlRunBuilt` answers for a build that PAUSED (`Pause`), the rest of its batch built once the bindings have
+// acted and ask for it: a custom element it constructed went in — they connect what it inserted — or a customizable
+// select's node went in or was popped — they run its selectedness and mirror it into its `<selectedcontent>`.
+const CUSTOM_ELEMENT_INSERTED: i32 = -2;
+const SELECT_NODE_INSERTED: i32 = -3;
+const SELECT_NODE_POPPED: i32 = -4;
 
 // Whether a token's attributes hold `customelementregistry` (no namespace): the element's registry the null one, and no
 // constructor run for it.
@@ -554,65 +494,6 @@ fn names_null_registry(attrs: &[(String, i32, String, String)]) -> bool {
     attrs.iter().any(|(prefix, ns, local, _)| prefix.is_empty() && *ns == 0 && local == "customelementregistry")
 }
 
-// Whether the engine leaves a live document's batch of `ops` to the bindings: one where the parser runs steps of the
-// bindings' own as it makes or inserts a node — a `<selectedcontent>`, mirrored as its select's options go in. (A
-// customized built-in is built: its `is` value fixed as the engine makes it,
-// it is upgraded as it connects, a connection step of its own — as the bindings' replay left it to.)
-fn declines(ops: &[Operand]) -> bool {
-    let int = |k: usize| match ops.get(k) {
-        Some(Operand::Int(v)) => Some(*v),
-        _ => None,
-    };
-    let string = |k: usize| match ops.get(k) {
-        Some(Operand::Str(v)) => Some(v.as_str()),
-        _ => None,
-    };
-    let mut i = 0;
-    while i < ops.len() {
-        let Some(op) = int(i) else { return true };
-        match op {
-            OP_ELEMENT => {
-                let (ns, local) = (int(i + 2).unwrap_or(0), string(i + 3).unwrap_or(""));
-                if namespace_of(ns) == html5ever::ns!(html) && local == "selectedcontent" {
-                    return true;
-                }
-            }
-            _ => {}
-        }
-        let Some(next) = op_end(ops, i) else { return true };
-        i = next;
-    }
-    false
-}
-// Whether a name the steps of `ops` give an element or an attribute holds a stand-in of a lone surrogate (`StandIns`):
-// a name the engine's interned names keep no room for, which the bindings make.
-fn names_stand_in(ops: &[Operand], standins: &StandIns) -> bool {
-    if standins.base.is_none() {
-        return false;
-    }
-    let int = |k: usize| match ops.get(k) {
-        Some(Operand::Int(v)) => Some(*v),
-        _ => None,
-    };
-    let held = |k: usize| matches!(ops.get(k), Some(Operand::Str(v)) if standins.in_text(v));
-    // (…an attribute list of `n` from `at`: each one's prefix and local name)
-    let attrs = |at: usize, n: usize| (0..n).any(|k| held(at + 4 * k) || held(at + 4 * k + 2));
-    let mut i = 0;
-    while i < ops.len() {
-        let hit = match int(i) {
-            Some(OP_ELEMENT) => held(i + 3) || attrs(i + 5, int(i + 4).unwrap_or(0).max(0) as usize),
-            Some(OP_ADD_ATTRS) => attrs(i + 3, int(i + 2).unwrap_or(0).max(0) as usize),
-            Some(_) => false,
-            None => return true,
-        };
-        if hit {
-            return true;
-        }
-        let Some(next) = op_end(ops, i) else { return true };
-        i = next;
-    }
-    false
-}
 // Where the step of `ops` at `i` ends: the index of the next one's code.
 fn op_end(ops: &[Operand], i: usize) -> Option<usize> {
     let int = |k: usize| match ops.get(k) {
@@ -650,18 +531,18 @@ fn insertion_parent(ops: &[Operand], handle: i32) -> Option<(i32, Option<i32>)> 
     None
 }
 
-// __dom.htmlRunBuilt(id, flags, document, templateDocument, html, head, body) -> [1, status, quirks, sheets, connect,
-// images, reused, count, nodes…, element, names, flags, …] where the engine builds the live document's next batch, or
-// [0, steps…, status] where it leaves it to the bindings (`declines`, or `flags` saying it may not: `MAY_BUILD`): the
-// parse run on to where it stops — a script to run first (its handle), or the input run out (-1) — and the batch built
-// as the page's own insertions are (`Build`'s live mode), its nodes in `document`, a template's contents in
-// `templateDocument`, the first `<html>`, `<head>` and `<body>` it parses the document's own (`html`, `head`, `body`):
-// the document's mode it set (`quirks`, -1 none), whether a style sheet's element came in (`sheets`), and the elements
-// the bindings act on — `connect` with a connection step, `images` that may fetch one, `reused` skeleton elements —
-// then the elements the bindings have steps for (`Build::answer`).
+// __dom.htmlRunBuilt(id, flags, document, templateDocument, html, head, body) -> [status, quirks, sheets, connect,
+// images, reused, count, nodes…, element, names, flags, …]: the parse run on to where it stops — a script to run first
+// (its handle), or the input run out (-1) — and the batch built as the page's own insertions are (`Build`'s live mode),
+// its nodes in `document`, a template's contents in `templateDocument`, the first `<html>`, `<head>` and `<body>` it
+// parses the document's own (`html`, `head`, `body`): the document's mode it set (`quirks`, -1 none), whether a style
+// sheet's element came in (`sheets`), and the elements the bindings act on — `connect` with a connection step, `images`
+// that may fetch one, `reused` skeleton elements, and the node a build that paused at a select's node paused at (the
+// last of `nodes`) — then the elements the bindings have steps for (`Build::answer`). [-1] alone for a parse a panic
+// wound down.
 fn html_run_built(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = parse_id(scope, &args);
-    parser_op(scope, Some(id), &mut rv, &[0, -1], |scope, rv| {
+    parser_op(scope, Some(id), &mut rv, &[-1], |scope, rv| {
         let flags = args.get(1).uint32_value(scope).unwrap_or(0);
         // (…or the steps a build that paused left of its batch, which stopped where it stopped — built on as they are)
         let resumed = parses(scope).live.get_mut(&id).and_then(|p| p.pending.take());
@@ -670,27 +551,8 @@ fn html_run_built(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
             None => parses(scope).live.get_mut(&id).map_or(-1, Parse::run),
         };
         let doc = v8::Local::<v8::Object>::try_from(args.get(2)).ok().map(|d| v8::Local::new(scope, d));
-        let document = doc.and_then(|d| crate::node_handle::nid_of(scope, d.into()));
+        let Some(document) = doc.and_then(|d| crate::node_handle::nid_of(scope, d.into())) else { return };
         let skeleton: [Option<crate::dom::NodeId>; 3] = [4, 5, 6].map(|k| crate::node_handle::nid_of(scope, args.get(k)));
-        let builds = flags & MAY_BUILD != 0
-            && document.is_some()
-            && (resumed.is_some()
-                || parses(scope).live.get(&id).is_some_and(|p| {
-                    let ops = p.tokenizer.sink.sink.ops.borrow();
-                    !names_stand_in(&ops, &p.standins) && !declines(&ops)
-                }));
-        let (Some(document), true) = (document, builds) else {
-            // (…a paused build's steps the bindings take after all, back where the parse's are)
-            if let (Some((rest, _)), Some(p)) = (resumed, parses(scope).live.get_mut(&id)) {
-                p.tokenizer.sink.sink.ops.borrow_mut().splice(0..0, rest.collect::<Vec<_>>());
-            }
-            let steps = steps(scope, id, status, false);
-            let mut items: Vec<v8::Local<'_, v8::Value>> = vec![v8::Integer::new(scope, 0).into()];
-            for k in 0..steps.length() {
-                items.push(steps.get_index(scope, k).unwrap_or_else(|| v8::undefined(scope).into()));
-            }
-            return rv.set(v8::Array::new_with_elements(scope, &items).into());
-        };
         let Some(cid) = crate::dom::dom(scope).arena.get(document).map(|n| n.realm) else { return };
         let template_doc = v8::Local::<v8::Object>::try_from(args.get(3)).ok().map(|d| v8::Local::new(scope, d)).or(doc);
         let Some(p) = parses(scope).live.get_mut(&id) else { return };
@@ -703,33 +565,44 @@ fn html_run_built(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
             handles = vec![Some(document), None, None];
         }
         let standins = p.standins;
-        let live = Live { observed: flags & OBSERVED != 0, ce_defined: flags & CE_DEFINED != 0, skeleton, ..Live::default() };
+        let live = Live {
+            observed: flags & OBSERVED != 0,
+            ce_defined: flags & CE_DEFINED != 0,
+            browsing_context: flags & IN_BROWSING_CONTEXT != 0,
+            skeleton,
+            ..Live::default()
+        };
         let mut build = Build::new(cid, doc, template_doc, handles);
         build.standins = standins;
         build.script = crate::script::SCRIPT_ALREADY_STARTED | crate::script::SCRIPT_PARSER_INSERTED;
         build.live = Some(live);
         let built = build.take(scope, ops);
         let live = build.live.take().unwrap_or_default();
-        let (paused, failed) = (build.paused, built.is_none());
+        let (paused, failed) = (build.paused.take(), built.is_none());
         if let Some(p) = parses(scope).live.get_mut(&id) {
             p.handles = std::mem::take(&mut build.nodes);
             p.held.append(&mut build.held);
-            if let (true, Some(rest)) = (paused, built) {
+            if let (Some(_), Some(rest)) = (&paused, built) {
                 p.pending = Some((rest, status));
             }
         }
         if failed {
             return;
         }
-        let status = if paused { CUSTOM_ELEMENT_INSERTED } else { status };
+        let (status, stepped) = match paused {
+            Some(Pause::CustomElement) => (CUSTOM_ELEMENT_INSERTED, None),
+            Some(Pause::Select(node, false)) => (SELECT_NODE_INSERTED, Some(node)),
+            Some(Pause::Select(node, true)) => (SELECT_NODE_POPPED, Some(node)),
+            None => (status, None),
+        };
         let arena = crate::dom::realm(scope, cid);
         let named = |e: &crate::dom::NodeId, names: &[&str]| arena.get(*e).is_some_and(|n| names.iter().any(|t| *t == &*n.local_name));
         let connect: Vec<crate::dom::NodeId> = live.inserted.iter().copied().filter(|&e| arena.get(e).is_some_and(crate::connection_steps::has_connection_step)).collect();
         let images: Vec<crate::dom::NodeId> = live.inserted.iter().copied().filter(|e| named(e, &["img", "image", "input"])).collect();
         let sheets = live.inserted.iter().any(|e| named(e, &["style", "link"]));
         let quirks = build.quirks.unwrap_or(-1);
-        let counts = [1, status, quirks, i32::from(sheets), connect.len() as i32, images.len() as i32, live.reused.len() as i32];
-        let tops: Vec<crate::dom::NodeId> = connect.into_iter().chain(images).chain(live.reused).collect();
+        let counts = [status, quirks, i32::from(sheets), connect.len() as i32, images.len() as i32, live.reused.len() as i32];
+        let tops: Vec<crate::dom::NodeId> = connect.into_iter().chain(images).chain(live.reused).chain(stepped).collect();
         let Some(answer) = build.answer(scope, &tops) else { return };
         let mut out: Vec<v8::Local<'_, v8::Value>> = counts.iter().map(|&n| v8::Integer::new(scope, n).into()).collect();
         out.extend(answer);
@@ -744,27 +617,6 @@ fn html_handle(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let node = parses(scope).live.get(&id).and_then(|p| p.handles.get(handle).copied().flatten());
     rv.set(crate::dom::node_value(scope, node));
 }
-// __dom.htmlSetHandles(id, [handle, node, …]): the nodes the bindings made for a parse's handles, replaying its steps.
-fn html_set_handles(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let id = parse_id(scope, &args);
-    let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(1)) else { return };
-    let mut pairs = Vec::with_capacity(list.length() as usize / 2);
-    for k in (0..list.length()).step_by(2) {
-        let handle = list.get_index(scope, k).and_then(|v| v.uint32_value(scope));
-        let node = list.get_index(scope, k + 1).and_then(|v| crate::node_handle::nid_of(scope, v));
-        if let Some(handle) = handle {
-            pairs.push((handle as usize, node));
-        }
-    }
-    let Some(p) = parses(scope).live.get_mut(&id) else { return };
-    for (handle, node) in pairs {
-        if p.handles.len() <= handle {
-            p.handles.resize(handle + 1, None);
-        }
-        p.handles[handle] = node;
-    }
-}
-
 // __dom.htmlScriptBegin(id): a script runs with an insertion point — just past its `</script>`, or before the next
 // input character for the pending parsing-blocking one: the input after it is set aside until `htmlScriptEnd`.
 fn html_script_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -892,11 +744,34 @@ pub(crate) struct Build<'s> {
     // The registry association every element it makes takes (ce_reactions.rs codes, and the registry a code names): a
     // fragment parse's context's, where it has one — a scoped registry, the null one or the tracking null.
     pub(crate) registry: Option<(u32, Option<v8::Local<'s, v8::Object>>)>,
-    // …and whether it paused, a custom element it constructed inserted, for the bindings to connect it before it goes on.
-    paused: bool,
+    // …and where it paused, for the bindings to act before it goes on (`Pause`).
+    paused: Option<Pause>,
     // The stand-ins of the parse's lone surrogates (`StandIns`): its text, comments, doctype and attribute values made the
     // page's UTF-16 again, as the bindings would have them.
     pub(crate) standins: StandIns,
+}
+
+// Where a live document's build pauses for the bindings: after a custom element it constructed went in — connected
+// before the next start tag's constructor runs — or at a customizable select's node (`select_node`), inserted or popped
+// (`true`): the select's selectedness run and its `<selectedcontent>` made to mirror it as the parser goes, the steps
+// the bindings' (custom-elements.js).
+enum Pause {
+    CustomElement,
+    Select(crate::dom::NodeId, bool),
+}
+
+// Whether `node`, just inserted or `popped`, is a customizable select's node the bindings act on: a `<selectedcontent>`
+// in a select — which makes it one — and an option of one, as it goes in and as it closes, and the select closing.
+fn select_node(arena: &crate::dom::RealmArena, node: crate::dom::NodeId, popped: bool) -> bool {
+    let customizable = |select: Option<crate::dom::NodeId>| {
+        select.and_then(|s| arena.get(s)).is_some_and(|n| n.element_flags & crate::element_flags::SELECT_HAS_SELECTED_CONTENT != 0)
+    };
+    match arena.get(node) {
+        Some(n) if n.is_html_named("selectedcontent") => !popped && arena.html_ancestor(node, "select", false).is_some(),
+        Some(n) if n.is_html_named("option") => customizable(arena.html_ancestor(node, "select", false)),
+        Some(n) if n.is_html_named("select") => popped && customizable(Some(node)),
+        _ => false,
+    }
 }
 
 // A live document parse's batch the engine builds: the document's `<html>`, `<head>` and `<body>` not taken yet, which
@@ -910,6 +785,8 @@ struct Live {
     observed: bool,
     // (…whether custom elements are defined, whose constructors it runs as it makes their elements)
     ce_defined: bool,
+    // (…whether its document has a browsing context, whose connection sets a select's options up)
+    browsing_context: bool,
     skeleton: [Option<crate::dom::NodeId>; 3],
     made: std::collections::HashSet<crate::dom::NodeId>,
     inserted: Vec<crate::dom::NodeId>,
@@ -949,11 +826,21 @@ impl<'s> Build<'s> {
     }
     // An element of the parser's token: its attributes — the first of a name taken, as "create an element for the token"
     // appends them — written as any element's are (`replace_attributes`), a namespaced one's names with them; its `is`
-    // value; the steps its attributes have that are the bindings'.
+    // value; the steps its attributes have that are the bindings'. A name holding a stand-in of a lone surrogate is the
+    // page's again exactly (`name_u16`), beside its lossy interned one — Chrome's and Firefox's `<a\uD800>` keeps it.
     fn element(&mut self, scope: &mut v8::PinScope<'s, '_>, ns: i32, local: &str, attrs: Vec<(String, i32, String, String)>) -> crate::dom::NodeId {
+        let ns = arena_namespace(ns);
+        let (local_name, name_u16) = if self.standins.in_text(local) {
+            let units = self.standins.units(local);
+            let exact = crate::dom::ExactName { ns: ns.encode_utf16().collect(), local: units.clone(), prefix: None };
+            (web_atoms::LocalName::from(String::from_utf16_lossy(&units)), Some(Box::new(exact)))
+        } else {
+            (web_atoms::LocalName::from(local), None)
+        };
         let id = self.make(scope, crate::dom::NodeData {
-            local_name: web_atoms::LocalName::from(local),
-            ns: arena_namespace(ns),
+            local_name,
+            ns,
+            name_u16,
             ..crate::dom::NodeData::of_kind(crate::dom::NodeKind::Element, Vec::new())
         });
         self.stamp_registry(scope, id);
@@ -967,7 +854,7 @@ impl<'s> Build<'s> {
     // into template contents, or under a node of the null registry. The element, and whether it is custom (a constructor
     // that failed leaves an HTMLUnknownElement); None where no constructor runs. `rest` the steps after the token's.
     fn construct(&mut self, scope: &mut v8::PinScope<'s, '_>, ns: i32, local: &str, handle: i32, rest: &[Operand]) -> Option<(crate::dom::NodeId, bool)> {
-        if !self.live.as_ref().is_some_and(|l| l.ce_defined) || namespace_of(ns) != html5ever::ns!(html) || !local.contains('-') {
+        if !self.live.as_ref().is_some_and(|l| l.ce_defined) || namespace_of(ns) != html5ever::ns!(html) || !local.contains('-') || self.standins.in_text(local) {
             return None;
         }
         if !crate::dom::dom(scope).arena.ce_reactions.defines(self.cid, local) {
@@ -1052,7 +939,11 @@ impl<'s> Build<'s> {
     // again — and the steps they have that are the bindings'.
     fn attributes(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId, attrs: Vec<(String, i32, String, String)>, existing: Vec<(String, String)>) {
         self.null_registry(scope, id, &attrs);
+        // (…a name holding a stand-in of a lone surrogate lossy, as a page's write of one is: the attribute list keeps no
+        // exact name of its own)
+        let lossy = |name: String| if self.standins.in_text(&name) { String::from_utf16_lossy(&self.standins.units(&name)) } else { name };
         let named = attrs.into_iter().map(|(prefix, ns, local, value)| {
+            let (prefix, local) = (lossy(prefix), lossy(local));
             let name = if prefix.is_empty() { local.clone() } else { format!("{prefix}:{local}") };
             (name, value, (ns != 0).then(|| (attribute_namespace(ns).to_owned(), local)))
         });
@@ -1113,7 +1004,11 @@ impl<'s> Build<'s> {
                 live.inserted.push(child);
                 // (…a custom element it constructed: HTML "insert an element at the adjusted insertion location" pops
                 // the element queue it pushed, its connectedCallback before the next start tag's constructor — a pause)
-                self.paused |= live.made.contains(&child) && arena.get(child).is_some_and(|n| n.state & crate::dom::STATE_CUSTOM != 0);
+                if live.made.contains(&child) && arena.get(child).is_some_and(|n| n.state & crate::dom::STATE_CUSTOM != 0) {
+                    self.paused = Some(Pause::CustomElement);
+                } else if live.browsing_context && select_node(arena, child, false) {
+                    self.paused = Some(Pause::Select(child, false));
+                }
             }
         }
         if contents && self.in_contents.insert(child) {
@@ -1234,8 +1129,8 @@ impl<'s> Build<'s> {
         self.contents.contains(&id)
     }
     // Whether `node` is in template contents: one the build made — or, a live document's, whose batches go on from where
-    // an earlier one (or the bindings' replay) left a template open, one whose node document is not the page's: the
-    // inert one template contents are in (a fragment a script moved an open element into is the page's).
+    // an earlier one left a template open, one whose node document is not the page's: the inert one template contents
+    // are in (a fragment a script moved an open element into is the page's).
     fn in_template_contents(&self, scope: &mut v8::PinScope<'s, '_>, node: crate::dom::NodeId) -> bool {
         if self.live.is_none() || self.in_contents.contains(&node) {
             return self.in_contents.contains(&node);
@@ -1302,7 +1197,7 @@ impl<'s> Build<'s> {
             let n = int(ops.next())?;
             (0..n).map(|_| Some((string(ops.next())?, int(ops.next())?, string(ops.next())?, string(ops.next())?))).collect()
         };
-        while let Some(op) = (!self.paused).then(|| ops.next()).flatten() {
+        while let Some(op) = self.paused.is_none().then(|| ops.next()).flatten() {
             let Operand::Int(op) = op else { return None };
             match op {
                 OP_ELEMENT => {
@@ -1394,12 +1289,16 @@ impl<'s> Build<'s> {
                         self.insert(scope, to, c, None);
                     }
                 }
-                // (…a select closed: its options set up — in a live document by its connection, out of template contents)
+                // (…a select closed: its options set up — in a document with a browsing context by its connection, out of
+                // template contents)
                 OP_POP => {
                     let id = self.node(int(ops.next())?)?;
-                    let connected = self.live.is_some() && !self.in_template_contents(scope, id);
-                    if !connected && crate::dom::realm(scope, self.cid).get(id).is_some_and(|n| n.is_html_named("select")) {
+                    let connected = self.live.as_ref().is_some_and(|l| l.browsing_context) && !self.in_template_contents(scope, id);
+                    let arena = crate::dom::realm(scope, self.cid);
+                    if !connected && arena.get(id).is_some_and(|n| n.is_html_named("select")) {
                         self.steps.push((id, Vec::new(), BUILT_SELECT));
+                    } else if connected && select_node(arena, id, true) {
+                        self.paused = Some(Pause::Select(id, true));
                     }
                 }
                 OP_FORM => {
@@ -1458,16 +1357,14 @@ impl<'s> Build<'s> {
 }
 
 // __dom.htmlParseFragment(html, wellFormed, contextNs, contextLocalName, formNid, quirks, document, templateDocument,
-// declarative, registry, registryObject) -> [count, nodes…, element, names, flags, …], or undefined where the engine
-// leaves it to the bindings: HTML's fragment
+// declarative, registry, registryObject) -> [count, nodes…, element, names, flags, …]: HTML's fragment
 // parsing algorithm in the context of an element (its namespace as `ns_code` numbers it, its local name; the nearest form
 // its form element pointer, -1 for none; its document's mode, as `htmlParse` takes it), built by the engine — the nodes
 // in `document`, those in template contents in `templateDocument` — and answered as the parse's top-level nodes, out
 // of any parent, then the elements the bindings have steps for (`BUILT_*`), each with the names of its attributes whose
 // steps are theirs (undefined for none). With `declarative` (setHTMLUnsafe's), the declarative shadow roots the markup
 // makes are attached; with a `registry` code (ce_reactions.rs: 0 none), the context's registry association, which every
-// element made takes — `registryObject` the registry it names. Left to the bindings: markup naming an element or an
-// attribute with a lone surrogate (`names_stand_in`).
+// element made takes — `registryObject` the registry it names. [-1] for a parse a panic wound down.
 fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     parser_op(scope, None, &mut rv, &[-1], |scope, rv| {
         let mut standins = StandIns::default();
@@ -1492,9 +1389,6 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         let registry_object = v8::Local::<v8::Object>::try_from(args.get(10)).ok().map(|r| v8::Local::new(scope, r));
         build.registry = (registry != 0).then_some((registry, registry_object));
         let ops = parsed(tokenizer, html);
-        if names_stand_in(&ops, &standins) {
-            return;
-        }
         build.standins = standins;
         let root = build.make(scope, crate::dom::NodeData::of_kind(crate::dom::NodeKind::Fragment, Vec::new()));
         build.set(0, root);
@@ -1516,7 +1410,7 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 }
 
 // __dom.htmlParseDocument(html, wellFormed, document, templateDocument, declarative) -> [quirks, element, names, flags,
-// …], or undefined where the engine leaves it to the bindings: HTML's parse of a whole document no script runs in
+// …] ([-2] for a parse a panic wound down): HTML's parse of a whole document no script runs in
 // (DOMParser's, scripting off), built by the engine into `document` (empty) as a fragment parse is (`htmlParseFragment`)
 // — its doctype too, and with `declarative` (parseHTMLUnsafe's) its declarative shadow roots — answered as the mode it
 // set (`htmlParse`'s numbers, -1 for none) and the elements the bindings have steps for.
@@ -1533,9 +1427,6 @@ fn html_parse_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         let doc = v8::Local::<v8::Object>::try_from(args.get(2)).ok().map(|d| v8::Local::new(scope, d));
         let template_doc = v8::Local::<v8::Object>::try_from(args.get(3)).ok().map(|d| v8::Local::new(scope, d)).or(doc);
         let ops = parsed(tokenizer, html);
-        if names_stand_in(&ops, &standins) {
-            return;
-        }
         let mut build = Build::new(cid, doc, template_doc, vec![Some(document), None, None]);
         build.standins = standins;
         if build.take(scope, ops.into_iter()).is_none() {
@@ -1585,7 +1476,7 @@ impl<'s> Build<'s> {
             contents_script: 0,
             live: None,
             registry: None,
-            paused: false,
+            paused: None,
             standins: StandIns::default(),
         }
     }
