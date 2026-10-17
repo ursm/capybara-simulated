@@ -49,7 +49,7 @@ pub(crate) fn parts_for_ruby(input: String, base: Option<String>) -> Option<Vec<
     Url::parse(input.as_str(), base.as_deref()).ok().map(|url| texts(&url).into())
 }
 
-fn parts<'s>(scope: &mut v8::PinScope<'s, '_>, url: &Url) -> v8::Local<'s, v8::Array> {
+pub(crate) fn parts<'s>(scope: &mut v8::PinScope<'s, '_>, url: &Url) -> v8::Local<'s, v8::Array> {
     let items: Vec<v8::Local<v8::Value>> = texts(url)
         .iter()
         .map(|t| v8::String::new(scope, t).map_or_else(|| v8::undefined(scope).into(), Into::into))
@@ -58,7 +58,7 @@ fn parts<'s>(scope: &mut v8::PinScope<'s, '_>, url: &Url) -> v8::Local<'s, v8::A
 }
 
 // The string a page's value is as a USVString: a lone surrogate is U+FFFD (WebIDL), which the lossy conversion does.
-fn usv(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> String {
+pub(crate) fn usv(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> String {
     value.to_rust_string_lossy(scope)
 }
 
@@ -74,7 +74,7 @@ fn url_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 }
 // HTML's "encoding-parse a URL": `input` parsed against `base`, its query percent-encoded in the encoding `label` names
 // (none, or UTF-8, as the parser does it).
-fn encoding_parse(input: &str, base: Option<&str>, label: Option<&str>) -> Option<Url> {
+pub(crate) fn encoding_parse(input: &str, base: Option<&str>, label: Option<&str>) -> Option<Url> {
     let mut url = Url::parse(input, base).ok()?;
     if let Some(encoding) = label.and_then(|l| encoding_rs::Encoding::for_label(l.as_bytes())).map(|e| e.output_encoding()) {
         if encoding != encoding_rs::UTF_8 {

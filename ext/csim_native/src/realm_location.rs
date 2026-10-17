@@ -268,19 +268,19 @@ fn domain_host(value: &str) -> Option<String> {
 }
 // `document.domain`'s setter steps past "has a browsing context" (HTML §7.5.2): what a write of `value` sets, or why it
 // may not (dom-nodes.js `DOMAIN_*`) — an opaque origin, no host, or one the effective domain is neither nor a subdomain
-// of, where neither is an IP address. A public suffix is no domain it may set, which
+// of, where neither is an IP address — with the host it did parse to. A public suffix is no domain it may set, which
 // this does not know: no list of them is kept.
 const DOMAIN_OPAQUE: u32 = 1;
 const DOMAIN_UNPARSED: u32 = 2;
 const DOMAIN_NOT_SUFFIX: u32 = 3;
-fn domain_to_set(effective: Option<&str>, value: &str) -> Result<String, u32> {
-    let effective = effective.ok_or(DOMAIN_OPAQUE)?;
-    let host = domain_host(value).ok_or(DOMAIN_UNPARSED)?;
+fn domain_to_set(effective: Option<&str>, value: &str) -> Result<String, (u32, String)> {
+    let effective = effective.ok_or((DOMAIN_OPAQUE, String::new()))?;
+    let host = domain_host(value).ok_or((DOMAIN_UNPARSED, String::new()))?;
     let suffix = || !ip_host(&host) && !ip_host(effective) && effective.strip_suffix(host.as_str()).is_some_and(|sub| sub.ends_with('.'));
     if host == effective || suffix() {
         Ok(host)
     } else {
-        Err(DOMAIN_NOT_SUFFIX)
+        Err((DOMAIN_NOT_SUFFIX, host))
     }
 }
 // …a document's: realm `realm`'s origin (its creator's, for a document with none of its own), with what a write set on
@@ -299,26 +299,26 @@ fn effective_domain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         None => rv.set_null(),
     }
 }
-// __dom.setDomain(doc, realm, value) -> null with `doc`'s domain set to `value` host-parsed, else `[why, host]`: why not
-// (`domain_to_set`), and that host ('' for none).
+// __dom.setDomain(doc, realm, value) -> null with `doc`'s domain set to `value` host-parsed, else `[why, host,
+// effective]`: why not (`domain_to_set`), the host it parsed to and the effective domain ('' for none).
 fn set_domain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let value = args.get(2).to_rust_string_lossy(scope);
-    let why = match crate::node_handle::nid_of(scope, args.get(0)) {
-        Some(doc) => {
-            let effective = document_effective_domain(scope, Some(doc), args.get(1));
-            match domain_to_set(effective.as_deref(), &value) {
-                Ok(host) => {
-                    crate::dom::dom(scope).arena.document_states.set_domain(doc, host);
-                    return rv.set_null();
-                }
-                Err(why) => why,
+    let doc = crate::node_handle::nid_of(scope, args.get(0));
+    let effective = doc.and_then(|doc| document_effective_domain(scope, Some(doc), args.get(1)));
+    // (…no document, no effective domain: an opaque origin's refusal)
+    let (why, host) = match domain_to_set(effective.as_deref(), &value) {
+        Ok(host) => {
+            if let Some(doc) = doc {
+                crate::dom::dom(scope).arena.document_states.set_domain(doc, host);
             }
+            return rv.set_null();
         }
-        None => DOMAIN_OPAQUE,
+        Err(refused) => refused,
     };
     let why = v8::Integer::new_from_unsigned(scope, why).into();
-    let host = v8::String::new(scope, &domain_host(&value).unwrap_or_default()).map_or_else(|| v8::undefined(scope).into(), Into::into);
-    rv.set(v8::Array::new_with_elements(scope, &[why, host]).into());
+    let mut item = |s: &str| v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into);
+    let (host, effective) = (item(&host), item(effective.as_deref().unwrap_or_default()));
+    rv.set(v8::Array::new_with_elements(scope, &[why, host, effective]).into());
 }
 // __dom.ipHost(host) -> whether it is an IP address (`ip_host`).
 fn ip_host_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -337,15 +337,15 @@ mod tests {
         assert_eq!(effective_domain("null", None), None);
         assert_eq!(domain_to_set(Some("a.b.test"), "B.Test"), Ok("b.test".to_owned()));
         assert_eq!(domain_to_set(Some("a.b.test"), "a.b.test"), Ok("a.b.test".to_owned()));
-        assert_eq!(domain_to_set(Some("a.b.test"), "c.test"), Err(DOMAIN_NOT_SUFFIX));
-        assert_eq!(domain_to_set(Some("ab.test"), "b.test"), Err(DOMAIN_NOT_SUFFIX));
-        assert_eq!(domain_to_set(Some("a.b.test"), "b.test:80"), Err(DOMAIN_UNPARSED));
-        assert_eq!(domain_to_set(Some("a.b.test"), "b.test/x"), Err(DOMAIN_UNPARSED));
-        assert_eq!(domain_to_set(Some("a.b.test"), ""), Err(DOMAIN_UNPARSED));
-        assert_eq!(domain_to_set(None, "b.test"), Err(DOMAIN_OPAQUE));
+        assert_eq!(domain_to_set(Some("a.b.test"), "c.test"), Err((DOMAIN_NOT_SUFFIX, "c.test".to_owned())));
+        assert_eq!(domain_to_set(Some("ab.test"), "b.test"), Err((DOMAIN_NOT_SUFFIX, "b.test".to_owned())));
+        assert_eq!(domain_to_set(Some("a.b.test"), "b.test:80"), Err((DOMAIN_UNPARSED, String::new())));
+        assert_eq!(domain_to_set(Some("a.b.test"), "b.test/x"), Err((DOMAIN_UNPARSED, String::new())));
+        assert_eq!(domain_to_set(Some("a.b.test"), ""), Err((DOMAIN_UNPARSED, String::new())));
+        assert_eq!(domain_to_set(None, "b.test"), Err((DOMAIN_OPAQUE, String::new())));
         // (…an IP address only ever itself, however it was written)
         assert_eq!(domain_to_set(Some("127.0.0.1"), "0x7f.0.0.1"), Ok("127.0.0.1".to_owned()));
-        assert_eq!(domain_to_set(Some("1.0.0.1"), "0.1"), Err(DOMAIN_NOT_SUFFIX));
+        assert_eq!(domain_to_set(Some("1.0.0.1"), "0.1"), Err((DOMAIN_NOT_SUFFIX, "0.0.0.1".to_owned())));
         assert!(ip_host("[::1]") && ip_host("10.0.0.1") && !ip_host("a.test"));
     }
 

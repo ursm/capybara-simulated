@@ -2,7 +2,7 @@
 // number written back as its value (`valueAsNumber`, `valueAsDate`), and the step `stepUp()` / `stepDown()` take —
 // what constraint validation (validity.rs) and the page's `value` accessors read alike.
 
-use crate::dom::NodeData;
+use crate::dom::{NodeData, Text};
 use crate::numbers::{to_js_string, to_precision};
 
 pub(crate) const MS_PER_DAY: f64 = 86_400_000.0;
@@ -415,9 +415,33 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "inputSanitize", input_sanitize, context_id);
     crate::dom::register(scope, ns, "inputValueOf", input_value_of, context_id);
     crate::dom::register(scope, ns, "inputNumber", input_number, context_id);
-    crate::dom::register(scope, ns, "inputValue", input_value, context_id);
+    crate::dom::register(scope, ns, "inputValueFromNumber", input_value_from_number, context_id);
     crate::dom::register(scope, ns, "inputDate", input_date, context_id);
     crate::dom::register(scope, ns, "inputStep", input_step, context_id);
+}
+
+impl crate::dom::RealmArena {
+    // An `<input>` of type `ty`'s value as its `value` getter returns it, by its type's value mode (HTML §4.10.5.4) —
+    // None for "filename", whose files are the bindings': a "default" mode type's `value` attribute as the arena holds
+    // it, a checkbox's and a radio's `on` where it has none; a "value" mode type's live value — its attribute until
+    // dirtied — sanitized for its type, but a number field the user typed into, whose value reads as it was typed where
+    // it converts ("001.50", "1e2" — Chrome).
+    pub(crate) fn input_value(&self, n: &NodeData, ty: &str, colour: &dyn Fn(&str) -> String) -> Option<Text> {
+        let attr = |or: &str| n.plain_attr_text("value").unwrap_or_else(|| Text::Utf8(or.to_owned()));
+        Some(match crate::input_types::value_mode(ty) {
+            crate::input_types::MODE_FILENAME => return None,
+            crate::input_types::MODE_DEFAULT_ON => attr("on"),
+            crate::input_types::MODE_DEFAULT => attr(""),
+            _ => {
+                let raw = self.raw_value_units(n);
+                Text::Units(if ty == "number" && n.state & crate::dom::STATE_DIRTY_BY_USER != 0 {
+                    typed_number(&String::from_utf16_lossy(&raw)).encode_utf16().collect()
+                } else {
+                    sanitize_units(ty, &raw, &Attrs::of(n), colour)
+                })
+            }
+        })
+    }
 }
 
 fn set_string(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnValue<'_, v8::Value>, s: &str) {
@@ -452,18 +476,22 @@ fn input_sanitize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set(out);
 }
 
-// __dom.inputValueOf(input) -> what its `value` getter returns (form_entries.rs `input_value`) — null for a file
-// input, whose files the bindings hold.
+// __dom.inputValueOf(input) -> what its `value` getter returns (`input_value`) — null for a file input, whose files the
+// bindings hold.
 fn input_value_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let caller = crate::dom::realm_id(scope, &args);
     let d = crate::dom::dom(scope);
+    // (…in the realm whose tree it is in — the calling one's where that realm is gone)
     let Some(cid) = d.arena.get(id).map(|n| n.realm) else { return };
+    let cid = if d.arena.enter_known(cid).is_some() { cid } else { caller };
     let arena: &crate::dom::RealmArena = d.arena.enter(cid);
     let engine = d.styles.get(&cid);
     let colour = |v: &str| colour_value(engine, arena, v);
-    let Some(units) = arena.get(id).and_then(|n| arena.input_value(n, &colour)) else { return };
-    rv.set(crate::dom::utf16_value(scope, &units));
+    let Some(text) = arena.get(id).and_then(|n| arena.input_value(n, n.input_type(), &colour)) else { return };
+    let value = text.value(scope);
+    rv.set(value);
 }
 // __dom.inputNumber(type, value) -> the value as `type`'s number (`number_of`), NaN for none.
 fn input_number(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -472,9 +500,9 @@ fn input_number(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set_double(number_of(&ty, &value).unwrap_or(f64::NAN));
 }
 
-// __dom.inputValue(type, n, fromDate) -> `n` written as `type`'s value (`value_of`) — with `fromDate`, a Date's time
+// __dom.inputValueFromNumber(type, n, fromDate) -> `n` written as `type`'s value (`value_of`) — with `fromDate`, a Date's time
 // value as a month's (`month_of_date`).
-fn input_value(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+fn input_value_from_number(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let ty = args.get(0).to_rust_string_lossy(scope);
     let n = args.get(1).number_value(scope).unwrap_or(f64::NAN);
     let out = if args.get(2).is_true() && ty == "month" { month_of_date(n) } else { value_of(&ty, n) };

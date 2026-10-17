@@ -654,9 +654,20 @@ impl NodeData {
         self.plain_attr_units(local) == other.plain_attr_units(other_local)
     }
     // The value of the attribute `local` in no namespace as the page wrote it: UTF-16, a lone surrogate included.
+    // The attribute stored under `key`'s value as its text (`Text`): the lossless UTF-16 override where it carried a lone
+    // surrogate, else its UTF-8.
+    pub(crate) fn attr_text(&self, key: &str) -> Option<Text> {
+        match self.get_attr_u16(key) {
+            Some(u) => Some(Text::Units(u.to_vec())),
+            None => self.get_attr(key).map(|v| Text::Utf8(v.to_owned())),
+        }
+    }
+    // …the one in no namespace named `local`'s.
+    pub(crate) fn plain_attr_text(&self, local: &str) -> Option<Text> {
+        self.plain_attr(local).and_then(|_| self.attr_text(local))
+    }
     pub(crate) fn plain_attr_units(&self, local: &str) -> Option<Vec<u16>> {
-        let value = self.plain_attr(local)?;
-        Some(self.get_attr_u16(local).map_or_else(|| value.encode_utf16().collect(), <[u16]>::to_vec))
+        self.plain_attr_text(local).map(Text::into_units)
     }
     // Whether the attribute `local` in no namespace is `units`, exactly (as UTF-16) — compared where the arena holds it,
     // no copy made.
@@ -3940,9 +3951,36 @@ fn inspect_node(
 
 // A JS string of these UTF-16 code units.
 pub(crate) fn utf16_value<'s>(scope: &mut v8::PinScope<'s, '_>, units: &[u16]) -> v8::Local<'s, v8::Value> {
-    match v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal) {
-        Some(s) => s.into(),
-        None => v8::undefined(scope).into(),
+    // (…a one-byte string where every unit fits one, as V8 makes of a Latin-1 literal: half the memory, and the fast
+    // paths a `JSON.parse` or a regex takes over one)
+    // (…the test an OR over every unit, which vectorizes where a short-circuiting `all` does not)
+    let made = if units.iter().fold(0, |any, &u| any | u) <= 0xFF {
+        let bytes: Vec<u8> = units.iter().map(|&u| u as u8).collect();
+        v8::String::new_from_one_byte(scope, &bytes, v8::NewStringType::Normal)
+    } else {
+        v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal)
+    };
+    made.map_or_else(|| v8::undefined(scope).into(), Into::into)
+}
+// A text as the arena holds it, taken out of a node's borrow to be made a string of: UTF-16 where it must be (a value
+// carrying a lone surrogate, one computed), else the UTF-8 an attribute keeps — which V8 makes a string of with no
+// re-encoding.
+pub(crate) enum Text {
+    Units(Vec<u16>),
+    Utf8(String),
+}
+impl Text {
+    pub(crate) fn into_units(self) -> Vec<u16> {
+        match self {
+            Text::Units(u) => u,
+            Text::Utf8(s) => s.encode_utf16().collect(),
+        }
+    }
+    pub(crate) fn value<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
+        match self {
+            Text::Units(u) => utf16_value(scope, u),
+            Text::Utf8(s) => v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into),
+        }
     }
 }
 
@@ -5760,25 +5798,10 @@ fn attr_get(
     let Some(id) = holder_node_id(scope, args) else {
         return v8::Intercepted::kNo;
     };
-    // Prefer the lossless UTF-16 override (a value that carried a lone surrogate); else the UTF-8. Clone
-    // the chosen representation out of the node borrow so the V8 string can be built with the scope after.
-    let value: Option<Result<Vec<u16>, String>> = dom(scope).arena.get(id).and_then(|n| {
-        match n.get_attr_u16(name) {
-            Some(u) => Some(Ok(u.to_vec())),
-            None => n.get_attr(name).map(|v| Err(v.to_string())),
-        }
-    });
-    match value {
-        Some(Ok(u)) => {
-            if let Some(js) = v8::String::new_from_two_byte(scope, &u, v8::NewStringType::Normal) {
-                rv.set(js.into());
-            }
-            v8::Intercepted::kYes
-        }
-        Some(Err(v)) => {
-            if let Some(js) = v8::String::new(scope, &v) {
-                rv.set(js.into());
-            }
+    match dom(scope).arena.get(id).and_then(|n| n.attr_text(name)) {
+        Some(text) => {
+            let js = text.value(scope);
+            rv.set(js);
             v8::Intercepted::kYes
         }
         None => v8::Intercepted::kNo,
@@ -5922,24 +5945,15 @@ fn attr_descriptor(
     let Some(id) = holder_node_id(scope, args) else {
         return v8::Intercepted::kNo;
     };
-    let value: Option<Result<Vec<u16>, String>> = dom(scope).arena.get(id).and_then(|n| {
-        match n.get_attr_u16(name) {
-            Some(u) => Some(Ok(u.to_vec())),
-            None => n.get_attr(name).map(|v| Err(v.to_string())),
-        }
-    });
-    match value {
-        Some(rep) => {
+    match dom(scope).arena.get(id).and_then(|n| n.attr_text(name)) {
+        Some(text) => {
             // A data descriptor consistent with the enumerator: enumerable + writable + configurable,
             // so Object.keys / hasOwnProperty / Object.assign see a valid own property (V8 invariant). The
             // value round-trips losslessly (the UTF-16 override wins over the lossy UTF-8 when present).
             let desc = v8::Object::new(scope);
-            let vstr = match rep {
-                Ok(u) => v8::String::new_from_two_byte(scope, &u, v8::NewStringType::Normal),
-                Err(s) => v8::String::new(scope, &s),
-            };
-            if let (Some(k), Some(v)) = (v8::String::new(scope, "value"), vstr) {
-                desc.set(scope, k.into(), v.into());
+            let v = text.value(scope);
+            if let Some(k) = v8::String::new(scope, "value") {
+                desc.set(scope, k.into(), v);
             }
             desc_set_bool(scope, desc, "writable", true);
             desc_set_bool(scope, desc, "enumerable", true);

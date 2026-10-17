@@ -13,29 +13,64 @@ use crate::editing_insert::Edit;
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "editCommand", edit_command, context_id);
     crate::dom::register(scope, ns, "commandSupport", command_support_op, context_id);
+    crate::dom::register(scope, ns, "commandInputType", command_input_type_op, context_id);
 }
 
 // The commands `execCommand` carries out, by name (matched ASCII case-insensitively), each with whether it is one a
-// focused text control takes as well as an editing host (Chrome's `queryCommandEnabled` with a selection in one). (…
-// `paste` among them, the driver's clipboard read: Chrome refuses a page that)
-const COMMANDS: [(&str, bool); 31] = [
-    ("bold", false), ("italic", false), ("underline", false), ("strikethrough", false), ("superscript", false),
-    ("subscript", false), ("forecolor", false), ("backcolor", false), ("hilitecolor", false), ("fontname", false),
-    ("justifycenter", false), ("justifyfull", false), ("justifyright", false), ("justifyleft", false),
-    ("removeformat", false), ("indent", false), ("outdent", false), ("createlink", false), ("unlink", false),
-    ("inserthorizontalrule", false), ("insertorderedlist", false), ("insertunorderedlist", false),
-    ("inserttext", true), ("inserthtml", true), ("insertlinebreak", true), ("insertparagraph", true), ("delete", true),
-    ("forwarddelete", true), ("cut", true), ("copy", true), ("paste", true),
+// focused text control takes as well as an editing host (Chrome's `queryCommandEnabled` with a selection in one), and
+// the `inputType` of the `input` event it fires (Input Events §5.1, as Chrome names each; '' for none: `unlink`'s
+// `input` carries none, `copy` fires no `input`). (…`paste` among them, the driver's clipboard read: Chrome refuses a page that)
+const COMMANDS: [(&str, bool, &str); 31] = [
+    ("bold", false, "formatBold"),
+    ("italic", false, "formatItalic"),
+    ("underline", false, "formatUnderline"),
+    ("strikethrough", false, "formatStrikeThrough"),
+    ("superscript", false, "formatSuperscript"),
+    ("subscript", false, "formatSubscript"),
+    ("forecolor", false, "formatFontColor"),
+    ("backcolor", false, "formatBackColor"),
+    ("hilitecolor", false, "formatBackColor"),
+    ("fontname", false, "formatFontName"),
+    ("justifycenter", false, "formatJustifyCenter"),
+    ("justifyfull", false, "formatJustifyFull"),
+    ("justifyright", false, "formatJustifyRight"),
+    ("justifyleft", false, "formatJustifyLeft"),
+    ("removeformat", false, "formatRemove"),
+    ("indent", false, "formatIndent"),
+    ("outdent", false, "formatOutdent"),
+    ("createlink", false, "insertLink"),
+    ("unlink", false, ""),
+    ("inserthorizontalrule", false, "insertHorizontalRule"),
+    ("insertorderedlist", false, "insertOrderedList"),
+    ("insertunorderedlist", false, "insertUnorderedList"),
+    ("inserttext", true, "insertText"),
+    ("inserthtml", true, ""),
+    ("insertlinebreak", true, "insertLineBreak"),
+    ("insertparagraph", true, "insertParagraph"),
+    ("delete", true, "deleteContentBackward"),
+    ("forwarddelete", true, "deleteContentForward"),
+    ("cut", true, "deleteByCut"),
+    ("copy", true, ""),
+    ("paste", true, "insertFromPaste"),
 ];
+fn command(name: &str) -> Option<&'static (&'static str, bool, &'static str)> {
+    COMMANDS.iter().find(|(c, _, _)| c.eq_ignore_ascii_case(name))
+}
 // What `queryCommandSupported` / `queryCommandEnabled` answer of `command`: None for one not carried out — 1 where a
 // text control's selection takes it as well as an editing host's, 0 where only an editing host's.
-pub(crate) fn command_support(command: &str) -> Option<u32> {
-    COMMANDS.iter().find(|(name, _)| name.eq_ignore_ascii_case(command)).map(|&(_, text)| u32::from(text))
+pub(crate) fn command_support(name: &str) -> Option<u32> {
+    command(name).map(|&(_, text, _)| u32::from(text))
 }
 // __dom.commandSupport(command) -> `command_support`, -1 for none.
 fn command_support_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let command = args.get(0).to_rust_string_lossy(scope);
     rv.set_int32(command_support(&command).map_or(-1, |s| s as i32));
+}
+// __dom.commandInputType(command) -> the `inputType` of the `input` it fires ('' for none, or for no command).
+fn command_input_type_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let name = args.get(0).to_rust_string_lossy(scope);
+    let input_type = command(&name).map_or("", |&(_, _, t)| t);
+    rv.set(v8::String::new(scope, input_type).map_or_else(|| v8::undefined(scope).into(), Into::into));
 }
 
 // (…an element of the local name `tag`, ASCII case-insensitively, in any namespace: the tags the commands compare)

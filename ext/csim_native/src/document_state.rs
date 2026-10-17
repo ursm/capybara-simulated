@@ -66,6 +66,10 @@ impl DocumentStates {
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty() && self.1.is_empty()
     }
+    // `doc`'s character encoding, UTF-8 until one is set.
+    fn encoding(&self, doc: NodeId) -> &str {
+        self.1.get(&doc).and_then(|t| t.texts[TEXT_ENCODING].as_deref()).filter(|e| !e.is_empty()).unwrap_or("UTF-8")
+    }
     // The domain a `document.domain` write set on `doc`, none until one did.
     pub(crate) fn domain(&self, doc: NodeId) -> Option<&str> {
         self.1.get(&doc).and_then(|t| t.texts[TEXT_DOMAIN].as_deref())
@@ -108,6 +112,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "docUrl", doc_url, context_id);
     crate::dom::register(scope, ns, "docBaseUrl", doc_base_url, context_id);
     crate::dom::register(scope, ns, "docText", doc_text, context_id);
+    crate::dom::register(scope, ns, "docParseUrl", doc_parse_url, context_id);
     crate::dom::register(scope, ns, "setDocText", set_doc_text, context_id);
     crate::dom::register(scope, ns, "docLastModified", doc_last_modified, context_id);
     crate::dom::register(scope, ns, "currentScript", current_script, context_id);
@@ -299,13 +304,19 @@ impl RealmArena {
         if let Some((_, _, href)) = texts.and_then(|t| t.base_url.as_ref()).filter(|(e, f, _)| *e == epoch && *f == fallback) {
             return href.clone();
         }
-        let encoding = texts.and_then(|t| t.texts[TEXT_ENCODING].as_deref()).filter(|e| !e.is_empty()).unwrap_or("UTF-8");
+        let encoding = self.document_states.encoding(doc);
         let href = crate::url_ops::document_base_url(self, doc, &fallback, Some(encoding));
         // (…none kept for a document freed, which a page can still hold: nothing would let go of it)
         if self.get(doc).is_some() {
             self.document_states.1.entry(doc).or_default().base_url = Some((epoch, fallback, href.clone()));
         }
         href
+    }
+    // HTML "encoding-parse a URL" relative to `doc`: `value` parsed against its base URL, a special URL's query in its
+    // encoding — None where that is no URL.
+    pub(crate) fn parse_document_url(&mut self, doc: NodeId, value: &str) -> Option<ada_url::Url> {
+        let base = self.document_base_url(doc);
+        crate::url_ops::encoding_parse(value, Some(&base), Some(self.document_states.encoding(doc)))
     }
 }
 
@@ -320,6 +331,20 @@ fn doc_url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     rv.set(v8::String::new(scope, &url).unwrap().into());
 }
 
+// __dom.docParseUrl(docNid, value, parts) -> `value` parsed relative to the document (`parse_document_url`), serialized
+// — or with `parts` its components (url_ops.rs `parts`) — or null where it is no URL.
+fn doc_parse_url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let Some(doc) = nid_arg(scope, &args, 0) else { return };
+    let value = crate::url_ops::usv(scope, args.get(1));
+    let Some(url) = crate::dom::dom(scope).arena.parse_document_url(doc, &value) else { return };
+    if args.get(2).is_true() {
+        let parts = crate::url_ops::parts(scope, &url);
+        rv.set(parts.into());
+    } else if let Some(href) = v8::String::new(scope, url.href()) {
+        rv.set(href.into());
+    }
+}
 // __dom.docBaseUrl(docNid) -> the document's base URL (`document_base_url`).
 fn doc_base_url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let url = match nid_arg(scope, &args, 0) {
