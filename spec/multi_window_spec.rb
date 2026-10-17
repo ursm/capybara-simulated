@@ -85,6 +85,15 @@ RSpec.describe 'multi-window' do
     end
   end
 
+  # (…HTML "window open steps": an empty target is `_blank`, where a link's empty target is its own window)
+  it "opens a new window for an empty target, and navigates this one for `_self`" do
+    session.visit '/'
+    win = session.window_opened_by { session.execute_script("window.open('/popup', '')") }
+    expect(session.within_window(win) { session.current_path }).to eq('/popup')
+    session.execute_script("window.open('/other', '_SELF')")
+    expect([session.windows.size, session.current_path]).to eq([2, '/other'])
+  end
+
   it 'sets window.opener on a JS-opened window' do
     win = session.window_opened_by { session.find(:css, '#open').click }
     session.within_window(win) do
