@@ -848,7 +848,8 @@ impl Input {
         let content = n.aspect_content || !n.border_box;
         let h = if content { n.content_w(w) / n.aspect } else { w / n.aspect };
         n.height = if content == !n.border_box { h } else if n.border_box { h + n.edges_y() } else { (h - n.edges_y()).max(0.0) };
-        n.height_is_floor = n.clip == 0;
+        // (…the automatic minimum only where `min-height` is `auto`: a `min-height: 0` box keeps its ratio)
+        n.height_is_floor = n.clip == 0 && is_auto(n.min_h);
         n
     }
     // Sum of the horizontal / vertical non-content edges (padding + border), used to convert between
@@ -3876,7 +3877,7 @@ fn measure_float(
     let fw = if is_auto(cn.width) || cn.width_kw != 0 {
         let room = (content_w - Input::m(cn.ml) - Input::m(cn.mr)).max(0.0);
         match content_sized_width(c, room, inputs, runs, run_texts, grids, children) {
-            Some(w) => used_width(&cn, w),
+            Some(w) => ratio_floor(c, used_width(&cn, w), inputs, runs, run_texts, grids, children),
             None => {
                 failed.set(true);
                 0.0
@@ -5623,7 +5624,7 @@ fn measure_flex(
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
 ) -> MInfo {
-    let n = inputs[i].get().with_imposed_height(imposed_h);
+    let n = inputs[i].get().with_imposed_height(imposed_h).with_ratio_height(w);
     let content_w = n.content_w(w);
     let content_left_rel = n.bl + n.pl;
     let content_top_rel = n.bt + n.pt;
@@ -5832,8 +5833,10 @@ fn measure_flex(
         // aligns its items in the pre-floor content, a max-height CAP its taller content overflows — the Avo
         // `field-wrapper` row). A genuinely DEFINITE height (declared, or imposed by a stretch or an inset
         // box) takes the else branch below.
-        if is_auto(n.height) || n.item_auto_height {
-            let flowed = lines_cross_sum + edges_y;
+        // (…and a height its preferred aspect ratio gave it, a FLOOR the content grows past: `height_is_floor`)
+        if is_auto(n.height) || n.item_auto_height || n.height_is_floor {
+            let floor = if n.height_is_floor { to_border_y(n.height) } else { 0.0 };
+            let flowed = (lines_cross_sum + edges_y).max(floor);
             let bh = clamp_min_max(flowed, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
             clamped = bh != flowed;
             (w, bh, lines_cross_sum, false)
@@ -5843,7 +5846,7 @@ fn measure_flex(
             (w, bh, (bh - edges_y).max(0.0), true)
         }
     } else {
-        let bh = if is_auto(n.height) {
+        let bh = if is_auto(n.height) || n.height_is_floor {
             // The box wraps what the items consumed OR the extent a min-height floored under them, then the
             // OUTER min/max-height clamp (a max-height the content overruns caps the box at it while the
             // items overflow). A ROW's is `content_main.max(used_main)`; a COLUMN's is asked per LINE — the
@@ -5853,7 +5856,7 @@ fn measure_flex(
                 col_extent(lm).max(lm)
             }).fold(0.0f64, f64::max);
             let content_ext = if main_is_x { content_main.max(used_main) } else { tallest };
-            let flowed = content_ext + edges_y;
+            let flowed = (content_ext + edges_y).max(if n.height_is_floor { to_border_y(n.height) } else { 0.0 });
             let bh = clamp_min_max(flowed, to_border_y(n.min_h), to_border_y(n.max_h)).max(0.0);
             clamped = bh != flowed;
             bh
@@ -6523,7 +6526,7 @@ fn measure_table(
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
 ) -> MInfo {
-    let n = inputs[i].get().with_imposed_height(imposed_h);
+    let n = inputs[i].get().with_imposed_height(imposed_h).with_ratio_height(w);
     let (sx, sy) = (n.sp_x, n.sp_y);
     let bail = |failed: &std::cell::Cell<bool>| {
         failed.set(true);
@@ -7597,6 +7600,11 @@ fn min_content_width(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts: 
     // percentage padding counts here as it does in the box (Chrome floors a `padding: 0 10%` item in a 100px row
     // at 52 — its text plus the 20 the padding comes to).
     let content = content_intrinsic(i, inputs, runs, run_texts, grids, children)?.0 + n.edges_x();
+    // (…a box whose preferred aspect ratio transfers a definite height across — its content size suggestion that width,
+    // Flexbox §4.5: Chrome and Firefox keep a `height: 50px; aspect-ratio: 2` item 100 wide in a full row)
+    if let Some(transferred) = ratio_width(&n).filter(|_| is_auto(n.decl_w)) {
+        return Some(transferred.max(content));
+    }
     if is_auto(n.decl_w) {
         return Some(content);
     }
@@ -8189,7 +8197,7 @@ fn measure_grid(
     boxes: &mut [Box],
     failed: &std::cell::Cell<bool>,
 ) -> MInfo {
-    let n = inputs[i].get().with_imposed_height(imposed_h);
+    let n = inputs[i].get().with_imposed_height(imposed_h).with_ratio_height(w);
     let bail = |failed: &std::cell::Cell<bool>| {
         failed.set(true);
         MInfo { top: CMargin::of(0.0), top_only: CMargin::of(0.0), bottom: CMargin::of(0.0), collapse_through: false }
@@ -8337,12 +8345,14 @@ fn measure_grid(
     boxes[i].inline_block_baseline = ib;
     boxes[i].nid = n.nid;
     boxes[i].w = w;
+    let declared = if n.border_box { n.height.max(n.edges_y()) } else { n.height + n.edges_y() };
     let box_h = if is_auto(n.height) {
         content_top_rel + bottom + n.pb + n.bb
-    } else if n.border_box {
-        n.height.max(n.edges_y())
+    } else if n.height_is_floor {
+        // (…a height its preferred aspect ratio gave it, a FLOOR its rows grow past)
+        (content_top_rel + bottom + n.pb + n.bb).max(declared)
     } else {
-        n.height + n.edges_y()
+        declared
     };
     let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_y() };
     boxes[i].h = clamp_min_max(box_h, to_border(n.min_h), to_border(n.max_h)).max(0.0);
@@ -8422,7 +8432,10 @@ fn replaced_box(n: &Input, auto_w: f64) -> (f64, f64) {
     // 100 at `aspect-ratio: 1`)
     let border_ratio = n.aspect > 0.0 && !n.aspect_content && n.border_box;
     let (rx, ry) = if border_ratio { (0.0, 0.0) } else { (extra_w, extra_h) };
-    let ratio = if border_ratio {
+    // (…a `<ratio>` the box's, an `auto && <ratio>` where it has no natural one — an image of no natural size included,
+    // whose 0 x 0 says none: Chrome's `<img style="aspect-ratio: 1; width: 100px">` with no source is 100 x 100)
+    let preferred = n.aspect > 0.0 && !(n.aspect_content && n.ratio && n.intrinsic_w > 0.0 && n.intrinsic_h > 0.0);
+    let ratio = if border_ratio || preferred {
         n.aspect
     } else if n.ratio && n.intrinsic_w > 0.0 && n.intrinsic_h > 0.0 {
         n.intrinsic_w / n.intrinsic_h
@@ -8698,7 +8711,9 @@ fn place_out_of_flow(
     let auto_h = if stretched_v && !n.height_kw { (avail_h - mt - mb).max(0.0) } else { 0.0 };
     // …a REPLACED box excepted: its height is its own intrinsic size, which §10.6.5 keeps whatever the insets say
     // (an inset `<input>` / list box keeps its own height rather than stretching to the inset one).
-    let imposed = if is_auto(n.height) && auto_h > 0.0 && !n.replaced { auto_h } else { f64::NAN };
+    // …and a box with a preferred aspect ratio, whose height goes through it from its width whatever the insets say
+    // (Chrome and Firefox: `top: 0; bottom: 0; width: 40px; aspect-ratio: 2` is 40 x 20).
+    let imposed = if is_auto(n.height) && auto_h > 0.0 && !n.replaced && !(n.aspect > 0.0) { auto_h } else { f64::NAN };
     measure(c, w, imposed, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
     let h = boxes[c].h;
     let am = n.auto_margins;

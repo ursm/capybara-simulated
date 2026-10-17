@@ -620,8 +620,6 @@ css/css-flexbox/inline-flexbox-wrap-vertically-width-calculation.html:
 - ".inline-flexbox 6"
 css/css-flexbox/intrinsic-size/col-wrap-005.html:
 - body > div 1
-css/css-flexbox/intrinsic-size/col-wrap-018.html:
-- body > div 1
 css/css-flexbox/intrinsic-size/col-wrap-019.html:
 - body > div 1
 css/css-flexbox/intrinsic-size/row-005.html:
@@ -834,19 +832,13 @@ css/css-shadow/part/pseudo-elements-after-part.html:
 - computed style for ::part()::selection
 - computed style for ::part()::spelling-error
 - computed style for ::part()::target-text
-css/css-sizing/aspect-ratio/abspos-003.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/abspos-004.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
-css/css-sizing/aspect-ratio/abspos-005.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/abspos-008.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/abspos-014.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/abspos-015.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
-css/css-sizing/aspect-ratio/abspos-018.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/abspos-021.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
@@ -886,10 +878,6 @@ css/css-sizing/aspect-ratio/box-sizing-squashed.html:
 - ".item 4"
 - ".item 6"
 - ".item 8"
-css/css-sizing/aspect-ratio/flex-aspect-ratio-007.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
-css/css-sizing/aspect-ratio/flex-aspect-ratio-008.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/flex-aspect-ratio-009.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/flex-aspect-ratio-013.html:
@@ -923,8 +911,6 @@ css/css-sizing/aspect-ratio/flex-aspect-ratio-038.html:
 css/css-sizing/aspect-ratio/flex-aspect-ratio-039.html:
 - "== css/reference/ref-filled-green-100px-square.xht"
 css/css-sizing/aspect-ratio/flex-aspect-ratio-045.html:
-- "== css/reference/ref-filled-green-100px-square-only.html"
-css/css-sizing/aspect-ratio/flex-aspect-ratio-047.html:
 - "== css/reference/ref-filled-green-100px-square-only.html"
 css/css-sizing/aspect-ratio/flex-aspect-ratio-054.html:
 - "== css/reference/ref-filled-green-100px-square-only.html"
@@ -1019,8 +1005,6 @@ css/css-sizing/aspect-ratio/replaced-element-043.html:
 - canvas 79
 css/css-sizing/aspect-ratio/select-element-001.html:
 - "== css/css-sizing/aspect-ratio/select-element-001-ref.html"
-css/css-sizing/aspect-ratio/table-element-001.html:
-- "== css/reference/ref-filled-green-100px-square.xht"
 css/css-transforms/2d-rotate-001.html:
 - "== css/css-transforms/2d-rotate-ref.html"
 css/css-transforms/3d-point-mapping-3.html:
@@ -4143,15 +4127,6 @@ html/rendering/non-replaced-elements/the-page/iframe-scrolling-attribute.html:
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/canvas-aspect-ratio.html:
 - 'Computed style test: canvas with {"width":"0.5","height":"1.5"}'
 - 'Computed style test: canvas with {"width":"10%","height":"20"}'
-html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-aspect-ratio-lazy.html:
-- Image width and height attributes are used to infer aspect-ratio for lazy-loaded
-  images
-html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-aspect-ratio.html:
-- 'Create, append and test immediately: <img> with attributes width=0.8, height=0.2'
-- 'Create, append and test immediately: <img> with attributes width=250, height=100'
-- 'Create, append and test immediately: <img> with invalid trailing attributes width=50pp
-  height=25xx'
-- 'Loaded images test: <img> with width, height and empty src attributes'
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-align-right-1.html:
 - "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-align-right-ref.html
   (both renderings blank)"
@@ -4162,10 +4137,6 @@ html/rendering/replaced-elements/attributes-for-embedded-content-and-images/inpu
 - "!= html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-border-radius-notref.html"
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-image-inline-alt.html:
 - "== html/rendering/replaced-elements/attributes-for-embedded-content-and-images/input-image-inline-alt-ref.html"
-html/rendering/replaced-elements/attributes-for-embedded-content-and-images/picture-aspect-ratio.html:
-- Computed style for width/height/aspect-ratio
-- Make sure style gets invalidated correctly when the source gets removed.
-- Source width/height should take precedence over img attributes.
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/textarea-scrollheight-empty.html:
 - Textarea scrollHeight shouldn't collapse under a line height
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/video-aspect-ratio.html:

@@ -371,16 +371,12 @@ impl Painter<'_> {
             _ => return [0.0, 0.0, cw, ch],
         };
         let (dw, dh) = (nw * scale, nh * scale);
-        // (…`object-position`, as computed: each axis a percentage of the room left and a length)
+        // (…`object-position`, as computed: each axis a percentage of the room left and a length — `calc(100% - 10px)` for
+        // `right 10px`)
         let position = self.value(el, "object-position", None).unwrap_or_else(|| "50% 50%".to_owned());
-        let mut axes = position.split_whitespace().map(|v| {
-            let (frac, px) = v.strip_suffix('%').map_or_else(|| (0.0, v.trim_end_matches("px").parse().unwrap_or(0.0)), |p| (p.parse::<f64>().unwrap_or(50.0) / 100.0, 0.0));
-            move |room: f64| room * frac + px
-        });
-        let (ax, ay) = (axes.next(), axes.next());
-        let x = ax.map_or((cw - dw) / 2.0, |f| f(cw - dw));
-        let y = ay.map_or((ch - dh) / 2.0, |f| f(ch - dh));
-        [x, y, dw, dh]
+        let axes = position_axes(&position);
+        let at = |k: usize, room: f64| axes.get(k).map_or(room / 2.0, |&(frac, px)| room * frac + px);
+        [at(0, cw - dw), at(1, ch - dh), dw, dh]
     }
 
     // One text piece of `box_owner`'s, in its owner's font and colour, where the flow put it.
@@ -675,4 +671,50 @@ mod tests {
         assert!(opaque("rgba(0, 0, 0, 0)".to_owned()).is_none());
         assert!(opaque("rgba(0, 0, 0, 0.5)".to_owned()).is_some());
     }
+}
+
+// A computed `<position>` (`object-position`'s) as its two axes, each `(fraction of the room, px)`: `50% 50%`, `0px 10px`,
+// `calc(100% - 10px) 0px` — its top-level components split apart outside parentheses, a `calc()`'s terms summed.
+fn position_axes(value: &str) -> Vec<(f64, f64)> {
+    let mut parts: Vec<String> = Vec::new();
+    let (mut depth, mut current) = (0i32, String::new());
+    for c in value.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ => {}
+        }
+        if c.is_whitespace() && depth == 0 {
+            if !current.is_empty() {
+                parts.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(c);
+        }
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    parts
+        .iter()
+        .map(|part| {
+            let inner = part.strip_prefix("calc(").and_then(|p| p.strip_suffix(')')).unwrap_or(part);
+            let (mut frac, mut px, mut sign) = (0.0, 0.0, 1.0);
+            for term in inner.split_whitespace() {
+                match term {
+                    "+" => sign = 1.0,
+                    "-" => sign = -1.0,
+                    t => {
+                        if let Some(p) = t.strip_suffix('%').and_then(|p| p.parse::<f64>().ok()) {
+                            frac += sign * p / 100.0;
+                        } else if let Some(l) = t.strip_suffix("px").and_then(|l| l.parse::<f64>().ok()) {
+                            px += sign * l;
+                        }
+                        sign = 1.0;
+                    }
+                }
+            }
+            (frac, px)
+        })
+        .collect()
 }

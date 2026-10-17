@@ -2086,7 +2086,16 @@ impl<'a> Walk<'a> {
         rec.clip = self.clip_flags(id, &style);
         // (…and its preferred aspect ratio, which a non-replaced box's automatic height goes through: a replaced one's is in
         // its intrinsic size, `intrinsic`)
-        if let Some((ratio, auto)) = preferred_ratio(&style) {
+        // (…none for a box it does not apply to: a non-replaced inline box, an internal table or ruby box — CSS Sizing 4
+        // §5.1; Chrome's `aspect-ratio: 2` table cell is as tall as its line)
+        let applies = {
+            let d = style.get_box().clone_display();
+            !matches!(d.outside(), DisplayOutside::InternalTable | DisplayOutside::InternalRuby)
+                && !(matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow) && !replaced_or_control(self.arena, id, self.node(id)))
+                // (…nor an `<audio>`'s controls, which keep their size: replaced-element-035)
+                && self.node(id).rendering_tag() != "audio"
+        };
+        if let Some((ratio, auto)) = preferred_ratio(&style).filter(|_| applies) {
             rec.aspect = ratio;
             rec.aspect_content = auto;
             rec.stretch_x = self.grid_stretched_x(id, &style);
