@@ -30,6 +30,27 @@ RSpec.describe 'text-transform in layout' do
     expect([widths['u'], widths['l'], widths['c'], widths['s']]).to eq([widths['U'], widths['L'], widths['C'], widths['S']])
     expect(session.evaluate_script("document.getElementById('c').innerText")).to eq("Hello World (Fine) Foo-Bar Don't 3rd X_y")
   end
+
+  # A word starts at a line break, a block, a cell and an atomic inline — an inline-block's text starts one, and the text
+  # after it goes on with that (Chrome's innerText, each); in the layout a line break or an atomic inline before a run.
+  it 'starts a word where the rendered text breaks' do
+    page = <<~HTML
+      <!doctype html><meta charset="utf-8"><body style="margin:0;font:16px serif;text-transform:capitalize">
+      <ul id=ul><li>foo</li><li>bar</li></ul>
+      <table id=t><tr><td>foo</td><td>bar</td></tr></table>
+      <div id=br><span>foo<br>bar</span></div>
+      <div id=p><p>foo</p><p>bar</p></div>
+      <div id=img><span>foo</span><img alt="" style="width:5px"><span id=after>bar</span></div>
+      <div id=ib>foo<span style="display:inline-block">x</span><span>bar</span></div>
+      <div style="text-transform:none"><span id=bar>Bar</span></div>
+    HTML
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    session.visit '/'
+    texts = session.evaluate_script("['ul', 't', 'br', 'p', 'img', 'ib'].map((id) => document.getElementById(id).innerText)")
+    expect(texts).to eq(["Foo\nBar", "Foo\tBar", "Foo\nBar", "Foo\n\nBar", 'FooBar', 'FooXbar'])
+    widths = session.evaluate_script("['after', 'bar'].map((id) => document.getElementById(id).getBoundingClientRect().width)")
+    expect(widths[0]).to eq(widths[1])
+  end
 end
 
 # `font-size: 0`: text that takes no room and makes no line taller (the white-space gap between inline-blocks gone).

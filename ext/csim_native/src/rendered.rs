@@ -389,12 +389,23 @@ impl Walk<'_> {
                 }
                 self.last_collapsible_only = false;
                 self.any_rendered = true;
+                self.in_word = false;
                 return vec![NEWLINE];
             }
             let style = primary_style(arena, id);
             if let Some(s) = &style {
                 transform = s.get_inherited_text().text_transform;
                 ws = own_ws(s).unwrap_or(ws);
+                // (…a box that is no plain inline one — a block, a cell, an atomic inline, a float, an out-of-flow one —
+                // starts a word: Chrome's `<li>foo</li><li>bar</li>` capitalized is "Foo\nBar", and an inline-block's "X"
+                // in `foo<span style="display:inline-block">x</span>bar` too, the "bar" after it going on with it)
+                let b = s.get_box();
+                let d = b.clone_display();
+                let plain_inline = d.is_contents() || (matches!(d.outside(), DisplayOutside::Inline) && matches!(d.inside(), DisplayInside::Flow));
+                let positioned = matches!(b.clone_position(), style::computed_values::position::T::Absolute | style::computed_values::position::T::Fixed);
+                if !plain_inline || positioned || b.clone_float() != style::computed_values::float::T::None {
+                    self.in_word = false;
+                }
             }
             if tag(node) == "details" && node.plain_attr("open").is_none() {
                 // (…a closed one renders its `<summary>` alone)
@@ -447,10 +458,12 @@ impl Walk<'_> {
             let part_ends_collapsible = self.ends_collapsible;
             let is_cell = is_element && CELL_TAGS.contains(&tag(cn));
             // (…an atomic inline separates the white space around it, though it contributes no text)
+            // (…and ends a word: Chrome's `foo<img>bar` capitalized is "FooBar")
             if is_element && ATOMIC_INLINE_TAGS.contains(&tag(cn)) && generates_text_box(self.engine, arena, c, cn, self.now) {
                 self.ends_collapsible = false;
                 self.at_start = false;
                 self.break_pending = false;
+                self.in_word = false;
             }
             // (…a cell whose content holds a block acts as one at the row's level: breaks before AND after it)
             let cell_with_block = is_cell && self.last_owed > 0;

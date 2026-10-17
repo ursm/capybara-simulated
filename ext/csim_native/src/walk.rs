@@ -4052,12 +4052,14 @@ impl<'a> Walk<'a> {
                         continue;
                     }
                     // (…in the case its `text-transform` lays it out in — a word going on from the text before it, across
-                    // an inline box's edge, not capitalized again)
+                    // an inline box's edge, not capitalized again; a line break or an atomic inline before it, an object
+                    // in the line's text, ends one)
                     let starts_word = || {
                         g.runs.iter().rev().find_map(|r| match r {
-                            Pending::Text { text, .. } => text.last().copied(),
+                            Pending::Text { text, .. } => Some(text.last().copied()),
+                            Pending::Br { .. } | Pending::Atomic { .. } => Some(None),
                             _ => None,
-                        }).is_none_or(|u| char::from_u32(u32::from(u)).is_none_or(|c| !crate::rendered::continues_word(c)))
+                        }).flatten().is_none_or(|u| char::from_u32(u32::from(u)).is_none_or(|c| !crate::rendered::continues_word(c)))
                     };
                     let transform = owner.get_inherited_text().text_transform;
                     let cased = transform.intersects(style::values::computed::text::TextTransform::CASE_TRANSFORMS);

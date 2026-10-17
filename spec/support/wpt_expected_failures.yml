@@ -3956,8 +3956,6 @@ html/rendering/non-replaced-elements/the-page/iframe-scrolling-attribute.html:
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/canvas-aspect-ratio.html:
 - 'Computed style test: canvas with {"width":"0.5","height":"1.5"}'
 - 'Computed style test: canvas with {"width":"10%","height":"20"}'
-html/rendering/replaced-elements/attributes-for-embedded-content-and-images/canvas-dimension-attributes.html:
-- "== css/reference/ref-filled-green-200px-square.html"
 html/rendering/replaced-elements/attributes-for-embedded-content-and-images/img-aspect-ratio-lazy.html:
 - Image width and height attributes are used to infer aspect-ratio for lazy-loaded
   images
