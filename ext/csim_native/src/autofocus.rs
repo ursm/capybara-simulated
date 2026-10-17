@@ -31,6 +31,10 @@ impl Autofocus {
             }
         }
     }
+    // Whether a top-level document of realm `realm` is owed a flush of its candidates (`pending`).
+    pub(crate) fn pending_in(&self, arena: &RealmArena, realm: i32) -> bool {
+        self.seen && self.pending.iter().any(|&d| arena.get(d).is_some_and(|n| n.realm == realm))
+    }
 }
 
 impl RealmArena {

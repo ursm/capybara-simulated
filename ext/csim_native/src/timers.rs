@@ -167,6 +167,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "timerClear", timer_clear, context_id);
     register(scope, ns, "timerNext", timer_next, context_id);
     register(scope, ns, "timerCount", timer_count, context_id);
+    register(scope, ns, "realmPending", realm_pending, context_id);
     register(scope, ns, "timerNextDue", timer_next_due, context_id);
     register(scope, ns, "timerStep", timer_step, context_id);
     register(scope, ns, "timerTaskEnd", timer_task_end, context_id);
@@ -364,6 +365,29 @@ fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let handler = v8::Local::new(scope, handler);
     let list = list.map_or_else(|| v8::undefined(scope).into(), |l| v8::Local::new(scope, l));
     rv.set(v8::Array::new_with_elements(scope, &[due, handler, list]).into());
+}
+
+// __dom.realmPending(realm, subtree) -> whether realm `realm` (the calling one, for null) has work its event loop is to
+// run — a timer, an animation frame callback, an observation owed at its next rendering update (`GEN_OBSERVATIONS`),
+// an autofocus candidate a flush is owed for, an animation that needs frames (`frames_due`) — and, with `subtree`, any
+// realm of its child navigables does, theirs too: what keeps the driver stepping the page.
+fn realm_pending(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = if args.get(0).is_int32() { args.get(0).int32_value(scope).unwrap_or(0) } else { realm_id(scope, &args) };
+    let subtree = args.get(1).is_true();
+    rv.set_bool(pending(scope, realm, subtree));
+}
+fn pending(scope: &mut v8::PinScope<'_, '_>, realm: i32, subtree: bool) -> bool {
+    let arena = &dom(scope).arena;
+    if arena.is_dropped(realm) {
+        return false;
+    }
+    let own = arena.realm_state(realm).is_some_and(|st| {
+        !st.timers.frames.is_empty() || !st.timers.by_key.is_empty() || st.generations.get(crate::dom::GEN_OBSERVATIONS) != 0
+    });
+    if own || arena.autofocus.pending_in(arena, realm) || crate::animation_ops::frames_due(scope, realm) {
+        return true;
+    }
+    subtree && dom(scope).arena.child_realms(realm).into_iter().any(|child| pending(scope, child, true))
 }
 
 // __dom.timerCount() -> how many timers the calling realm has.

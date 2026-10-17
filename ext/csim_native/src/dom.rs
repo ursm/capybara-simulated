@@ -771,7 +771,9 @@ pub(crate) struct Generations {
 // the settle generation (every observable change); the tree's (that and every parser change); the nodes' (that but a
 // text's data); the structure's (an insertion or removal, nothing else); the style state's (a state no other moves); the
 // rule set's (the cascade made of other sheets — the bindings' `cascadeVersion`, cascade.js); the scroll's (a scroll
-// offset moved, or a scroll into view asked for, which moves every rendered box and no other generation).
+// offset moved, or a scroll into view asked for, which moves every rendered box and no other generation). And beside
+// them a word of flags rather than a count: the observations the realm owes at its next rendering update
+// (`OBSERVATIONS_*`, observers.js), which keep its event loop stepping (timers.rs `realmPending`).
 pub(crate) const GEN_DIRTY: usize = 0;
 pub(crate) const GEN_SUBTREE_MARKS: usize = 1;
 pub(crate) const GEN_SETTLE: usize = 2;
@@ -781,7 +783,8 @@ pub(crate) const GEN_STRUCTURE: usize = 5;
 pub(crate) const GEN_STYLE_STATE: usize = 6;
 pub(crate) const GEN_CASCADE: usize = 7;
 pub(crate) const GEN_SCROLL: usize = 8;
-const GENERATIONS: usize = 9;
+pub(crate) const GEN_OBSERVATIONS: usize = 9;
+const GENERATIONS: usize = 10;
 
 impl Generations {
     pub(crate) fn get(&self, which: usize) -> u32 {

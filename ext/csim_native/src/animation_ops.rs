@@ -43,6 +43,19 @@ fn at_time(engine: &mut StyleEngine, arena: &RealmArena) {
     }
 }
 
+// Whether an animation the style engine of realm `realm` runs needs frames: one waiting on one to start (its `ready`), or
+// running to an end its events and its finished state fall at — none for a realm the engine styles nothing of.
+pub(crate) fn frames_due(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> bool {
+    let mut due = false;
+    style_op(scope, realm, |scope| {
+        let d = dom(scope);
+        let (Some(engine), Some(arena)) = (d.styles.get_mut(&realm), d.arena.enter_known(realm)) else { return };
+        at_time(engine, arena);
+        due = engine.web_animations.next_frame_delay().is_some_and(|delay| delay >= 0.0);
+    });
+    due
+}
+
 // The realm's style engine, for an op to work on, and its arena (none: the page is not styled by the engine, and the
 // op does nothing).
 fn with_engine(
