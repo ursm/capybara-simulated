@@ -19,6 +19,7 @@
     "web-streams-polyfill": "^4.3.0"
   },
   "devDependencies": {
+    "@webref/elements": "^2.9.2",
     "@webref/idl": "^3.85.0",
     "acorn": "^8.18.0",
     "esbuild": "^0.28.1",

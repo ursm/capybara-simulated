@@ -15,6 +15,9 @@ importers:
         specifier: ^4.3.0
         version: 4.3.0
     devDependencies:
+      '@webref/elements':
+        specifier: ^2.9.2
+        version: 2.9.2
       '@webref/idl':
         specifier: ^3.85.0
         version: 3.85.0(webidl2@24.5.0)
@@ -195,6 +198,9 @@ packages:
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
+  '@webref/elements@2.9.2':
+    resolution: {integrity: sha512-NjGr2/UMDsHc4yBYTLoXOxmt+hQW1YcsBZTX+w1SrEKA0fHJtapqMoFXWYrE4MhtZOjh7PjwKNgE+7w9qVxA9Q==}
+
   '@webref/idl@3.85.0':
     resolution: {integrity: sha512-pUflhFMSsZ+uwjxiyFwvzs1q/Y+1a4xps0toQbHgyNXvE9QMC+BpQZxhdX3VAS+OF0349XIezNHUE0V4NWFffw==}
     peerDependencies:
@@ -316,6 +322,8 @@ snapshots:
   '@types/esrecurse@4.3.1': {}
 
   '@types/estree@1.0.9': {}
+
+  '@webref/elements@2.9.2': {}
 
   '@webref/idl@3.85.0(webidl2@24.5.0)':
     dependencies:

@@ -12,6 +12,7 @@
 // silent gap.
 
 import { parseAll } from '@webref/idl';
+import { listAll as listAllElements } from '@webref/elements';
 import { parse as parseIdl } from 'webidl2';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -1911,6 +1912,26 @@ const htmlParents = [...definitions.values()]
   .filter((d) => d.type === 'interface' && /^HTML\w*Element$/.test(d.name) && d.inheritance)
   .map((d) => [d.name, d.inheritance])
   .sort(([a], [b]) => (a < b ? -1 : 1));
+// The element interface of each HTML element (HTML "element interface", DOM §4.9) — @webref/elements' of every spec, the
+// HTML ones and their extensions' (ruby's `rb` / `rtc`), an HTMLUnknownElement one left out: a name absent is one.
+// …but where @webref/elements says otherwise than the steps, each the steps' and why; one it has come to agree with is
+// an error, and the entry goes.
+const ELEMENT_INTERFACE_CORRECTIONS = {
+  // ("Otherwise, if this specification defines an interface appropriate for the element type corresponding to the local
+  // name name, then return that interface. … Return HTMLUnknownElement." — `menuitem` is in no list of the steps' and
+  // has no interface of its own: obsolete, its entry in §16.2 no requirement of one. Chrome's HTMLUnknownElement too.)
+  menuitem: 'HTMLUnknownElement'
+};
+const elementSpecs = await listAllElements();
+const elementInterfaces = new Map();
+for (const spec of ['html', 'html-ruby-extensions']) {
+  for (const e of elementSpecs[spec].elements) if (e.interface && !elementInterfaces.has(e.name)) elementInterfaces.set(e.name, e.interface);
+}
+for (const [name, iface] of Object.entries(ELEMENT_INTERFACE_CORRECTIONS)) {
+  if (elementInterfaces.get(name) === iface) throw new Error(`${name}: @webref/elements says ${iface} now — remove it from ELEMENT_INTERFACE_CORRECTIONS`);
+  elementInterfaces.set(name, iface);
+}
+const htmlElementInterfaces = [...elementInterfaces].filter(([, i]) => i !== 'HTMLUnknownElement').sort(([a], [b]) => (a < b ? -1 : 1));
 // …and the event handlers of WindowEventHandlers (its own and its partials' — but those of specs the Window omits):
 // what `<body>` / `<frameset>` reflect to their Window (events.js).
 const htmlElementInstalls = INTERFACES.filter(([, n, o]) => o?.install && /^HTML.+Element$/.test(n)).map(([, n]) => n);
@@ -1924,6 +1945,11 @@ export const WINDOW_EVENT_HANDLERS = ${JSON.stringify(windowHandlers)};
 // The interface each HTML element interface inherits.
 export const HTML_INTERFACE_PARENTS = {
 ${htmlParents.map(([n, p]) => `  ${n}: '${p}'`).join(',\n')}
+};
+
+// The element interface of each HTML element whose interface is not HTMLUnknownElement, by its local name.
+export const HTML_ELEMENT_INTERFACES = {
+${htmlElementInterfaces.map(([n, i]) => `  ${/^[a-z][a-z0-9]*$/.test(n) ? n : `'${n}'`}: '${i}'`).join(',\n')}
 };
 
 // The HTML element interfaces generated, each its install, which dom-class-aliases.js runs on the class it makes of it.
