@@ -1,6 +1,6 @@
 // Customizable-combobox filtering (open-ui, tentative): an `<input filter=ID>` filters the `<select id=ID>`'s options,
-// an `<input list=ID>` the `<datalist id=ID>`'s, against its value — an option whose text, trimmed, does not start with
-// the value (both lowercased) is `:filtered`, which the UA sheet's `option:filtered { display: none }` hides. The
+// an `<input list=ID>` the `<datalist id=ID>`'s, against its value — an option whose `text` (its descendant text but a
+// script's, ASCII whitespace stripped and collapsed) does not start with the value (both lowercased) is `:filtered`, which the UA sheet's `option:filtered { display: none }` hides. The
 // bindings fire the cancelable `beforefilter` between finding the list and filtering it.
 
 use crate::dom::{nid_arg, node_value, realm, realm_id, NodeId, RealmArena, GEN_STYLE_STATE, STATE_FILTERED};
@@ -22,8 +22,8 @@ impl RealmArena {
         let needle = self.get(input).map_or_else(String::new, |n| String::from_utf16_lossy(&self.relevant_value(n)).to_lowercase());
         let mut moved = false;
         for option in options {
-            let text = String::from_utf16_lossy(&self.text_content(option));
-            let filtered = !needle.is_empty() && !text.trim().to_lowercase().starts_with(&needle);
+            let text = String::from_utf16_lossy(&self.option_text_units(option));
+            let filtered = !needle.is_empty() && !text.to_lowercase().starts_with(&needle);
             let had = self.get(option).map_or(0, |o| o.state);
             let next = if filtered { had | STATE_FILTERED } else { had & !STATE_FILTERED };
             if next != had {

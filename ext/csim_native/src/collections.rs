@@ -280,12 +280,18 @@ impl IdIndex {
 
 impl RealmArena {
     // The first element of `root`'s tree in tree order, `root` itself included, whose id is `id` (exactly, as UTF-16 —
-    // a lone surrogate included)…
+    // a lone surrogate included) — none for '', which is no ID (DOM: an element's ID is a non-empty `id`)…
     pub(crate) fn element_by_id(&self, root: NodeId, id: &[u16]) -> Option<NodeId> {
+        if id.is_empty() {
+            return None;
+        }
         self.with_ids(root, id, true, |ids| ids.get(id).and_then(|found| found.first().copied()), |found| found.first().copied())
     }
     // …and every one, in tree order.
     pub(crate) fn elements_by_id(&self, root: NodeId, id: &[u16]) -> Vec<NodeId> {
+        if id.is_empty() {
+            return Vec::new();
+        }
         self.with_ids(root, id, false, |ids| ids.get(id).cloned().unwrap_or_default(), |found| found)
     }
     // An answer for the elements of `id` in `root`'s tree from its id map where it has one, or where the walks have come

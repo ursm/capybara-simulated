@@ -134,12 +134,21 @@ fn text_decode(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
 }
 
-// __dom.decodeBytes(bytes, label) -> the Encoding Standard's "decode" of `bytes` with the fallback encoding `label`'s
-// (null, or one no encoding has: UTF-8): a BOM's encoding over it, the BOM removed — a response's text (XHR).
+// __dom.decodeBytes(bytes, label[, type]) -> the Encoding Standard's "decode" of `bytes` with the fallback encoding
+// `label`'s — else, where it is null or no encoding's, that of `type`'s `charset` parameter (a MIME type: a Blob's, a
+// `data:` URL's), else UTF-8: a BOM's encoding over it, the BOM removed — a response's text (XHR), a FileReader's
+// `readAsText` (File API §6.4.3 "package data").
 fn decode_bytes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(bytes) = bytes_arg(scope, args.get(0)) else { return };
     let label = args.get(1);
-    let fallback = if label.is_null_or_undefined() { None } else { encoding_arg(scope, label) };
+    let given = if label.is_null_or_undefined() { None } else { encoding_arg(scope, label) };
+    let fallback = given.or_else(|| {
+        let ty = args.get(2);
+        let ty = (!ty.is_null_or_undefined()).then(|| ty.to_rust_string_lossy(scope))?;
+        let mime = crate::mime::parse(&ty)?;
+        let charset = mime.parameters.iter().find(|(n, _)| n == "charset")?;
+        encoding_rs::Encoding::for_label(charset.1.as_bytes())
+    });
     let (text, _, _) = fallback.unwrap_or(encoding_rs::UTF_8).decode(&bytes);
     let units: Vec<u16> = text.encode_utf16().collect();
     let text = utf16_string(scope, &units);
