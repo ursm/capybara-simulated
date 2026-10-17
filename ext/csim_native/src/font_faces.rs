@@ -261,6 +261,17 @@ pub(crate) fn family_descriptor(value: &str) -> Option<(String, String)> {
     });
     parsed.ok().filter(|(name, _)| !name.is_empty())
 }
+// …and the family a FontFace is constructed with (csswg-drafts#6236, RESOLVED 2026-03-11: "If a FontFace is constructed
+// with an invalid font-family name, treat it as a quoted string rather than throwing" — the draft's SyntaxError step
+// overturned; Chrome and Firefox both): the descriptor where its serialization is `value` as written, else `value`
+// itself, literally, as a quoted string (`a, b` the name `a, b`; `a  b` too, which writes back as `a b`).
+pub(crate) fn constructed_family(value: &str) -> (String, String) {
+    family_descriptor(value).filter(|(_, serialized)| serialized == value).unwrap_or_else(|| {
+        let mut out = String::new();
+        let _ = cssparser::serialize_string(value, &mut out);
+        (value.to_owned(), out)
+    })
+}
 
 // …each written back as a stack of that one family: a string quoted (its escapes kept), identifiers as identifiers — so
 // a family handed on as a stack is the family it was (`"x, A"` stays one; `serif` stays the generic).
@@ -344,11 +355,13 @@ fn font_family_list_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.fontFamilyDescriptor(value) -> [name, serialization] of a `font-family` descriptor (`family_descriptor`), or
-// null for a value that is none.
+// __dom.fontFamilyDescriptor(value, constructed) -> [name, serialization] of a `font-family` descriptor
+// (`family_descriptor`), or null for a value that is none — with `constructed`, a FontFace constructor's
+// (`constructed_family`), which is never none.
 fn font_family_descriptor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let value = args.get(0).to_rust_string_lossy(scope);
-    let Some((name, serialized)) = family_descriptor(&value) else { return rv.set_null() };
+    let parsed = if args.get(1).is_true() { Some(constructed_family(&value)) } else { family_descriptor(&value) };
+    let Some((name, serialized)) = parsed else { return rv.set_null() };
     let items: Vec<v8::Local<v8::Value>> = [name, serialized].iter().filter_map(|s| v8::String::new(scope, s)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
@@ -428,7 +441,8 @@ fn font_faces_matching(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         .iter()
         .zip(&blocks)
         .map(|(family, block)| {
-            // (…a face's `family` its descriptor serialized: the name it names)
+            // (…a face's `family` its descriptor serialized, a string where it was constructed with no family: the name it
+            // names)
             let family = family_descriptor(family).map_or_else(|| family.clone(), |(name, _)| name).to_ascii_lowercase();
             let face = parse(&format!("font-family: x; {block}"), "about:blank").unwrap_or_else(|| FaceRecord::of(String::new()));
             FaceRecord { family, ..face }

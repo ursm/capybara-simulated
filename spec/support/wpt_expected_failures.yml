@@ -2569,21 +2569,6 @@ html/canvas/element/manual/text/canvas.2d.fontStretch.ultra-condensed.html:
 - "== html/canvas/element/manual/text/canvas.2d.fontStretch-ref.html"
 html/canvas/element/manual/text/canvas.2d.fontStretch.ultra-expanded.html:
 - "== html/canvas/element/manual/text/canvas.2d.fontStretch-ref.html"
-html/canvas/element/manual/text/canvas.2d.lang.dynamic.html:
-- "== html/canvas/element/manual/text/canvas.2d.lang.dynamic-ref.html (never ready
-  to capture)"
-html/canvas/element/manual/text/canvas.2d.lang.empty.canvas.html:
-- "== html/canvas/element/manual/text/canvas.2d.lang.empty-ref.html (never ready to
-  capture)"
-html/canvas/element/manual/text/canvas.2d.lang.html:
-- "== html/canvas/element/manual/text/canvas.2d.lang-ref.html (never ready to capture)"
-html/canvas/element/manual/text/canvas.2d.lang.inherit.disconnected.canvas.html:
-- "== html/canvas/element/manual/text/canvas.2d.lang-ref.html (never ready to capture)"
-html/canvas/element/manual/text/canvas.2d.lang.inherit.disconnected.canvas.no.lang.html:
-- "== html/canvas/element/manual/text/canvas.2d.unknown.lang-ref.html (never ready
-  to capture)"
-html/canvas/element/manual/text/canvas.2d.lang.inherit.html:
-- "== html/canvas/element/manual/text/canvas.2d.lang-ref.html (never ready to capture)"
 html/canvas/element/manual/transformations/canvas_transformations_reset_001.html:
 - "== html/canvas/element/manual/transformations/canvas_transformations_reset_001-ref.html"
 html/canvas/element/manual/wide-gamut-canvas/canvas-display-p3-drawImage-ImageBitmap-Blob.html:
