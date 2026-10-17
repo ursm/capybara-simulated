@@ -305,6 +305,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "corsSafelistedMethod", cors_safelisted_method_op, context_id);
     crate::dom::register(scope, ns, "interceptedHop", intercepted_hop_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
+    crate::dom::register(scope, ns, "responseHeader", response_header_op, context_id);
     crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
     crate::dom::register(scope, ns, "headerValue", header_value_op, context_id);
     crate::dom::register(scope, ns, "httpToken", http_token_op, context_id);
@@ -384,6 +385,37 @@ fn forbidden_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 }
 // (…these two take a ByteString the bindings converted already: `units` reads a unit past U+00FF as 0xFF, which is
 // obs-text to them)
+// __dom.responseHeader(headers, name) -> the value of the header `name` (lowercase) among a response's headers as the
+// host gives them — an object keyed by name, in any case, a list of values joined with ", " — or null for none.
+fn response_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let Ok(headers) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
+    let name = args.get(1).to_rust_string_lossy(scope);
+    let Some(keys) = headers.get_own_property_names(scope, Default::default()) else { return };
+    for i in 0..keys.length() {
+        let Some(key) = keys.get_index(scope, i) else { continue };
+        if !key.to_rust_string_lossy(scope).eq_ignore_ascii_case(&name) {
+            continue;
+        }
+        let Some(value) = headers.get(scope, key).filter(|v| !v.is_null_or_undefined()) else { return };
+        let text = match v8::Local::<v8::Array>::try_from(value) {
+            Ok(list) => {
+                let mut values = Vec::new();
+                for j in 0..list.length() {
+                    if let Some(v) = list.get_index(scope, j) {
+                        values.push(v.to_rust_string_lossy(scope));
+                    }
+                }
+                values.join(", ")
+            }
+            Err(_) => value.to_rust_string_lossy(scope),
+        };
+        if let Some(text) = v8::String::new(scope, &text) {
+            rv.set(text.into());
+        }
+        return;
+    }
+}
 // __dom.headerValue(s) -> whether `s` is a header value (`is_header_value`).
 fn header_value_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let s = units(scope, args.get(0));

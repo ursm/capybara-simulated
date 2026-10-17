@@ -64,7 +64,7 @@ impl RealmLocation {
     }
     // The serialization of its document's origin: its own where it was given one, else its location's — "null" for an
     // opaque one.
-    fn origin(&self) -> &str {
+    pub(crate) fn origin(&self) -> &str {
         self.document_origin.as_deref().or(self.origin_override.as_deref()).unwrap_or(&self.parts[ORIGIN])
     }
     // Its document's origin is `text`: an origin's serialization, "null" a new opaque one (sandboxed), `null|<key>` an

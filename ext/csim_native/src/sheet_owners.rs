@@ -163,8 +163,20 @@ impl RealmArena {
     }
 }
 
+// Whether a fetched style sheet is one (HTML "process the linked resource" for `rel=stylesheet`, and CSS Cascade's
+// `@import`): one whose Content-Type is `text/css` — or names no MIME type at all, which Chrome and Firefox both apply
+// (Blink's `CanUseSheet` takes an empty type and `application/x-unknown-content-type`, what a missing header is
+// sniffed as) — and in a quirks-mode document, whatever its type, one `same_origin` with the document. Any other is
+// none: both refuse one ("not a supported stylesheet MIME type"), and applied, a page's `@import` answered with an
+// HTML page cascaded that page's text as thousands of rules.
+pub(crate) fn sheet_response_accepted(content_type: &str, quirks: bool, same_origin: impl FnOnce() -> bool) -> bool {
+    let essence = crate::mime::extract(content_type).map(|m| m.essence).unwrap_or_default();
+    matches!(essence.as_str(), "" | "text/css" | "application/x-unknown-content-type") || (quirks && same_origin())
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "associatesSheet", associates_sheet_op, context_id);
+    crate::dom::register(scope, ns, "sheetResponseAccepted", sheet_response_accepted_op, context_id);
     crate::dom::register(scope, ns, "sheetGen", sheet_gen_op, context_id);
     crate::dom::register(scope, ns, "takeStyleLoads", take_style_loads_op, context_id);
     crate::dom::register(scope, ns, "ownerSheetShown", owner_sheet_shown_op, context_id);
@@ -447,4 +459,15 @@ fn sheet_set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let owners = crate::dom::nodes_value(scope, cid, &set.taking_part);
     let items = [key, selected, owners];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.sheetResponseAccepted(contentType, url, quirks) -> `sheet_response_accepted` of a response from `url` — of the
+// calling realm's document's origin where it is same origin.
+fn sheet_response_accepted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let content_type = args.get(0).to_rust_string_lossy(scope);
+    let url = args.get(1).to_rust_string_lossy(scope);
+    let quirks = args.get(2).is_true();
+    let cid = crate::dom::realm_id(scope, &args);
+    let origin = crate::dom::realm(scope, cid).location.origin().to_owned();
+    let accepted = sheet_response_accepted(&content_type, quirks, || ada_url::Url::parse(&url, None).is_ok_and(|u| u.origin() == origin));
+    rv.set_bool(accepted);
 }
