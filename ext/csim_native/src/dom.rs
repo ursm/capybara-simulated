@@ -2801,6 +2801,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::autofocus::install(scope, ns, context_id);
     crate::sheet_owners::install(scope, ns, context_id);
     crate::blob_urls::install(scope, ns, context_id);
+    crate::blob_rules::install(scope, ns, context_id);
     let edges = dom(scope).arena.edge_gen.store();
     view_word(scope, ns, "edgeGen", edges);
     let changes = dom(scope).arena.change_flags.store();
