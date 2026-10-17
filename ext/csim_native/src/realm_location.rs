@@ -158,10 +158,16 @@ fn origin_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 }
 
 // …and realm `realm`'s, whichever realm asks — what a WindowProxy of another realm's window and a postMessage across
-// realms compare: its origin's serialization, and its key (`origin_key`) — '' for a realm gone (a dropped one's).
+// realms compare: its origin's serialization, and its key (`origin_key`) — none for a realm dropped (its page torn
+// down), or for an argument that is no realm's id. (A realm whose frame was discarded keeps its origin: a Window's
+// outlives its browsing context.)
 fn other_realm<R>(scope: &mut v8::PinScope<'_, '_>, realm_arg: v8::Local<'_, v8::Value>, read: impl FnOnce(&mut RealmLocation, i32) -> R) -> Option<R> {
-    let realm = realm_arg.int32_value(scope)?;
-    crate::dom::dom(scope).arena.realm_state_mut(realm).map(|st| read(&mut st.location, realm))
+    let realm = realm_arg.is_int32().then(|| realm_arg.int32_value(scope)).flatten()?;
+    let arena = &mut crate::dom::dom(scope).arena;
+    if arena.is_dropped(realm) {
+        return None;
+    }
+    arena.realm_state_mut(realm).map(|st| read(&mut st.location, realm))
 }
 // __dom.realmOrigin(realm) -> realm `realm`'s document's origin, serialized ('' for none).
 fn realm_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
