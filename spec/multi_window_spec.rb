@@ -86,7 +86,7 @@ RSpec.describe 'multi-window' do
   end
 
   # (…HTML "window open steps": an empty target is `_blank`, where a link's empty target is its own window)
-  it "opens a new window for an empty target, and navigates this one for `_self`" do
+  it 'opens a new window for an empty target, and navigates this one for `_self`' do
     session.visit '/'
     win = session.window_opened_by { session.execute_script("window.open('/popup', '')") }
     expect(session.within_window(win) { session.current_path }).to eq('/popup')
