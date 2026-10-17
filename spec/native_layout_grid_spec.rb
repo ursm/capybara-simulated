@@ -906,19 +906,17 @@ RSpec.describe 'native layout grid' do
     ].each {|body| expect_layout(body) }
   end
 
-  # The layout does not apply an item's self-alignment: an auto-height item fills its track's width and keeps its
-  # content's height whatever it says. So an item in a row another item makes 36 tall keeps its own 18 and a list box
-  # in a 100px track its 28.42, where `normal` stretches both (Chrome: 36, 100); and an item aligned to `start` in a
-  # 350px track is 350 wide, where Chrome sizes it to its content, 74.64. Every grid golden of an item shorter than
-  # its row holds the unstretched box.
-  it 'applies no self-alignment to a grid item (Chrome: stretched, or fit to its content under start)' do
+  # An item's self-alignment in its area (CSS Box Alignment 3 §6): `normal` stretches an auto-height item to its row —
+  # an item in a row another item makes 36 tall is 36, a list box in a 100px track 100 — and one aligned to `start` is
+  # as wide as its content, 74.64 in a 350px track (Chrome, each).
+  it 'aligns a grid item in its area: stretched, or fit to its content under start' do
     [
-      [3, 18, 36, '<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a b</div><div id="m">x</div></div>'],
-      [2, 28.42, 100, '<div style="display:grid;grid-template-columns:100px;width:400px"><select id="m" multiple><option>a</option><option>b</option></select></div>'],
-      [2, 350, 74.64, '<div style="display:grid;grid-template-columns:350px;width:400px"><div id="m" style="justify-self:start">a long label</div></div>']
-    ].each do |index, shared, chrome, body|
+      [3, 36, '<div style="display:grid;grid-template-columns:min-content auto;width:400px"><div>a b</div><div id="m">x</div></div>'],
+      [2, 100, '<div style="display:grid;grid-template-columns:100px;width:400px"><select id="m" multiple><option>a</option><option>b</option></select></div>'],
+      [2, 74.64, '<div style="display:grid;grid-template-columns:350px;width:400px"><div id="m" style="justify-self:start">a long label</div></div>']
+    ].each do |index, chrome, body|
       expect_layout(body)
-      expect_shared_gap(laid_out_rect(body)[index], shared: shared, chrome: chrome, what: "#{body}: #m rect[#{index}]")
+      expect(laid_out_rect(body)[index]).to be_within(0.01).of(chrome), "#{body}: #m rect[#{index}]"
     end
   end
 end

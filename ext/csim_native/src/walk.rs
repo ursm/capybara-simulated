@@ -1797,6 +1797,34 @@ impl<'a> Walk<'a> {
         p
     }
 
+    // A GRID ITEM's self-alignment in its area, `[inline, block]` (layout.rs `GRID_*`; `[0, 0]` for any other box): its
+    // `justify-self` / `align-self`, `auto` its container's `justify-items` / `align-items` (CSS Box Alignment 3 §6) —
+    // `normal` STRETCH but on a replaced box, which keeps its own size at the start, and in the block axis of one with
+    // a preferred aspect ratio, whose height its width gives it (Chrome: an `aspect-ratio: 1` item fills its 100px
+    // column and is 100 tall); a baseline coarsely `start`; `left` / `right` the inline start and end.
+    fn grid_self(&self, id: NodeId, style: &ComputedValues) -> [u8; 2] {
+        use crate::layout::{GRID_CENTER, GRID_END, GRID_START, GRID_STRETCH};
+        let Some(ps) = self.layout_parent(id).and_then(|p| self.style(p).ok()) else { return [GRID_STRETCH; 2] };
+        if !matches!(ps.get_box().clone_display().inside(), DisplayInside::Grid) {
+            return [GRID_STRETCH; 2];
+        }
+        // (…a REPLACED element's, not a form control's, which stretches as any box does: Chrome's list box fills its row)
+        let replaced = replaced_or_control(self.arena, id, self.node(id)) && !widget_tag(self.node(id).rendering_tag());
+        let ratio = preferred_ratio(style).is_some();
+        let code = |own: Kw, items: Kw, sized: bool| match if own == Kw::Auto { items } else { own } {
+            Kw::Stretch => GRID_STRETCH,
+            Kw::Normal | Kw::Auto | Kw::Other => if sized { GRID_START } else { GRID_STRETCH },
+            Kw::Center => GRID_CENTER,
+            Kw::End | Kw::FlexEnd | Kw::SelfEnd | Kw::Right | Kw::LastBaseline => GRID_END,
+            _ => GRID_START,
+        };
+        let (pos, ppos) = (style.get_position(), ps.get_position());
+        [
+            code(align_kw(pos.justify_self.0), align_kw(ppos.justify_items.computed.0 .0), replaced),
+            code(align_kw(pos.align_self.0), align_kw(ppos.align_items.0), replaced || ratio),
+        ]
+    }
+
     // Whether `id` is a GRID ITEM stretched in its inline axis explicitly: `justify-self: stretch`, or `auto` under its
     // container's `justify-items: stretch` (`Input::stretch_x`).
     fn grid_stretched_x(&self, id: NodeId, style: &ComputedValues) -> bool {
@@ -2086,6 +2114,8 @@ impl<'a> Walk<'a> {
         rec.clip = self.clip_flags(id, &style);
         // (…and its preferred aspect ratio, which a non-replaced box's automatic height goes through: a replaced one's is in
         // its intrinsic size, `intrinsic`)
+        // (…a grid item's self-alignment in its area)
+        rec.grid_self = self.grid_self(id, &style);
         // (…none for a box it does not apply to: a non-replaced inline box, an internal table or ruby box — CSS Sizing 4
         // §5.1; Chrome's `aspect-ratio: 2` table cell is as tall as its line)
         let applies = {
@@ -2871,6 +2901,17 @@ impl<'a> Walk<'a> {
         let row_h = grid_row_height(&pos.grid_auto_rows);
         let row_floor = if row_h.is_none() { grid_row_floor(&pos.grid_auto_rows) } else { None };
         let grid_start = self.grids.len() as i32;
+        // (…its `justify-content`: `normal` / `stretch` stretches its auto columns, a `space-*` distribution coarsely its
+        // columns from the start)
+        self.inputs[idx as usize].grid_justify = {
+            use crate::layout::{GRID_CENTER, GRID_END, GRID_START, GRID_STRETCH};
+            match align_kw(pos.justify_content.primary()) {
+                Kw::Normal | Kw::Stretch | Kw::Auto => GRID_STRETCH,
+                Kw::Center => GRID_CENTER,
+                Kw::End | Kw::FlexEnd | Kw::Right => GRID_END,
+                _ => GRID_START,
+            }
+        };
         self.grids.extend([
             template.tracks.len() as f64,
             col_gap.px,
@@ -4849,6 +4890,8 @@ pub(crate) fn fresh_record() -> Input {
         aspect: 0.0,
         aspect_content: false,
         stretch_x: false,
+        grid_self: [0, 0],
+        grid_justify: 0,
         cell_valign: 0,
         cell_pct_h_child: false,
         anon_group: false,

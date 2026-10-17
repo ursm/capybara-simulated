@@ -64,6 +64,11 @@ pub(crate) const DISPLAY_TABLE_ROW: u8 = 6;
 // track width — rows are content-height or the declared `grid-auto-rows` (a coarse row model: no row template
 // sizing). An out-of-flow child is positioned against its containing block, as a block's is (`place_out_of_flow`).
 pub(crate) const DISPLAY_GRID: u8 = 7;
+// A grid item's self-alignment in one axis (`Input::grid_self`).
+pub(crate) const GRID_STRETCH: u8 = 0;
+pub(crate) const GRID_START: u8 = 1;
+pub(crate) const GRID_CENTER: u8 = 2;
+pub(crate) const GRID_END: u8 = 3;
 // A table CAPTION keeps its own block / text display (measure lays out its subtree); it is identified
 // structurally as the table's only non-row/non-group child, not by a display code.
 
@@ -381,6 +386,12 @@ pub(crate) struct Input {
     // …and whether a GRID ITEM is STRETCHED in its inline axis explicitly (`justify-self: stretch`, or `auto` under the
     // container's `justify-items: stretch`), which wins over its ratio there, where `normal` lets the ratio size it.
     pub(crate) stretch_x: bool,
+    // A GRID ITEM's self-alignment in its area, `[inline, block]` (`GRID_STRETCH` … `GRID_END`): stretched to fill it,
+    // or its own size placed at its start, centre or end (CSS Box Alignment 3 §6.1, §6.2).
+    pub(crate) grid_self: [u8; 2],
+    // …and a GRID CONTAINER's `justify-content` (`GRID_*`): `normal` / `stretch` its auto columns stretched to fill it
+    // (§11.8), any other its columns at their own sizes, placed at its start, centre or end.
+    pub(crate) grid_justify: u8,
     // TABLE CELL: how its content sits in the row-tall box (§17.5.3) — 0 baseline (its first baseline meets the
     // row's), 1 top, 2 middle, 3 bottom.
     pub(crate) cell_valign: u8,
@@ -555,7 +566,7 @@ impl InlineBox {
 }
 impl Input {
     pub(crate) fn same(&self, o: &Input) -> bool {
-        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, ws_mode, item_auto_height, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, clip, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, height_is_floor, aspect, aspect_content, stretch_x, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, text_overflows, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect, fits_content } = self;
+        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, ws_mode, item_auto_height, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, clip, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, height_is_floor, aspect, aspect_content, stretch_x, grid_self, grid_justify, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, text_overflows, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect, fits_content } = self;
         nid.bit_eq(&o.nid)
             && parent.bit_eq(&o.parent)
             && display.bit_eq(&o.display)
@@ -661,6 +672,8 @@ impl Input {
             && aspect.bit_eq(&o.aspect)
             && aspect_content.bit_eq(&o.aspect_content)
             && stretch_x.bit_eq(&o.stretch_x)
+            && grid_self.bit_eq(&o.grid_self)
+            && grid_justify.bit_eq(&o.grid_justify)
             && cell_valign.bit_eq(&o.cell_valign)
             && cell_pct_h_child.bit_eq(&o.cell_pct_h_child)
             && anon_group.bit_eq(&o.anon_group)
@@ -7116,7 +7129,7 @@ fn resolve_track_side(kind: u8, val: f64, col: (f64, f64), content_w: f64, px: f
 // toward their limits sharing free space equally, then §12.7 hands the remainder to the `fr` tracks (weight
 // sum floored at 1, floors refrozen), or — with no `fr` — stretches the `auto` tracks to fill
 // (`justify-content: normal`).
-fn grid_column_widths(tracks: &[GridTrack], cols: Option<&[(f64, f64)]>, content_w: f64, col_gap: f64) -> Vec<f64> {
+fn grid_column_widths(tracks: &[GridTrack], cols: Option<&[(f64, f64)]>, content_w: f64, col_gap: f64, stretch_autos: bool) -> Vec<f64> {
     let col_count = tracks.len();
     let inner = content_w - col_gap * (col_count as f64 - 1.0).max(0.0);
     let mut base = vec![0.0f64; col_count];
@@ -7173,9 +7186,10 @@ fn grid_column_widths(tracks: &[GridTrack], cols: Option<&[(f64, f64)]>, content
                 break;
             }
         }
-    } else if free > 0.01 {
+    } else if free > 0.01 && stretch_autos {
         // No `fr` to absorb the remainder: `auto` tracks stretch to fill the row (the `justify-content: normal`
-        // default behaves as `stretch` for them); a fixed-only list keeps its sizes and leaves the remainder.
+        // default behaves as `stretch` for them; any other leaves the remainder, `stretch_autos`); a fixed-only list
+        // keeps its sizes and leaves the remainder.
         let autos: Vec<usize> = (0..col_count).filter(|&c| tracks[c].is_auto).collect();
         if !autos.is_empty() {
             let extra = free / autos.len() as f64;
@@ -8178,6 +8192,47 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
     Some((min.max(0.0), max.max(0.0)))
 }
 
+// Where a grid item's own size sits in the room its area leaves it, as a fraction of that room (`Input::grid_self`).
+fn grid_align_frac(code: u8) -> f64 {
+    match code {
+        GRID_CENTER => 0.5,
+        GRID_END => 1.0,
+        _ => 0.0,
+    }
+}
+// A grid row's items aligned in it, now that its height `row_height` is known (CSS Box Alignment 3 §6.2): a STRETCHED
+// one of an automatic height laid out again as tall as its area less its margins (`normal` on a non-replaced box,
+// Chrome's default — a sibling of a 100px item is 100 tall), any other moved to the start, centre or end of the room
+// left. Each item's box keeps the width it was laid out at, `items`' second figure.
+#[allow(clippy::too_many_arguments)]
+fn align_grid_row(
+    items: &[(usize, f64)],
+    row_height: f64,
+    inputs: &[Cell<Input>],
+    runs: &[Run],
+    run_texts: &[RunText],
+    grids: &[f64],
+    children: &[Vec<usize>],
+    boxes: &mut [Box],
+    failed: &std::cell::Cell<bool>,
+) {
+    for &(c, w) in items {
+        let item = inputs[c].get();
+        let room = row_height - Input::m(item.mt) - Input::m(item.mb);
+        let ih = boxes[c].h;
+        let align = item.grid_self[1];
+        if align == GRID_STRETCH {
+            if is_auto(item.height) && (!item.replaced || item.form_control) && !item.row_imposed && room > ih {
+                let (x, y) = (boxes[c].x, boxes[c].y);
+                measure(c, w, room.max(item.edges_y()), inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
+                (boxes[c].x, boxes[c].y) = (x, y);
+            }
+        } else {
+            boxes[c].y += (room - ih) * grid_align_frac(align);
+        }
+    }
+}
+
 // A GRID container (§12, see DISPLAY_GRID). Sizes the columns — measuring each item's min/max-content when a
 // track asks for content (`intrinsic_widths`) — then places the items row-major (`grid_placement`): each in-flow
 // item is laid out at its track width (auto fills the track less its margins; a length uses its resolved box);
@@ -8257,9 +8312,11 @@ fn measure_grid(
     } else {
         None
     };
-    let widths = grid_column_widths(&tracks, cols.as_deref(), content_w, col_gap);
+    let widths = grid_column_widths(&tracks, cols.as_deref(), content_w, col_gap, n.grid_justify == GRID_STRETCH);
     let mut offsets = vec![0.0f64; col_count];
-    let mut atx = 0.0;
+    // (…the columns at the start, centre or end of what they leave of the content box: `justify-content`)
+    let span = widths.iter().sum::<f64>() + col_gap * (col_count as f64 - 1.0).max(0.0);
+    let mut atx = ((content_w - span) * grid_align_frac(n.grid_justify)).max(0.0);
     for c in 0..col_count {
         offsets[c] = atx;
         atx += widths[c] + col_gap;
@@ -8277,10 +8334,15 @@ fn measure_grid(
     let mut row_top = 0.0f64; // relative to the content origin
     let mut row_h = 0.0f64;
     let mut bottom = 0.0f64;
+    // (…each row's items, and the width each was laid out at, aligned in their row once every row's height is known)
+    let mut rows: Vec<(f64, Vec<(usize, f64)>)> = Vec::new();
+    let mut row_items: Vec<(usize, f64)> = Vec::new();
     for (k, &c) in kids.iter().enumerate() {
         let cell = cells[k];
         if k > 0 && cell.row != cells[k - 1].row {
-            row_top += if is_auto(decl_row_h) { row_h.max(row_floor) } else { decl_row_h } + row_gap;
+            let row_height = if is_auto(decl_row_h) { row_h.max(row_floor) } else { decl_row_h };
+            rows.push((row_height, std::mem::take(&mut row_items)));
+            row_top += row_height + row_gap;
             row_h = 0.0;
         }
         let mut track_w = 0.0;
@@ -8317,6 +8379,23 @@ fn measure_grid(
                     0.0
                 }
             }
+        } else if item.form_control && item.grid_self[0] == GRID_STRETCH && is_auto(item.width) {
+            // (…a form control STRETCHED across its area fills it, as a box does — its replaced size set aside: Chrome's
+            // list box in a 100px track is 100 wide)
+            let fill = (track_w - Input::m(item.ml) - Input::m(item.mr)).max(0.0);
+            let width = if item.border_box { fill } else { (fill - item.edges_x()).max(0.0) };
+            used_width(&Input { width, ..item }, track_w)
+        } else if item.grid_self[0] != GRID_STRETCH && is_auto(item.width) && !item.replaced {
+            // (…one aligned in its area rather than stretched across it is as wide as its content wants there, the
+            // shrink-to-fit width: CSS Box Alignment 3 §6.1 — Chrome's `place-items: center` span is its text wide)
+            let room = (track_w - Input::m(item.ml) - Input::m(item.mr)).max(0.0);
+            match content_sized_width(c, room, inputs, runs, run_texts, grids, children) {
+                Some(w) => ratio_floor(c, used_width(&item, w), inputs, runs, run_texts, grids, children),
+                None => {
+                    failed.set(true);
+                    0.0
+                }
+            }
         } else {
             resolve_width(&item, track_w)
         };
@@ -8331,8 +8410,11 @@ fn measure_grid(
             measure(c, child_w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
             ih = boxes[c].h;
         }
-        boxes[c].x = content_left + offsets[cell.col] + Input::m(item.ml);
+        // (…placed at the start, centre or end of the room its area leaves it across)
+        let free_x = track_w - Input::m(item.ml) - Input::m(item.mr) - child_w;
+        boxes[c].x = content_left + offsets[cell.col] + Input::m(item.ml) + free_x * grid_align_frac(item.grid_self[0]);
         boxes[c].y = content_top_rel + row_top + Input::m(item.mt);
+        row_items.push((c, child_w));
         if ih > row_h {
             row_h = ih;
         }
@@ -8342,6 +8424,33 @@ fn measure_grid(
         if row_top + row_end > bottom {
             bottom = row_top + row_end;
         }
+    }
+
+    if !row_items.is_empty() {
+        let row_height = if is_auto(decl_row_h) { row_h.max(row_floor) } else { decl_row_h };
+        rows.push((row_height, row_items));
+    }
+    // AUTO rows of a grid with a definite height share what it has left over (CSS Grid §11.8, "stretch auto tracks":
+    // `align-content: normal` stretches them) — each row's items moved down by what the rows above it gained — and
+    // each row's items are aligned in its height then (Chrome: a `place-items: center` item in a 100px grid's one
+    // row is centred in the 100).
+    if is_auto(decl_row_h) && !rows.is_empty() {
+        if let Some(h) = n.definite_content_h() {
+            let used: f64 = rows.iter().map(|(rh, _)| rh).sum::<f64>() + row_gap * (rows.len() - 1) as f64;
+            let extra = ((h - used) / rows.len() as f64).max(0.0);
+            if extra > 0.0 {
+                for (k, (rh, items)) in rows.iter_mut().enumerate() {
+                    *rh += extra;
+                    for &(c, _) in items.iter() {
+                        boxes[c].y += extra * k as f64;
+                    }
+                }
+                bottom = bottom.max(h);
+            }
+        }
+    }
+    for (row_height, items) in &rows {
+        align_grid_row(items, *row_height, inputs, runs, run_texts, grids, children, boxes, failed);
     }
 
     let (fb, lb, ib) = child_baselines(children[i].iter().copied(), inputs, boxes);
@@ -9097,6 +9206,8 @@ mod tests {
             aspect: 0.0,
             aspect_content: false,
             stretch_x: false,
+            grid_self: [0, 0],
+            grid_justify: 0,
             cell_valign: 0,
             cell_pct_h_child: false,
             anon_group: false,
