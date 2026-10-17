@@ -9,6 +9,7 @@
 use web_atoms::ns;
 
 use crate::dom::{nid_arg, NodeData, NodeId, NodeKind, RealmArena};
+use crate::token_list::{link_types, LINK_ALTERNATE, LINK_STYLESHEET};
 
 // A node that owns a style sheet: an HTML or SVG `<style>`, an HTML `<link>` (the elements of the cascade's list of them,
 // collections.rs `SheetOwners`), an `<?xml-stylesheet?>`.
@@ -90,10 +91,9 @@ impl RealmArena {
         }
         let title = n.plain_attr("title").unwrap_or("").to_string();
         if &*n.local_name == "link" {
-            let rel = n.plain_attr("rel").unwrap_or("").to_ascii_lowercase();
-            let rel: Vec<&str> = rel.split(|c: char| c.is_ascii_whitespace()).filter(|t| !t.is_empty()).collect();
-            let sheet = rel.contains(&"stylesheet") && n.plain_attr("href").is_some_and(|h| !h.is_empty()) && n.plain_attr("disabled").is_none();
-            return sheet.then(|| (title, rel.contains(&"alternate")));
+            let rel = link_types(n.plain_attr("rel").unwrap_or(""));
+            let sheet = rel & LINK_STYLESHEET != 0 && n.plain_attr("href").is_some_and(|h| !h.is_empty()) && n.plain_attr("disabled").is_none();
+            return sheet.then(|| (title, rel & LINK_ALTERNATE != 0));
         }
         style_is_css(n).then_some((title, false))
     }
@@ -406,12 +406,11 @@ impl RealmArena {
                 }
                 sheets.push((owner, title, alternate, enabled));
             } else if link {
-                let rel = n.plain_attr("rel").unwrap_or("").to_ascii_lowercase();
-                let rel: Vec<&str> = rel.split(|c: char| c.is_ascii_whitespace()).filter(|t| !t.is_empty()).collect();
-                if !rel.contains(&"stylesheet") || n.plain_attr("href").is_none_or(str::is_empty) || n.plain_attr("disabled").is_some() {
+                let rel = link_types(n.plain_attr("rel").unwrap_or(""));
+                if rel & LINK_STYLESHEET == 0 || n.plain_attr("href").is_none_or(str::is_empty) || n.plain_attr("disabled").is_some() {
                     continue;
                 }
-                let alternate = rel.contains(&"alternate");
+                let alternate = rel & LINK_ALTERNATE != 0;
                 if shadow && alternate {
                     continue;
                 }

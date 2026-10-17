@@ -100,8 +100,7 @@ const POLICIES: [&str; 8] = [
 // link types include `noreferrer`, else its `referrerpolicy` attribute's state — a token matched ASCII
 // case-insensitively, '' (the document's policy) for none or an invalid one.
 pub(crate) fn hyperlink_referrer_policy(node: &crate::dom::NodeData) -> &'static str {
-    let rel = node.plain_attr("rel").unwrap_or("");
-    if rel.split(['\t', '\n', '\x0c', '\r', ' ']).any(|t| t.eq_ignore_ascii_case("noreferrer")) {
+    if crate::token_list::link_types(node.plain_attr("rel").unwrap_or("")) & crate::token_list::LINK_NOREFERRER != 0 {
         return "no-referrer";
     }
     let attr = node.plain_attr("referrerpolicy").unwrap_or("");

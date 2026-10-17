@@ -48,6 +48,41 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "tokenListContains", token_list_contains, context_id);
     register(scope, ns, "tokenListEdit", token_list_edit, context_id);
     register(scope, ns, "tokenListSupports", token_list_supports, context_id);
+    register(scope, ns, "linkTypes", link_types_op, context_id);
+}
+
+// The link types a `rel` value names (HTML §4.6.7), ASCII case-insensitively, as `LINK_*` bits: what a `<link>`
+// obtains (a style sheet, a prefetch, a preload, a module preload, a manifest), whether a sheet is an alternate one,
+// and what following a hyperlink does with its opener and its referrer.
+pub(crate) const LINK_STYLESHEET: u32 = 1;
+pub(crate) const LINK_ALTERNATE: u32 = 1 << 1;
+pub(crate) const LINK_PREFETCH: u32 = 1 << 2;
+pub(crate) const LINK_PRELOAD: u32 = 1 << 3;
+pub(crate) const LINK_MODULEPRELOAD: u32 = 1 << 4;
+pub(crate) const LINK_MANIFEST: u32 = 1 << 5;
+pub(crate) const LINK_OPENER: u32 = 1 << 6;
+pub(crate) const LINK_NOOPENER: u32 = 1 << 7;
+pub(crate) const LINK_NOREFERRER: u32 = 1 << 8;
+const LINK_TYPES: [(&str, u32); 9] = [
+    ("stylesheet", LINK_STYLESHEET),
+    ("alternate", LINK_ALTERNATE),
+    ("prefetch", LINK_PREFETCH),
+    ("preload", LINK_PRELOAD),
+    ("modulepreload", LINK_MODULEPRELOAD),
+    ("manifest", LINK_MANIFEST),
+    ("opener", LINK_OPENER),
+    ("noopener", LINK_NOOPENER),
+    ("noreferrer", LINK_NOREFERRER),
+];
+pub(crate) fn link_types(rel: &str) -> u32 {
+    rel.split(|c: char| c.is_ascii_whitespace())
+        .filter_map(|t| LINK_TYPES.iter().find(|(name, _)| name.eq_ignore_ascii_case(t)))
+        .fold(0, |types, &(_, bit)| types | bit)
+}
+// __dom.linkTypes(rel) -> `link_types` of a `rel` value.
+fn link_types_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let rel = args.get(0).to_rust_string_lossy(scope);
+    rv.set_uint32(link_types(&rel));
 }
 
 // HTML's "supported tokens" of an element's attribute's DOMTokenList, by the element's local name: the keywords the
