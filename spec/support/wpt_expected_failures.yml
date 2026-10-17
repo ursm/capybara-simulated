@@ -2468,10 +2468,6 @@ fetch/api/request/request-consume-empty.any.js:
 - "[serviceworker] Consume empty FormData request body as text"
 fetch/api/request/request-keepalive-quota.html:
 - A Keep-Alive fetch() should return only its allocated Quota upon promise resolution.
-fetch/api/response/response-arraybuffer-realm.window.js:
-- realm of the ArrayBuffer from Response arrayBuffer()
-fetch/api/response/response-blob-realm.any.js:
-- realm of the Uint8Array from Response bytes()
 fetch/api/response/response-consume-empty.any.js:
 - Consume empty FormData response body as text
 - "[dedicatedworker] Consume empty FormData response body as text"

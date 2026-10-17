@@ -69,4 +69,21 @@ RSpec.describe 'Fetch Response semantics' do
     expect(r['fetchedThrew']).to eq('TypeError')
     expect(r['fetchedHas']).to be_nil
   end
+
+  # A Response or Request another realm made is cloned in ITS realm, whichever realm's `clone` is called (Fetch "clone":
+  # "in this's relevant realm"): Chrome's clone of a frame's Response by the top page's method is the frame's.
+  it 'clones another realm’s Response and Request into that realm' do
+    session = simulated_session(app)
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const f = document.body.appendChild(document.createElement('iframe'));
+        const W = f.contentWindow;
+        const response = Response.prototype.clone.call(new W.Response('x'));
+        const request = Request.prototype.clone.call(new W.Request('/x'));
+        return [Object.getPrototypeOf(response) === W.Response.prototype, Object.getPrototypeOf(request) === W.Request.prototype];
+      })()
+    JS
+    expect(got).to eq([true, true])
+  end
 end

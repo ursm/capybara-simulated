@@ -114,7 +114,7 @@ fn condition(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>, 
         None => None,
         Some(value) => {
             let shown = text(scope, value);
-            let bytes: Vec<u8> = shown.chars().map(|c| u8::try_from(u32::from(c)).unwrap_or(0xFF)).collect();
+            let bytes = crate::fetch_rules::byte_string(scope, value);
             if !crate::fetch_rules::is_token(&bytes) {
                 return Err("requestMethod is not a valid HTTP method");
             }

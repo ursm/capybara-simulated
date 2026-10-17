@@ -88,10 +88,6 @@ fn member<'s>(scope: &mut v8::PinScope<'s, '_>, init: v8::Local<'_, v8::Object>,
     init.get(scope, k.into()).filter(|v| !v.is_undefined())
 }
 
-// A ByteString's bytes: its code units, each one a byte (the bindings converted it: none is past U+00FF).
-fn byte_string(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<u8> {
-    value.to_rust_string_lossy(scope).chars().map(|c| u8::try_from(u32::from(c)).unwrap_or(0xFF)).collect()
-}
 
 // Fetch's Request-constructor referrer processing: the empty string is no referrer; any other value is parsed against
 // the API base URL — a failure a TypeError — and one that is `about:client`, or of another origin than the document's
@@ -192,7 +188,7 @@ fn construct_request(
         request.keepalive = keepalive.boolean_value(scope);
     }
     if let Some(method) = member(scope, init, "method") {
-        let bytes = byte_string(scope, method);
+        let bytes = crate::fetch_rules::byte_string(scope, method);
         let shown = method.to_rust_string_lossy(scope);
         if !crate::fetch_rules::is_token(&bytes) {
             return Err(format!("'{shown}' is not a valid HTTP method."));

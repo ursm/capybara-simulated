@@ -310,11 +310,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "headerValue", header_value_op, context_id);
     crate::dom::register(scope, ns, "httpToken", http_token_op, context_id);
     crate::dom::register(scope, ns, "normalizedMethod", normalized_method_op, context_id);
-    crate::dom::register(scope, ns, "nullBodyStatus", null_body_status_op, context_id);
-    crate::dom::register(scope, ns, "reasonPhrase", reason_phrase_op, context_id);
-    crate::dom::register(scope, ns, "redirectStatus", redirect_status_op, context_id);
 }
-fn units(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<u8> {
+pub(crate) fn byte_string(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<u8> {
     let Some(s) = value.to_string(scope) else { return Vec::new() };
     let mut units = vec![0u16; s.length()];
     s.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
@@ -327,7 +324,7 @@ fn bad_port_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 }
 // __dom.corsSafelistedMethod(method) -> whether it is a CORS-safelisted method.
 fn cors_safelisted_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let method = units(scope, args.get(0));
+    let method = byte_string(scope, args.get(0));
     rv.set_bool(cors_safelisted_method(&method));
 }
 // __dom.interceptedHop(mode, redirectMode, url, method, requestOrigin, crossed, hops, status, type, responseUrl, redirected,
@@ -335,7 +332,7 @@ fn cors_safelisted_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
 // bodyless GET, 2 its Authorization dropped, 4 its chain at another origin), or a network error's message.
 fn intercepted_hop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let [mode, redirect_mode, url, request_origin, response_type, response_url] = [0, 1, 2, 4, 8, 9].map(|k| args.get(k).to_rust_string_lossy(scope));
-    let method = units(scope, args.get(3));
+    let method = byte_string(scope, args.get(3));
     let location = (!args.get(11).is_null_or_undefined()).then(|| args.get(11).to_rust_string_lossy(scope));
     let hop = InterceptedHop {
         mode: &mode,
@@ -366,12 +363,12 @@ fn intercepted_hop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 }
 // __dom.requestBodyHeader(name) -> whether it is a request-body-header name.
 fn request_body_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let name = units(scope, args.get(0));
+    let name = byte_string(scope, args.get(0));
     rv.set_bool(request_body_header(&name));
 }
 // __dom.blobRange(value, total) -> [first, last] of `blob_range`, or null.
 fn blob_range_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let value = units(scope, args.get(0));
+    let value = byte_string(scope, args.get(0));
     let total = args.get(1).number_value(scope).unwrap_or(0.0) as u64;
     match blob_range(&value, total) {
         Some((first, last)) => rv.set(crate::dom::f64_array(scope, &[first as f64, last as f64]).into()),
@@ -380,7 +377,7 @@ fn blob_range_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 }
 // __dom.forbiddenMethod(method) -> whether it is a forbidden method.
 fn forbidden_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let method = units(scope, args.get(0));
+    let method = byte_string(scope, args.get(0));
     rv.set_bool(forbidden_method(&method));
 }
 // __dom.responseHeader(headers, name) -> the value of the header `name` (lowercase) among a response's headers as the
@@ -414,33 +411,21 @@ fn response_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         return;
     }
 }
-// (…these two take a ByteString the bindings converted already: `units` reads a unit past U+00FF as 0xFF, which is
+// (…these take a ByteString the bindings converted already: `byte_string` reads a unit past U+00FF as 0xFF, which is
 // obs-text to them)
 // __dom.headerValue(s) -> whether `s` is a header value (`is_header_value`).
 fn header_value_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let s = units(scope, args.get(0));
+    let s = byte_string(scope, args.get(0));
     rv.set_bool(is_header_value(&s));
-}
-// __dom.reasonPhrase(s) -> whether `s` is a reason-phrase (`is_reason_phrase`).
-fn reason_phrase_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let s = units(scope, args.get(0));
-    rv.set_bool(is_reason_phrase(&s));
-}
-// __dom.redirectStatus(status) / __dom.nullBodyStatus(status) -> whether it is one (`redirect_status` / `null_body_status`).
-fn redirect_status_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_bool(args.get(0).uint32_value(scope).is_some_and(redirect_status));
-}
-fn null_body_status_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_bool(args.get(0).uint32_value(scope).is_some_and(null_body_status));
 }
 // __dom.httpToken(s) -> whether `s` is an HTTP token (`is_token`).
 fn http_token_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let s = units(scope, args.get(0));
+    let s = byte_string(scope, args.get(0));
     rv.set_bool(is_token(&s));
 }
 // __dom.normalizedMethod(method) -> `normalized_method`: the uppercase method, or null for one that keeps its case.
 fn normalized_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let method = units(scope, args.get(0));
+    let method = byte_string(scope, args.get(0));
     match normalized_method(&method).and_then(|m| v8::String::new(scope, m)) {
         Some(m) => rv.set(m.into()),
         None => rv.set_null(),

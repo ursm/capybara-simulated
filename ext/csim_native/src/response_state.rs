@@ -77,8 +77,7 @@ fn made(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'
                 return Err(Refusal::Range(format!("The status provided ({status}) is outside the range [200, 599].")));
             }
             let status_text = text(scope, 2);
-            let bytes: Vec<u8> = status_text.chars().map(|c| u8::try_from(u32::from(c)).unwrap_or(0)).collect();
-            if !crate::fetch_rules::is_reason_phrase(&bytes) {
+            if !crate::fetch_rules::is_reason_phrase(&crate::fetch_rules::byte_string(scope, args.get(2))) {
                 return Err(Refusal::Type("Invalid statusText".into()));
             }
             Ok(Response::new(status, status_text))
