@@ -5428,6 +5428,7 @@ fn reset_arena(
     crate::idb_databases::drop_realm(scope, cid);   // (…and its IndexedDB agent: its connections closed)
     dom(scope).walk_reuse.remove(&cid);
     dom(scope).caret_moves.remove(&cid);
+    dom(scope).sw_router_rules.remove(&cid);   // (…a service worker's static router rules, which a new script registers anew)
     // …and the style engine forgets the nodes it held (its sheets stay until the new page sets its own).
     if let Some(engine) = dom(scope).styles.get_mut(&cid) {
         engine.reset();
@@ -5480,6 +5481,7 @@ fn drop_realm(
         d.styles.remove(&id);          // (…and its style engine)
         d.walk_reuse.remove(&id);      // (…and its Rust walk's last pass)
         d.caret_moves.remove(&id);     // (…and its caret's last line-wise move)
+        d.sw_router_rules.remove(&id); // (…and its static router rules)
         d.arenas.remove(&id);          // (…and its arena object, which holds its global's `__dom`)
         d.clone_shadow_hooks.remove(&id);   // (…and its shadow root cloning hook)
         crate::text_codec::drop_realm(scope, id);   // (…and the stream decoders it left open)

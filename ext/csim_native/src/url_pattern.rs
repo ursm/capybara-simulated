@@ -7,6 +7,7 @@
 use std::borrow::Cow;
 
 use urlpattern::quirks::{self, StringOrInit};
+use urlpattern::regexp::RegExp;
 use v8::cppgc::{GarbageCollected, Visitor};
 
 // The wrapper tag `Object::wrap` / `unwrap` file the handle under (request_state.rs' 11).
@@ -76,12 +77,61 @@ fn optional(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -
     (!value.is_undefined()).then(|| crate::url_ops::usv(scope, value))
 }
 
+// A component's regular expression as rust-urlpattern holds it while it parses a pattern: its source alone, which V8
+// alone judges (`create` compiles it) — the crate's own judging, in a Rust engine with no lookaround, refused
+// `/((?!admin).*)`, which Chrome takes. The one match the parse asks of it — whether a constructor string's protocol is
+// a special scheme's — is answered by that engine where it can read the expression, and as no match where it cannot.
+struct EngineRegExp(String);
+
+impl RegExp for EngineRegExp {
+    fn syntax() -> urlpattern::RegexSyntax {
+        urlpattern::RegexSyntax::EcmaScript
+    }
+    fn parse(pattern: &str, _flags: &str, _force_eval: bool) -> Result<Self, ()> {
+        Ok(EngineRegExp(pattern.to_owned()))
+    }
+    fn matches<'a>(&self, text: &'a str) -> Option<Vec<Option<&'a str>>> {
+        quirks::EcmaRegexp::parse(&self.0, "u", false).ok()?.matches(text)
+    }
+    fn pattern_string(&self) -> &str {
+        &self.0
+    }
+}
+
+// URL Pattern "process a URLPatternInit" of a constructor's `input`: a string parsed as a constructor string against
+// `base` (one with no protocol needs it), an init with its own base URL, given none besides.
+fn constructor_input(input: StringOrInit<'_>, base: Option<&str>) -> Result<urlpattern::UrlPatternInit, String> {
+    let parse_url = |s: &str| url::Url::parse(s).map_err(|e| e.to_string());
+    match input {
+        StringOrInit::String(pattern) => {
+            let base = base.map(parse_url).transpose()?;
+            urlpattern::UrlPatternInit::parse_constructor_string::<EngineRegExp>(&pattern, base).map_err(|e| e.to_string())
+        }
+        StringOrInit::Init(init) => {
+            if base.is_some() {
+                return Err(urlpattern::Error::BaseUrlWithInit.to_string());
+            }
+            Ok(urlpattern::UrlPatternInit {
+                protocol: init.protocol,
+                username: init.username,
+                password: init.password,
+                hostname: init.hostname,
+                port: init.port,
+                pathname: init.pathname,
+                search: init.search,
+                hash: init.hash,
+                base_url: init.base_url.as_deref().map(parse_url).transpose()?,
+            })
+        }
+    }
+}
+
 // URL Pattern "create" a URL pattern: `input` processed (against `base` for a string), each component parsed and its
 // regular expression compiled — a TypeError's message where any of it fails.
 pub(crate) fn create(scope: &mut v8::PinScope<'_, '_>, input: StringOrInit<'_>, base: Option<&str>, ignore_case: bool) -> Result<Pattern, String> {
-    let init = quirks::process_construct_pattern_input(input, base).map_err(|e| e.to_string())?;
+    let init = constructor_input(input, base)?;
     let options = urlpattern::UrlPatternOptions { regex_syntax: urlpattern::RegexSyntax::EcmaScript, ignore_case };
-    let parsed = quirks::parse_pattern::<quirks::EcmaRegexp>(init, options).map_err(|e| e.to_string())?;
+    let parsed = quirks::parse_pattern::<EngineRegExp>(init, options).map_err(|e| e.to_string())?;
     let mut flags = v8::RegExpCreationFlags::UNICODE_SETS;
     if ignore_case {
         flags |= v8::RegExpCreationFlags::IGNORE_CASE;
@@ -236,29 +286,35 @@ fn match_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         return rv.set_bool(matched.is_some());
     }
     let Some(components) = matched else { return rv.set_null() };
-    let result = v8::Object::new(scope);
-    let mut inputs = vec![args.get(1)];
-    if base.is_some() {
-        inputs.push(args.get(2));
-    }
-    let inputs = v8::Array::new_with_elements(scope, &inputs);
+    // (…as WebIDL converts the URLPatternResult dictionary: its members, and each URLPatternComponentResult's, in
+    // lexicographic order — Chrome's `hash, hostname, inputs, …`, `groups` before `input`)
     let set = |scope: &mut v8::PinScope<'_, '_>, obj: v8::Local<'_, v8::Object>, key: &str, value: v8::Local<'_, v8::Value>| {
         if let Some(k) = v8::String::new(scope, key) {
             obj.create_data_property(scope, k.into(), value);
         }
     };
-    set(scope, result, "inputs", inputs.into());
+    let mut members: Vec<(&str, v8::Local<'_, v8::Value>)> = Vec::with_capacity(COMPONENTS.len() + 1);
+    let mut inputs = vec![args.get(1)];
+    if base.is_some() {
+        inputs.push(args.get(2));
+    }
+    members.push(("inputs", v8::Array::new_with_elements(scope, &inputs).into()));
     for ((name, (text, values)), component) in COMPONENTS.iter().zip(components).zip(&p.components) {
         let entry = v8::Object::new(scope);
-        let text = v8::String::new(scope, &text).map_or_else(|| v8::undefined(scope).into(), Into::into);
-        set(scope, entry, "input", text);
         let groups = v8::Object::new(scope);
         for (group, value) in component.groups.iter().zip(values) {
             let value = value.and_then(|v| v8::String::new(scope, &v)).map_or_else(|| v8::undefined(scope).into(), Into::into);
             set(scope, groups, group, value);
         }
         set(scope, entry, "groups", groups.into());
-        set(scope, result, name, entry.into());
+        let text = v8::String::new(scope, &text).map_or_else(|| v8::undefined(scope).into(), Into::into);
+        set(scope, entry, "input", text);
+        members.push((name, entry.into()));
+    }
+    members.sort_by_key(|(name, _)| *name);
+    let result = v8::Object::new(scope);
+    for (name, value) in members {
+        set(scope, result, name, value);
     }
     rv.set(result.into());
 }
