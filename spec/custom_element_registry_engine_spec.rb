@@ -160,4 +160,28 @@ RSpec.describe 'custom element registries in the engine' do
     JS
     expect(got).to eq(['scoped scoped null null null scoped'] * 2)
   end
+
+  # A definition's disabled features are what `disabledFeatures` said when it was defined (HTML "define": its disable
+  # internals and disable shadow flags) — the getter read once, a later answer of it changing nothing — and they are the
+  # element's own registry's definition's, a scoped one's too, not the global registry's of that name.
+  it 'disables the features its definition named when it was defined, in the element\'s own registry' do
+    s = session_for('/' => '<!doctype html><meta charset=utf-8><body>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        let reads = 0, features = ['shadow', 'internals'];
+        customElements.define('x-d', class extends HTMLElement { static get disabledFeatures() { reads++; return features; } });
+        features = [];
+        const refused = (f) => { try { f(); return 'ok'; } catch (e) { return e.name; } };
+        const d = document.createElement('x-d');
+        const own = [refused(() => d.attachShadow({ mode: 'open' })), refused(() => d.attachInternals()), reads];
+        const scoped = new CustomElementRegistry();
+        scoped.define('x-s', class extends HTMLElement { static disabledFeatures = ['shadow']; });
+        customElements.define('x-s', class extends HTMLElement {});
+        const inScoped = document.createElement('x-s', { customElementRegistry: scoped });
+        const inGlobal = document.createElement('x-s');
+        return own.concat(refused(() => inScoped.attachShadow({ mode: 'open' })), refused(() => inGlobal.attachShadow({ mode: 'open' })));
+      })()
+    JS
+    expect(got).to eq(['NotSupportedError', 'NotSupportedError', 1, 'NotSupportedError', 'ok'])
+  end
 end
