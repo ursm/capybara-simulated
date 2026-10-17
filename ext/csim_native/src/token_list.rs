@@ -179,10 +179,25 @@ const REMOVE: u32 = 1;
 const TOGGLE: u32 = 2;
 const REPLACE: u32 = 3;
 
-// __dom.tokenListEdit(nid, name, op, tokens, force) -> [result, value]: `add` (op 0) / `remove` (1) of `tokens`, `toggle`
-// (2) of `tokens[0]` — `force` true, false or undefined — or `replace` (3) of `tokens[0]` by `tokens[1]`, the tokens
-// checked already; `result` the method's (toggle's and replace's booleans), `value` what the update steps write, or
-// undefined where they write nothing (an absent attribute and an empty set; a replace of a token the set lacks).
+// Why an edit's tokens refuse it (DOM §7.1, each method's steps 1-2), with the index of the token that does: one that is
+// the empty string (`EMPTY_TOKEN`, a SyntaxError), else one with ASCII whitespace in it (`SPACED_TOKEN`, an
+// InvalidCharacterError) — each token in turn, but `replace`'s both for emptiness before either for whitespace.
+const EMPTY_TOKEN: u32 = 1;
+const SPACED_TOKEN: u32 = 2;
+fn refusal(op: u32, tokens: &[Vec<u16>]) -> Option<(u32, usize)> {
+    let why = |t: &Vec<u16>| if t.is_empty() { Some(EMPTY_TOKEN) } else if t.iter().any(|&u| ascii_whitespace(u)) { Some(SPACED_TOKEN) } else { None };
+    if op == REPLACE {
+        if let Some(i) = tokens.iter().position(Vec::is_empty) {
+            return Some((EMPTY_TOKEN, i));
+        }
+    }
+    tokens.iter().enumerate().find_map(|(i, t)| why(t).map(|w| (w, i)))
+}
+// __dom.tokenListEdit(nid, name, op, tokens, force) -> [result, value] — or [undefined, undefined, why, index] for tokens
+// that refuse it (`refusal`): `add` (op 0) / `remove` (1) of `tokens`, `toggle` (2) of `tokens[0]` — `force` true, false
+// or undefined — or `replace` (3) of `tokens[0]` by `tokens[1]`; `result` the method's (toggle's and replace's booleans),
+// `value` what the update steps write, or undefined where they write nothing (an absent attribute and an empty set; a
+// replace of a token the set lacks).
 fn token_list_edit(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let op = args.get(2).uint32_value(scope).unwrap_or(ADD);
     let mut tokens: Vec<Vec<u16>> = Vec::new();
@@ -195,6 +210,10 @@ fn token_list_edit(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     }
     let force = args.get(4);
     let force = if force.is_undefined() { None } else { Some(force.boolean_value(scope)) };
+    if let Some((refused, index)) = refusal(op, &tokens) {
+        let items = [v8::undefined(scope).into(), v8::undefined(scope).into(), v8::Integer::new_from_unsigned(scope, refused).into(), v8::Integer::new_from_unsigned(scope, index as u32).into()];
+        return rv.set(v8::Array::new_with_elements(scope, &items).into());
+    }
     let current = value(scope, &args);
     let present = current.is_some();
     let mut set = current.map_or(Vec::new(), |v| ordered_set(&v));
@@ -262,6 +281,15 @@ mod tests {
         assert!(set(" \n ").is_empty());
     }
 
+    #[test]
+    fn an_edit_is_refused_for_an_empty_token_then_a_spaced_one() {
+        assert_eq!(refusal(ADD, &[u("a"), u("b c"), u("")]), Some((SPACED_TOKEN, 1)));
+        assert_eq!(refusal(ADD, &[u("a"), u("")]), Some((EMPTY_TOKEN, 1)));
+        // (…replace's both for emptiness first)
+        assert_eq!(refusal(REPLACE, &[u(" "), u("")]), Some((EMPTY_TOKEN, 1)));
+        assert_eq!(refusal(REPLACE, &[u("a"), u("b\tc")]), Some((SPACED_TOKEN, 1)));
+        assert_eq!(refusal(TOGGLE, &[u("\u{a0}")]), None);
+    }
     #[test]
     fn a_replace_keeps_the_first_instance_of_either_token() {
         let mut s = set("a b c");
