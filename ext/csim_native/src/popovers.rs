@@ -33,19 +33,24 @@ pub(crate) fn popover_state(value: Option<&str>) -> u32 {
         Some(_) => MANUAL,
     }
 }
-// …an element's, of those the lists hold — auto or hint; manual and none are neither (0).
+// …whether an element is a popover: an HTML one whose `popover` is in any state but none (the attribute an HTML
+// element's: none of an SVG or MathML one makes it a popover).
+pub(crate) fn is_popover(n: &NodeData) -> bool {
+    n.is_html() && n.plain_attr("popover").is_some()
+}
+// …an element's, of those the lists hold — auto or hint; manual and none are neither (`NONE`).
 pub(crate) fn popover_kind(n: &NodeData) -> u32 {
     if !n.is_html() {
-        return 0;
+        return NONE;
     }
     match popover_state(n.plain_attr("popover")) {
         kind @ (AUTO | HINT) => kind,
-        _ => 0,
+        _ => NONE,
     }
 }
 // …of one showing.
 fn showing_kind(n: &NodeData) -> u32 {
-    if n.state & STATE_POPOVER_OPEN != 0 { popover_kind(n) } else { 0 }
+    if n.state & STATE_POPOVER_OPEN != 0 { popover_kind(n) } else { NONE }
 }
 
 impl RealmArena {
@@ -215,8 +220,7 @@ fn popover_check(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let expected = args.get(1).is_true();
     let arena = &crate::dom::dom(scope).arena;
     let Some(n) = arena.get(id) else { return rv.set_uint32(NOT_A_POPOVER) };
-    // (…the attribute an HTML element's: none of an SVG or MathML one makes it a popover)
-    rv.set_uint32(if !n.is_html() || n.plain_attr("popover").is_none() {
+    rv.set_uint32(if !is_popover(n) {
         NOT_A_POPOVER
     } else if (n.state & STATE_POPOVER_OPEN != 0) != expected {
         AS_ASKED

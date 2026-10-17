@@ -541,9 +541,10 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     steps |= flag(local.starts_with("on"), STEP_HANDLER);
     steps |= flag(changed && matches!(local, "form" | "id" | "disabled"), STEP_FORM_OWNER);
     // (…its state — auto, hint, manual (any other value), none — not its value: HTML's `popover` attribute change steps)
+    // (…read only for a showing popover's: a value's state is no write's to compute)
     let state = |v: Option<&[u16]>| crate::popovers::popover_state(v.map(String::from_utf16_lossy).as_deref());
-    let popover_moved = state(old) != state(value);
-    steps |= flag(html && local == "popover" && popover_moved && n.state & crate::dom::STATE_POPOVER_OPEN != 0, STEP_POPOVER);
+    let popover = html && local == "popover" && n.state & crate::dom::STATE_POPOVER_OPEN != 0;
+    steps |= flag(popover && state(old) != state(value), STEP_POPOVER);
     steps
 }
 

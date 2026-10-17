@@ -206,7 +206,7 @@ pub(crate) fn invoked_popover(arena: &RealmArena, id: NodeId) -> Option<NodeId> 
     if arena.is_actually_disabled(id) || (n.is_submit_button() && arena.form_owner(id).is_some()) {
         return None;
     }
-    let popover = |p: NodeId| arena.get(p).is_some_and(|t| crate::popovers::popover_kind(t) != 0 || t.plain_attr("popover").is_some());
+    let popover = |p: NodeId| arena.get(p).is_some_and(crate::popovers::is_popover);
     if let Some(target) = button.then(|| arena.referenced_element(id, "commandfor")).flatten() {
         let command = button_command(n);
         return command.filter(|c| POPOVER_COMMANDS.contains(&c.as_str())).map(|_| target).filter(|&t| popover(t));
@@ -239,7 +239,7 @@ fn invoker_action(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     if arena.is_actually_disabled(invoker) || !arena.is_connected(invoker) || (arena.form_owner(invoker).is_some() && ty != "button") {
         return;
     }
-    let popover = |id: NodeId| arena.get(id).is_some_and(|p| p.plain_attr("popover").is_some());
+    let popover = |id: NodeId| arena.get(id).is_some_and(crate::popovers::is_popover);
     let (kind, target, command, action) = match button.then(|| arena.referenced_element(invoker, "commandfor")).flatten() {
         Some(target) => {
             let Some(command) = button_command(n) else { return };
