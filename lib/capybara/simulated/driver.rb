@@ -497,7 +497,7 @@ module Capybara
           if post
             existing[:browser].navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: referrer_policy, initiator: source&.raw_current_url)
           else
-            navigate_window(existing[:browser], url, source: source)
+            navigate_window(existing[:browser], url, source: source, referrer: referrer, referrer_policy: referrer_policy)
           end
           return existing[:handle]
         end
@@ -739,7 +739,7 @@ module Capybara
       # navigating it synchronously (`visit` → `rebuild_ctx`) would dispose the
       # V8 context mid-call and abort the running handler. A non-active window
       # can navigate immediately (its VM isn't on the stack).
-      private def navigate_window(browser, url, source: nil)
+      private def navigate_window(browser, url, source: nil, referrer: nil, referrer_policy: nil)
         return if url.nil? || url.to_s.empty?
         # A blob: navigation loads directly from the opener's blob bytes (not
         # rack-navigable, cross-isolate). Only when the target isn't the active
@@ -753,7 +753,7 @@ module Capybara
         else
           # A cross-window navigation's initiator is the SETTING window's document
           # (seeds Sec-Fetch-Site → the SameSite cookie gate); raw_ — no re-entrant tick.
-          browser.visit(url, initiator: source&.raw_current_url)
+          browser.visit(url, referer: referrer, referrer_policy: referrer_policy, initiator: source&.raw_current_url)
         end
       end
 

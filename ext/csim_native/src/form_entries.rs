@@ -157,20 +157,7 @@ fn form_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let state = |table: usize, value: Option<Vec<u16>>| TABLES[table].state(value.map(text).as_deref()).unwrap_or_default();
     let method = state(FORM_METHOD, own("formmethod", "method"));
     let enctype = state(FORM_ENCTYPE, own("formenctype", "enctype"));
-    let target = s.and_then(|s| s.plain_attr_units("formtarget")).or_else(|| f.plain_attr_units("target")).or_else(|| {
-        let root = arena.root_of(form);
-        let mut stack = vec![root];
-        while let Some(id) = stack.pop() {
-            let n = arena.get(id)?;
-            if n.is_html_named("base") {
-                if let Some(t) = n.plain_attr_units("target") {
-                    return Some(t);
-                }
-            }
-            stack.extend(n.children.iter().rev());
-        }
-        None
-    });
+    let target = s.and_then(|s| s.plain_attr_units("formtarget")).or_else(|| f.plain_attr_units("target")).or_else(|| arena.base_target(form));
     let rel = f.plain_attr_units("rel").unwrap_or_default();
     let ascii_ws = |c: char| matches!(c, '\t' | '\n' | '\x0C' | '\r' | ' ' | ',');
     let labelled = f.plain_attr("accept-charset").and_then(|ac| ac.split(ascii_ws).filter(|l| !l.is_empty()).find_map(|l| encoding_rs::Encoding::for_label(l.as_bytes())));

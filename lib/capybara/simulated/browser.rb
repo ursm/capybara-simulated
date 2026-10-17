@@ -1360,14 +1360,17 @@ module Capybara
             end
           # `target="_blank"` (or any non-_self/_top/_parent name) opens
           # in a new browsing context (its own Browser/VM); the primary
-          # stays put (per HTML spec — original window is unaffected). A
-          # `target=_blank` link defaults to `noopener` (window.opener null) unless
-          # `rel=opener` (carried as `action['opener']`); open_aux_window forces
-          # noopener anyway for a cross-partition blob. Matches the scripted
-          # click / dispatchEvent activation paths.
+          # stays put (per HTML spec — original window is unaffected), with the
+          # opener the link's noopener leaves it (`action['opener']`), as the
+          # scripted click / dispatchEvent activation paths do.
           elsif new_window_target?(target)
-            @driver.open_aux_window(resolve_against_current(url, use_base: true), source: self, opener: !!action['opener'], blob_snapshot: action['blob'],
-                                    **hyperlink_referrer(action['referrerPolicy']))
+            open_hyperlink_window(
+              resolve_against_current(url, use_base: true),
+              target:      target,
+              opener:      action['opener'],
+              link_policy: action['referrerPolicy'],
+              blob:        action['blob']
+            )
           # In-page anchor links (`#frag` / current-page + `#frag`) move
           # the hash but don't fetch a new document. Pure-fragment also
           # short-circuits the `<a>`s test fixtures use as click sinks.
@@ -2028,21 +2031,35 @@ module Capybara
         # (…the main document's slot: its hyperlink's href resolved against it, whichever frame `within_frame` entered)
         in_top_context { follow_pending_hyperlink(pending) }
       end
-      # The referrer a hyperlink's new window loads with (HTML "follow the hyperlink" steps 8-9), under the policy its
-      # `rel` / `referrerpolicy` set (`policy`: '' for its document's): none for `no-referrer`, else this document's URL.
-      def hyperlink_referrer(policy)
-        policy = policy.to_s
-        {referrer: policy == 'no-referrer' ? '' : (@current_url || ''), referrer_policy: policy.empty? ? nil : policy}
+      # A hyperlink's new window (HTML "follow the hyperlink" with a target that names none): named by its target but
+      # for `_blank` — a second link of the name navigates the window the first opened — with the opener `opener` says
+      # (token_list.rs `noopener`), and loaded with its document's URL as the referrer (steps 8-9), under the policy its
+      # `rel` / `referrerpolicy` set (`link_policy`: '' for its document's) — the document of realm `realm_id`'s.
+      def open_hyperlink_window(url, target:, opener:, link_policy:, blob: nil, realm_id: @current_realm_id.to_i)
+        referrer, document_policy = realm_referrer_initiator(realm_id)
+        @driver.open_aux_window(
+          url,
+          name:            target.to_s.casecmp?('_blank') ? nil : target.to_s,
+          source:          self,
+          opener:          !!opener,
+          blob_snapshot:   blob,
+          referrer:        referrer || '',
+          referrer_policy: link_policy.to_s.empty? ? document_policy : link_policy.to_s
+        )
       end
 
       def follow_pending_hyperlink(pending)
         url    = pending['url'].to_s
         target = pending['target'].to_s
         if new_window_target?(target)
-          # `opener` reflects rel=opener (a bare target=_blank link is noopener);
-          # open_aux_window forces noopener anyway for a cross-partition blob.
-          @driver.open_aux_window(resolve_against_current(url, use_base: true), source: self, opener: !!pending['opener'], blob_snapshot: pending['blob'],
-                                  **hyperlink_referrer(pending['referrerPolicy']))
+          # (…`opener` the link's noopener's answer; open_aux_window forces noopener anyway for a cross-partition blob)
+          open_hyperlink_window(
+            resolve_against_current(url, use_base: true),
+            target:      target,
+            opener:      pending['opener'],
+            link_policy: pending['referrerPolicy'],
+            blob:        pending['blob']
+          )
         elsif pure_fragment_navigation?(url, use_base: true)
           update_current_hash(resolve_against_current(url, use_base: true))
         else
@@ -3196,7 +3213,7 @@ module Capybara
         # (token_list.rs `noopener`) — `noopener` / `noreferrer` drop it, `_blank` without `opener` too, a named target
         # keeps it. `noreferrer` also empties the referrer.
         no_referrer = Native.link_noreferrer(spec['rel'].to_s)
-        keep_opener = !Native.link_noopener(spec['rel'].to_s, keyword.to_s)
+        keep_opener = !Native.link_noopener(spec['rel'].to_s, keyword)
         referrer    = no_referrer ? '' : (@current_url || '')
         # (…and a frame it navigates is told its initiator under the policy `noreferrer` sets)
         if named_frame
@@ -7349,14 +7366,19 @@ module Capybara
         @driver.open_window_from_js(self, url.to_s, name.to_s, opener_realm_id.to_i, about_base.to_s, about_origin.to_s)
       end
 
-      # A `target=_blank`/named link/area activation from a frame or window realm in
-      # THIS browser opens a new top-level auxiliary window. `opener` reflects
-      # rel=opener (a bare target=_blank is noopener); the Driver forces noopener for
-      # a cross-partition blob: target. `blob` is an optional click-time blob snapshot.
-      def open_aux_from_realm(url, opener, blob)
+      # A `target=_blank`/named link/area activation from frame or window realm `realm_id` in THIS browser opens a new
+      # top-level auxiliary window (`open_hyperlink_window`). `opener` is the link's noopener's answer; the Driver
+      # forces noopener for a cross-partition blob: target. `blob` is an optional click-time blob snapshot.
+      def open_aux_from_realm(url, opener, blob, target, link_policy, realm_id)
         return unless @driver.respond_to?(:open_aux_window)
-        snap = blob.is_a?(Hash) ? blob : nil
-        @driver.open_aux_window(resolve_document_url(url.to_s), source: self, opener: !!opener, blob_snapshot: snap)
+        open_hyperlink_window(
+          resolve_document_url(url.to_s),
+          target:      target,
+          opener:      opener,
+          link_policy: link_policy,
+          blob:        blob.is_a?(Hash) ? blob : nil,
+          realm_id:    realm_id.to_i
+        )
       end
 
       # Open a SAME-ORIGIN auxiliary window as a realm in THIS browser's isolate
@@ -10852,7 +10874,14 @@ module Capybara
         pending = @runtime.call('__csimTakePendingAuxWindow')
         return unless pending.is_a?(Hash) && pending['url'] && @driver.respond_to?(:open_aux_window)
         url = in_top_context { resolve_against_current(pending['url'].to_s, use_base: true) }
-        @driver.open_aux_window(url, source: self, blob_snapshot: pending['blob'])
+        open_hyperlink_window(
+          url,
+          target:      pending['target'],
+          opener:      pending['opener'],
+          link_policy: pending['referrerPolicy'],
+          blob:        pending['blob'],
+          realm_id:    0
+        )
       rescue StandardError => e
         log_console('warn', "aux-window open failed: #{e.message}")
       end

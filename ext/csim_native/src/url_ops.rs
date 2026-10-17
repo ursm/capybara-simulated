@@ -18,10 +18,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "postMessageTarget", post_message_target_op, context_id);
     register(scope, ns, "postMessageReaches", post_message_reaches_op, context_id);
     register(scope, ns, "urlencodedParse", urlencoded_parse, context_id);
-    register(scope, ns, "urlencodedSerialize", urlencoded_serialize, context_id);
     register(scope, ns, "javascriptUrlSource", javascript_url_source_op, context_id);
     register(scope, ns, "metaReferrerPolicy", meta_referrer_policy_op, context_id);
     register(scope, ns, "hyperlinkReferrerPolicy", hyperlink_referrer_policy_op, context_id);
+    register(scope, ns, "elementTarget", element_target_op, context_id);
 }
 
 // A URL's parts, in `parts`' order.
@@ -95,6 +95,33 @@ const POLICIES: [&str; 8] = [
     "strict-origin-when-cross-origin",
     "unsafe-url",
 ];
+
+impl crate::dom::RealmArena {
+    // The `target` of the first `<base>` with one in `id`'s tree, in tree order — what a hyperlink or a form with no
+    // target of its own opens in (HTML "get an element's target").
+    pub(crate) fn base_target(&self, id: crate::dom::NodeId) -> Option<Vec<u16>> {
+        let mut stack = vec![self.root_of(id)];
+        while let Some(c) = stack.pop() {
+            let n = self.get(c)?;
+            if n.is_html_named("base") {
+                if let Some(t) = n.plain_attr_units("target") {
+                    return Some(t);
+                }
+            }
+            stack.extend(n.children.iter().rev());
+        }
+        None
+    }
+    // HTML "get an element's target" of a hyperlink: its `target`, else its tree's base target, else ''.
+    pub(crate) fn element_target(&self, id: crate::dom::NodeId) -> Vec<u16> {
+        self.get(id).and_then(|n| n.plain_attr_units("target")).or_else(|| self.base_target(id)).unwrap_or_default()
+    }
+}
+// __dom.elementTarget(nid) -> `element_target`.
+fn element_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let target = crate::dom::nid_arg(scope, &args, 0).map_or_else(Vec::new, |id| crate::dom::dom(scope).arena.element_target(id));
+    rv.set(crate::dom::utf16_value(scope, &target));
+}
 
 // The referrer policy a hyperlink is followed under (HTML "follow the hyperlink" steps 8-9): `no-referrer` where its
 // link types include `noreferrer`, else its `referrerpolicy` attribute's state — a token matched ASCII
@@ -336,33 +363,13 @@ fn url_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     rv.set(parts.into());
 }
 
-// __dom.urlencodedParse(input) -> [name, value, name, value, …]: the application/x-www-form-urlencoded parser's tuples
-// (URL Standard §5.1) of `input`'s UTF-8 bytes — `+` a space, each `%XX` its byte, the bytes UTF-8 decoded without BOM,
-// an invalid sequence U+FFFD.
+// __dom.urlencodedParse(input) -> [[name, value], …]: the application/x-www-form-urlencoded parser's tuples (URL
+// Standard §5.1) of `input`'s UTF-8 bytes — `+` a space, each `%XX` its byte, the bytes UTF-8 decoded without BOM, an
+// invalid sequence U+FFFD.
 fn urlencoded_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let input = usv(scope, args.get(0));
-    let items: Vec<v8::Local<v8::Value>> = url::form_urlencoded::parse(input.as_bytes())
-        .flat_map(|(name, value)| [name, value])
-        .map(|text| v8::String::new(scope, &text).map_or_else(|| v8::undefined(scope).into(), Into::into))
-        .collect();
-    let array = v8::Array::new_with_elements(scope, &items);
-    rv.set(array.into());
-}
-
-// __dom.urlencodedSerialize(list) -> the application/x-www-form-urlencoded serializer's string (URL Standard §5.2) of the
-// tuples in `list`, flat as the parser answers them: each name and value percent-encoded in UTF-8 with the
-// application/x-www-form-urlencoded set, a space `+`.
-fn urlencoded_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
-    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
-    for i in (0..list.length()).step_by(2) {
-        let [name, value] = [i, i + 1].map(|k| list.get_index(scope, k).map(|v| usv(scope, v)).unwrap_or_default());
-        serializer.append_pair(&name, &value);
-    }
-    let text = serializer.finish();
-    if let Some(string) = v8::String::new(scope, &text) {
-        rv.set(string.into());
-    }
+    let pairs = crate::search_params::parse_pairs(&input);
+    rv.set(crate::search_params::pairs_value(scope, &pairs));
 }
 
 // The script a `javascript:` URL runs (HTML "evaluate a javascript: URL"): its serialization with the scheme taken off,

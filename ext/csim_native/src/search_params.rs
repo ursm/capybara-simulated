@@ -1,8 +1,8 @@
 // A URLSearchParams object's list (URL Standard §6): its name-value pairs, in order, on a handle the bindings' object
 // wraps (`__dom.SearchParamsBase`) — appended, deleted, set and sorted here, read by name, and serialized as the
 // application/x-www-form-urlencoded serializer has them. Where the object is a URL's `searchParams`, the bindings write
-// the serialization back to the URL's query after a change (its update steps) and hand the list the query a change of
-// the URL made (`searchParamsReplace`). Names and values are USVStrings: the bindings converted them, so no lone
+// the serialization back to the URL's query after a change (its update steps), and make a list of the query again
+// after a change of the URL. Names and values are USVStrings: the bindings converted them, so no lone
 // surrogate reaches a pair.
 
 use std::cell::RefCell;
@@ -15,13 +15,17 @@ const TAG: u16 = 10;
 // What marks an object as a search params list's (its internal field 0).
 static BRAND: u8 = 0;
 
+// The application/x-www-form-urlencoded parser's pairs of `query` (URL Standard §5.1).
+pub(crate) fn parse_pairs(query: &str) -> Vec<(String, String)> {
+    url::form_urlencoded::parse(query.as_bytes()).map(|(n, v)| (n.into_owned(), v.into_owned())).collect()
+}
+
 #[derive(Default)]
 pub(crate) struct ParamsList(Vec<(String, String)>);
 
 impl ParamsList {
-    // The application/x-www-form-urlencoded parser's pairs of `query`.
     fn parse(query: &str) -> Self {
-        ParamsList(url::form_urlencoded::parse(query.as_bytes()).map(|(n, v)| (n.into_owned(), v.into_owned())).collect())
+        ParamsList(parse_pairs(query))
     }
     fn serialize(&self) -> String {
         let mut serializer = url::form_urlencoded::Serializer::new(String::new());
@@ -136,7 +140,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "searchParamsSort", sort_op, context_id);
     crate::dom::register(scope, ns, "searchParamsSerialize", serialize_op, context_id);
     crate::dom::register(scope, ns, "searchParamsPairs", pairs_op, context_id);
-    crate::dom::register(scope, ns, "searchParamsReplace", replace_op, context_id);
 }
 
 fn text(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> String {
@@ -215,20 +218,22 @@ fn serialize_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let serialized = string(scope, &serialized);
     rv.set(serialized);
 }
-// __dom.searchParamsPairs(list) -> its pairs, flat: [name, value, name, value, …] — what its iterator walks.
+// Name-value pairs as the bindings take them: [[name, value], …].
+pub(crate) fn pairs_value<'s>(scope: &mut v8::PinScope<'s, '_>, pairs: &[(String, String)]) -> v8::Local<'s, v8::Value> {
+    let items: Vec<v8::Local<v8::Value>> = pairs
+        .iter()
+        .map(|(n, v)| {
+            let pair = [string(scope, n), string(scope, v)];
+            v8::Array::new_with_elements(scope, &pair).into()
+        })
+        .collect();
+    v8::Array::new_with_elements(scope, &items).into()
+}
+// __dom.searchParamsPairs(list) -> its pairs (`pairs_value`) — what its iterator walks.
 fn pairs_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let pairs: Vec<(String, String)> = list(scope, args.get(0)).map_or_else(Vec::new, |l| l.borrow().0.clone());
-    let items: Vec<v8::Local<v8::Value>> = pairs.iter().flat_map(|(n, v)| [n, v]).map(|s| string(scope, s)).collect();
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
+    rv.set(pairs_value(scope, &pairs));
 }
-// __dom.searchParamsReplace(list, query) — its pairs those `query` parses to (a URL's query moved under it).
-fn replace_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let query = text(scope, args.get(1));
-    if let Some(l) = list(scope, args.get(0)) {
-        *l.borrow_mut() = ParamsList::parse(&query);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::ParamsList;
