@@ -283,6 +283,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "fontFaceInfo", font_face_info, context_id);
     crate::dom::register(scope, ns, "fontFaceSources", font_face_sources, context_id);
     crate::dom::register(scope, ns, "fontFaceDescriptor", font_face_descriptor, context_id);
+    crate::dom::register(scope, ns, "fontLocalStyle", font_local_style, context_id);
     crate::dom::register(scope, ns, "fontFamilyList", font_family_list_op, context_id);
     crate::dom::register(scope, ns, "fontFacesMatching", font_faces_matching, context_id);
 }
@@ -387,6 +388,23 @@ fn font_face_pick(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let all = args.get(2).is_true();
     let picked: Vec<f64> = pick(faces_of(scope, &args), &stack, &bucket, all).into_iter().map(|i| i as f64).collect();
     rv.set(crate::dom::f64_array(scope, &picked).into());
+}
+
+// __dom.fontLocalStyle(weight, style) -> the weight / style a face's `local()` names are looked up under, of its `weight`
+// and `style` descriptors as written (a FontFace's attributes, a rule's — a value they refuse as none: normal): `bold`
+// where the low end of its weight is 600 or more, `italic` where it is slanted, in the colon form `fc_match` expects —
+// '' for neither.
+fn font_local_style(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let [weight, style] = [0, 1].map(|k| args.get(k).to_rust_string_lossy(scope));
+    let face = parse(&format!("font-family: a; font-weight: {weight}; font-style: {style}"), "about:blank");
+    let (bold, slanted) = face.map_or((false, false), |f| (f.weight.0 >= 600.0, f.slanted));
+    let ws = match (bold, slanted) {
+        (true, true) => "bold:italic",
+        (true, false) => "bold",
+        (false, true) => "italic",
+        (false, false) => "",
+    };
+    rv.set(v8::String::new(scope, ws).unwrap().into());
 }
 
 // __dom.fontFaceInfo(index) -> `[sources, sizeAdjust, ascentOverride, descentOverride, lineGapOverride, ranges, weight,
