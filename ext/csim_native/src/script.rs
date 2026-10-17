@@ -194,8 +194,8 @@ pub(crate) fn script_response_refused(content_type: &str, nosniff: &str, integri
 // __dom.scriptResponseRefused(nid, url, contentType, nosniff, body) -> `script_response_refused` of the response the
 // classic script element `nid` fetched from `url` — by its `integrity`, the body its bytes (a Uint8Array) or a string
 // whose UTF-8 is them, '' where it has none; opaque where it was fetched without `crossorigin` from another origin
-// than the calling realm's document's (an about:blank or srcdoc one's its creator's), but for a `data:` URL, which Fetch
-// taints basic.
+// than the calling realm's document's (an about:blank or srcdoc one's its creator's) — any, for an opaque one — but for
+// a `data:` URL, which Fetch taints basic.
 fn script_response_refused_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let [url, content_type, nosniff] = [1, 2, 3].map(|i| args.get(i).to_rust_string_lossy(scope));
     let body = match v8::Local::<v8::ArrayBufferView>::try_from(args.get(4)) {
@@ -211,8 +211,9 @@ fn script_response_refused_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
     let element = nid_arg(scope, &args, 0).and_then(|id| dom(scope).arena.get(id));
     let integrity = element.and_then(|n| n.plain_attr("integrity")).unwrap_or("").to_owned();
     let cors = element.is_some_and(|n| n.plain_attr("crossorigin").is_some());
+    // (…an opaque document origin the same as no URL's: two opaque origins are never the same)
     let opaque = !cors
-        && ada_url::Url::parse(&url, None).is_ok_and(|u| u.protocol() != "data:" && u.origin() != origin);
+        && ada_url::Url::parse(&url, None).is_ok_and(|u| u.protocol() != "data:" && (origin == "null" || u.origin() != origin));
     rv.set_bool(script_response_refused(&content_type, &nosniff, &integrity, &body, opaque));
 }
 // The encoding a classic script's response decodes with (HTML "fetch a classic script"): its `Content-Type`'s charset

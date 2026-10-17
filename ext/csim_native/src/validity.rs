@@ -723,7 +723,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "selectedness", selectedness, context_id);
     crate::dom::register(scope, ns, "askForReset", ask_for_reset, context_id);
     crate::dom::register(scope, ns, "optionSelect", option_select, context_id);
-    crate::dom::register(scope, ns, "htmlAncestor", html_ancestor, context_id);
+    crate::dom::register(scope, ns, "elementAncestor", element_ancestor_op, context_id);
     crate::dom::register(scope, ns, "initialiseOptions", initialise_options, context_id);
     crate::dom::register(scope, ns, "formOwner", form_owner, context_id);
     crate::dom::register(scope, ns, "defaultButton", default_button, context_id);
@@ -1097,13 +1097,13 @@ fn option_select(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set(crate::dom::node_value(scope, found));
 }
 
-// __dom.htmlAncestor(nid, name, inclusive, svg) -> the node (`inclusive`) or its nearest ancestor that is an HTML element
-// named `name` — an SVG one, with `svg` (`element_ancestor`) — as `node_value` answers it: null for none.
-fn html_ancestor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.elementAncestor(nid, namespace, name, inclusive) -> the node (`inclusive`) or its nearest ancestor that is an
+// element of `namespace` named `name` (`element_ancestor`), as `node_value` answers it — null for none.
+fn element_ancestor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
-    let name = args.get(1).to_rust_string_lossy(scope);
-    let inclusive = args.get(2).is_true();
-    let ns = if args.get(3).is_true() { web_atoms::ns!(svg) } else { web_atoms::ns!(html) };
+    let ns = web_atoms::Namespace::from(args.get(1).to_rust_string_lossy(scope));
+    let name = args.get(2).to_rust_string_lossy(scope);
+    let inclusive = args.get(3).is_true();
     let found = crate::dom::nid_arg(scope, &args, 0).and_then(|id| crate::dom::realm(scope, cid).element_ancestor(id, &ns, &name, inclusive));
     rv.set(crate::dom::node_value(scope, found));
 }
