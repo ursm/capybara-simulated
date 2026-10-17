@@ -138,7 +138,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "formSubmission", form_submission, context_id);
 }
 
-// An enumerated attribute's state: its value ASCII-lowercased where it is one of `keywords`, else `invalid`.
 // __dom.formSubmission(formNid, submitterNid, documentEncoding) -> `[action, method, enctype, target, rel, encoding]`:
 // how a form submits (HTML §4.10.21.3) — the submitter's `formaction`, `formmethod`, `formenctype` and `formtarget`
 // where it has them, else the form's own; the action as written (null for none: the bindings resolve it against the
