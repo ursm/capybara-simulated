@@ -220,6 +220,10 @@ const TREES = [
   'css/geometry',                      // DOMMatrix / DOMPoint / DOMRect / DOMQuad — the geometry interfaces
                                        // canvas transforms, Path2D.addPath and app code build on, and the
                                        // CSS transform list `new DOMMatrix(string)` parses.
+  'css/css-sizing/aspect-ratio',       // `aspect-ratio`: a box's preferred aspect ratio, a replaced element's
+                                       // natural one overridden or kept (`auto`) — the box layout sizes an
+                                       // `aspect-video` / `aspect-square` card from it. Reftests and
+                                       // testharness tests both: the painter renders either.
 ];
 
 // Trees vendored HARNESS-ONLY: everything under `support/` plus the `.html` tests that actually

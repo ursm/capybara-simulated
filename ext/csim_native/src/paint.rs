@@ -332,9 +332,55 @@ impl Painter<'_> {
             if cw > 0.0 && ch > 0.0 {
                 p.list.nodes.push(el);
                 let node = (p.list.nodes.len() - 1) as f64;
-                p.list.push(IMAGE, &[node, x + left, y + top, cw, ch]);
+                let [dx, dy, dw, dh] = p.object_rect(el, cw, ch);
+                // (…what overflows the content box — `cover`, `none` — clipped to it)
+                let overflows = dx < 0.0 || dy < 0.0 || dx + dw > cw || dy + dh > ch;
+                if overflows {
+                    p.list.push(SAVE, &[]);
+                    p.list.push(CLIP_RECT, &[x + left, y + top, cw, ch]);
+                }
+                p.list.push(IMAGE, &[node, x + left + dx, y + top + dy, dw, dh]);
+                if overflows {
+                    p.list.push(RESTORE, &[]);
+                }
             }
         });
+    }
+    // Where a replaced element's content is drawn in its `cw` x `ch` content box (CSS Images 3 §5.5, §5.6), `[x, y, w,
+    // h]` from the box's corner: its natural size fitted as `object-fit` says — `fill` the box, `contain` and `cover`
+    // keeping the ratio, `none` its own size, `scale-down` the smaller of those two — and placed by `object-position`.
+    // An image's natural size its decoded one's, a canvas's its bitmap's; any other's the box's.
+    fn object_rect(&mut self, el: NodeId, cw: f64, ch: f64) -> [f64; 4] {
+        let Some(node) = self.arena.get(el) else { return [0.0, 0.0, cw, ch] };
+        let natural = match node.rendering_tag() {
+            "img" | "input" => node.natural_size.map(|n| n.concrete()),
+            "canvas" => {
+                let dim = |name: &str, default: f64| node.get_attr(name).and_then(crate::validity::parse_non_negative).map_or(default, |n| n as f64);
+                Some((dim("width", 300.0), dim("height", 150.0)))
+            }
+            _ => None,
+        };
+        let fit = self.value(el, "object-fit", None).unwrap_or_default();
+        let Some((nw, nh)) = natural.filter(|&(w, h)| w > 0.0 && h > 0.0 && fit != "fill" && !fit.is_empty()) else { return [0.0, 0.0, cw, ch] };
+        let contain = (cw / nw).min(ch / nh);
+        let scale = match fit.as_str() {
+            "contain" => contain,
+            "cover" => (cw / nw).max(ch / nh),
+            "none" => 1.0,
+            "scale-down" => contain.min(1.0),
+            _ => return [0.0, 0.0, cw, ch],
+        };
+        let (dw, dh) = (nw * scale, nh * scale);
+        // (…`object-position`, as computed: each axis a percentage of the room left and a length)
+        let position = self.value(el, "object-position", None).unwrap_or_else(|| "50% 50%".to_owned());
+        let mut axes = position.split_whitespace().map(|v| {
+            let (frac, px) = v.strip_suffix('%').map_or_else(|| (0.0, v.trim_end_matches("px").parse().unwrap_or(0.0)), |p| (p.parse::<f64>().unwrap_or(50.0) / 100.0, 0.0));
+            move |room: f64| room * frac + px
+        });
+        let (ax, ay) = (axes.next(), axes.next());
+        let x = ax.map_or((cw - dw) / 2.0, |f| f(cw - dw));
+        let y = ay.map_or((ch - dh) / 2.0, |f| f(ch - dh));
+        [x, y, dw, dh]
     }
 
     // One text piece of `box_owner`'s, in its owner's font and colour, where the flow put it.

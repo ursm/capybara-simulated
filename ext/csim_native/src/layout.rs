@@ -374,6 +374,14 @@ pub(crate) struct Input {
     // box, and min/max-height clamp the result. Its natural flow height is kept in
     // `Box::natural_h`, which is the slack `vertical-align` distributes against.
     pub(crate) height_is_floor: bool,
+    // A PREFERRED ASPECT RATIO (`aspect-ratio`, CSS Sizing 4 §5), width over height — 0 for none — and whether it is the
+    // CONTENT box's (`auto && <ratio>`), where it is otherwise the box-sizing box's. A non-replaced box's automatic
+    // height goes through it from its width (`with_ratio_height`); a replaced box's is in its intrinsic size.
+    pub(crate) aspect: f64,
+    pub(crate) aspect_content: bool,
+    // …and whether a GRID ITEM is STRETCHED in its inline axis explicitly (`justify-self: stretch`, or `auto` under the
+    // container's `justify-items: stretch`), which wins over its ratio there, where `normal` lets the ratio size it.
+    pub(crate) stretch_x: bool,
     // TABLE CELL: how its content sits in the row-tall box (§17.5.3) — 0 baseline (its first baseline meets the
     // row's), 1 top, 2 middle, 3 bottom.
     pub(crate) cell_valign: u8,
@@ -548,7 +556,7 @@ impl InlineBox {
 }
 impl Input {
     pub(crate) fn same(&self, o: &Input) -> bool {
-        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, ws_mode, item_auto_height, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, clip, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, height_is_floor, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, text_overflows, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect, fits_content } = self;
+        let Input { nid, parent, display, border_box, width, height, min_w, max_w, min_h, max_h, mt, mr, mb, ml, pt, pr, pb, pl, bt, br, bb, bl, height_adjoins, minh_adjoins, bottom_adjoins, run_start, run_count, strut_lh, strut_asc, float_kind, clear, takes_clearance, starts_bfc, flex_justify, flex_main_gap, flex_cross_align, flex_main_is_x, flex_wrap, flex_cross_flip, flex_align_content, flex_cross_gap, flex_main_reverse, flex_cross_far, rel_x, rel_y, rel_pct, rel_x_px, rel_x_neg, chain_rel, chain_px, chain_shift, chain_math, rel_math, flex_item_auto, out_of_flow, sp_x, sp_y, cell_col, cell_colspan, cell_rowspan, caption_side, rtl, text_align, ws_mode, item_auto_height, grid_start, decl_w, decl_min_w, decl_max_w, flex_basis, flex_grow, decl_border_box, flex_shrink, flex_basis_cb, flex_basis_frac, flex_basis_math, pct_sizes, pct_px, pct_math, edge_frac, edge_px, edge_math, basis_w, inset_frac, inset_math, flex_main_gap_frac, flex_main_gap_math, flex_cross_gap_math, indent_math, flex_cross_gap_frac, flex_basis_kw, scrolls_x, scrolls_y, clip, is_button, self_sizes, block_axis_is_x, decl_edges_x, decl_margin_x, height_from_outside, cell_pct, height_is_floor, aspect, aspect_content, stretch_x, cell_valign, cell_pct_h_child, anon_group, group_pct_h, pct_h_decl, row_imposed, row_height, row_pct, row_rank, table_fixed, flex_stretch, flex_dir_reverse, replaced, lays_out_children, ratio, ratio_only, shrinks_to_nothing, form_control, control_baseline, control_font_box, control_font_asc, text_overflows, intrinsic_w, intrinsic_h, cb_index, inset_top, inset_right, inset_bottom, inset_left, auto_margins, legacy_align, legend_align, indent_px, indent_frac, indent_hanging, indent_each_line, indent_spent, width_kw, height_kw, cb_rect, fits_content } = self;
         nid.bit_eq(&o.nid)
             && parent.bit_eq(&o.parent)
             && display.bit_eq(&o.display)
@@ -651,6 +659,9 @@ impl Input {
             && height_from_outside.bit_eq(&o.height_from_outside)
             && cell_pct.bit_eq(&o.cell_pct)
             && height_is_floor.bit_eq(&o.height_is_floor)
+            && aspect.bit_eq(&o.aspect)
+            && aspect_content.bit_eq(&o.aspect_content)
+            && stretch_x.bit_eq(&o.stretch_x)
             && cell_valign.bit_eq(&o.cell_valign)
             && cell_pct_h_child.bit_eq(&o.cell_pct_h_child)
             && anon_group.bit_eq(&o.anon_group)
@@ -821,6 +832,23 @@ impl Input {
         }
         n.height = if n.border_box { h } else { (h - n.edges_y()).max(0.0) };
         n.item_auto_height = false;
+        n
+    }
+    // This record with its automatic height through its preferred aspect ratio from the border-box width `w` it is laid
+    // out at (CSS Sizing 4 §5.2) — a non-replaced box's: a replaced one's is its intrinsic size's — the box-sizing box's
+    // ratio or the content box's, and a FLOOR its content grows past where it shows its overflow (the automatic minimum
+    // size, §5.3): Chrome's `aspect-ratio: 2` block 300 wide is 150 tall, and taller with more content in it.
+    fn with_ratio_height(self, w: f64) -> Input {
+        // (…a flex item's CONTENT height asked for — its flex base size in a column — is that one too: the transferred size)
+        if !(self.aspect > 0.0) || self.replaced || !is_auto(self.height) || !w.is_finite() {
+            return self;
+        }
+        let mut n = self;
+        n.item_auto_height = false;
+        let content = n.aspect_content || !n.border_box;
+        let h = if content { n.content_w(w) / n.aspect } else { w / n.aspect };
+        n.height = if content == !n.border_box { h } else if n.border_box { h + n.edges_y() } else { (h - n.edges_y()).max(0.0) };
+        n.height_is_floor = n.clip == 0;
         n
     }
     // Sum of the horizontal / vertical non-content edges (padding + border), used to convert between
@@ -4303,7 +4331,7 @@ fn measure_uncached(
     } else {
         (w, imposed_h)
     };
-    let n = inputs[i].get().with_imposed_height(imposed_h);
+    let n = inputs[i].get().with_imposed_height(imposed_h).with_ratio_height(w);
     boxes[i].clamped_h = false; // (set by the arms below, where an auto height's clamp moves it)
     let content_top_rel = n.bt + n.pt;
     let content_w = n.content_w(w);
@@ -4445,7 +4473,7 @@ fn measure_uncached(
                         }
                     }
                 };
-                let w = used_width(&k, auto_w);
+                let w = ratio_floor(c, used_width(&k, auto_w), inputs, runs, run_texts, grids, children);
                 measure(c, w, f64::NAN, inputs, runs, run_texts, grids, children, boxes, failed, &mut FloatCtx::new(), 0.0, 0.0);
                 let h = boxes[c].h;
                 // The baseline the atomic hands its line: a box that SCROLLS has no baseline of its own (CSS Align
@@ -7389,6 +7417,20 @@ fn intrinsic_widths_of(i: usize, inputs: &[Cell<Input>], runs: &[Run], run_texts
     } else {
         content_intrinsic(i, inputs, runs, run_texts, grids, children)?
     };
+    // …and a box whose preferred aspect ratio transfers a definite height across (`ratio_width`) contributes that width
+    // — floored at its content's min-content where its `min-width` is `auto` and it shows its overflow, the automatic
+    // minimum (CSS Sizing 4 §5.3): Chrome's `height: 100px; aspect-ratio: 1/2; min-width: 0` flex item is 50 wide.
+    let (inner_min, inner_max) = match ratio_width(&n).filter(|_| !n.replaced && is_auto(n.decl_w)) {
+        // (…its min-content one its content's where it is a scroll container, which no ratio makes larger: Firefox's
+        // grid-aspect-ratio-027, a `min-content` grid of such items as narrow as their own min-widths)
+        Some(border_w) => {
+            let transferred = (border_w - n.edges_x()).max(0.0);
+            let floor = if is_auto(n.min_w) && n.clip == 0 { inner_min } else { 0.0 };
+            let min = if n.clip != 0 { inner_min } else { transferred.max(floor) };
+            (min, transferred.max(floor))
+        }
+        None => (inner_min, inner_max),
+    };
     // …and a COMPRESSIBLE replaced box can be squeezed to nothing, its min-content contribution 0 (CSS Sizing 3
     // §5.2.2): one sized by a percentage width, and any but a form control by a percentage max-width too, whatever
     // width it declares (an image, a canvas, a video, a frame: Chrome and Firefox squeeze each to its room). Chrome and
@@ -8375,12 +8417,23 @@ fn replaced_box(n: &Input, auto_w: f64) -> (f64, f64) {
     let sized = !n.ratio_only;
     let mut width = if w_decl { n.width + if grow { extra_w } else { 0.0 } } else if sized { n.intrinsic_w + extra_w } else { auto_w };
     let mut height = if h_decl { n.height + if grow { extra_h } else { 0.0 } } else if sized { n.intrinsic_h + extra_h } else { 0.0 };
-    let ratio = if n.ratio && n.intrinsic_w > 0.0 && n.intrinsic_h > 0.0 { n.intrinsic_w / n.intrinsic_h } else { 0.0 };
+    // (…a preferred aspect ratio of the BORDER box — `aspect-ratio: <ratio>` under `box-sizing: border-box` — ties the
+    // border box's axes, not the content box's: CSS Sizing 4 §5.1, a 20x50 image with 80px and 50px of padding 100 by
+    // 100 at `aspect-ratio: 1`)
+    let border_ratio = n.aspect > 0.0 && !n.aspect_content && n.border_box;
+    let (rx, ry) = if border_ratio { (0.0, 0.0) } else { (extra_w, extra_h) };
+    let ratio = if border_ratio {
+        n.aspect
+    } else if n.ratio && n.intrinsic_w > 0.0 && n.intrinsic_h > 0.0 {
+        n.intrinsic_w / n.intrinsic_h
+    } else {
+        0.0
+    };
     if ratio > 0.0 {
-        if !h_decl && (w_decl || n.ratio_only) {
-            height = (width - extra_w).max(0.0) / ratio + extra_h;
+        if !h_decl && (w_decl || n.ratio_only || border_ratio) {
+            height = (width - rx).max(0.0) / ratio + ry;
         } else if !w_decl && h_decl {
-            width = (height - extra_h).max(0.0) * ratio + extra_w;
+            width = (height - ry).max(0.0) * ratio + rx;
         }
     }
     let to_border_w = |v: f64| if is_auto(v) || n.border_box { v } else { v + extra_w };
@@ -8390,9 +8443,9 @@ fn replaced_box(n: &Input, auto_w: f64) -> (f64, f64) {
     if ratio > 0.0 {
         // CSS 2.1 §10.4's constraint table for a box whose axes are tied by a ratio: whichever clamp binds hardest
         // wins, the other axis follows the ratio and is clamped in turn; only an AUTO axis follows.
-        let (cw, ch) = ((width - extra_w).max(0.0), (height - extra_h).max(0.0));
-        let sw = if cw > 0.0 { (clamp_w(width) - extra_w) / cw } else { 1.0 };
-        let sh = if ch > 0.0 { (clamp_h(height) - extra_h) / ch } else { 1.0 };
+        let (cw, ch) = ((width - rx).max(0.0), (height - ry).max(0.0));
+        let sw = if cw > 0.0 { (clamp_w(width) - rx) / cw } else { 1.0 };
+        let sh = if ch > 0.0 { (clamp_h(height) - ry) / ch } else { 1.0 };
         let (auto_w_axis, auto_h_axis) = (!w_decl, !h_decl);
         let scale = if auto_w_axis && auto_h_axis {
             if sw == 1.0 { sh } else if sh == 1.0 { sw } else if (sw < 1.0) != (sh < 1.0) { 0.0 } else if sw < 1.0 { sw.min(sh) } else { sw.max(sh) }
@@ -8407,8 +8460,8 @@ fn replaced_box(n: &Input, auto_w: f64) -> (f64, f64) {
             width = clamp_w(width);
             height = clamp_h(height);
         } else {
-            width = clamp_w(cw * scale + extra_w);
-            height = clamp_h(ch * scale + extra_h);
+            width = clamp_w(cw * scale + rx);
+            height = clamp_h(ch * scale + ry);
         }
     } else {
         width = clamp_w(width);
@@ -8637,7 +8690,7 @@ fn place_out_of_flow(
             }
         }
     };
-    let w = used_width(&n, auto_w);
+    let w = ratio_floor(c, used_width(&n, auto_w), inputs, runs, run_texts, grids, children);
     // A stretched AUTO height is imposed as the box's height where it is non-zero — a zero one is taken as no
     // stretch, and the height back-fills from the content.
     // (…an intrinsic-size KEYWORD height is no `auto`: it is the content's, between the insets or not, and the auto
@@ -8805,16 +8858,26 @@ fn block_child_width(
     let anon_group = cn.is_anonymous() && cn.display == DISPLAY_TEXT_BLOCK;
     let content_sized = cn.width_kw != 0 || (is_auto(cn.width) && ((cn.block_axis_is_x && !anon_group) || cn.is_button));
     if !content_sized {
-        return resolve_width(cn, avail);
+        return ratio_floor(c, resolve_width(cn, avail), inputs, runs, run_texts, grids, children);
     }
     let room = (avail - Input::m(cn.ml) - Input::m(cn.mr)).max(0.0);
     match content_sized_width(c, room, inputs, runs, run_texts, grids, children) {
-        Some(w) => used_width(cn, w),
+        Some(w) => ratio_floor(c, used_width(cn, w), inputs, runs, run_texts, grids, children),
         None => {
             failed.set(true);
             0.0
         }
     }
+}
+// A width a box's preferred aspect ratio gave it (`ratio_width`) floored at its min-content where its `min-width` is
+// `auto` and it shows its overflow — the automatic minimum size (CSS Sizing 4 §5.3): Chrome's `height: 100px;
+// aspect-ratio: 1/2` box around a 100px-wide child is 100 wide, not 50. Any other width as it is.
+fn ratio_floor(c: usize, w: f64, inputs: &[Cell<Input>], runs: &[Run], run_texts: &[RunText], grids: &[f64], children: &[Vec<usize>]) -> f64 {
+    let n = inputs[c].get();
+    if !is_auto(n.width) || n.replaced || ratio_width(&n).is_none() || !is_auto(n.min_w) || n.clip != 0 {
+        return w;
+    }
+    intrinsic_widths(c, inputs, runs, run_texts, grids, children).map_or(w, |(min, _)| w.max(min + n.pct_edges_x()))
 }
 // What a box sized from its OWN CONTENT comes to in `room` of inline space: an intrinsic-size KEYWORD asks for its
 // min-content, its max-content, or — `fit-content` — the room clamped between the two; no keyword is the shrink-to-fit rule, which is `fit-content` by another name
@@ -8854,12 +8917,27 @@ fn keyword_width(kw: u8, imin: f64, imax: f64, room: f64, pct: f64) -> f64 {
 // content there — a vertical writing mode, a flex column item, an out-of-flow or atomic box —
 // `shrink_to_fit_width`): a declared width converted to border-box, else `auto_w`, clamped by min/max-width
 // (same box model).
+// An automatic WIDTH through a preferred aspect ratio from a definite height (CSS Sizing 4 §5.2), as a border-box
+// width — the ratio's box the box-sizing one, or the content box for `auto && <ratio>` — the height clamped by its
+// min/max first: Chrome's `height: 100px; aspect-ratio: 1/1` block is 100 wide, not its container's width.
+fn ratio_width(n: &Input) -> Option<f64> {
+    if !(n.aspect > 0.0) || is_auto(n.height) || n.item_auto_height || n.stretch_x {
+        return None;
+    }
+    let to_border = |v: f64| if is_auto(v) || n.border_box { v } else { v + n.edges_y() };
+    let border_h = clamp_min_max(to_border(n.height), to_border(n.min_h), to_border(n.max_h)).max(n.edges_y());
+    Some(if n.aspect_content || !n.border_box {
+        (border_h - n.edges_y()).max(0.0) * n.aspect + n.edges_x()
+    } else {
+        border_h * n.aspect
+    })
+}
 fn used_width(n: &Input, auto_w: f64) -> f64 {
     if n.replaced {
         return replaced_box(n, auto_w).0;
     }
     let border_w = if is_auto(n.width) {
-        auto_w
+        ratio_width(n).unwrap_or(auto_w)
     } else if n.border_box {
         n.width
     } else {
@@ -8987,6 +9065,9 @@ mod tests {
             decl_margin_x: 0.0,
             cell_pct: f64::NAN,
             height_is_floor: false,
+            aspect: 0.0,
+            aspect_content: false,
+            stretch_x: false,
             cell_valign: 0,
             cell_pct_h_child: false,
             anon_group: false,

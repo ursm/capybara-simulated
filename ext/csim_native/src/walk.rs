@@ -1797,6 +1797,21 @@ impl<'a> Walk<'a> {
         p
     }
 
+    // Whether `id` is a GRID ITEM stretched in its inline axis explicitly: `justify-self: stretch`, or `auto` under its
+    // container's `justify-items: stretch` (`Input::stretch_x`).
+    fn grid_stretched_x(&self, id: NodeId, style: &ComputedValues) -> bool {
+        use style::values::specified::align::AlignFlags;
+        let Some(ps) = self.layout_parent(id).and_then(|p| self.style(p).ok()) else { return false };
+        if !matches!(ps.get_box().clone_display().inside(), DisplayInside::Grid) {
+            return false;
+        }
+        match style.get_position().justify_self.0.value() {
+            AlignFlags::STRETCH => true,
+            AlignFlags::AUTO => ps.get_position().justify_items.computed.0.0.value() == AlignFlags::STRETCH,
+            _ => false,
+        }
+    }
+
     // How a rendered legend sits across its fieldset (`Input::legend_align`): by its `justify-self`
     // where that is `left` / `center` / `right`, by its margins otherwise; 0 for any other element.
     fn legend_align(&self, id: NodeId, style: &ComputedValues) -> u8 {
@@ -2069,6 +2084,13 @@ impl<'a> Walk<'a> {
         rec.scrolls_x = scrolls(b.overflow_x);
         rec.scrolls_y = scrolls(b.overflow_y);
         rec.clip = self.clip_flags(id, &style);
+        // (…and its preferred aspect ratio, which a non-replaced box's automatic height goes through: a replaced one's is in
+        // its intrinsic size, `intrinsic`)
+        if let Some((ratio, auto)) = preferred_ratio(&style) {
+            rec.aspect = ratio;
+            rec.aspect_content = auto;
+            rec.stretch_x = self.grid_stretched_x(id, &style);
+        }
         rec.legacy_align = self.legacy_align(id);
         rec.legend_align = self.legend_align(id, &style);
         // `position: relative` is a shift applied after the flow (§9.4.3) — not the pass root's, which is folded into
@@ -2420,6 +2442,22 @@ impl<'a> Walk<'a> {
     // a frame's default object size, a canvas's or an svg's from its attributes, a control's from the UA's chrome
     // or, for a button `<input>` and a `<select>`, from the label it draws measured in its own font.
     fn intrinsic(&mut self, id: NodeId) -> Result<Option<Intrinsic>, &'static str> {
+        let Some(natural) = self.natural_intrinsic(id)? else { return Ok(None) };
+        // (…none for an `<audio>`'s controls, which keep their own size whatever ratio is asked of them: Chrome and Firefox,
+        // replaced-element-035)
+        let ratio = preferred_ratio(&*self.style(id)?).filter(|_| self.node(id).rendering_tag() != "audio");
+        Ok(Some(match ratio {
+            // (…a `<ratio>` overriding the natural one, an `auto && <ratio>` standing in only where there is none: the
+            // natural width kept, the height through the ratio — a view box's ratio only, a ratio only still)
+            Some((ratio, auto)) if !(auto && natural.ratio) => match natural.ratio_only {
+                true => Intrinsic { w: ratio, h: 1.0, ratio: true, ratio_only: true },
+                false => Intrinsic { w: natural.w, h: natural.w / ratio, ratio: true, ratio_only: false },
+            },
+            _ => natural,
+        }))
+    }
+    // …what its content gives it, before its `aspect-ratio`.
+    fn natural_intrinsic(&mut self, id: NodeId) -> Result<Option<Intrinsic>, &'static str> {
         let node = self.node(id);
         let sized = |w: f64, h: f64| Intrinsic { w, h, ratio: false, ratio_only: false };
         Ok(Some(match node.rendering_tag() {
@@ -4799,6 +4837,9 @@ pub(crate) fn fresh_record() -> Input {
         height_from_outside: false,
         cell_pct: 0.0,
         height_is_floor: false,
+        aspect: 0.0,
+        aspect_content: false,
+        stretch_x: false,
         cell_valign: 0,
         cell_pct_h_child: false,
         anon_group: false,
@@ -5044,6 +5085,17 @@ pub(crate) fn contains_out_of_flow(style: &ComputedValues, arena: &RealmArena, i
     }
     use style::values::specified::box_::WillChangeBits;
     b.will_change.bits.intersects(WillChangeBits::FIXPOS_CB_NON_SVG | WillChangeBits::TRANSFORM | WillChangeBits::PERSPECTIVE | WillChangeBits::CONTAIN)
+}
+
+// The PREFERRED ASPECT RATIO a box's `aspect-ratio` gives it (CSS Sizing 4 §5.1), width over height, and whether it is
+// `auto && <ratio>` (a replaced element's natural ratio wins over it) — None for `auto`, and for a degenerate ratio, a
+// 0 or an infinite term, which behaves as `auto`.
+pub(crate) fn preferred_ratio(style: &ComputedValues) -> Option<(f64, bool)> {
+    use style::values::generics::position::PreferredRatio;
+    let ar = &style.get_position().aspect_ratio;
+    let PreferredRatio::Ratio(r) = &ar.ratio else { return None };
+    let (w, h) = (f32_exact(r.0.0), f32_exact(r.1.0));
+    (w > 0.0 && h > 0.0 && w.is_finite() && h.is_finite()).then(|| (w / h, ar.auto))
 }
 
 // A size's length-percentage, None for `auto` / `none` / a keyword — and for an `anchor-size()`, which takes the size of
