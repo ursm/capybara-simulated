@@ -367,7 +367,8 @@ fn credentials_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // as the body is first read (from LOADING, when overrideMimeType() can no longer change them) — the override's type
 // over the one the response's `Content-Type` gives (Fetch "extract a MIME type"), `text/xml` where it gives none (an
 // empty one, `bogus`, `application`), so it parses as XML (responsexml-media-type); whether that is an XML MIME type;
-// and the final encoding's label, the override's charset over the response's — null for none.
+// and the final encoding's label, the override's charset over the response's — null for none, or for one that names no
+// encoding.
 fn final_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let content_type = args.get(1).to_rust_string_lossy(scope);
     let Some(s) = state(scope, args.get(0)) else { return };
@@ -378,9 +379,12 @@ fn final_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     };
     let mime = overridden.or_else(|| response.as_ref().map(|r| r.essence.clone())).unwrap_or_else(|| "text/xml".into());
     let is_xml = crate::mime::is_xml(&mime);
+    // (…a label that names no encoding none at all — XHR "get a final encoding": "get an encoding" of it, failure null —
+    // so an XML response's own declaration decides: Chrome reads `charset=""` and `charset=bogus` so)
     let label = override_charset
         .filter(|c| !c.is_empty())
-        .or_else(|| response.as_ref().and_then(|r| r.parameters.iter().find(|(n, _)| n == "charset").map(|(_, v)| v.clone())));
+        .or_else(|| response.as_ref().and_then(|r| r.parameters.iter().find(|(n, _)| n == "charset").map(|(_, v)| v.clone())))
+        .filter(|l| encoding_rs::Encoding::for_label(l.as_bytes()).is_some());
     let mime_value = v8::String::new(scope, &mime).map_or_else(|| v8::undefined(scope).into(), Into::into);
     let label_value: v8::Local<'_, v8::Value> = match label.and_then(|l| v8::String::new(scope, &l)) {
         Some(l) => l.into(),

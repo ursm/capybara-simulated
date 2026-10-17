@@ -163,4 +163,22 @@ RSpec.describe 'XMLHttpRequest bindings' do
       'application/xml' => 'r', 'image/svg+xml' => 'r', 'image/xml' => nil, 'text/plain' => nil
     )
   end
+
+  # A charset that names no encoding is none at all (XHR "get a final encoding": "get an encoding" of the label, a
+  # failure null), so an XML response's own declaration decides how its text decodes — a quoted empty one and a bogus one
+  # alike (Chrome: `é` from a windows-1252 declaration under both).
+  it 'decodes an XML response by its declaration where the charset names no encoding' do
+    session.execute_script(<<~JS)
+      window.got = {};
+      const bytes = new Uint8Array([...new TextEncoder().encode('<?xml version="1.0" encoding="windows-1252"?><a>'), 0xE9, ...new TextEncoder().encode('</a>')]);
+      for (const type of ['text/xml;charset=""', 'application/xml;charset=bogus']) {
+        const x = new XMLHttpRequest();
+        x.open('GET', URL.createObjectURL(new Blob([bytes], {type})));
+        x.onload = () => { window.got[type] = escape(x.responseText.slice(x.responseText.indexOf('<a>'))); };
+        x.send();
+      }
+    JS
+    poll_until { session.evaluate_script('Object.keys(window.got).length === 2') }
+    expect(session.evaluate_script('window.got')).to eq('text/xml;charset=""' => '%3Ca%3E%E9%3C/a%3E', 'application/xml;charset=bogus' => '%3Ca%3E%E9%3C/a%3E')
+  end
 end
