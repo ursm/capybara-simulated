@@ -872,6 +872,8 @@ pub(crate) struct RealmArena {
     pub(crate) owner_sheets: std::collections::HashMap<NodeId, (u32, u32)>,
     // …and what it was made of, by the realm whose store holds it (sheet_owners.rs `MadeSheet`).
     pub(crate) made_sheets: std::collections::HashMap<NodeId, crate::sheet_owners::MadeSheet>,
+    // The blob URLs the isolate's realms made (blob_urls.rs).
+    pub(crate) blob_urls: crate::blob_urls::BlobUrls,
     // …and each tree's style sheet sets (sheet_owners.rs `sheet_set`) — a document's, a shadow root's — as of `mutations`
     // and `sheet_epoch`, which moves with what else they turn on: a sheet disabled or renewed, an owner's sheet made.
     pub(crate) sheet_sets: std::collections::HashMap<NodeId, (u64, u32, std::rc::Rc<crate::sheet_owners::SheetSet>)>,
@@ -1210,6 +1212,7 @@ impl RealmArena {
         self.discard_intersection_observers(cid);
         self.forget_foreign_observations(Some(cid));
         self.forget_reactions_of(cid);
+        self.blob_urls.forget_realm(cid);
     }
     // The custom element reactions owed to realm `cid`'s elements — or to a node already freed — let go of
     // (ce_reactions.rs `forget`).
@@ -1231,6 +1234,7 @@ impl RealmArena {
         // (…and its timers, now and from then on: `is_dropped` refuses it any, where a disposal's mark did)
         self.drop_timers(cid);
         self.forget_reactions_of(cid);
+        self.blob_urls.forget_realm(cid);
         self.task_keys.discarded.remove(&cid);
         self.dropped.insert(cid);
         self.parked.remove(&cid);
@@ -2774,6 +2778,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::focus::install(scope, ns, context_id);
     crate::autofocus::install(scope, ns, context_id);
     crate::sheet_owners::install(scope, ns, context_id);
+    crate::blob_urls::install(scope, ns, context_id);
     let edges = dom(scope).arena.edge_gen.store();
     view_word(scope, ns, "edgeGen", edges);
     let changes = dom(scope).arena.change_flags.store();

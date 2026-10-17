@@ -12,6 +12,7 @@ mod animation_ops;
 mod animations;
 mod autofocus;
 mod av1;
+mod blob_urls;
 mod canvas;
 mod canvas_paint;
 mod canvas_path;
