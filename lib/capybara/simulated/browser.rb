@@ -208,7 +208,7 @@ module Capybara
         Rack::Mime.mime_type(File.extname(path.to_s), '')
       end
 
-      def initialize(app, driver: nil, cookies: nil, cookie_flags: nil, auth_cache: nil, local_storage: nil, clipboard: nil, session_partition: nil, all_hosts_local: nil)
+      def initialize(app, driver: nil, cookies: nil, cookie_flags: nil, auth_cache: nil, local_storage: nil, session_partition: nil, all_hosts_local: nil)
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
@@ -260,11 +260,8 @@ module Capybara
         # (origin and top-level site) — the session's (the Driver's, every window's) and this top-level browsing context's own.
         @local_storage                = local_storage || Native.storage_partition_new
         @local_storage_owned          = local_storage.nil?
-        # The system clipboard, the Driver's (one for the session, every window's): `entries` — [type, byte string] each —
-        # and the change count a ClipboardItem read from it checks.
-        @clipboard                    = clipboard || {}
-        # IndexedDB and Cache Storage are origin-shared too: the session's partition of the engine's registries
-        # (idb_databases.rs, cache_storage.rs), every window's and worker's.
+        # IndexedDB, Cache Storage and the system clipboard are the session's too: its partition of the engine's
+        # registries (idb_databases.rs, cache_storage.rs, system_clipboard.rs), every window's and worker's.
         @session_partition            = session_partition || Native.session_partition_new
         @session_partition_owned      = session_partition.nil?
         @session_storage              = Native.storage_partition_new
@@ -3504,8 +3501,6 @@ module Capybara
         @cookie_flags.clear
         @auth_cache.clear
         Native.storage_clear(@local_storage)
-        # (…emptied as a write would — its change count moved on, so no realm's cache keyed on it is the next session's)
-        clipboard_write([])
         Native.session_partition_clear(@session_partition)
         Native.storage_clear(@session_storage)
         @sticky_headers.clear
@@ -3620,7 +3615,8 @@ module Capybara
         Native.storage_clear(@session_storage)
         Native.storage_clear(@local_storage) if @local_storage_owned
         @runtime.dispose
-        # …and the IndexedDB databases and caches of a partition this window alone had (one a driver gave it is the driver's).
+        # …and the IndexedDB databases, caches and clipboard of a partition this window alone had (one a driver gave it is
+        # the driver's).
         Native.session_partition_clear(@session_partition) if @session_partition_owned
       rescue StandardError
         nil
@@ -4183,15 +4179,6 @@ module Capybara
       end
 
       # (`hold`: the window's close holds the clock — a worker's, delivered by its own loop, does not)
-      # The system clipboard (clipboard.js): what is on it, with its change count — and a write of it, which counts.
-      def clipboard_read = {'entries' => @clipboard['entries'] || [], 'count' => clipboard_count}
-      def clipboard_count = @clipboard['count'] || 0
-      def clipboard_write(entries)
-        @clipboard['entries'] = entries.to_a
-        @clipboard['count']   = (@clipboard['count'] || 0) + 1
-        nil
-      end
-
       def ws_close(id, code = nil, reason = '', hold: true)
         sock = @websocket_lock.synchronize { @websocket_sockets[id.to_i] } or return
         # Send the close frame and let the close HANDSHAKE complete: the server

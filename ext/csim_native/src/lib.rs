@@ -84,6 +84,7 @@ mod request_state;
 mod response_state;
 mod search_params;
 mod sw_router;
+mod system_clipboard;
 mod ws_state;
 mod url_pattern;
 mod storage_areas;
@@ -276,9 +277,9 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("content_type_essence", magnus::function!(mime::content_type_essence_for_ruby, 1))?;
     native.define_module_function("javascript_content", magnus::function!(script::javascript_content_for_ruby, 1))?;
     native.define_module_function("module_content", magnus::function!(script::module_content_for_ruby, 2))?;
-    // A driver session's IndexedDB and Cache Storage: a new partition of their registries (idb_databases.rs,
-    // cache_storage.rs), cleared as the session resets — and whether an IndexedDB agent of it has notices to take, its
-    // event loop work.
+    // A driver session's IndexedDB, Cache Storage and system clipboard: a new partition of their registries
+    // (idb_databases.rs, cache_storage.rs, system_clipboard.rs), cleared as the session resets — and whether an
+    // IndexedDB agent of it has notices to take, its event loop work.
     native.define_module_function("session_partition_new", magnus::function!(session_partition_new, 0))?;
     native.define_module_function("session_partition_clear", magnus::function!(session_partition_clear, 1))?;
     native.define_module_function("idb_pending", magnus::function!(idb_databases::pending, 1))?;
@@ -292,8 +293,9 @@ fn session_partition_new() -> u64 {
     static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     LAST.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
 }
-// …and its IndexedDB databases and caches deleted.
+// …and its IndexedDB databases, its caches and its clipboard deleted.
 fn session_partition_clear(partition: u64) {
     idb_databases::clear(partition);
     cache_storage::clear(partition);
+    system_clipboard::clear(partition);
 }

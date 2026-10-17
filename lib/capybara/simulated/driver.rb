@@ -98,11 +98,9 @@ module Capybara
         @auth_cache      = {}
         # localStorage: the session's storage shed in the engine (storage_areas.rs), an area per origin, every window's.
         @local_storage   = Native.storage_partition_new
-        # The system clipboard: one for the session, like a desktop's — what a page copies another window, frame or the
-        # next visit pastes (clipboard.js reads and writes it through the host).
-        @clipboard       = {}
-        # …and IndexedDB and Cache Storage, the session's partition of the engine's registries, which a service worker
-        # and every same-origin window share (idb_databases.rs, cache_storage.rs).
+        # …and IndexedDB, Cache Storage and the system clipboard, the session's partition of the engine's registries,
+        # which a service worker and every same-origin window share — and every window and frame and the next visit the
+        # clipboard (idb_databases.rs, cache_storage.rs, system_clipboard.rs).
         @session_partition = Native.session_partition_new
         # Capture the universal-server flag ONCE, at session construction — the WPT
         # runner sets CSIM_LOCAL_ALL_HOSTS only while building the session, then
@@ -144,7 +142,6 @@ module Capybara
                     cookie_flags:    @cookie_flags,
                     auth_cache:      @auth_cache,
                     local_storage:   @local_storage,
-                    clipboard:       @clipboard,
                     session_partition: @session_partition,
                     all_hosts_local: @all_hosts_local).tap do |b|
           b.touch_input        = @touch

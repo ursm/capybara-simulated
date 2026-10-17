@@ -144,6 +144,26 @@ RSpec.describe 'Clipboard bindings' do
     expect(poll_until { session.evaluate_script('window.got') }).to eq('top')
   end
 
+  # The clipboard is the session's: another session's is its own, and a reset empties it — a binary representation
+  # (an image/png Blob) kept byte for byte meanwhile.
+  it 'keeps one clipboard per session, emptied as the session resets' do
+    other = simulated_session(app)
+    other.visit('/')
+    session.execute_script(<<~JS)
+      const png = new Blob([new Uint8Array([0x89, 0x50, 0x00, 0xff])], { type: 'image/png' });
+      window.done = navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => navigator.clipboard.read())
+        .then(([item]) => item.getType('image/png')).then((b) => b.arrayBuffer()).then((buf) => { window.got = Array.from(new Uint8Array(buf)); });
+    JS
+    expect(poll_until { session.evaluate_script('window.got') }).to eq([0x89, 0x50, 0x00, 0xff])
+    read = 'navigator.clipboard.read().then((items) => { window.items = items.length; })'
+    other.execute_script(read)
+    expect(poll_until { other.evaluate_script('window.items') }).to eq(0)
+    session.reset!
+    session.visit('/')
+    session.execute_script(read)
+    expect(poll_until { session.evaluate_script('window.items') }).to eq(0)
+  end
+
   # A promise the page handled fires no unhandledrejection for being given to a ClipboardItem (Chrome); a Symbol is no
   # string; two representations landing on one type are refused, not one dropped; a read item answers one promise per
   # type.

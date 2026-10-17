@@ -2856,6 +2856,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::canvas_paint::install(scope, ns, context_id);
     crate::media::install(scope, ns, context_id);
     crate::subresources::install(scope, ns, context_id);
+    crate::system_clipboard::install(scope, ns, context_id);
     crate::image_requests::install(scope, ns, context_id);
     crate::drag_data_store::install(scope, ns, context_id);
     crate::search_params::install(scope, ns, context_id);
