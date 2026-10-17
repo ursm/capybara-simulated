@@ -149,6 +149,14 @@ impl RealmArena {
         let nav = &self.navigables;
         nav.containers.get(&realm).copied().filter(|c| nav.children.contains_key(c))
     }
+    // The realm of the top-level traversable realm `realm`'s document is in: its own for a window's, else its container's
+    // document's, up (a removed frame's own, as its container is gone).
+    pub(crate) fn top_level_realm(&self, mut realm: i32) -> i32 {
+        while let Some(parent) = self.live_container(realm).and_then(|c| self.get(c)).map(|n| n.realm).filter(|&p| p != realm) {
+            realm = parent;
+        }
+        realm
+    }
     // `container`'s navigable destroyed — its container left its document.
     pub(crate) fn discard_navigable(&mut self, container: NodeId) {
         self.navigables.children.remove(&container);

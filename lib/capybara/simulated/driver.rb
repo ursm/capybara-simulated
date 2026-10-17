@@ -483,7 +483,7 @@ module Capybara
       # in place first (platform-globals' `fireAuxLoadSoon`). ONLY the JS `window.open`
       # path does that — a `target=_blank` click or `open_new_window` hands nobody a
       # reference to hook, so their window announces its own load like any other.
-      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, defer_load: false)
+      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, defer_load: false, creator: nil)
         name = name.to_s
         # (…the policy the opening hyperlink sets, else its document's)
         referrer_policy = source&.main_document_referrer_policy if referrer_policy.to_s.empty?
@@ -514,6 +514,9 @@ module Capybara
         @aux_windows << {handle: handle, browser: aux, name: name, opener: opener_handle}
         # (…in its opener's browsing context group, where it has one: its about:blank, cross-origin isolated as it is)
         aux.inherit_cross_origin_isolation(source) if opener_handle && source
+        # (…and its initial about:blank document its creator's origin and base URL — the document that called
+        # `window.open`: a window it opens at about:blank stays that document, its origin no new opaque one)
+        aux.inherit_creator(**creator) if creator && opener_handle
         if url && !url.empty?
           if post
             # A `<form target=_blank method=post>` loads the new window via POST,
@@ -570,7 +573,14 @@ module Capybara
         if (rid = opener_browser.open_window_realm(resolved, name: name, opener_realm_id: opener_realm_id, about_base: about_base, about_origin: about_origin))
           return rid
         end
-        open_aux_window(resolved, name: name, opener_handle: handle_for(opener_browser), source: opener_browser, defer_load: true)
+        open_aux_window(
+          resolved,
+          name:          name,
+          opener_handle: handle_for(opener_browser),
+          source:        opener_browser,
+          defer_load:    true,
+          creator:       {origin: about_origin, base: about_base}
+        )
       end
 
       # The storage-partition site a blob: URL was created in (its creator's top-level

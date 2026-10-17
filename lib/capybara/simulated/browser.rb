@@ -244,10 +244,10 @@ module Capybara
         # referrer)` when navigating from `/t/N` → `/login` via link
         # click) can reconstruct the origin URL.
         @current_referer              = ''
-        # Cookies + localStorage are origin-shared in real browsers —
-        # the Driver injects the jars so aux windows (per-window VMs)
-        # see the same auth state and storage as the primary. Tests
-        # without a Driver (gem-internal callers) get fresh jars.
+        # Cookies are origin-shared in real browsers — the Driver injects
+        # the jars so aux windows (per-window VMs) see the same auth state
+        # as the primary. Tests without a Driver (gem-internal callers)
+        # get fresh jars. (localStorage's shed likewise, below.)
         @cookies                      = cookies       || {}
         @cookie_flags                 = cookie_flags  || {}
         # HTTP Basic-auth credential cache, keyed by target origin: once credentials authenticate an
@@ -2172,6 +2172,12 @@ module Capybara
       def cross_origin_isolated? = @runtime&.cross_origin_isolated == true
       # …which a pop-up its opener keeps takes from it, ahead of its initial about:blank document (`boot_response_into_ctx`).
       def inherit_cross_origin_isolation(opener) = (@runtime.cross_origin_isolated = opener.cross_origin_isolated?)
+      # …and the origin and base URL of the document that opened it, which its about:blank document takes (HTML "create a
+      # new browsing context": the creator's origin), the next one the window boots — an opaque one none: a separate VM
+      # has no way to share its key, and a new opaque origin is what it would be otherwise.
+      def inherit_creator(origin:, base:)
+        @creator = {origin: origin.to_s, base: base.to_s} unless origin.to_s.empty? || origin.to_s.start_with?('null')
+      end
 
       def set_header(name, value)         ; @sticky_headers[name.to_s] = value.to_s ; end
       # Capybara's `current_window.resize_to(w, h)` lands here; the
@@ -3613,14 +3619,14 @@ module Capybara
         # closed window leaked a live V8 isolate (RSS climbed across a long
         # suite). Only reached on teardown, never on the per-test `reset!` path
         # (which keeps the runtime).
-        # (…its service worker registrations first — they are this window's alone, and nothing below may skip them)
+        # (…its service worker registrations first — they are this window's alone, and nothing below may skip them — and
+        # its storage sheds: its sessionStorage's, and a localStorage one no driver gave it)
         Native.sw_clear(@sw_partition)
-        @runtime.dispose
-        # …and the IndexedDB databases of a partition this window alone had (one a driver gave it is the driver's), and its
-        # storage sheds likewise.
-        Native.idb_clear(@idb_partition) if @idb_partition_owned
         Native.storage_clear(@session_storage)
         Native.storage_clear(@local_storage) if @local_storage_owned
+        @runtime.dispose
+        # …and the IndexedDB databases of a partition this window alone had (one a driver gave it is the driver's).
+        Native.idb_clear(@idb_partition) if @idb_partition_owned
       rescue StandardError
         nil
       end
@@ -7560,8 +7566,8 @@ module Capybara
 
       # A Storage change (setItem/removeItem/clear) in realm `source_realm_id`: fire a `storage`
       # event at every OTHER same-origin document. Within this isolate that's the other realms
-      # (main + frames — a window's documents share both storage areas); localStorage ALSO spans
-      # separate same-origin windows (the Driver shares its jar), so fan the change out to them —
+      # (main + frames — each lets one of another origin's area go); localStorage ALSO spans
+      # separate same-origin windows (the Driver's one shed), so fan the change out to them —
       # sessionStorage is per-browsing-context and never crosses windows.
       # (…`origin` the area's: a document of another origin lets the event go)
       def storage_changed(kind, key, old, new, url, source_realm_id, origin)
@@ -7573,8 +7579,11 @@ module Capybara
       # Queue a storage event for THIS window's documents. `source_realm_id` is the changing realm
       # within this isolate (skipped at delivery); nil (a cross-window fan-out) matches no realm, so
       # it reaches every one.
+      # (…its targets the documents there are NOW, the source's skipped: a frame made after the change fires none for it —
+      # HTML "broadcast": each Document whose storage area is the changed one, as the change is made)
       def enqueue_storage_event(kind, key, old, new, url, origin, source_realm_id = nil)
-        @storage_inbox << {'kind' => kind.to_s, 'key' => key, 'old' => old, 'new' => new, 'url' => url.to_s, 'origin' => origin.to_s, 'source' => source_realm_id}
+        targets = [0, *@runtime.frame_realm_ids].reject {|id| id == source_realm_id }
+        @storage_inbox << {'kind' => kind.to_s, 'key' => key, 'old' => old, 'new' => new, 'url' => url.to_s, 'origin' => origin.to_s, 'targets' => targets}
       end
 
       # Fire queued cross-window messages (postMessage, BroadcastChannel, `storage`) — each a task of its own: one per
@@ -7600,13 +7609,10 @@ module Capybara
         end
         unless @storage_inbox.empty?
           events = @storage_inbox.slice!(0, @storage_inbox.length)
-          # The `storage` event fires at every same-origin document EXCEPT the one that changed the area: the main realm
-          # (0) and every live frame realm as they are now, the source realm skipped. A nil source (a cross-window
-          # fan-out) is excluded from no realm.
-          realms = [0, *@runtime.frame_realm_ids]
+          # The `storage` event fires at every same-origin document EXCEPT the one that changed the area: the realms there
+          # were as the change was made (`targets`), the source's skipped, those still alive.
           events.each do |event|
-            realms.each do |target_id|
-              next if event['source'] == target_id
+            event.delete('targets').each do |target_id|
               next unless target_id.zero? || @runtime.frame_realm_alive?(target_id)
               @runtime.realm_call(target_id, '__csim_deliverStorageEvents', event)
             end
@@ -11530,6 +11536,11 @@ module Capybara
         end
         opts['touch'] = true if @touch_input
         opts['historyState'] = @restoring_history_state unless @restoring_history_state.nil?
+        creator, @creator = @creator, nil
+        if creator && @current_url.to_s.match?(%r{\Aabout:blank(?:[?#]|\z)}i)
+          opts['creatorOrigin'] = creator[:origin]
+          opts['aboutBase']     = creator[:base]
+        end
         @document_handle = @runtime.call('__csimBootContext', opts).to_i
         # Drain the app's deferred external-script (chunk) boot chain to quiescence.
         # A dynamically-inserted external <script> runs async (setTimeout 0; HTML
