@@ -25,11 +25,12 @@ RSpec.describe 'native arena upkeep' do
     JS
   end
 
-  # (…a parse the bindings replay: the engine builds the rest itself, and leaves them one with a lone surrogate)
+  # (…a parse the bindings replay: the engine builds the rest itself, and leaves them one naming an element with a lone
+  # surrogate, html_parse.rs `names_stand_in`)
   it 'sends a coalesced text only the chunks appended to it' do
     text   = 'a ' * 10_000
     length = text.length + 1   # (the surrogate is one unit of it)
-    chars  = crossed(%w[setData appendData createNode], "Document.parseHTMLUnsafe(`<pre>\\uD800#{text}</pre>`)",
+    chars  = crossed(%w[setData appendData createNode], "Document.parseHTMLUnsafe(`<x\\uD800>\\uD800#{text}</x\\uD800>`)",
                      units: 'a => typeof a[1] === "string" ? a[1].length : 0')
     expect(chars).to be <= 2 * length
     expect(chars).to be >= length

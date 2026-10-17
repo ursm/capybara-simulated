@@ -278,8 +278,8 @@ impl TreeSink for Sink {
 // surrogate) would come back as surrogates — a residual no page meets.
 const SURROGATE_STANDINS: [u32; 2] = [0xF0000, 0x100000];
 
-#[derive(Default)]
-struct StandIns {
+#[derive(Clone, Copy, Default)]
+pub(crate) struct StandIns {
     // Which blocks the parse's text has characters of.
     used: [bool; 2],
     // The block standing for lone surrogates, once the text had one.
@@ -300,6 +300,24 @@ impl StandIns {
     }
     fn holds(&self, c: u32) -> bool {
         self.base.is_some_and(|b| (b..b + 0x800).contains(&c))
+    }
+    // Whether a string of the parse's has a stand-in.
+    fn in_text(&self, text: &str) -> bool {
+        self.base.is_some() && text.chars().any(|c| self.holds(u32::from(c)))
+    }
+    // …that string as the page's UTF-16: its stand-ins the lone surrogates again.
+    fn units(&self, text: &str) -> Vec<u16> {
+        let Some(base) = self.base.filter(|_| self.in_text(text)) else { return text.encode_utf16().collect() };
+        let mut units = Vec::with_capacity(text.len());
+        for c in text.chars() {
+            if self.holds(u32::from(c)) {
+                units.push((u32::from(c) - base + 0xD800) as u16);
+            } else {
+                let mut pair = [0u16; 2];
+                units.extend_from_slice(c.encode_utf16(&mut pair));
+            }
+        }
+        units
     }
 }
 
@@ -327,20 +345,10 @@ fn parser_text(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>
 
 // …and a string of the parse's, home: its stand-ins the surrogates again.
 fn page_string<'s>(scope: &mut v8::PinScope<'s, '_>, text: &str, standins: &StandIns) -> Option<v8::Local<'s, v8::String>> {
-    if standins.base.is_none() || !text.chars().any(|c| standins.holds(u32::from(c))) {
+    if !standins.in_text(text) {
         return v8::String::new(scope, text);
     }
-    let base = standins.base.unwrap_or_default();
-    let mut units = Vec::with_capacity(text.len());
-    for c in text.chars() {
-        if standins.holds(u32::from(c)) {
-            units.push((u32::from(c) - base + 0xD800) as u16);
-        } else {
-            let mut pair = [0u16; 2];
-            units.extend_from_slice(c.encode_utf16(&mut pair));
-        }
-    }
-    v8::String::new_from_two_byte(scope, &units, v8::NewStringType::Normal)
+    v8::String::new_from_two_byte(scope, &standins.units(text), v8::NewStringType::Normal)
 }
 
 // One parse in progress: its tokenizer (which owns the tree builder, which owns the sink), the input not yet tokenized,
@@ -582,6 +590,35 @@ fn declines(ops: &[Operand], ce_defined: bool, has_doctype: bool) -> bool {
     }
     false
 }
+// Whether a name the steps of `ops` give an element or an attribute holds a stand-in of a lone surrogate (`StandIns`):
+// a name the engine's interned names keep no room for, which the bindings make.
+fn names_stand_in(ops: &[Operand], standins: &StandIns) -> bool {
+    if standins.base.is_none() {
+        return false;
+    }
+    let int = |k: usize| match ops.get(k) {
+        Some(Operand::Int(v)) => Some(*v),
+        _ => None,
+    };
+    let held = |k: usize| matches!(ops.get(k), Some(Operand::Str(v)) if standins.in_text(v));
+    // (…an attribute list of `n` from `at`: each one's prefix and local name)
+    let attrs = |at: usize, n: usize| (0..n).any(|k| held(at + 4 * k) || held(at + 4 * k + 2));
+    let mut i = 0;
+    while i < ops.len() {
+        let hit = match int(i) {
+            Some(OP_ELEMENT) => held(i + 3) || attrs(i + 5, int(i + 4).unwrap_or(0).max(0) as usize),
+            Some(OP_ADD_ATTRS) => attrs(i + 3, int(i + 2).unwrap_or(0).max(0) as usize),
+            Some(_) => false,
+            None => return true,
+        };
+        if hit {
+            return true;
+        }
+        let Some(next) = op_end(ops, i) else { return true };
+        i = next;
+    }
+    false
+}
 // Where the step of `ops` at `i` ends: the index of the next one's code.
 fn op_end(ops: &[Operand], i: usize) -> Option<usize> {
     let int = |k: usize| match ops.get(k) {
@@ -645,7 +682,10 @@ fn html_run_built(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         let builds = flags & MAY_BUILD != 0
             && document.is_some()
             && (resumed.is_some()
-                || parses(scope).live.get(&id).is_some_and(|p| p.standins.base.is_none() && !declines(&p.tokenizer.sink.sink.ops.borrow(), flags & CE_DEFINED != 0, has_doctype)));
+                || parses(scope).live.get(&id).is_some_and(|p| {
+                    let ops = p.tokenizer.sink.sink.ops.borrow();
+                    !names_stand_in(&ops, &p.standins) && !declines(&ops, flags & CE_DEFINED != 0, has_doctype)
+                }));
         let (Some(document), true) = (document, builds) else {
             // (…a paused build's steps the bindings take after all, back where the parse's are)
             if let (Some((rest, _)), Some(p)) = (resumed, parses(scope).live.get_mut(&id)) {
@@ -669,8 +709,10 @@ fn html_run_built(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         if handles.is_empty() {
             handles = vec![Some(document), None, None];
         }
+        let standins = p.standins;
         let live = Live { observed: flags & OBSERVED != 0, ce_defined: flags & CE_DEFINED != 0, skeleton, ..Live::default() };
         let mut build = Build::new(cid, doc, template_doc, handles);
+        build.standins = standins;
         build.script = crate::script::SCRIPT_ALREADY_STARTED | crate::script::SCRIPT_PARSER_INSERTED;
         build.live = Some(live);
         let built = build.take(scope, ops);
@@ -859,6 +901,9 @@ pub(crate) struct Build<'s> {
     pub(crate) registry: Option<(u32, Option<v8::Local<'s, v8::Object>>)>,
     // …and whether it paused, a custom element it constructed inserted, for the bindings to connect it before it goes on.
     paused: bool,
+    // The stand-ins of the parse's lone surrogates (`StandIns`): its text, comments, doctype and attribute values made the
+    // page's UTF-16 again, as the bindings would have them.
+    pub(crate) standins: StandIns,
 }
 
 // A live document parse's batch the engine builds: the document's `<html>`, `<head>` and `<body>` not taken yet, which
@@ -1023,7 +1068,11 @@ impl<'s> Build<'s> {
     // …(name, value, namespace and local name where it has a namespace).
     #[allow(clippy::type_complexity)]
     pub(crate) fn named_attributes(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId, attrs: Vec<(String, String, Option<(String, String)>)>, existing: Vec<(String, String)>) {
-        let (mut list, mut namespaced) = (existing, crate::dom::realm(scope, self.cid).get(id).map_or_else(Vec::new, |n| n.attr_ns.clone()));
+        // (…a value holding a stand-in kept exactly beside its lossy text, as a page's write of one is: `attr_u16`)
+        let (mut namespaced, mut exact) =
+            crate::dom::realm(scope, self.cid).get(id).map_or_else(Default::default, |n| (n.attr_ns.clone(), n.attr_u16.clone()));
+        let mut list = existing;
+        exact.retain(|(k, _)| list.iter().any(|(name, _)| name == k));
         let mut names = Vec::new();
         for (name, value, ns) in attrs {
             if list.iter().any(|(k, _)| *k == name) {
@@ -1035,9 +1084,17 @@ impl<'s> Build<'s> {
             if crate::cloning::bindings_steps(&name) || matches!(name.as_str(), "autofocus") {
                 names.push(name.clone());
             }
+            let value = if self.standins.in_text(&value) {
+                let units = self.standins.units(&value);
+                let lossy = String::from_utf16_lossy(&units);
+                exact.push((name.clone(), units));
+                lossy
+            } else {
+                value
+            };
             list.push((name, value));
         }
-        crate::dom::replace_attributes(scope, self.cid, id, list, Vec::new(), Some((namespaced, Vec::new())));
+        crate::dom::replace_attributes(scope, self.cid, id, list, exact, Some((namespaced, Vec::new())));
         if !names.is_empty() {
             self.steps.push((id, names, 0));
         }
@@ -1151,16 +1208,17 @@ impl<'s> Build<'s> {
             if self.live.as_ref().is_some_and(|l| !l.made.contains(&t)) {
                 let at = arena.get(t).map_or(0, |n| n.data.len());
                 let object = crate::dom::node_value(scope, Some(t));
-                let Some(more) = v8::String::new(scope, text).filter(|_| !crate::dom::factory_threw(scope)) else { return };
+                let Some(more) = page_string(scope, text, &self.standins).filter(|_| !crate::dom::factory_threw(scope)) else { return };
                 let _ = crate::character_data::replace_data(scope, self.maker, t, object, at, 0, more);
                 return;
             }
-            if let Some(n) = arena.get_mut_quietly(t) {
-                n.data.extend(text.encode_utf16());
+            let units = self.standins.units(text);
+            if let Some(n) = crate::dom::realm(scope, self.cid).get_mut_quietly(t) {
+                n.data.extend(units);
             }
             return;
         }
-        let t = self.make(scope, crate::dom::NodeData::of_kind(crate::dom::NodeKind::Text, text.encode_utf16().collect()));
+        let t = self.make(scope, crate::dom::NodeData::of_kind(crate::dom::NodeKind::Text, self.standins.units(text)));
         self.insert(scope, parent, t, before);
     }
 
@@ -1282,7 +1340,7 @@ impl<'s> Build<'s> {
                 }
                 OP_COMMENT => {
                     let (handle, text) = (int(ops.next())?, string(ops.next())?);
-                    let c = self.make(scope, crate::dom::NodeData::of_kind(crate::dom::NodeKind::Comment, text.encode_utf16().collect()));
+                    let c = self.make(scope, crate::dom::NodeData::of_kind(crate::dom::NodeKind::Comment, self.standins.units(&text)));
                     self.set(handle, c);
                 }
                 OP_APPEND => {
@@ -1372,8 +1430,8 @@ impl<'s> Build<'s> {
                 // (…a document's doctype and mode — none in a fragment parse — and no declarative shadow root)
                 OP_DOCTYPE => {
                     let (name, public, system) = (string(ops.next())?, string(ops.next())?, string(ops.next())?);
-                    let ids = Some(Box::new((public.encode_utf16().collect(), system.encode_utf16().collect())));
-                    let dt = self.make(scope, crate::dom::NodeData { doctype_ids: ids, ..crate::dom::NodeData::of_kind(crate::dom::NodeKind::Other, name.encode_utf16().collect()) });
+                    let ids = Some(Box::new((self.standins.units(&public), self.standins.units(&system))));
+                    let dt = self.make(scope, crate::dom::NodeData { doctype_ids: ids, ..crate::dom::NodeData::of_kind(crate::dom::NodeKind::Other, self.standins.units(&name)) });
                     let doc = self.node(0)?;
                     self.insert(scope, doc, dt, None);
                 }
@@ -1413,15 +1471,13 @@ impl<'s> Build<'s> {
 // of any parent, then the elements the bindings have steps for (`BUILT_*`), each with the names of its attributes whose
 // steps are theirs (undefined for none). With `declarative` (setHTMLUnsafe's), the declarative shadow roots the markup
 // makes are attached; with a `registry` code (ce_reactions.rs: 0 none), the context's registry association, which every
-// element made takes — `registryObject` the registry it names. Left to the bindings: markup with a lone surrogate.
+// element made takes — `registryObject` the registry it names. Left to the bindings: markup naming an element or an
+// attribute with a lone surrogate (`names_stand_in`).
 fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     parser_op(scope, None, &mut rv, &[-1], |scope, rv| {
         let mut standins = StandIns::default();
         let well_formed = args.get(1).boolean_value(scope);
         let html = parser_text(scope, args.get(0), well_formed, &mut standins);
-        if !buildable(&standins) {
-            return;
-        }
         let ns = args.get(2).int32_value(scope).unwrap_or(1);
         let local = args.get(3).to_rust_string_lossy(scope);
         let form = crate::dom::nid_arg(scope, &args, 4);
@@ -1440,9 +1496,14 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         let registry = args.get(9).uint32_value(scope).unwrap_or(0);
         let registry_object = v8::Local::<v8::Object>::try_from(args.get(10)).ok().map(|r| v8::Local::new(scope, r));
         build.registry = (registry != 0).then_some((registry, registry_object));
+        let ops = parsed(tokenizer, html);
+        if names_stand_in(&ops, &standins) {
+            return;
+        }
+        build.standins = standins;
         let root = build.make(scope, crate::dom::NodeData::of_kind(crate::dom::NodeKind::Fragment, Vec::new()));
         build.set(0, root);
-        if build.take(scope, parsed(tokenizer, html).into_iter()).is_none() {
+        if build.take(scope, ops.into_iter()).is_none() {
             return;
         }
         build.finish(scope, None);
@@ -1470,17 +1531,19 @@ fn html_parse_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         let well_formed = args.get(1).boolean_value(scope);
         let html = parser_text(scope, args.get(0), well_formed, &mut standins);
         let Some(document) = crate::node_handle::nid_of(scope, args.get(2)) else { return };
-        if !buildable(&standins) {
-            return;
-        }
         let opts = TreeBuilderOpts { scripting_enabled: false, ..Default::default() };
         let declarative = args.get(4).boolean_value(scope);
         let tokenizer = Tokenizer::new(TreeBuilder::new(Sink::new(None, declarative), opts), TokenizerOpts { discard_bom: false, ..Default::default() });
         let cid = crate::dom::realm_id(scope, &args);
         let doc = v8::Local::<v8::Object>::try_from(args.get(2)).ok().map(|d| v8::Local::new(scope, d));
         let template_doc = v8::Local::<v8::Object>::try_from(args.get(3)).ok().map(|d| v8::Local::new(scope, d)).or(doc);
+        let ops = parsed(tokenizer, html);
+        if names_stand_in(&ops, &standins) {
+            return;
+        }
         let mut build = Build::new(cid, doc, template_doc, vec![Some(document), None, None]);
-        if build.take(scope, parsed(tokenizer, html).into_iter()).is_none() {
+        build.standins = standins;
+        if build.take(scope, ops.into_iter()).is_none() {
             return;
         }
         build.finish(scope, Some(document));
@@ -1492,10 +1555,6 @@ fn html_parse_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     });
 }
 
-// Whether the engine builds a parse of `html`: one with no lone surrogate (the stand-ins' text is the bindings').
-fn buildable(standins: &StandIns) -> bool {
-    standins.base.is_none()
-}
 // A document mode as `htmlParse` numbers it.
 fn quirks_mode(code: Option<i32>) -> QuirksMode {
     match code {
@@ -1532,6 +1591,7 @@ impl<'s> Build<'s> {
             live: None,
             registry: None,
             paused: false,
+            standins: StandIns::default(),
         }
     }
     // The insertion steps of the engine's own over what no later insertion runs them for — a document's children, every
