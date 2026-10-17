@@ -639,6 +639,18 @@ enum Kw {
     SpaceEvenly,
     Other,
 }
+// A grid item's self-alignment keyword as layout.rs `GRID_*`: `normal` stretch but on a box that keeps its own size
+// (`sized`), at the start.
+fn grid_self_code(kw: Kw, sized: bool) -> u8 {
+    use crate::layout::{GRID_CENTER, GRID_END, GRID_START, GRID_STRETCH};
+    match kw {
+        Kw::Stretch => GRID_STRETCH,
+        Kw::Normal | Kw::Auto | Kw::Other => if sized { GRID_START } else { GRID_STRETCH },
+        Kw::Center => GRID_CENTER,
+        Kw::End | Kw::FlexEnd | Kw::SelfEnd | Kw::Right | Kw::LastBaseline => GRID_END,
+        _ => GRID_START,
+    }
+}
 fn align_kw(flags: style::values::specified::align::AlignFlags) -> Kw {
     use style::values::specified::align::AlignFlags as F;
     match flags.value() {
@@ -1136,7 +1148,8 @@ fn half(w: f64) -> f64 {
 }
 // A grid's column template as the layout takes it: the tracks with an `auto-fill` / `auto-fit`
 // repeat left as ONE copy — where it starts, how long it is, and 1 fill / 2 fit (-1, 0, 0 for none) — and a literal
-// `repeat(N, …)` expanded. `none` is one implicit column the full width.
+// `repeat(N, …)` expanded. `none` is one implicit `auto` column (`grid-auto-columns`' initial value): the full width
+// under `justify-content: normal`, its content's under any other.
 struct GridTemplate {
     tracks: Vec<GridTrack>,
     repeat_start: f64,
@@ -1168,7 +1181,9 @@ impl GridTemplate {
             repeat_kind: 0.0,
         };
         let list = match v {
-            Template::None => return Ok(implicit()),
+            Template::None => {
+                return Ok(GridTemplate { tracks: vec![GridTrack { auto: true, ..Default::default() }], ..implicit() });
+            }
             Template::TrackList(list) => list,
             // (…a `subgrid` takes its parent's tracks — `Walk::subgrid_columns` — and is `none` where it has no grid
             // to join; `masonry` is unratified)
@@ -1808,20 +1823,18 @@ impl<'a> Walk<'a> {
         if !matches!(ps.get_box().clone_display().inside(), DisplayInside::Grid) {
             return [GRID_STRETCH; 2];
         }
-        // (…a REPLACED element's, not a form control's, which stretches as any box does: Chrome's list box fills its row)
-        let replaced = replaced_or_control(self.arena, id, self.node(id)) && !widget_tag(self.node(id).rendering_tag());
+        // (…a REPLACED element's, not a form control's, which stretches as any box does — Chrome's list box fills its row
+        // — but for a `<progress>`, a `<meter>` and a colour well, which the UA style sizes as a replaced one is sized)
+        let node = self.node(id);
+        let tag = node.rendering_tag();
+        let sized_control = matches!(tag, "progress" | "meter") || (tag == "input" && node.get_attr("type").is_some_and(|t| t.eq_ignore_ascii_case("color")));
+        let replaced = replaced_or_control(self.arena, id, node) && (!widget_tag(tag) || sized_control);
         let ratio = preferred_ratio(style).is_some();
-        let code = |own: Kw, items: Kw, sized: bool| match if own == Kw::Auto { items } else { own } {
-            Kw::Stretch => GRID_STRETCH,
-            Kw::Normal | Kw::Auto | Kw::Other => if sized { GRID_START } else { GRID_STRETCH },
-            Kw::Center => GRID_CENTER,
-            Kw::End | Kw::FlexEnd | Kw::SelfEnd | Kw::Right | Kw::LastBaseline => GRID_END,
-            _ => GRID_START,
-        };
         let (pos, ppos) = (style.get_position(), ps.get_position());
+        let own = |own: Kw, items: Kw| if own == Kw::Auto { items } else { own };
         [
-            code(align_kw(pos.justify_self.0), align_kw(ppos.justify_items.computed.0 .0), replaced),
-            code(align_kw(pos.align_self.0), align_kw(ppos.align_items.0), replaced || ratio),
+            grid_self_code(own(align_kw(pos.justify_self.0), align_kw(ppos.justify_items.computed.0 .0)), replaced),
+            grid_self_code(own(align_kw(pos.align_self.0), align_kw(ppos.align_items.0)), replaced || ratio),
         ]
     }
 
@@ -2901,17 +2914,24 @@ impl<'a> Walk<'a> {
         let row_h = grid_row_height(&pos.grid_auto_rows);
         let row_floor = if row_h.is_none() { grid_row_floor(&pos.grid_auto_rows) } else { None };
         let grid_start = self.grids.len() as i32;
-        // (…its `justify-content`: `normal` / `stretch` stretches its auto columns, a `space-*` distribution coarsely its
-        // columns from the start)
-        self.inputs[idx as usize].grid_justify = {
-            use crate::layout::{GRID_CENTER, GRID_END, GRID_START, GRID_STRETCH};
-            match align_kw(pos.justify_content.primary()) {
+        // (…its `justify-content` and `align-content`: `normal` / `stretch` stretches its auto tracks, any other
+        // distributes them in what they leave; its rows at the start where a row template, which no row sizing here
+        // models, sizes them — one that is a single `auto` track is the implicit rows' own, and stretches)
+        let content = |kw: Kw| {
+            use crate::layout::{GRID_CENTER, GRID_END, GRID_SPACE_AROUND, GRID_SPACE_BETWEEN, GRID_SPACE_EVENLY, GRID_START, GRID_STRETCH};
+            match kw {
                 Kw::Normal | Kw::Stretch | Kw::Auto => GRID_STRETCH,
                 Kw::Center => GRID_CENTER,
                 Kw::End | Kw::FlexEnd | Kw::Right => GRID_END,
+                Kw::SpaceBetween => GRID_SPACE_BETWEEN,
+                Kw::SpaceAround => GRID_SPACE_AROUND,
+                Kw::SpaceEvenly => GRID_SPACE_EVENLY,
                 _ => GRID_START,
             }
         };
+        let rows_templated = !GridTemplate::of(&pos.grid_template_rows).is_ok_and(|t| matches!(&t.tracks[..], [GridTrack { auto: true, px: None, frac: None, fr: None, fit: None, floor: None, .. }]) && t.repeat_len == 0.0);
+        self.inputs[idx as usize].grid_justify = content(align_kw(pos.justify_content.primary()));
+        self.inputs[idx as usize].grid_align = if rows_templated { crate::layout::GRID_START } else { content(align_kw(pos.align_content.primary())) };
         self.grids.extend([
             template.tracks.len() as f64,
             col_gap.px,
@@ -2954,8 +2974,9 @@ impl<'a> Walk<'a> {
             // Under `grid-auto-rows`, an AUTO-height item IS the row height: the layout imposes the row on it as a definite
             // border-box height (a replaced one keeps its own, and an anonymous one is auto).
             // (…and under a row that is only a FLOOR, stretched to it where it is shorter — its height still its own —
-            // where it STRETCHES across its row at all: `align-self`, else the grid's `align-items` — a gap: where an
-            // unstretched item then sits in its row is not modelled)
+            // where it STRETCHES across its row at all: `align-self`, else the grid's `align-items`; under a fixed row too,
+            // an item that does not stretch keeping its own height, placed in the row by its alignment, layout.rs
+            // `align_grid_row`)
             let (auto, stretches) = match item {
                 FlexItem::Element(c) => {
                     let cs = self.style(*c)?;
@@ -2970,7 +2991,7 @@ impl<'a> Walk<'a> {
                 FlexItem::Anonymous(..) => (true, matches!(align_kw(pos.align_items.0), Kw::Normal | Kw::Stretch | Kw::Auto | Kw::Left | Kw::Right)),
             };
             let fixed = row_h.is_some_and(|h| h != 0.0);
-            if auto && (fixed || (row_floor.is_some() && stretches)) {
+            if auto && stretches && (fixed || row_floor.is_some()) {
                 let r = &mut self.inputs[at as usize];
                 r.row_imposed = true;
                 if fixed {
@@ -3774,6 +3795,11 @@ impl<'a> Walk<'a> {
         rec.rtl = (style.get_inherited_box().direction == Direction::Rtl) as u8;
         rec.block_axis_is_x = !style.writing_mode.is_horizontal();
         rec.legacy_align = self.legacy_align(container);
+        // (…a grid's anonymous item `auto` in both axes: its container's `justify-items` / `align-items`)
+        if matches!(style.get_box().clone_display().inside(), DisplayInside::Grid) {
+            let pos = style.get_position();
+            rec.grid_self = [grid_self_code(align_kw(pos.justify_items.computed.0 .0), false), grid_self_code(align_kw(pos.align_items.0), false)];
+        }
         self.push_record(rec);
         let ws_mode = ws_mode_of(style)?;
         let mut inline = false;
@@ -4892,6 +4918,7 @@ pub(crate) fn fresh_record() -> Input {
         stretch_x: false,
         grid_self: [0, 0],
         grid_justify: 0,
+        grid_align: 0,
         cell_valign: 0,
         cell_pct_h_child: false,
         anon_group: false,
