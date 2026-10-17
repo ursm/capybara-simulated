@@ -45,4 +45,18 @@ RSpec.describe 'scheme fetch' do
     expect(poll_until { session.evaluate_script('window.inserted') }).to eq('é')
     expect(poll_until { session.evaluate_script('window.parsed') }).to eq('é')
   end
+
+  # An empty `data:` or `blob:` script is a loaded one (its `load` fires, Chrome and Firefox), the parser's too — not an
+  # inline script waiting for its text — and the src names its scheme as the URL parser reads it: whitespace around it
+  # stripped, the scheme ASCII-case-insensitive.
+  it 'loads an empty data: or blob: script, and reads its scheme off the parsed src' do
+    session.execute_script(<<~JS)
+      window.events = [];
+      const empty = URL.createObjectURL(new Blob([], { type: 'text/javascript' }));
+      const ran = URL.createObjectURL(new Blob(['window.events.push("ran")'], { type: 'text/javascript' }));
+      const tag = (name, src) => '<script src="' + src + '" onload="events.push(\\'' + name + ' load\\')" onerror="events.push(\\'' + name + ' error\\')"><\\/script>';
+      document.write(tag('blob', empty) + tag('data', 'data:text/javascript,') + tag('spaced', ' ' + ran.toUpperCase().slice(0, 4) + ran.slice(4) + ' '));
+    JS
+    expect(poll_until { v = session.evaluate_script('window.events'); v.length >= 4 ? v : nil }).to contain_exactly('blob load', 'data load', 'ran', 'spaced load')
+  end
 end
