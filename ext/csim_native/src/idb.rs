@@ -191,6 +191,7 @@ fn with<R>(f: impl FnOnce(&mut Registry) -> R) -> R {
 const MAX_GENERATED: f64 = 9_007_199_254_740_992.0; // 2^53
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    register(scope, ns, "idbKey", key_op, context_id);
     register(scope, ns, "idbCompare", compare_op, context_id);
     register(scope, ns, "idbInRange", in_range_op, context_id);
     register(scope, ns, "idbStore", store_info, context_id);
@@ -340,6 +341,96 @@ fn in_range_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     rv.set_bool(range.contains(&key));
 }
 // __dom.idbCompare(a, b) -> -1, 0 or 1: "compare two keys".
+// __dom.idbKey(value, multiEntry) -> "convert a value to a key" (§2.7) — or, `multiEntry`, "… to a multiEntry key" — as
+// the bindings hold one, undefined for "invalid"; whatever a Get of an Array's item throws thrown.
+fn key_op<'s>(scope: &mut v8::PinScope<'s, '_>, args: v8::FunctionCallbackArguments<'s>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let input = args.get(0);
+    let key = if args.get(1).is_true() { multi_entry_key(scope, input) } else { value_to_key(scope, input, &mut Vec::new()) };
+    match key {
+        Ok(Some(key)) => rv.set(key_value(scope, &key)),
+        Ok(None) => rv.set_undefined(),
+        Err(Thrown) => {}
+    }
+}
+// (…an exception a page's getter threw, left pending for the caller)
+struct Thrown;
+// "Convert a value to a key": a number but NaN, a string, a date of a time value, a buffer source's bytes (a detached or
+// shared one none), an Array exotic object's own items each converted — one missing, or the array among those it is
+// inside (`seen`), invalid; anything else invalid (None).
+fn value_to_key<'s>(scope: &mut v8::PinScope<'s, '_>, input: v8::Local<'s, v8::Value>, seen: &mut Vec<v8::Local<'s, v8::Value>>) -> Result<Option<Key>, Thrown> {
+    if input.is_number() {
+        let n = input.number_value(scope).unwrap_or(f64::NAN);
+        return Ok((!n.is_nan()).then_some(Key::Number(n)));
+    }
+    if let Ok(s) = v8::Local::<v8::String>::try_from(input) {
+        let mut units = vec![0u16; s.length()];
+        s.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
+        return Ok(Some(Key::String(units)));
+    }
+    if !input.is_object() || seen.iter().any(|v| v.strict_equals(input)) {
+        return Ok(None);
+    }
+    if let Ok(date) = v8::Local::<v8::Date>::try_from(input) {
+        let ms = date.value_of();
+        return Ok((!ms.is_nan()).then_some(Key::Date(ms)));
+    }
+    if let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(input) {
+        let buffer = view.buffer(scope);
+        if buffer.is_none_or(|b| b.was_detached() || Into::<v8::Local<v8::Value>>::into(b).is_shared_array_buffer()) {
+            return Ok(None);
+        }
+        let mut bytes = vec![0u8; view.byte_length()];
+        view.copy_contents(&mut bytes);
+        return Ok(Some(Key::Binary(bytes)));
+    }
+    if let Ok(buffer) = v8::Local::<v8::ArrayBuffer>::try_from(input) {
+        if buffer.was_detached() {
+            return Ok(None);
+        }
+        let length = buffer.byte_length();
+        let Some(view) = v8::Uint8Array::new(scope, buffer, 0, length) else { return Ok(None) };
+        let mut bytes = vec![0u8; length];
+        view.copy_contents(&mut bytes);
+        return Ok(Some(Key::Binary(bytes)));
+    }
+    let Ok(array) = v8::Local::<v8::Array>::try_from(input) else { return Ok(None) };
+    seen.push(input);
+    let mut keys = Vec::with_capacity(array.length() as usize);
+    for i in 0..array.length() {
+        if !has_own_index(scope, array, i)? {
+            return Ok(None);
+        }
+        let item = array.get_index(scope, i).ok_or(Thrown)?;
+        let Some(key) = value_to_key(scope, item, seen)? else { return Ok(None) };
+        keys.push(key);
+    }
+    seen.pop();
+    Ok(Some(Key::Array(keys)))
+}
+// (…HasOwnProperty of an index, which a page's Proxy is not, an Array exotic object being none)
+fn has_own_index(scope: &mut v8::PinScope<'_, '_>, array: v8::Local<'_, v8::Array>, i: u32) -> Result<bool, Thrown> {
+    let name = v8::String::new(scope, &i.to_string()).ok_or(Thrown)?;
+    array.has_own_property(scope, name.into()).ok_or(Thrown)
+}
+// …"convert a value to a multiEntry key": an Array exotic object's items each a key, the invalid and the repeated left
+// out; anything else a key as above.
+fn multi_entry_key<'s>(scope: &mut v8::PinScope<'s, '_>, input: v8::Local<'s, v8::Value>) -> Result<Option<Key>, Thrown> {
+    let Ok(array) = v8::Local::<v8::Array>::try_from(input) else { return value_to_key(scope, input, &mut Vec::new()) };
+    let mut seen = vec![input];
+    let mut keys: Vec<Key> = Vec::new();
+    for i in 0..array.length() {
+        if !has_own_index(scope, array, i)? {
+            continue;
+        }
+        let item = array.get_index(scope, i).ok_or(Thrown)?;
+        if let Some(key) = value_to_key(scope, item, &mut seen)? {
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+        }
+    }
+    Ok(Some(Key::Array(keys)))
+}
 fn compare_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(a), Some(b)) = (key_arg(scope, args.get(0)), key_arg(scope, args.get(1))) else { return };
     rv.set_int32(a.cmp(&b) as i32);
