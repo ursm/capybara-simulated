@@ -373,7 +373,7 @@ pub(crate) fn location_set(current: &str, part: &str, value: &str, label: Option
             }
             // (…a scheme the setter refuses — a special one for a non-special URL or the reverse, `file:` for one with
             // credentials or a port — leaves the copy as it was: no failure, a navigation to the URL itself)
-            drop(url.set_protocol(value));
+            let _ = url.set_protocol(value);
             if !matches!(url.protocol(), "http:" | "https:") {
                 return Ok(None);
             }

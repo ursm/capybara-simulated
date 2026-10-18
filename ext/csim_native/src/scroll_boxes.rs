@@ -71,6 +71,23 @@ pub(crate) fn holds_scroll_offset(engine: &mut StyleEngine, arena: &RealmArena, 
     rendered(engine, arena, id, true, false, None, now)
 }
 
+// Where `id`'s scroll offset is KEPT, the box a scroll of it moves: the VIEWPORT's — kept on the document element — for
+// its document's scrolling element (the root in standards mode, the body in quirks mode, whose `scrollTop` is the
+// viewport's there: Chrome reads 1350 on both `scrollY` and `body.scrollTop` after a `scrollIntoView`), none for the
+// root in quirks mode (CSSOM View: its scroll members read 0 and move nothing there, however the body stands), and
+// `id`'s own for every other element.
+pub(crate) fn scroll_holder(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, quirks: bool, now: f64) -> Option<NodeId> {
+    let doc = arena.root_of(id);
+    if arena.get(doc).is_none_or(|d| d.kind != NodeKind::Document) {
+        return Some(id);
+    }
+    let root = document_element(arena, doc);
+    if scrolling_element(engine, arena, doc, quirks, now) == Some(id) {
+        return root;
+    }
+    (!(quirks && root == Some(id))).then_some(id)
+}
+
 // The overflow a box uses once VIEWPORT PROPAGATION is applied (CSS Overflow 3 §3.3): the root's goes to the viewport,
 // and the body's too where the root's is `visible` in both axes — each then `visible` on the box itself (Chrome: `body
 // { overflow: auto }` neither clips nor keeps an offset, while under `html { overflow: hidden }` the body scrolls).
@@ -114,6 +131,7 @@ pub(crate) fn padding_edge_box(engine: &mut StyleEngine, arena: &RealmArena, id:
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "scrollingElement", scrolling_element_op, context_id);
     crate::dom::register(scope, ns, "holdsScrollOffset", holds_scroll_offset_op, context_id);
+    crate::dom::register(scope, ns, "scrollHolder", scroll_holder_op, context_id);
     crate::dom::register(scope, ns, "paddingEdgeBox", padding_edge_box_op, context_id);
 }
 
@@ -140,6 +158,20 @@ fn holds_scroll_offset_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         holds_scroll_offset(engine, arena, id, quirks, now)
     });
     rv.set_bool(holds.unwrap_or(false));
+}
+
+// __dom.scrollHolder(nid, docNid) -> [the box whose scroll offset the element's is] or [] (`scroll_holder`), as
+// `nodes_value` answers — in its document's mode (`document_mode`).
+fn scroll_holder_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let doc = nid_arg(scope, &args, 1);
+    let found = with_engine(scope, &args, |engine, arena, now| {
+        let quirks = arena.document_mode(doc).0;
+        scroll_holder(engine, arena, id, quirks, now)
+    })
+    .unwrap_or(Some(id));
+    let cid = crate::dom::realm_id(scope, &args);
+    rv.set(crate::dom::nodes_value(scope, cid, found.as_slice()));
 }
 
 // __dom.paddingEdgeBox(nid) -> [the box a mouse event's offset is measured from] (`padding_edge_box`), as
