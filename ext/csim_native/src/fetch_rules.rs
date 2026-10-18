@@ -65,6 +65,16 @@ pub(crate) fn service_worker_response_allowed(mode: &str, redirect: &str, respon
         || (redirect != "follow" && redirected))
 }
 
+// Fetch "main fetch" (§4.1) step 12's `same-origin` branch: whether a request in mode `same-origin` for `url` (parsed
+// against `base`) from a client of origin `here` (serialized — an opaque one's "null", or none) is a network error: an
+// http(s) URL of another origin. (A `data:` / `blob:` URL is its own scheme fetch's to answer.)
+pub(crate) fn same_origin_mode_refused(url: &str, base: Option<&str>, here: &str) -> bool {
+    ada_url::Url::parse(url, base)
+        .ok()
+        .filter(|u| matches!(u.protocol(), "http:" | "https:"))
+        .is_some_and(|u| u.origin() != here)
+}
+
 // Fetch "HTTP-redirect fetch" (§4.4) step 12: whether a redirect of `status` makes a request of `method` a bodyless GET —
 // a 301 or 302 of a POST, a 303 of anything but a GET or HEAD.
 pub(crate) fn redirect_to_get(status: u32, method: &[u8]) -> bool {
@@ -337,6 +347,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "badPort", bad_port_op, context_id);
     crate::dom::register(scope, ns, "blobResponse", blob_response_op, context_id);
     crate::dom::register(scope, ns, "corsRequest", cors_request_op, context_id);
+    crate::dom::register(scope, ns, "swResponseAllowed", sw_response_allowed_op, context_id);
+    crate::dom::register(scope, ns, "sameOriginModeRefused", same_origin_mode_refused_op, context_id);
     crate::dom::register(scope, ns, "corsSafelistedMethod", cors_safelisted_method_op, context_id);
     crate::dom::register(scope, ns, "interceptedHop", intercepted_hop_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
@@ -400,6 +412,17 @@ fn intercepted_hop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 fn request_body_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = byte_string(scope, args.get(0));
     rv.set_bool(request_body_header(&name));
+}
+// __dom.sameOriginModeRefused(url, base, here) -> `same_origin_mode_refused` (`base` null for none).
+fn same_origin_mode_refused_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (url, here) = (args.get(0).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
+    let base = (!args.get(1).is_null_or_undefined()).then(|| args.get(1).to_rust_string_lossy(scope));
+    rv.set_bool(same_origin_mode_refused(&url, base.as_deref(), &here));
+}
+// __dom.swResponseAllowed(mode, redirectMode, type, redirected) -> `service_worker_response_allowed`.
+fn sw_response_allowed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let [mode, redirect, response_type] = [0, 1, 2].map(|k| args.get(k).to_rust_string_lossy(scope));
+    rv.set_bool(service_worker_response_allowed(&mode, &redirect, &response_type, args.get(3).is_true()));
 }
 // __dom.corsRequest(el, module) -> [mode, credentials] of the request element `el` makes (`cors_request`, by its
 // `crossorigin` attribute) — one of no element (a module graph's root nobody's) as one of no attribute.
