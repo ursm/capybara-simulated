@@ -65,11 +65,11 @@ pub(crate) fn service_worker_response_allowed(mode: &str, redirect: &str, respon
         || (redirect != "follow" && redirected))
 }
 
-// Fetch "main fetch" (§4.1) step 12's `same-origin` branch: whether a request in mode `same-origin` for `url` (parsed
-// against `base`) from a client of origin `here` (serialized — an opaque one's "null", or none) is a network error: an
-// http(s) URL of another origin. (A `data:` / `blob:` URL is its own scheme fetch's to answer.)
-pub(crate) fn same_origin_mode_refused(url: &str, base: Option<&str>, here: &str) -> bool {
-    ada_url::Url::parse(url, base)
+// Fetch "main fetch" (§4.1) step 12's `same-origin` branch: whether a request in mode `same-origin` for `url` (absolute,
+// the Request's) from a client of origin `here` — its document's origin, serialized: an opaque one's "null" — is a
+// network error: an http(s) URL of another origin. (A `data:` / `blob:` URL is its own scheme fetch's to answer.)
+pub(crate) fn same_origin_mode_refused(url: &str, here: &str) -> bool {
+    ada_url::Url::parse(url, None)
         .ok()
         .filter(|u| matches!(u.protocol(), "http:" | "https:"))
         .is_some_and(|u| u.origin() != here)
@@ -347,12 +347,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "badPort", bad_port_op, context_id);
     crate::dom::register(scope, ns, "blobResponse", blob_response_op, context_id);
     crate::dom::register(scope, ns, "corsRequest", cors_request_op, context_id);
-    crate::dom::register(scope, ns, "swResponseAllowed", sw_response_allowed_op, context_id);
-    crate::dom::register(scope, ns, "sameOriginModeRefused", same_origin_mode_refused_op, context_id);
     crate::dom::register(scope, ns, "corsSafelistedMethod", cors_safelisted_method_op, context_id);
     crate::dom::register(scope, ns, "interceptedHop", intercepted_hop_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
     crate::dom::register(scope, ns, "responseHeader", response_header_op, context_id);
+    crate::dom::register(scope, ns, "sameOriginModeRefused", same_origin_mode_refused_op, context_id);
+    crate::dom::register(scope, ns, "swResponseAllowed", sw_response_allowed_op, context_id);
     crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
     crate::dom::register(scope, ns, "headerValue", header_value_op, context_id);
     crate::dom::register(scope, ns, "httpToken", http_token_op, context_id);
@@ -413,11 +413,10 @@ fn request_body_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let name = byte_string(scope, args.get(0));
     rv.set_bool(request_body_header(&name));
 }
-// __dom.sameOriginModeRefused(url, base, here) -> `same_origin_mode_refused` (`base` null for none).
+// __dom.sameOriginModeRefused(url, here) -> `same_origin_mode_refused`.
 fn same_origin_mode_refused_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (url, here) = (args.get(0).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
-    let base = (!args.get(1).is_null_or_undefined()).then(|| args.get(1).to_rust_string_lossy(scope));
-    rv.set_bool(same_origin_mode_refused(&url, base.as_deref(), &here));
+    let (url, here) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
+    rv.set_bool(same_origin_mode_refused(&url, &here));
 }
 // __dom.swResponseAllowed(mode, redirectMode, type, redirected) -> `service_worker_response_allowed`.
 fn sw_response_allowed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -554,6 +553,19 @@ mod tests {
         assert!(service_worker_response_allowed("navigate", "manual", "opaqueredirect", false));
         assert!(!service_worker_response_allowed("cors", "follow", "opaqueredirect", false));
         assert!(!service_worker_response_allowed("no-cors", "follow", "error", false));
+    }
+
+    #[test]
+    fn a_same_origin_request_refuses_an_http_url_of_another_origin() {
+        let here = "http://a.test";
+        assert!(!same_origin_mode_refused("http://a.test/x", here));
+        assert!(!same_origin_mode_refused("http://A.TEST:80/x", here));
+        assert!(same_origin_mode_refused("http://b.test/x", here));
+        assert!(same_origin_mode_refused("https://a.test/x", here));
+        assert!(same_origin_mode_refused("http://a.test/x", "null"));
+        assert!(!same_origin_mode_refused("data:,x", here));
+        assert!(!same_origin_mode_refused("blob:http://b.test/u", here));
+        assert!(!same_origin_mode_refused("about:blank", here));
     }
 
     #[test]
