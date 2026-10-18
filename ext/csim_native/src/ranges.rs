@@ -603,7 +603,8 @@ fn selected(arena: &RealmArena, s: Boundary, e: Boundary) -> Vec<Selected> {
 
 // __dom.rangeRects(range) -> Float64Array [x, y, width, height, …]: the range's client rects (CSSOM View §6.1) — each
 // element it selects whose parent it does not, its own client rects; each Text node it selects or partially selects, the
-// rects of its part of it (text_geometry.rs `text_rects`) — of the layout and the text geometry the bindings made current.
+// rects of its part of it (text_geometry.rs `text_rects`) — of the layout and the text geometry the bindings made current;
+// with `bounding`, the one rect `getBoundingClientRect` answers of them instead (`bounding_rect`).
 fn range_rects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some([s, e]) = entry_points(scope, args.get(0)) else { return };
     let cid = realm_id(scope, &args);
@@ -617,7 +618,22 @@ fn range_rects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         }
         rects
     }).unwrap_or_default();
+    let rects = if args.get(1).boolean_value(scope) { bounding_rect(&rects).to_vec() } else { rects };
     rv.set(crate::dom::f64_array(scope, &rects).into());
+}
+// The smallest rect around those of `rects` (`[x, y, width, height, …]`) neither zero wide nor zero tall, or where every
+// one is, the first — a collapsed range's caret — or, for none, the empty one at the origin (CSSOM View §6.1).
+fn bounding_rect(rects: &[f64]) -> [f64; 4] {
+    let mut sized = rects.chunks_exact(4).filter(|r| r[2] != 0.0 && r[3] != 0.0).peekable();
+    if sized.peek().is_none() {
+        return rects.first_chunk::<4>().copied().unwrap_or_default();
+    }
+    let [mut left, mut top, mut right, mut bottom] = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for r in sized {
+        (left, top) = (left.min(r[0]), top.min(r[1]));
+        (right, bottom) = (right.max(r[0] + r[2]), bottom.max(r[1] + r[3]));
+    }
+    [left, top, right - left, bottom - top]
 }
 
 // What the contents of the range from `s` to `e` are, as cloning, extracting and deleting them take them (DOM §5.5): its
@@ -881,4 +897,16 @@ pub(crate) fn split(
         }
     }
     follow(scope, moved, new_obj);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bounding_rect;
+
+    #[test]
+    fn bounds_the_sized_rects_else_the_first() {
+        assert_eq!(bounding_rect(&[]), [0.0; 4]);
+        assert_eq!(bounding_rect(&[5.0, 6.0, 0.0, 10.0, 1.0, 1.0, 0.0, 0.0]), [5.0, 6.0, 0.0, 10.0]);
+        assert_eq!(bounding_rect(&[5.0, 6.0, 0.0, 10.0, 10.0, 20.0, 30.0, 10.0, 0.0, 40.0, 5.0, 5.0]), [0.0, 20.0, 40.0, 25.0]);
+    }
 }
