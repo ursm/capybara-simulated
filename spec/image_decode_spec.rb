@@ -293,5 +293,30 @@ RSpec.describe 'image decode' do
     JS
     expect(got).to eq(%w[EncodingError EncodingError])
   end
+  # A `blob:` image loads from the blob the page made — a file input's preview's shape — and a revoked one, or one of a
+  # scheme nothing fetches (`ftp:`), is broken: its `error` fired and its decode rejected. Chrome: the same log.
+  it 'loads a blob: image from its blob, and breaks one nothing can fetch' do
+    session = simulated_session(app).tap {|s| s.visit '/' }
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const png = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAYAAAC56t6BAAAAEklEQVR4nGNgYGD4z8DAwMDAAAAQAAH/0XvFsQAAAABJRU5ErkJggg==';
+      const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
+      const blob = () => URL.createObjectURL(new Blob([bytes], {type: 'image/png'}));
+      const [ok, ftp, revoked] = [new Image(), new Image(), new Image()];
+      const ev = (img, name) => new Promise((r) => {
+        img.onload = () => r(name + ':load:' + img.naturalWidth + 'x' + img.naturalHeight);
+        img.onerror = () => r(name + ':error');
+      });
+      const waits = [ev(ok, 'blob'), ev(ftp, 'ftp'), ev(revoked, 'revoked')];
+      ok.src = blob();
+      ftp.src = 'ftp://example.com/x.png';
+      const gone = blob();
+      URL.revokeObjectURL(gone);
+      revoked.src = gone;
+      const decodes = [ok, ftp].map((i) => i.decode().then(() => 'ok', (e) => e.name));
+      Promise.all([...waits, ...decodes]).then(done);
+    JS
+    expect(got).to eq(%w[blob:load:2x3 ftp:error revoked:error ok EncodingError])
+  end
 end
 

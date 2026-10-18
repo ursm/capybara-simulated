@@ -7779,9 +7779,9 @@ module Capybara
       # Fetch + decode an `<img>` resource to an RGBA bitmap for the drawImage / createPattern surface (the decode is
       # csim_native's, memoized by content: see `@@image_cache`). Returns {'width','height','refId'} — the pixels ride
       # the transfer registry, a FRESH stash per call, since `fetchTransfer` consumes the entry — or nil when the
-      # resource can't be fetched or decoded (the caller fires `error`). A scheme with no host-side reader yet (blob:,
-      # whose bytes live in the VM) returns {'unsupported' => true} so the caller stays inert rather than reporting a
-      # spuriously-broken image.
+      # resource can't be fetched or decoded (the caller fires `error`). A scheme with no host-side reader returns
+      # {'unsupported' => true}, which the caller takes for broken too — a blob: one it never asks for, reading the blob
+      # from the VM's own store.
       # `cors` (a `crossorigin` <img>) fetches under CORS: a cross-origin response without a
       # matching Access-Control-Allow-Origin fails the load. `credentials` is 'include' for
       # crossorigin="use-credentials", 'same-origin' (uncredentialed cross-origin) otherwise.
