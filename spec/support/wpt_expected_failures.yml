@@ -153,8 +153,6 @@ cookies/samesite/get_named_cookie-default-samesite.html:
 - Get Named cookie  w/ default SameSite
 cookies/samesite/sandbox-iframe-nested.https.html:
 - SameSite cookies with intervening sandboxed iframe and navigation
-cookies/samesite/sandbox-iframe-subresource.https.html:
-- SameSite cookies with intervening sandboxed iframe and subresources
 cookies/secure/set-from-dom.https.sub.html:
 - "'secure' cookie visible in HTTP request"
 - "'secure' cookie visible in `document.cookie`"

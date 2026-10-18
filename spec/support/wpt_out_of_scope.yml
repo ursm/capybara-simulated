@@ -28825,12 +28825,6 @@ cookies/partitioned-cookies/partitioned-cookies.tentative.https.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-cookies/samesite/sandbox-allow-same-site-none-cookies-value.tentative.https.html:
-- name: SameSite=None cookies should be allowed in the iframe by the `allow-same-site-none-cookies`
-    value
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 cookies/schemeful-same-site/schemeful-iframe-subresource.tentative.html:
 - name: SameSite cookies with intervening cross-scheme iframe and subresources
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
