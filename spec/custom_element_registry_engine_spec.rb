@@ -184,4 +184,30 @@ RSpec.describe 'custom element registries in the engine' do
     JS
     expect(got).to eq(['NotSupportedError', 'NotSupportedError', 1, 'NotSupportedError', 'ok'])
   end
+  # Whether an element is owed an upgrade is its custom element STATE's to say ("undefined" or "uncustomized"), not its
+  # prototype's: one a page gave the class's prototype before the definition existed upgrades all the same — its
+  # constructor runs and it is called back — and so does one whose prototype a page set back. Chrome: the log below.
+  it 'upgrades by the custom element state, whatever prototype a page gave the element' do
+    page = <<~HTML
+      <!doctype html><meta charset=utf-8><body><script>
+        window.__log = [];
+        class XA extends HTMLElement { constructor() { super(); __log.push('ctor'); } connectedCallback() { __log.push('conn'); } }
+        const a = document.createElement('x-a');
+        Object.setPrototypeOf(a, XA.prototype);
+        document.body.append(a);
+        customElements.define('x-a', XA);
+        __log.push(String(a.matches(':defined')));
+        const b = document.createElement('div');
+        b.innerHTML = '<x-c></x-c>';
+        const c = b.firstChild;
+        class XC extends HTMLElement { constructor() { super(); __log.push('ctorC'); } }
+        customElements.define('x-c', XC);
+        Object.setPrototypeOf(c, HTMLElement.prototype);
+        customElements.upgrade(b);
+        __log.push(String(c instanceof XC), String(c.matches(':defined')));
+      </script>
+    HTML
+    s = session_for('/' => page)
+    expect(s.evaluate_script('__log')).to eq(%w[ctor conn true ctorC true true])
+  end
 end
