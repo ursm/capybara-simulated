@@ -43,6 +43,19 @@ struct Run<'s> {
 pub(crate) fn node_length(arena: &RealmArena, n: NodeId) -> u32 {
     arena.get(n).map_or(0, |d| if is_character_data(arena, n) { d.data.len() } else { d.children.len() }) as u32
 }
+// What a boundary point no range may have is (DOM §5.5 "set the start or end", §4.5's selection steps): a doctype's
+// (InvalidNodeTypeError), or one past its node's length (IndexSizeError) — None for a point it may.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum PointError {
+    Doctype,
+    PastLength,
+}
+pub(crate) fn point_error(arena: &RealmArena, nid: NodeId, offset: u32) -> Option<PointError> {
+    if arena.get(nid).is_some_and(|n| n.node_type() == 10) {
+        return Some(PointError::Doctype);
+    }
+    (offset > node_length(arena, nid)).then_some(PointError::PastLength)
+}
 fn is_character_data(arena: &RealmArena, n: NodeId) -> bool {
     arena.get(n).is_some_and(|d| matches!(d.kind, NodeKind::Text | NodeKind::Comment | NodeKind::ProcessingInstruction))
 }

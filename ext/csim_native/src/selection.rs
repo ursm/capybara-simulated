@@ -280,10 +280,10 @@ fn selection_direct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 
 // What a point a range cannot have comes to: a doctype's, or one past its node's length.
 fn check_point(arena: &RealmArena, (nid, offset): (NodeId, u32)) -> Option<u32> {
-    if arena.get(nid).is_some_and(|n| n.node_type() == 10) {
-        return Some(DOCTYPE);
-    }
-    (offset > node_length(arena, nid)).then_some(OFFSET)
+    crate::range_contents::point_error(arena, nid, offset).map(|e| match e {
+        crate::range_contents::PointError::Doctype => DOCTYPE,
+        crate::range_contents::PointError::PastLength => OFFSET,
+    })
 }
 // Whether the document is a shadow-including inclusive ancestor of `nid` — where collapse, extend and setBaseAndExtent
 // take a point at all.

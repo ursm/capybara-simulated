@@ -255,6 +255,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "rangesLive", ranges_live, context_id);
     register(scope, ns, "isRange", is_range, context_id);
     register(scope, ns, "rangeSetPoint", range_set_point, context_id);
+    register(scope, ns, "rangePointError", range_point_error, context_id);
+    register(scope, ns, "nodeLength", node_length_op, context_id);
     register(scope, ns, "rangeComparePoint", range_compare_point, context_id);
     register(scope, ns, "rangeCompareBoundaries", range_compare_boundaries, context_id);
     register(scope, ns, "rangeCollapsed", range_collapsed, context_id);
@@ -303,6 +305,28 @@ fn entry_points(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value
     ranges(scope).entries.get(id as usize)?.as_ref().map(|e| e.points)
 }
 
+// __dom.rangePointError(nid, offset) -> what a boundary point (`nid`, `offset`) may not be (range_contents.rs
+// `point_error`): 0 none, 1 a doctype's, 2 past its node's length.
+fn range_point_error(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(nid) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
+    let offset = args.get(1).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let code = match crate::range_contents::point_error(crate::dom::realm(scope, cid), nid, offset) {
+        None => 0,
+        Some(crate::range_contents::PointError::Doctype) => 1,
+        Some(crate::range_contents::PointError::PastLength) => 2,
+    };
+    rv.set_uint32(code);
+}
+// __dom.nodeLength(nid) -> the "length of a node" (DOM §4.4: a doctype 0, character data its data's, any other its
+// children's count), the engine's — not a `data` getter a page may replace.
+fn node_length_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(nid) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let doctype = arena.get(nid).is_some_and(|n| n.node_type() == 10);
+    rv.set_uint32(if doctype { 0 } else { crate::range_contents::node_length(arena, nid) });
+}
 // __dom.rangeSetPoint(range, which, node, nid, offset) — DOM "set the start or end" (§5.5), the node and offset checked
 // already: the range's start (`which` 0) or end (1) is (`node`, `offset`), and the other point with it where it would
 // be in another tree, or on the wrong side.
