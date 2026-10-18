@@ -9419,7 +9419,7 @@ module Capybara
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -9543,13 +9543,16 @@ module Capybara
         # …which a hop to `hop` widens (RFC 6265bis "site for cookies"): a script fetch's by its client document's site
         # against the hop's; a mode-less load's — an image's, a font's, a style sheet's, the host's for a document — by its
         # client's and its top-level document's; a client of an opaque origin (`null`, `data:`) cross-site
-        # (cookie_cross_site_document?). None for a load with no client at all.
+        # (cookie_cross_site_document?); one a frame's document made (`client_realm`, which the bindings name) by that
+        # frame's chain too, the top-level document's included (container_cross_site?). None for a load with no client
+        # at all.
         widen_cookie_site = lambda {|hop|
           cookie_client ||= cors_mode ? (doc_origin || sec_initiator) : (client_url || sec_initiator)
           next if cookie_client.nil?
 
           cross = cookie_cross_site_document?(cookie_client, hop) ||
-                  (!cors_mode && !@current_url.nil? && cookie_cross_site_document?(@current_url, hop))
+                  (!cors_mode && !@current_url.nil? && cookie_cross_site_document?(@current_url, hop)) ||
+                  (client_realm.to_i.positive? && container_cross_site?(client_realm, hop))
           cookie_site = widen_sec_fetch_site(cookie_site, cross ? 'cross-site' : sec_fetch_site(cookie_client, hop))
         }
         (MAX_FETCH_REDIRECTS + 1).times do
