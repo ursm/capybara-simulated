@@ -137,6 +137,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "effectiveDomain", effective_domain_op, context_id);
     register(scope, ns, "setDomain", set_domain_op, context_id);
     register(scope, ns, "ipHost", ip_host_op, context_id);
+    register(scope, ns, "registrableDomainSuffix", registrable_domain_suffix_op, context_id);
 }
 
 // __dom.documentOrigin() -> the serialization of the calling realm's document's origin (`RealmLocation::origin`).
@@ -291,19 +292,37 @@ pub(crate) fn effective_domain(origin: &str, domain: Option<&str>) -> Option<Str
 pub(crate) fn ip_host(host: &str) -> bool {
     host.starts_with('[') || host.parse::<std::net::Ipv4Addr>().is_ok()
 }
+// A host's public suffix (URL §3.2: the Public Suffix List's, a TLD it does not list its own — the `*` rule) and its
+// registrable domain, that suffix and the label before it — none for an IP address, nor the latter for a host that is
+// a public suffix itself.
+fn public_suffix(host: &str) -> Option<&str> {
+    (!ip_host(host)).then(|| psl::suffix_str(host)).flatten()
+}
+fn registrable_domain(host: &str) -> Option<&str> {
+    (!ip_host(host)).then(|| psl::domain_str(host)).flatten()
+}
+// HTML "is a registrable domain suffix of or is equal to": `suffix` the host itself, or — both domains — the end of it
+// after a dot, where `suffix` is no public suffix, nor the end of the host's.
+pub(crate) fn registrable_domain_suffix(suffix: &str, host: &str) -> bool {
+    if suffix == host {
+        return true;
+    }
+    if ip_host(suffix) || ip_host(host) || !host.strip_suffix(suffix).is_some_and(|sub| sub.ends_with('.')) {
+        return false;
+    }
+    let public = public_suffix(host).unwrap_or(host);
+    public_suffix(suffix) != Some(suffix) && public != suffix && !public.ends_with(&format!(".{suffix}"))
+}
 // The site of `url`'s origin (HTML "obtain a site"), a `blob:` URL's its inner URL's: its scheme and its host's
-// registrable domain — the last two labels, no public suffix list being kept (right for the single-label TLDs a suite's
-// hosts have); an IP address, or a host of two labels or fewer, its own. None for a URL that is no http(s) one with a
-// host. One rule for every partition keyed on a site: storage, blob URLs, `Sec-Fetch-Site`.
+// registrable domain — the host itself where it has none (an IP address, a public suffix). None for a URL that is no
+// http(s) one with a host. One rule for every partition keyed on a site: storage, blob URLs, `Sec-Fetch-Site`.
 pub(crate) fn site(url: &str) -> Option<String> {
     let url = ada_url::Url::parse(url.strip_prefix("blob:").unwrap_or(url), None).ok()?;
     let host = url.hostname();
     if !matches!(url.protocol(), "http:" | "https:") || host.is_empty() {
         return None;
     }
-    let labels: Vec<&str> = host.split('.').collect();
-    let domain = if ip_host(host) || labels.len() <= 2 { host.to_owned() } else { labels[labels.len() - 2..].join(".") };
-    Some(format!("{}//{domain}", url.protocol()))
+    Some(format!("{}//{}", url.protocol(), registrable_domain(host).unwrap_or(host)))
 }
 pub(crate) fn site_for_ruby(url: String) -> Option<String> {
     site(&url)
@@ -319,17 +338,15 @@ fn domain_host(value: &str) -> Option<String> {
     (bare && url.href() == format!("http://{}/", url.host())).then(|| url.hostname().to_owned())
 }
 // `document.domain`'s setter steps past "has a browsing context" (HTML §7.5.2): what a write of `value` sets, or why it
-// may not (dom-nodes.js `DOMAIN_*`) — an opaque origin, no host, or one the effective domain is neither nor a subdomain
-// of, where neither is an IP address — with the host it did parse to. A public suffix is no domain it may set, which
-// this does not know: no list of them is kept.
+// may not (dom-nodes.js `DOMAIN_*`) — an opaque origin, no host, or one that is no registrable domain suffix of the
+// effective domain, nor it — with the host it did parse to.
 const DOMAIN_OPAQUE: u32 = 1;
 const DOMAIN_UNPARSED: u32 = 2;
 const DOMAIN_NOT_SUFFIX: u32 = 3;
 fn domain_to_set(effective: Option<&str>, value: &str) -> Result<String, (u32, String)> {
     let effective = effective.ok_or((DOMAIN_OPAQUE, String::new()))?;
     let host = domain_host(value).ok_or((DOMAIN_UNPARSED, String::new()))?;
-    let suffix = || !ip_host(&host) && !ip_host(effective) && effective.strip_suffix(host.as_str()).is_some_and(|sub| sub.ends_with('.'));
-    if host == effective || suffix() {
+    if registrable_domain_suffix(&host, effective) {
         Ok(host)
     } else {
         Err((DOMAIN_NOT_SUFFIX, host))
@@ -377,10 +394,31 @@ fn ip_host_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let host = args.get(0).to_rust_string_lossy(scope);
     rv.set_bool(ip_host(&host));
 }
+// __dom.registrableDomainSuffix(suffix, host) -> whether `suffix` is a registrable domain suffix of `host` or it
+// (`registrable_domain_suffix`).
+fn registrable_domain_suffix_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (suffix, host) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
+    rv.set_bool(registrable_domain_suffix(&suffix, &host));
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_site_is_a_registrable_domain_by_the_public_suffix_list() {
+        assert_eq!(site("https://a.b.example.com/x").as_deref(), Some("https://example.com"));
+        assert_eq!(site("https://a.example.co.uk/").as_deref(), Some("https://example.co.uk"));
+        assert_eq!(site("https://user.github.io/").as_deref(), Some("https://user.github.io"));
+        assert_eq!(site("http://www1.web-platform.test:8000/").as_deref(), Some("http://web-platform.test"));
+        assert_eq!(site("http://localhost:3000/").as_deref(), Some("http://localhost"));
+        assert_eq!(site("http://127.0.0.1:3000/").as_deref(), Some("http://127.0.0.1"));
+        assert_eq!(site("http://co.uk/").as_deref(), Some("http://co.uk"));
+        assert!(registrable_domain_suffix("example.co.uk", "a.example.co.uk"));
+        assert!(!registrable_domain_suffix("co.uk", "a.example.co.uk"));
+        assert!(!registrable_domain_suffix("github.io", "user.github.io"));
+        assert!(!registrable_domain_suffix("test", "a.b.test"));
+    }
 
     #[test]
     fn a_domain_is_set_to_the_effective_one_or_a_superdomain_of_it() {

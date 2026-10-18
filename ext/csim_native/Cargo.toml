@@ -58,6 +58,9 @@ ada-url = "4"
 # URLPattern's parser and canonicalization (url_pattern.rs): the URL Pattern Standard's, Deno's — its `quirks`
 # interface leaves the regular expressions to the ECMAScript engine, which is V8's here.
 urlpattern = "0.6"
+# The Public Suffix List, compiled in: a host's registrable domain — its site (HTML "obtain a site"), what
+# `document.domain` may be set to and a WebAuthn RP ID may be (HTML "is a registrable domain suffix of or is equal to").
+psl = "2"
 encoding_rs = "0.8"
 # Fetch's "data: URL processor", forgiving-base64 included (data_url.rs).
 data-url = "0.3"
