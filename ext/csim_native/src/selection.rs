@@ -143,8 +143,10 @@ const DIRECTION: u32 = 7;
 const RANGE: u32 = 8;
 // …the range where it counts (getRangeAt's, deleteFromDocument's), or null…
 const COUNTED_RANGE: u32 = 9;
-// …and the focus, [node, offset], wherever it is (`modify` moves it), or null.
+// …the focus, [node, offset], wherever it is (`modify` moves it), or null…
 const FOCUS: u32 = 10;
+// …and the range where it is in the document, a shadow tree in it included — what an edit acts on — or null.
+const CONNECTED_RANGE: u32 = 11;
 
 // What a change came to: nothing (a point out of the document, or a range a selection that has one does not take),
 // a change — a `selectionchange` owed — or an error the bindings throw: there is no selection (InvalidStateError), the
@@ -233,6 +235,10 @@ fn selection_get(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
             };
             rv.set(v8::String::new(scope, name).expect("a short string").into());
         }
+        CONNECTED_RANGE => match s.filter(|s| in_document(realm(scope, cid), sel, s.start.0)).and_then(|_| sel.range(scope)) {
+            Some(range) => rv.set(range.into()),
+            None => rv.set_null(),
+        },
         RANGE | COUNTED_RANGE => match sel.range(scope).filter(|_| code == RANGE || counted.is_some()) {
             Some(range) => rv.set(range.into()),
             None => rv.set_null(),

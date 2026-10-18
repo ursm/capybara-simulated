@@ -209,8 +209,7 @@
   // Enter: a TEXTAREA inserts a line break, a contenteditable a PARAGRAPH
   // (insertParagraph) or — with Shift — a line break. A single-line <input> runs
   // implicit form submission instead: no newline, no beforeinput / input. The
-  // event is the contract editors gate on; block-splitting for insertParagraph
-  // isn't modeled (no in-scope test checks the markup).
+  // block split or the `<br>` the engine's, as send_keys makes them.
   function enterKeyAction(shift, target) {
     if (!isEditableTarget(target)) return;
     var isTextarea = target.tagName === 'TEXTAREA';
@@ -218,7 +217,8 @@
     var inputType = (!isTextarea && !shift) ? 'insertParagraph' : 'insertLineBreak';
     editingKeyAction(target, inputType, null, function () {
       if (isTextarea) spliceTextCtl(target, '\n');
-      else if (typeof W.__csimInsertTextAtSelection === 'function') W.__csimInsertTextAtSelection('\n');
+      // (…the engine's insertion, `EDIT_PARAGRAPH` (2) or with Shift `EDIT_LINE_BREAK` (1): dom-nodes.js)
+      else if (typeof W.__csimInsertInEditingHost === 'function') W.__csimInsertInEditingHost(shift ? 1 : 2);
     }, ceTargetRanges(target));
   }
   // Undo / Redo accelerator (Ctrl/Cmd+Z, +Shift = redo, Ctrl+Y): historyUndo /
@@ -243,7 +243,8 @@
     if (!isEditableTarget(target)) return;
     editingKeyAction(target, 'insertText', ch, function () {
       if (isTextControlTarget(target)) spliceTextCtl(target, ch);
-      else if (typeof W.__csimInsertTextAtSelection === 'function') W.__csimInsertTextAtSelection(ch);
+      // (…the engine's insertion of text, `EDIT_TEXT` (0): dom-nodes.js)
+      else if (typeof W.__csimInsertInEditingHost === 'function') W.__csimInsertInEditingHost(0, ch);
     }, ceTargetRanges(target));
   }
   // The default action this driver ties to a trusted key press. Today: Tab moves

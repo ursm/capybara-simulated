@@ -318,14 +318,12 @@ fn range_point_error(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     };
     rv.set_uint32(code);
 }
-// __dom.nodeLength(nid) -> the "length of a node" (DOM §4.4: a doctype 0, character data its data's, any other its
+// __dom.nodeLength(nid) -> the "length of a node" (DOM §4.2: a doctype 0, character data its data's, any other its
 // children's count), the engine's — not a `data` getter a page may replace.
 fn node_length_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(nid) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
     let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let doctype = arena.get(nid).is_some_and(|n| n.node_type() == 10);
-    rv.set_uint32(if doctype { 0 } else { crate::range_contents::node_length(arena, nid) });
+    rv.set_uint32(crate::range_contents::node_length(crate::dom::realm(scope, cid), nid));
 }
 // __dom.rangeSetPoint(range, which, node, nid, offset) — DOM "set the start or end" (§5.5), the node and offset checked
 // already: the range's start (`which` 0) or end (1) is (`node`, `offset`), and the other point with it where it would

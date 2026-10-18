@@ -249,6 +249,31 @@ RSpec.describe 'inserting in an editing host' do
     ])
   end
 
+  it 'edits nothing where the selection is in no document — a shadow host taken out, a range a page moved out' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const e = document.getElementById('e'), g = getSelection();
+        const host = document.createElement('div');
+        document.body.append(host);
+        host.attachShadow({mode: 'open'}).innerHTML = '<div contenteditable>sh</div>';
+        const inner = host.shadowRoot.firstChild;
+        inner.focus();
+        g.collapse(inner.firstChild, 1);
+        host.remove();
+        document.execCommand('insertText', false, 'Z');
+        e.textContent = 'live';
+        e.focus();
+        g.collapse(e.firstChild, 4);
+        const out = document.createElement('div');
+        out.textContent = 'det';
+        g.getRangeAt(0).setStart(out.firstChild, 1);
+        document.execCommand('insertText', false, 'Q');
+        return [inner.innerHTML, out.innerHTML, e.innerHTML];
+      })()
+    JS
+    expect(got).to eq(%w[sh det live])
+  end
+
   it "edits by the selection's anchor: none from outside its host or from an island, the focus kept out of one" do
     island = 'a<span contenteditable="false">XY</span>b'
     selected = lambda {|anchor, focus, key|

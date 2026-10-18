@@ -255,18 +255,21 @@ fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, 
 // null for none — or null for a resource of no network scheme.
 fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(obj) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
-    // (…none for a resource a URL of no network scheme names — data:, blob:, about:, javascript: — Resource Timing's
-    // "mark resource timing" running only for a fetch over the network)
-    let name = member(scope, obj, "name").map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
-    let scheme = name.split_once(':').map_or("", |(s, _)| s);
-    if ["data", "blob", "about", "javascript"].iter().any(|s| s.eq_ignore_ascii_case(scheme)) {
+    // (…none for a resource whose URL is of no HTTP(S) scheme — Fetch's "finalize and report timing" returns for its
+    // original URL's: data:, blob:, about: … — its scheme read off the string's start, a data: URL's body left in it)
+    let Some(name) = member(scope, obj, "name").and_then(|v| v.to_string(scope)) else { return rv.set_null() };
+    let mut head = [0u16; 6];
+    let len = name.length().min(head.len());
+    name.write_v2(scope, 0, &mut head[..len], v8::WriteFlags::empty());
+    let head = String::from_utf16_lossy(&head[..len]).to_ascii_lowercase();
+    if !(head.starts_with("http:") || head.starts_with("https:")) {
         return rv.set_null();
     }
     let string = |scope: &mut v8::PinScope<'_, '_>, key: &str| member(scope, obj, key).map(|v| v.to_rust_string_lossy(scope));
     let flag = |scope: &mut v8::PinScope<'_, '_>, key: &str| member(scope, obj, key).is_some_and(|v| v.boolean_value(scope));
     let number = |scope: &mut v8::PinScope<'_, '_>, key: &str| member(scope, obj, key).and_then(|v| v.number_value(scope)).unwrap_or(0.0);
     let facts = Facts {
-        name: string(scope, "name").unwrap_or_default(),
+        name: name.to_rust_string_lossy(scope),
         final_url: string(scope, "finalUrl").unwrap_or_default(),
         document_origin: string(scope, "documentOrigin").unwrap_or_default(),
         tao: string(scope, "tao"),

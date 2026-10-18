@@ -39,11 +39,11 @@ struct Run<'s> {
     cut_any: bool,
 }
 
-// DOM's length of a node: its data's for character data, its children's count for any other.
+// DOM's length of a node (§4.2): its data's for character data, its children's count for any other — a doctype's, none.
 pub(crate) fn node_length(arena: &RealmArena, n: NodeId) -> u32 {
     arena.get(n).map_or(0, |d| if is_character_data(arena, n) { d.data.len() } else { d.children.len() }) as u32
 }
-// What a boundary point no range may have is (DOM §5.5 "set the start or end", §4.5's selection steps): a doctype's
+// What a boundary point no range may have is (DOM §5.5 "set the start or end", and the Selection API's collapse, extend and setBaseAndExtent): a doctype's
 // (InvalidNodeTypeError), or one past its node's length (IndexSizeError) — None for a point it may.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum PointError {
