@@ -28,8 +28,6 @@ FileAPI/url/unicode-origin.sub.html:
 FileAPI/url/url-in-tags.window.js:
 - Blob URL fragment is implemented.
 - "[harness] TIMEOUT"
-FileAPI/url/url_xmlhttprequest_img.html:
-- "== FileAPI/url/url_xmlhttprequest_img-ref.html (never ready to capture)"
 IndexedDB/back-forward-cache-open-connection.window.js:
 - back-forward-cache-open-connection
 IndexedDB/back-forward-cache-open-transaction.window.js:
@@ -2753,6 +2751,8 @@ html/canvas/element/manual/context-attributes/reset_color_alpha_false.html:
 html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_canvas.html:
 - 'Test scenario 12: sx = -20, sy = -20, sw = 50, sh = 50, dx = 20, dy = 20, dw =
   125, dh = 125 --- Pixel 82,82 should be blue.'
+html/canvas/element/manual/drawing-text-to-the-canvas/canvas.2d.disconnected-font-size-math.html:
+- "== html/canvas/element/manual/drawing-text-to-the-canvas/canvas.2d.disconnected-font-size-math-ref.html"
 html/canvas/element/manual/fill-and-stroke-styles/conic-gradient-rotation.html:
 - "== html/canvas/element/manual/fill-and-stroke-styles/conic-gradient-rotation-expected.html"
 html/canvas/element/manual/fill-and-stroke-styles/conic-gradient.html:
@@ -2828,8 +2828,6 @@ html/canvas/element/manual/shadows/shadowBlur_gaussian_tolerance.1.html:
 - shadowBlur Gaussian pixel values for small blur
 html/canvas/element/manual/text/canvas.2d.direction.inherit.disconnected.canvas.html:
 - "== html/canvas/element/manual/text/canvas.2d.direction-ref.html"
-html/canvas/element/manual/text/canvas.2d.disconnected.html:
-- "== html/canvas/element/manual/text/canvas.2d.disconnected-ref.html"
 html/canvas/element/manual/text/canvas.2d.fontStretch.condensed.html:
 - "== html/canvas/element/manual/text/canvas.2d.fontStretch-ref.html"
 html/canvas/element/manual/text/canvas.2d.fontStretch.expanded.html:
@@ -4288,8 +4286,6 @@ html/rendering/replaced-elements/images/img-sizes-auto.html:
 - <img sizes="auto"> - contain-intrinsic-size
 - <img sizes="auto,xyz"> - contain
 - <img sizes="auto,xyz"> - contain-intrinsic-size
-html/rendering/replaced-elements/images/revoked-blob-print.html:
-- "== html/rendering/replaced-elements/images/revoked-blob-print-ref.html"
 html/rendering/replaced-elements/svg-embedded-sizing/svg-in-object-auto.html:
 - "[harness] TIMEOUT"
 - 'placeholder: ''object'', '
