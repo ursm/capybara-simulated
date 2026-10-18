@@ -465,6 +465,7 @@ const STATE: u32 = 12;
 const CUSTOM_CANDIDATES: u32 = 13;
 const SHADOW_INCLUDING_ELEMENTS: u32 = 14;
 const CHILD_ELEMENTS: u32 = 15;
+const IMAGE_ELEMENTS: u32 = 16;
 
 // A string argument, or None for "*" (any).
 fn name_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Option<String> {
@@ -480,7 +481,8 @@ fn name_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Op
 // shadow-including tree order, a host before its shadow tree's own), those with a state bit of a mask (12: `a`), those
 // a custom element definition could be for (13), or every element of its shadow-including inclusive descendants (14: in
 // the shadow hosts' order, the scope itself first where it is one) — or its children that are elements (15: what its
-// `children` holds).
+// `children` holds) — or the image elements of its shadow-including inclusive descendants, in that order (16: an HTML
+// `<img>` or `<input>`, an SVG `<image>` — what loads an image, an input once its type is Image).
 fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let kind = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
@@ -523,10 +525,14 @@ fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         SHEET_OWNERS => Filter::SheetOwners,
         STATE => Filter::State(a.uint32_value(scope).unwrap_or(0)),
         CUSTOM_CANDIDATES => Filter::CustomCandidates,
-        SHADOW_HOSTS | SHADOW_INCLUDING_ELEMENTS => {
+        SHADOW_HOSTS | SHADOW_INCLUDING_ELEMENTS | IMAGE_ELEMENTS => {
             let cid = realm_id(scope, &args);
-            let hosts = kind == SHADOW_HOSTS;
-            let ids = crate::dom::realm(scope, cid).shadow_including_elements(root, |n| !hosts || n.shadow_root.is_some());
+            let pick = |n: &crate::dom::NodeData| match kind {
+                SHADOW_HOSTS => n.shadow_root.is_some(),
+                IMAGE_ELEMENTS => n.is_html_named("img") || n.is_html_named("input") || (n.ns == ns!(svg) && &*n.local_name == "image"),
+                _ => true,
+            };
+            let ids = crate::dom::realm(scope, cid).shadow_including_elements(root, pick);
             return rv.set(crate::dom::nodes_value(scope, cid, &ids));
         }
         CHILD_ELEMENTS => {

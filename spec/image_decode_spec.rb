@@ -318,5 +318,25 @@ RSpec.describe 'image decode' do
     JS
     expect(got).to eq(%w[blob:load:2x3 ftp:error revoked:error ok EncodingError])
   end
+  # An image of a document with no browsing context (a DOMParser's) loads nothing — however its `src` is set — until an
+  # adoption brings it into this one: then it does, inside nested shadow trees too. Chrome: no size, then `load`.
+  it 'loads no image in a document with no browsing context until it is adopted into one' do
+    session = simulated_session(app).tap {|s| s.visit '/' }
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const d = new DOMParser().parseFromString('<div id=h></div>', 'text/html');
+      const host = d.getElementById('h');
+      const inner = document.createElement('div');
+      inner.attachShadow({mode: 'open'});
+      host.attachShadow({mode: 'open'}).append(inner);
+      const img = d.createElement('img');
+      img.src = '/green';
+      inner.shadowRoot.append(img);
+      const before = img.naturalWidth;
+      img.onload = () => done([before, img.naturalWidth]);
+      document.body.append(host);
+    JS
+    expect(got).to eq([0, 100])
+  end
 end
 
