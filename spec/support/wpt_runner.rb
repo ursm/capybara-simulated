@@ -303,15 +303,14 @@ module WptRunner
   end
 
   # Collapse an ordered list of [name, value] response-header pairs into Rack's
-  # name→value Hash, the way a browser builds the response header list: names
-  # lowercased, each value normalized (leading/trailing HTTP whitespace stripped —
-  # NOT \v/\f, which headers-some-are-empty preserves), and a field that appears more
-  # than once combined with ", " (headers.py's repeated X-Custom-Header-Comma, the
-  # `.asis` duplicate-header fixtures). So getResponseHeader sees "1, 2", not "2".
-  # Set-Cookie is the one field that must NOT comma-combine (a cookie's Expires
-  # itself contains a comma, so the join is unsplittable): accumulate it as an
-  # Array — Rack 3's multi-value shape, which merge_set_cookie handles — so a
-  # handler setting four cookies (setSameSite.py) lands four jar entries.
+  # name→value Hash: names lowercased, each value normalized (leading/trailing HTTP
+  # whitespace stripped — NOT \v/\f, which headers-some-are-empty preserves), and a
+  # field that appears more than once — and Set-Cookie always — kept as an Array of
+  # its fields, Rack 3's multi-value shape, which the driver reads as a browser builds
+  # the response header list: the fields combined with ", " (headers.py's repeated
+  # X-Custom-Header-Comma, the `.asis` duplicate-header fixtures: getResponseHeader
+  # sees "1, 2", not "2"; two empty fields ", "), and a cookie per Set-Cookie field (a
+  # cookie's Expires itself holds a comma; setSameSite.py lands four jar entries).
   def combine_headers(pairs)
     Array(pairs).each_with_object({}) do |(name, value), hdrs|
       key = name.to_s.downcase

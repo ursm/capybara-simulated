@@ -6024,9 +6024,8 @@ module Capybara
         ct = (res['headers'] || {}).find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
         return {'error' => 'mime'} unless js_mime_type?(ct)
         # (…and the scope one the script may control: its directory, or the path its Service-Worker-Allowed names)
-        # (…a header given more than once — Rack 3's array, Rack 2's lines — combined, as a header list combines one)
+        # (…a header given more than once combined, as `response_hash` hands every one over)
         allowed = (res['headers'] || {}).find {|k, _| k.to_s.casecmp('service-worker-allowed').zero? }&.last
-        allowed = Array(allowed).flat_map {|v| v.to_s.split("\n") }.join(', ') unless allowed.nil?
         case Native.service_worker_max_scope(scope.to_s, script_url.to_s, allowed)
         when 'network' then return {'error' => 'network'}
         when 'scope'   then return {'error' => 'scope'}
@@ -11464,7 +11463,8 @@ module Capybara
         # `document.lastModified` reflects the response Last-Modified header (parsed
         # to local time); absent → the current time (handled JS-side).
         lm = response_headers['Last-Modified']   # response_headers normalizes keys to Capitalized-Dash form
-        opts['lastModified'] = lm if lm && !lm.to_s.empty?
+        lm &&= header_text(lm)
+        opts['lastModified'] = lm if lm && !lm.empty?
         if @viewport_width && @viewport_height
           opts['viewportW'] = @viewport_width
           opts['viewportH'] = @viewport_height
@@ -11718,6 +11718,24 @@ module Capybara
       # back from `tmp/downloads/`; routing the response through the
       # save path here keeps the page state unchanged (no rebuild),
       # mirroring what a real browser does after a download.
+      # The filename a Content-Disposition gives (RFC 6266 §4.3): `filename*`'s ext-value (RFC 8187: its charset's bytes,
+      # percent-encoded) where it has one, else `filename`'s — a quoted-string's backslash escapes undone — its bytes
+      # UTF-8 where they are (Chrome: a raw UTF-8 name), else each byte the code point it is; and no directory of it
+      # (`../x` is `x`). '' for none. `cd` the header's text, each byte a code point (`header_text`).
+      def disposition_filename(cd)
+        bytes = cd.encode(Encoding::ISO_8859_1, invalid: :replace, undef: :replace).b
+        param = ->(name) { bytes[/(?:\A|;)\s*#{name}\s*=\s*("(?:[^"\\]|\\.)*"|[^;]*)/ni, 1]&.strip }
+        name = if (ext = param.('filename\\*')) && (m = ext.match(/\A([\w!#$%&+^`{}~-]+)'[^']*'(.*)\z/n))
+          decoded = m[2].gsub(/%(\h\h)/n) { $1.hex.chr }
+          m[1].casecmp?('utf-8') ? decoded.force_encoding(Encoding::UTF_8) : decoded.force_encoding(Encoding::ISO_8859_1)
+        elsif (plain = param.('filename'))
+          plain = plain[1..-2].gsub(/\\(.)/n, '\\1') if plain.start_with?('"') && plain.end_with?('"') && plain.length >= 2
+          utf8 = plain.dup.force_encoding(Encoding::UTF_8)
+          utf8.valid_encoding? ? utf8 : plain.force_encoding(Encoding::ISO_8859_1)
+        end
+        File.basename(name.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace).tr('\\', '/'))
+      end
+
       def content_disposition_header(headers)
         value = headers['content-disposition'] || headers['Content-Disposition']
         value && header_text(value)
@@ -11729,9 +11747,7 @@ module Capybara
       end
 
       def save_downloaded_response(url, headers, body)
-        cd = content_disposition_header(headers).to_s
-        m = cd.match(/filename\*?\s*=\s*(?:"([^"]+)"|([^;]+))/i)
-        filename = (m && (m[1] || m[2]) || '').strip
+        filename = disposition_filename(content_disposition_header(headers).to_s)
         filename = File.basename(parse_url(url.to_s)&.fetch(:pathname).to_s) if filename.empty?
         filename = 'download' if filename.empty?
         dir = downloads_directory
@@ -12060,9 +12076,10 @@ module Capybara
           req['Content-Type'] = env['CONTENT_TYPE'] if env['CONTENT_TYPE']
           req.body = body if body && !body.empty?
           resp = http.request(req)
+          # (…each name's fields as they came — Rack 3's Array for a repeated one — where `each_capitalized` joins them,
+          # and two Set-Cookie fields, the first's Expires holding a comma, made one cookie)
           headers = {}
-          resp.each_capitalized {|k, v| (headers[k] ||= []) << v }
-          headers = headers.transform_values {|vs| vs.length == 1 ? vs.first : vs }
+          resp.each_capitalized_name {|k| fields = resp.get_fields(k); headers[k] = fields.one? ? fields.first : fields }
           [resp.code.to_i, headers, [resp.body || '']]
         end
       rescue SystemExit, Interrupt, NoMemoryError
@@ -12166,11 +12183,10 @@ module Capybara
         headers.each_with_object({}) {|(k, v), out| out[k.to_s] = header_text(v) }
       end
 
-      # …a header's value as script reads it: its fields — each without the HTTP whitespace around it, as an HTTP stack
-      # reads a field (Chrome and Firefox: ` 5 ` is `5`) — combined with `, `, each byte the code point it is.
+      # …a header's value as script reads it: its fields combined (AssetCache.combined: each without the HTTP whitespace
+      # around it), each byte the code point it is.
       def header_text(value)
-        fields = Array(value).map {|field| field.to_s.b.sub(/\A[\t ]+/n, '').sub(/[\t ]+\z/n, '') }
-        AssetCache.combined(fields).force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
+        AssetCache.combined(value).to_s.b.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
       end
 
       # The Fetch "redirect status" set — ONLY these are followed. 300 (multiple
@@ -12386,7 +12402,7 @@ module Capybara
       def server_delay_ms_of(headers)
         return 0 unless headers.is_a?(Hash)
         pair = headers.find {|k, _| k.to_s.casecmp?('x-csim-server-delay-ms') }
-        pair ? pair.last.to_i : 0
+        pair ? header_text(pair.last).to_i : 0
       end
 
       def cors_exposed_headers(headers, credentialed = false)

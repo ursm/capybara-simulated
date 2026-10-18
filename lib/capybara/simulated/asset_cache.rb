@@ -95,9 +95,13 @@ module Capybara
       # the map is bounded the way `@@asset_src` is: wipe and restart when it fills.
       MAX_ENTRIES = 4096
 
-      # A response header's value as one: a Rack 3 app may give it as an Array of its fields, which an HTTP response's
-      # header list combines with ", ".
-      def self.combined(value) = value.is_a?(Array) ? value.join(', ') : value
+      # A response header's value as one: each of its fields — a Rack 3 app may give an Array of them — without the HTTP
+      # whitespace around it, as an HTTP stack reads a field (Chrome and Firefox: ` 5 ` is `5`), combined with ", " as an
+      # HTTP response's header list combines them; nil for none.
+      def self.combined(value)
+        return nil if value.nil?
+        Array(value).map {|field| field.to_s.sub(/\A[\t ]+/, '').sub(/[\t ]+\z/, '') }.join(', ')
+      end
 
       def initialize
         @entries = {}
