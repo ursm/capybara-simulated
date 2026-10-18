@@ -61,4 +61,35 @@ RSpec.describe 'the cookie store' do
     s.visit 'http://www.example.com/sandboxed'
     expect(s.evaluate_script('window.got')).to eq('SecurityError')
   end
+
+  # A load the host makes for a document — an image's — is cross-site for cookies where its document is, or the top-level
+  # one, or a `data:` one it is in, and stays so across its redirects, one the HTTP cache answers too: no Strict or Lax
+  # cookie goes (Chrome measured).
+  it "sends a cross-site document's image loads no SameSite cookie" do
+    seen = []
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      seen << [req.path, env['HTTP_COOKIE'].to_s] if req.path.start_with?('/echo')
+      case req.path
+      when '/set'   then [200, {'content-type' => 'text/plain', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
+      when '/frame' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><img src="http://a.test/echo-frame">']]
+      when '/r301'  then [301, {'location' => 'http://a.test/echo-redirect', 'cache-control' => 'max-age=3600'}, ['']]
+      when '/top'   then [200, {'content-type' => 'text/html'}, [
+        '<!DOCTYPE html><iframe src="http://b.test/frame"></iframe>' \
+        '<iframe src="data:text/html,<img src=http://a.test/echo-data>"></iframe>' \
+        '<img src="http://b.test/r301">'
+      ]]
+      else [200, {'content-type' => 'image/gif'}, ['GIF89a']]
+      end
+    }
+    # (…every host the app's, so the cross-site frame is built as the page loads)
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
+    s = simulated_session(app)
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+    s.visit 'http://a.test/set'
+    2.times { s.visit 'http://a.test/top' }
+    expect(seen.map(&:first).uniq.sort).to eq(%w[/echo-data /echo-frame /echo-redirect])
+    expect(seen.reject {|_, c| c.empty? }).to eq([])
+  end
 end

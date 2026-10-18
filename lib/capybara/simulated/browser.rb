@@ -7767,11 +7767,12 @@ module Capybara
       # `cors` (a `crossorigin` <img>) fetches under CORS: a cross-origin response without a
       # matching Access-Control-Allow-Origin fails the load. `credentials` is 'include' for
       # crossorigin="use-credentials", 'same-origin' (uncredentialed cross-origin) otherwise.
-      def load_image(url, cors = false, credentials = 'same-origin')
+      def load_image(url, cors = false, credentials = 'same-origin', realm: nil)
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
         Thread.current[:csim_image_meta] = nil
-        entry = cached_image(key, cors, credentials)
+        origin_base, cookie_cross = load_client(realm, key)
+        entry = cached_image(key, cors, credentials, origin_base: origin_base, cookie_cross_site: cookie_cross)
         return {'unsupported' => true} if entry == :unsupported
         return undecodable_image_result unless entry
         image_payload(entry, image_tainted?(key, cors), Thread.current[:csim_image_meta])
@@ -7782,10 +7783,10 @@ module Capybara
       # JS side files its pending element under, or -1 when the URL can't resolve (the caller
       # falls back to the synchronous path). The heavy call chain is exactly `load_image`'s —
       # same cache, same CORS enforcement, same taint verdict — just off-thread.
-      def image_load_start(url, cors = false, credentials = 'same-origin')
+      def image_load_start(url, cors = false, credentials = 'same-origin', realm: nil)
         key = resolve_against_current(url.to_s)
         return -1 unless key.is_a?(String)
-        origin_base = @current_url
+        origin_base, cookie_cross = load_client(realm, key)
         id = nil
         @image_load_lock.synchronize do
           id = (@image_load_seq += 1)
@@ -7795,7 +7796,7 @@ module Capybara
           # not race N identical Rack requests + decodes where the sync path did one fetch and
           # N−1 cache hits. Followers just register their id on the in-flight group; the one
           # thread finalizes every member with the shared result.
-          flight = [key, cors, credentials, cors ? url_origin(origin_base) : nil]
+          flight = [key, cors, credentials, cors ? url_origin(origin_base) : nil, cookie_cross]
           if (group = @image_load_flights[flight])
             group << id
             next
@@ -7806,7 +7807,7 @@ module Capybara
             r = nil
             begin
               r = begin
-                image_load_result(key, cors, credentials, origin_base)
+                image_load_result(key, cors, credentials, origin_base, cookie_cross)
               rescue StandardError
                 nil
               end
@@ -7835,9 +7836,9 @@ module Capybara
 
       # The thread-side body: everything except the transfer stash (engine-affine, done at
       # delivery on the main thread). Result mirrors `load_image`'s shapes with the raw entry.
-      private def image_load_result(key, cors, credentials, origin_base)
+      private def image_load_result(key, cors, credentials, origin_base, cookie_cross = false)
         Thread.current[:csim_image_meta] = nil
-        entry = cached_image(key, cors, credentials, origin_base: origin_base)
+        entry = cached_image(key, cors, credentials, origin_base: origin_base, cookie_cross_site: cookie_cross)
         return {'unsupported' => true} if entry == :unsupported
         return undecodable_image_result unless entry
         { entry: entry, tainted: origin_tainted?(key, cors, client_url: origin_base), meta: Thread.current[:csim_image_meta] }
@@ -7947,8 +7948,8 @@ module Capybara
       # CORS load's success is origin-dependent (a response's ACAO may allow one origin and
       # not another) — fetching per load is what keeps the verdict the requesting document's
       # own; only the origin-free decode result is shared.
-      private def cached_image(key, cors = false, credentials = 'same-origin', origin_base: @current_url)
-        bytes = image_source_bytes(key, cors, credentials, origin_base: origin_base)
+      private def cached_image(key, cors = false, credentials = 'same-origin', origin_base: @current_url, cookie_cross_site: false)
+        bytes = image_source_bytes(key, cors, credentials, origin_base: origin_base, cookie_cross_site: cookie_cross_site)
         return bytes if bytes == :unsupported
         return nil unless bytes
         cache_key = Digest::SHA256.digest(bytes)
@@ -7977,7 +7978,7 @@ module Capybara
       # fetch, so rack_fetch's Access-Control enforcement rejects (→ nil) a cross-origin
       # response with no matching ACAO. :unsupported for a scheme with no host-side reader,
       # nil for a missing / failed / CORS-rejected / empty resource.
-      private def image_source_bytes(key, cors = false, credentials = 'same-origin', origin_base: @current_url)
+      private def image_source_bytes(key, cors = false, credentials = 'same-origin', origin_base: @current_url, cookie_cross_site: false)
         if key.start_with?('data:')
           bytes = decode_data_url_body(key)
           bytes.empty? ? nil : bytes
@@ -7987,7 +7988,7 @@ module Capybara
           # must not swing the CORS / SameSite / Referer verdicts to a document that never
           # issued this request.
           result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials,
-                              client_url: origin_base, referrer: origin_base, body_raw: true)
+                              client_url: origin_base, referrer: origin_base, body_raw: true, cookie_cross_site: cookie_cross_site)
           # What the image's Resource Timing entry reports of the response — its content type,
           # whether it was redirected to, its status and size — read back on this thread right
           # after; a 404 is a response too (the element breaks, the entry keeps the status).
@@ -9539,6 +9540,18 @@ module Capybara
         # (…the site for cookies and the client it is judged by, kept across the hops: a redirect back to the client's own
         # site is still a cross-site chain's)
         cookie_site = cookie_client = nil
+        # …which a hop to `hop` widens (RFC 6265bis "site for cookies"): a script fetch's by its client document's site
+        # against the hop's; a mode-less load's — an image's, a font's, a style sheet's, the host's for a document — by its
+        # client's and its top-level document's; a client of an opaque origin (`null`, `data:`) cross-site
+        # (cookie_cross_site_document?). None for a load with no client at all.
+        widen_cookie_site = lambda {|hop|
+          cookie_client ||= cors_mode ? (doc_origin || sec_initiator) : (client_url || sec_initiator)
+          next if cookie_client.nil?
+
+          cross = cookie_cross_site_document?(cookie_client, hop) ||
+                  (!cors_mode && !@current_url.nil? && cookie_cross_site_document?(@current_url, hop))
+          cookie_site = widen_sec_fetch_site(cookie_site, cross ? 'cross-site' : sec_fetch_site(cookie_client, hop))
+        }
         (MAX_FETCH_REDIRECTS + 1).times do
           t0 = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
           # Cross-origin-ness for the request mode/type, latched across hops. Computed
@@ -9572,6 +9585,7 @@ module Capybara
               end
               if (loc = redirect_location(cache_entry.status, cache_entry.headers))
                 trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, true)
+                widen_cookie_site.(target) unless cors_mode == 'navigate'   # (…a hop the cache answered a hop all the same)
                 redirected = true
                 next_url   = resolve_against(loc, target)
                 return nil unless next_url.to_s.match?(%r{\Ahttps?://}i)
@@ -9667,48 +9681,29 @@ module Capybara
             # (…and whether it is a top-level navigation's, which may set a SameSite cookie however cross-site:
             # merge_set_cookie)
             env['csim.cookie_top_level'] = true if cors_mode == 'navigate' && nav_dest.to_s == 'document'
-            # SameSite re-filter: cookies attached above (apply_default_request_env ran
-            # before this hop's Sec-Fetch-Site existed) — a cross-site hop must shed
-            # Strict/Lax cookies. The COOKIE site is not always the Sec-Fetch latch:
-            # a `navigate`-mode request is a SW re-issuing the navigation it
-            # intercepted, which keeps the CHAIN's verdict (and the top-level Lax
-            # exception for a GET) — but any other mode is a script fetch whose
-            # site-for-cookies is its CLIENT's origin vs the target (an SW that
-            # builds a `new Request` fetches as ITSELF: same-site-cookies expects
-            # Strict cookies on the rewritten same-origin request even though the
-            # intercepted navigation was cross-site), widened across this fetch's
-            # own redirect hops.
-            cookie_site = if cors_mode == 'navigate'
-                            sec_site
-                          else
-                            cookie_client ||= doc_origin || sec_initiator
-                            cookie_site = widen_sec_fetch_site(cookie_site, sec_fetch_site(cookie_client, target))
-                          end
-            # The ancestor-chain verdict (a SW re-fetch of a navigation into a frame with
-            # a cross-site ancestor — see frame_ancestor_cross_site?) overrides: it's a
-            # property of the target frame, cross-site whoever issues the request.
+          end
+          # SameSite re-filter: cookies attached above (apply_default_request_env ran before this hop's site was known) —
+          # a cross-site hop sheds Strict/Lax cookies. The COOKIE site is not always the Sec-Fetch latch: a `navigate`-mode
+          # request is a SW re-issuing the navigation it intercepted, which keeps the CHAIN's verdict (and the top-level
+          # Lax exception for a GET) — any other is judged by its client (`widen_cookie_site`: an SW that builds a
+          # `new Request` fetches as ITSELF — same-site-cookies expects Strict cookies on the rewritten same-origin request
+          # even though the intercepted navigation was cross-site).
+          if cors_mode == 'navigate'
+            cookie_site = sec_site
+          else
+            widen_cookie_site.(target)
+          end
+          if cookie_site
+            # The ancestor-chain verdict (a SW re-fetch of a navigation into a frame with a cross-site ancestor — see
+            # frame_ancestor_cross_site?) overrides: it's a property of the target frame, cross-site whoever issues it.
             cookie_site = 'cross-site' if cookie_cross_site
             # (…the one verdict the response's Set-Cookie is stored by too: merge_set_cookie)
             env['csim.cookie_site'] = cookie_site
             if env['HTTP_COOKIE'] && cookie_site == 'cross-site'
-              # The Lax navigation exception is TOP-LEVEL only (dest 'document'): an
-              # iframe navigation or an ancestor-cross frame navigation
-              # (cookie_cross_site) sheds Lax like any cross-site subresource.
-              ck = cookie_header_for(env_request_url(env),
-                                     secure:     env_secure_channel?(env),
-                                     cross_site: true,
-                                     lax_ok: cors_mode == 'navigate' && method.to_s.upcase == 'GET' && nav_dest.to_s == 'document' && !cookie_cross_site)
-              ck.empty? ? env.delete('HTTP_COOKIE') : env['HTTP_COOKIE'] = ck
-            end
-          elsif (cookie_client ||= url_origin(client_url) || sec_initiator)
-            # A load the host makes for a page — an image's, a font's, a style sheet's — with no request mode of its own
-            # sends no Fetch metadata, but its site for cookies is its client's against the target, widened across its
-            # redirects, as a no-cors request's is: cross-site, it sheds its Strict and Lax cookies (and stores none).
-            cookie_site = widen_sec_fetch_site(cookie_site, sec_fetch_site(cookie_client, target))
-            cookie_site = 'cross-site' if cookie_cross_site
-            env['csim.cookie_site'] = cookie_site
-            if env['HTTP_COOKIE'] && cookie_site == 'cross-site'
-              ck = cookie_header_for(env_request_url(env), secure: env_secure_channel?(env), cross_site: true, lax_ok: false)
+              # The Lax navigation exception is TOP-LEVEL only (dest 'document'): an iframe navigation or an
+              # ancestor-cross frame navigation (cookie_cross_site) sheds Lax like any cross-site subresource.
+              lax_ok = cors_mode == 'navigate' && method.to_s.upcase == 'GET' && nav_dest.to_s == 'document' && !cookie_cross_site
+              ck = cookie_header_for(env_request_url(env), secure: env_secure_channel?(env), cross_site: true, lax_ok: lax_ok)
               ck.empty? ? env.delete('HTTP_COOKIE') : env['HTTP_COOKIE'] = ck
             end
           end
@@ -11853,8 +11848,9 @@ module Capybara
         # Attach the TARGET host's cookies (not the document's) — SERVER_NAME is the
         # request's host — so a cross-origin request carries the right jar or none.
         # SameSite context from the request's own Fetch metadata (set by
-        # navigation_request_headers before cookies attach). No metadata — internal
-        # asset/ESM/beacon callers — stays same-site, today's permissive behavior.
+        # navigation_request_headers before cookies attach). No metadata — a fetch, an
+        # asset / ESM / beacon load — attaches every cookie here, and rack_fetch sheds
+        # the cross-site ones once it knows the hop's site for cookies.
         # `csim.cookie_cross_site` is the ANCESTOR-CHAIN verdict (RFC 6265bis "site for
         # cookies"): a navigation into a frame with a cross-site ancestor is cross-site
         # for cookies even when its initiator is same-origin — while Sec-Fetch-Site
@@ -11915,15 +11911,24 @@ module Capybara
       # initiator-based Sec-Fetch-Site latch).
       # …and a navigation of a frame in realm `realm_id`'s document: cross-site where that document is, or an ancestor of
       # it.
+      # The document a load the host makes is for — realm `realm`'s, the top-level one's for none (a frame's gone, its
+      # parent's chain all the same) — and whether a request to `target_url` from it is cross-site for cookies: where
+      # it, or an ancestor, is (`container_cross_site?`). Read on the main thread, which a realm's URL is asked on.
+      def load_client(realm, target_url)
+        rid = realm.to_i
+        return [@current_url, false] unless rid.positive?
+
+        [frame_realm_url(rid) || @current_url, container_cross_site?(rid, target_url)]
+      end
       private def container_cross_site?(realm_id, target_url)
         rid = realm_id.to_i
         cookie_cross_site_document?(rid.positive? ? frame_realm_url(rid) : @current_url, target_url) || frame_ancestor_cross_site?(rid, target_url)
       end
-      # Whether a document of `url` makes a request to `target_url` under it cross-site for cookies: one whose URL is not
-      # known (closed rather than open), one of an opaque origin (a `data:` document's: of no site at all), one of
-      # another site.
+      # Whether a document of `url` (or an origin) makes a request to `target_url` under it cross-site for cookies: one
+      # whose URL is not known (closed rather than open), one of an opaque origin (a `data:` document's, a sandboxed
+      # one's `null`: of no site at all), one of another site.
       private def cookie_cross_site_document?(url, target_url)
-        url.nil? || url.to_s.match?(/\Adata:/i) || sec_fetch_site(url, target_url.to_s) == 'cross-site'
+        url.nil? || url == 'null' || url.to_s.match?(/\Adata:/i) || sec_fetch_site(url, target_url.to_s) == 'cross-site'
       end
       private def frame_ancestor_cross_site?(realm_id, target_url)
         rid = realm_id.to_i
