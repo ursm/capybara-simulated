@@ -383,12 +383,51 @@ fn create(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     rv.set_uint32(store.next);
 }
 
-// __dom.moObserve(observer, nid, flags, filter) — `filter` the attribute names given, or null.
+// DOM "observe" steps 1-6: the options a MutationObserverInit asks for — `flags` the members that are true, `given` those
+// present (one with no default may be absent), `filtered` whether it has an `attributeFilter` — with `attributes`
+// implied by an attribute option and `characterData` by its old value where they are absent (not where they are false,
+// which contradicts them); or the TypeError's words where they ask for no kind of change, or contradict themselves.
+fn observe_options(mut flags: u32, given: u32, filtered: bool) -> Result<u32, &'static str> {
+    if (given & ATTRIBUTE_OLD_VALUE != 0 || filtered) && given & ATTRIBUTES == 0 {
+        flags |= ATTRIBUTES;
+    }
+    if given & CHARACTER_DATA_OLD_VALUE != 0 && given & CHARACTER_DATA == 0 {
+        flags |= CHARACTER_DATA;
+    }
+    let has = |f: u32| flags & f != 0;
+    if !has(CHILD_LIST | ATTRIBUTES | CHARACTER_DATA) {
+        return Err("The options object must set at least one of 'attributes', 'characterData', or 'childList' to true.");
+    }
+    if has(ATTRIBUTE_OLD_VALUE) && !has(ATTRIBUTES) {
+        return Err("The options object may only set 'attributeOldValue' to true when 'attributes' is true or not present.");
+    }
+    if filtered && !has(ATTRIBUTES) {
+        return Err("The options object may only set 'attributeFilter' when 'attributes' is true or not present.");
+    }
+    if has(CHARACTER_DATA_OLD_VALUE) && !has(CHARACTER_DATA) {
+        return Err("The options object may only set 'characterDataOldValue' to true when 'characterData' is true or not present.");
+    }
+    Ok(flags)
+}
+
+// __dom.moObserve(observer, nid, flags, given, filter) — the options `observe_options` makes of `flags` and `given`, `filter` the
+// attribute names given, or null; a TypeError where they are refused.
 fn observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let observer = args.get(0).uint32_value(scope).unwrap_or(0);
     let Some(target) = nid_arg(scope, &args, 1) else { return };
-    let flags = args.get(2).uint32_value(scope).unwrap_or(0);
-    let filter = v8::Local::<v8::Array>::try_from(args.get(3)).ok().map(|names| {
+    let (flags, given) = (args.get(2).uint32_value(scope).unwrap_or(0), args.get(3).uint32_value(scope).unwrap_or(0));
+    let flags = match observe_options(flags, given, !args.get(4).is_null_or_undefined()) {
+        Ok(flags) => flags,
+        Err(words) => {
+            let message = format!("Failed to execute 'observe' on 'MutationObserver': {words}");
+            if let Some(message) = v8::String::new(scope, &message) {
+                let error = v8::Exception::type_error(scope, message);
+                scope.throw_exception(error);
+            }
+            return;
+        }
+    };
+    let filter = v8::Local::<v8::Array>::try_from(args.get(4)).ok().map(|names| {
         let mut filter = Vec::new();
         for i in 0..names.length() {
             if let Some(name) = names.get_index(scope, i) {
@@ -560,5 +599,22 @@ pub(crate) fn transients_of_children(arena: &mut RealmArena, parent: NodeId) {
         for child in children {
             arena.add_transient_observers(child, parent);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn observe_implies_and_refuses_options() {
+        assert_eq!(observe_options(CHILD_LIST, CHILD_LIST | SUBTREE, false), Ok(CHILD_LIST));
+        assert_eq!(observe_options(ATTRIBUTE_OLD_VALUE, ATTRIBUTE_OLD_VALUE | CHILD_LIST | SUBTREE, false), Ok(ATTRIBUTES | ATTRIBUTE_OLD_VALUE));
+        assert_eq!(observe_options(0, CHILD_LIST | SUBTREE, true), Ok(ATTRIBUTES));
+        assert_eq!(observe_options(0, CHARACTER_DATA_OLD_VALUE, false), Ok(CHARACTER_DATA));
+        assert!(observe_options(0, CHILD_LIST | SUBTREE, false).is_err());
+        assert!(observe_options(ATTRIBUTE_OLD_VALUE | CHILD_LIST, ATTRIBUTES | ATTRIBUTE_OLD_VALUE | CHILD_LIST, false).is_err());
+        assert!(observe_options(CHILD_LIST, ATTRIBUTES | CHILD_LIST, true).is_err());
+        assert!(observe_options(CHARACTER_DATA_OLD_VALUE | CHILD_LIST, CHARACTER_DATA | CHARACTER_DATA_OLD_VALUE | CHILD_LIST, false).is_err());
     }
 }
