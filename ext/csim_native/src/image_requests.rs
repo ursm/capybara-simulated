@@ -18,6 +18,9 @@ pub(crate) struct ImageRequest {
     size: [u32; 2],
     tainted: bool,
     orientation: u8,
+    // The current pixel density of its source (a `2x` candidate's 2; 0, unset, as 1): what its natural size is divided
+    // by (HTML: the density-corrected natural width and height).
+    density: f64,
     load: u32,
     // (…the key a hash: a `data:` URL is the whole image)
     key: Option<u64>,
@@ -41,6 +44,10 @@ impl RealmArena {
     pub(crate) fn image_pending(&self, id: NodeId) -> bool {
         self.image(id).is_some_and(|r| r.url.is_some() && !r.complete)
     }
+    // …and the pixel density its current request's source has (1 for none).
+    pub(crate) fn image_density(&self, id: NodeId) -> f64 {
+        self.image(id).map(|r| r.density).filter(|&d| d > 0.0 && d.is_finite()).unwrap_or(1.0)
+    }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -57,17 +64,19 @@ fn element(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) ->
     crate::node_handle::nid_of(scope, value)
 }
 
-// __dom.imageLoadBegin(img, url, crossorigin) -> the new load's number, or 0 where `url` and the CORS mode
-// (`crossorigin`, null for none) are the ones the current load was made for (a relevant mutation that changes neither
-// restarts nothing). The request's URL is `url` from then on: what `currentSrc` reads.
+// __dom.imageLoadBegin(img, url, crossorigin, density) -> the new load's number, or 0 where `url`, the CORS mode
+// (`crossorigin`, null for none) and the pixel density (1 where not given) are the ones the current load was made for (a
+// relevant mutation that changes none restarts nothing). The request's URL is `url` from then on: what `currentSrc`
+// reads.
 fn load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     use std::hash::{Hash, Hasher};
     let Some(id) = element(scope, args.get(0)) else { return rv.set_uint32(0) };
     let url = args.get(1).to_rust_string_lossy(scope);
     let mode = args.get(2);
     let mode = (!mode.is_null_or_undefined()).then(|| mode.to_rust_string_lossy(scope));
+    let density = args.get(3).number_value(scope).filter(|&d| d > 0.0 && d.is_finite()).unwrap_or(1.0);
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    (&url, &mode).hash(&mut hasher);
+    (&url, &mode, density.to_bits()).hash(&mut hasher);
     let key = hasher.finish();
     let r = crate::dom::dom(scope).arena.image_mut(id);
     if r.key == Some(key) {
@@ -75,6 +84,7 @@ fn load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
     r.key = Some(key);
     r.url = Some(url);
+    r.density = density;
     r.load += 1;
     rv.set_uint32(r.load);
 }
@@ -113,14 +123,16 @@ fn apply(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'
     r.tainted = image && tainted;
     rv.set_bool(true);
 }
-// __dom.imageInfo(img) -> [complete, broken, width, height, tainted, orientation]: the current request, as the
-// element's members and a canvas read it.
+// __dom.imageInfo(img) -> [complete, broken, width, height, tainted, orientation, density]: the current request, as the
+// element's members and a canvas read it — its decoded bitmap's size, and its source's pixel density, which the natural
+// size is that size divided by.
 fn info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
     let (complete, broken, size, tainted, orientation) = match crate::dom::dom(scope).arena.image(id) {
         Some(r) => (r.complete, r.broken, r.size, r.tainted, r.orientation),
         None => (false, false, [0, 0], false, 0),
     };
+    let density = crate::dom::dom(scope).arena.image_density(id);
     let items = [
         v8::Boolean::new(scope, complete).into(),
         v8::Boolean::new(scope, broken).into(),
@@ -128,6 +140,7 @@ fn info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_
         v8::Integer::new_from_unsigned(scope, size[1]).into(),
         v8::Boolean::new(scope, tainted).into(),
         v8::Integer::new_from_unsigned(scope, u32::from(orientation)).into(),
+        v8::Number::new(scope, density).into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }

@@ -3570,6 +3570,10 @@ fn set_natural_size(
         view_box: vw.zip(vh).filter(|&(vw, vh)| vw > 0.0 && vh > 0.0),
     });
     let cid = realm_id(scope, &args);
+    // (…an image's divided by its source's pixel density: a `2x` candidate's 100x50 bitmap is 50x25 — HTML's
+    // density-corrected natural size, which lays it out)
+    let density = realm(scope, cid).image_density(id);
+    let natural = natural.map(|n| NaturalSize { width: n.width.map(|w| w / density), height: n.height.map(|h| h / density), ..n });
     if let Some(node) = realm(scope, cid).get_mut(id) {
         node.natural_size = natural;
     }

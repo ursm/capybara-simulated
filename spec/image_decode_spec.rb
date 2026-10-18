@@ -377,5 +377,33 @@ RSpec.describe 'image decode' do
     JS
     expect(got).to eq(%w[sync:false:0 same:error later:load picture:none svgimg:none htmlimage:none])
   end
+  # A `srcset` candidate's density divides its natural size — what `naturalWidth`, the layout and a canvas's
+  # `drawImage` take: a 100x50 image at `2x` is 50x25, drawn so, its source rectangle in those coordinates. Chrome: below.
+  it "corrects an image's natural size by its candidate's density" do
+    session = simulated_session(app).tap {|s| s.visit '/' }
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const [a, b] = ['/green 2x', '/green 1.5x'].map((set) => {
+        const img = document.createElement('img');
+        img.srcset = set;
+        document.body.append(img);
+        return img;
+      });
+      const loaded = (img) => new Promise((r) => { if (img.complete) r(); else img.onload = r; });
+      Promise.all([loaded(a), loaded(b)]).then(() => {
+        const cv = document.createElement('canvas');
+        cv.width = 200;
+        cv.height = 100;
+        const g = cv.getContext('2d');
+        const alpha = (x, y) => g.getImageData(x, y, 1, 1).data[3];
+        g.drawImage(a, 0, 0);
+        const whole = [alpha(49, 24), alpha(51, 24), alpha(49, 26)];
+        g.clearRect(0, 0, 200, 100);
+        g.drawImage(a, 10, 5, 20, 10, 0, 0, 20, 10);
+        done([[a.naturalWidth, a.naturalHeight, a.width], [b.naturalWidth, b.naturalHeight, b.width], whole, [alpha(19, 9), alpha(21, 9)]]);
+      });
+    JS
+    expect(got).to eq([[50, 25, 50], [66, 33, 67], [255, 0, 0], [255, 0]])
+  end
 end
 

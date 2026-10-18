@@ -111,8 +111,9 @@ fn leading_float(s: &str) -> f64 {
 // The URL `img` fetches ("select an image source", in brief): its picture's selected source's candidates, else its
 // own `srcset`'s, over its `src`. Where its own srcset has only densities and no `1x`, `src` joins it as `1x`
 // (`srcset="big 99x"` still fetches `src` at a device pixel ratio of 1). A candidate with a width is chosen first-come
-// (exact for one); else the smallest density at or above 1, else the largest. None where it names nothing.
-pub(crate) fn select(arena: &RealmArena, img: NodeId, media_matches: &dyn Fn(&str) -> bool) -> Option<String> {
+// (exact for one); else the smallest density at or above 1, else the largest. None where it names nothing. With it, the
+// candidate's pixel density — 1 for `src` alone, and for a width-described candidate (its `sizes` not modelled yet).
+pub(crate) fn select(arena: &RealmArena, img: NodeId, media_matches: &dyn Fn(&str) -> bool) -> Option<(String, f64)> {
     let node = arena.get(img)?;
     let picked = picture_source(arena, img, media_matches);
     let srcset = match picked {
@@ -122,11 +123,11 @@ pub(crate) fn select(arena: &RealmArena, img: NodeId, media_matches: &dyn Fn(&st
     let src = node.plain_attr("src");
     let mut candidates = parse_srcset(srcset.unwrap_or(""));
     if candidates.is_empty() {
-        return src.map(str::to_owned);
+        return src.map(|s| (s.to_owned(), 1.0));
     }
     let by_width = candidates.iter().any(|c| c.width.is_some());
     if by_width {
-        return Some(candidates[0].url.to_owned());
+        return Some((candidates[0].url.to_owned(), 1.0));
     }
     if picked.is_none() && !candidates.iter().any(|c| c.density == 1.0) {
         if let Some(src) = src.filter(|s| !s.is_empty()) {
@@ -135,15 +136,15 @@ pub(crate) fn select(arena: &RealmArena, img: NodeId, media_matches: &dyn Fn(&st
     }
     candidates.sort_by(|a, b| a.density.total_cmp(&b.density));
     let chosen = candidates.iter().find(|c| c.density >= 1.0).or(candidates.last())?;
-    Some(chosen.url.to_owned())
+    Some((chosen.url.to_owned(), chosen.density))
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "imageSource", image_source, context_id);
 }
 
-// __dom.imageSource(nid, viewportWidth, viewportHeight) -> the URL the `<img>` fetches (`select`), a `media` judged on a
-// viewport of that size; undefined where it names none.
+// __dom.imageSource(nid, viewportWidth, viewportHeight) -> [the URL the `<img>` fetches, its pixel density] (`select`), a
+// `media` judged on a viewport of that size; undefined where it names none.
 fn image_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
@@ -152,10 +153,10 @@ fn image_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
     let Some(arena) = d.arena.enter_known(cid) else { return };
     let engine = d.styles.get(&cid);
-    let url = select(arena, id, &|media| crate::style::media_matches(engine, arena, screen, media));
-    if let Some(s) = url.and_then(|u| v8::String::new(scope, &u)) {
-        rv.set(s.into());
-    }
+    let Some((url, density)) = select(arena, id, &|media| crate::style::media_matches(engine, arena, screen, media)) else { return };
+    let Some(url) = v8::String::new(scope, &url) else { return };
+    let density = v8::Number::new(scope, density);
+    rv.set(v8::Array::new_with_elements(scope, &[url.into(), density.into()]).into());
 }
 
 #[cfg(test)]
