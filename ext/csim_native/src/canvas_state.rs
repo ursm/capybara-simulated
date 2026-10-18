@@ -649,8 +649,9 @@ fn canvas_line_dash(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     h.state.borrow_mut().dash = dash;
 }
 
-// __dom.canvasFontFace(state) -> `[weight, slant, family, inherits, rem]`: what the bindings answer a text op with — the
-// face it is drawn with, which they resolve by the computed font's weight, slant and family (canvas.js `_textInputs`);
+// __dom.canvasFontFace(state) -> `[bucket, family, inherits, rem]`: what the bindings answer a text op with — the face it
+// is drawn with, which they resolve by the computed font's family in its weight's and slant's bucket
+// (font_faces.rs `bucket`; canvas.js `_textInputs`);
 // the canvas element's direction, where the state's `direction` inherits it; the root's font size, where a letter or
 // word spacing is in `rem`.
 fn canvas_font_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -660,9 +661,8 @@ fn canvas_font_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         let rem = |v: &str| v.to_ascii_lowercase().contains("rem");
         (s.font.clone(), DIRECTIONS[s.direction as usize] == "inherit", rem(&s.letter_spacing) || rem(&s.word_spacing))
     };
-    let items: [v8::Local<'_, v8::Value>; 5] = [
-        v8::Number::new(scope, font.weight).into(),
-        v8::Number::new(scope, f64::from(font.slant)).into(),
+    let items: [v8::Local<'_, v8::Value>; 4] = [
+        string(scope, crate::font_faces::bucket(font.weight, font.slant != 0)),
         string(scope, &font.family),
         v8::Boolean::new(scope, inherits).into(),
         v8::Boolean::new(scope, rem).into(),

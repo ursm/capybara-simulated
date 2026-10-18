@@ -38,20 +38,25 @@ impl Distance {
     }
 }
 
+// The bucket a face is resolved and measured in — `bold` at a weight of 600 or more, `italic` slanted, in the colon form
+// `fc_match` expects; '' for neither — which a page's text, a canvas's and a `local()` name all take.
+pub(crate) fn bucket(weight: f64, slanted: bool) -> &'static str {
+    match (weight >= 600.0, slanted) {
+        (true, true) => "bold:italic",
+        (true, false) => "bold",
+        (false, true) => "italic",
+        (false, false) => "",
+    }
+}
+
 impl FaceRecord {
     // A face of `family` with every descriptor at its initial value.
     fn of(family: String) -> FaceRecord {
         FaceRecord { family, sources: Vec::new(), weight: (400.0, 400.0), stretch: (100.0, 100.0), slanted: false, ranges: None, size_adjust: 1.0, overrides: [None; 3] }
     }
-    // The weight / style its `local()` names are looked up under: `bold` where the low end of its weight is 600 or more,
-    // `italic` where it is slanted, in the colon form `fc_match` expects — '' for neither.
+    // The weight / style its `local()` names are looked up under: the bucket of the low end of its weight and its slant.
     fn local_style(&self) -> &'static str {
-        match (self.weight.0 >= 600.0, self.slanted) {
-            (true, true) => "bold:italic",
-            (true, false) => "bold",
-            (false, true) => "italic",
-            (false, false) => "",
-        }
+        bucket(self.weight.0, self.slanted)
     }
     // How far it is from what a style asks for (CSS Fonts 4 §5.2): the nearest stretch first, then the same slant, then
     // the nearest weight.
