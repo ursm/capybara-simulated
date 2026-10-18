@@ -1315,6 +1315,11 @@ fn is_listed(n: &NodeData) -> bool {
     (n.is_html() && tag) || n.state & STATE_FORM_ASSOCIATED != 0
 }
 
+// …and a form-associated element (HTML §4.10.2): a listed one or an HTML `<img>`.
+pub(crate) fn is_form_associated(n: &NodeData) -> bool {
+    is_listed(n) || n.is_html_named("img")
+}
+
 // A radio's group name: its `name`, as UTF-16 (compared exactly), where it has a non-empty one.
 fn radio_name(n: &NodeData) -> Option<Vec<u16>> {
     n.plain_attr_units("name").filter(|name| !name.is_empty())

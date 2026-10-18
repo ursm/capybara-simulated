@@ -746,9 +746,14 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "labeledControl", labeled_control, context_id);
     crate::dom::register(scope, ns, "labelsOf", labels_of, context_id);
     crate::dom::register(scope, ns, "isEditable", is_editable, context_id);
+    crate::dom::register(scope, ns, "isFormAssociated", is_form_associated, context_id);
     crate::dom::register(scope, ns, "activationTarget", activation_target, context_id);
 }
 
+// __dom.isFormAssociated(nid) -> whether the element is a form-associated one (`element_state::is_form_associated`).
+fn is_form_associated(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    node_test(scope, &args, rv, |arena, id| arena.get(id).is_some_and(crate::element_state::is_form_associated));
+}
 // __dom.isEditable(nid) -> what `element_state` answers of the node: whether it is in an editing host.
 fn is_editable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     node_test(scope, &args, rv, RealmArena::is_editable);
