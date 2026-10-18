@@ -1428,6 +1428,7 @@ module Capybara
         referrer               = referrer_header(@current_url)
         env['HTTP_REFERER']    = referrer if referrer
         status, headers, body = @app.call(env)
+        headers = utf8_tagged_headers(headers)
         return unless status.to_i == 200
         # Fall back to the link's `download="filename"` value or the
         # URL path tail when Content-Disposition is absent — `<a download>`
@@ -9922,7 +9923,7 @@ module Capybara
           # phrase (response_hash lifts it into statusText); it's never a real wire
           # header, so keep it out of the trace.
           next if k.to_s.downcase == 'x-csim-status-text'
-          out[k.to_s] = v.is_a?(Array) ? v.join(', ') : v.to_s
+          out[k.to_s] = header_text(v)
         end
       end
 
@@ -11719,21 +11720,41 @@ module Capybara
       # save path here keeps the page state unchanged (no rebuild),
       # mirroring what a real browser does after a download.
       # The filename a Content-Disposition gives (RFC 6266 §4.3): `filename*`'s ext-value (RFC 8187: its charset's bytes,
-      # percent-encoded) where it has one, else `filename`'s — a quoted-string's backslash escapes undone — its bytes
-      # UTF-8 where they are (Chrome: a raw UTF-8 name), else each byte the code point it is; and no directory of it
-      # (`../x` is `x`). '' for none. `cd` the header's text, each byte a code point (`header_text`).
+      # percent-encoded) where it decodes — in a charset Ruby knows, to valid text — else `filename`'s, a quoted-string's
+      # backslash escapes undone, its bytes UTF-8 where they are (Chrome: a raw UTF-8 name), else each byte the code point
+      # it is; trimmed, and no directory of it (`../x` is `x`). '' for none, and for a name no file can have (`.`, `..`,
+      # one holding a NUL). `cd` the header's text, each byte a code point (`header_text`).
       def disposition_filename(cd)
-        bytes = cd.encode(Encoding::ISO_8859_1, invalid: :replace, undef: :replace).b
-        param = ->(name) { bytes[/(?:\A|;)\s*#{name}\s*=\s*("(?:[^"\\]|\\.)*"|[^;]*)/ni, 1]&.strip }
-        name = if (ext = param.('filename\\*')) && (m = ext.match(/\A([\w!#$%&+^`{}~-]+)'[^']*'(.*)\z/n))
-          decoded = m[2].gsub(/%(\h\h)/n) { $1.hex.chr }
-          m[1].casecmp?('utf-8') ? decoded.force_encoding(Encoding::UTF_8) : decoded.force_encoding(Encoding::ISO_8859_1)
-        elsif (plain = param.('filename'))
-          plain = plain[1..-2].gsub(/\\(.)/n, '\\1') if plain.start_with?('"') && plain.end_with?('"') && plain.length >= 2
+        params = disposition_params(cd.encode(Encoding::ISO_8859_1, invalid: :replace, undef: :replace).b)
+        name = ext_value_text(params['filename*']) || params['filename']&.then {|plain|
           utf8 = plain.dup.force_encoding(Encoding::UTF_8)
-          utf8.valid_encoding? ? utf8 : plain.force_encoding(Encoding::ISO_8859_1)
+          utf8.valid_encoding? ? utf8 : plain.dup.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
+        }
+        return '' if name.nil? || name.include?("\0")
+        name = File.basename(name.tr('\\', '/')).strip
+        name == '.' || name == '..' ? '' : name
+      end
+      # …the header's parameters (after its disposition type), by name lowercased — the first of each — their values a
+      # quoted-string's unescaped, a `;` or `=` inside one no separator.
+      def disposition_params(bytes)
+        params = {}
+        bytes.scan(/;\s*([^\s=;]+)\s*=\s*("(?:[^"\\]|\\.)*"?|[^;]*)/n) do |name, value|
+          value = value.strip
+          value = value.delete_prefix('"').delete_suffix('"').gsub(/\\(.)/n, '\\1') if value.start_with?('"')
+          params[name.downcase] ||= value
         end
-        File.basename(name.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace).tr('\\', '/'))
+        params
+      end
+      # …and an ext-value's text (RFC 8187): `charset'language'value`, its bytes percent-decoded in the charset — nil
+      # where it is none, or its charset one Ruby does not know, or its bytes no text in it.
+      def ext_value_text(ext)
+        m = ext&.match(/\A([\w!#$%&+^`{}~-]+)'[^']*'(.*)\z/n) or return nil
+        encoding = Encoding.find(m[1]) rescue nil
+        return nil unless encoding && m[2].match?(/\A(?:[^%]|%\h\h)*\z/n)
+        text = m[2].gsub(/%(\h\h)/n) { $1.hex.chr }.force_encoding(encoding)
+        text.valid_encoding? ? text.encode(Encoding::UTF_8) : nil
+      rescue EncodingError
+        nil
       end
 
       def content_disposition_header(headers)

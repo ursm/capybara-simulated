@@ -39,6 +39,7 @@ RSpec.describe 'a response header given as an Array' do
         [401, {'www-authenticate' => ['Basic realm="x"']}, ['no']]
       when '/two' then [302, {'location' => ['/a', '/b']}, ['']]
       when '/none' then [302, {'location' => [], 'content-type' => 'text/plain'}, ['three']]
+      when '/mix' then [200, {'x-m' => ["\xE9".b, 'é']}, ['mixed']]
       when '/a', '/b' then [200, {}, [path]]
       else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']]
       end
@@ -48,9 +49,9 @@ RSpec.describe 'a response header given as an Array' do
     got = s.evaluate_script(<<~JS)
       (() => {
         const read = (url, user) => { const x = new XMLHttpRequest(); try { x.open('GET', url, false, user, user && 'p'); x.send(); return x.status + ' ' + x.responseText; } catch (e) { return e.name; } };
-        return [read('/nostore'), read('/nostore'), read('/auth', 'u'), read('/two'), read('/none')];
+        return [read('/nostore'), read('/nostore'), read('/auth', 'u'), read('/two'), read('/none'), read('/mix')];
       })()
     JS
-    expect(got).to eq(['200 n=1', '200 n=2', '200 in', 'NetworkError', '302 three'])
+    expect(got).to eq(['200 n=1', '200 n=2', '200 in', 'NetworkError', '302 three', '200 mixed'])
   end
 end

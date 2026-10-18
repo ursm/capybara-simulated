@@ -97,10 +97,10 @@ module Capybara
 
       # A response header's value as one: each of its fields — a Rack 3 app may give an Array of them — without the HTTP
       # whitespace around it, as an HTTP stack reads a field (Chrome and Firefox: ` 5 ` is `5`), combined with ", " as an
-      # HTTP response's header list combines them; nil for none.
+      # HTTP response's header list combines them — as bytes, whatever encoding each is tagged with; nil for none.
       def self.combined(value)
         return nil if value.nil?
-        Array(value).map {|field| field.to_s.sub(/\A[\t ]+/, '').sub(/[\t ]+\z/, '') }.join(', ')
+        Array(value).map {|field| field.to_s.b.sub(/\A[\t ]+/n, '').sub(/[\t ]+\z/n, '') }.join(', ')
       end
 
       def initialize
