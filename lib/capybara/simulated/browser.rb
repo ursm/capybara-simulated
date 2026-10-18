@@ -4478,7 +4478,7 @@ module Capybara
       # (`xhr.open(_, _, false)`, deprecated) stay on `__rackFetch`
       # because the hijack contract can't satisfy a synchronous XHR
       # response anyway.
-      # Returns either a response hash (immediate — middleware didn't
+      # Returns a response hash or nil for a network error (immediate — middleware didn't
       # hijack) or a `{'handle' => N}` token (deferred — middleware
       # hijacked the connection and a background thread is reading
       # the pipe). The JS-side XHR checks the return shape to pick
@@ -4490,37 +4490,23 @@ module Capybara
         rescue JSON::ParserError
           {}
         end
-        # `rack_fetch` already handles redirects, cookie merge, the
-        # asset cache shortcut, and download detection — keep async
-        # XHRs on that single source of truth. The new behaviour is
-        # the hijack hook for long-poll-shaped requests: install
-        # `rack.hijack` so the middleware can hold the connection
-        # open until something publishes through it.
-        #
-        # We can't unconditionally install the hijack env keys: some
-        # downstream Discourse middleware paths take a different
-        # streaming branch when `rack.hijack?` is truthy (even
-        # without ever invoking the lambda) and the response then
-        # re-renders the page in a slightly different order, racing
-        # subsequent Capybara `find`s into StaleElement. Restrict
-        # the hook to URLs that look like the long-poll endpoints
-        # we actually need it for (`/message-bus/{id}/poll` today;
-        # extend as new patterns surface).
+        # `rack_fetch` already handles redirects, cookie merge, the asset cache shortcut and download detection — an async
+        # XHR stays on that single source of truth, its Rack call offered `rack.hijack` as a server (Puma) offers every
+        # request: middleware that takes it holds the connection open until something publishes through it (a long poll),
+        # and one that does not answers as it would anyway.
         read_io = nil
-        env_extras =
-          if HIJACK_AWARE_URL_PATTERNS.any? {|re| re.match?(url.to_s) }
-            {
-              'rack.hijack?' => true,
-              'rack.hijack'  => lambda {
-                read_io, write_io = IO.pipe
-                write_io
-              }
-            }
-          end
+        env_extras = {
+          'rack.hijack?' => true,
+          'rack.hijack'  => lambda {
+            read_io, write_io = IO.pipe
+            write_io
+          }
+        }
         # (…a CORS request as an XHR's is, by its client)
         resp = rack_fetch(method, url, body, headers, 'follow', 'cors', credentials: credentials, env_extras: env_extras, client_url: client_url,
                           client_origin: client_origin, client_realm: client_realm)
-        return resp || {'status' => 0, 'headers' => {}, 'body' => ''} unless read_io
+        # (…nil, a network error, as `rack_fetch` answers one)
+        return resp unless read_io
         id = (@hijack_fetch_seq += 1)
         @hijack_fetch_threads[id] = Thread.new do
           Thread.current.report_on_exception = false
@@ -4528,15 +4514,6 @@ module Capybara
         end
         {'handle' => id}
       end
-
-      # URLs whose middleware needs `rack.hijack` to hold the
-      # connection open. Only enable hijack for these so the
-      # `rack.hijack?` capability check doesn't perturb the response
-      # path on unrelated requests.
-      HIJACK_AWARE_URL_PATTERNS = [
-        %r{/message-bus/[^/]+/poll(?:\?|$)}
-      ].freeze
-      private_constant :HIJACK_AWARE_URL_PATTERNS
 
       def rack_fetch_async_abort(id)
         thread = @hijack_fetch_threads.delete(id.to_i)
