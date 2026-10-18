@@ -152,6 +152,8 @@ pub(crate) struct Registry {
     connections: HashMap<u32, Connection>,
     transactions: HashMap<u32, Transaction>,
     agents: HashMap<u64, Agent>,
+    // (…the cursors the transactions opened, each gone with its transaction: idb.rs `Cursor`)
+    pub(crate) cursors: HashMap<u32, crate::idb::Cursor>,
 }
 
 static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(|| Mutex::new(Registry::default()));
@@ -430,6 +432,7 @@ impl Registry {
     // A transaction finished: gone from its database's schedule — which may start the next — and its connection closed
     // where that waited on it.
     fn finished(&mut self, tx: u32) {
+        self.cursors.retain(|_, c| c.tx != tx);
         let Some(t) = self.transactions.remove(&tx) else { return };
         if let Some(db) = self.databases.get_mut(&t.db) {
             db.transactions.retain(|&x| x != tx);

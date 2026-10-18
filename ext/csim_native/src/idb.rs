@@ -210,7 +210,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "idbDelete", delete, context_id);
     register(scope, ns, "idbRetrieve", retrieve, context_id);
     register(scope, ns, "idbCount", count, context_id);
-    register(scope, ns, "idbCursor", cursor, context_id);
+    register(scope, ns, "idbCursorOpen", cursor_open, context_id);
+    register(scope, ns, "idbCursorMove", cursor_move, context_id);
+    register(scope, ns, "idbCursorIterate", cursor_iterate, context_id);
+    register(scope, ns, "idbCursorHolds", cursor_holds, context_id);
     register(scope, ns, "idbPopulate", populate, context_id);
     register(scope, ns, "idbJournal", journal, context_id);
 }
@@ -860,67 +863,213 @@ fn count(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'
     rv.set_uint32(n as u32);
 }
 
-// __dom.idbCursor(store, index, range, direction, position, objectStorePosition, key, primaryKey, count, keyOnly) ->
-// [key, primaryKey, value] or null: "iterate a cursor" `count` times from its position (an index cursor's object store
-// position too, in a direction that is no unique one), past `key` (and `primaryKey`, continuing by primary key) where
-// given — the record it lands on, its value a serialization's number unless `keyOnly`; null past the range's end.
-fn cursor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let store = id_arg(scope, &args, 0);
-    let index = index_arg(scope, &args, 1);
-    let range = range_arg(scope, args.get(2));
-    let direction = args.get(3).uint32_value(scope).unwrap_or(NEXT);
-    let given = |scope: &mut v8::PinScope<'_, '_>, i: i32| {
-        let v = args.get(i);
-        (!v.is_undefined()).then(|| key_arg(scope, v)).flatten()
-    };
-    let (mut position, mut os_position) = (given(scope, 4), given(scope, 5));
-    let (mut key, mut primary) = (given(scope, 6), given(scope, 7));
-    let count = args.get(8).uint32_value(scope).unwrap_or(1).max(1);
-    let key_only = args.get(9).is_true();
+// A cursor (§2.10, §4.8): its transaction, its source (a store, or an index of one), its range and direction, whether
+// it reads keys only, its position (and an index cursor's object store position) — and whether it holds a record
+// ("got value"), and where its next iteration goes, as a `continue()` / `advance()` asked (`pending`).
+#[derive(Clone)]
+pub(crate) struct Cursor {
+    pub(crate) tx: u32,
+    store: u32,
+    index: Option<u32>,
+    range: Range,
+    direction: u32,
+    key_only: bool,
+    position: Option<Key>,
+    os_position: Option<Key>,
+    got_value: bool,
+    pending: (Option<Key>, Option<Key>, u32),
+}
+
+// "Iterate a cursor" over `source` `count` times from `position` (an index cursor's `os_position` too, in a direction
+// that is no unique one), past `key` (and `primary`, continuing by primary key) where given: the record it lands on.
+#[allow(clippy::too_many_arguments)]
+fn iterate_source(
+    source: &Source<'_>,
+    indexed: bool,
+    range: &Range,
+    direction: u32,
+    mut position: Option<Key>,
+    mut os_position: Option<Key>,
+    mut key: Option<Key>,
+    mut primary: Option<Key>,
+    count: u32,
+) -> Option<(Key, Key)> {
     let forward = matches!(direction, NEXT | NEXT_UNIQUE);
     let unique = matches!(direction, NEXT_UNIQUE | PREV_UNIQUE);
-    let found = with(|s| {
-        let st = s.stores.get(&store)?;
-        let source = Source::of(st, index)?;
-        let mut found = None;
-        for _ in 0..count {
-            let by_position = if unique || index.is_none() { None } else { os_position.clone() };
-            found = if forward {
-                // (…the first in the range at or past `key`, past the position)
-                let mut lower = range.lower_pair();
-                if let Some(k) = &key {
-                    lower = tighter(lower, Bound::Included((k.clone(), primary.clone().unwrap_or(Key::Min))), true);
+    let mut found = None;
+    for _ in 0..count.max(1) {
+        let by_position = if unique || !indexed { None } else { os_position.clone() };
+        found = if forward {
+            // (…the first in the range at or past `key`, past the position)
+            let mut lower = range.lower_pair();
+            if let Some(k) = &key {
+                lower = tighter(lower, Bound::Included((k.clone(), primary.clone().unwrap_or(Key::Min))), true);
+            }
+            if let Some(pos) = &position {
+                lower = tighter(lower, Bound::Excluded((pos.clone(), by_position.clone().unwrap_or(Key::Max))), true);
+            }
+            source.between(lower, range.upper_pair()).next()
+        } else {
+            // (…the last in the range at or before `key`, before the position — `prevunique` the first of its key)
+            let mut upper = range.upper_pair();
+            if let Some(k) = &key {
+                upper = tighter(upper, Bound::Included((k.clone(), primary.clone().unwrap_or(Key::Max))), false);
+            }
+            if let Some(pos) = &position {
+                upper = tighter(upper, Bound::Excluded((pos.clone(), by_position.clone().unwrap_or(Key::Min))), false);
+            }
+            match source.between(range.lower_pair(), upper).next_back() {
+                Some((k, _)) if direction == PREV_UNIQUE => {
+                    let first = tighter(range.lower_pair(), Bound::Included((k, Key::Min)), true);
+                    source.between(first, range.upper_pair()).next()
                 }
-                if let Some(pos) = &position {
-                    lower = tighter(lower, Bound::Excluded((pos.clone(), by_position.clone().unwrap_or(Key::Max))), true);
-                }
-                source.between(lower, range.upper_pair()).next()
-            } else {
-                // (…the last in the range at or before `key`, before the position — `prevunique` the first of its key)
-                let mut upper = range.upper_pair();
-                if let Some(k) = &key {
-                    upper = tighter(upper, Bound::Included((k.clone(), primary.clone().unwrap_or(Key::Max))), false);
-                }
-                if let Some(pos) = &position {
-                    upper = tighter(upper, Bound::Excluded((pos.clone(), by_position.clone().unwrap_or(Key::Min))), false);
-                }
-                match source.between(range.lower_pair(), upper).next_back() {
-                    Some((k, _)) if direction == PREV_UNIQUE => {
-                        let first = tighter(range.lower_pair(), Bound::Included((k, Key::Min)), true);
-                        source.between(first, range.upper_pair()).next()
-                    }
-                    last => last,
-                }
-            };
-            let (k, p) = found.clone()?;
-            position = Some(k);
-            os_position = Some(p);
-            key = None;
-            primary = None;
+                last => last,
+            }
+        };
+        let (k, p) = found.clone()?;
+        position = Some(k);
+        os_position = Some(p);
+        key = None;
+        primary = None;
+    }
+    found
+}
+
+// __dom.idbCursorOpen(transaction, store, index, range, direction, keyOnly) -> a cursor's number: one of transaction
+// `transaction`'s, over the store or the index (-1 none), holding no record yet — its first iteration is its request's.
+fn cursor_open(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let tx = id_arg(scope, &args, 0);
+    let store = id_arg(scope, &args, 1);
+    let index = index_arg(scope, &args, 2);
+    let range = range_arg(scope, args.get(3));
+    let direction = args.get(4).uint32_value(scope).unwrap_or(NEXT);
+    let key_only = args.get(5).is_true();
+    let id = with(|s| {
+        let id = s.next_id();
+        let cursor = Cursor { tx, store, index, range, direction, key_only, position: None, os_position: None, got_value: false, pending: (None, None, 1) };
+        s.cursors.insert(id, cursor);
+        id
+    });
+    rv.set_uint32(id);
+}
+
+// What a `continue()`, a `continuePrimaryKey()` or an `advance()` of a cursor asks (`idbCursorMove`), and why one may
+// not, in the order IDB §4.8 checks (after the transaction's activity and the source's deletion, the bindings').
+const MOVE_ADVANCE: u32 = 0;
+const MOVE_CONTINUE: u32 = 1;
+const MOVE_CONTINUE_PRIMARY_KEY: u32 = 2;
+const MOVE_OK: u32 = 0;
+const REFUSED_NOT_HOLDING: u32 = 1; // InvalidStateError: being iterated, or past its end
+const REFUSED_NOT_PAST: u32 = 2; // DataError: the key is not past the position
+const REFUSED_NOT_INDEX: u32 = 3; // InvalidAccessError: continuePrimaryKey of a store's cursor
+const REFUSED_DIRECTION: u32 = 4; // InvalidAccessError: continuePrimaryKey in a unique direction
+const REFUSED_INVALID_KEY: u32 = 5; // DataError: no key
+enum Converted {
+    Key(Key),
+    Absent,
+    Invalid,
+    Thrown,
+}
+
+// __dom.idbCursorMove(cursor, how, key, primaryKey | count) -> MOVE_OK, the cursor holding no record now and its next
+// iteration set; else why not (`REFUSED_*`). The keys are the page's values, converted here in the steps' order;
+// whatever a Get in their conversion throws is thrown.
+fn cursor_move<'s>(scope: &mut v8::PinScope<'s, '_>, args: v8::FunctionCallbackArguments<'s>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = id_arg(scope, &args, 0);
+    let how = args.get(1).uint32_value(scope).unwrap_or(MOVE_CONTINUE);
+    let Some(c) = with(|s| s.cursors.get(&id).cloned()) else { return rv.set_uint32(REFUSED_NOT_HOLDING) };
+    if how == MOVE_CONTINUE_PRIMARY_KEY {
+        if c.index.is_none() {
+            return rv.set_uint32(REFUSED_NOT_INDEX);
         }
-        let (k, p) = found?;
-        let value = (!key_only).then(|| st.records.get(&p).map(|r| r.value.clone())).flatten();
-        Some((k, p, value))
+        if !matches!(c.direction, NEXT | PREV) {
+            return rv.set_uint32(REFUSED_DIRECTION);
+        }
+    }
+    if !c.got_value {
+        return rv.set_uint32(REFUSED_NOT_HOLDING);
+    }
+    // (…a key the page gave converted: absent where `continue()` was given none)
+    let mut convert = |i: i32| -> Converted {
+        let v = args.get(i);
+        if v.is_undefined() && how == MOVE_CONTINUE {
+            return Converted::Absent;
+        }
+        match value_to_key(scope, v, &mut Vec::new()) {
+            Ok(Some(k)) => Converted::Key(k),
+            Ok(None) => Converted::Invalid,
+            Err(Thrown) => Converted::Thrown,
+        }
+    };
+    let forward = matches!(c.direction, NEXT | NEXT_UNIQUE);
+    let pending = match how {
+        MOVE_ADVANCE => (None, None, args.get(2).uint32_value(scope).unwrap_or(1)),
+        MOVE_CONTINUE => {
+            let key = match convert(2) {
+                Converted::Key(k) => Some(k),
+                Converted::Absent => None,
+                Converted::Invalid => return rv.set_uint32(REFUSED_INVALID_KEY),
+                Converted::Thrown => return,
+            };
+            if let (Some(k), Some(pos)) = (&key, &c.position) {
+                if if forward { k <= pos } else { k >= pos } {
+                    return rv.set_uint32(REFUSED_NOT_PAST);
+                }
+            }
+            (key, None, 1)
+        }
+        _ => {
+            // (…the key, then the primary key: an invalid one refused before the other is read)
+            let key = match convert(2) {
+                Converted::Key(k) => k,
+                Converted::Thrown => return,
+                _ => return rv.set_uint32(REFUSED_INVALID_KEY),
+            };
+            let primary = match convert(3) {
+                Converted::Key(p) => p,
+                Converted::Thrown => return,
+                _ => return rv.set_uint32(REFUSED_INVALID_KEY),
+            };
+            let (pos, os) = (c.position.clone().unwrap_or(Key::Min), c.os_position.clone().unwrap_or(Key::Min));
+            let before = if forward { key < pos || (key == pos && primary <= os) } else { key > pos || (key == pos && primary >= os) };
+            if before {
+                return rv.set_uint32(REFUSED_NOT_PAST);
+            }
+            (Some(key), Some(primary), 1)
+        }
+    };
+    with(|s| {
+        if let Some(c) = s.cursors.get_mut(&id) {
+            c.got_value = false;
+            c.pending = pending;
+        }
+    });
+    rv.set_uint32(MOVE_OK);
+}
+
+// __dom.idbCursorIterate(cursor) -> [key, primaryKey, value] or null: "iterate a cursor" as its last move asked (its
+// first iteration once) — the record it lands on and holds, its value a serialization's number unless it reads keys
+// only; null past the range's end, the cursor then holding none.
+fn cursor_iterate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = id_arg(scope, &args, 0);
+    let found = with(|s| {
+        let c = s.cursors.get(&id)?.clone();
+        let st = s.stores.get(&c.store)?;
+        let source = Source::of(st, c.index)?;
+        let (key, primary, count) = c.pending.clone();
+        let landed = iterate_source(&source, c.index.is_some(), &c.range, c.direction, c.position.clone(), c.os_position.clone(), key, primary, count);
+        let value = landed.as_ref().and_then(|(_, p)| (!c.key_only).then(|| st.records.get(p).map(|r| r.value.clone())).flatten());
+        let c = s.cursors.get_mut(&id)?;
+        c.pending = (None, None, 1);
+        match &landed {
+            Some((k, p)) => {
+                c.position = Some(k.clone());
+                c.os_position = Some(p.clone());
+                c.got_value = true;
+            }
+            None => c.got_value = false,
+        }
+        landed.map(|(k, p)| (k, p, value))
     });
     let Some((k, p, value)) = found else { return rv.set_null() };
     let key = key_value(scope, &k);
@@ -933,6 +1082,13 @@ fn cursor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
         None => v8::undefined(scope).into(),
     };
     rv.set(v8::Array::new_with_elements(scope, &[key, primary, value]).into());
+}
+
+// __dom.idbCursorHolds(cursor) -> whether it holds a record a write may change (`update()` / `delete()`): it holds
+// one, and reads values.
+fn cursor_holds(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = id_arg(scope, &args, 0);
+    rv.set_bool(with(|s| s.cursors.get(&id).is_some_and(|c| c.got_value && !c.key_only)));
 }
 
 // __dom.idbPopulate(store, index, [primaryKey, count, key…, …]) -> whether the index took them: its records, each the
