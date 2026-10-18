@@ -147,11 +147,11 @@ RSpec.describe 'XMLHttpRequest bindings' do
   end
 
   # …its total the length the response's Content-Length gives — Fetch "extract a length", the engine's (headers.rs
-  # `extract_length`): its values all the same, of ASCII digits — and 0, not computable, where it gives none: `5, 6` had
-  # been read as 5 (`parseInt` of its first digits); and each of its fields is read without the HTTP whitespace around
-  # it, as an HTTP stack reads one (Chrome and Firefox: `" 5 "` is `5`).
+  # `extract_length`): its values all the same, of ASCII digits — and 0, not computable, where it gives none (values that
+  # differ are no response at all: content_length_framing_spec); and each of its fields is read without the HTTP
+  # whitespace around it, as an HTTP stack reads one (Chrome and Firefox: `" 5 "` is `5`).
   it "totals its progress by what the response's Content-Length extracts to" do
-    lengths = {'/same' => '5, 5', '/differ' => '5, 6', '/junk' => '5x', '/spaced' => ' 5 '}
+    lengths = {'/same' => '5, 5', '/junk' => '5x', '/spaced' => ' 5 '}
     s = simulated_session(lambda {|env|
       next [200, {'content-type' => 'text/plain', 'content-length' => lengths[env['PATH_INFO']]}, ['hello']] if lengths.key?(env['PATH_INFO'])
       [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']]
@@ -168,7 +168,7 @@ RSpec.describe 'XMLHttpRequest bindings' do
     JS
     got = poll_until { v = s.evaluate_script('window.got'); v.size == lengths.size ? v : nil }
     expect(got).to eq(
-      '/same' => [5, true, '5, 5'], '/differ' => [0, false, '5, 6'], '/junk' => [0, false, '5x'], '/spaced' => [5, true, '5']
+      '/same' => [5, true, '5, 5'], '/junk' => [0, false, '5x'], '/spaced' => [5, true, '5']
     )
   end
 

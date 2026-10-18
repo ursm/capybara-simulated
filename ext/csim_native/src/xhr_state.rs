@@ -54,10 +54,11 @@ struct XhrState {
 }
 
 impl XhrState {
-    // The network error's response: status 0, no status message (the bindings drop its body and headers).
+    // The network error's response: status 0, no status message, no URL (the bindings drop its body and headers).
     fn clear_response(&mut self) {
         self.status = 0;
         self.status_text.clear();
+        self.response_url.clear();
     }
 }
 
@@ -314,7 +315,6 @@ fn open_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     s.aborted = false;
     s.send = false;
     s.clear_response();
-    s.response_url.clear();
     let was_opened = s.ready == OPENED;
     s.ready = OPENED;
     rv.set_int32(i32::from(!was_opened));

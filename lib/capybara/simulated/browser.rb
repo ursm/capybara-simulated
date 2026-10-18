@@ -1427,8 +1427,8 @@ module Capybara
         env['HTTP_COOKIE']     = ck              unless ck.empty?
         referrer               = referrer_header(@current_url)
         env['HTTP_REFERER']    = referrer if referrer
-        status, headers, body = @app.call(env)
-        headers = utf8_tagged_headers(headers)
+        response = dispatch_rack_or_http(url, env) or return
+        status, headers, body = response
         return unless status.to_i == 200
         # Fall back to the link's `download="filename"` value or the
         # URL path tail when Content-Disposition is absent — `<a download>`
@@ -3640,9 +3640,14 @@ module Capybara
         Thread.current[:csim_asset_bytes] = raw if raw && raw.b != result['body'].to_s.b
         # (…a script's or a style sheet's resource loads with an ok status alone, 200 to 299: HTML "fetch a classic script",
         # "fetch and process the linked resource")
-        return nil unless result && (200..299).cover?(result['status'].to_i)
+        return nil unless resource_loaded?(result) && (200..299).cover?(result['status'].to_i)
         result['body'].to_s
       end
+
+      # Whether a resource the host loads came in `result` (`rack_fetch`'s): a response, and its body whole — one the wire
+      # cut short (`framed_response`) fails the load, as a network error does (Chrome and Firefox: a script's, a style
+      # sheet's, an image's `error`).
+      def resource_loaded?(result) = result && !result['body_error']
 
       # A module the graph loader just fetched (via `rack_fetch_body`, whose facts are stashed in
       # `csim_asset_meta`) — collected so the bridge can file its 'script' Resource Timing entry.
@@ -4943,7 +4948,8 @@ module Capybara
             end
             # No respondWith (or no answer): fall back to the network for THIS hop.
           end
-          res = rack_fetch('GET', current, '', {}, 'manual') or return :error
+          res = rack_fetch('GET', current, '', {}, 'manual')
+          return :error unless resource_loaded?(res)
           if (loc = res['redirect_loc'])
             # A redirect received FROM THE NETWORK: no SW intercepts it or any later hop.
             sw_allowed = false
@@ -6015,7 +6021,7 @@ module Capybara
         # The MAIN script request carries `Service-Worker: script` (Update algorithm —
         # servers gate SW scripts on it); imported scripts must NOT (service-worker-header).
         res = rack_fetch('GET', script_url.to_s, '', {'Service-Worker' => 'script'}, 'manual', cache_mode: uvc == 'all' ? 'default' : 'no-cache')
-        return {'error' => 'network'} unless res
+        return {'error' => 'network'} unless resource_loaded?(res)
         return {'error' => 'redirect'} if res['redirect_loc'] || res['redirect_status']
         return {'error' => 'network'} unless (200..299).cover?(res['status'].to_i)
         ct = (res['headers'] || {}).find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
@@ -6036,7 +6042,7 @@ module Capybara
           import_mode = uvc == 'none' ? 'no-cache' : 'default'
           (w[:sw_imports] || {}).each do |u, b|
             r2 = rack_fetch('GET', u, '', {}, 'follow', cache_mode: import_mode)
-            ok = r2 && (200..299).cover?(r2['status'].to_i)
+            ok = resource_loaded?(r2) && (200..299).cover?(r2['status'].to_i)
             # The probe results ARE the new version's script resource map (Chrome
             # fetches each script ONCE during Update and the new worker runs from
             # those responses): a 404 seen here must be the 404 its importScripts
@@ -7991,7 +7997,7 @@ module Capybara
               'encoded'     => result['encoded'].to_i
             }
           end
-          return nil unless result && result['status'].to_i < 400
+          return nil unless resource_loaded?(result) && result['status'].to_i < 400
           bytes = result['body_raw'].to_s
           bytes.empty? ? nil : bytes
         else
@@ -8214,7 +8220,7 @@ module Capybara
           # The fetch's facts for the font's Resource Timing entry (read back by the caller
           # on this thread), a 404 included.
           Thread.current[:csim_font_meta] = result && resource_timing_meta(result)
-          return nil unless result && result['status'].to_i < 400
+          return nil unless resource_loaded?(result) && result['status'].to_i < 400
           bytes = result['body_raw'].to_s
           bytes.empty? ? nil : bytes
         end
@@ -8545,7 +8551,7 @@ module Capybara
         # the fetching CLIENT's document (a frame's own, not the top window's) as
         # the origin the verdict compares against.
         result = rack_fetch('GET', url, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client_url, body_raw: true)
-        return nil unless result && result['status'].to_i < 400
+        return nil unless resource_loaded?(result) && result['status'].to_i < 400
         bytes = result['body_raw'].to_s
         return nil if bytes.empty?
         {'bytes' => bytes, 'tainted' => origin_tainted?(url, cors, client_url: client_url)}
@@ -8842,7 +8848,7 @@ module Capybara
                   body2 = rec['body'].to_s
                 else
                   r = rack_fetch('GET', abs, '', {}, 'follow', cache_mode: sw_uvc == 'none' ? 'no-cache' : 'default')
-                  raise "module import failed: #{abs}" unless r && (200..299).cover?(r['status'].to_i)
+                  raise "module import failed: #{abs}" unless resource_loaded?(r) && (200..299).cover?(r['status'].to_i)
 
                   ct   = (r['headers'] || {}).find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
                   body2 = r['body'].to_s
@@ -10511,7 +10517,7 @@ module Capybara
            (sw = any_window_sw_navigation_fetch(url, is_reload: is_reload, is_history: is_history,
                                                       referrer_source: referrer_source, referrer_policy: referrer_policy,
                                                       resulting_client_id: rid, **post_args))
-          return if sw['networkError']
+          return commit_frame_error_document(realm_id, url, rid) if sw['networkError']
 
           # Raw decoded bytes (like read_rack_body's byte-tagged output); reload_frame_realm_by_id
           # does the single utf8_text re-tag, matching the network path below.
@@ -10525,7 +10531,7 @@ module Capybara
           env['CONTENT_LENGTH'] = body.bytesize.to_s
         end
         apply_default_request_env(env, referer: compute_referrer(referrer_policy, referrer_source, url))
-        response = dispatch_rack_or_http(url, env, method: is_post ? 'POST' : 'GET', body: is_post ? body : nil) or return
+        response = dispatch_rack_or_http(url, env, method: is_post ? 'POST' : 'GET', body: is_post ? body : nil) or return commit_frame_error_document(realm_id, url, rid)
         status, headers, resp_body = response
         merge_set_cookie(headers, url)
         return if download_response?(headers)
@@ -10641,7 +10647,7 @@ module Capybara
            (sw = any_window_sw_navigation_fetch(get_url, method: 'GET', is_reload: is_reload, is_history: is_history,
                                                           referrer_source: initiator, referrer_policy: referrer_policy,
                                                           site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross, resulting_client_id: rid))
-          return if sw['networkError']
+          return commit_frame_error_document(realm_id, get_url, rid) if sw['networkError']
 
           # An SW-served redirect is FOLLOWED like a network one (the recursion
           # re-enters interception at the new URL — a redirect out of this SW's scope
@@ -10666,7 +10672,7 @@ module Capybara
           site:              site,
           origin_null:       origin_null,
           cookie_cross_site: cookie_cross
-        ) or return
+        ) or return commit_frame_error_document(realm_id, get_url, rid)
         status, headers, resp_body = response
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(get_url, resolve_against(loc, get_url))
@@ -10716,7 +10722,7 @@ module Capybara
            (sw = any_window_sw_navigation_fetch(url, method: 'POST', body: body, content_type: content_type, is_reload: is_reload, is_history: is_history,
                                                       referrer_source: initiator, referrer_policy: referrer_policy,
                                                       site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross, resulting_client_id: rid))
-          return if sw['networkError']
+          return commit_frame_error_document(realm_id, url, rid) if sw['networkError']
 
           # SW-served redirect: 307/308 re-POST, everything else GETs — the same split
           # as the network branch below, re-entering interception at the new URL.
@@ -10752,7 +10758,7 @@ module Capybara
           body:              body,
           content_type:      content_type,
           cookie_cross_site: cookie_cross
-        ) or return
+        ) or return commit_frame_error_document(realm_id, url, rid)
         status, headers, resp_body = response
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
@@ -11173,7 +11179,7 @@ module Capybara
         env = rack_env_for(url, method: 'GET')
         # (…its Referer the frame document's, under its referrer policy — its `<meta name="referrer">`)
         apply_default_request_env(env, referer: compute_referrer(referrer[1], referrer[0], url))
-        response = dispatch_rack_or_http(url, env, method: 'GET') or return
+        response = dispatch_rack_or_http(url, env, method: 'GET') or return reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry)
         status, headers, body = response
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
@@ -11197,7 +11203,7 @@ module Capybara
         env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
         apply_default_request_env(env, referer: compute_referrer(referrer[1], referrer[0], url))
-        response = dispatch_rack_or_http(url, env, method: 'POST', body: body) or return
+        response = dispatch_rack_or_http(url, env, method: 'POST', body: body) or return reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry)
         status, headers, resp_body = response
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
@@ -11772,6 +11778,8 @@ module Capybara
       end
 
       def save_downloaded_response(url, headers, body)
+        return if body.is_a?(CutShortBody)   # the download fails: its body never came whole (Chrome)
+
         filename = disposition_filename(content_disposition_header(headers).to_s)
         filename = File.basename(parse_url(url.to_s)&.fetch(:pathname).to_s) if filename.empty?
         filename = 'download' if filename.empty?
@@ -11945,7 +11953,8 @@ module Capybara
       # the server sees exactly what a no-SW navigation would) plus the `Service-Worker-Navigation-
       # Preload` header carrying the registration's header value. The SW intercepts the FINAL URL (a
       # pre-SW network redirect already happened + widened `site_seed`), so this is a single hop — no
-      # redirect loop. Returns the response wire hash for the fetch-event JSON, or nil on a hard error.
+      # redirect loop. Returns the response wire hash for the fetch-event JSON, or `PRELOAD_NETWORK_ERROR`
+      # on a network error.
       def navigation_preload_response(url, referrer_source, referrer_policy, site_seed, origin_null, header_value, dest: 'iframe', cookie_cross_site: false)
         site = widen_sec_fetch_site(site_seed, sec_fetch_site(referrer_source, url))
         response = dispatch_navigation_request(
@@ -11958,8 +11967,9 @@ module Capybara
           dest:              dest,
           cookie_cross_site: cookie_cross_site,
           extra_headers:     {'HTTP_SERVICE_WORKER_NAVIGATION_PRELOAD' => header_value.to_s}
-        ) or return nil
+        ) or return PRELOAD_NETWORK_ERROR
         status, headers, resp_body = response
+        cut_short = resp_body.is_a?(CutShortBody)
         {
           'status'     => status,
           'statusText' => RuntimeShared.utf8_text(Rack::Utils::HTTP_STATUS_CODES[status.to_i] || ''),
@@ -11971,11 +11981,15 @@ module Capybara
           # The UA transparently decodes a Content-Encoding'd body (gzip/deflate) before the SW's
           # `event.preloadResponse.text()` sees it — the header stays, the bytes are inflated (as the
           # regular fetch path does).
-          'body_b64'   => Base64.strict_encode64(decode_content_encoding(read_rack_body(resp_body), headers))
-        }
+          'body_b64'   => Base64.strict_encode64(decode_content_encoding(read_rack_body(resp_body), headers)),
+          # (…a body the wire cut short: what came, and then a network error as the SW reads it)
+          'body_error' => (true if cut_short)
+        }.compact
       rescue StandardError
-        nil
+        PRELOAD_NETWORK_ERROR
       end
+      # A preload that failed: `event.preloadResponse` rejects (Service Workers "Handle Fetch").
+      PRELOAD_NETWORK_ERROR = {'networkError' => true}.freeze
 
       # Fetch-Metadata `Sec-Fetch-Site`: the relationship of a request's INITIATOR to its target.
       # no initiator (a direct address-bar load) → 'none'; same (scheme,host,port) → 'same-origin';
@@ -12014,6 +12028,12 @@ module Capybara
       # non-http(s) URL.
       def registrable_site(url) = Native.site(url.to_s)
 
+      # A frame's navigation that FAILED — a network error: the frame commits an error document at the target URL (an empty
+      # one, as a failed `src` does), not keeping the document it unloaded.
+      def commit_frame_error_document(realm_id, url, client_id)
+        reload_frame_realm_by_id(realm_id, url.to_s, '', 'text/html', client_id: client_id)
+      end
+
       # A top-level navigation that FAILED — a network error: Chrome still commits an error document at the target URL, so
       # the URL moves even though nothing loaded.
       def commit_error_document(url)
@@ -12035,6 +12055,8 @@ module Capybara
         # for tests that route through an external OAuth provider URL
         # without intending the call to land.
         remote = net_http_fetch(url, env, method: method, body: body) unless url_is_local?(url)
+        return nil if remote == :network_error
+
         response = remote || framed_response(method, *@app.call(env)) or return nil
         status, headers, body = response
         [status, utf8_tagged_headers(headers), body]
@@ -12047,23 +12069,31 @@ module Capybara
 
       # A Rack response read as an HTTP/1.1 client reads it off the wire (RFC 9112 §6.3; Net::HTTP frames a remote one):
       # unless a Transfer-Encoding frames its body, its Content-Length values that differ are a network error (nil — a
-      # navigation fails, Chrome and Firefox measured), and its body — but a HEAD's, a 1xx's, a 204's and a 304's, which
-      # have none whatever the app gave — is as long as one says (the engine's `message_length`): what is past it
+      # navigation fails, Chrome and Firefox measured), and its body — but a HEAD's, a 1xx's, a 204's, a 205's and a
+      # 304's, which have none whatever the app gave (Chrome's, and Firefox's, a 205's too) — is as long as one says (the engine's `message_length`): what is past it
       # dropped, what falls short of it a `CutShortBody` (a fetch's body then fails as it is read; a document renders
       # what came, as Firefox does — Chrome commits an empty one).
       def framed_response(method, status, headers, body)
         return [status, headers, body] if headers.any? {|k, _| k.to_s.casecmp?('transfer-encoding') }
 
-        field          = headers.find {|k, _| k.to_s.casecmp?('content-length') }&.last
-        framed, length = Native.message_length(AssetCache.combined(field))
+        fields         = headers.filter_map {|k, v| v if k.to_s.casecmp?('content-length') }
+        framed, length = Native.message_length(fields.empty? ? nil : AssetCache.combined(fields.flatten))
         unless framed
           body.close if body.respond_to?(:close)
           return nil
         end
         code = status.to_i
-        return [status, headers, body] if length.nil? || method.to_s.casecmp?('HEAD') || code < 200 || code == 204 || code == 304
+        return [status, headers, body] if length.nil? || method.to_s.casecmp?('HEAD') || code < 200 || [204, 205, 304].include?(code)
 
-        bytes = read_rack_body(body)
+        # (…read no further than its length: what is past it is the next message's, which may never end)
+        bytes = +''
+        if body.respond_to?(:each)
+          body.each do |chunk|
+            bytes << chunk.to_s
+            break if bytes.bytesize >= length
+          end
+        end
+        body.close if body.respond_to?(:close)
         return [status, headers, CutShortBody.new(bytes)] if bytes.bytesize < length
 
         [status, headers, [bytes.bytesize > length ? bytes.byteslice(0, length) : bytes]]
@@ -12125,8 +12155,9 @@ module Capybara
         url[:port].empty? ? (url[:protocol] == 'https:' ? 443 : 80) : url[:port].to_i
       end
 
-      # Returns a Rack-shaped triple, or `nil` if the network attempt
-      # failed for any reason — the caller falls back to @app.call so
+      # Returns a Rack-shaped triple, `:network_error` where the server
+      # answered with no message to read, or `nil` if the network attempt
+      # failed otherwise — the caller falls back to @app.call so
       # WebMock-blocked external URLs (Discourse's OAuth provider
       # redirects) still round-trip through Rails like before. Cookies
       # are origin-scoped: ours don't go out. No redirect-follow either
@@ -12150,6 +12181,10 @@ module Capybara
         end
       rescue SystemExit, Interrupt, NoMemoryError
         raise
+      rescue EOFError, Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError
+        # (…the server answered, with no message Net::HTTP could read — a body short of its Content-Length, Content-Length
+        # values that differ: a network error, not a request for the app to serve)
+        :network_error
       rescue Exception  # WebMock::NetConnectNotAllowedError descends from Exception, not StandardError
         nil
       end

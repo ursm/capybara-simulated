@@ -22,6 +22,12 @@ RSpec.describe 'a response framed by its Content-Length' do
       when '/page'    then [200, {'content-type' => 'text/html', 'content-length' => '2'}, ['<p>cut</p>']]
       when '/bad-page' then [200, {'content-type' => 'text/html', 'content-length' => ['5', '6']}, ['<p>no</p>']]
       when '/short-page' then [200, {'content-type' => 'text/html', 'content-length' => '500'}, ['<p id=got>came</p>']]
+      when '/reset'   then [205, {'content-length' => '10'}, []]
+      when '/s.js'    then [200, {'content-type' => 'text/javascript', 'content-length' => '500'}, ['window.ran = 1;']]
+      when '/s.css'   then [200, {'content-type' => 'text/css', 'content-length' => '500'}, ['p { color: red }']]
+      when '/i.svg'   then [200, {'content-type' => 'image/svg+xml', 'content-length' => '500'}, ['<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>']]
+      when '/inner'   then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body><p id=old>old</p><a href="/bad-page">go</a>']]
+      when '/framed'  then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body><iframe src="/inner"></iframe>']]
       else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><a href="/bad-page">bad</a>']]
       end
     }
@@ -74,6 +80,47 @@ RSpec.describe 'a response framed by its Content-Length' do
       'NetworkError',
       '200 four'
     ])
+  end
+
+  it 'fails a script, a style sheet and an image whose body is cut short' do
+    s = simulated_session(framing_app)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.got = {};
+      const load = (el, key) => { el.onload = () => { got[key] = 'load'; }; el.onerror = () => { got[key] = 'error'; }; };
+      const script = document.createElement('script'); script.src = '/s.js'; load(script, 'script'); document.head.append(script);
+      const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = '/s.css'; load(link, 'css'); document.head.append(link);
+      const img = new Image(); load(img, 'img'); img.src = '/i.svg';
+    JS
+    got = poll_until { v = s.evaluate_script('window.got'); v.size == 3 ? v : nil }
+    expect(got).to eq('script' => 'error', 'css' => 'error', 'img' => 'error')
+    expect(s.evaluate_script('window.ran')).to be_nil
+  end
+
+  it 'leaves a 205 with no body to frame, and a network error with no response URL' do
+    s = simulated_session(framing_app)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.got = null;
+      const xhr = (url) => new Promise((done) => {
+        const x = new XMLHttpRequest();
+        x.onloadend = () => done(x.status + ' ' + JSON.stringify(x.responseURL));
+        x.open('GET', url);
+        x.send();
+      });
+      Promise.all([xhr('/reset'), xhr('/short')]).then((all) => { window.got = all; });
+    JS
+    expect(poll_until { s.evaluate_script('window.got') }).to eq(['205 "http://www.example.com/reset"', '0 ""'])
+  end
+
+  it 'commits an error document in a frame whose navigation fails' do
+    s = simulated_session(framing_app)
+    s.visit '/framed'
+    s.within_frame(0) do
+      s.click_link 'go'
+      expect(s).to have_no_css('#old')
+      expect(s.evaluate_script('location.pathname')).to eq('/bad-page')
+    end
   end
 
   it 'fails a navigation whose lengths differ, and renders what came of one cut short' do

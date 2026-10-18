@@ -30,10 +30,12 @@ RSpec.describe 'a download' do
     }
     app = lambda {|env|
       next [200, {'content-type' => 'text/plain', 'content-disposition' => dispositions[env['PATH_INFO']]}, ['x']] if dispositions.key?(env['PATH_INFO'])
-      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><a href="/ext">e</a><a href="/raw">r</a><a href="/path">p</a><a href="/nul">n</a><a href="/bad" download>b</a>']]
+      # (…and one whose body the wire cut short is no download at all: Chrome fails it)
+      next [200, {'content-type' => 'text/plain', 'content-disposition' => 'attachment; filename="cut.txt"', 'content-length' => '50'}, ['x']] if env['PATH_INFO'] == '/cut'
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><a href="/ext">e</a><a href="/raw">r</a><a href="/path">p</a><a href="/nul">n</a><a href="/cut">c</a><a href="/bad" download>b</a>']]
     }
     s = simulated_session(app)
-    %w[e r p n b].each do |link|
+    %w[e r p n c b].each do |link|
       s.visit '/'
       s.click_link link
     end

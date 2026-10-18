@@ -378,10 +378,11 @@ pub(crate) fn message_length(combined: Option<&str>) -> Result<Option<u64>, ()> 
     }
     Ok(extract_length(Some(combined)))
 }
-// (…for the host, of the header's value combined — its bytes: `[framable, length]`)
+// (…for the host, of the header's value combined — its bytes, each the code point it is, so values that differ in a
+// byte no UTF-8 decode keeps still differ: `[framable, length]`)
 pub(crate) fn message_length_for_ruby(combined: Option<magnus::RString>) -> (bool, Option<u64>) {
     // SAFETY: copied at once, before anything could run Ruby code that moves or frees it.
-    let combined = combined.map(|s| String::from_utf8_lossy(unsafe { s.as_slice() }).into_owned());
+    let combined = combined.map(|s| unsafe { s.as_slice() }.iter().map(|&b| char::from(b)).collect::<String>());
     match message_length(combined.as_deref()) {
         Ok(length) => (true, length),
         Err(()) => (false, None),
