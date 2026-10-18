@@ -10073,7 +10073,7 @@ module Capybara
         if (loc = redirect_location(status, resp_headers))
           o_r['redirect_loc'] = resolve_against(loc, target)
         else
-          o_r['redirect_ct']       = (resp_headers['content-type'] || resp_headers['Content-Type']).to_s
+          o_r['redirect_ct']       = header_text(resp_headers['content-type'] || resp_headers['Content-Type'])
           o_r['opaque_render'] = body_str.to_s.b unless body_str.to_s.empty?
         end
         o_r
@@ -10105,7 +10105,7 @@ module Capybara
       end
 
       def text_response?(headers)
-        ct = (headers['content-type'] || headers['Content-Type']).to_s.downcase
+        ct = header_text(headers['content-type'] || headers['Content-Type']).downcase
         return false if ct.empty?
         TEXT_CONTENT_TYPE_PREFIXES.any? {|p| ct.start_with?(p) }
       end
@@ -11266,12 +11266,12 @@ module Capybara
         end
       end
 
-      # Response content-type, defaulting to text/html. Header values can be a
-      # bare string or a one-element array (Rack 3 tuple form).
+      # Response content-type, defaulting to text/html — its fields combined, a header value being a bare string or an
+      # array of fields (Rack 3's form), as "extract a MIME type" reads the header list.
       def response_content_type(headers)
         ct = headers.find {|k, _| k.to_s.downcase == 'content-type' }&.last
-        ct = ct.first if ct.is_a?(Array)
-        ct.to_s.empty? ? 'text/html' : ct.to_s
+        ct = header_text(ct)
+        ct.empty? ? 'text/html' : ct
       end
 
       def navigate(url, depth: 0, referer: @current_url, referrer_policy: nil, from_history: false, is_reload: false, initiator: @current_url, site_seed: nil, replace: false)
@@ -11461,7 +11461,7 @@ module Capybara
         # XHTML/XML/SVG parse case-sensitively, no html/head/body skeleton,
         # `isHtmlDocument` false) and the encoding's HTTP-charset signal.
         ct = (@last_response_headers || {}).find {|k, _| k.to_s.downcase == 'content-type' }&.last
-        ct = ct.first if ct.is_a?(Array)
+        ct = ct && header_text(ct)
         opts = {
           'traceActive'        => !@trace.nil?,
           'timezone'           => ENV['TZ'].to_s,
@@ -11728,7 +11728,8 @@ module Capybara
       # save path here keeps the page state unchanged (no rebuild),
       # mirroring what a real browser does after a download.
       def content_disposition_header(headers)
-        headers['content-disposition'] || headers['Content-Disposition']
+        value = headers['content-disposition'] || headers['Content-Disposition']
+        value && header_text(value)
       end
 
       def download_response?(headers)
@@ -12406,7 +12407,7 @@ module Capybara
       # Case-insensitive response-header lookup + comma-list split for the CORS checks.
       def cors_header(headers, name)
         pair = headers.find {|k, _| k.to_s.downcase == name }
-        pair&.last.to_s
+        pair ? header_text(pair.last) : ''
       end
 
       def cors_list(value)
