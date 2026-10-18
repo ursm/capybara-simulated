@@ -2323,10 +2323,6 @@ fetch/api/abort/serviceworker-intercepted.https.html:
 - Stream errors once aborted.
 - "[harness] TIMEOUT"
 - fetch() response body has abort reason
-fetch/api/basic/conditional-get.any.js:
-- Testing conditional GET with ETags
-- "[dedicatedworker] Testing conditional GET with ETags"
-- "[serviceworker] Testing conditional GET with ETags"
 fetch/api/basic/error-after-response.any.js:
 - Response reader closed promise should reject after a network error happening after
   resolving fetch promise

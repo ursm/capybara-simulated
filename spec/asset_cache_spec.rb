@@ -39,6 +39,17 @@ RSpec.describe Capybara::Simulated::AssetCache do
     entry = cache.lookup('http://app/e')
     expect(cache.revalidation_headers(entry)).to eq('If-None-Match' => '"v1"')
   end
+
+  # (…and a 304 updating the stored fields with the ones it carries — a rotated ETag what the next revalidation sends —
+  # but for those describing a content it carries none of, and the driver's own: RFC 9111 §3.2, §4.3.4)
+  it 'updates what is stored from a 304' do
+    cache = described_class.new
+    cache.store('http://app/e', 200, {'cache-control' => 'no-cache', 'etag' => '"v1"', 'content-length' => '4'}, 'body')
+    entry = cache.lookup('http://app/e')
+    cache.refresh(entry, {'etag' => '"v2"', 'content-length' => '0', 'x-csim-status-text' => 'Not Modified'})
+    expect(cache.revalidation_headers(entry)).to eq('If-None-Match' => '"v2"')
+    expect(entry.headers.to_h.slice('content-length', 'x-csim-status-text')).to eq('content-length' => '4')
+  end
 end
 
 # …and the same contract seen from a session: a `reset!` between visits keeps an immutable

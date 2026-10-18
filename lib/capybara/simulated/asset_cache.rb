@@ -79,6 +79,9 @@ module Capybara
       # 302/307 are NOT here: a temporary redirect is served fresh only with explicit freshness,
       # never a Last-Modified-derived heuristic (which would risk serving it stale).
       HEURISTIC_STATUSES = [200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, 501].freeze
+      # The fields a 304 does not update in the stored response (RFC 9111 §3.2): those that describe the content it
+      # carries none of.
+      UNREFRESHED_FIELDS = %w[content-encoding content-length content-range transfer-encoding].freeze
 
       # `Vary` fields we can safely ignore because Simulated never sends
       # the corresponding request header — the cached "no value" variant
@@ -155,10 +158,15 @@ module Capybara
       end
 
       # RFC 9111 §4.3.4: a 304 refreshes the cached entry's freshness
-      # window without replacing the body. Mutation under the GVL is fine
+      # window without replacing the body, and updates the stored header
+      # fields with the ones it carries — a rotated ETag or Last-Modified
+      # is what the next revalidation sends — but for those describing the
+      # content it carries none of (§3.2) and the driver's own `x-csim-*`
+      # (a 304's status text is no 200's). Mutation under the GVL is fine
       # — see class-level Mutex note.
       def refresh(entry, new_headers)
         h  = ensure_lowercase(new_headers)
+        h.each {|k, v| entry.headers[k] = v unless UNREFRESHED_FIELDS.include?(k) || k.start_with?('x-csim-') }
         cc = parse_cache_control(h['cache-control'])
         entry.stored_at = Time.now
         entry.max_age   = freshness_seconds(cc, h, heuristic: HEURISTIC_STATUSES.include?(entry.status)) || entry.max_age
