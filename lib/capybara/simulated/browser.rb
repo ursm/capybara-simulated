@@ -4484,7 +4484,7 @@ module Capybara
       # the pipe). The JS-side XHR checks the return shape to pick
       # between inline processing and waiting for `__csim_
       # deliverHijackedFetches`.
-      def rack_fetch_async(method, url, body, headers_json)
+      def rack_fetch_async(method, url, body, headers_json, credentials: 'same-origin', client_url: nil, client_origin: nil, client_realm: nil)
         headers = begin
           JSON.parse(headers_json.to_s)
         rescue JSON::ParserError
@@ -4517,7 +4517,9 @@ module Capybara
               }
             }
           end
-        resp = rack_fetch(method, url, body, headers, 'follow', env_extras: env_extras)
+        # (…a CORS request as an XHR's is, by its client)
+        resp = rack_fetch(method, url, body, headers, 'follow', 'cors', credentials: credentials, env_extras: env_extras, client_url: client_url,
+                          client_origin: client_origin, client_realm: client_realm)
         return resp || {'status' => 0, 'headers' => {}, 'body' => ''} unless read_io
         id = (@hijack_fetch_seq += 1)
         @hijack_fetch_threads[id] = Thread.new do
@@ -4734,6 +4736,11 @@ module Capybara
         # script (+ its recorded imports — sw_note_import fills that map as the worker
         # evaluates). SW scripts are small; only service workers pay the retention.
         record[:script_body] = body if service
+        # (…a dedicated worker's site for cookies its owner document's, kept as it was made — HTML's worker settings —
+        # which its fetches, on its own thread, are judged by; a nested worker's its parent's)
+        unless service
+          record[:site_for_cookies] = parent_worker ? @workers.dig(parent_worker, :site_for_cookies) : site_for_cookies(realm_id)
+        end
         # …and the registry's worker, its script URL and TYPE what every realm's ServiceWorker of it reflects (an
         # update()/re-register from any realm parse-checks and respawns as its newest worker's type).
         Native.sw_worker_new(@sw_partition, handle, target, script_type.to_s.empty? ? 'classic' : script_type.to_s) if service
@@ -5291,7 +5298,9 @@ module Capybara
       # quota, the caller rejects with TypeError synchronously, like a browser.
       KEEPALIVE_QUOTA = 65_536
 
-      def keepalive_start(method, url, body, headers, redirect, mode, credentials, referrer_policy, referrer, cache_mode, client_url)
+      def keepalive_start(method, url, body, headers, redirect, mode, credentials, referrer_policy, referrer, cache_mode, client_url, realm = nil)
+        # (…its site for cookies worked out here, on the main thread its realm's URL is asked on, for the thread it runs on)
+        cookie_cross = realm.to_i.positive? && container_cross_site?(realm, url.to_s)
         # The quota reserves the PAYLOAD size: a text body arrives as its UTF-8 String and
         # any other as its BINARY bytes, so either way that is the String's byte count.
         size = body.to_s.bytesize
@@ -5311,7 +5320,7 @@ module Capybara
               r = begin
                 rack_fetch(method.to_s, url.to_s, body.to_s, headers || {}, redirect.to_s.empty? ? 'follow' : redirect.to_s,
                            mode, credentials: credentials || 'same-origin', referrer_policy: referrer_policy,
-                           referrer: referrer, cache_mode: cache_mode || 'default', client_url: client_url)
+                           referrer: referrer, cache_mode: cache_mode || 'default', client_url: client_url, cookie_cross_site: cookie_cross)
               rescue StandardError
                 nil
               end
@@ -9544,15 +9553,16 @@ module Capybara
         # against the hop's; a mode-less load's — an image's, a font's, a style sheet's, the host's for a document — by its
         # client's and its top-level document's; a client of an opaque origin (`null`, `data:`) cross-site
         # (cookie_cross_site_document?); one a frame's document made (`client_realm`, which the bindings name) by that
-        # frame's chain too, the top-level document's included (container_cross_site?). None for a load with no client
-        # at all.
+        # frame's ancestors too, the top-level document included (its own document is the client); a dedicated worker's
+        # by the site for cookies it was made with (worker_cross_site?). None for a load with no client at all.
         widen_cookie_site = lambda {|hop|
           cookie_client ||= cors_mode ? (doc_origin || sec_initiator) : (client_url || sec_initiator)
           next if cookie_client.nil?
 
           cross = cookie_cross_site_document?(cookie_client, hop) ||
                   (!cors_mode && !@current_url.nil? && cookie_cross_site_document?(@current_url, hop)) ||
-                  (client_realm.to_i.positive? && container_cross_site?(client_realm, hop))
+                  (client_realm.to_i.positive? && frame_ancestor_cross_site?(client_realm, hop)) ||
+                  worker_cross_site?(hop)
           cookie_site = widen_sec_fetch_site(cookie_site, cross ? 'cross-site' : sec_fetch_site(cookie_client, hop))
         }
         (MAX_FETCH_REDIRECTS + 1).times do
@@ -11934,6 +11944,29 @@ module Capybara
         end
         url = referrer unless url.match?(%r{\Ahttps?://}i)
         LoadClient.new(url, opaque || container_cross_site?(rid, target_url), referrer, policy)
+      end
+      # A document's site for cookies (RFC 6265bis "site for cookies"): its top-level document's site where every ancestor
+      # of it is of that site, else none (nil) — an about:blank / srcdoc one inheriting its creator's.
+      private def site_for_cookies(realm_id)
+        urls = []
+        rid  = realm_id.to_i
+        while rid.positive? && !@runtime.top_level_realm?(rid)
+          urls << frame_realm_url(rid)
+          rid = @runtime.frame_realm_parent(rid).to_i
+        end
+        site = registrable_site(rid.positive? ? frame_realm_url(rid) : @current_url) or return nil
+        same = urls.all? {|u| u && !u.match?(/\Adata:/i) && (!u.match?(%r{\Ahttps?://}i) || registrable_site(u) == site) }
+        same ? site : nil
+      end
+      # …and whether a request to `hop` a dedicated worker makes — on its own thread — is cross-site for cookies by the one
+      # it was made with: false for none (not a worker's thread, a service worker).
+      private def worker_cross_site?(hop)
+        handle = Thread.current[:csim_worker_handle] or return false
+        record = @workers[handle]
+        return false unless record&.key?(:site_for_cookies)
+
+        site = record[:site_for_cookies]
+        site.nil? || registrable_site(hop) != site
       end
       private def container_cross_site?(realm_id, target_url)
         rid = realm_id.to_i
