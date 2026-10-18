@@ -4524,6 +4524,8 @@ module Capybara
         query = env['QUERY_STRING'].to_s
         # (…as text: an env's values may be BINARY-tagged, and a binary string crosses to the page as bytes)
         answered = env.empty? ? requested : RuntimeShared.utf8_text(env_request_url(env) + (query.empty? ? '' : "?#{query}"))
+        # (…the request's own where no redirect led elsewhere — an env keeps no empty query's `?`)
+        answered = requested if answered == requested.chomp('?')
         @hijack_fetch_contexts[id] = {url: answered, redirected: answered != requested, credentials: credentials, cookie_env: cookie_env, realm: client_realm.to_i}
         {'handle' => id}
       end
