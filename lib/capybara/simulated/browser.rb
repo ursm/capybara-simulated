@@ -12182,9 +12182,9 @@ module Capybara
         end
       rescue SystemExit, Interrupt, NoMemoryError
         raise
-      rescue EOFError, Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError
-        # (…the server answered with no message Net::HTTP could read — closing before a status line, a malformed one: a
-        # network error, not a request for the app to serve)
+      rescue EOFError, Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Zlib::Error
+        # (…the server answered with no message Net::HTTP could read — closing before a status line, a malformed one, a
+        # body its coding cannot be undone of: a network error, not a request for the app to serve)
         :network_error
       rescue Exception  # WebMock::NetConnectNotAllowedError descends from Exception, not StandardError
         nil
