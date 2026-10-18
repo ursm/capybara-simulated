@@ -3882,18 +3882,24 @@ fn assigned_nodes_of(
     rv.set(answer);
 }
 
-// __dom.latchFocusRing(focusedNid, textEntry): the focus ring of the realm whose tree the element just focused is in,
-// latched as it is focused — whichever realm's code focused it: one a frame made, adopted here, is matched by this
-// realm's `:focus-visible` — shown (`:focus-visible` matches) unless the user's last driven input there was a pointer's
-// and the element is no text entry (`textEntry`, the bindings' to say).
+// __dom.latchFocusRing(focusedNid): the focus ring of the realm whose tree the element just focused is in, latched as
+// it is focused — whichever realm's code focused it: one a frame made, adopted here, is matched by this realm's
+// `:focus-visible` — shown (`:focus-visible` matches) unless the user's last driven input there was a pointer's and the
+// element is no TEXT ENTRY: a textarea, a textual `<input>`, an editable element — whose ring a browser shows however
+// focus came to it.
 fn latch_focus_ring(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let text_entry = args.get(1).is_true();
-    let cid = nid_arg(scope, &args, 0).and_then(|id| dom(scope).arena.get(id).map(|n| n.realm)).unwrap_or_else(|| realm_id(scope, &args));
+    let id = nid_arg(scope, &args, 0);
+    let cid = id.and_then(|id| dom(scope).arena.get(id).map(|n| n.realm)).unwrap_or_else(|| realm_id(scope, &args));
     let arena = realm(scope, cid);
+    let text_entry = id.is_some_and(|id| {
+        arena.get(id).filter(|n| n.kind == NodeKind::Element).is_some_and(|n| {
+            n.is_html_named("textarea") || (n.is_html_named("input") && n.input_has(crate::input_types::TEXTUAL)) || arena.is_editable(id)
+        })
+    });
     let hidden = arena.pointer_modality && !text_entry;
     arena.set_focus_ring_hidden(hidden);
 }
