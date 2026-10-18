@@ -586,8 +586,16 @@ module Capybara
       # The storage-partition site a blob: URL was created in (its creator's top-level
       # site), or nil for an unknown / revoked / unpartitioned URL.
       def blob_partition_site_of(url)
-        e = @blob_partitions_lock.synchronize { @blob_partitions[url.to_s] }
+        e = blob_partition(url)
         e && e[:site]
+      end
+
+      # The entry of the blob a URL a document loads or navigates to resolves to: its
+      # fragment aside, as a fetch of it resolves (blob_urls.rs `entry_key`) — a revoke's
+      # URL names it whole, so `revoke_blob_partitioned` reads the entry as given.
+      private def blob_partition(url)
+        key = Native.blob_url_key(url.to_s)
+        @blob_partitions_lock.synchronize { @blob_partitions[key] }
       end
 
       # Is this blob: URL in a different storage partition than `accessor`'s top-level
@@ -606,7 +614,7 @@ module Capybara
       # frames it is enforced at the frame-navigation site. Falls back to the
       # accessor's own store for an unpartitioned URL (worker / legacy path).
       def blob_bytes_for(url, accessor)
-        entry = @blob_partitions_lock.synchronize { @blob_partitions[url.to_s] }
+        entry = blob_partition(url)
         creator = entry ? entry[:browser] : accessor
         creator.respond_to?(:read_blob_for_window) ? creator.read_blob_for_window(url) : nil
       end

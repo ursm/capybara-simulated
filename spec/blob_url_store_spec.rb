@@ -36,4 +36,22 @@ RSpec.describe 'the blob URL store' do
     ctx.low_memory_notification
     expect(ctx.heap_statistics[:number_of_native_contexts]).to eq(2)   # (…the page's and its frame's)
   end
+
+  # A window opened at a blob URL another window made loads that window's blob whatever the fragment — the entry a URL
+  # names is the one a fetch of it resolves to (blob_urls.rs `entry_key`), across windows as within one: `<url>#x` was
+  # found in no window's partition and navigated to as a path on the opener's server.
+  it 'opens another window\'s blob URL with a fragment' do
+    app = lambda {|env|
+      body = env['PATH_INFO'] == '/b' ? '<body>b<script>window.go = (s) => window.open(localStorage.u + s)</script>' : '<body>a'
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8>#{body}"]]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script("localStorage.u = URL.createObjectURL(new Blob(['<!DOCTYPE html><meta charset=utf-8><title>made</title>'], {type: 'text/html'}))")
+    b = s.window_opened_by { s.execute_script("window.open('/b')") }
+    s.switch_to_window(b)
+    opened = s.window_opened_by { s.execute_script("go('#x')") }
+    s.switch_to_window(opened)
+    expect(s.evaluate_script('[location.protocol, location.hash, document.title]')).to eq(['blob:', '#x', 'made'])
+  end
 end

@@ -8377,7 +8377,8 @@ module Capybara
         # timeout under suite load — flaky in the gate. So we only resolve a blob from
         # THIS window's registry; the cross-window same-partition fetch is a backlog
         # item (cross-partition.https "fetched from a same-partition {iframe,worker}").
-        @blob_registry_lock.synchronize { @blob_registry[url.to_s] }
+        key = Native.blob_url_key(url.to_s)
+        @blob_registry_lock.synchronize { @blob_registry[key] }
       end
 
       # The SITE (scheme + registrable domain) of this window's top-level document.
