@@ -83,6 +83,37 @@ const PUNCTUATION: [(char, &str, u32); 33] = [
     ('}', "BracketRight", 221),
     ('~', "Backquote", 192),
 ];
+// What a key a US keyboard types a character with types with Shift held (WebDriver's shifted keys): a letter its
+// capital, a digit or a punctuation mark the one above it; any other character as it is (Chrome: Shift+ß types ß).
+const SHIFTED: [(char, char); 21] = [
+    ('`', '~'),
+    ('1', '!'),
+    ('2', '@'),
+    ('3', '#'),
+    ('4', '$'),
+    ('5', '%'),
+    ('6', '^'),
+    ('7', '&'),
+    ('8', '*'),
+    ('9', '('),
+    ('0', ')'),
+    ('-', '_'),
+    ('=', '+'),
+    ('[', '{'),
+    (']', '}'),
+    ('\\', '|'),
+    (';', ':'),
+    ('\'', '"'),
+    (',', '<'),
+    ('.', '>'),
+    ('/', '?'),
+];
+fn shifted(spec: &[u16]) -> Option<u16> {
+    let &[unit] = spec else { return None };
+    let c = char::from_u32(u32::from(unit))?;
+    let up = if c.is_ascii_lowercase() { c.to_ascii_uppercase() } else { SHIFTED.iter().find(|s| s.0 == c)?.1 };
+    Some(up as u16)
+}
 
 fn units(s: &str) -> Vec<u16> {
     s.encode_utf16().collect()
@@ -92,10 +123,11 @@ fn lower(spec: &[u16]) -> String {
     String::from_utf16_lossy(spec).to_lowercase()
 }
 
-// What `spec` presses: a key by its name, a line feed Enter and a tab Tab — a text's own — else the character it is
-// (one code unit typed with its key's code, `Key` and its uppercase letter for any other; more, as an astral
-// character is, with none).
-pub(crate) fn resolve(spec: &[u16]) -> Key {
+// What `spec` presses: a key by its name, a line feed Enter and a tab Tab — a text's own — else the character it is,
+// with `shift` held the one its key types so (`shifted`): typed with its key's code on a US keyboard — `Key` and its
+// capital for a letter, `Digit` and it for a digit — and its `keyCode`; one no such key types (a `ß`, an astral
+// character) with none, `keyCode` 0 (Chrome).
+pub(crate) fn resolve(spec: &[u16], shift: bool) -> Key {
     let named = |name: &str| {
         NAMED.iter().find(|n| n.0 == name).map(|&(_, key, code, key_code, ch, input_type)| Key {
             named: true,
@@ -115,27 +147,17 @@ pub(crate) fn resolve(spec: &[u16]) -> Key {
         [] => return Key { named: false, key: Vec::new(), code: Vec::new(), key_code: 0, char: None, input_type: None },
         _ => {}
     }
-    let (code, key_code) = match spec {
-        [unit] => match char::from_u32(u32::from(*unit)) {
-            Some(c) => match PUNCTUATION.iter().find(|p| p.0 == c) {
-                Some(&(_, code, key_code)) => (units(code), key_code),
-                None => {
-                    let upper: Vec<u16> = c.to_uppercase().collect::<String>().encode_utf16().collect();
-                    let mut code = units("Key");
-                    code.extend(&upper);
-                    (code, u32::from(upper[0]))
-                }
-            },
-            // (…a lone surrogate, which no case maps)
-            None => {
-                let mut code = units("Key");
-                code.push(*unit);
-                (code, u32::from(*unit))
-            }
+    let typed = shift.then(|| shifted(spec)).flatten().map_or_else(|| spec.to_vec(), |u| vec![u]);
+    let (code, key_code) = match typed[..] {
+        [unit] => match char::from_u32(u32::from(unit)) {
+            Some(c) if c.is_ascii_alphabetic() => (units(&format!("Key{}", c.to_ascii_uppercase())), u32::from(c.to_ascii_uppercase())),
+            Some(c) if c.is_ascii_digit() => (units(&format!("Digit{c}")), u32::from(c)),
+            Some(c) => PUNCTUATION.iter().find(|p| p.0 == c).map_or((Vec::new(), 0), |&(_, code, key_code)| (units(code), key_code)),
+            None => (Vec::new(), 0),
         },
         _ => (Vec::new(), 0),
     };
-    Key { named: false, key: spec.to_vec(), code, key_code, char: Some(spec.to_vec()), input_type: Some("insertText") }
+    Key { named: false, key: typed.clone(), code, key_code, char: Some(typed), input_type: Some("insertText") }
 }
 
 // The modifier `name` names: its `key`, `code` and `keyCode` — None for a name that is none.
@@ -356,10 +378,12 @@ fn motion_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let modifiers = args.get(2).uint32_value(scope).unwrap_or(0);
     rv.set_uint32(motion(crate::dom::realm(scope, cid), id, &key, modifiers));
 }
-// __dom.resolveKey(spec) -> [key, code, keyCode, char (null for none), inputType (null for none), named] (`resolve`).
+// __dom.resolveKey(spec, shift) -> [key, code, keyCode, char (null for none), inputType (null for none), named]
+// (`resolve`).
 fn resolve_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let spec = crate::dom::utf16_arg(scope, args.get(0));
-    let k = resolve(&spec);
+    let shift = args.get(1).is_true();
+    let k = resolve(&spec, shift);
     let ch: v8::Local<v8::Value> = match k.char.as_deref() {
         Some(c) => crate::dom::utf16_value(scope, c),
         None => v8::null(scope).into(),
@@ -388,7 +412,7 @@ mod tests {
     use super::*;
 
     fn key(s: &str) -> (String, String, u32, Option<String>, Option<&'static str>) {
-        let k = resolve(&units(s));
+        let k = resolve(&units(s), false);
         (String::from_utf16_lossy(&k.key), String::from_utf16_lossy(&k.code), k.key_code, k.char.map(|c| String::from_utf16_lossy(&c)), k.input_type)
     }
 
@@ -399,8 +423,17 @@ mod tests {
         assert_eq!(key(".").1, "Period");
         assert_eq!(key(".").2, 190);
         assert_eq!(key("a"), ("a".into(), "KeyA".into(), 65, Some("a".into()), Some("insertText")));
-        assert_eq!(key("ß").1, "KeySS");
+        assert_eq!((key("1").1, key("1").2), ("Digit1".into(), 49));
+        assert_eq!((key("ß").1, key("ß").2), (String::new(), 0));
         assert_eq!(key("😀").2, 0);
+        let shift = |s: &str| {
+            let k = resolve(&units(s), true);
+            (String::from_utf16_lossy(&k.key), String::from_utf16_lossy(&k.code), k.key_code)
+        };
+        assert_eq!(shift("1"), ("!".into(), "Digit1".into(), 49));
+        assert_eq!(shift("a"), ("A".into(), "KeyA".into(), 65));
+        assert_eq!(shift(";"), (":".into(), "Semicolon".into(), 186));
+        assert_eq!(shift("ß"), ("ß".into(), String::new(), 0));
         assert_eq!(modifier(&units("Cmd")), Some(("Meta", "MetaLeft", 91)));
         assert_eq!(modifier(&units("x")), None);
     }

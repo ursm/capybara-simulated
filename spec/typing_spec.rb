@@ -246,4 +246,22 @@ RSpec.describe 'typing into a text control' do
     s.find(:css, '#z').click
     expect(s.evaluate_script('L')).to eq(%w[a:input:3 a:input:4 a:change:4 b:input:2 b:change:2 m:input:5 m:input:5 m:change:5])
   end
+  # A character typed with Shift held is the one its key types so on a US keyboard (WebDriver's shifted keys) — `!` for
+  # `1`, `:` for `;`, a capital for a letter — with that key's `code` and `keyCode`; a character no such key types
+  # (`ß`, `é`) is typed as it is, with no code and `keyCode` 0. Chrome through chromedriver, but for those last ones'
+  # `key`: it reports '' where WebDriver says the character itself.
+  it "types the character a key types with Shift held, and the key's code" do
+    html = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8><input id=i><script>
+        window.__k = [];
+        document.getElementById('i').addEventListener('keydown', (e) => { if (e.key !== 'Shift') __k.push([e.key, e.code, e.keyCode].join('/')); });
+      </script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
+    s.find(:css, '#i').send_keys([:shift, '1'], [:shift, 'a'], [:shift, 'ß'], [:shift, ';'], 'b', '1', [:shift, 'é'], [:shift, 'si'])
+    expect(s.evaluate_script("[document.getElementById('i').value, __k]")).to eq([
+      '!Aß:b1éSI',
+      %w[!/Digit1/49 A/KeyA/65 ß//0 :/Semicolon/186 b/KeyB/66 1/Digit1/49 é//0 S/KeyS/83 I/KeyI/73]
+    ])
+  end
 end
