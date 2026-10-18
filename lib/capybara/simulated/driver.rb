@@ -476,7 +476,9 @@ module Capybara
       # in place first (platform-globals' `fireAuxLoadSoon`). ONLY the JS `window.open`
       # path does that — a `target=_blank` click or `open_new_window` hands nobody a
       # reference to hook, so their window announces its own load like any other.
-      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, defer_load: false, creator: nil)
+      # (…`activation_realm` the realm of `source`'s whose window chose the new one, whose user activation a new window
+      # consumes — not one a name found)
+      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, defer_load: false, creator: nil, activation_realm: nil)
         name = name.to_s
         # (…the policy the opening hyperlink sets, else its document's)
         referrer_policy = source&.main_document_referrer_policy if referrer_policy.to_s.empty?
@@ -496,6 +498,7 @@ module Capybara
           end
           return existing[:handle]
         end
+        source.consume_user_activation(activation_realm) if source && activation_realm
         @next_window_seq += 1
         handle = "csim-window-#{@next_window_seq}"
         aux = build_window_browser
@@ -560,7 +563,7 @@ module Capybara
         if noopener
           # (…no opener_handle ⇒ window.opener null; loaded now, as no WindowProxy is handed back to fire its load)
           # (…an empty URL about:blank, as the window open steps make it: the opener path's window realm is that already)
-          open_aux_window(resolved || 'about:blank', name: name, source: opener_browser, referrer: referrer, referrer_policy: referrer_policy)
+          open_aux_window(resolved || 'about:blank', name: name, source: opener_browser, activation_realm: opener_realm_id, referrer: referrer, referrer_policy: referrer_policy)
           return nil
         end
         # Same-origin window → a realm in the opener's isolate (shared heap); the
@@ -573,13 +576,14 @@ module Capybara
         end
         open_aux_window(
           resolved,
-          name:            name,
-          opener_handle:   handle_for(opener_browser),
-          source:          opener_browser,
-          referrer:        referrer,
-          referrer_policy: referrer_policy,
-          defer_load:      true,
-          creator:         {origin: about_origin, base: about_base}
+          name:             name,
+          opener_handle:    handle_for(opener_browser),
+          source:           opener_browser,
+          activation_realm: opener_realm_id,
+          referrer:         referrer,
+          referrer_policy:  referrer_policy,
+          defer_load:       true,
+          creator:          {origin: about_origin, base: about_base}
         )
       end
 

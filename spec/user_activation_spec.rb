@@ -24,4 +24,21 @@ RSpec.describe 'user activation' do
     s.execute_script('setTimeout(() => { window.later = navigator.userActivation.isActive; }, 6000)')
     expect(poll_until(timeout: 15) { v = s.evaluate_script('window.later'); v.nil? ? nil : [v] }).to eq([false])
   end
+
+  # (…the initial about:blank window of a frame no script has looked into, whose realm is made later, among the same-
+  # origin descendants a click activates — Chrome 154: [true, true] — and a new top-level window a click opens consuming
+  # it, as HTML's rules for choosing a navigable have it: `window.open` had left it active)
+  it 'reaches a frame not built yet, and is consumed by a window opened' do
+    page = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8><body><iframe></iframe>
+      <button id=open onclick="window.open('/p'); window.after = navigator.userActivation.isActive">o</button>
+      <button id=plain>b</button>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    s.find('#plain').click
+    expect(s.evaluate_script('[frames[0].navigator.userActivation.hasBeenActive, frames[0].navigator.userActivation.isActive]')).to eq([true, true])
+    s.find('#open').click
+    expect(s.evaluate_script('[window.after, navigator.userActivation.hasBeenActive]')).to eq([false, true])
+  end
 end

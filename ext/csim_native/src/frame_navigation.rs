@@ -49,10 +49,16 @@ struct FrameNavigation {
     // navigation per navigable, a later one replacing it), by the number `planFrameNavigation` gave it — 0 for none.
     planned: u32,
     contents: [Option<Content>; CONTENT_SLOTS],
+    // While its navigable has no realm made: the user activation the window of its initial about:blank document has
+    // had (user_activation.rs) — its last activation, on the container's realm's clock, and the activation notifications
+    // that reached it — which that window takes as its realm is made (navigables.rs `set_frame_realm`).
+    activation: Option<(f64, u32)>,
 }
 
 // A scripted navigation's response awaited (frame-nav.js `FN_NAV_PENDING`): what a plan superseded clears.
 const NAV_PENDING: u32 = 1 << 1;
+// Its post-insertion step ran: its navigable exists (frame-nav.js `FN_CONTEXT_READY`).
+const CONTEXT_READY: u32 = 1 << 6;
 // Its `src` refused as its attributes were last processed (frame-nav.js `FN_SRC_REFUSED`, `process_src`).
 const SRC_REFUSED: u32 = 1 << 7;
 
@@ -81,6 +87,23 @@ impl FrameNavigations {
 impl RealmArena {
     fn frame_navigation(&mut self, container: NodeId) -> &mut FrameNavigation {
         self.frame_navigations.0.entry(container).or_default()
+    }
+    // The frames in the documents of realms `parents` whose navigables exist but have no realm made — an `about:blank`
+    // frame no script has looked into — which an activation of those documents reaches all the same.
+    pub(crate) fn unbuilt_frames(&self, parents: &[i32]) -> Vec<NodeId> {
+        let ready = |nav: &FrameNavigation| nav.flags & CONTEXT_READY != 0;
+        let in_parents = |c: NodeId| self.get(c).is_some_and(|n| parents.contains(&n.realm));
+        self.frame_navigations.0.iter().filter(|&(&c, nav)| ready(nav) && in_parents(c) && self.frame_realm(c).is_none() && self.is_connected(c)).map(|(&c, _)| c).collect()
+    }
+    // …one more activation notification reaching such a frame's window, its last at `at` on its container's realm's
+    // clock…
+    pub(crate) fn note_unbuilt_activation(&mut self, container: NodeId, at: f64) {
+        let nav = self.frame_navigation(container);
+        nav.activation = Some((at, nav.activation.map_or(0, |(_, n)| n) + 1));
+    }
+    // …and what it had, taken as its realm is made.
+    pub(crate) fn take_unbuilt_activation(&mut self, container: NodeId) -> Option<(f64, u32)> {
+        self.frame_navigations.0.get_mut(&container).and_then(|nav| nav.activation.take())
     }
     // …and those of containers freed with their realm let go of (a realm's nodes are freed together, past `free_node`).
     pub(crate) fn forget_freed_frame_navigations(&mut self) {

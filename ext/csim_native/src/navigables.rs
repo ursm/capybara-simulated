@@ -117,8 +117,13 @@ impl RealmArena {
         child.realm = realm;
         if let Some(realm) = realm {
             nav.containers.insert(realm, container);
-            let top = self.get(container).map(|n| n.realm).filter(|&p| p != realm).map(|p| self.top_level_realm(p));
+            let activation = self.take_unbuilt_activation(container);
+            let parent = self.get(container).map(|n| n.realm).filter(|&p| p != realm);
+            let top = parent.map(|p| self.top_level_realm(p));
             self.navigables.tops.insert(realm, top.unwrap_or(realm));
+            if let (Some((at, count)), Some(parent)) = (activation, parent) {
+                self.inherit_activation(realm, parent, at, count);
+            }
         }
         self.note_linked();
     }
@@ -191,15 +196,17 @@ impl RealmArena {
     // The realms of realm `realm`'s descendant navigables' active documents — its frames', theirs, … — in no order:
     // never a window `window.open` made, which is a top-level one.
     pub(crate) fn descendant_realms(&self, realm: i32) -> Vec<i32> {
-        let mut found = Vec::new();
-        let mut parents = vec![realm];
-        while let Some(parent) = parents.pop() {
-            for (&c, child) in &self.navigables.children {
-                if let Some(r) = self.stepped_realm(c, child).filter(|_| self.get(c).is_some_and(|n| n.realm == parent)) {
-                    found.push(r);
-                    parents.push(r);
-                }
+        let mut by_parent: HashMap<i32, Vec<i32>> = HashMap::new();
+        for (&c, child) in &self.navigables.children {
+            if let (Some(parent), Some(r)) = (self.get(c).map(|n| n.realm), self.stepped_realm(c, child)) {
+                by_parent.entry(parent).or_default().push(r);
             }
+        }
+        let (mut found, mut parents) = (Vec::new(), vec![realm]);
+        while let Some(parent) = parents.pop() {
+            let children = by_parent.get(&parent).map_or(&[][..], Vec::as_slice);
+            found.extend_from_slice(children);
+            parents.extend_from_slice(children);
         }
         found
     }

@@ -2037,12 +2037,13 @@ module Capybara
         referrer, document_policy = realm_referrer_initiator(realm_id)
         @driver.open_aux_window(
           url,
-          name:            target_keyword(target) == TARGET_BLANK ? nil : target.to_s,
-          source:          self,
-          opener:          !!opener,
-          blob_snapshot:   blob,
-          referrer:        referrer || '',
-          referrer_policy: link_policy.to_s.empty? ? document_policy : link_policy.to_s
+          name:             target_keyword(target) == TARGET_BLANK ? nil : target.to_s,
+          source:           self,
+          activation_realm: realm_id,
+          opener:           !!opener,
+          blob_snapshot:    blob,
+          referrer:         referrer || '',
+          referrer_policy:  link_policy.to_s.empty? ? document_policy : link_policy.to_s
         )
       end
 
@@ -3223,8 +3224,6 @@ module Capybara
           initiator = realm_referrer_initiator(@current_realm_id.to_i)
           initiator = [initiator[0], 'no-referrer'] if no_referrer
         end
-        # Opening a new top-level browsing context consumes transient user activation.
-        @runtime.call('__csimConsumeTransientActivation') if new_window rescue nil
         if method == 'GET'
           # GET ignores enctype: the entry list is always the urlencoded query.
           query, = encode_entry_list(entries, 'application/x-www-form-urlencoded', encoding)
@@ -3233,7 +3232,7 @@ module Capybara
           # carried (browsers navigate to `action?`), it isn't preserved.
           target = Native.form_action_url(parse_url(action_url.to_s)&.fetch(:href) || action_url.to_s, query)
           if new_window
-            @driver.open_aux_window(target, name: window_name, source: self,
+            @driver.open_aux_window(target, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
                                     opener: keep_opener, referrer: referrer)
           elsif named_frame
             navigate_realm_self_get(named_frame, target, referrer: initiator)
@@ -3245,7 +3244,7 @@ module Capybara
         else
           body, content_type = encode_entry_list(entries, enctype, encoding)
           if new_window
-            @driver.open_aux_window(action_url, name: window_name, source: self,
+            @driver.open_aux_window(action_url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
                                     opener: keep_opener, referrer: referrer,
                                     post: {body: body, content_type: content_type})
           elsif named_frame
@@ -7403,10 +7402,19 @@ module Capybara
       # same-origin URL still takes the aux path until realm URL-loading lands).
       def open_window_realm(url, name: nil, opener_realm_id: 0, about_base: nil, about_origin: nil)
         return nil unless url.nil?
+        consume_user_activation(opener_realm_id)
         @runtime.create_window_realm(
           '', '', 'text/html',
           window_name: name, opener_id: opener_realm_id, about_base: about_base, about_origin: about_origin
         )
+      end
+
+      # HTML "rules for choosing a navigable": a new top-level traversable made consumes the user activation of the
+      # window that chose it, realm `realm_id`'s — the engine's (user_activation.rs), in every window of its page.
+      def consume_user_activation(realm_id)
+        @runtime.realm_call(realm_id.to_i, '__csimConsumeTransientActivation')
+      rescue StandardError
+        nil
       end
 
       # `targetWindow.postMessage(data, targetOrigin)` — route to the target window's

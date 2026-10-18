@@ -19,22 +19,51 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 impl RealmArena {
     // HTML "activation notification steps" for realm `realm`'s document: its window, its ancestor navigables' windows
     // and those of its descendant navigables whose documents are of its origin, each activated now on its clock, and
-    // each window's close watcher manager notified (`activations`).
+    // each window's close watcher manager notified (`activations`) — the initial about:blank window of a frame no script
+    // has looked into, whose realm is not made yet, among them (frame_navigation.rs `note_unbuilt_activation`): it is of
+    // its container's document's origin, unless a sandbox makes it opaque.
     pub(crate) fn activation_notify(&mut self, realm: i32) {
-        let origin = self.realm_state_mut(realm).map(|s| s.location.origin_key(realm));
         let mut windows = vec![realm];
         windows.extend(self.ancestor_realms(realm));
-        for descendant in self.descendant_realms(realm) {
-            if self.realm_state_mut(descendant).map(|s| s.location.origin_key(descendant)) == origin {
-                windows.push(descendant);
+        let descendants = self.descendant_realms(realm);
+        let same: Vec<i32> = if descendants.is_empty() {
+            descendants
+        } else {
+            let origin = self.origin_key_of(realm);
+            descendants.into_iter().filter(|&d| self.origin_key_of(d) == origin).collect()
+        };
+        let parents: Vec<i32> = std::iter::once(realm).chain(same.iter().copied()).collect();
+        for container in self.unbuilt_frames(&parents) {
+            if !self.sandboxes_origin(container) {
+                let at = self.get(container).and_then(|n| self.realm_state(n.realm)).map_or(0.0, |s| s.clock);
+                self.note_unbuilt_activation(container, at);
             }
         }
+        windows.extend(same);
         for window in windows {
             if let Some(state) = self.realm_state_mut(window) {
                 state.last_activation = Some(state.clock);
                 state.activations += 1;
             }
         }
+    }
+    // …and what the initial about:blank window of a frame takes as its realm `realm` is made, of what it had while its
+    // realm was not: the activation notifications, its last activation `at` on its container's realm `parent`'s clock —
+    // as long before now on its own.
+    pub(crate) fn inherit_activation(&mut self, realm: i32, parent: i32, at: f64, count: u32) {
+        let elapsed = self.realm_state(parent).map_or(0.0, |s| s.clock - at);
+        let initial = self.realm_state(realm).is_some_and(|s| s.location.href() == "about:blank");
+        if let Some(state) = self.realm_state_mut(realm).filter(|_| initial) {
+            state.last_activation = Some(state.clock - elapsed);
+            state.activations = count;
+        }
+    }
+    fn origin_key_of(&mut self, realm: i32) -> Option<String> {
+        self.realm_state_mut(realm).map(|s| s.location.origin_key(realm))
+    }
+    // Whether the frame `container`'s `sandbox` attribute makes its document's origin opaque (sandbox.rs).
+    fn sandboxes_origin(&self, container: crate::dom::NodeId) -> bool {
+        crate::sandbox::opaque_origin(None, self.get(container).and_then(|n| n.plain_attr("sandbox")))
     }
     // Whether realm `realm`'s window has transient activation: its last activation timestamp at or before now, less
     // than the transient activation duration ago.
