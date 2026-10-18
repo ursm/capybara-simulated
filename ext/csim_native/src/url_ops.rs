@@ -21,6 +21,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "javascriptUrlSource", javascript_url_source_op, context_id);
     register(scope, ns, "metaReferrerPolicy", meta_referrer_policy_op, context_id);
     register(scope, ns, "hyperlinkReferrerPolicy", hyperlink_referrer_policy_op, context_id);
+    register(scope, ns, "referrerPolicyAttribute", referrer_policy_attribute_op, context_id);
     register(scope, ns, "elementTarget", element_target_op, context_id);
     register(scope, ns, "formActionUrl", form_action_url, context_id);
 }
@@ -157,8 +158,20 @@ pub(crate) fn hyperlink_referrer_policy(node: &crate::dom::NodeData) -> &'static
     if crate::token_list::link_types(node.plain_attr("rel").unwrap_or("")) & crate::token_list::LINK_NOREFERRER != 0 {
         return "no-referrer";
     }
+    referrer_policy_attribute(node)
+}
+// An element's `referrerpolicy` attribute (HTML's referrer policy attribute: an enumerated one, its invalid and missing
+// value default the empty string) — what an `<img>`'s, a `<script>`'s, a `<link>`'s fetch is made under.
+pub(crate) fn referrer_policy_attribute(node: &crate::dom::NodeData) -> &'static str {
     let attr = node.plain_attr("referrerpolicy").unwrap_or("");
     POLICIES.iter().find(|p| p.eq_ignore_ascii_case(attr)).copied().unwrap_or("")
+}
+// __dom.referrerPolicyAttribute(nid) -> the element's referrer policy attribute (`referrer_policy_attribute`).
+fn referrer_policy_attribute_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let cid = crate::dom::realm_id(scope, &args);
+    let policy = crate::dom::realm(scope, cid).get(id).map_or("", referrer_policy_attribute);
+    rv.set(v8::String::new(scope, policy).unwrap().into());
 }
 // __dom.hyperlinkReferrerPolicy(nid) -> the policy the hyperlink is followed under (`hyperlink_referrer_policy`).
 fn hyperlink_referrer_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

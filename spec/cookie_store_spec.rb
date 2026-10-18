@@ -92,4 +92,19 @@ RSpec.describe 'the cookie store' do
     expect(seen.map(&:first).uniq.sort).to eq(%w[/echo-data /echo-frame /echo-redirect])
     expect(seen.reject {|_, c| c.empty? }).to eq([])
   end
+
+  # An image is fetched under its own `referrerpolicy` attribute where it has one, else its document's (HTML).
+  it "refers an image's request under its referrerpolicy attribute" do
+    seen = {}
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      seen[req.params['id']] = env['HTTP_REFERER'] if req.path == '/i'
+      next [200, {'content-type' => 'image/gif'}, ['GIF89a']] if req.path == '/i'
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><img src="/i?id=plain"><img referrerpolicy="no-referrer" src="/i?id=none"><img referrerpolicy="bogus" src="/i?id=bogus">']]
+    }
+    s = simulated_session(app)
+    s.visit 'http://www.example.com/page'
+    expect(seen).to eq('plain' => 'http://www.example.com/page', 'none' => nil, 'bogus' => 'http://www.example.com/page')
+  end
 end
