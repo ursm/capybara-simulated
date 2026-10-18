@@ -12,6 +12,7 @@ const TRANSIENT_DURATION: f64 = 5000.0;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "activationNotify", activation_notify, context_id);
+    crate::dom::register(scope, ns, "userInputNotify", user_input_notify, context_id);
     crate::dom::register(scope, ns, "userActivation", user_activation, context_id);
     crate::dom::register(scope, ns, "consumeActivation", consume_activation, context_id);
 }
@@ -91,10 +92,31 @@ impl RealmArena {
     }
 }
 
-// __dom.activationNotify() — the activation notification steps for the calling realm's document.
+// HTML "activation triggering input event": a keydown but Escape's, a mousedown, a mouse's pointerdown, any other
+// pointer's pointerup, a touchend.
+fn activation_triggering(event_type: &str, key: &str, pointer_type: &str) -> bool {
+    match event_type {
+        "keydown" => key != "Escape",
+        "mousedown" | "touchend" => true,
+        "pointerdown" => pointer_type == "mouse",
+        "pointerup" => pointer_type != "mouse",
+        _ => false,
+    }
+}
+
+// __dom.activationNotify() — the activation notification steps for the calling realm's document (the driver's own
+// grant of it, `test_driver.bless`)…
 fn activation_notify(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     realm(scope, cid).activation_notify(cid);
+}
+// …and __dom.userInputNotify(type, key, pointerType): those steps where an event of `type` (a keydown of `key`, a
+// pointer event of `pointerType`) fired at a user's action is an activation triggering one, run before it is dispatched.
+fn user_input_notify(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    let [event_type, key, pointer_type] = [0, 1, 2].map(|i| args.get(i).to_rust_string_lossy(scope));
+    if activation_triggering(&event_type, &key, &pointer_type) {
+        activation_notify(scope, args, rv);
+    }
 }
 
 // What `userActivation` asks of a window (navigator.js): whether it has sticky activation, or transient activation.
@@ -119,4 +141,19 @@ fn user_activation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 fn consume_activation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     rv.set_bool(realm(scope, cid).consume_activation(cid));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::activation_triggering;
+
+    #[test]
+    fn triggers_on_the_input_events_html_names() {
+        assert!(activation_triggering("keydown", "a", ""));
+        assert!(!activation_triggering("keydown", "Escape", ""));
+        assert!(activation_triggering("mousedown", "", ""));
+        assert!(activation_triggering("pointerdown", "", "mouse") && !activation_triggering("pointerdown", "", "touch"));
+        assert!(activation_triggering("pointerup", "", "pen") && !activation_triggering("pointerup", "", "mouse"));
+        assert!(activation_triggering("touchend", "", "") && !activation_triggering("click", "", "mouse"));
+    }
 }
