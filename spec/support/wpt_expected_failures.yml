@@ -2484,9 +2484,6 @@ fetch/api/basic/http-response-code.any.js:
 - "[serviceworker] Fetch on 425 response should not be retried for non TLS early data."
 fetch/api/basic/mediasource.window.js:
 - 'Cannot fetch blob: URL from a MediaSource'
-fetch/api/basic/request-forbidden-headers.any.js:
-- "[serviceworker] [harness] TIMEOUT"
-- "[serviceworker] [harness] no subtests"
 fetch/api/basic/request-headers-nonascii.any.js:
 - Non-ascii bytes in request headers
 - "[dedicatedworker] Non-ascii bytes in request headers"
@@ -2602,9 +2599,6 @@ fetch/api/request/destination/fetch-destination.https.html:
 - 'Import declaration with `type: "css"` fetches with a "style" Request.destination'
 - 'Import declaration with `type: "json"` fetches with a "json" Request.destination'
 - 'Import declaration with `type: "text"` fetches with a "text" Request.destination'
-fetch/api/request/request-cache-default-conditional.any.js:
-- "[serviceworker] [harness] TIMEOUT"
-- "[serviceworker] [harness] no subtests"
 fetch/api/request/request-consume-empty.any.js:
 - Consume empty FormData request body as text
 - "[dedicatedworker] Consume empty FormData request body as text"

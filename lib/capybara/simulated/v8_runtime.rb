@@ -433,6 +433,7 @@ module Capybara
         @frame_realm_depths&.clear
         @frame_realm_parents&.clear
         @window_realm_meta&.clear
+        @loading_frame_realms&.clear
         return if @frame_realms.nil?
         # Free each frame realm's native arena (an isolate-global Dom entry keyed by its context_id)
         # before disposing the realm — otherwise a page's frame arenas accumulate across visits. Done
@@ -496,6 +497,8 @@ module Capybara
       # ancestor frame re-navigates). No-op for nil/0/unknown ids.
       def dispose_frame_realm(id)
         return if id.nil? || id.zero?
+
+        loading_frame_realms.delete(id)
         # The frame's browsing context is going away — revoke the blob URLs it
         # created (url-lifetime "Removing an iframe").
         @browser.revoke_realm_blobs(id) rescue nil

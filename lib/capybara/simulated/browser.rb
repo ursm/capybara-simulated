@@ -6645,7 +6645,7 @@ module Capybara
       # re-POST). Returns __rackFetch's response wire shape (the JS frame builder
       # reads body / headers / url / redirected / charset), or nil for a failed
       # navigation (respondWith network error / redirect loop).
-      def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body: nil, content_type: nil, defer_ok: false, dest: 'iframe')
+      def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body: nil, content_type: nil, defer_ok: false, dest: 'iframe', container_realm: nil)
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # The main thread can't block for it — the settling message is sent by this very
@@ -6671,6 +6671,9 @@ module Capybara
         rid         = mint_resulting_client_id
         (MAX_FETCH_REDIRECTS + 1).times do
           resp_body = nil
+          # (…cross-site for cookies where the document the frame is in, or one of ITS ancestors, is: RFC 6265bis "site
+          # for cookies" — the realm building it, when it says which)
+          cookie_cross = !container_realm.nil? && container_cross_site?(container_realm, target)
           # A service worker only controls a client whose EVERY ancestor is a secure
           # context: an httpS frame anywhere under an http document loads from the
           # network (secure-context.https). Gated on the target being https — a scope
@@ -6681,7 +6684,8 @@ module Capybara
           # the ancestor chain (it IS the chain — the building realm is the parent).
           if (secure_ancestors || !target.start_with?('https://')) &&
              (sw = any_window_sw_navigation_fetch(target, method: meth, body: req_body, content_type: req_ct, is_reload: is_reload, dest: dest,
-                                                          referrer_source: initiator, site_seed: site, origin_null: origin_null, resulting_client_id: rid))
+                                                          referrer_source: initiator, site_seed: site, origin_null: origin_null, resulting_client_id: rid,
+                                                          cookie_cross_site: cookie_cross))
             return nil if sw['networkError']
 
             status  = (sw['status'] || 200).to_i
@@ -6690,14 +6694,15 @@ module Capybara
           else
             response = dispatch_navigation_request(
               target,
-              method:          meth,
-              initiator:       initiator,
-              referrer_policy: nil,
-              site:            widen_sec_fetch_site(site, sec_fetch_site(initiator, target)),
-              origin_null:     origin_null,
-              body:            req_body.empty? ? nil : req_body,
-              content_type:    req_ct,
-              dest:            dest
+              method:            meth,
+              initiator:         initiator,
+              referrer_policy:   nil,
+              site:              widen_sec_fetch_site(site, sec_fetch_site(initiator, target)),
+              origin_null:       origin_null,
+              body:              req_body.empty? ? nil : req_body,
+              content_type:      req_ct,
+              dest:              dest,
+              cookie_cross_site: cookie_cross
             ) or return nil
             status, headers, resp_body = response
             body = nil   # read only for the terminal hop, below
@@ -11037,15 +11042,19 @@ module Capybara
 
       # `document.cookie` reads/writes the cookies of a document's cookie URL (`url`, Chrome's: its own, or an about:blank
       # / srcdoc frame's creator's, which the bindings find); a top-level window's about:blank one its opener's (realm
-      # `realm`'s, a window realm's; this window's, another window's browser), else the session's default host.
+      # `realm`'s, a window realm's; this window's, another window's browser), else the session's default host's — a
+      # frame's that comes to none, none (nil: no cookies).
       def document_cookie_url(url = nil, realm = nil)
         url = opener_cookie_url(realm) unless url.to_s.match?(%r{\Ahttps?://}i)
-        cookie_host(url) ? url : @default_host
+        return url if cookie_host(url)
+
+        realm.to_i.positive? && !@runtime.window_realm_meta.key?(realm.to_i) ? nil : @default_host
       end
       private def opener_cookie_url(realm)
         rid = realm.to_i
         if rid.positive?
-          opener = @runtime.window_realm_meta.dig(rid, :opener_id).to_i
+          meta = @runtime.window_realm_meta[rid] or return nil
+          opener = meta[:opener_id].to_i
           return opener.positive? ? frame_realm_url(opener) : @current_url
         end
         handle = opener_handle
@@ -11056,7 +11065,7 @@ module Capybara
       # where an ancestor's document is (RFC 6265bis "site for cookies": no SameSite cookie read or stored there but a
       # None one).
       def document_cookie(url = nil, realm = nil)
-        url = document_cookie_url(url, realm)
+        url = document_cookie_url(url, realm) or return ''
         cookies = cookie_header_for(
           url,
           secure:     secure_cookie_channel?(url),
@@ -11070,7 +11079,7 @@ module Capybara
       def write_document_cookie(s, url = nil, realm = nil)
         return if s.nil? || s.empty?
 
-        url = document_cookie_url(url, realm)
+        url = document_cookie_url(url, realm) or return
         store_cookie(
           url,
           s,
@@ -11890,6 +11899,13 @@ module Capybara
       # target — even if the navigation's own initiator is same-origin. Top-level
       # navigations have no ancestors and never fold (their strict/lax split is the
       # initiator-based Sec-Fetch-Site latch).
+      # …and a navigation of a frame in realm `realm_id`'s document: cross-site where that document is, or an ancestor of
+      # it.
+      private def container_cross_site?(realm_id, target_url)
+        rid = realm_id.to_i
+        container_url = rid.positive? ? frame_realm_url(rid) : @current_url
+        container_url.nil? || sec_fetch_site(container_url, target_url.to_s) == 'cross-site' || frame_ancestor_cross_site?(rid, target_url)
+      end
       private def frame_ancestor_cross_site?(realm_id, target_url)
         rid = realm_id.to_i
         # A WINDOW realm (same-isolate popup) is itself a top-level navigable: it has
