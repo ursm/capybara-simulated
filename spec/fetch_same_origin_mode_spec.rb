@@ -15,7 +15,7 @@ RSpec.describe 'a same-origin request' do
       self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
       self.addEventListener('fetch', (e) => { if (new URL(e.request.url).pathname === '/scope/t') e.respondWith(new Response('sw-ok')); });
     JS
-    lambda { |env|
+    lambda {|env|
       case env['PATH_INFO']
       when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [worker]]
       when '/scope/page.html' then [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>in scope']]
@@ -32,7 +32,7 @@ RSpec.describe 'a same-origin request' do
     ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
 
-  it 'is its client document\'s origin\'s, in a srcdoc or about:blank frame of a controlled page' do
+  it "is its client document's origin's, in a srcdoc or about:blank frame of a controlled page" do
     session = simulated_session(app)
     session.visit '/'
     session.execute_script(<<~JS)
@@ -43,16 +43,20 @@ RSpec.describe 'a same-origin request' do
         const page = document.body.appendChild(document.createElement('iframe'));
         page.src = '/scope/page.html';
         page.onload = async () => {
+          const attempt = (w, u) => w.fetch(u, { mode: 'same-origin' }).then((r) => r.text(), (e) => e.name);
           const inner = page.contentDocument.body.appendChild(page.contentDocument.createElement('iframe'));
           inner.srcdoc = '<p>inner';
           inner.onload = async () => {
             const w = inner.contentWindow;
-            const attempt = (u) => w.fetch(u, { mode: 'same-origin' }).then((r) => r.text(), (e) => e.name);
-            window.out = [w.location.origin, w.origin, await attempt(location.origin + '/scope/t'), await attempt('http://other.test/scope/t')];
+            const blank = page.contentDocument.body.appendChild(page.contentDocument.createElement('iframe')).contentWindow;
+            window.out = [
+              w.location.origin, w.origin, await attempt(w, location.origin + '/scope/t'), await attempt(w, 'http://other.test/scope/t'),
+              blank.location.origin, await attempt(blank, location.origin + '/scope/t')
+            ];
           };
         };
       });
     JS
-    expect(poll_until(timeout: 10) { session.evaluate_script('window.out') }).to eq(['null', 'http://www.example.com', 'sw-ok', 'TypeError'])
+    expect(poll_until(timeout: 10) { session.evaluate_script('window.out') }).to eq(['null', 'http://www.example.com', 'sw-ok', 'TypeError', 'null', 'sw-ok'])
   end
 end

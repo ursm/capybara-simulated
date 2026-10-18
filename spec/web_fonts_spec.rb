@@ -497,7 +497,7 @@ RSpec.describe 'web fonts' do
         navigator.serviceWorker.register('/sw.js');
       </script>
     HTML
-    a = lambda { |env|
+    a = lambda {|env|
       case env['PATH_INFO']
       when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [worker]]
       when '/ahem.ttf' then [200, {'content-type' => 'font/ttf'}, [AHEM]]

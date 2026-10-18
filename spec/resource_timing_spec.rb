@@ -473,7 +473,7 @@ RSpec.describe 'resource timing' do
       </script></body></html>
     HTML
     served = []
-    a = lambda { |env|
+    a = lambda {|env|
       case env['PATH_INFO']
       when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [worker]]
       when '/css.png' then served << env['QUERY_STRING']; [200, {'content-type' => 'image/png'}, [png]]
