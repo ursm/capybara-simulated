@@ -210,4 +210,30 @@ RSpec.describe 'custom element registries in the engine' do
     s = session_for('/' => page)
     expect(s.evaluate_script('__log')).to eq(%w[ctor conn true ctorC true true])
   end
+  # A custom element's constructor that makes another custom element — after its `super()`, or before it during an
+  # upgrade — makes it as any other: of its own definition, under its own local name, `:defined`; the element being
+  # created or upgraded stays the outer constructor's (HTML: each definition its own construction stack). Chrome: below.
+  it "makes an element another constructor creates inside one as its own definition's" do
+    page = <<~HTML
+      <!doctype html><meta charset=utf-8><body><x-u></x-u><script>
+        window.__log = [];
+        class YY extends HTMLElement {}
+        customElements.define('y-y', YY);
+        class XX extends HTMLElement { constructor() { super(); const y = new YY(); __log.push('inner:' + y.localName + ':' + y.matches(':defined')); } }
+        customElements.define('x-x', XX);
+        const x = document.createElement('x-x');
+        __log.push('outer:' + x.localName + ':' + x.matches(':defined'));
+        class ZZ extends HTMLElement {}
+        customElements.define('z-z', ZZ);
+        const u = document.querySelector('x-u');
+        class XU extends HTMLElement {
+          constructor() { const z = new ZZ(); __log.push('innerZ:' + z.localName + ':' + (z === u)); super(); __log.push('ctorU:' + (this === u)); }
+        }
+        customElements.define('x-u', XU);
+        __log.push('u:' + u.matches(':defined'));
+      </script>
+    HTML
+    s = session_for('/' => page)
+    expect(s.evaluate_script('__log')).to eq(%w[inner:y-y:true outer:x-x:true innerZ:z-z:false ctorU:true u:true])
+  end
 end

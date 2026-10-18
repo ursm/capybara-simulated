@@ -133,7 +133,8 @@ impl RealmArena {
         let Some(n) = self.get(id) else { return 0 };
         let current = self.relevant_value(n);
         let number = n.is_html_named("input") && n.input_type() == "number";
-        let cuts = n.is_html_named("textarea") || (n.is_html_named("input") && n.input_has(crate::input_types::FREE_TEXT));
+        let textarea = n.is_html_named("textarea");
+        let cuts = textarea || (n.is_html_named("input") && n.input_has(crate::input_types::FREE_TEXT));
         let max = if cuts { n.plain_attr("maxlength").and_then(crate::validity::parse_non_negative) } else { None };
         let (sel, set) = self.text_selection(id);
         let (start, end) = match (at, set) {
@@ -142,7 +143,8 @@ impl RealmArena {
             _ => (sel.start as usize, sel.end as usize),
         };
         let (start, end) = (start.min(current.len()), end.min(current.len()));
-        let mut text = text;
+        let normalized = textarea_text(textarea, text);
+        let mut text = &normalized[..];
         if let Some(max) = max {
             let mut room = (max as usize).saturating_sub(current.len() - (end - start)).min(text.len());
             if room > 0 && room < text.len() && is_high(text[room - 1]) {
@@ -303,6 +305,11 @@ impl RealmArena {
             return Err(RangeTextError::NotApplicable);
         }
         let value = self.relevant_value(n);
+        // (…the selection placed by the replacement as given, a textarea's CRs and all, and clamped to the value its
+        // newlines normalized leave: HTML "set the selection range" — Chrome: `'1\r\n2\r3'` over `a` of `ab`, selected,
+        // is 0 to 6 of `1\n2\n3b`)
+        let given = replacement.len() as u32;
+        let replacement = &textarea_text(n.is_html_named("textarea"), replacement)[..];
         let (sel, _) = self.text_selection(id);
         let (start, end) = range.unwrap_or((sel.start, sel.end));
         if start > end {
@@ -311,20 +318,21 @@ impl RealmArena {
         let len = value.len() as u32;
         let (s, e) = (start.min(len), end.min(len));
         let next = [&value[..s as usize], replacement, &value[e as usize..]].concat();
-        let replaced_end = s + replacement.len() as u32;
+        let replaced_end = s + given;
         let (ns, ne) = match mode {
             "select" => (s, replaced_end),
             "start" => (s, s),
             "end" => (replaced_end, replaced_end),
             _ => {
-                let delta = replacement.len() as i64 - i64::from(e - s);
+                let delta = i64::from(given) - i64::from(e - s);
                 let past = |o: u32| (i64::from(o) + delta) as u32;
                 let start = if sel.start > e { past(sel.start) } else if sel.start > s { s } else { sel.start };
                 let end = if sel.end > e { past(sel.end) } else if sel.end > s { replaced_end } else { sel.end };
                 (start, end)
             }
         };
-        Ok((next, ns, ne, Direction::None))
+        let last = next.len() as u32;
+        Ok((next, ns.min(last), ne.min(last), Direction::None))
     }
 }
 
@@ -571,6 +579,17 @@ fn range_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         }
         Err(RangeTextError::NotApplicable) => rv.set_int32(1),
         Err(RangeTextError::Index) => rv.set_int32(2),
+    }
+}
+
+// What goes into a control's value of `text`: a textarea's with its newlines normalized (CR LF and CR a LF) — its value
+// is never anything else (HTML: its API value is its raw value so normalized; Chrome and Firefox: `setRangeText('1\r\n2')`
+// leaves `1\n2`) — any other's as it is.
+fn textarea_text(textarea: bool, text: &[u16]) -> std::borrow::Cow<'_, [u16]> {
+    if textarea && text.contains(&0x0D) {
+        std::borrow::Cow::Owned(crate::validity::normalize_newlines(text.iter().copied()))
+    } else {
+        std::borrow::Cow::Borrowed(text)
     }
 }
 

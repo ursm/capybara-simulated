@@ -253,8 +253,9 @@ RSpec.describe 'image decode' do
     expect(got).to eq(%w[ok ok EncodingError])
   end
 
-  # An `<img>`'s `x` / `y`: its first box's border edge, no transform applied, as the scrolled viewport has it — read
-  # through no member a page may replace. Chrome and Firefox: [30, -50, 0, 0, 5, 1974] (Firefox 1975).
+  # An `<img>`'s `x` / `y`: its first box's border edge, no transform applied, relative to the initial containing
+  # block's origin — the page's — read through no member a page may replace. CSSOM View says so explicitly; Chrome and
+  # Firefox measure from the scrolled viewport instead ([30, -50, 0, 0, 5, 1974], Firefox 1975), and the spec wins.
   it "measures x and y off the image's first box in the viewport" do
     page = <<~HTML
       <!DOCTYPE html><meta charset=utf-8><body style="margin:0">
@@ -273,6 +274,24 @@ RSpec.describe 'image decode' do
         return [a.x, a.y, b.x, b.y, c.x, c.y];
       })()
     JS
-    expect(got).to eq([30, -50, 0, 0, 5, 1974])
+    expect(got).to eq([30, 50, 0, 0, 5, 2074])
+  end
+  # A decode waits on the CURRENT request: a new one started, or the source removed, rejects it (HTML `decode()`;
+  # Chrome: EncodingError for each).
+  it 'rejects a pending decode() when the current request changes' do
+    session = simulated_session(app).tap {|s| s.visit '/' }
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const swapped = new Image(), removed = new Image();
+      swapped.src = '/green?a';
+      const a = swapped.decode();
+      swapped.src = '/green?b';
+      removed.src = '/green?c';
+      const b = removed.decode();
+      removed.removeAttribute('src');
+      Promise.all([a, b].map((p) => p.then(() => 'ok', (e) => e.name))).then(done);
+    JS
+    expect(got).to eq(%w[EncodingError EncodingError])
   end
 end
+

@@ -264,4 +264,16 @@ RSpec.describe 'typing into a text control' do
       %w[!/Digit1/49 A/KeyA/65 ß//0 :/Semicolon/186 b/KeyB/66 1/Digit1/49 é//0 S/KeyS/83 I/KeyI/73]
     ])
   end
+  # A textarea's value never holds a CR: `setRangeText` and a driver's fill put CR LF and CR in as LF — the former's
+  # selection placed by the replacement as it was given, clamped to the value (Chrome: ["1\n2\n3b", 0, 6]), the latter as
+  # the `value` setter normalizes.
+  it "keeps a textarea's value free of CRs, however text goes in" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><textarea id=t>ab</textarea><textarea id=u></textarea>']] })
+    s.visit '/'
+    s.execute_script("document.getElementById('t').setRangeText('1\\r\\n2\\r3', 0, 1, 'select')")
+    s.find(:css, '#u').set("a\r\nb")
+    expect(s.evaluate_script("(() => { const t = document.getElementById('t'); return [t.value, t.selectionStart, t.selectionEnd, document.getElementById('u').value]; })()"))
+      .to eq(["1\n2\n3b", 0, 6, "a\nb"])
+  end
 end
+
