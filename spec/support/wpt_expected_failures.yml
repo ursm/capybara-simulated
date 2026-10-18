@@ -147,23 +147,10 @@ cookies/partitioned-cookies/partitioned-cookies-samesite-attribute.https.html:
 - In top-level contexts, partitioned cookies can be set with all SameSite attributes.
 - In top-level contexts, partitioned cookies default to the same SameSite attribute
   as unpartitioned cookies.
-cookies/samesite/fetch.https.html:
-- Cross-site redirecting to same-host fetches are cross-site
-- Cross-site redirecting to subdomain fetches are cross-site
 cookies/samesite/get_all_cookies-default-samesite.html:
 - Get all cookies w/ default SameSite
 cookies/samesite/get_named_cookie-default-samesite.html:
 - Get Named cookie  w/ default SameSite
-cookies/samesite/img.https.html:
-- Cross-site images are cross-site
-- Cross-site redirecting to cross-site images are cross-site
-- Cross-site redirecting to same-host images are cross-site
-- Cross-site redirecting to subdomain images are cross-site
-- Same-host redirecting to cross-site images are cross-site
-- Subdomain redirecting to cross-site images are cross-site
-cookies/samesite/multiple-samesite-attributes.https.html:
-- Cross-site redirecting to same-host images are cross-site
-- Cross-site redirecting to subdomain images are cross-site
 cookies/samesite/sandbox-iframe-nested.https.html:
 - SameSite cookies with intervening sandboxed iframe and navigation
 cookies/samesite/sandbox-iframe-subresource.https.html:
