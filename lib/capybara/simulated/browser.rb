@@ -4517,9 +4517,14 @@ module Capybara
                           client_origin: client_origin, client_realm: client_realm)
         # (…nil, a network error, as `rack_fetch` answers one)
         return resp unless hijacked
+        # (…of the hop that hijacked it — a redirect's target where one came first — whose URL the response is)
         env = Thread.current[:csim_fetch_env] || {}
         cookie_env = env.slice('csim.cookie_site', 'csim.cookie_cross_site', 'csim.cookie_top_level', 'HTTP_SEC_FETCH_SITE', 'HTTP_SEC_FETCH_MODE', 'HTTP_SEC_FETCH_DEST')
-        @hijack_fetch_contexts[id] = {url: url.to_s, credentials: credentials, cookie_env: cookie_env, realm: client_realm.to_i}
+        requested = resolve_against_current(url.to_s).to_s
+        query = env['QUERY_STRING'].to_s
+        # (…as text: an env's values may be BINARY-tagged, and a binary string crosses to the page as bytes)
+        answered = env.empty? ? requested : RuntimeShared.utf8_text(env_request_url(env) + (query.empty? ? '' : "?#{query}"))
+        @hijack_fetch_contexts[id] = {url: answered, redirected: answered != requested, credentials: credentials, cookie_env: cookie_env, realm: client_realm.to_i}
         {'handle' => id}
       end
 
@@ -4545,7 +4550,7 @@ module Capybara
           response =
             unless r['error']
               merge_set_cookie(r['headers'], context[:url], context[:cookie_env]) unless context[:credentials] == 'omit'
-              response_hash(r['status'], r['headers'], r['body'], context[:url], false)
+              response_hash(r['status'], r['headers'], r['body'], context[:url], context[:redirected])
             end
           by_realm[context[:realm]] << {'handle' => r['handle'], 'response' => response}
         end
@@ -4620,8 +4625,11 @@ module Capybara
           elsif (idx = line.index(':'))
             k = line[0...idx].strip.downcase
             v = line[(idx + 1)..].to_s.strip
-            # Slices of the BINARY socket buffer (see `RuntimeShared.utf8_text`).
-            headers[RuntimeShared.utf8_text(k)] = RuntimeShared.utf8_text(v)
+            # Slices of the BINARY socket buffer (see `RuntimeShared.utf8_text`) — a repeated one's values combined:
+            # Set-Cookie's a line each, as `merge_set_cookie` reads them, any other's with `, ` (Fetch's "combine").
+            k = RuntimeShared.utf8_text(k)
+            v = RuntimeShared.utf8_text(v)
+            headers[k] = headers.key?(k) ? [headers[k], v].join(k == 'set-cookie' ? "\n" : ', ') : v
           end
         end
         # (…the body as its bytes — decoded at delivery as any response's is — a chunked one's chunks joined)

@@ -286,5 +286,14 @@ RSpec.describe 'typing into a text control' do
     s.find(:css, '#u').send_keys('y')
     expect(s.evaluate_script("[document.getElementById('i').value, document.getElementById('j').value]")).to eq(%w[x y])
   end
+  # …but a container that takes focus (a `tabindex` list) takes it, and the keys: WebDriver's keyboard-interactable.
+  it 'focuses a focusable container the keys are sent to' do
+    html = '<!DOCTYPE html><meta charset=utf-8><ul id=u tabindex=0><li><input id=i></li></ul>' \
+           '<script>window.__k = []; document.addEventListener("keydown", (e) => __k.push(e.target.id));</script>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
+    s.execute_script("document.getElementById('i').focus()")
+    s.find(:css, '#u').send_keys('x')
+    expect(s.evaluate_script("[document.activeElement.id, document.getElementById('i').value, __k.join()]")).to eq(['u', '', 'u'])
+  end
 end
 
