@@ -2780,7 +2780,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "sheetDisabled", sheet_disabled, context_id);
     register(scope, ns, "mediaText", media_text, context_id);
     register(scope, ns, "sheetMediaText", sheet_media_text, context_id);
-    register(scope, ns, "sheetApplies", sheet_applies, context_id);
+    register(scope, ns, "adoptedSheetsSet", adopted_sheets_set, context_id);
     register(scope, ns, "sheetModificationDisallowed", sheet_modification_disallowed, context_id);
     register(scope, ns, "mediaQueries", media_queries, context_id);
     register(scope, ns, "mediaAppend", media_append, context_id);
@@ -4512,20 +4512,28 @@ fn sheet_media_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     });
     rv.set(utf16_value(scope, &current.unwrap_or_default()));
 }
-// __dom.sheetApplies(handle, width, height) -> whether a sheet no owner holds (a constructed one, adopted) contributes rules
-// at the viewport: its disabled flag clear, and its media list empty or matching — what the cascade hands the engine of a
-// document's or a shadow root's `adoptedStyleSheets`.
-fn sheet_applies(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_bool(false);
-    let Some(sheet) = handle_arg(scope, &args, 0) else { return };
-    let viewport = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0) as f32);
-    let cid = realm_id(scope, &args);
-    let d = dom(scope);
-    let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
-    let Some(arena) = d.arena.enter_known(cid) else { return };
-    let Some(stored) = arena.sheets.get(sheet).filter(|s| !s.disabled && !s.set_excluded) else { return };
+// Whether the sheet `id` contributes rules at `screen`: its disabled flag clear, no style sheet set leaving it out, and
+// its media list empty or matching — what a document's or a shadow root's `adoptedStyleSheets` hand its cascade of each.
+pub(crate) fn sheet_applies_at(engine: Option<&crate::style::StyleEngine>, arena: &RealmArena, screen: crate::style::Screen, id: u32) -> bool {
+    let Some(stored) = arena.sheets.get(id).filter(|s| !s.disabled && !s.set_excluded) else { return false };
     let media = String::from_utf16_lossy(&stored.media_text);
-    rv.set_bool(media.is_empty() || crate::style::media_matches(d.styles.get(&cid), arena, screen, &media));
+    media.is_empty() || crate::style::media_matches(engine, arena, screen, &media)
+}
+// …and the adopted sheets of `root` that do, in its list's order.
+pub(crate) fn adopted_applying(engine: Option<&crate::style::StyleEngine>, arena: &RealmArena, screen: crate::style::Screen, root: NodeId) -> Vec<u32> {
+    arena.sheets.adopted(root).iter().copied().filter(|&id| sheet_applies_at(engine, arena, screen, id)).collect()
+}
+// __dom.adoptedSheetsSet(rootNid, ids): the document's or shadow root's `adoptedStyleSheets` is the sheets of `ids` (a
+// Float64Array) — in the realm whose tree it is.
+fn adopted_sheets_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(root) = nid_arg(scope, &args, 0) else { return };
+    let ids: Vec<u32> = f64_arg(args.get(1)).iter().map(|&id| id as u32).collect();
+    let caller = realm_id(scope, &args);
+    let d = dom(scope);
+    let cid = d.arena.get(root).map_or(caller, |n| n.realm);
+    if let Some(arena) = d.arena.enter_known(cid) {
+        arena.sheets.set_adopted(root, ids);
+    }
 }
 // __dom.sheetModificationDisallowed(handle[, on]) -> whether the sheet's disallow modification flag is set (a
 // `replace()` pending); with `on`, that set.
@@ -4771,8 +4779,9 @@ fn sheet_source(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArg
 }
 
 // __dom.styleSheets(docNid, baseUrl, width, height, [sheetId, …]): the realm document's sheets (the realm's,
-// sheetMake), in document order, for its style engine — which is made again only when the document's base URL, mode,
-// kind (an HTML document or not: `document_mode`) or viewport moved.
+// sheetMake), in document order, and after them its adopted ones that apply (`adopted_applying`), for its style engine —
+// which is made again only when the document's base URL, mode, kind (an HTML document or not: `document_mode`) or
+// viewport moved.
 fn style_sheets(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -4792,7 +4801,7 @@ fn style_sheets_unguarded(
         args.get(2).number_value(scope).unwrap_or(0.0) as f32,
         args.get(3).number_value(scope).unwrap_or(0.0) as f32,
     );
-    let ids = sheet_ids(scope, args.get(4));
+    let mut ids = sheet_ids(scope, args.get(4));
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     if d.arena.is_dropped(cid) {
@@ -4801,13 +4810,16 @@ fn style_sheets_unguarded(
     let (quirks, html_document) = d.arena.document_mode(Some(doc));
     let screen = crate::style::Screen { viewport, touch: d.touch_input };
     let arena = d.arena.enter(cid);
+    // (…its owned sheets, then its adopted ones that apply)
+    ids.extend(adopted_applying(d.styles.get(&cid), arena, screen, doc));
     let mut engine = crate::style::StyleEngine::for_document(d.styles.remove(&cid), arena, &base, quirks, html_document, screen);
     let sheets: Vec<_> = ids.iter().filter_map(|&id| arena.sheets.get(id)).collect();
     engine.set_sheets(doc, &sheets);
     d.styles.insert(cid, engine);
 }
 
-// __dom.styleShadowSheets(rootNid, [sheetId, …]): a shadow root's own sheets (the realm's), in its tree order.
+// __dom.styleShadowSheets(rootNid, [sheetId, …], width, height): a shadow root's own sheets (the realm's), in its tree
+// order, and after them its adopted ones that apply at that viewport (`adopted_applying`).
 fn style_shadow_sheets(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -4822,8 +4834,17 @@ fn style_shadow_sheets_unguarded(
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
-    let ids = sheet_ids(scope, args.get(1));
+    let mut ids = sheet_ids(scope, args.get(1));
+    let viewport = [2, 3].map(|i| args.get(i).number_value(scope).unwrap_or(0.0) as f32);
     let cid = realm_id(scope, &args);
+    // (…its owned sheets, then its adopted ones that apply at the viewport)
+    {
+        let d = dom(scope);
+        let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
+        if let Some(arena) = d.arena.enter_known(cid) {
+            ids.extend(adopted_applying(d.styles.get(&cid), arena, screen, root));
+        }
+    }
     let (arena, engine) = arena_and_engine(scope, cid);
     let Some(engine) = engine else { return };
     let sheets: Vec<_> = ids.iter().filter_map(|&id| arena.sheets.get(id)).collect();

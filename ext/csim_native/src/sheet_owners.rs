@@ -194,9 +194,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 
 // What a document's cascade is made of, as the realm last handed it to its style engine (cascade.js `rebuildCascade`):
 // the document, its style sheet sets (`SheetSet::key`), the viewport, its mode and its base URL (a sheet is made again
-// under another base), and its adopted sheets — each one's id and how many times it was made of new text (`replaceSync`:
-// another sheet to the engine), -1 for one that contributes nothing (disabled, its media not matching). (…the numbers by
-// their bits: a NaN is the same key again, not one that never matches itself)
+// under another base), and its adopted sheets — each one's id and version (a `replaceSync` makes it another sheet to the
+// engine, of another version), a marker for one that contributes nothing (disabled, its media not matching). (…the
+// viewport by its bits: a NaN is the same key again, not one that never matches itself)
 #[derive(PartialEq)]
 pub(crate) struct CascadeKey {
     doc: NodeId,
@@ -207,21 +207,32 @@ pub(crate) struct CascadeKey {
     adopted: Vec<u64>,
 }
 
-// __dom.cascadeRekey(docNid, width, height, adopted) -> where the document's cascade is made of other sheets than the realm
-// last handed its style engine (`CascadeKey`; `adopted` its adopted sheets', as numbers): the `<style>` / `<link>`
+// __dom.cascadeRekey(docNid, width, height) -> where the document's cascade is made of other sheets than the realm last
+// handed its style engine (`CascadeKey`, its adopted sheets the store's — `adoptedSheetsSet`): the `<style>` / `<link>`
 // elements whose sheets take part, in tree order (`sheetSet`'s), the realm's rule-set generation moved (`GEN_CASCADE`) —
 // else null, nothing to hand it.
 fn cascade_rekey_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
-    let viewport = [1, 2].map(|k| args.get(k).number_value(scope).unwrap_or(0.0).to_bits());
-    let adopted = match v8::Local::<v8::Array>::try_from(args.get(3)) {
-        Ok(list) => (0..list.length())
-            .map(|i| list.get_index(scope, i).and_then(|v| v.number_value(scope)).unwrap_or(-1.0).to_bits())
-            .collect(),
-        Err(_) => Vec::new(),
-    };
+    let size = [1, 2].map(|k| args.get(k).number_value(scope).unwrap_or(0.0));
+    let viewport = size.map(f64::to_bits);
     let cid = crate::dom::realm_id(scope, &args);
+    // (…its adopted sheets: each that applies by its id and version — a `replace` makes it another sheet to the engine —
+    // one that does not as -1, so toggling `disabled` or a media change re-keys too)
+    let adopted = {
+        let d = crate::dom::dom(scope);
+        let screen = crate::style::Screen { viewport: (size[0] as f32, size[1] as f32), touch: d.touch_input };
+        let engine = d.styles.get(&cid);
+        let arena: &crate::dom::RealmArena = d.arena.enter(cid);
+        let mut key = Vec::new();
+        for &id in arena.sheets.adopted(doc) {
+            match arena.sheets.get(id).filter(|_| crate::dom::sheet_applies_at(engine, arena, screen, id)) {
+                Some(stored) => key.extend([u64::from(id), u64::from(stored.version)]),
+                None => key.push(u64::MAX),
+            }
+        }
+        key
+    };
     let arena = crate::dom::realm(scope, cid);
     let set = arena.sheet_set(doc);
     let key = CascadeKey { doc, sets: set.key, viewport, quirks: arena.document_mode(Some(doc)).0, base: arena.document_base_url(doc), adopted };

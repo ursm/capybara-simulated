@@ -108,4 +108,23 @@ RSpec.describe 'adoptedStyleSheets ObservableArray + shadow encapsulation' do
     JS
     expect(out).to eq([1, 1, 'rgb(0, 255, 0)'])
   end
+  # The adopted sheets the cascade takes are the list's own, the engine's — not what a getter a page replaced answers:
+  # a rebuild after `adoptedStyleSheets` was redefined to answer [] keeps the adopted rule (Chrome).
+  it "cascades the adopted list itself, whatever getter a page put over it" do
+    session = simulated_session(app)
+    session.visit '/'
+    out = session.evaluate_script(<<~JS)
+      (() => {
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync('#target { color: rgb(255, 0, 0) }');
+        document.adoptedStyleSheets = [sheet];
+        const before = getComputedStyle(document.getElementById('target')).color;
+        Object.defineProperty(document, 'adoptedStyleSheets', {get: () => [], configurable: true});
+        document.head.append(document.createElement('style'));
+        return [before, getComputedStyle(document.getElementById('target')).color];
+      })()
+    JS
+    expect(out).to eq(['rgb(255, 0, 0)', 'rgb(255, 0, 0)'])
+  end
 end
+
