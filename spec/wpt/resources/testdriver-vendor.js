@@ -92,20 +92,14 @@
   };
 
   // `test_driver.bless(intent, fn)` grants transient user activation (a real
-  // automation backend does this via a trusted click). The in-process driver
-  // models the transient-activation flag as `globalThis.__csimTransientActivation`
-  // (read by navigator.userActivation.isActive, consumed by activation-gated
-  // APIs like HTMLInputElement.showPicker()).
-  // An optional 3rd `context` argument blesses ANOTHER window (a cross-window
-  // proxy): set its transient-activation flag through the proxy (→ that VM's
-  // globalThis), so `popup.navigator.userActivation.isActive` reads true there.
+  // automation backend does this via a trusted click): the activation
+  // notification steps a user's click runs (`__csimActivationNotify`), read by
+  // navigator.userActivation and consumed by activation-gated APIs like
+  // HTMLInputElement.showPicker(). An optional 3rd `context` argument blesses
+  // ANOTHER window (a cross-window proxy) — that window's own steps.
   window.test_driver.bless = function (intent, fn, context) {
-    if (context && context !== window && typeof context === 'object') {
-      try { context.__csimTransientActivation = true; context.__csimUserActivations = (context.__csimUserActivations || 0) + 1; } catch (e) {}
-    } else {
-      globalThis.__csimTransientActivation = true;
-      globalThis.__csimUserActivations = (globalThis.__csimUserActivations || 0) + 1;   // (…which a close watcher's group follows)
-    }
+    const target = context && context !== window && typeof context === 'object' ? context : globalThis;
+    try { target.__csimActivationNotify(); } catch (e) {}
     try {
       return Promise.resolve(typeof fn === 'function' ? fn() : undefined);
     } catch (e) {

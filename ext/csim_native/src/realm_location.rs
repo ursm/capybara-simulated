@@ -84,7 +84,7 @@ impl RealmLocation {
     // The key its origin is matched by — what a BroadcastChannel is scoped to, a postMessage's target origin matched
     // against: a tuple origin's serialization, an opaque one's a token of the realm `cid` that has it (its own, made
     // the first time it is asked, unless it inherited one), so two unrelated opaque origins never match.
-    fn origin_key(&mut self, cid: i32) -> String {
+    pub(crate) fn origin_key(&mut self, cid: i32) -> String {
         if let Some(key) = &self.origin_key {
             return key.clone();
         }

@@ -154,14 +154,8 @@ impl RealmArena {
     // `url` but for their fragments (frame_navigation.rs `src_nested`).
     pub(crate) fn ancestor_document_at(&self, realm: i32, url: &str) -> bool {
         let url = crate::url_ops::without_fragment(url);
-        let mut at = Some(realm);
-        while let Some(realm) = at {
-            if self.realm_state(realm).is_some_and(|s| crate::url_ops::without_fragment(s.location.href()) == url) {
-                return true;
-            }
-            at = self.live_container(realm).and_then(|c| self.get(c)).map(|n| n.realm);
-        }
-        false
+        let at = |r: i32| self.realm_state(r).is_some_and(|s| crate::url_ops::without_fragment(s.location.href()) == url);
+        at(realm) || self.ancestor_realms(realm).into_iter().any(at)
     }
     // …in whichever realm's document: none for a top-level navigable's realm, or a discarded one's.
     fn live_container(&self, realm: i32) -> Option<NodeId> {
@@ -193,6 +187,31 @@ impl RealmArena {
         }
         realms.sort_unstable();
         realms
+    }
+    // The realms of realm `realm`'s descendant navigables' active documents — its frames', theirs, … — in no order:
+    // never a window `window.open` made, which is a top-level one.
+    pub(crate) fn descendant_realms(&self, realm: i32) -> Vec<i32> {
+        let mut found = Vec::new();
+        let mut parents = vec![realm];
+        while let Some(parent) = parents.pop() {
+            for (&c, child) in &self.navigables.children {
+                if let Some(r) = self.stepped_realm(c, child).filter(|_| self.get(c).is_some_and(|n| n.realm == parent)) {
+                    found.push(r);
+                    parents.push(r);
+                }
+            }
+        }
+        found
+    }
+    // …and those of its ancestor navigables: its container's document's, up.
+    pub(crate) fn ancestor_realms(&self, realm: i32) -> Vec<i32> {
+        let mut found = Vec::new();
+        let mut at = realm;
+        while let Some(parent) = self.live_container(at).and_then(|c| self.get(c)).map(|n| n.realm) {
+            found.push(parent);
+            at = parent;
+        }
+        found
     }
     // A window `window.open` made in this isolate (realm `realm`) the page's event loop steps now (`on`), or no more.
     pub(crate) fn set_stepped_window(&mut self, realm: i32, on: bool) {

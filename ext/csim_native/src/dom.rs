@@ -1067,6 +1067,11 @@ pub(crate) struct RealmState {
     // …and its virtual clock: the time its event loop has reached, in milliseconds since its context began (timers.rs
     // `clockNow`) — which runs on while a disposed context's code still does, as its timers do not.
     pub(crate) clock: f64,
+    // Its Window's user activation (user_activation.rs): its last activation timestamp — None for positive infinity, a
+    // window never activated — and how many activation notifications reached it, which its close watcher manager
+    // groups by.
+    pub(crate) last_activation: Option<f64>,
+    pub(crate) activations: u32,
     // Its ResizeObservers that observe anything, and their observations (resize_observers.rs).
     pub(crate) resize_observers: crate::resize_observers::ResizeObservers,
     // The selects whose `<selectedcontent>` waits for an update at the end of the task (selected_content.rs).
@@ -2861,6 +2866,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::subresources::install(scope, ns, context_id);
     crate::select_options::install(scope, ns, context_id);
     crate::text_setters::install(scope, ns, context_id);
+    crate::user_activation::install(scope, ns, context_id);
     crate::system_clipboard::install(scope, ns, context_id);
     crate::image_requests::install(scope, ns, context_id);
     crate::drag_data_store::install(scope, ns, context_id);

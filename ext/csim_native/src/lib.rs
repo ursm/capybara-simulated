@@ -165,6 +165,7 @@ mod traversal;
 // The Unicode classes layout asks of a character, parsed out of the regex that spells them by regex-syntax.
 mod unicode;
 mod url_ops;
+mod user_activation;
 mod validity;
 mod values;
 mod video;

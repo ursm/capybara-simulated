@@ -18,8 +18,9 @@ pub(crate) struct OpenDialogs {
 
 impl RealmArena {
     // The open dialogs list of document `doc`, `dialog` its last — its close watcher in a group of its own where the window
-    // has had a user activation since the last group was made (`activations` the window's count of them), else in the last.
-    fn dialog_opened(&mut self, doc: NodeId, dialog: NodeId, activations: u32) {
+    // has had a user activation since the last group was made (its count of them: user_activation.rs), else in the last.
+    fn dialog_opened(&mut self, doc: NodeId, dialog: NodeId) {
+        let activations = self.get(doc).and_then(|n| self.realm_state(n.realm)).map_or(0, |s| s.activations);
         let list = self.open_dialogs.entry(doc).or_default();
         list.dialogs.retain(|&(d, _)| d != dialog);
         let last = list.dialogs.last().map(|&(_, g)| g);
@@ -127,13 +128,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "clickedDialog", clicked_dialog, context_id);
 }
 
-// __dom.dialogOpened(docNid, dialogNid, activations) — the dialog the last of the document's open dialogs (`activations`
-// the window's count of user activations, which its close watcher's group follows).
+// __dom.dialogOpened(docNid, dialogNid) — the dialog the last of the document's open dialogs (its close watcher's group
+// following its window's count of user activations: user_activation.rs).
 fn dialog_opened(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(doc), Some(dialog)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
-    let activations = args.get(2).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
-    realm(scope, cid).dialog_opened(doc, dialog, activations);
+    realm(scope, cid).dialog_opened(doc, dialog);
 }
 // __dom.closeWatcherGroup(docNid) -> the dialogs a close request goes through (`close_watcher_group`), as `nodes_value`
 // answers.

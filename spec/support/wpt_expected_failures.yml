@@ -4533,28 +4533,28 @@ html/semantics/forms/the-select-element/customizable-select/select-appearance-di
 - "== html/semantics/forms/the-select-element/customizable-select/select-appearance-disabled-ref.html"
 html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-left-scroller.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-left-scroller-ref.html
-  (never ready to capture)"
+  (a frame the painter never enters)"
 html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-left.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-left-ref.html
-  (never ready to capture)"
+  (a frame the painter never enters)"
 html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-right-scroller.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-right-scroller-ref.html
-  (never ready to capture)"
+  (a frame the painter never enters)"
 html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-right.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-bottom-right-ref.html
-  (never ready to capture)"
+  (a frame the painter never enters)"
 html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-left-scroller.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-left-scroller-ref.html
-  (never ready to capture)"
+  (a frame the painter never enters)"
 html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-left.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-left-ref.html
-  (never ready to capture)"
+  (a frame the painter never enters)"
 html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-right-scroller.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-right-scroller-ref.html
-  (never ready to capture)"
+  (a frame the painter never enters)"
 html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-right.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-appearance-fallback-top-right-ref.html
-  (never ready to capture)"
+  (a frame the painter never enters)"
 html/semantics/forms/the-select-element/customizable-select/select-appearance-font-inheriting.html:
 - "== html/semantics/forms/the-select-element/customizable-select/select-appearance-font-inheriting-ref.html"
 html/semantics/forms/the-select-element/customizable-select/select-appearance-hover.html:
