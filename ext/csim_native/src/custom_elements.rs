@@ -40,6 +40,35 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "validCustomElementName", valid_custom_element_name, context_id);
     crate::dom::register(scope, ns, "upgradedElementsIn", upgraded_elements_in, context_id);
     crate::dom::register(scope, ns, "upgradeCandidates", upgrade_candidates, context_id);
+    crate::dom::register(scope, ns, "shadowHostKind", shadow_host_kind_op, context_id);
+}
+
+// What an element's local name makes of it as a shadow host (DOM `attachShadow` step 2, "valid shadow host name"): none
+// (0) — another namespace's element, or a name neither listed nor a valid custom element name (`font-face` and the
+// other reserved hyphenated names are none: Chrome's NotSupportedError) — one of the listed elements (`HOST_LISTED`), or
+// a custom element's name (`HOST_CUSTOM`), whose definition may disable a shadow root (the bindings').
+const HOST_LISTED: u32 = 1;
+const HOST_CUSTOM: u32 = 2;
+const SHADOW_HOSTS: [&str; 18] = [
+    "article", "aside", "blockquote", "body", "div", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "main", "nav",
+    "p", "section", "span",
+];
+pub(crate) fn shadow_host_kind(node: &crate::dom::NodeData) -> u32 {
+    let name = &*node.local_name;
+    if !node.is_html() {
+        0
+    } else if SHADOW_HOSTS.contains(&name) {
+        HOST_LISTED
+    } else if crate::element_state::is_valid_custom_element_name(name) {
+        HOST_CUSTOM
+    } else {
+        0
+    }
+}
+// __dom.shadowHostKind(nid) -> `shadow_host_kind`.
+fn shadow_host_kind_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
+    rv.set_uint32(crate::dom::dom(scope).arena.get(id).map_or(0, shadow_host_kind));
 }
 
 // __dom.upgradedElementsIn(rootNid) -> the elements of its subtree an upgrade has been tried on (`upgraded_elements_in`),
@@ -73,6 +102,17 @@ mod tests {
         n.ns = ns!(html);
         n.state = if upgraded { STATE_UPGRADED } else { 0 };
         arena.create(n, parent)
+    }
+
+    #[test]
+    fn a_shadow_host_is_listed_or_custom() {
+        let html = |name: &str| NodeData { local_name: name.into(), ns: ns!(html), ..NodeData::of_kind(NodeKind::Element, Vec::new()) };
+        assert_eq!(super::shadow_host_kind(&html("div")), super::HOST_LISTED);
+        assert_eq!(super::shadow_host_kind(&html("x-a")), super::HOST_CUSTOM);
+        assert_eq!(super::shadow_host_kind(&html("font-face")), 0);
+        assert_eq!(super::shadow_host_kind(&html("img")), 0);
+        let svg = NodeData { local_name: "div".into(), ns: ns!(svg), ..NodeData::of_kind(NodeKind::Element, Vec::new()) };
+        assert_eq!(super::shadow_host_kind(&svg), 0);
     }
 
     #[test]
