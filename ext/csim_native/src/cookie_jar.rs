@@ -392,9 +392,9 @@ fn url_text(s: magnus::RString) -> String {
     // SAFETY: as above.
     String::from_utf8_lossy(unsafe { s.as_slice() }).into_owned()
 }
-fn bytes(text: &str) -> magnus::RString {
+fn bytes(ruby: &magnus::Ruby, text: &str) -> magnus::RString {
     let bytes: Vec<u8> = text.chars().map(|c| u8::try_from(u32::from(c)).unwrap_or(b'?')).collect();
-    magnus::RString::from_slice(&bytes)
+    ruby.str_from_slice(&bytes)
 }
 // A new session's cookie store.
 pub(crate) fn new_for_ruby() -> u64 {
@@ -418,10 +418,10 @@ pub(crate) fn set_for_ruby(jar: u64, url: magnus::RString, line: magnus::RString
     }
 }
 // The cookie-string a request to `url` in `context` at `now` takes ('' for none), as bytes.
-pub(crate) fn get_for_ruby(jar: u64, url: magnus::RString, context: u32, now: f64) -> magnus::RString {
+pub(crate) fn get_for_ruby(ruby: &magnus::Ruby, jar: u64, url: magnus::RString, context: u32, now: f64) -> magnus::RString {
     let url = url_text(url);
     let found = lock().jars.get_mut(&jar).map_or_else(String::new, |j| j.retrieve(&url, context, now));
-    bytes(&found)
+    bytes(ruby, &found)
 }
 
 #[cfg(test)]
