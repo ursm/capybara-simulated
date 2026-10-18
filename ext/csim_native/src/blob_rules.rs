@@ -29,12 +29,43 @@ pub(crate) fn revocable(url: &str, here: &str) -> bool {
     opaque(&theirs) || opaque(here) || theirs == here
 }
 
+// A string part of a Blob's (§3.1 "process blob parts"), as its bytes: UTF-8 encoded — a lone surrogate U+FFFD, the
+// USVString it is — its line endings converted to the native ones (`\n`) where `endings` is "native".
+pub(crate) fn blob_text(units: &[u16], native: bool) -> Vec<u8> {
+    let text = String::from_utf16_lossy(units);
+    if !native {
+        return text.into_bytes();
+    }
+    let mut out = Vec::with_capacity(text.len());
+    let mut bytes = text.bytes().peekable();
+    while let Some(b) = bytes.next() {
+        if b == b'\r' {
+            if bytes.peek() == Some(&b'\n') {
+                bytes.next();
+            }
+            out.push(b'\n');
+        } else {
+            out.push(b);
+        }
+    }
+    out
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "blobText", blob_text_op, context_id);
     crate::dom::register(scope, ns, "blobType", blob_type_op, context_id);
     crate::dom::register(scope, ns, "blobSliceRange", slice_range_op, context_id);
     crate::dom::register(scope, ns, "blobUrlRevocable", revocable_op, context_id);
 }
 
+// __dom.blobText(text, native) -> `blob_text`, as a byte string (each byte a code unit).
+fn blob_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let units = crate::dom::utf16_arg(scope, args.get(0));
+    let bytes = blob_text(&units, args.get(1).is_true());
+    if let Some(s) = v8::String::new_from_one_byte(scope, &bytes, v8::NewStringType::Normal) {
+        rv.set(s.into());
+    }
+}
 // __dom.blobType(type) -> `blob_type` ('' for undefined).
 fn blob_type_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let t = if args.get(0).is_undefined() { Vec::new() } else { crate::dom::utf16_arg(scope, args.get(0)) };
@@ -67,6 +98,9 @@ mod tests {
         assert_eq!(blob_type(&u("Text/HTML; Charset=UTF-8")), "text/html; charset=utf-8");
         assert_eq!(blob_type(&u("text/plain\u{0}")), "");
         assert_eq!(blob_type(&u("é")), "");
+        assert_eq!(blob_text(&u("a\r\nb\rc\nd"), true), b"a\nb\nc\nd");
+        assert_eq!(blob_text(&u("a\r\nb"), false), b"a\r\nb");
+        assert_eq!(blob_text(&[0xD800, 0x61], false), "\u{FFFD}a".as_bytes());
         assert_eq!(slice_range(10.0, None, None), (0.0, 10.0));
         assert_eq!(slice_range(10.0, Some(-3.0), None), (7.0, 3.0));
         assert_eq!(slice_range(10.0, Some(8.0), Some(2.0)), (8.0, 0.0));
