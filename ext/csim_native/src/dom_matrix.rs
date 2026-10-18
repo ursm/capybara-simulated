@@ -469,7 +469,7 @@ const ENTRY_NAMES: [&str; 6] = ["m11", "m12", "m21", "m22", "m41", "m42"];
 // aliases and `is2D`, in that order, each undefined where the dictionary has none; a TypeError where it is refused.
 fn matrix_fix_up(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(members) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
-    let mut member = |i: u32| members.get_index(scope, i).filter(|v| !v.is_undefined());
+    let member = |i: u32| members.get_index(scope, i).filter(|v| !v.is_undefined());
     let entries: [Option<f64>; 16] = std::array::from_fn(|i| member(i as u32).and_then(|v| v.number_value(scope)));
     let aliases: [Option<f64>; 6] = std::array::from_fn(|k| member(16 + k as u32).and_then(|v| v.number_value(scope)));
     let is_2d = member(22).map(|v| v.is_true());

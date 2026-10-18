@@ -11,6 +11,10 @@ use crate::dom::{dom, realm_id, register};
 pub(crate) struct BlobUrls(HashMap<String, (i32, v8::Global<v8::Object>)>);
 
 impl BlobUrls {
+    // Whether realm `cid` made the blob URL `url` — the entry it resolves to (`entry_key`).
+    pub(crate) fn made_by(&self, url: &str, cid: i32) -> bool {
+        self.0.get(&entry_key(url)).is_some_and(|(realm, _)| *realm == cid)
+    }
     // …of realm `cid` no more: its document went (a frame removed or navigated, its page torn down, a new one begun in
     // its context), and the URLs it made with it (url-lifetime: "Removing an iframe").
     pub(crate) fn forget_realm(&mut self, cid: i32) {
@@ -71,9 +75,9 @@ fn blob_url_get(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 
 // __dom.blobUrlRealm(url) -> whether the calling realm made the blob `url` resolves to.
 fn blob_url_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let url = entry_key(&args.get(0).to_rust_string_lossy(scope));
+    let url = args.get(0).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    rv.set_bool(dom(scope).arena.blob_urls.0.get(&url).is_some_and(|(realm, _)| *realm == cid));
+    rv.set_bool(dom(scope).arena.blob_urls.made_by(&url, cid));
 }
 
 // __dom.blobUrlDelete(url): `url` names no blob any more — revoked (the origin's check the bindings', before), or

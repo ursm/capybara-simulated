@@ -127,6 +127,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "setLocationOrigin", set_location_origin, context_id);
     register(scope, ns, "setTargetHash", set_target_hash, context_id);
     register(scope, ns, "documentOrigin", document_origin, context_id);
+    register(scope, ns, "frameOrigins", frame_origins_op, context_id);
     register(scope, ns, "setDocumentOrigin", set_document_origin, context_id);
     register(scope, ns, "originKey", origin_key, context_id);
     register(scope, ns, "realmOrigin", realm_origin, context_id);
@@ -144,6 +145,47 @@ fn document_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let cid = realm_id(scope, &args);
     let origin = realm(scope, cid).location.origin().to_owned();
     rv.set(v8::String::new(scope, &origin).unwrap().into());
+}
+
+// The two origins of the document a frame of realm `cid`'s document loads at `url` ('' for none: about:blank), its
+// container's `sandbox` attribute `sandbox` and its response's Content-Security-Policy `csp` (None for none) — what the
+// new realm is seeded with, None for each it takes from its URL:
+//   its document's (HTML "determine the origin"): a new opaque one ("null") where it is sandboxed — by its container, by
+//   its response, or by this document, whose sandboxing every frame it makes inherits (step 1); else, inherited from this
+//   document — an opaque one with its key (`null|<key>`), which no serialization carries — for an about: or javascript:
+//   URL, or a blob: URL this realm made (the origin of the document that made it); else its URL's;
+//   its location's (`location.origin`): "null" for an opaque URL — about:, javascript:, none — though the document's is
+//   inherited; else its URL's, sandboxed or not.
+pub(crate) fn frame_origins(arena: &mut RealmArena, cid: i32, url: &str, sandbox: Option<&str>, csp: Option<&str>) -> (Option<String>, Option<&'static str>) {
+    let scheme = |s: &str| url.get(..s.len()).is_some_and(|p| p.eq_ignore_ascii_case(s));
+    let opaque_url = url.is_empty() || scheme("about:") || scheme("javascript:");
+    let own_blob = scheme("blob:") && arena.blob_urls.made_by(url, cid);
+    let location = &mut arena.location;
+    let document = if location.sandboxed || crate::sandbox::opaque_origin(csp, sandbox) {
+        Some("null".to_owned())
+    } else if opaque_url || own_blob {
+        let origin = location.origin().to_owned();
+        Some(if origin == "null" { format!("null|{}", location.origin_key(cid)) } else { origin })
+    } else {
+        None
+    };
+    (document, opaque_url.then_some("null"))
+}
+// __dom.frameOrigins(url, sandbox, csp) -> `[document, location]` of `frame_origins`, each null for its URL's.
+fn frame_origins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = |scope: &mut v8::PinScope<'_, '_>, i: i32| (!args.get(i).is_null_or_undefined()).then(|| args.get(i).to_rust_string_lossy(scope));
+    let url = text(scope, 0).unwrap_or_default();
+    let (sandbox, csp) = (text(scope, 1), text(scope, 2));
+    let cid = realm_id(scope, &args);
+    let (document, location) = frame_origins(realm(scope, cid), cid, &url, sandbox.as_deref(), csp.as_deref());
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
+    for text in [document.as_deref(), location] {
+        items.push(match text.and_then(|t| v8::String::new(scope, t)) {
+            Some(t) => t.into(),
+            None => v8::null(scope).into(),
+        });
+    }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // __dom.setDocumentOrigin(text) — the calling realm's document's origin (`set_document_origin`; null: its location's).
