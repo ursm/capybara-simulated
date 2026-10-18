@@ -62,8 +62,15 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 fn blob_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let units = crate::dom::utf16_arg(scope, args.get(0));
     let bytes = blob_text(&units, args.get(1).is_true());
-    if let Some(s) = v8::String::new_from_one_byte(scope, &bytes, v8::NewStringType::Normal) {
-        rv.set(s.into());
+    match v8::String::new_from_one_byte(scope, &bytes, v8::NewStringType::Normal) {
+        Some(s) => rv.set(s.into()),
+        // (…its bytes past the longest string V8 makes, as the encoder the bindings used refused them)
+        None => {
+            if let Some(message) = v8::String::new(scope, "Invalid string length") {
+                let error = v8::Exception::range_error(scope, message);
+                scope.throw_exception(error);
+            }
+        }
     }
 }
 // __dom.blobType(type) -> `blob_type` ('' for undefined).
@@ -98,9 +105,6 @@ mod tests {
         assert_eq!(blob_type(&u("Text/HTML; Charset=UTF-8")), "text/html; charset=utf-8");
         assert_eq!(blob_type(&u("text/plain\u{0}")), "");
         assert_eq!(blob_type(&u("é")), "");
-        assert_eq!(blob_text(&u("a\r\nb\rc\nd"), true), b"a\nb\nc\nd");
-        assert_eq!(blob_text(&u("a\r\nb"), false), b"a\r\nb");
-        assert_eq!(blob_text(&[0xD800, 0x61], false), "\u{FFFD}a".as_bytes());
         assert_eq!(slice_range(10.0, None, None), (0.0, 10.0));
         assert_eq!(slice_range(10.0, Some(-3.0), None), (7.0, 3.0));
         assert_eq!(slice_range(10.0, Some(8.0), Some(2.0)), (8.0, 0.0));
@@ -109,5 +113,13 @@ mod tests {
         assert!(!revocable("blob:http://a.test/x", "http://b.test"));
         assert!(revocable("blob:null/x", "http://b.test"));
         assert!(revocable("blob:http://a.test/x", "null"));
+    }
+
+    #[test]
+    fn a_string_part_is_utf_8_its_line_endings_native_where_asked() {
+        let u = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+        assert_eq!(blob_text(&u("a\r\nb\rc\nd"), true), b"a\nb\nc\nd");
+        assert_eq!(blob_text(&u("a\r\nb"), false), b"a\r\nb");
+        assert_eq!(blob_text(&[0xD800, 0x61], false), "\u{FFFD}a".as_bytes());
     }
 }

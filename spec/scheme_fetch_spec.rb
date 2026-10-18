@@ -75,4 +75,22 @@ RSpec.describe 'scheme fetch' do
     expect(poll_until { v = session.evaluate_script('window.order'); v.length >= 6 ? v : nil })
       .to eq(['empty load', 'after empty', 'bad error', 'after bad', 'micro', 'after micro'])
   end
+
+  # A blob URL is read as the URL parser reads it — `BLOB:` is `blob:` — by an XHR as by fetch(), and revoked so too
+  # (its fragment and all: revoking `<url>#x` revokes no entry).
+  it 'resolves and revokes a blob URL as parsed' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const url = URL.createObjectURL(new Blob(['hi']));
+        const upper = 'BLOB:' + url.slice(5);
+        const read = (u) => { const x = new XMLHttpRequest(); try { x.open('GET', u, false); x.send(); return x.responseText; } catch (e) { return e.name; } };
+        const before = read(upper);
+        URL.revokeObjectURL(upper + '#x');
+        const fragmentKept = read(url);
+        URL.revokeObjectURL(upper);
+        return [before, fragmentKept, read(url)];
+      })()
+    JS
+    expect(got).to eq(%w[hi hi NetworkError])
+  end
 end

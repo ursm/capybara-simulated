@@ -29,6 +29,15 @@ pub(crate) fn entry_key(url: &str) -> String {
         Err(_) => url.split('#').next().unwrap_or_default().to_owned(),
     }
 }
+// …and the URL "remove an entry from the blob URL store" names (§8.3.2): serialized whole, its fragment and all — so
+// revoking `<url>#frag` removes no entry — itself where it is no URL.
+pub(crate) fn revoked_key(url: &str) -> String {
+    ada_url::Url::parse(url, None).map_or_else(|_| url.to_owned(), |u| u.href().to_owned())
+}
+// …for the host: `entry_key`.
+pub(crate) fn entry_key_for_ruby(url: String) -> String {
+    entry_key(&url)
+}
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "blobUrlKey", blob_url_key, context_id);
@@ -38,10 +47,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "blobUrlDelete", blob_url_delete, context_id);
 }
 
-// __dom.blobUrlKey(url) -> `entry_key`: what the host's registry knows the URL by too.
+// __dom.blobUrlKey(url, revoking) -> `entry_key` — or, `revoking`, `revoked_key` — what the host's registry knows the
+// URL by too.
 fn blob_url_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
-    if let Some(key) = v8::String::new(scope, &entry_key(&url)) {
+    let key = if args.get(1).is_true() { revoked_key(&url) } else { entry_key(&url) };
+    if let Some(key) = v8::String::new(scope, &key) {
         rv.set(key.into());
     }
 }
@@ -73,8 +84,23 @@ fn blob_url_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 
 // __dom.blobUrlDelete(url): `url` names no blob any more — revoked (the origin's check the bindings', before), or
 // dropped as another window revoked it — whichever realm made it. Matched as it is, its fragment and all: revoking
-// `<url>#frag` removes no entry (§8.3.2: the URL serialized whole).
+// `<url>#frag` removes no entry (`revoked_key`).
 fn blob_url_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let url = args.get(0).to_rust_string_lossy(scope);
+    let url = revoked_key(&args.get(0).to_rust_string_lossy(scope));
     dom(scope).arena.blob_urls.0.remove(&url);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_blob_url_resolves_without_its_fragment_and_is_revoked_whole() {
+        assert_eq!(entry_key("blob:http://a.test/u#x"), "blob:http://a.test/u");
+        assert_eq!(entry_key("blob:http://a.test/u?q"), "blob:http://a.test/u?q");
+        assert_eq!(entry_key("BLOB:http://a.test/u"), "blob:http://a.test/u");
+        assert_eq!(entry_key("not a url#x"), "not a url");
+        assert_eq!(revoked_key("BLOB:http://a.test/u#x"), "blob:http://a.test/u#x");
+        assert_eq!(revoked_key("not a url#x"), "not a url#x");
+    }
 }

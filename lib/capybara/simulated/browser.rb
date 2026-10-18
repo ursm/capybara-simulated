@@ -8428,10 +8428,12 @@ module Capybara
         # entry — the blob keeps its original storage partition; this only makes it
         # first-party-fetchable in the window it was navigated into.
         # (…no copy to let go of as the boot begins this page: a window sent to the same blob document again keeps it)
-        @blob_registry_lock.synchronize { @blob_copies.delete(url.to_s); @blob_registry[url.to_s] = bytes }
+        # (…by the key a lookup resolves it by, its fragment excluded: blob_urls.rs `entry_key`)
+        key = Native.blob_url_key(url.to_s)
+        @blob_registry_lock.synchronize { @blob_copies.delete(key); @blob_registry[key] = bytes }
         boot_response_into_ctx(bytes)
         # (…its document's copy, which the next page to begin here lets go of — noted after the boot, which begins this one)
-        @blob_registry_lock.synchronize { @blob_copies << url.to_s }
+        @blob_registry_lock.synchronize { @blob_copies << key }
         # Adopt into the in-VM store too, so a LATER resolve keeps the correct content
         # type (a bytes-only @blob_registry entry resolves as application/octet-stream).
         @runtime.call('__csimAdoptBlobBytes', url.to_s, bytes, content_type.to_s) rescue nil
