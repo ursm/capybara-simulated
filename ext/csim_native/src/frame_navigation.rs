@@ -111,6 +111,34 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameContentHeld", frame_content_held, context_id);
     crate::dom::register(scope, ns, "frameContentUrl", frame_content_url, context_id);
     crate::dom::register(scope, ns, "copyFrameContent", copy_frame_content, context_id);
+    crate::dom::register(scope, ns, "frameSrcNested", frame_src_nested, context_id);
+}
+
+// HTML "shared attribute processing steps for iframe and frame elements" step 3, as the frame `container`'s attributes
+// are processed — it is inserted, its `src` or `srcdoc` set or removed: whether its `src` names a document a navigable
+// among the inclusive ancestors of its node navigable has, fragments aside (`RealmArena::ancestor_document_at`), so that
+// the steps return null and it navigates nowhere — no document but the one it has, and no `load`. Not for a frame with
+// a `srcdoc`, nor one a navigation already carries a document for (a form's response), nor one in no document (it has
+// no navigable); and not where the URL matches about:blank — which an empty or absent `src` is too — though the step
+// matches that as well: an iframe in an about:blank document would never load, where Chrome and Firefox load it. (They
+// allow one level of a document framing itself, where HTML allows none.)
+pub(crate) fn src_nested(arena: &mut crate::dom::RealmArena, container: NodeId) -> bool {
+    let carried = arena.frame_navigations.0.get(&container).is_some_and(|nav| nav.contents[CONTENT_NAV].is_some());
+    let Some(node) = arena.get(container).filter(|n| !carried && n.plain_attr("srcdoc").is_none()) else { return false };
+    let (realm, src) = (node.realm, node.plain_attr("src").unwrap_or_default().to_owned());
+    let doc = arena.shadow_including_root(container);
+    if src.is_empty() || arena.get(doc).is_none_or(|n| n.kind != crate::dom::NodeKind::Document) {
+        return false;
+    }
+    let Some(url) = arena.parse_document_url(doc, &src) else { return false };
+    let about_blank = url.protocol() == "about:" && url.pathname() == "blank";
+    !about_blank && arena.ancestor_document_at(realm, url.href())
+}
+// __dom.frameSrcNested(containerNid) -> `src_nested`.
+fn frame_src_nested(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let cid = realm_id(scope, &args);
+    rv.set_bool(src_nested(crate::dom::realm(scope, cid), container));
 }
 
 // __dom.frameContentUrl(containerNid, slot) -> the URL of the document the navigation carries in `slot`, or null.

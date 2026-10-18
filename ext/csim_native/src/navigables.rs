@@ -151,8 +151,7 @@ impl RealmArena {
     }
     // HTML "shared attribute processing steps for iframe and frame elements" step 3: whether a navigable among the
     // inclusive ancestors of realm `realm`'s — its own, its container's document's, up — has a document whose URL is
-    // `url` but for their fragments, so that a frame in the realm's document whose `src` is `url` navigates nowhere.
-    // (Chrome and Firefox compare the fragments too, so `<iframe src="#x">` of its own page loads once more there.)
+    // `url` but for their fragments (frame_navigation.rs `src_nested`).
     pub(crate) fn ancestor_document_at(&self, realm: i32, url: &str) -> bool {
         let url = crate::url_ops::without_fragment(url);
         let mut at = Some(realm);
@@ -441,7 +440,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setPrompting", set_prompting, context_id);
     crate::dom::register(scope, ns, "unloading", unloading, context_id);
     crate::dom::register(scope, ns, "ancestorUnloading", ancestor_unloading, context_id);
-    crate::dom::register(scope, ns, "frameSrcNested", frame_src_nested, context_id);
     let linked = crate::dom::dom(scope).arena.navigables.linked.store();
     crate::dom::view_word(scope, ns, "childFrames", linked);
 }
@@ -604,16 +602,6 @@ fn ancestor_unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let realm = args.get(0).int32_value(scope).unwrap_or(-1);
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).ancestor_unloading(realm));
-}
-// __dom.frameSrcNested(containerNid, url) -> whether the frame `container` is would navigate nowhere for `url`, a
-// document of it its own document's navigable's or an ancestor's (`RealmArena::ancestor_document_at`).
-fn frame_src_nested(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    let url = args.get(1).to_rust_string_lossy(scope);
-    let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let nested = arena.get(container).is_some_and(|n| arena.ancestor_document_at(n.realm, &url));
-    rv.set_bool(nested);
 }
 
 #[cfg(test)]
