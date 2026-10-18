@@ -392,10 +392,29 @@ pub(crate) fn descriptor(name: &str, value: &str) -> Option<String> {
     descriptors.get(id, &mut out).ok()?;
     Some(out)
 }
-// __dom.fontFaceDescriptor(name, value) -> the value serialized, or null where it is invalid (`descriptor`).
+// …and the value a FontFace attribute takes for the descriptor `name` where none is given (CSS Font Loading's FontFace
+// attributes, the descriptors' initial values) — none for no FontFace attribute's.
+pub(crate) fn descriptor_default(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "font-style" | "font-weight" | "font-stretch" | "font-feature-settings" | "font-variation-settings" => "normal",
+        "ascent-override" | "descent-override" | "line-gap-override" => "normal",
+        "unicode-range" => "U+0-10FFFF",
+        "font-display" => "auto",
+        "size-adjust" => "100%",
+        _ => return None,
+    })
+}
+// __dom.fontFaceDescriptor(name, value) -> the value serialized, or null where it is invalid (`descriptor`) — with no
+// value, the default (`descriptor_default`).
 fn font_face_descriptor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (name, value) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
-    match descriptor(&name, &value).and_then(|v| v8::String::new(scope, &v)) {
+    let name = args.get(0).to_rust_string_lossy(scope);
+    let value = if args.get(1).is_undefined() {
+        descriptor_default(&name).map(str::to_owned)
+    } else {
+        let value = args.get(1).to_rust_string_lossy(scope);
+        descriptor(&name, &value)
+    };
+    match value.and_then(|v| v8::String::new(scope, &v)) {
         Some(v) => rv.set(v.into()),
         None => rv.set_null(),
     }
@@ -571,6 +590,9 @@ mod tests {
         assert_eq!(descriptor("font-weight", " AUTO/**/"), Some("auto".into()));
         assert_eq!(descriptor("font-weight", "\u{a0}auto"), None);
         assert_eq!(descriptor("font-display", "auto"), Some("auto".into()));
+        assert_eq!(descriptor_default("unicode-range"), Some("U+0-10FFFF"));
+        assert_eq!(descriptor_default("size-adjust"), Some("100%"));
+        assert_eq!(descriptor_default("src"), None);
     }
 
     fn face(family: &str, weight: (f64, f64), slanted: bool) -> FaceRecord {
