@@ -265,6 +265,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "rangeText", range_text, context_id);
     register(scope, ns, "rangeContents", range_contents, context_id);
     register(scope, ns, "rangeRects", range_rects, context_id);
+    register(scope, ns, "rangeTextPoints", range_text_points, context_id);
 }
 
 // ── boundary points in tree order (DOM §5.2) ─────────────────────────────────────────────────────────────────────
@@ -476,6 +477,40 @@ fn range_common_ancestor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let found = common_ancestor(crate::dom::realm(scope, cid), s.node, e.node);
     rv.set(crate::dom::node_value(scope, Some(found)));
 }
+// __dom.rangeTextPoints(range) -> [startNode, startOffset, endNode, endOffset]: the range's points each moved onto the
+// Text node beside it where it is between an element's children (`text_point`) — the target range a `beforeinput` of
+// an editing action on the selection reports, whose boundaries real browsers give at the deepest text node (a
+// `selectAllChildren` selection's `(el, 0)-(el, n)` as `(text, 0)-(text, length)`).
+fn range_text_points(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some([s, e]) = entry_points(scope, args.get(0)) else { return };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let [s, e] = [s, e].map(|p| text_point(arena, p));
+    let mut out = Vec::with_capacity(4);
+    for p in [s, e] {
+        out.push(crate::dom::node_value(scope, Some(p.node)));
+        out.push(v8::Integer::new_from_unsigned(scope, p.offset).into());
+    }
+    rv.set(v8::Array::new_with_elements(scope, &out).into());
+}
+// (…a point between an element's children onto the Text node after it, at its start, else the one before it, at its
+// end; any other as it is)
+fn text_point(arena: &RealmArena, p: Boundary) -> Boundary {
+    let is_text = |id: NodeId| arena.get(id).is_some_and(|n| n.node_type() == 3);
+    if is_text(p.node) {
+        return p;
+    }
+    let Some(n) = arena.get(p.node) else { return p };
+    let at = p.offset as usize;
+    if let Some(&after) = n.children.get(at).filter(|&&c| is_text(c)) {
+        return Boundary { node: after, offset: 0 };
+    }
+    match at.checked_sub(1).and_then(|i| n.children.get(i)).filter(|&&c| is_text(c)) {
+        Some(&before) => Boundary { node: before, offset: crate::range_contents::node_length(arena, before) },
+        None => p,
+    }
+}
+
 // The nearest inclusive ancestor of `a` that is an inclusive ancestor of `b` too — `a` where they share no tree.
 pub(crate) fn common_ancestor(arena: &RealmArena, a: NodeId, b: NodeId) -> NodeId {
     let (ca, cb) = (arena.chain(a), arena.chain(b));
