@@ -27,6 +27,8 @@ pub(crate) const RANGE_UNDERFLOW: u16 = 1 << 5;
 pub(crate) const RANGE_OVERFLOW: u16 = 1 << 6;
 pub(crate) const STEP_MISMATCH: u16 = 1 << 7;
 pub(crate) const BAD_INPUT: u16 = 1 << 8;
+// (…the bindings' to set, `setCustomValidity`'s)
+#[cfg(test)]
 pub(crate) const CUSTOM_ERROR: u16 = 1 << 9;
 
 // HTML "normalize newlines": every CRLF and every lone CR a LF.

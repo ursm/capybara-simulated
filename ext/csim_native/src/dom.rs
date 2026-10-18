@@ -752,9 +752,6 @@ pub(crate) struct SharedWord {
 }
 
 impl SharedWord {
-    pub(crate) fn get(&self) -> u32 {
-        self.value
-    }
     pub(crate) fn set(&mut self, value: u32) {
         self.value = value;
         if let Some(buffer) = &self.buffer {

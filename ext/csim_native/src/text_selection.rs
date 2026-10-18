@@ -47,10 +47,9 @@ pub(crate) const TYPED_SELECTION: u32 = 2;
 const TYPED_LENGTH_SHIFT: u32 = 2;
 // Where typed text goes (`type_text`): at the selection, the caret at the value's end where none was ever set (the
 // user's keystrokes); over the whole value (a driver's fill); at the selection a script reads, its start where none was
-// set (execCommand, the clipboard).
+// set (execCommand, the clipboard: any other, 2 as the bindings number it).
 pub(crate) const TYPE_AT_CARET: u32 = 0;
 pub(crate) const TYPE_WHOLE: u32 = 1;
-pub(crate) const TYPE_AT_SELECTION: u32 = 2;
 // The editing keys a text control takes (`edit_control`) — the moves extending the selection with `EDIT_EXTEND` (Shift).
 const EDIT_BACKSPACE: u32 = 0;
 const EDIT_DELETE: u32 = 1;

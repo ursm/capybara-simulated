@@ -1,16 +1,12 @@
 // Resize Observer's sizes (§3.4): a target's border box, content box and device pixel content box (the content box at
 // `device_pixel_ratio`, rounded), each `[inline, block]` in its writing mode, and its content rect at its padding edge
 // in physical axes — all 0 where it has no box it measures (`geometry::observed_sizes`), or is not laid out (the
-// bindings' `isLaidOutNode` says); an observation's size, of the box it observes; and the target's DEPTH, the elements
-// on its flat-tree path to the root, by which "gather active observations at depth" keeps a loop of resizes from running
-// on. One answer for both the gather and the entries it makes. Whether a size moved since the last one reported, and
-// the entries, the bindings keep.
+// bindings' `isLaidOutNode` says), an observation's size of the box it observes among them; and the target's DEPTH, the
+// elements on its flat-tree path to the root, by which "gather active observations at depth" keeps a loop of resizes
+// from running on. One answer for both the gather and the entries it makes. Whether a size moved since the last one
+// reported, and the entries, the bindings keep.
 
 use crate::dom::{nid_arg, NodeId, NodeKind, RealmArena};
-
-// The observed boxes, as the bindings number them.
-const CONTENT_BOX: i32 = 0;
-const BORDER_BOX: i32 = 1;
 
 // A target's sizes: border, content and device-pixel content `[inline, block]`, then the content rect `[x, y, w, h]`.
 pub(crate) type Sizes = [f64; 10];

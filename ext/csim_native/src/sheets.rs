@@ -233,15 +233,9 @@ impl SheetStore {
         *stored.sheet.0.media.write_with(&mut lock.write()) = list;
     }
 
-    // Whether the sheet `id` is disabled…
+    // Whether the sheet `id` is disabled.
     pub(crate) fn disabled(&self, id: u32) -> bool {
         self.sheets.get(&id).is_some_and(|s| s.disabled)
-    }
-    // …and that it is, or is not.
-    pub(crate) fn set_disabled(&mut self, id: u32, disabled: bool) {
-        if let Some(stored) = self.sheets.get_mut(&id) {
-            stored.disabled = disabled;
-        }
     }
 
     // The sheet `id`'s media text and disallow modification flag (`StoredSheet::media_text`)…

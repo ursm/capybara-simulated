@@ -1071,7 +1071,6 @@ struct GridRow {
 }
 struct GridGroup {
     el: NodeId,
-    index: usize,
     first: i32,
     last: i32,
     // (…0 header, 1 body, 2 footer: the order a table renders its groups in, `rowGroupRankOf`)
@@ -3661,7 +3660,7 @@ impl<'a> Walk<'a> {
                                 DisplayInside::TableFooterGroup => 2,
                                 _ => 1,
                             };
-                            grid.groups.push(GridGroup { el: c, index: grid.groups.len(), first: -1, last: -1, rank });
+                            grid.groups.push(GridGroup { el: c, first: -1, last: -1, rank });
                             let gi = grid.groups.len() - 1;
                             let rows: Vec<NodeId> = self.children(c).collect();
                             self.collect_table(&rows, Some(gi), grid)?;
