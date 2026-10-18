@@ -12062,7 +12062,7 @@ module Capybara
           resp = http.request(req)
           headers = {}
           resp.each_capitalized {|k, v| (headers[k] ||= []) << v }
-          headers = headers.transform_values {|vs| vs.length == 1 ? vs.first : vs.join("\n") }
+          headers = headers.transform_values {|vs| vs.length == 1 ? vs.first : vs }
           [resp.code.to_i, headers, [resp.body || '']]
         end
       rescue SystemExit, Interrupt, NoMemoryError
@@ -12166,9 +12166,11 @@ module Capybara
         headers.each_with_object({}) {|(k, v), out| out[k.to_s] = header_text(v) }
       end
 
-      # …a header's value as script reads it: its fields combined with `, `, each byte the code point it is.
+      # …a header's value as script reads it: its fields — each without the HTTP whitespace around it, as an HTTP stack
+      # reads a field (Chrome and Firefox: ` 5 ` is `5`) — combined with `, `, each byte the code point it is.
       def header_text(value)
-        AssetCache.combined(value).to_s.b.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
+        fields = Array(value).map {|field| field.to_s.b.sub(/\A[\t ]+/n, '').sub(/[\t ]+\z/n, '') }
+        AssetCache.combined(fields).force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
       end
 
       # The Fetch "redirect status" set — ONLY these are followed. 300 (multiple

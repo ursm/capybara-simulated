@@ -148,9 +148,10 @@ RSpec.describe 'XMLHttpRequest bindings' do
 
   # …its total the length the response's Content-Length gives — Fetch "extract a length", the engine's (headers.rs
   # `extract_length`): its values all the same, of ASCII digits — and 0, not computable, where it gives none: `5, 6` had
-  # been read as 5 (`parseInt` of its first digits).
+  # been read as 5 (`parseInt` of its first digits); and each of its fields is read without the HTTP whitespace around
+  # it, as an HTTP stack reads one (Chrome and Firefox: `" 5 "` is `5`).
   it "totals its progress by what the response's Content-Length extracts to" do
-    lengths = {'/same' => '5, 5', '/differ' => '5, 6', '/junk' => '5x'}
+    lengths = {'/same' => '5, 5', '/differ' => '5, 6', '/junk' => '5x', '/spaced' => ' 5 '}
     s = simulated_session(lambda {|env|
       next [200, {'content-type' => 'text/plain', 'content-length' => lengths[env['PATH_INFO']]}, ['hello']] if lengths.key?(env['PATH_INFO'])
       [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']]
@@ -161,12 +162,14 @@ RSpec.describe 'XMLHttpRequest bindings' do
       for (const path of #{lengths.keys.to_json}) {
         const x = new XMLHttpRequest();
         x.open('GET', path);
-        x.onprogress = (e) => { got[path] = [e.total, e.lengthComputable]; };
+        x.onprogress = (e) => { got[path] = [e.total, e.lengthComputable, x.getResponseHeader('content-length')]; };
         x.send();
       }
     JS
     got = poll_until { v = s.evaluate_script('window.got'); v.size == lengths.size ? v : nil }
-    expect(got).to eq('/same' => [5, true], '/differ' => [0, false], '/junk' => [0, false])
+    expect(got).to eq(
+      '/same' => [5, true, '5, 5'], '/differ' => [0, false, '5, 6'], '/junk' => [0, false, '5x'], '/spaced' => [5, true, '5']
+    )
   end
 
   # The final MIME type is the one the Content-Type gives (Fetch's "extract a MIME type"), and an XML document is

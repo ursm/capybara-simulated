@@ -316,11 +316,7 @@ module WptRunner
     Array(pairs).each_with_object({}) do |(name, value), hdrs|
       key = name.to_s.downcase
       val = value.to_s.gsub(/\A[\t\n\r ]+|[\t\n\r ]+\z/, '')
-      if key == 'set-cookie'
-        hdrs[key] = Array(hdrs[key]) + [val]
-      else
-        hdrs[key] = hdrs.key?(key) ? "#{hdrs[key]}, #{val}" : val
-      end
+      hdrs[key] = hdrs.key?(key) || key == 'set-cookie' ? Array(hdrs[key]) + [val] : val
     end
   end
 
