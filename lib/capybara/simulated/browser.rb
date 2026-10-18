@@ -9680,6 +9680,8 @@ module Capybara
             # a cross-site ancestor — see frame_ancestor_cross_site?) overrides: it's a
             # property of the target frame, cross-site whoever issues the request.
             cookie_site = 'cross-site' if cookie_cross_site
+            # (…the one verdict the response's Set-Cookie is stored by too: merge_set_cookie)
+            env['csim.cookie_site'] = cookie_site
             if env['HTTP_COOKIE'] && cookie_site == 'cross-site'
               # The Lax navigation exception is TOP-LEVEL only (dest 'document'): an
               # iframe navigation or an ancestor-cross frame navigation
@@ -12170,15 +12172,17 @@ module Capybara
 
       # A response's Set-Cookie fields stored for `url` — one cookie each (Rack 2 joins them with a newline, Rack 3 gives
       # an Array; splitting first keeps the second of two, Rails' session cookie beside `remember_user_token`) — for the
-      # request `env` made, whose Fetch metadata says whether it was cross-site and a top-level navigation (no metadata:
-      # same-site).
+      # request `env` made, whose site for cookies (the one its cookies were sent by, where a fetch worked it out:
+      # `csim.cookie_site`; else its Fetch metadata's) says whether it was cross-site, and whether a top-level navigation
+      # (no metadata: same-site).
       def merge_set_cookie(headers, url, env = nil)
         sc = headers['set-cookie'] || headers['Set-Cookie']
         return if sc.nil? || sc.empty?
 
         url = document_cookie_url unless cookie_host(url)
         secure     = secure_cookie_channel?(url)
-        cross_site = !env.nil? && (env['HTTP_SEC_FETCH_SITE'] == 'cross-site' || env['csim.cookie_cross_site'] == true)
+        site       = env && (env['csim.cookie_site'] || env['HTTP_SEC_FETCH_SITE'])
+        cross_site = !env.nil? && (site == 'cross-site' || env['csim.cookie_cross_site'] == true)
         top_level  = !env.nil? && (env['csim.cookie_top_level'] == true ||
                                    (env['HTTP_SEC_FETCH_MODE'] == 'navigate' && env['HTTP_SEC_FETCH_DEST'] == 'document'))
         (sc.is_a?(Array) ? sc : sc.split("\n")).each do |line|
