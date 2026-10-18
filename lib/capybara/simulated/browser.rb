@@ -11035,10 +11035,15 @@ module Capybara
       def delete_all_cookies = Native.cookie_jar_clear(@cookie_jar)
 
       # `document.cookie` reads/writes the cookies of a document's URL (`url`, the document's own: its path, its host);
-      # one that is no http(s) one's — about:blank, srcdoc — those of the browsing context it is shown in, else the
-      # session's default host.
-      def document_cookie_url(url = nil)
-        url = current_browsing_context_url unless cookie_host(url) && url.to_s.match?(%r{\Ahttps?://}i)
+      # one that is no http(s) one's — about:blank, srcdoc — those of the document that embeds it (realm `realm`'s
+      # parent, and so on up: its creator's, as Chrome's cookie URL is), else the session's default host.
+      def document_cookie_url(url = nil, realm = nil)
+        rid = realm.to_i
+        until url.to_s.match?(%r{\Ahttps?://}i) || !rid.positive? || @runtime.top_level_realm?(rid)
+          rid = @runtime.frame_realm_parent(rid).to_i
+          url = rid.positive? ? frame_realm_url(rid) : @current_url
+        end
+        url = current_browsing_context_url if realm.nil? && !url.to_s.match?(%r{\Ahttps?://}i)
         cookie_host(url) ? url : @default_host
       end
 
@@ -11046,19 +11051,28 @@ module Capybara
       # where an ancestor's document is (RFC 6265bis "site for cookies": no SameSite cookie read or stored there but a
       # None one).
       def document_cookie(url = nil, realm = nil)
-        url = document_cookie_url(url)
-        RuntimeShared.utf8_text(cookie_header_for(url, secure: secure_cookie_channel?(url), http: false,
-                                                       cross_site: document_cookie_cross_site?(realm, url), lax_ok: false))
+        url = document_cookie_url(url, realm)
+        cookies = cookie_header_for(
+          url,
+          secure:     secure_cookie_channel?(url),
+          http:       false,
+          cross_site: frame_ancestor_cross_site?(realm, url),
+          lax_ok:     false
+        )
+        RuntimeShared.utf8_text(cookies)
       end
       def current_referer      ; @current_referer.to_s ; end
       def write_document_cookie(s, url = nil, realm = nil)
         return if s.nil? || s.empty?
 
-        url = document_cookie_url(url)
-        store_cookie(url, s, secure: secure_cookie_channel?(url), http: false, cross_site: document_cookie_cross_site?(realm, url))
-      end
-      private def document_cookie_cross_site?(realm, url)
-        !realm.nil? && realm.to_i.positive? && frame_ancestor_cross_site?(realm, url)
+        url = document_cookie_url(url, realm)
+        store_cookie(
+          url,
+          s,
+          secure:     secure_cookie_channel?(url),
+          http:       false,
+          cross_site: frame_ancestor_cross_site?(realm, url)
+        )
       end
 
       # Web Storage's sheds for the bindings (storage.js): [localStorage's, sessionStorage's] — the engine keeps their
@@ -11881,7 +11895,8 @@ module Capybara
         while rid.positive? && !@runtime.top_level_realm?(rid)
           parent       = @runtime.frame_realm_parent(rid).to_i
           ancestor_url = parent.positive? ? frame_realm_url(parent) : @current_url
-          return true if sec_fetch_site(ancestor_url, target_url.to_s) == 'cross-site'
+          # (…an ancestor of an opaque origin — a `data:` document's — is of no site at all: cross-site)
+          return true if ancestor_url.to_s.match?(/\Adata:/i) || sec_fetch_site(ancestor_url, target_url.to_s) == 'cross-site'
 
           rid = parent
         end
