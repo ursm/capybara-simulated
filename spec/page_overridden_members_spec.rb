@@ -174,9 +174,10 @@ RSpec.describe 'members a page overrides' do
         a.commitStyles();
         CSSStyleDeclaration.prototype.setProperty = setProperty;
         out.push(t.style.opacity);
+        const connected = Object.getOwnPropertyDescriptor(Node.prototype, 'isConnected');
         Object.defineProperty(Node.prototype, 'isConnected', {get: () => false, configurable: true});
         out.push(getComputedStyle(document.body).display);
-        delete Node.prototype.isConnected;
+        Object.defineProperty(Node.prototype, 'isConnected', connected);
         return out;
       })()
     JS

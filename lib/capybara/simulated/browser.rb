@@ -389,6 +389,8 @@ module Capybara
         @hijack_fetch_seq     = 0
         @hijack_fetch_threads = {}
         @hijack_fetch_queue   = Thread::Queue.new
+        # (…each hijacked fetch's URL, credentials mode, cookie context and realm, which its delivery answers by)
+        @hijack_fetch_contexts = {}
         # Web Workers — per-Browser handle counter, per-worker
         # {thread, inbox} pair, and a shared outbox the main settle
         # drains via `__csim_deliverWorkerMessages`. Each worker
@@ -4494,47 +4496,72 @@ module Capybara
         # XHR stays on that single source of truth, its Rack call offered `rack.hijack` as a server (Puma) offers every
         # request: middleware that takes it holds the connection open until something publishes through it (a long poll),
         # and one that does not answers as it would anyway.
-        read_io = nil
+        # (…the pipe read from the moment the middleware takes it, so a write larger than the pipe holds never blocks it)
+        id = (@hijack_fetch_seq += 1)
+        hijacked = false
         env_extras = {
           'rack.hijack?' => true,
           'rack.hijack'  => lambda {
             read_io, write_io = IO.pipe
+            hijacked = true
+            @hijack_fetch_threads[id] = Thread.new do
+              Thread.current.report_on_exception = false
+              run_hijacked_pipe_read(id, read_io, @hijack_fetch_queue)
+            end
             write_io
           }
         }
+        Thread.current[:csim_fetch_env] = nil
         # (…a CORS request as an XHR's is, by its client)
         resp = rack_fetch(method, url, body, headers, 'follow', 'cors', credentials: credentials, env_extras: env_extras, client_url: client_url,
                           client_origin: client_origin, client_realm: client_realm)
         # (…nil, a network error, as `rack_fetch` answers one)
-        return resp unless read_io
-        id = (@hijack_fetch_seq += 1)
-        @hijack_fetch_threads[id] = Thread.new do
-          Thread.current.report_on_exception = false
-          run_hijacked_pipe_read(id, read_io, @hijack_fetch_queue)
-        end
+        return resp unless hijacked
+        env = Thread.current[:csim_fetch_env] || {}
+        cookie_env = env.slice('csim.cookie_site', 'csim.cookie_cross_site', 'csim.cookie_top_level', 'HTTP_SEC_FETCH_SITE', 'HTTP_SEC_FETCH_MODE', 'HTTP_SEC_FETCH_DEST')
+        @hijack_fetch_contexts[id] = {url: url.to_s, credentials: credentials, cookie_env: cookie_env, realm: client_realm.to_i}
         {'handle' => id}
       end
 
       def rack_fetch_async_abort(id)
         thread = @hijack_fetch_threads.delete(id.to_i)
         thread&.kill
+        @hijack_fetch_contexts.delete(id.to_i)
         nil
       end
 
       def hijack_fetch_pending? = !@hijack_fetch_threads.empty? || !@hijack_fetch_queue.empty?
 
+      # Each hijacked response, as `rack_fetch` would have answered it — its Set-Cookie stored (by the request's cookie
+      # context), its body shaped as any response's (`response_hash`: text, or bytes beside it) — or a network error (nil)
+      # where reading it failed: delivered to the realm whose XHR made it, a frame's included; none to a realm gone.
       def deliver_hijacked_fetches
         return 0 if @hijack_fetch_threads.empty? && @hijack_fetch_queue.empty?
-        responses = drain_queue(@hijack_fetch_queue)
-        return 0 if responses.empty?
-        @runtime.call('__csim_deliverHijackedFetches', responses)
-        responses.size
+        raw = drain_queue(@hijack_fetch_queue)
+        return 0 if raw.empty?
+        by_realm = Hash.new {|h, k| h[k] = [] }
+        raw.each do |r|
+          context = @hijack_fetch_contexts.delete(r['handle']) or next
+          response =
+            unless r['error']
+              merge_set_cookie(r['headers'], context[:url], context[:cookie_env]) unless context[:credentials] == 'omit'
+              response_hash(r['status'], r['headers'], r['body'], context[:url], false)
+            end
+          by_realm[context[:realm]] << {'handle' => r['handle'], 'response' => response}
+        end
+        by_realm.each do |realm, responses|
+          if realm.zero? then @runtime.call('__csim_deliverHijackedFetches', responses)
+          elsif @runtime.frame_realm_alive?(realm) then @runtime.realm_call(realm, '__csim_deliverHijackedFetches', responses)
+          end
+        end
+        raw.size
       end
 
       def reset_hijacked_fetches
         @hijack_fetch_threads.each_value(&:kill)
         @hijack_fetch_threads.clear
         @hijack_fetch_queue.clear
+        @hijack_fetch_contexts.clear
       end
 
       # MessageBus's `long_polling_interval` defaults to 25 s — its
@@ -4564,7 +4591,7 @@ module Capybara
         end
         queue << {'handle' => id, **parse_hijacked_http_response(buf)}
       rescue StandardError => e
-        queue << {'handle' => id, 'status' => 0, 'headers' => {}, 'body' => '', 'error' => "#{e.class}: #{e.message}"}
+        queue << {'handle' => id, 'error' => "#{e.class}: #{e.message}"}
       ensure
         @hijack_fetch_threads.delete(id)
         begin
@@ -4597,10 +4624,27 @@ module Capybara
             headers[RuntimeShared.utf8_text(k)] = RuntimeShared.utf8_text(v)
           end
         end
-        # The held-poll body is TEXT (long-poll JSON); the socket read is
-        # BINARY-tagged.
-        body = RuntimeShared.utf8_text(body.to_s)
+        # (…the body as its bytes — decoded at delivery as any response's is — a chunked one's chunks joined)
+        body = body.to_s.b
+        if headers['transfer-encoding'].to_s.downcase.include?('chunked')
+          headers.delete('transfer-encoding')
+          body = dechunk_http_body(body)
+        end
         {'status' => status, 'headers' => headers, 'body' => body}
+      end
+
+      # An HTTP/1.1 chunked body's chunks, joined: each a hex size line and its bytes, up to the zero-size one (RFC 9112
+      # §7.1; its trailers dropped).
+      private def dechunk_http_body(raw)
+        out = String.new(encoding: Encoding::BINARY)
+        pos = 0
+        while (eol = raw.index("\r\n", pos))
+          size = raw[pos...eol].split(';', 2).first.to_s.strip.to_i(16)
+          break if size.zero?
+          out << raw.byteslice(eol + 2, size).to_s
+          pos = eol + 2 + size + 2
+        end
+        out
       end
 
       # ── Web Workers ────────────────────────────────────────────────
@@ -9708,7 +9752,12 @@ module Capybara
               ck.empty? ? env.delete('HTTP_COOKIE') : env['HTTP_COOKIE'] = ck
             end
           end
-          env.merge!(env_extras) if env_extras
+          if env_extras
+            env.merge!(env_extras)
+            # (…and the env it went with, where the caller asked something of the request's: a hijacked fetch's cookie
+            # context, which its later response is stored by)
+            Thread.current[:csim_fetch_env] = env
+          end
           response = dispatch_rack_or_http(target, env, method: method, body: body) or return nil
           status, resp_headers, resp_body = response
           Thread.current[:csim_fetch_server_delay_ms] += server_delay_ms_of(resp_headers)
