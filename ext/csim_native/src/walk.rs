@@ -130,15 +130,8 @@ impl SharedFaces {
 // A style's face key: its family list as it serializes, and the bucket its weight and style fall in.
 pub(crate) fn face_key(f: &style::properties::style_structs::Font) -> FaceKey {
     use style_traits::ToCss;
-    let bold = f.font_weight.value() >= 600.0;
     let italic = f.font_style != style::values::computed::font::FontStyle::NORMAL;
-    let bucket = match (bold, italic) {
-        (false, false) => "",
-        (true, false) => "bold",
-        (false, true) => "italic",
-        (true, true) => "bold:italic",
-    };
-    (f.font_family.to_css_string(), bucket)
+    (f.font_family.to_css_string(), crate::font_faces::bucket(f64::from(f.font_weight.value()), italic))
 }
 
 impl Faces {
