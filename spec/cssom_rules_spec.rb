@@ -118,6 +118,13 @@ RSpec.describe 'CSSOM rules' do
     expect(got).to eq(%w[CSSLayerStatementRule CSSContainerRule CSSPropertyRule CSSPageRule])
   end
 
+  # A page rule's margin rules are named by their at-keywords, the engine's (stylo's MarginRule) — a corner too.
+  it "names a page rule's margin rules" do
+    got = page('@page { @top-left { content: "a" } @bottom-right-corner { color: red } }')
+      .evaluate_script('[...document.styleSheets[0].cssRules[0].cssRules].map((r) => [r.constructor.name, r.name])')
+    expect(got).to eq([%w[CSSMarginRule top-left], %w[CSSMarginRule bottom-right-corner]])
+  end
+
   # Sheets of one text share the engine's parse until CSSOM reaches one, which then takes its own copy: an edit of one
   # is its alone — the other still reads and applies what it was written with (Chrome: the same).
   it 'keeps an edit of one of two sheets of the same text its alone' do

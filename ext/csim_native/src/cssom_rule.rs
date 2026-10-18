@@ -181,6 +181,7 @@ pub(crate) fn get(store: &SheetStore, lock: &SharedRwLock, handle: u32, what: &s
         // (…none where it declares none, and an empty one where it declares that)
         (Rule::Css(CssRule::Property(p)), "initial") => css(&**p.descriptors.initial_value.as_ref()?),
         (Rule::Css(CssRule::CounterStyle(c)), "name") => css(c.read_with(&guard).name()),
+        (Rule::Css(CssRule::Margin(m)), "name") => m.name().to_owned(),
         (Rule::Css(CssRule::PositionTry(p)), "name") => css(&p.read_with(&guard).name),
         (Rule::Css(CssRule::FontPaletteValues(p)), "name") => css(&p.name),
         (Rule::Css(CssRule::FontPaletteValues(p)), "family") => p.family_names.iter().map(|n| css(n)).collect::<Vec<_>>().join(", "),
