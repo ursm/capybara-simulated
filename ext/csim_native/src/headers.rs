@@ -336,7 +336,6 @@ fn delete_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let Some(l) = list(scope, args.get(0)) else { return rv.set_uint32(WRITTEN) };
     rv.set_uint32(l.borrow_mut().delete(&name));
 }
-// __dom.headersGet(list, name) -> the name's values combined, null for none, undefined for a name that is no header
 // Fetch "get, decode, and split" a header's combined value: its values split at commas outside a quoted string (a quote's
 // backslash escaping the next character), each trimmed of HTTP tabs and spaces.
 pub(crate) fn decode_split(value: &str) -> Vec<String> {
@@ -377,6 +376,7 @@ fn content_length_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         None => rv.set_null(),
     }
 }
+// __dom.headersGet(list, name) -> the name's values combined, null for none, undefined for a name that is no header
 // name.
 fn get_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = bytes(scope, args.get(1));

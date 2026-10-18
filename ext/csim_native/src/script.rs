@@ -186,7 +186,7 @@ pub(crate) fn script_response_refused(content_type: &str, nosniff: &str, integri
         ["audio/", "image/", "video/"].iter().any(|p| e.starts_with(p)) || e == "text/csv"
     });
     // (…the header's first value, as Fetch "determine nosniff" takes it)
-    let nosniff = nosniff.split(',').next().is_some_and(|v| v.trim_matches([' ', '\t']).eq_ignore_ascii_case("nosniff"));
+    let nosniff = crate::headers::decode_split(nosniff).first().is_some_and(|v| v.eq_ignore_ascii_case("nosniff"));
     let sniffed = nosniff && !essence.as_deref().is_some_and(is_javascript_mime);
     let integrity_fails = !crate::integrity::response_matches(body, integrity, !opaque);
     never || sniffed || integrity_fails

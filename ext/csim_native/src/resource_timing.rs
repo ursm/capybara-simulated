@@ -128,7 +128,7 @@ pub(crate) fn content_encoding(header: &str) -> String {
 // Fetch's "TAO check" for a cross-origin response: its `Timing-Allow-Origin` values, comma-separated, one `*` or the
 // requesting document's origin serialized.
 fn timing_allowed(tao: &str, origin: &str) -> bool {
-    tao.split(',').map(|v| v.trim_matches([' ', '\t'])).any(|v| v == "*" || (!v.is_empty() && v == origin))
+    crate::headers::decode_split(tao).iter().any(|v| v == "*" || (!v.is_empty() && v == origin))
 }
 
 // What a resource's entry lets the document see (Resource Timing §4.7, Fetch): whether its timing is allowed — a

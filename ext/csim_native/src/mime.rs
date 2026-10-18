@@ -126,7 +126,7 @@ pub(crate) fn extract(header: &str) -> Option<MimeType> {
     let mut charset: Option<String> = None;
     let mut essence: Option<String> = None;
     let mut mime: Option<MimeType> = None;
-    for value in split_values(header) {
+    for value in crate::headers::decode_split(header) {
         let Some(mut parsed) = parse(&value).filter(|m| m.essence != "*/*") else { continue };
         let own = parsed.parameters.iter().find(|(n, _)| n == "charset").map(|(_, v)| v.clone());
         if essence.as_deref() != Some(parsed.essence.as_str()) {
@@ -139,35 +139,6 @@ pub(crate) fn extract(header: &str) -> Option<MimeType> {
     }
     mime
 }
-// A header's value split at its commas, as Fetch's "getting, decoding, and splitting" does: a comma inside a quoted
-// string is part of it, and each value is trimmed of tabs and spaces.
-fn split_values(value: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut current = String::new();
-    let mut chars = value.chars();
-    while let Some(c) = chars.next() {
-        match c {
-            '"' => {
-                current.push('"');
-                while let Some(q) = chars.next() {
-                    current.push(q);
-                    if q == '\\' {
-                        if let Some(escaped) = chars.next() {
-                            current.push(escaped);
-                        }
-                    } else if q == '"' {
-                        break;
-                    }
-                }
-            }
-            ',' => out.push(std::mem::take(&mut current)),
-            c => current.push(c),
-        }
-    }
-    out.push(current);
-    out.into_iter().map(|v| v.trim_matches([' ', '\t']).to_owned()).collect()
-}
-
 // …for the host: the essence of the MIME type a `Content-Type` header's value gives, or nil.
 pub(crate) fn content_type_essence_for_ruby(header: String) -> Option<String> {
     extract(&header).map(|m| m.essence)
