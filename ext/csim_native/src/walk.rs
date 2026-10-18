@@ -2530,7 +2530,8 @@ impl<'a> Walk<'a> {
                     "file" => sized(253.0, 21.0),
                     "range" => sized(129.0, 16.0),
                     "color" => sized(44.0, 23.0),
-                    "image" => sized(0.0, 0.0),
+                    // (…an image button's its decoded image's, as an `<img>`'s: Chrome and Firefox, a 100x50 one 100x50)
+                    "image" => node.natural_size.map_or(sized(0.0, 0.0), Intrinsic::of),
                     "date" => sized(118.33, 20.0),
                     "time" => sized(97.0, 20.0),
                     "datetime-local" => sized(204.33, 20.0),

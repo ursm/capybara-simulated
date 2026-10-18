@@ -405,5 +405,41 @@ RSpec.describe 'image decode' do
     JS
     expect(got).to eq([[50, 25, 50], [66, 33, 67], [255, 0, 0], [255, 0]])
   end
+  # …but a `drawImage` source rectangle is in image pixels (the bitmap's, a `2x` image's 40 to 60 its middle), and an
+  # image not rendered reads its bitmap's size for `width`; an image button lays out at its image's size. Chrome: below.
+  it "takes a drawImage source rectangle in image pixels, and an unrendered image's width from its bitmap" do
+    session = simulated_session(app).tap {|s| s.visit '/' }
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const c0 = document.createElement('canvas');
+      c0.width = 100;
+      c0.height = 50;
+      const g0 = c0.getContext('2d');
+      g0.fillStyle = 'red';
+      g0.fillRect(0, 0, 50, 50);
+      g0.fillStyle = 'blue';
+      g0.fillRect(50, 0, 50, 50);
+      const img = document.createElement('img');
+      img.srcset = c0.toDataURL() + ' 2x';
+      img.style.display = 'none';
+      document.body.append(img);
+      const button = document.createElement('input');
+      button.type = 'image';
+      button.src = '/green';
+      document.body.append(button);
+      const ready = (i) => new Promise((r) => { if (i.complete && i.naturalWidth) r(); else i.addEventListener('load', r); });
+      Promise.all([ready(img), ready(button)]).then(() => {
+        const cv = document.createElement('canvas');
+        cv.width = 100;
+        cv.height = 50;
+        const g = cv.getContext('2d');
+        g.drawImage(img, 40, 0, 20, 25, 0, 0, 20, 25);
+        const colour = (x, y) => { const d = g.getImageData(x, y, 1, 1).data; return d[0] > 200 ? 'red' : d[2] > 200 ? 'blue' : 'none'; };
+        const r = button.getBoundingClientRect();
+        done([colour(5, 10), colour(15, 10), img.naturalWidth, img.width, r.width, r.height]);
+      });
+    JS
+    expect(got).to eq(['red', 'blue', 50, 100, 100, 50])
+  end
 end
 
