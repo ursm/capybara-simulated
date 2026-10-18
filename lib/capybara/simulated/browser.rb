@@ -7771,8 +7771,7 @@ module Capybara
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
         Thread.current[:csim_image_meta] = nil
-        origin_base, cookie_cross = load_client(realm, key)
-        entry = cached_image(key, cors, credentials, origin_base: origin_base, cookie_cross_site: cookie_cross)
+        entry = cached_image(key, cors, credentials, client: load_client(realm, key))
         return {'unsupported' => true} if entry == :unsupported
         return undecodable_image_result unless entry
         image_payload(entry, image_tainted?(key, cors), Thread.current[:csim_image_meta])
@@ -7786,7 +7785,7 @@ module Capybara
       def image_load_start(url, cors = false, credentials = 'same-origin', realm: nil)
         key = resolve_against_current(url.to_s)
         return -1 unless key.is_a?(String)
-        origin_base, cookie_cross = load_client(realm, key)
+        client = load_client(realm, key)
         id = nil
         @image_load_lock.synchronize do
           id = (@image_load_seq += 1)
@@ -7796,7 +7795,7 @@ module Capybara
           # not race N identical Rack requests + decodes where the sync path did one fetch and
           # N−1 cache hits. Followers just register their id on the in-flight group; the one
           # thread finalizes every member with the shared result.
-          flight = [key, cors, credentials, cors ? url_origin(origin_base) : nil, cookie_cross]
+          flight = [key, cors, credentials, client]
           if (group = @image_load_flights[flight])
             group << id
             next
@@ -7807,7 +7806,7 @@ module Capybara
             r = nil
             begin
               r = begin
-                image_load_result(key, cors, credentials, origin_base, cookie_cross)
+                image_load_result(key, cors, credentials, client)
               rescue StandardError
                 nil
               end
@@ -7836,12 +7835,12 @@ module Capybara
 
       # The thread-side body: everything except the transfer stash (engine-affine, done at
       # delivery on the main thread). Result mirrors `load_image`'s shapes with the raw entry.
-      private def image_load_result(key, cors, credentials, origin_base, cookie_cross = false)
+      private def image_load_result(key, cors, credentials, client)
         Thread.current[:csim_image_meta] = nil
-        entry = cached_image(key, cors, credentials, origin_base: origin_base, cookie_cross_site: cookie_cross)
+        entry = cached_image(key, cors, credentials, client: client)
         return {'unsupported' => true} if entry == :unsupported
         return undecodable_image_result unless entry
-        { entry: entry, tainted: origin_tainted?(key, cors, client_url: origin_base), meta: Thread.current[:csim_image_meta] }
+        { entry: entry, tainted: origin_tainted?(key, cors, client_url: client.url), meta: Thread.current[:csim_image_meta] }
       end
       # A response that arrived but is no image: the element is broken, the resource was still
       # fetched — its Resource Timing entry carries the real status and size.
@@ -7948,8 +7947,8 @@ module Capybara
       # CORS load's success is origin-dependent (a response's ACAO may allow one origin and
       # not another) — fetching per load is what keeps the verdict the requesting document's
       # own; only the origin-free decode result is shared.
-      private def cached_image(key, cors = false, credentials = 'same-origin', origin_base: @current_url, cookie_cross_site: false)
-        bytes = image_source_bytes(key, cors, credentials, origin_base: origin_base, cookie_cross_site: cookie_cross_site)
+      private def cached_image(key, cors = false, credentials = 'same-origin', client: load_client(nil, key))
+        bytes = image_source_bytes(key, cors, credentials, client: client)
         return bytes if bytes == :unsupported
         return nil unless bytes
         cache_key = Digest::SHA256.digest(bytes)
@@ -7978,7 +7977,7 @@ module Capybara
       # fetch, so rack_fetch's Access-Control enforcement rejects (→ nil) a cross-origin
       # response with no matching ACAO. :unsupported for a scheme with no host-side reader,
       # nil for a missing / failed / CORS-rejected / empty resource.
-      private def image_source_bytes(key, cors = false, credentials = 'same-origin', origin_base: @current_url, cookie_cross_site: false)
+      private def image_source_bytes(key, cors = false, credentials = 'same-origin', client: load_client(nil, key))
         if key.start_with?('data:')
           bytes = decode_data_url_body(key)
           bytes.empty? ? nil : bytes
@@ -7987,8 +7986,9 @@ module Capybara
           # on the async path this runs on a background thread, and a concurrent navigation
           # must not swing the CORS / SameSite / Referer verdicts to a document that never
           # issued this request.
-          result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials,
-                              client_url: origin_base, referrer: origin_base, body_raw: true, cookie_cross_site: cookie_cross_site)
+          result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client.url,
+                              referrer: client.referrer, referrer_policy: client.referrer_policy, body_raw: true,
+                              cookie_cross_site: client.cookie_cross_site)
           # What the image's Resource Timing entry reports of the response — its content type,
           # whether it was redirected to, its status and size — read back on this thread right
           # after; a 404 is a response too (the element breaks, the entry keeps the status).
@@ -11911,14 +11911,21 @@ module Capybara
       # initiator-based Sec-Fetch-Site latch).
       # …and a navigation of a frame in realm `realm_id`'s document: cross-site where that document is, or an ancestor of
       # it.
-      # The document a load the host makes is for — realm `realm`'s, the top-level one's for none (a frame's gone, its
-      # parent's chain all the same) — and whether a request to `target_url` from it is cross-site for cookies: where
-      # it, or an ancestor, is (`container_cross_site?`). Read on the main thread, which a realm's URL is asked on.
+      # The document a load the host makes is for — realm `realm`'s, the top-level one's for none — as a request to
+      # `target_url` takes it: its URL (an about:blank / srcdoc one's its creator's, whose origin it has), whether the
+      # request is cross-site for cookies (where it, or an ancestor, is: `container_cross_site?`), and the referrer and
+      # policy it refers by (`realm_referrer_initiator`: a srcdoc document its container's, a sandboxed one none). Read on
+      # the main thread, which a realm's URL is asked on; a frame gone, the top-level one's.
+      LoadClient = Struct.new(:url, :cookie_cross_site, :referrer, :referrer_policy)
       def load_client(realm, target_url)
         rid = realm.to_i
-        return [@current_url, false] unless rid.positive?
+        # (…the top-level document's own policy left to rack_fetch's default, as it had been: a load runs inside a call
+        # of its realm's, which the policy is not asked back through)
+        return LoadClient.new(@current_url, false, @current_url, nil) unless rid.positive? && (url = frame_realm_url(rid))
 
-        [frame_realm_url(rid) || @current_url, container_cross_site?(rid, target_url)]
+        referrer, policy = realm_referrer_initiator(rid)
+        url = referrer unless url.match?(%r{\Ahttps?://}i)
+        LoadClient.new(url, container_cross_site?(rid, target_url), referrer, policy)
       end
       private def container_cross_site?(realm_id, target_url)
         rid = realm_id.to_i
