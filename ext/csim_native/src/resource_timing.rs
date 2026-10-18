@@ -252,9 +252,16 @@ fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, 
 }
 // __dom.resourceTimingEntry(facts) -> the entry's fields (`entry_fields`) as an object, `serverTiming` a flat
 // [name, duration, description, …] list — `facts` an object of `Facts`' members by their camel-cased names, a header
-// null for none.
+// null for none — or null for a resource of no network scheme.
 fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(obj) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
+    // (…none for a resource a URL of no network scheme names — data:, blob:, about:, javascript: — Resource Timing's
+    // "mark resource timing" running only for a fetch over the network)
+    let name = member(scope, obj, "name").map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
+    let scheme = name.split_once(':').map_or("", |(s, _)| s);
+    if ["data", "blob", "about", "javascript"].iter().any(|s| s.eq_ignore_ascii_case(scheme)) {
+        return rv.set_null();
+    }
     let string = |scope: &mut v8::PinScope<'_, '_>, key: &str| member(scope, obj, key).map(|v| v.to_rust_string_lossy(scope));
     let flag = |scope: &mut v8::PinScope<'_, '_>, key: &str| member(scope, obj, key).is_some_and(|v| v.boolean_value(scope));
     let number = |scope: &mut v8::PinScope<'_, '_>, key: &str| member(scope, obj, key).and_then(|v| v.number_value(scope)).unwrap_or(0.0);
