@@ -151,7 +151,7 @@ fn header_place(arena: &RealmArena, table: NodeId, part: u32) -> (Option<NodeId>
 }
 // The answer of an op that changed the tree: the element it made or names, or none (null), and the changes of children
 // it made (mutation.rs `changes_value`).
-fn answer<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, made: Option<NodeId>, changes: &[Change]) -> Option<v8::Local<'s, v8::Value>> {
+pub(crate) fn answer<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, made: Option<NodeId>, changes: &[Change]) -> Option<v8::Local<'s, v8::Value>> {
     let mut out = vec![crate::dom::node_value(scope, made)];
     if crate::dom::factory_threw(scope) {
         return None;
