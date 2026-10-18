@@ -889,6 +889,22 @@ pub(crate) fn client_rects(arena: &RealmArena, id: NodeId) -> Option<Vec<[f64; 4
     })
 }
 
+// The origin of the border edge of `id`'s FIRST box, as `client_rects` would give it with no transform applied — in the
+// viewport, where the page's scrolling carried it (CSSOM View's `x` / `y` of an `<img>`: Chrome and Firefox read 30
+// for a `translate(7px, 9px)` image laid out at 30, and -50 for one at 50 on a page scrolled by 100). None where it
+// generates no box.
+pub(crate) fn first_box_origin(arena: &RealmArena, id: NodeId) -> Option<[f64; 2]> {
+    let style = box_style(arena, id)?;
+    if is_boxless(arena, id, &style) {
+        return None;
+    }
+    if let Some(&[x, y, _, _]) = arena.get(id).and_then(|n| laid_frags(arena, n)).filter(|f| f.len() > 1).and_then(|f| f.first()) {
+        let [sx, sy] = scroll_shift(arena, id);
+        return Some([x - sx, y - sy]);
+    }
+    laid_out_box(arena, id).map(|[x, y, _, _]| [x, y])
+}
+
 // The map the PAINTER draws `id` under, `[a, b, c, d, e, f]` — a 2D affine, all a canvas has — None where no transform
 // moves it, and `Some(None)` where one does that the painter cannot express at all, which it must not read as "none"
 // and draw at the layout position. A homography whose projective row is `0, 0, w` is no projection: it is a UNIFORM
@@ -1379,6 +1395,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "usedInsets", used_insets_op, context_id);
     register(scope, ns, "clientRects", client_rects_op, context_id);
     register(scope, ns, "offsets", offsets_op, context_id);
+    register(scope, ns, "firstBoxOrigin", first_box_origin_op, context_id);
     register(scope, ns, "scrollOffset", scroll_offset, context_id);
     register(scope, ns, "setScrollOffset", set_scroll_offset, context_id);
     register(scope, ns, "layoutRootAlone", layout_root_alone, context_id);
@@ -1482,6 +1499,11 @@ fn frame_viewport_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 // (`offsets`).
 fn offsets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     answer_into(scope, &args, rv, offsets);
+}
+// __dom.firstBoxOrigin(nid, out) -> whether `nid` has a box, its first one's origin written to `out`, `[x, y]`
+// (`first_box_origin`).
+fn first_box_origin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
+    answer_into(scope, &args, rv, first_box_origin);
 }
 // __dom.clientRects(nid) -> Float64Array: `nid`'s client rects, `[x, y, w, h]` each (`client_rects`), none for no box.
 fn client_rects_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

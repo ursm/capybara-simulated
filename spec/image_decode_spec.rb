@@ -236,4 +236,43 @@ RSpec.describe 'image decode' do
     JS
     expect(got).to eq(['img', 'load', 100])
   end
+  # `decode()` settles with the image's load itself, not through a listener: a page that replaced
+  # `addEventListener` still has its decodes resolve — one whose pixels are corrupt past a good header among them, which
+  # loads — and a broken image's reject. Chrome: ok, ok, EncodingError.
+  it 'settles decode() by the load, whatever the page did to its events' do
+    session = simulated_session(app).tap {|s| s.visit '/' }
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      EventTarget.prototype.addEventListener = () => {};
+      const [good, corrupt, broken] = [new Image(), new Image(), new Image()];
+      good.src = '/green';
+      corrupt.src = '/bad';
+      broken.src = 'data:text/plain,x';
+      Promise.all([good, corrupt, broken].map((img) => img.decode().then(() => 'ok', (e) => e.name))).then(done);
+    JS
+    expect(got).to eq(%w[ok ok EncodingError])
+  end
+
+  # An `<img>`'s `x` / `y`: its first box's border edge, no transform applied, as the scrolled viewport has it — read
+  # through no member a page may replace. Chrome and Firefox: [30, -50, 0, 0, 5, 1974] (Firefox 1975).
+  it "measures x and y off the image's first box in the viewport" do
+    page = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8><body style="margin:0">
+      <div style="height:50px"></div>
+      <img id=a width=20 height=20 style="margin-left:30px;transform:translate(7px,9px)">
+      <div style="height:2000px"></div>
+      <img id=b width=20 height=20 style="display:none">
+      <span style="position:relative;left:5px"><img id=c width=20 height=20></span>
+    HTML
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] }).tap {|s| s.visit '/' }
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        scrollTo(0, 100);
+        Element.prototype.getBoundingClientRect = () => ({left: 999, top: 999});
+        const [a, b, c] = ['a', 'b', 'c'].map((id) => document.getElementById(id));
+        return [a.x, a.y, b.x, b.y, c.x, c.y];
+      })()
+    JS
+    expect(got).to eq([30, -50, 0, 0, 5, 1974])
+  end
 end
