@@ -361,8 +361,9 @@ pub(crate) fn location_set(current: &str, part: &str, value: &str, label: Option
         "pathname" => drop(url.set_pathname(Some(value))),
         "search" if value.is_empty() => url.set_search(None),
         "search" => {
-            let query = value.strip_prefix('?').unwrap_or(value);
-            match query_encoding(&url, label).and_then(|e| encoded_query(query, e)) {
+            // (…as the basic URL parser reads its input: no tab or newline — ada's setter drops them from what it takes)
+            let query: String = value.strip_prefix('?').unwrap_or(value).chars().filter(|c| !matches!(c, '\t' | '\n' | '\r')).collect();
+            match query_encoding(&url, label).and_then(|e| encoded_query(&query, e)) {
                 Some(encoded) => url.set_search(Some(&encoded)),
                 None => url.set_search(Some(value)),
             }
@@ -553,6 +554,7 @@ mod tests {
         assert_eq!(location_set(at, "search", "", None), Ok(Some("https://a.test/p#x".into())));
         assert_eq!(location_set(at, "search", "??é#", None), Ok(Some("https://a.test/p??%C3%A9%23#x".into())));
         assert_eq!(location_set(at, "search", "?é", Some("windows-1252")), Ok(Some("https://a.test/p?%E9#x".into())));
+        assert_eq!(location_set(at, "search", "\té\n", Some("windows-1252")), Ok(Some("https://a.test/p?%E9#x".into())));
         assert_eq!(location_set("wss://a.test/", "search", "é", Some("windows-1252")), Ok(Some("wss://a.test/?%C3%A9".into())));
         assert_eq!(location_set(at, "hash", "#x", None), Ok(None));
         assert_eq!(location_set(at, "hash", "y", None), Ok(Some("https://a.test/p?q#y".into())));

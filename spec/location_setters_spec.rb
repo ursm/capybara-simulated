@@ -22,7 +22,7 @@ RSpec.describe 'Location setters' do
     JS
     session.execute_script("location.hash = ''")
     expect(session.evaluate_script('location.href')).to end_with('/legacy')
-    session.execute_script("location.search = '\\u00e9 x'")
+    session.execute_script("location.search = '\\u00e9 \\tx\\n'")
     expect(session.current_url).to end_with('/legacy?%E9%20x')
   end
 end
