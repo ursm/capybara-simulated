@@ -98,14 +98,13 @@ pub(crate) fn server_timing(value: &str) -> Vec<Metric> {
 pub(crate) fn minimize_mime(content_type: &str) -> String {
     let Some(mime) = crate::mime::extract(content_type) else { return String::new() };
     let essence = mime.essence.as_str();
-    let subtype = essence.split_once('/').map_or("", |(_, s)| s);
     if crate::script::is_javascript_mime(essence) {
         "text/javascript".to_owned()
-    } else if essence == "application/json" || essence == "text/json" || subtype.ends_with("+json") {
+    } else if crate::mime::is_json(essence) {
         "application/json".to_owned()
     } else if essence == "image/svg+xml" {
         essence.to_owned()
-    } else if essence == "application/xml" || essence == "text/xml" || subtype.ends_with("+xml") {
+    } else if crate::mime::is_xml(essence) {
         "application/xml".to_owned()
     } else {
         essence.to_owned()

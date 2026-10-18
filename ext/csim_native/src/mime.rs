@@ -178,6 +178,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "mimeSerialize", mime_serialize, context_id);
     crate::dom::register(scope, ns, "mimeExtract", mime_extract, context_id);
     crate::dom::register(scope, ns, "mimeIsXml", mime_is_xml, context_id);
+    crate::dom::register(scope, ns, "documentKind", document_kind_op, context_id);
     crate::dom::register(scope, ns, "mimeCharsetUtf8", mime_charset_utf8, context_id);
 }
 
@@ -187,6 +188,33 @@ pub(crate) fn is_xml(content_type: &str) -> bool {
     let essence = content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
     essence.ends_with("+xml") || essence == "text/xml" || essence == "application/xml"
 }
+// A JSON MIME type's essence (MIME Sniffing §4.6): `application/json`, `text/json`, or any `+json` subtype.
+pub(crate) fn is_json(essence: &str) -> bool {
+    essence == "application/json" || essence == "text/json" || essence.split_once('/').is_some_and(|(_, s)| s.ends_with("+json"))
+}
+
+// What document a navigation response of the MIME type `essence` loads as (HTML "loading a document"): an XML one for an
+// XML MIME type; a text one — the text in a `<pre>`, "convert to a preformatted document" — for `text/css`, `text/plain`,
+// `text/vtt`, a JavaScript or a JSON MIME type; an HTML one for any other. (OPEN: a media document for an image, video or
+// audio type and a download for a type no document is made of are not modelled; such a response is HTML-parsed.)
+pub(crate) const DOCUMENT_HTML: u32 = 0;
+pub(crate) const DOCUMENT_XML: u32 = 1;
+pub(crate) const DOCUMENT_TEXT: u32 = 2;
+pub(crate) fn document_kind(essence: &str) -> u32 {
+    if is_xml(essence) {
+        DOCUMENT_XML
+    } else if matches!(essence, "text/css" | "text/plain" | "text/vtt") || crate::script::is_javascript_mime(essence) || is_json(essence) {
+        DOCUMENT_TEXT
+    } else {
+        DOCUMENT_HTML
+    }
+}
+// __dom.documentKind(essence) -> `document_kind`.
+fn document_kind_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let essence = args.get(0).to_rust_string_lossy(scope);
+    rv.set_uint32(document_kind(&essence));
+}
+
 // __dom.mimeIsXml(contentType) -> whether it is an XML MIME type (`is_xml`).
 fn mime_is_xml(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let ct = args.get(0).to_rust_string_lossy(scope);
@@ -247,6 +275,18 @@ fn mime_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_navigation_response_loads_by_its_type() {
+        assert_eq!(document_kind("text/html"), DOCUMENT_HTML);
+        assert_eq!(document_kind("image/svg+xml"), DOCUMENT_XML);
+        assert_eq!(document_kind("text/xml"), DOCUMENT_XML);
+        for text in ["text/plain", "text/css", "text/vtt", "text/javascript", "application/json", "application/ld+json"] {
+            assert_eq!(document_kind(text), DOCUMENT_TEXT, "{text}");
+        }
+        assert_eq!(document_kind("application/jsonx"), DOCUMENT_HTML);
+        assert_eq!(document_kind(""), DOCUMENT_HTML);
+    }
 
     fn round_trip(input: &str) -> Option<String> {
         parse(input).map(|m| serialize(&m))

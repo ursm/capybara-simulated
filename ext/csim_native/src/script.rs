@@ -165,7 +165,7 @@ pub(crate) fn javascript_content_for_ruby(content_type: String) -> bool {
 pub(crate) fn module_content_for_ruby(content_type: String, json: bool) -> bool {
     crate::mime::extract(&content_type).is_some_and(|m| {
         is_javascript_mime(&m.essence)
-            || (json && (m.essence == "application/json" || m.essence == "text/json" || m.essence.ends_with("+json")))
+            || (json && crate::mime::is_json(&m.essence))
     })
 }
 // __dom.javaScriptContent(contentType) -> whether a response's `Content-Type` (Fetch "extract a MIME type") is a
