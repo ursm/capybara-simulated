@@ -464,3 +464,29 @@ pub(crate) fn media_queries(text: &str) -> Vec<String> {
     let url = crate::cssom_decl::url_data("about:blank");
     crate::sheets::media_list(text, &url, QuirksMode::NoQuirks).media_queries.iter().map(|q| q.to_css_string()).collect()
 }
+// …the one medium `text` parses to, or none where it is no media query or more than one (CSSOM "parse a media query").
+fn one_medium(text: &str) -> Option<String> {
+    let mut queries = media_queries(text);
+    (queries.len() == 1).then(|| queries.remove(0))
+}
+// CSSOM `appendMedium` (§4.3): the list `list` is once `medium` is appended — none where it is no one medium, or one the
+// list holds already (media queries compared as serialized).
+pub(crate) fn media_append(list: &str, medium: &str) -> Option<String> {
+    let medium = one_medium(medium)?;
+    let mut queries = media_queries(list);
+    if queries.contains(&medium) {
+        return None;
+    }
+    queries.push(medium);
+    Some(queries.join(", "))
+}
+// CSSOM `deleteMedium` (§4.3): the list `list` is once every query that is `medium` is removed — Ok(None) where it is no
+// one medium (nothing to do), Err(the medium) where the list holds none (a NotFoundError).
+pub(crate) fn media_delete(list: &str, medium: &str) -> Result<Option<String>, String> {
+    let Some(medium) = one_medium(medium) else { return Ok(None) };
+    let queries = media_queries(list);
+    if !queries.contains(&medium) {
+        return Err(medium);
+    }
+    Ok(Some(queries.into_iter().filter(|q| *q != medium).collect::<Vec<_>>().join(", ")))
+}

@@ -2780,6 +2780,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "sheetApplies", sheet_applies, context_id);
     register(scope, ns, "sheetModificationDisallowed", sheet_modification_disallowed, context_id);
     register(scope, ns, "mediaQueries", media_queries, context_id);
+    register(scope, ns, "mediaAppend", media_append, context_id);
+    register(scope, ns, "mediaDelete", media_delete, context_id);
     register(scope, ns, "styleValue", style_value, context_id);
     register(scope, ns, "styleProperties", style_properties, context_id);
     // CSSOM's declaration blocks, over the engine's (cssom_decl.rs): each takes the block's TEXT, its kind and the
@@ -4536,6 +4538,28 @@ fn media_queries(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         .filter_map(|q| v8::String::new(scope, q).map(Into::into))
         .collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.mediaAppend(list, medium) -> the media list's text once `medium` is appended (`cssom_rule::media_append`), or
+// null for no change.
+fn media_append(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (list, medium) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
+    match crate::cssom_rule::media_append(&list, &medium) {
+        Some(text) => set_str(scope, &mut rv, &text),
+        None => rv.set_null(),
+    }
+}
+// __dom.mediaDelete(list, medium) -> [text] once `medium` is removed (`cssom_rule::media_delete`), null for no change, or
+// the medium's serialization (a string) where the list holds none of it.
+fn media_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (list, medium) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
+    match crate::cssom_rule::media_delete(&list, &medium) {
+        Ok(None) => rv.set_null(),
+        Ok(Some(text)) => {
+            let Some(text) = v8::String::new(scope, &text) else { return };
+            rv.set(v8::Array::new_with_elements(scope, &[text.into()]).into());
+        }
+        Err(missing) => set_str(scope, &mut rv, &missing),
+    }
 }
 // __dom.ruleDrop(handle): the CSSOM object naming the rule is gone.
 fn rule_drop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {

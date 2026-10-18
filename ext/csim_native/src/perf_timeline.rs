@@ -130,7 +130,8 @@ impl PerfTimeline {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "perfRecord", perf_record, context_id);
     crate::dom::register(scope, ns, "perfEntries", perf_entries, context_id);
-    crate::dom::register(scope, ns, "perfMarkTime", perf_mark_time, context_id);
+    crate::dom::register(scope, ns, "perfMarkTimestamp", perf_mark_timestamp, context_id);
+    crate::dom::register(scope, ns, "perfTimingName", perf_timing_name, context_id);
     crate::dom::register(scope, ns, "perfClear", perf_clear, context_id);
     crate::dom::register(scope, ns, "perfSetResourceBufferSize", perf_set_resource_buffer_size, context_id);
     crate::dom::register(scope, ns, "perfOverflow", perf_overflow, context_id);
@@ -222,15 +223,56 @@ fn perf_entries(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set(serials(scope, found));
 }
 
-// __dom.perfMarkTime(name) -> the start time of the most recent mark named `name`, or null for none (User Timing §3.1
-// "convert a mark to a timestamp").
-fn perf_mark_time(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let name = utf16_arg(scope, args.get(0));
-    let t = timeline(scope, &args);
-    match t.entries.iter().rev().find(|e| e.kind == Kind::Mark && e.name == name) {
-        Some(e) => rv.set_double(e.start),
-        None => rv.set_null(),
+// The PerformanceTiming interface's attribute names (User Timing §3.2): what a mark may not be named in a Window, and
+// what a measure reads as a navigation timestamp — Navigation Timing is not modelled, so every one but navigationStart
+// is an event that "hasn't happened yet".
+const PERFORMANCE_TIMING_NAMES: [&str; 21] = [
+    "navigationStart", "unloadEventStart", "unloadEventEnd", "redirectStart", "redirectEnd", "fetchStart",
+    "domainLookupStart", "domainLookupEnd", "connectStart", "connectEnd", "secureConnectionStart", "requestStart",
+    "responseStart", "responseEnd", "domLoading", "domInteractive", "domContentLoadedEventStart",
+    "domContentLoadedEventEnd", "domComplete", "loadEventStart", "loadEventEnd",
+];
+fn performance_timing_name(name: &[u16]) -> bool {
+    PERFORMANCE_TIMING_NAMES.iter().any(|n| n.encode_utf16().eq(name.iter().copied()))
+}
+
+// What "convert a mark to a timestamp" refuses (User Timing §3.1), each its error: a negative number (a TypeError), a
+// PerformanceTiming name in a worker (a TypeError), one of an event that has not happened (an InvalidAccessError), a
+// name no mark has (a SyntaxError).
+const MARK_NEGATIVE: f64 = -1.0;
+const MARK_TIMING_IN_WORKER: f64 = -2.0;
+const MARK_TIMING_EMPTY: f64 = -3.0;
+const MARK_NONE: f64 = -4.0;
+
+// __dom.perfMarkTimestamp(mark, inWindow) -> "convert a mark to a timestamp" (User Timing §3.1): a number itself; a
+// PerformanceTiming name navigation's (§3.2: navigationStart 0, every other an event not yet happened); any other name
+// the start time of the most recent mark of it — or, refused, one of the `MARK_*` codes (each below 0, which no
+// timestamp is).
+fn perf_mark_timestamp(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let mark = args.get(0);
+    if mark.is_number() {
+        // (…a number that is none no timestamp either — the bindings' conversion lets none through)
+        let at = mark.number_value(scope).unwrap_or(f64::NAN);
+        return rv.set_double(if at < 0.0 || at.is_nan() { MARK_NEGATIVE } else { at });
     }
+    let name = utf16_arg(scope, mark);
+    if performance_timing_name(&name) {
+        let answer = if !args.get(1).is_true() {
+            MARK_TIMING_IN_WORKER
+        } else if name == "navigationStart".encode_utf16().collect::<Vec<u16>>() {
+            0.0
+        } else {
+            MARK_TIMING_EMPTY
+        };
+        return rv.set_double(answer);
+    }
+    let t = timeline(scope, &args);
+    rv.set_double(t.entries.iter().rev().find(|e| e.kind == Kind::Mark && e.name == name).map_or(MARK_NONE, |e| e.start));
+}
+// __dom.perfTimingName(name) -> whether `name` is a PerformanceTiming attribute's name (User Timing §3.2).
+fn perf_timing_name(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let name = utf16_arg(scope, args.get(0));
+    rv.set_bool(performance_timing_name(&name));
 }
 
 // __dom.perfClear(type, name) -> the serials of the entries let go of: the buffered marks or measures (`type`) named

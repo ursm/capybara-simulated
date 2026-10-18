@@ -102,12 +102,12 @@ fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'st
     out
 }
 
-// What element `id`'s `crossorigin` asks of its resource's request.
+// What element `id`'s `crossorigin` asks of its resource's request (fetch_rules.rs `cors_request`).
 fn cors_of(arena: &RealmArena, id: NodeId) -> u32 {
-    match arena.get(id).and_then(|n| n.plain_attr("crossorigin")) {
-        None => NO_CORS,
-        Some(v) if v.eq_ignore_ascii_case("use-credentials") => CORS_CREDENTIALS,
-        Some(_) => CORS,
+    match crate::fetch_rules::cors_request(arena.get(id).and_then(|n| n.plain_attr("crossorigin")), false) {
+        ("no-cors", _) => NO_CORS,
+        (_, "include") => CORS_CREDENTIALS,
+        _ => CORS,
     }
 }
 

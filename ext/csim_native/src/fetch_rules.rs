@@ -311,6 +311,20 @@ pub(crate) fn blob_response(method: &str, range: Option<&[u8]>, blob_type: &str,
     }
 }
 
+// HTML "create a potential-CORS request" (§2.5.5) for an element whose CORS settings attribute (`crossorigin`, §2.5.4)
+// is `attr` — the request's mode and credentials mode: No CORS (no attribute) a no-cors request with credentials
+// (a module script's — `module` — a cors one, same-origin), Use Credentials (`use-credentials`, ASCII
+// case-insensitively) a cors one with credentials, Anonymous (any other value, an empty or invalid one included) a cors
+// one, same-origin.
+pub(crate) fn cors_request(attr: Option<&str>, module: bool) -> (&'static str, &'static str) {
+    match attr {
+        None if module => ("cors", "same-origin"),
+        None => ("no-cors", "include"),
+        Some(v) if v.eq_ignore_ascii_case("use-credentials") => ("cors", "include"),
+        Some(_) => ("cors", "same-origin"),
+    }
+}
+
 // "CORS-safelisted response-header name" (with no `Access-Control-Expose-Headers` naming more).
 pub(crate) fn cors_safelisted_response_header(name: &[u8]) -> bool {
     ["cache-control", "content-language", "content-length", "content-type", "expires", "last-modified", "pragma"]
@@ -322,6 +336,7 @@ pub(crate) fn cors_safelisted_response_header(name: &[u8]) -> bool {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "badPort", bad_port_op, context_id);
     crate::dom::register(scope, ns, "blobResponse", blob_response_op, context_id);
+    crate::dom::register(scope, ns, "corsRequest", cors_request_op, context_id);
     crate::dom::register(scope, ns, "corsSafelistedMethod", cors_safelisted_method_op, context_id);
     crate::dom::register(scope, ns, "interceptedHop", intercepted_hop_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
@@ -385,6 +400,16 @@ fn intercepted_hop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 fn request_body_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = byte_string(scope, args.get(0));
     rv.set_bool(request_body_header(&name));
+}
+// __dom.corsRequest(el, module) -> [mode, credentials] of the request element `el` makes (`cors_request`, by its
+// `crossorigin` attribute) — one of no element (a module graph's root nobody's) as one of no attribute.
+fn cors_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = crate::node_handle::nid_of(scope, args.get(0));
+    let module = args.get(1).is_true();
+    let attr = id.and_then(|id| crate::dom::dom(scope).arena.get(id).and_then(|n| n.plain_attr("crossorigin").map(str::to_owned)));
+    let (mode, credentials) = cors_request(attr.as_deref(), module);
+    let (Some(mode), Some(credentials)) = (v8::String::new(scope, mode), v8::String::new(scope, credentials)) else { return };
+    rv.set(v8::Array::new_with_elements(scope, &[mode.into(), credentials.into()]).into());
 }
 // __dom.blobResponse(method, range, type, size) -> [status, content type, first byte, end, content range] of
 // `blob_response` (`range` null for none; the content range null for a whole blob), or null for a network error.
