@@ -9536,6 +9536,9 @@ module Capybara
         # it survives the referrer reset a `new Request(event.request, init)` performs (referrer →
         # about:client), so a SW's change-request re-fetch is same-origin to the SW's own script.
         sec_initiator = initiator || url_origin(ref_source) || url_origin(@current_url)
+        # (…the site for cookies and the client it is judged by, kept across the hops: a redirect back to the client's own
+        # site is still a cross-site chain's)
+        cookie_site = cookie_client = nil
         (MAX_FETCH_REDIRECTS + 1).times do
           t0 = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
           # Cross-origin-ness for the request mode/type, latched across hops. Computed
@@ -9695,6 +9698,17 @@ module Capybara
                                      secure:     env_secure_channel?(env),
                                      cross_site: true,
                                      lax_ok: cors_mode == 'navigate' && method.to_s.upcase == 'GET' && nav_dest.to_s == 'document' && !cookie_cross_site)
+              ck.empty? ? env.delete('HTTP_COOKIE') : env['HTTP_COOKIE'] = ck
+            end
+          elsif (cookie_client ||= url_origin(client_url) || sec_initiator)
+            # A load the host makes for a page — an image's, a font's, a style sheet's — with no request mode of its own
+            # sends no Fetch metadata, but its site for cookies is its client's against the target, widened across its
+            # redirects, as a no-cors request's is: cross-site, it sheds its Strict and Lax cookies (and stores none).
+            cookie_site = widen_sec_fetch_site(cookie_site, sec_fetch_site(cookie_client, target))
+            cookie_site = 'cross-site' if cookie_cross_site
+            env['csim.cookie_site'] = cookie_site
+            if env['HTTP_COOKIE'] && cookie_site == 'cross-site'
+              ck = cookie_header_for(env_request_url(env), secure: env_secure_channel?(env), cross_site: true, lax_ok: false)
               ck.empty? ? env.delete('HTTP_COOKIE') : env['HTTP_COOKIE'] = ck
             end
           end
