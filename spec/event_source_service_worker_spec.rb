@@ -55,7 +55,9 @@ RSpec.describe 'an EventSource a service worker answers' do
           let opened = false;
           stream.onopen = () => { opened = true; log.push('open ' + stream.readyState); };
           stream.onmessage = (e) => log.push('message ' + e.data);
-          setTimeout(() => log.push('at 300 ' + (stream.readyState === 1 && !opened ? 'open unannounced' : 'consistent')), 300);
+          // (…every 10 ms, so the check holds whenever the head comes)
+          const watch = setInterval(() => { if (stream.readyState === 1 && !opened && !log.includes('open unannounced')) log.push('open unannounced'); }, 10);
+          setTimeout(() => clearInterval(watch), 800);
           const plain = new W.EventSource('/scope/plain');
           plain.onerror = () => log.push('plain error ' + plain.readyState);
           setTimeout(() => { window.done = true; }, 900);
@@ -64,7 +66,32 @@ RSpec.describe 'an EventSource a service worker answers' do
     JS
     poll_until(timeout: 15) { session.evaluate_script('window.done') }
     log = session.evaluate_script('window.log')
-    expect(log).to include('open 1', 'at 300 consistent', 'plain error 2', 'message one', 'message two')
-    expect(log.index('open 1')).to be < log.index('at 300 consistent')
+    expect(log).to include('open 1', 'plain error 2', 'message one', 'message two')
+    expect(log).not_to include('open unannounced')
+    expect(log.index('open 1')).to be < log.index('message one')
+  end
+
+  # The unloading document cleanup steps close a source a service worker answers, as they close a fetched one: a frame
+  # removed in its `open` handler delivers no more of its messages.
+  it 'is closed with its document' do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.log = [];
+      navigator.serviceWorker.register('/sw.js', { scope: '/scope/' }).then(async (reg) => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise((res) => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const page = document.body.appendChild(document.createElement('iframe'));
+        page.src = '/scope/page.html';
+        page.onload = () => {
+          const stream = new page.contentWindow.EventSource('/scope/stream');
+          stream.onopen = () => { page.remove(); log.push('removed ' + stream.readyState); };
+          stream.onmessage = (e) => log.push('message ' + e.data);
+          setTimeout(() => { window.done = true; }, 900);
+        };
+      });
+    JS
+    poll_until(timeout: 15) { session.evaluate_script('window.done') }
+    expect(session.evaluate_script('window.log')).to eq(['removed 2'])
   end
 end
