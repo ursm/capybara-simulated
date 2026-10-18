@@ -12057,7 +12057,7 @@ module Capybara
         remote = net_http_fetch(url, env, method: method, body: body) unless url_is_local?(url)
         return nil if remote == :network_error
 
-        response = remote || framed_response(method, *@app.call(env)) or return nil
+        response = framed_response(method, *(remote || @app.call(env))) or return nil
         status, headers, body = response
         [status, utf8_tagged_headers(headers), body]
       end
@@ -12067,12 +12067,13 @@ module Capybara
         def each = yield(bytes)
       end
 
-      # A Rack response read as an HTTP/1.1 client reads it off the wire (RFC 9112 §6.3; Net::HTTP frames a remote one):
+      # A response read as an HTTP/1.1 client reads it off the wire (RFC 9112 §6.3) — the app's, and a remote one as
+      # Net::HTTP gave it (a body short of its length read as far as it came, a decoded one given its decoded length):
       # unless a Transfer-Encoding frames its body, its Content-Length values that differ are a network error (nil — a
       # navigation fails, Chrome and Firefox measured), and its body — but a HEAD's, a 1xx's, a 204's, a 205's and a
-      # 304's, which have none whatever the app gave (Chrome's, and Firefox's, a 205's too) — is as long as one says (the engine's `message_length`): what is past it
-      # dropped, what falls short of it a `CutShortBody` (a fetch's body then fails as it is read; a document renders
-      # what came, as Firefox does — Chrome commits an empty one).
+      # 304's, which have none whatever the app gave (Chrome's and Firefox's) — is as long as one says (the engine's
+      # `message_length`): what is past it dropped, what falls short of it a `CutShortBody` (a fetch's body then fails as
+      # it is read; a document renders what came, as Firefox does — Chrome commits an empty one).
       def framed_response(method, status, headers, body)
         return [status, headers, body] if headers.any? {|k, _| k.to_s.casecmp?('transfer-encoding') }
 
@@ -12182,8 +12183,8 @@ module Capybara
       rescue SystemExit, Interrupt, NoMemoryError
         raise
       rescue EOFError, Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError
-        # (…the server answered, with no message Net::HTTP could read — a body short of its Content-Length, Content-Length
-        # values that differ: a network error, not a request for the app to serve)
+        # (…the server answered with no message Net::HTTP could read — closing before a status line, a malformed one: a
+        # network error, not a request for the app to serve)
         :network_error
       rescue Exception  # WebMock::NetConnectNotAllowedError descends from Exception, not StandardError
         nil
