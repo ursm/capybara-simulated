@@ -22,7 +22,8 @@ const LINE_BREAK: u32 = 1;
 // __dom.editInsert(anchorNode, anchorOffset, focusNode, focusOffset, kind, text, steps) -> [caretNode, caretOffset,
 // copies, (source, copy, names)…, changes…], or undefined where nothing is inserted: the insertion in the editing host
 // the selection from the anchor to the focus edits (editing.rs `selection_host`: its anchor's, the focus kept to it and
-// out of its non-editable islands) at the selection's range — its contents deleted first — of `text` (`TEXT`), a line break
+// out of its non-editable islands) at the selection's range — its contents deleted first — of `text` (`TEXT`: its lines,
+// a paragraph's break between them; nothing at all where it is empty), a line break
 // (`LINE_BREAK`) or a paragraph's break (any other): the place the caret goes (null where a copy's shadow root threw:
 // `takeCloneException`), how many elements a split copied and each
 // with its source and the names of the attributes whose cloning steps are the bindings' (cloning.rs `bindings_value`),
@@ -39,7 +40,7 @@ fn edit_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     });
     let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(6)) else { return };
     let caller = crate::dom::realm_id(scope, &args);
-    if kind == TEXT && text.is_empty() && (sc, so) == (ec, eo) {
+    if kind == TEXT && text.is_empty() {
         return;
     }
     let Some((host, ((sc, so), (ec, eo)))) = selection_host(&crate::dom::dom(scope).arena, (sc, so), (ec, eo)) else { return };
@@ -59,7 +60,7 @@ fn edit_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         }
     }
     let caret = match kind {
-        TEXT => edit.text(scope, caret, &text),
+        TEXT => edit.lines(scope, caret, &text),
         LINE_BREAK => edit.line_break(scope, caret),
         _ => edit.paragraph(scope, caret),
     };
@@ -192,6 +193,34 @@ impl<'s> Edit<'s, '_> {
     fn copy(&mut self, scope: &mut v8::PinScope<'_, '_>, src: NodeId) -> Option<NodeId> {
         let doc = crate::editing::document_of(scope, src);
         crate::cloning::clone_into(scope, self.cid, self.caller, src, None, false, doc, self.held, self.copies)
+    }
+
+    // Text of lines: each line at the caret, a paragraph's break between them (CR LF, CR or LF — Enter's); where one
+    // inserts nothing the next goes where the caret was. Where the caret goes, none where nothing went in or a copy's
+    // shadow root threw.
+    fn lines(&mut self, scope: &mut v8::PinScope<'_, '_>, mut caret: (NodeId, u32), text: &[u16]) -> Option<(NodeId, u32)> {
+        let mut inserted = false;
+        let mut rest = text;
+        loop {
+            let end = rest.iter().position(|&u| u == 0x0d || u == 0x0a).unwrap_or(rest.len());
+            if end > 0 {
+                if let Some(at) = self.text(scope, caret, &rest[..end]) {
+                    (caret, inserted) = (at, true);
+                }
+            }
+            if end == rest.len() || crate::dom::dom(scope).clone_exception.is_some() || crate::dom::factory_threw(scope) {
+                break;
+            }
+            let crlf = rest[end] == 0x0d && rest.get(end + 1) == Some(&0x0a);
+            rest = &rest[end + if crlf { 2 } else { 1 }..];
+            if let Some(at) = self.paragraph(scope, caret) {
+                (caret, inserted) = (at, true);
+            }
+            if crate::dom::dom(scope).clone_exception.is_some() || crate::dom::factory_threw(scope) {
+                break;
+            }
+        }
+        inserted.then_some(caret)
     }
 
     // `text` at the caret: into the text there, or a text of its own — taking the place of a placeholder `<br>` — and the

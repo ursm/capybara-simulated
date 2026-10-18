@@ -223,6 +223,32 @@ RSpec.describe 'inserting in an editing host' do
     expect(across.evaluate_script('document.body.innerHTML')).to eq('<div id="e" contenteditable=""><p>aZ</p></div><div id="f" contenteditable="">cd</div>')
   end
 
+  it 'inserts text of lines, a paragraph broken between each — CR LF one break, CR one too' do
+    inserted = lambda {|html, at, from, to, text|
+      session.evaluate_script(<<~JS)
+        (() => {
+          const e = document.getElementById('e'), g = getSelection();
+          e.innerHTML = #{html.to_json};
+          e.focus();
+          g.setBaseAndExtent(#{at}, #{from}, #{at}, #{to});
+          document.execCommand('insertText', false, #{text.to_json});
+          const n = g.focusNode;
+          return [e.innerHTML, (n.nodeType === 3 ? n.data : n.nodeName) + '@' + g.focusOffset];
+        })()
+      JS
+    }
+    expect([
+      inserted.call('<p>x</p>', 'e.firstChild.firstChild', 1, 1, "a\nb\r\nc"),
+      inserted.call('<p>x</p>', 'e.firstChild.firstChild', 1, 1, "\n\nq\n"),
+      inserted.call('<p>x</p>', 'e.firstChild.firstChild', 1, 1, "a\rb"),
+      inserted.call('<p>xyz</p>', 'e.firstChild.firstChild', 1, 2, "1\n2"),
+      inserted.call('plain', 'e.firstChild', 5, 5, "L1\nL2")
+    ]).to eq([
+      ['<p>xa</p><p>b</p><p>c</p>', 'c@1'], ['<p>x</p><p><br></p><p>q</p><p><br></p>', 'P@0'], ['<p>xa</p><p>b</p>', 'b@1'],
+      ['<p>x1</p><p>2z</p>', '2z@1'], ['plainL1<div>L2</div>', 'L2@2']
+    ])
+  end
+
   it "edits by the selection's anchor: none from outside its host or from an island, the focus kept out of one" do
     island = 'a<span contenteditable="false">XY</span>b'
     selected = lambda {|anchor, focus, key|
