@@ -2,8 +2,9 @@
 // generator, an index's records sorted by key and then primary key, ranges of them, what a request retrieves and where a
 // cursor moves next — and what a transaction wrote, which an abort puts back; and each store's and index's schema, its
 // name and key path. The stores are their databases' (idb_databases.rs), in the one registry, each named by a number.
-// The bindings (idb.js) keep the transactions, requests and events; they convert a page's values to keys and evaluate
-// key paths (both read the page's objects), and a value reaches here serialized (clone.rs): its bytes.
+// The bindings (idb.js) keep the transactions, requests and events and evaluate key paths (which read the page's
+// objects as a page's getters see them); a page's value is converted to a key here, and reaches here serialized
+// (clone.rs): its bytes.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -340,7 +341,6 @@ fn in_range_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let Some(key) = key_arg(scope, args.get(1)) else { return };
     rv.set_bool(range.contains(&key));
 }
-// __dom.idbCompare(a, b) -> -1, 0 or 1: "compare two keys".
 // __dom.idbKey(value, multiEntry) -> "convert a value to a key" (§2.7) — or, `multiEntry`, "… to a multiEntry key" — as
 // the bindings hold one, undefined for "invalid"; whatever a Get of an Array's item throws thrown.
 fn key_op<'s>(scope: &mut v8::PinScope<'s, '_>, args: v8::FunctionCallbackArguments<'s>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -354,8 +354,9 @@ fn key_op<'s>(scope: &mut v8::PinScope<'s, '_>, args: v8::FunctionCallbackArgume
 }
 // (…an exception a page's getter threw, left pending for the caller)
 struct Thrown;
-// "Convert a value to a key": a number but NaN, a string, a date of a time value, a buffer source's bytes (a detached or
-// shared one none), an Array exotic object's own items each converted — one missing, or the array among those it is
+// "Convert a value to a key": a number but NaN, a string, a date of a time value, a buffer source's bytes (one over a
+// detached, a shared or a resizable buffer none — no buffer source type, Web IDL's, takes it: Firefox's DataError), an
+// Array exotic object's own items each converted — one missing, or the array among those it is
 // inside (`seen`), invalid; anything else invalid (None).
 fn value_to_key<'s>(scope: &mut v8::PinScope<'s, '_>, input: v8::Local<'s, v8::Value>, seen: &mut Vec<v8::Local<'s, v8::Value>>) -> Result<Option<Key>, Thrown> {
     if input.is_number() {
@@ -375,8 +376,7 @@ fn value_to_key<'s>(scope: &mut v8::PinScope<'s, '_>, input: v8::Local<'s, v8::V
         return Ok((!ms.is_nan()).then_some(Key::Date(ms)));
     }
     if let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(input) {
-        let buffer = view.buffer(scope);
-        if buffer.is_none_or(|b| b.was_detached() || Into::<v8::Local<v8::Value>>::into(b).is_shared_array_buffer()) {
+        if view.buffer(scope).is_none_or(|b| !fixed_buffer(b)) {
             return Ok(None);
         }
         let mut bytes = vec![0u8; view.byte_length()];
@@ -384,7 +384,7 @@ fn value_to_key<'s>(scope: &mut v8::PinScope<'s, '_>, input: v8::Local<'s, v8::V
         return Ok(Some(Key::Binary(bytes)));
     }
     if let Ok(buffer) = v8::Local::<v8::ArrayBuffer>::try_from(input) {
-        if buffer.was_detached() {
+        if !fixed_buffer(buffer) {
             return Ok(None);
         }
         let length = buffer.byte_length();
@@ -395,7 +395,8 @@ fn value_to_key<'s>(scope: &mut v8::PinScope<'s, '_>, input: v8::Local<'s, v8::V
     }
     let Ok(array) = v8::Local::<v8::Array>::try_from(input) else { return Ok(None) };
     seen.push(input);
-    let mut keys = Vec::with_capacity(array.length() as usize);
+    // (…no room made for the length the page gave: a sparse one of 2^32 - 1 is invalid at its first hole)
+    let mut keys = Vec::new();
     for i in 0..array.length() {
         if !has_own_index(scope, array, i)? {
             return Ok(None);
@@ -406,6 +407,12 @@ fn value_to_key<'s>(scope: &mut v8::PinScope<'s, '_>, input: v8::Local<'s, v8::V
     }
     seen.pop();
     Ok(Some(Key::Array(keys)))
+}
+// (…a buffer a buffer source type takes: not detached, not shared, not resizable)
+fn fixed_buffer(buffer: v8::Local<'_, v8::ArrayBuffer>) -> bool {
+    !buffer.was_detached()
+        && !Into::<v8::Local<v8::Value>>::into(buffer).is_shared_array_buffer()
+        && !buffer.get_backing_store().is_resizable_by_user_javascript()
 }
 // (…HasOwnProperty of an index, which a page's Proxy is not, an Array exotic object being none)
 fn has_own_index(scope: &mut v8::PinScope<'_, '_>, array: v8::Local<'_, v8::Array>, i: u32) -> Result<bool, Thrown> {
@@ -431,6 +438,7 @@ fn multi_entry_key<'s>(scope: &mut v8::PinScope<'s, '_>, input: v8::Local<'s, v8
     }
     Ok(Some(Key::Array(keys)))
 }
+// __dom.idbCompare(a, b) -> -1, 0 or 1: "compare two keys".
 fn compare_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(a), Some(b)) = (key_arg(scope, args.get(0)), key_arg(scope, args.get(1))) else { return };
     rv.set_int32(a.cmp(&b) as i32);

@@ -69,6 +69,24 @@ RSpec.describe 'IndexedDB bindings' do
     )
   end
 
+  # A value is converted to a key by the engine (idb.rs `value_to_key`): a sparse Array of any length is invalid at its
+  # first hole, with no room made for the length it claims, and a buffer source over a resizable buffer is none
+  # (Firefox: a DataError).
+  it 'refuses a sparse array and a resizable buffer as keys' do
+    session = simulated_session(app)
+    session.visit '/'
+    out = probe(session, <<~JS)
+      const resizable = new ArrayBuffer(2, { maxByteLength: 8 });
+      return [
+        err(() => indexedDB.cmp(new Array(2 ** 32 - 1), 0)),
+        err(() => indexedDB.cmp(resizable, 0)),
+        err(() => indexedDB.cmp(new Uint8Array(resizable), 0)),
+        indexedDB.cmp(new Uint8Array([1]), new ArrayBuffer(1))
+      ];
+    JS
+    expect(out).to eq(['DataError', 'DataError', 'DataError', 1])
+  end
+
   it 'writes, reads back through an index and a cursor, and reverts an aborted transaction' do
     session = simulated_session(app)
     session.visit '/'
