@@ -53,6 +53,8 @@ struct FrameNavigation {
 
 // A scripted navigation's response awaited (frame-nav.js `FN_NAV_PENDING`): what a plan superseded clears.
 const NAV_PENDING: u32 = 1 << 1;
+// Its `src` refused as its attributes were last processed (frame-nav.js `FN_SRC_REFUSED`, `process_src`).
+const SRC_REFUSED: u32 = 1 << 7;
 
 #[derive(Default)]
 pub(crate) struct FrameNavigations(HashMap<NodeId, FrameNavigation>, Plans);
@@ -111,7 +113,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameContentHeld", frame_content_held, context_id);
     crate::dom::register(scope, ns, "frameContentUrl", frame_content_url, context_id);
     crate::dom::register(scope, ns, "copyFrameContent", copy_frame_content, context_id);
-    crate::dom::register(scope, ns, "frameSrcNested", frame_src_nested, context_id);
+    crate::dom::register(scope, ns, "processFrameSrc", process_frame_src, context_id);
 }
 
 // HTML "shared attribute processing steps for iframe and frame elements" step 3, as the frame `container`'s attributes
@@ -122,7 +124,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // no navigable); and not where the URL matches about:blank — which an empty or absent `src` is too — though the step
 // matches that as well: an iframe in an about:blank document would never load, where Chrome and Firefox load it. (They
 // allow one level of a document framing itself, where HTML allows none.)
-pub(crate) fn src_nested(arena: &mut crate::dom::RealmArena, container: NodeId) -> bool {
+fn src_nested(arena: &mut crate::dom::RealmArena, container: NodeId) -> bool {
     let carried = arena.frame_navigations.0.get(&container).is_some_and(|nav| nav.contents[CONTENT_NAV].is_some());
     let Some(node) = arena.get(container).filter(|n| !carried && n.plain_attr("srcdoc").is_none()) else { return false };
     let (realm, src) = (node.realm, node.plain_attr("src").unwrap_or_default().to_owned());
@@ -134,11 +136,23 @@ pub(crate) fn src_nested(arena: &mut crate::dom::RealmArena, container: NodeId) 
     let about_blank = url.protocol() == "about:" && url.pathname() == "blank";
     !about_blank && arena.ancestor_document_at(realm, url.href())
 }
-// __dom.frameSrcNested(containerNid) -> `src_nested`.
-fn frame_src_nested(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// …as the frame's attributes are processed, which is what its `src` stays refused by until they are again, or a
+// navigation of it begins (`SRC_REFUSED`): a build of it made later, on a read, loads none of it — though the ancestors'
+// URLs have moved since, or the `src` was set on it while it was in no document.
+pub(crate) fn process_src(arena: &mut crate::dom::RealmArena, container: NodeId) -> bool {
+    let refused = src_nested(arena, container);
+    if refused {
+        arena.frame_navigation(container).flags |= SRC_REFUSED;
+    } else if let Some(nav) = arena.frame_navigations.0.get_mut(&container) {
+        nav.flags &= !SRC_REFUSED;
+    }
+    refused
+}
+// __dom.processFrameSrc(containerNid) -> whether `process_src` refused the frame's `src`.
+fn process_frame_src(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
-    rv.set_bool(src_nested(crate::dom::realm(scope, cid), container));
+    rv.set_bool(process_src(crate::dom::realm(scope, cid), container));
 }
 
 // __dom.frameContentUrl(containerNid, slot) -> the URL of the document the navigation carries in `slot`, or null.

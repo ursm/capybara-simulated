@@ -59,4 +59,20 @@ RSpec.describe 'a frame of a document above it' do
     got = poll_until { v = session.evaluate_script('loads'); v.include?('reloaded') ? v : nil }
     expect(got).to contain_exactly('pending /other', 'about:blank#x', 'loaded', 'beforeunload', 'reloaded')
   end
+
+  # (…a frame given its `src` while in no document is refused as it is inserted, and stays so for a build made on a read
+  # after its ancestors' URLs moved)
+  it 'is refused as it is inserted, whatever its src was before' do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      const f = document.createElement('iframe');
+      f.src = '/other';
+      f.src = '/';
+      f.onload = () => loads.push('load');
+      document.body.append(f);
+      history.pushState(null, '', '/elsewhere');
+    JS
+    expect(session.evaluate_script('[document.querySelector("iframe").contentDocument.URL, loads]')).to eq(['about:blank', []])
+    expect(requests).to eq(['/'])
+  end
 end
