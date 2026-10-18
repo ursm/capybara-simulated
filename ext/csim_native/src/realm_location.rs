@@ -306,6 +306,10 @@ fn registrable_domain(host: &str) -> Option<String> {
 fn listed(host: &str) -> bool {
     !ip_host(host) && !host.ends_with("..")
 }
+// Whether a host is a public suffix itself (`com`, `co.uk`, `github.io`).
+pub(crate) fn is_public_suffix(host: &str) -> bool {
+    public_suffix(host).as_deref() == Some(host)
+}
 fn with_trailing_dot(host: &str, part: &str) -> String {
     if host.ends_with('.') && !part.ends_with('.') { format!("{part}.") } else { part.to_owned() }
 }

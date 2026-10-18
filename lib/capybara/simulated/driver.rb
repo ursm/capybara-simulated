@@ -93,8 +93,8 @@ module Capybara
         # (real browser semantics), so we own the jars at the Driver
         # level and inject them into every per-window Browser. Each
         # Browser still has its own sessionStorage + DOM + JS VM.
-        @cookies         = {}
-        @cookie_flags    = {}   # (host \0 name) => {secure: true} — attribute sidecar for the shared jar
+        # Cookies: the session's cookie store in the engine (cookie_jar.rs), every window's.
+        @cookie_jar      = Native.cookie_jar_new
         @auth_cache      = {}
         # localStorage: the session's storage shed in the engine (storage_areas.rs), an area per origin, every window's.
         @local_storage   = Native.storage_partition_new
@@ -138,8 +138,7 @@ module Capybara
       private def build_window_browser
         Browser.new(@app,
                     driver:          self,
-                    cookies:         @cookies,
-                    cookie_flags:    @cookie_flags,
+                    cookie_jar:      @cookie_jar,
                     auth_cache:      @auth_cache,
                     local_storage:   @local_storage,
                     session_partition: @session_partition,

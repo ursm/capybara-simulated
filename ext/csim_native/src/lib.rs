@@ -151,6 +151,7 @@ mod selected_content;
 mod nonce;
 mod popovers;
 mod activation;
+mod cookie_jar;
 mod text;
 mod text_codec;
 mod text_geometry;
@@ -227,6 +228,11 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("event_stream_close", magnus::function!(event_stream::close_for_ruby, 1))?;
     // Fetch's fixed header, method and port rules, the page's too (fetch_rules.rs).
     native.define_module_function("bad_port", magnus::function!(fetch_rules::bad_port_for_ruby, 1))?;
+    // Each session's cookie store (cookie_jar.rs).
+    native.define_module_function("cookie_jar_new", magnus::function!(cookie_jar::new_for_ruby, 0))?;
+    native.define_module_function("cookie_jar_clear", magnus::function!(cookie_jar::clear_for_ruby, 1))?;
+    native.define_module_function("cookie_jar_set", magnus::function!(cookie_jar::set_for_ruby, 5))?;
+    native.define_module_function("cookie_jar_get", magnus::function!(cookie_jar::get_for_ruby, 4))?;
     // The length a response's body is framed by (headers.rs).
     native.define_module_function("message_length", magnus::function!(headers::message_length_for_ruby, 1))?;
     native.define_module_function("link_noopener", magnus::function!(token_list::noopener_for_ruby, 2))?;

@@ -208,7 +208,7 @@ module Capybara
         Rack::Mime.mime_type(File.extname(path.to_s), '')
       end
 
-      def initialize(app, driver: nil, cookies: nil, cookie_flags: nil, auth_cache: nil, local_storage: nil, session_partition: nil, all_hosts_local: nil)
+      def initialize(app, driver: nil, cookie_jar: nil, auth_cache: nil, local_storage: nil, session_partition: nil, all_hosts_local: nil)
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
@@ -248,8 +248,7 @@ module Capybara
         # the jars so aux windows (per-window VMs) see the same auth state
         # as the primary. Tests without a Driver (gem-internal callers)
         # get fresh jars. (localStorage's shed likewise, below.)
-        @cookies                      = cookies       || {}
-        @cookie_flags                 = cookie_flags  || {}
+        @cookie_jar                   = cookie_jar    || Native.cookie_jar_new
         # HTTP Basic-auth credential cache, keyed by target origin: once credentials authenticate an
         # origin, the UA sends them pre-emptively for later credentialed requests to it (RFC 7617
         # §2.2), so a Basic-auth resource loads without re-challenging. Session-scoped (cleared on
@@ -1423,7 +1422,7 @@ module Capybara
         env = rack_env_for(url, method: 'GET')
         env['HTTP_USER_AGENT'] = @default_user_agent || USER_AGENT
         env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
-        ck = cookie_header_for(env_cookie_host(env), secure: %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}"))
+        ck = cookie_header_for(env_request_url(env), secure: env_secure_channel?(env))
         env['HTTP_COOKIE']     = ck              unless ck.empty?
         referrer               = referrer_header(@current_url)
         env['HTTP_REFERER']    = referrer if referrer
@@ -3493,8 +3492,7 @@ module Capybara
           @image_load_flights.clear
           @image_load_pending = 0
         end
-        @cookies.clear
-        @cookie_flags.clear
+        Native.cookie_jar_clear(@cookie_jar)
         @auth_cache.clear
         Native.storage_clear(@local_storage)
         Native.session_partition_clear(@session_partition)
@@ -4056,7 +4054,7 @@ module Capybara
         # Forward the streaming host's cookie jar so the server can
         # authenticate the user the same way the browser would — scoped to
         # the EventSource target's host, like every other request.
-        cookies = cookie_header_for(cookie_host(uri), secure: uri.scheme == 'https' || secure_cookie_channel?(uri.to_s))
+        cookies = cookie_header_for(uri.to_s, secure: uri.scheme == 'https' || secure_cookie_channel?(uri.to_s))
         lines << "Cookie: #{cookies}" unless cookies.empty?
         socket.write(lines.join("\r\n") << "\r\n\r\n")
         socket.flush
@@ -9683,8 +9681,8 @@ module Capybara
               # The Lax navigation exception is TOP-LEVEL only (dest 'document'): an
               # iframe navigation or an ancestor-cross frame navigation
               # (cookie_cross_site) sheds Lax like any cross-site subresource.
-              ck = cookie_header_for(env_cookie_host(env),
-                                     secure: %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}"),
+              ck = cookie_header_for(env_request_url(env),
+                                     secure:     env_secure_channel?(env),
                                      cross_site: true,
                                      lax_ok: cors_mode == 'navigate' && method.to_s.upcase == 'GET' && nav_dest.to_s == 'document' && !cookie_cross_site)
               ck.empty? ? env.delete('HTTP_COOKIE') : env['HTTP_COOKIE'] = ck
@@ -10982,118 +10980,64 @@ module Capybara
       def history_length
         [@history.size, 1].max
       end
-      # The host a cookie is scoped to for `url`. RFC 6265 cookies are keyed by host
-      # (not scheme/port), so cross-host requests never see each other's cookies while
-      # a same-origin flow behaves exactly like a single jar. nil when the URL carries
-      # no host (about:blank / data: / a relative current_url before the first navigate).
+      # The host a URL names, or nil for one with none (about:blank / data: / a relative current_url before the first
+      # navigate).
       def cookie_host(url)
         h = parse_url(url.to_s)&.fetch(:hostname)
         h && !h.empty? ? h : nil
       end
 
-      # The host cookies attach to for a request built into `env` — the target server
-      # (SERVER_NAME / HTTP_HOST), NOT the current document, so a cross-origin fetch sends
-      # the TARGET's cookies rather than leaking the document's (cors-cookies). Strips the
-      # port while preserving an IPv6 bracket-literal (`[::1]`) so the key matches what
-      # `cookie_host` derives from the URL via `URI#host`.
-      def env_cookie_host(env)
-        h = (env['HTTP_HOST'] || env['SERVER_NAME']).to_s
-        h = h.start_with?('[') ? h[/\A\[[^\]]*\]/].to_s : h.split(':', 2).first
-        h && !h.empty? ? h.downcase : nil
+      # The URL a request built into `env` is for — the TARGET server's (SERVER_NAME / HTTP_HOST), not the current
+      # document's, so a cross-origin fetch sends the target's cookies rather than leaking the document's (cors-cookies)
+      # — and whether it goes over a secure channel.
+      def env_request_url(env) = Rack::Request.new(env).url
+      def env_secure_channel?(env)
+        %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}")
       end
 
-      # The `Cookie` request-header value for a request to `host`: that host's jar,
-      # serialized `name=value; …`. (Domain-attribute subdomain sharing isn't modelled —
-      # the app suites are single-host; cross-host ISOLATION is what matters here.)
-      #
-      # TEXT, not binary: jar entries parsed out of Rack's Set-Cookie headers can carry the
-      # BINARY tag, which would make the joined string cross into JS as a Uint8Array
-      # (`document.cookie.match is not a function`). Cookies are ASCII per RFC 6265.
-      # `secure:` is the transport of the REQUEST being built — a Secure-flagged
-      # cookie is omitted from any non-secure one (RFC 6265 §5.4 step 1). REQUIRED
-      # so a new caller can't silently fail open. `cross_site:` is the request's
-      # site relationship (from its own Sec-Fetch-Site metadata): a SameSite=Strict
-      # cookie is withheld from any cross-site request; Lax — and the unspecified
-      # default, which Chrome treats as Lax — additionally rides a cross-site
-      # TOP-LEVEL GET navigation (`lax_ok:`); only SameSite=None crosses freely.
-      def cookie_header_for(host, secure:, cross_site: false, lax_ok: true)
-        jar = host && @cookies[host]
-        return '' if jar.nil? || jar.empty?
-        # Snapshot: a keepalive/race/hijack thread's Set-Cookie writes into this jar
-        # concurrently; iterating the live Hash would raise in the WRITER ("can't add
-        # a new key into hash during iteration") and silently drop its beacon.
-        pairs = jar.dup.filter_map {|k, v|
-          flags = @cookie_flags["#{host}\0#{k}"]
-          next if !secure && flags&.dig(:secure)
-          if cross_site
-            case flags&.dig(:same_site)
-            when 'none'   then nil   # always sent (subject to the Secure gate above)
-            when 'strict' then next
-            else               next unless lax_ok
-            end
-          end
-          # (…a cookie with no name its value alone — RFC 6265bis §5.8.3)
-          k.empty? ? v : "#{k}=#{v}"
-        }
-        RuntimeShared.utf8_text(pairs.join('; '))
+      # The context a cookie is set or retrieved in, as the session's cookie store (cookie_jar.rs) takes it: through an
+      # HTTP API (not `document.cookie`), over a secure channel, for a cross-site request, one where a Lax cookie goes.
+      COOKIE_HTTP       = 1
+      COOKIE_SECURE     = 2
+      COOKIE_CROSS_SITE = 4
+      COOKIE_LAX_OK     = 8
+      # (…the time a cookie expires by: the app's clock, which a test may travel)
+      def cookie_now = Time.now.to_f * 1000
+
+      # The `Cookie` request-header value for a request to `url`: the cookies the store retrieves for it (RFC 6265bis
+      # §5.8.3) — its host's and those of a domain it domain-matches, whose path its path matches. `secure:` is the
+      # transport of the request being built — a Secure cookie is omitted from any other (§5.4 step 1); REQUIRED so a
+      # new caller can't silently fail open. `cross_site:` is the request's site relationship (from its own
+      # Sec-Fetch-Site metadata): a SameSite=Strict cookie is withheld from any cross-site request; Lax — and the
+      # unspecified default, which Chrome treats as Lax — additionally rides a cross-site TOP-LEVEL GET navigation
+      # (`lax_ok:`); only SameSite=None crosses freely. `http: false` is `document.cookie`'s, which no HttpOnly cookie
+      # is read through. Text (cookies are ASCII per RFC 6265).
+      def cookie_header_for(url, secure:, cross_site: false, lax_ok: true, http: true)
+        context = (http ? COOKIE_HTTP : 0) | (secure ? COOKIE_SECURE : 0) | (cross_site ? COOKIE_CROSS_SITE : 0) | (lax_ok ? COOKIE_LAX_OK : 0)
+        RuntimeShared.utf8_text(Native.cookie_jar_get(@cookie_jar, url.to_s, context, cookie_now))
       end
 
-      # A set-cookie-string's name and value (RFC 6265bis §5.6): split at its first `=`, each trimmed — with no `=`, a
-      # cookie with no name, the whole pair its value (`document.cookie = 'null'` sets `null`, Chrome) — or nil where
-      # both are empty.
-      def cookie_name_value(pair)
-        name, value = pair.include?('=') ? pair.split('=', 2) : ['', pair]
-        name = name.strip
-        value = value.to_s.strip
-        name.empty? && value.empty? ? nil : [name, value]
+      # …and a set-cookie-string received for `url`, stored as the store says (§5.7).
+      def store_cookie(url, line, secure:, http:)
+        context = (http ? COOKIE_HTTP : 0) | (secure ? COOKIE_SECURE : 0)
+        Native.cookie_jar_set(@cookie_jar, url.to_s, line.to_s, context, cookie_now)
       end
 
-      # `document.cookie` reads/writes the CURRENT document's host jar.
-      def document_cookie_host
-        cookie_host(current_browsing_context_url) || cookie_host(@default_host)
+      # `document.cookie` reads/writes the CURRENT document's cookies — a document with no host its session's default
+      # host's.
+      def document_cookie_url
+        url = current_browsing_context_url
+        cookie_host(url) ? url : @default_host
       end
 
       def document_cookie
-        cookie_header_for(document_cookie_host, secure: secure_cookie_channel?(current_browsing_context_url))
+        cookie_header_for(document_cookie_url, secure: secure_cookie_channel?(current_browsing_context_url), http: false)
       end
       def current_referer      ; @current_referer.to_s ; end
       def write_document_cookie(s)
         return if s.nil? || s.empty?
-        host = document_cookie_host or return
-        parts = s.split(';').map(&:strip)
-        name, value = cookie_name_value(parts.shift.to_s)
-        return if name.nil?
-        jar = (@cookies[host] ||= {})
-        key = "#{host}\0#{name}"
-        flags = cookie_attr_flags(parts)
-        return if flags[:same_site] == 'none' && !flags[:secure]   # None requires Secure
-        secure_channel = secure_cookie_channel?(current_browsing_context_url)
-        # Strict Secure Cookies, same as merge_set_cookie above.
-        return if !secure_channel && (flags[:secure] || @cookie_flags[key]&.dig(:secure))
-        if cookie_deletion?(parts)
-          jar.delete(name)
-          @cookie_flags.delete(key)
-        else
-          jar[name] = value
-          if flags.empty?
-            @cookie_flags.delete(key)
-          else
-            @cookie_flags[key] = flags
-          end
-        end
-      end
 
-      # The sidecar-worthy attributes of one Set-Cookie's attribute list.
-      def cookie_attr_flags(parts)
-        flags = {}
-        parts.each {|attr|
-          k, v = attr.split('=', 2)
-          case k.to_s.strip.downcase
-          when 'secure'   then flags[:secure] = true
-          when 'samesite' then flags[:same_site] = v.to_s.strip.downcase
-          end
-        }
-        flags
+        store_cookie(document_cookie_url, s, secure: secure_cookie_channel?(current_browsing_context_url), http: false)
       end
 
       # Web Storage's sheds for the bindings (storage.js): [localStorage's, sessionStorage's] — the engine keeps their
@@ -11856,7 +11800,7 @@ module Capybara
         # The Lax exception is TOP-LEVEL navigations only (dest 'document'): a cross-site
         # iframe GET is mode navigate too, but Chrome's Lax-by-default blocks it there.
         lax_ok     = env['HTTP_SEC_FETCH_MODE'] == 'navigate' && env['HTTP_SEC_FETCH_DEST'] == 'document' && env['REQUEST_METHOD'] == 'GET'
-        ck = cookie_header_for(env_cookie_host(env), secure: %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}"),
+        ck = cookie_header_for(env_request_url(env), secure: env_secure_channel?(env),
                                                      cross_site: cross_site, lax_ok: lax_ok)
         if ck.empty?
           env.delete('HTTP_COOKIE')
@@ -12211,65 +12155,17 @@ module Capybara
         h == 'localhost' || h == '127.0.0.1' || h == '[::1]'
       end
 
+      # A response's Set-Cookie fields stored for `url` — one cookie each (Rack 2 joins them with a newline, Rack 3 gives
+      # an Array; splitting first keeps the second of two, Rails' session cookie beside `remember_user_token`).
       def merge_set_cookie(headers, url)
         sc = headers['set-cookie'] || headers['Set-Cookie']
         return if sc.nil? || sc.empty?
-        host = cookie_host(url) || document_cookie_host or return
-        secure_channel = secure_cookie_channel?(url)
-        jar  = (@cookies[host] ||= {})
-        # Rack 2 returns multiple Set-Cookie headers as a single
-        # newline-separated string; Rack 3 returns an Array. Treat both
-        # uniformly — splitting first means the second cookie in a
-        # multi-cookie response (Rails' session cookie alongside the
-        # remember_user_token) doesn't get silently dropped.
-        lines = sc.is_a?(Array) ? sc : sc.split("\n")
-        lines.each {|line|
-          parts = line.split(';').map(&:strip)
-          name, value = cookie_name_value(parts.shift.to_s)
-          next if name.nil?
-          key = "#{host}\0#{name}"
-          flags = cookie_attr_flags(parts)
-          # SameSite=None without Secure is rejected outright (RFC 6265bis / Chrome 80+):
-          # accepting it would mint the MOST permissive cookie kind from the weakest set.
-          next if flags[:same_site] == 'none' && !flags[:secure]
-          # RFC 6265bis "Strict Secure Cookies": a non-secure channel can neither STORE a
-          # Secure cookie nor evict/overwrite an existing Secure one of the same name.
-          next if !secure_channel && (flags[:secure] || @cookie_flags[key]&.dig(:secure))
-          if cookie_deletion?(parts)
-            jar.delete(name)
-            @cookie_flags.delete(key)
-          else
-            jar[name] = value
-            # Attribute sidecar: the jar itself stays name=>value (every reader depends on
-            # that), but the send side needs Secure (never over non-secure transport) and
-            # SameSite (withheld from cross-site requests — see cookie_header_for).
-            if flags.empty?
-              @cookie_flags.delete(key)
-            else
-              @cookie_flags[key] = flags
-            end
-          end
-        }
-      end
 
-      # Real browsers treat `Set-Cookie: foo=; Max-Age=0` (or an
-      # `Expires=<past>`) as a delete instruction and drop the cookie
-      # entirely. ahoy_matey's controller uses this exact pattern to
-      # invalidate `ahoy_visit` / `ahoy_visitor` when it decides to
-      # mint a new visit. Without honoring the delete, the empty value
-      # sits in the jar; the next `getCookie('ahoy_visit')` returns
-      # `""` (truthy-ish but useless), and ahoy.js stamps the event
-      # with `visit_token: ""` — the server then rejects the POST.
-      def cookie_deletion?(attrs)
-        attrs.any? {|attr|
-          k, v = attr.split('=', 2)
-          case k.to_s.downcase
-          when 'max-age'
-            v.to_s.strip.to_i <= 0
-          when 'expires'
-            (Time.parse(v.to_s) < Time.now rescue false)
-          end
-        }
+        url = document_cookie_url unless cookie_host(url)
+        secure = secure_cookie_channel?(url)
+        (sc.is_a?(Array) ? sc : sc.split("\n")).each do |line|
+          store_cookie(url, line, secure: secure, http: true)
+        end
       end
 
       # Header names/values are BYTE sequences (RFC 9110), and script reads them
