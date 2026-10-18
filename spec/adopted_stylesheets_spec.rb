@@ -87,4 +87,25 @@ RSpec.describe 'adoptedStyleSheets ObservableArray + shadow encapsulation' do
     expect(r['shadowAfter']).to eq('rgb(0, 0, 255)')    # shadow-adopted sheet takes effect
     expect(r['docAfter']).to eq('rgb(0, 255, 0)')       # ...without leaking out to the document
   end
+  # The assignment's steps are the platform's: a page that replaced Array.prototype.splice still adopts what it assigns,
+  # into the document and into a shadow root. (Its array iterator is another matter: Web IDL converts the sequence
+  # through it.)
+  it 'adopts what is assigned whatever the page did to Array.prototype' do
+    session = simulated_session(app)
+    session.visit '/'
+    out = session.evaluate_script(<<~JS)
+      (() => {
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync('#target { background-color: lime !important }');
+        const host = document.body.appendChild(document.createElement('div'));
+        const root = host.attachShadow({mode: 'open'});
+        Array.prototype.splice = () => [];
+        document.adoptedStyleSheets = [sheet];
+        root.adoptedStyleSheets = [sheet];
+        return [document.adoptedStyleSheets.length, root.adoptedStyleSheets.length,
+          getComputedStyle(document.getElementById('target')).backgroundColor];
+      })()
+    JS
+    expect(out).to eq([1, 1, 'rgb(0, 255, 0)'])
+  end
 end
