@@ -16,6 +16,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "normalize", normalize_op, context_id);
     crate::dom::register(scope, ns, "xmlName", xml_name_op, context_id);
     crate::dom::register(scope, ns, "pseudoAttributes", pseudo_attributes_op, context_id);
+    crate::dom::register(scope, ns, "pseudoAttributesData", pseudo_attributes_data_op, context_id);
 }
 
 // The rules for parsing pseudo-attributes from a string (xml-stylesheet §3) — a processing instruction's attribute map
@@ -124,6 +125,63 @@ fn pseudo_attributes_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
         }
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// The length of `pseudo_attributes_data` of `map`, counted before anything is built: what a write is refused for past a
+// string's length.
+fn pseudo_attributes_data_len(map: &[(Vec<u16>, Vec<u16>)]) -> usize {
+    let escaped = |c: &u16| match c {
+        0x26 => 5,
+        0x3C | 0x3E => 4,
+        0x22 => 6,
+        _ => 1,
+    };
+    map.iter().map(|(name, value)| name.len() + 3 + value.iter().map(escaped).sum::<usize>()).sum::<usize>() + map.len().saturating_sub(1)
+}
+// "Update data from attributes": each `name="value"`, the value's `&`, `<`, `>` and `"` escaped as references, joined by
+// a space — the data `pseudo_attributes` reads the list back from.
+pub(crate) fn pseudo_attributes_data(map: &[(Vec<u16>, Vec<u16>)]) -> Vec<u16> {
+    let mut out: Vec<u16> = Vec::new();
+    for (name, value) in map {
+        if !out.is_empty() {
+            out.push(u16::from(b' '));
+        }
+        out.extend_from_slice(name);
+        out.extend("=\"".encode_utf16());
+        for &c in value {
+            match c {
+                0x26 => out.extend("&amp;".encode_utf16()),
+                0x3C => out.extend("&lt;".encode_utf16()),
+                0x3E => out.extend("&gt;".encode_utf16()),
+                0x22 => out.extend("&quot;".encode_utf16()),
+                _ => out.push(c),
+            }
+        }
+        out.push(u16::from(b'"'));
+    }
+    out
+}
+// __dom.pseudoAttributesData(map) -> `pseudo_attributes_data` of a Map of names to values (read natively, no prototype of
+// the page's in the way); a RangeError for data longer than a string can be, as V8's own string operations throw.
+fn pseudo_attributes_data_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(entries) = v8::Local::<v8::Map>::try_from(args.get(0)) else { return };
+    let flat = entries.as_array(scope);
+    let mut map = Vec::new();
+    for i in (0..flat.length().saturating_sub(1)).step_by(2) {
+        let (Some(n), Some(v)) = (flat.get_index(scope, i), flat.get_index(scope, i + 1)) else { continue };
+        let pair = (units_arg(scope, n), units_arg(scope, v));
+        map.push(pair);
+    }
+    let fits = pseudo_attributes_data_len(&map) <= v8::String::MAX_LENGTH;
+    let text = fits.then(|| v8::String::new_from_two_byte(scope, &pseudo_attributes_data(&map), v8::NewStringType::Normal)).flatten();
+    match text {
+        Some(text) => rv.set(text.into()),
+        None => {
+            let message = v8::String::new(scope, "Invalid string length").expect("a short string");
+            let error = v8::Exception::range_error(scope, message);
+            scope.throw_exception(error);
+        }
+    }
 }
 
 // Why "replace data" throws: the offset is past the data (an IndexSizeError), or the data it would make is longer than
@@ -361,11 +419,22 @@ fn normalize_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 
 #[cfg(test)]
 mod tests {
-    use super::pseudo_attributes;
+    use super::{pseudo_attributes, pseudo_attributes_data};
 
     fn parse(s: &str) -> Option<Vec<(String, String)>> {
         let units: Vec<u16> = s.encode_utf16().collect();
         pseudo_attributes(&units).map(|m| m.into_iter().map(|(n, v)| (String::from_utf16_lossy(&n), String::from_utf16_lossy(&v))).collect())
+    }
+
+    #[test]
+    fn pseudo_attributes_write_back_to_what_they_parse_from() {
+        let pair = |n: &str, v: &str| (n.encode_utf16().collect::<Vec<u16>>(), v.encode_utf16().collect::<Vec<u16>>());
+        let map = [pair("href", "a&b<\">"), pair("t", "")];
+        let data = pseudo_attributes_data(&map);
+        assert_eq!(String::from_utf16_lossy(&data), r#"href="a&amp;b&lt;&quot;&gt;" t="""#);
+        assert_eq!(super::pseudo_attributes_data_len(&map), data.len());
+        assert_eq!(parse(&String::from_utf16_lossy(&data)), Some(vec![("href".into(), "a&b<\">".into()), ("t".into(), String::new())]));
+        assert!(pseudo_attributes_data(&[]).is_empty());
     }
 
     #[test]
