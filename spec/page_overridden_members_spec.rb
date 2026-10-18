@@ -152,4 +152,41 @@ RSpec.describe 'members a page overrides' do
     expect(got).to eq(['a<b>b</b>c', 'a<u></u>c', 'opt', 'object', 'object'])
     expect(s.text).to eq('ac')
   end
+  # …nor a style read, an animation's committed styles, the font set's layout flush or a modal dialog's close request:
+  # `isConnected`, `setProperty`, `getBoundingClientRect`, `defaultPrevented` replaced, each goes on (Chrome: below).
+  it "reads its own state where a page replaced isConnected, setProperty, getBoundingClientRect or defaultPrevented" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><div id="t">x</div><dialog id="d">dlg</dialog>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const out = [];
+        let calls = 0;
+        const rect = Element.prototype.getBoundingClientRect;
+        Element.prototype.getBoundingClientRect = function () { calls++; return rect.call(this); };
+        [...document.fonts];
+        out.push(calls);
+        Element.prototype.getBoundingClientRect = rect;
+        const setProperty = CSSStyleDeclaration.prototype.setProperty;
+        CSSStyleDeclaration.prototype.setProperty = () => {};
+        const t = document.getElementById('t');
+        const a = t.animate({opacity: [0.25, 0.25]}, {fill: 'forwards'});
+        a.finish();
+        a.commitStyles();
+        CSSStyleDeclaration.prototype.setProperty = setProperty;
+        out.push(t.style.opacity);
+        Object.defineProperty(Node.prototype, 'isConnected', {get: () => false, configurable: true});
+        out.push(getComputedStyle(document.body).display);
+        delete Node.prototype.isConnected;
+        return out;
+      })()
+    JS
+    expect(got).to eq([0, '0.25', 'block'])
+    s.execute_script(<<~JS)
+      document.getElementById('d').showModal();
+      Object.defineProperty(Event.prototype, 'defaultPrevented', {get: () => true, configurable: true});
+    JS
+    s.find(:css, '#d').send_keys(:escape)
+    expect(s.evaluate_script("document.getElementById('d').open")).to be(false)
+  end
 end
+
