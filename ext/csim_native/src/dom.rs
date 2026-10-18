@@ -5035,15 +5035,14 @@ fn style_value_unguarded(
 
 // __dom.styleSupports(property) -> whether the style engine implements the property: one it computes a value of for
 // every element it styles.
-// __dom.styleProperties() -> every property a page can name, as `[name, property, animatable, longhand]` (cssom_decl.rs
+// __dom.styleProperties() -> every property a page can name, as `[name, property, longhand]` (cssom_decl.rs
 // `properties`): what script/gen_css_properties.rb writes js/src/css-properties.js from.
 fn style_properties(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let mut rows = Vec::new();
     for p in crate::cssom_decl::properties() {
-        let row: [v8::Local<v8::Value>; 4] = [
+        let row: [v8::Local<v8::Value>; 3] = [
             v8::String::new(scope, p.name).unwrap().into(),
             v8::String::new(scope, p.property).unwrap().into(),
-            v8::Boolean::new(scope, p.animatable).into(),
             v8::Boolean::new(scope, p.longhand).into(),
         ];
         rows.push(v8::Array::new_with_elements(scope, &row).into());

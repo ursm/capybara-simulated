@@ -27,6 +27,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "animCommitValues", anim_commit_values, context_id);
     register(scope, ns, "animNextFrameDelay", anim_next_frame_delay, context_id);
     register(scope, ns, "animList", anim_list, context_id);
+    register(scope, ns, "keyframeProperty", keyframe_property_op, context_id);
     register(scope, ns, "animAdopt", anim_adopt, context_id);
     register(scope, ns, "animEffectTiming", anim_effect_timing, context_id);
     register(scope, ns, "animKeyframes", anim_keyframes, context_id);
@@ -775,6 +776,16 @@ fn anim_composite_order(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     });
 }
 
+
+// __dom.keyframeProperty(member) -> the CSS name of the property a keyframe member is a keyframe property of, or null
+// (keyframes.rs `keyframe_property`).
+fn keyframe_property_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let member = args.get(0).to_rust_string_lossy(scope);
+    match crate::keyframes::keyframe_property(&member).and_then(|p| v8::String::new(scope, &p)) {
+        Some(p) => rv.set(p.into()),
+        None => rv.set_null(),
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::event_order;

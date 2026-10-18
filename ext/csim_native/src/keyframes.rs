@@ -220,3 +220,69 @@ fn space(frames: &mut [Processed]) {
         anchor = i;
     }
 }
+
+// The property a keyframe-like object's member `member` is a keyframe property of — its CSS name — or none, decided
+// by the name alone (web-animations §Processing a keyframe-like object: a property that cannot be animated is no keyframe
+// property, its getter never read). A member is an IDL attribute: a custom property its own name, `cssFloat` and
+// `cssOffset` the renamed `float` and `offset`, a hyphenated name, `float` or `offset` none; an attribute names its
+// property under its own camel-cased spelling, or an alias's where the alias is a legacy NAME (`gridColumnGap`,
+// `wordWrap`: Chrome and Firefox take those) — not a vendor-prefixed one (`webkitTransform`, which Chrome ignores); and
+// the property animates (a shorthand does where a longhand under it does).
+pub(crate) fn keyframe_property(member: &str) -> Option<String> {
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+    if member.starts_with("--") {
+        return Some(member.to_owned());
+    }
+    // (…each attribute a page can write — a property's camel-cased name, an alias's that is no vendor's — and the
+    // property it names, where it animates)
+    static MEMBERS: OnceLock<HashMap<String, &'static str>> = OnceLock::new();
+    let members = MEMBERS.get_or_init(|| {
+        let mut members = HashMap::new();
+        for p in crate::cssom_decl::properties() {
+            let vendor = p.name != p.property && p.name.starts_with('-');
+            if p.animatable && !vendor {
+                members.insert(idl_attribute(p.name), p.property);
+            }
+        }
+        // (…the two renamed: `float` a reserved word once, `offset` a keyframe's own member)
+        members.remove("float");
+        members.remove("offset");
+        members.insert("cssFloat".to_owned(), "float");
+        members.insert("cssOffset".to_owned(), "offset");
+        members
+    });
+    members.get(member).map(|p| (*p).to_owned())
+}
+// CSSOM's "CSS property to IDL attribute": a `-` dropped and the letter after it uppercased.
+fn idl_attribute(property: &str) -> String {
+    let mut out = String::new();
+    let mut upper = false;
+    for c in property.chars() {
+        if c == '-' {
+            upper = true;
+        } else {
+            out.push(if upper { c.to_ascii_uppercase() } else { c });
+            upper = false;
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_member_names_an_animatable_property() {
+        assert_eq!(keyframe_property("blockSize").as_deref(), Some("block-size"));
+        assert_eq!(keyframe_property("cssFloat").as_deref(), Some("float"));
+        assert_eq!(keyframe_property("cssOffset").as_deref(), Some("offset"));
+        assert_eq!(keyframe_property("--x").as_deref(), Some("--x"));
+        assert_eq!(keyframe_property("gridColumnGap").as_deref(), Some("column-gap"));
+        assert_eq!(keyframe_property("WebkitTransform").as_deref(), Some("-webkit-transform"));
+        for none in ["float", "font-size", "Opacity", "webkitTransform", "WebkitTransformOrigin", "animationDelay", "writingMode", "offset"] {
+            assert_eq!(keyframe_property(none), None, "{none}");
+        }
+    }
+}
