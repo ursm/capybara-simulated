@@ -87,6 +87,7 @@ mod search_params;
 mod select_options;
 mod sw_router;
 mod system_clipboard;
+mod text_setters;
 mod ws_state;
 mod url_pattern;
 mod storage_areas;

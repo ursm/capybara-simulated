@@ -2860,6 +2860,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::media::install(scope, ns, context_id);
     crate::subresources::install(scope, ns, context_id);
     crate::select_options::install(scope, ns, context_id);
+    crate::text_setters::install(scope, ns, context_id);
     crate::system_clipboard::install(scope, ns, context_id);
     crate::image_requests::install(scope, ns, context_id);
     crate::drag_data_store::install(scope, ns, context_id);
