@@ -372,10 +372,11 @@ module WptRunner
     # still report ORIGINAL_HOST = web-platform.test — it derives REMOTE_HOST as
     # 'www1.' + host, so a www1 substitution doubles the prefix and flips every origin
     # comparison (navigation-redirect's other-origin helper then drops the top window's
-    # messages on its origin filter). A NON-family host (www.example.com) keeps the
+    # messages on its origin filter) — nor the alt domain, whose pages' `{{host}}` is the
+    # config host too (cookie-helper.sub.js on not-web-platform.test must still name
+    # web-platform.test its SECURE_ORIGIN). A NON-family host (www.example.com) keeps the
     # request host: its own document origin is the family root there.
-    host = SUB_HOST     if host.end_with?(".#{SUB_HOST}")
-    host = SUB_ALT_HOST if host.end_with?(".#{SUB_ALT_HOST}")
+    host = SUB_HOST if sub_family
     # File.binread gives ASCII-8BIT; splicing the UTF-8 replacement strings below
     # would raise Encoding::CompatibilityError the moment the body carries any
     # non-ASCII byte. `.sub.` templates are UTF-8 source, so reinterpret as such.

@@ -28811,8 +28811,8 @@ WebCryptoAPI/supports.tentative.https.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-cookies/partitioned-cookies/partitioned-cookies-top-level-redirect.tentative.https.html:
-- name: Partitioned Cookies are available in top-level cross-site to same-site redirects
+cookies/partitioned-cookies/partitioned-cookies-a-b-a-embed.tentative.https.html:
+- name: Setting Partitioned cookie on top-level site and embedding a cross-site iframe
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -58260,6 +58260,10 @@ service-workers/service-worker/partitioned-cookies.tentative.https.html:
     path/suffix. CLAUDE.md rule 1.
 service-workers/service-worker/partitioned.tentative.https.html:
 - name: Services workers under different top-level sites are partitioned.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Services workers with cross-site ancestors are partitioned.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

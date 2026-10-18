@@ -11042,17 +11042,23 @@ module Capybara
         cookie_host(url) ? url : @default_host
       end
 
-      # (…its text: HTML's UTF-8 decode of the bytes)
-      def document_cookie(url = nil)
+      # (…its text: HTML's UTF-8 decode of the bytes) — in the browsing context of realm `realm`, cross-site for cookies
+      # where an ancestor's document is (RFC 6265bis "site for cookies": no SameSite cookie read or stored there but a
+      # None one).
+      def document_cookie(url = nil, realm = nil)
         url = document_cookie_url(url)
-        RuntimeShared.utf8_text(cookie_header_for(url, secure: secure_cookie_channel?(url), http: false))
+        RuntimeShared.utf8_text(cookie_header_for(url, secure: secure_cookie_channel?(url), http: false,
+                                                       cross_site: document_cookie_cross_site?(realm, url), lax_ok: false))
       end
       def current_referer      ; @current_referer.to_s ; end
-      def write_document_cookie(s, url = nil)
+      def write_document_cookie(s, url = nil, realm = nil)
         return if s.nil? || s.empty?
 
         url = document_cookie_url(url)
-        store_cookie(url, s, secure: secure_cookie_channel?(url), http: false)
+        store_cookie(url, s, secure: secure_cookie_channel?(url), http: false, cross_site: document_cookie_cross_site?(realm, url))
+      end
+      private def document_cookie_cross_site?(realm, url)
+        !realm.nil? && realm.to_i.positive? && frame_ancestor_cross_site?(realm, url)
       end
 
       # Web Storage's sheds for the bindings (storage.js): [localStorage's, sessionStorage's] — the engine keeps their

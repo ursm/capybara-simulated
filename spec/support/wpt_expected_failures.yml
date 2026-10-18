@@ -38,6 +38,8 @@ IndexedDB/file_support.sub.html:
 - Composed slices of a file can be stored and retrieved from IndexedDB
 - Saves and loads back File objects from IndexedDB
 - Sliced file can be stored and retrieved from IndexedDB
+IndexedDB/idb-partitioned-basic.sub.html:
+- Simple test for partitioned IndexedDB
 IndexedDB/serialize-sharedarraybuffer-throws.https.html:
 - 'IndexedDB: Attempting to serialize a SharedArrayBuffer should throw'
 cookies/attributes/attributes-ctl.sub.html:
@@ -152,18 +154,9 @@ cookies/samesite/get_all_cookies-default-samesite.html:
 - Get all cookies w/ default SameSite
 cookies/samesite/get_named_cookie-default-samesite.html:
 - Get Named cookie  w/ default SameSite
-cookies/samesite/iframe-reload.https.html:
-- Reloaded cross-site fetches are cross-site
 cookies/samesite/iframe.https.html:
-- Cross-site fetches are cross-site
-- Cross-site navigating to cross-site fetches are cross-site
 - Cross-site navigating to same-host fetches are cross-site
 - Cross-site navigating to subdomain fetches are cross-site-site
-- Cross-site redirecting to cross-site fetches are cross-site
-- Same-host navigating to cross-site fetches are cross-site
-- Same-host redirecting to cross-site fetches are cross-site
-- Subdomain navigating to cross-site fetches are cross-site
-- Subdomain redirecting to cross-site fetches are cross-site
 cookies/samesite/img.https.html:
 - Cross-site images are cross-site
 - Cross-site redirecting to cross-site images are cross-site
@@ -178,8 +171,6 @@ cookies/samesite/sandbox-iframe-nested.https.html:
 - SameSite cookies with intervening sandboxed iframe and navigation
 cookies/samesite/sandbox-iframe-subresource.https.html:
 - SameSite cookies with intervening sandboxed iframe and subresources
-cookies/samesite/setcookie-lax.https.html:
-- Cross-site window shouldn't be able to set `SameSite=Lax` or `SameSite=Strict` cookies.
 cookies/secure/set-from-dom.https.sub.html:
 - "'secure' cookie visible in HTTP request"
 - "'secure' cookie visible in `document.cookie`"
