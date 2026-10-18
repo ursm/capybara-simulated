@@ -11903,8 +11903,13 @@ module Capybara
       # it.
       private def container_cross_site?(realm_id, target_url)
         rid = realm_id.to_i
-        container_url = rid.positive? ? frame_realm_url(rid) : @current_url
-        container_url.nil? || sec_fetch_site(container_url, target_url.to_s) == 'cross-site' || frame_ancestor_cross_site?(rid, target_url)
+        cookie_cross_site_document?(rid.positive? ? frame_realm_url(rid) : @current_url, target_url) || frame_ancestor_cross_site?(rid, target_url)
+      end
+      # Whether a document of `url` makes a request to `target_url` under it cross-site for cookies: one whose URL is not
+      # known (closed rather than open), one of an opaque origin (a `data:` document's: of no site at all), one of
+      # another site.
+      private def cookie_cross_site_document?(url, target_url)
+        url.nil? || url.to_s.match?(/\Adata:/i) || sec_fetch_site(url, target_url.to_s) == 'cross-site'
       end
       private def frame_ancestor_cross_site?(realm_id, target_url)
         rid = realm_id.to_i
@@ -11915,10 +11920,7 @@ module Capybara
         # the walk ends there instead of crossing into the opener via parent 0).
         while rid.positive? && !@runtime.top_level_realm?(rid)
           parent       = @runtime.frame_realm_parent(rid).to_i
-          ancestor_url = parent.positive? ? frame_realm_url(parent) : @current_url
-          # (…an ancestor of an opaque origin — a `data:` document's — is of no site at all, nor one whose URL is not
-          # known: cross-site, closed rather than open)
-          return true if ancestor_url.nil? || ancestor_url.to_s.match?(/\Adata:/i) || sec_fetch_site(ancestor_url, target_url.to_s) == 'cross-site'
+          return true if cookie_cross_site_document?(parent.positive? ? frame_realm_url(parent) : @current_url, target_url)
 
           rid = parent
         end
