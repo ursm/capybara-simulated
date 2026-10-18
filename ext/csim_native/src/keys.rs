@@ -277,6 +277,40 @@ pub(crate) fn edit(
     }
     Some((input_type, EDIT_TYPE))
 }
+// The caret a key moves in a typeable element (`motion`): to an edge of its line (Home / End — of the whole text with
+// Control), by a character (ArrowLeft / ArrowRight — by a word with Control), or a line over (ArrowUp / ArrowDown);
+// forward (End, ArrowRight, ArrowDown) or back, and extending the selection with Shift.
+pub(crate) const MOVE_LINE_EDGE: u32 = 1;
+pub(crate) const MOVE_CHAR: u32 = 2;
+pub(crate) const MOVE_LINE: u32 = 3;
+pub(crate) const MOVE_FORWARD: u32 = 1 << 2;
+pub(crate) const MOVE_WHOLE: u32 = 1 << 3;
+pub(crate) const MOVE_WORD: u32 = 1 << 4;
+pub(crate) const MOVE_EXTEND: u32 = 1 << 5;
+
+// The caret motion the key `key` makes in `id` with `modifiers` held, 0 for none — no typeable element, a key that moves
+// nothing, or one with a chord it makes none with: Meta with Home or End, Alt or Meta with ArrowLeft or ArrowRight
+// (Control a word's), any of Control, Alt and Meta with ArrowUp or ArrowDown — Chrome on Linux.
+pub(crate) fn motion(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, key: &[u16], modifiers: u32) -> u32 {
+    if plan(arena, id, key, None, modifiers) & TYPEABLE == 0 {
+        return 0;
+    }
+    let is = |name: &str| is_units(key, name);
+    let held = |bits: u32| modifiers & bits != 0;
+    let (kind, forward) = if is("Home") || is("End") {
+        (if held(META) { 0 } else { MOVE_LINE_EDGE | if held(CTRL) { MOVE_WHOLE } else { 0 } }, is("End"))
+    } else if is("ArrowLeft") || is("ArrowRight") {
+        (if held(ALT | META) { 0 } else { MOVE_CHAR | if held(CTRL) { MOVE_WORD } else { 0 } }, is("ArrowRight"))
+    } else if is("ArrowUp") || is("ArrowDown") {
+        (if held(CTRL | ALT | META) { 0 } else { MOVE_LINE }, is("ArrowDown"))
+    } else {
+        (0, false)
+    };
+    if kind == 0 {
+        return 0;
+    }
+    kind | if forward { MOVE_FORWARD } else { 0 } | if held(SHIFT) { MOVE_EXTEND } else { 0 }
+}
 fn is_units(units: &[u16], ascii: &str) -> bool {
     units.iter().copied().eq(ascii.bytes().map(u16::from))
 }
@@ -286,6 +320,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "modifierKey", modifier_op, context_id);
     crate::dom::register(scope, ns, "keyPlan", plan_op, context_id);
     crate::dom::register(scope, ns, "keyEdit", edit_op, context_id);
+    crate::dom::register(scope, ns, "keyMotion", motion_op, context_id);
 }
 // __dom.keyPlan(element, key, char, modifiers) -> `plan` (its bits, `modifiers` CTRL | META | ALT).
 fn plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -312,6 +347,14 @@ fn edit_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     };
     let items: [v8::Local<v8::Value>; 2] = [v8::String::new(scope, input_type).unwrap().into(), v8::Integer::new_from_unsigned(scope, bits).into()];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.keyMotion(element, key, modifiers) -> `motion` (its bits, `modifiers` CTRL | META | ALT | SHIFT).
+fn motion_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_uint32(0) };
+    let key = crate::dom::utf16_arg(scope, args.get(1));
+    let modifiers = args.get(2).uint32_value(scope).unwrap_or(0);
+    rv.set_uint32(motion(crate::dom::realm(scope, cid), id, &key, modifiers));
 }
 // __dom.resolveKey(spec) -> [key, code, keyCode, char (null for none), inputType (null for none), named] (`resolve`).
 fn resolve_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
