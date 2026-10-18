@@ -193,10 +193,12 @@ RSpec.describe 'adoptedStyleSheets ObservableArray + shadow encapsulation' do
         out.push(Reflect.defineProperty(list, '3', data(b)), list.length);
         try { Reflect.defineProperty(list, '1', data('x')); out.push('no throw'); } catch (e) { out.push(e.name); }
         out.push(list.push(b), colour());
+        out.push(Reflect.defineProperty(list, '0', {value: b, configurable: false}), Reflect.defineProperty(list, '0', {value: b, writable: false}));
+        out.push(Reflect.defineProperty(list, 'length', {value: 0, configurable: true}), list.length);
         return out;
       })()
     JS
-    expect(out).to eq([true, 1, 'rgb(1, 1, 1)', false, 1, 'TypeError', 2, 'rgb(2, 2, 2)'])
+    expect(out).to eq([true, 1, 'rgb(1, 1, 1)', false, 1, 'TypeError', 2, 'rgb(2, 2, 2)', false, false, false, 2])
   end
 end
 
