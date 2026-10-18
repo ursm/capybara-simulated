@@ -122,7 +122,6 @@ const URL: u32 = 0;
 const ORIGIN: u32 = 1;
 const WITH_CREDENTIALS: u32 = 2;
 const READY_STATE: u32 = 3;
-const ID: u32 = 4;
 
 // __dom.esField(state, field) -> the source's `field`.
 fn field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -133,7 +132,6 @@ fn field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         ORIGIN => &s.origin,
         WITH_CREDENTIALS => return rv.set_bool(s.with_credentials),
         READY_STATE => return rv.set_uint32(s.ready_state),
-        ID => return rv.set_int32(s.id),
         _ => return,
     };
     if let Some(t) = v8::String::new(scope, text) {
@@ -166,45 +164,69 @@ const FIRE_OPEN: u32 = 1;
 const FIRE_ERROR: u32 = 2;
 const FIRE_MESSAGE: u32 = 3;
 
-// __dom.esDeliver(state, kind) -> what one event the host delivered (or the bindings, a service worker's answer) does
-// to the source, and the event it fires (`FIRE_*`):
+// What one event the host delivered (or the bindings, a service worker's answer) does to a source of `ready_state`, its
+// ready state after and the event it fires (`FIRE_*`):
 //   "__open": "announce the connection" — while connecting, open, an `open`; nothing otherwise;
 //   "__error" / "__fail": "fail the connection" — closed, an `error` (a simple event; no reconnect) — a fail of one
 //     closed already nothing (a service worker's answer after `close()`);
 //   any other: a message, its type the kind.
+fn delivered(ready_state: u32, kind: &str) -> (u32, u32) {
+    match kind {
+        "__open" if ready_state == CONNECTING => (OPEN, FIRE_OPEN),
+        "__open" => (ready_state, FIRE_NONE),
+        "__fail" if ready_state == CLOSED => (CLOSED, FIRE_NONE),
+        "__error" | "__fail" => (CLOSED, FIRE_ERROR),
+        _ => (ready_state, FIRE_MESSAGE),
+    }
+}
+// …and what a controlling service worker's response of `status` and `content_type` does to it (HTML "process the event
+// source response"): nothing for one closed already; a status other than 200, or a MIME type whose essence is not
+// `text/event-stream`, fails it — an `error`; any other announces it — open, an `open` — its body's events read after.
+fn served(ready_state: u32, status: u32, content_type: &str) -> (u32, u32) {
+    if ready_state == CLOSED {
+        return (CLOSED, FIRE_NONE);
+    }
+    let accepted = status == 200 && crate::mime::extract(content_type).is_some_and(|m| m.essence == "text/event-stream");
+    if accepted { delivered(ready_state, "__open") } else { delivered(ready_state, "__fail") }
+}
+
+// __dom.esDeliver(state, kind) -> the event one event the host delivered fires (`delivered`), the source changed as it
+// says.
 fn deliver_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(source) = source(scope, args.get(0)) else { return };
     let kind = args.get(1).to_rust_string_lossy(scope);
     let mut s = source.borrow_mut();
-    let fire = match kind.as_str() {
-        "__open" if s.ready_state == CONNECTING => {
-            s.ready_state = OPEN;
-            FIRE_OPEN
-        }
-        "__open" => FIRE_NONE,
-        "__fail" if s.ready_state == CLOSED => FIRE_NONE,
-        "__error" | "__fail" => {
-            s.ready_state = CLOSED;
-            FIRE_ERROR
-        }
-        _ => FIRE_MESSAGE,
-    };
+    let (ready_state, fire) = delivered(s.ready_state, &kind);
+    s.ready_state = ready_state;
     rv.set_uint32(fire);
 }
 
-// __dom.esServed(state, status, contentType) -> what a controlling service worker's response does to the source (HTML
-// "process the event source response"), the event it fires: none for one closed already; a status other than 200, or
-// a MIME type whose essence is not `text/event-stream`, fails it — `error`; any other announces it — `open` — the
-// bindings to read its body's events.
+// __dom.esServed(state, status, contentType) -> the event a controlling service worker's response fires (`served`), the
+// source changed as it says.
 fn served_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(source) = source(scope, args.get(0)) else { return };
     let status = args.get(1).uint32_value(scope).unwrap_or(0);
     let content_type = args.get(2).to_rust_string_lossy(scope);
     let mut s = source.borrow_mut();
-    if s.ready_state == CLOSED {
-        return rv.set_uint32(FIRE_NONE);
+    let (ready_state, fire) = served(s.ready_state, status, &content_type);
+    s.ready_state = ready_state;
+    rv.set_uint32(fire);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_source_opens_once_fails_once_and_takes_messages() {
+        assert_eq!(delivered(CONNECTING, "__open"), (OPEN, FIRE_OPEN));
+        assert_eq!(delivered(OPEN, "__open"), (OPEN, FIRE_NONE));
+        assert_eq!(delivered(OPEN, "__error"), (CLOSED, FIRE_ERROR));
+        assert_eq!(delivered(CLOSED, "__fail"), (CLOSED, FIRE_NONE));
+        assert_eq!(delivered(OPEN, "message"), (OPEN, FIRE_MESSAGE));
+        assert_eq!(served(CONNECTING, 200, "text/event-stream; charset=utf-8"), (OPEN, FIRE_OPEN));
+        assert_eq!(served(CONNECTING, 200, "text/plain"), (CLOSED, FIRE_ERROR));
+        assert_eq!(served(CONNECTING, 404, "text/event-stream"), (CLOSED, FIRE_ERROR));
+        assert_eq!(served(CLOSED, 200, "text/event-stream"), (CLOSED, FIRE_NONE));
     }
-    let accepted = status == 200 && crate::mime::extract(&content_type).is_some_and(|m| m.essence == "text/event-stream");
-    s.ready_state = if accepted { OPEN } else { CLOSED };
-    rv.set_uint32(if accepted { FIRE_OPEN } else { FIRE_ERROR });
 }
