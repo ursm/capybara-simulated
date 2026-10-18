@@ -286,6 +286,18 @@ fn has_opaque_path(url: &Url) -> bool {
     !url.has_hostname() && !url.pathname().starts_with('/')
 }
 
+// A URL serialized with its fragment excluded (the URL Standard's "exclude fragments") — its text up to a `#` where it is
+// no URL.
+pub(crate) fn without_fragment(url: &str) -> String {
+    match Url::parse(url, None) {
+        Ok(mut parsed) => {
+            parsed.set_hash(None);
+            parsed.href().to_owned()
+        }
+        Err(_) => url.split('#').next().unwrap_or_default().to_owned(),
+    }
+}
+
 // HTML "navigate" (step "navigate to a fragment"): whether a navigation to `url` from a document at `current` is one to a
 // fragment of it — `url` has a fragment (an empty one too: `#`) and equals `current` but for their fragments. Not one
 // without a fragment: `/a#x` → `/a` loads the document again, as does assigning a fragmentless URL its own.

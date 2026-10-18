@@ -21,13 +21,7 @@ impl BlobUrls {
 // The store's key for `url` as "resolve a blob URL" looks it up (§8.3.4): the URL serialized with its fragment
 // excluded — a fragment names no other resource, a query or a path more does — its text up to a `#` where it is no URL.
 pub(crate) fn entry_key(url: &str) -> String {
-    match ada_url::Url::parse(url, None) {
-        Ok(mut parsed) => {
-            parsed.set_hash(None);
-            parsed.href().to_owned()
-        }
-        Err(_) => url.split('#').next().unwrap_or_default().to_owned(),
-    }
+    crate::url_ops::without_fragment(url)
 }
 // …and the URL "remove an entry from the blob URL store" names (§8.3.2): serialized whole, its fragment and all — so
 // revoking `<url>#frag` removes no entry — itself where it is no URL.
